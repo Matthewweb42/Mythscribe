@@ -27,6 +27,8 @@ import {
 import { CONTEXT_FILE_TYPES } from '../../shared/contextLibrary'
 import { CATEGORY_ICONS, CATEGORY_ORIGINS } from '../../shared/categories'
 import { ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
+import { FACT_ORIGINS, FACT_STATUSES } from '../../shared/facts'
+import { CHANGE_KINDS, CHANGE_STATUSES } from '../../shared/changes'
 import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { SNAPSHOT_KINDS, SNAPSHOT_SCOPES } from '../../shared/snapshots'
@@ -440,7 +442,9 @@ export const entity = sqliteTable(
      */
     aliases: text('aliases').notNull().default('[]'),
     created: text('created').notNull(),
-    modified: text('modified').notNull()
+    modified: text('modified').notNull(),
+    /** F-9.13 (D7): canon, plan, or idea; the author flips it on the sheet. */
+    status: text('status', { enum: FACT_STATUSES }).notNull().default('canon')
   },
   (t) => [index('entity_kind_name_idx').on(t.kind, t.name)]
 )
@@ -503,6 +507,74 @@ export const observedFact = sqliteTable(
 )
 export type ObservedFactRow = typeof observedFact.$inferSelect
 export type ObservedFactInsert = typeof observedFact.$inferInsert
+
+/**
+ * Dated facts (F-9.13), the knowledge model's statements about a record: the author's (the
+ * undated baseline mirrors `entity.fields`, one row per filled field, written only by
+ * `writeAuthorFact`; a row dated at a scene holds from there on) and the AI's (read from a scene,
+ * always with its quote; `hidden` is the author's tombstone). `fact_key` is unique per record
+ * (`aiFactKey` / `authorFactKey`). A deleted scene takes its AI facts with it in the same
+ * transaction (`deleteAiFactsUnder`); the column is SET NULL so an author line survives.
+ * `object_entity_id` is for relationships (phase P3). F-5.16's `observed_fact` stays, frozen, for
+ * older builds (decision D9).
+ */
+export const fact = sqliteTable(
+  'fact',
+  {
+    id: text('id').primaryKey(),
+    entityId: text('entity_id')
+      .notNull()
+      .references(() => entity.id, { onDelete: 'cascade' }),
+    attribute: text('attribute').notNull(),
+    value: text('value').notNull(),
+    objectEntityId: text('object_entity_id').references(() => entity.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id').references(() => node.id, { onDelete: 'set null' }),
+    quote: text('quote'),
+    origin: text('origin', { enum: FACT_ORIGINS }).notNull(),
+    status: text('status', { enum: FACT_STATUSES }).notNull().default('canon'),
+    hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
+    factKey: text('fact_key').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull()
+  },
+  (t) => [
+    index('fact_entity_attribute_idx').on(t.entityId, t.attribute),
+    index('fact_node_idx').on(t.nodeId),
+    index('fact_object_idx').on(t.objectEntityId),
+    uniqueIndex('fact_entity_key_uq').on(t.entityId, t.factKey)
+  ]
+)
+export type FactRow = typeof fact.$inferSelect
+export type FactInsert = typeof fact.$inferInsert
+
+/**
+ * The Changes log (F-9.13, D12): one row per change the background reading applied on its own,
+ * grouped by `run_id` (one reading of one scene). `undo` is the JSON `ChangeUndo` main runs to
+ * take it back through an existing tombstone; `target_id` is the fact, sheet, or tag it made.
+ * Pruned to `CHANGES_MAX` rows.
+ */
+export const knowledgeChange = sqliteTable(
+  'knowledge_change',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id').notNull(),
+    createdAt: text('created_at').notNull(),
+    nodeId: text('node_id').references(() => node.id, { onDelete: 'set null' }),
+    quote: text('quote'),
+    kind: text('kind', { enum: CHANGE_KINDS }).notNull(),
+    entityId: text('entity_id').references(() => entity.id, { onDelete: 'set null' }),
+    targetId: text('target_id').notNull(),
+    label: text('label').notNull(),
+    undo: text('undo').notNull(),
+    status: text('status', { enum: CHANGE_STATUSES }).notNull().default('applied')
+  },
+  (t) => [
+    index('knowledge_change_created_idx').on(t.createdAt),
+    index('knowledge_change_run_idx').on(t.runId)
+  ]
+)
+export type KnowledgeChangeRow = typeof knowledgeChange.$inferSelect
+export type KnowledgeChangeInsert = typeof knowledgeChange.$inferInsert
 
 /**
  * One contradiction the consistency checker found (F-13.4): a passage of a scene (`quote`)

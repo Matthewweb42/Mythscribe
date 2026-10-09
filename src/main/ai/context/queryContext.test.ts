@@ -10,11 +10,7 @@ import { saveDocument } from '../../document/documentStore'
 import { setSceneMeta } from '../../document/sceneMetaStore'
 import { upsertSummary } from '../../document/summaryStore'
 import { createEntity } from '../../entity/entityStore'
-import {
-  listFactsForEntity,
-  replaceSceneFacts,
-  setFactHidden
-} from '../../entity/observedFactStore'
+import { listFactsForEntity, applySceneFacts, setFactHidden } from '../../entity/factStore'
 import { projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { createSeededProject } from '../../project/testProject'
 import { addDocumentTag } from '../../tag/documentTagStore'
@@ -315,9 +311,12 @@ describe('the story bible in the retrieval (F-5.16)', () => {
     expect(
       rankCandidates(db, { question: 'How old is Mara?', nodeId: null }).full.map((c) => c.nodeId)
     ).toEqual(scenes.slice(0, QUERY_FULL_SCENES))
-    replaceSceneFacts(db, scenes[3]!, [
-      { entityId: mara.id, attribute: 'age', value: 'nineteen', quote: AGE }
-    ])
+    applySceneFacts(
+      db,
+      scenes[3]!,
+      [{ entityId: mara.id, attribute: 'age', value: 'nineteen', quote: AGE }],
+      ''
+    )
     const ranked = rankCandidates(db, { question: 'How old is Mara?', nodeId: null })
     expect(ranked.full[0]?.nodeId).toBe(scenes[3])
     expect(ranked.full[0]!.score - ranked.full[1]!.score).toBeCloseTo(QUERY_WEIGHTS.fact)
@@ -335,11 +334,16 @@ describe('the story bible in the retrieval (F-5.16)', () => {
       name: 'Mara',
       fields: { appearance: 'Tall, with a scar.' }
     }).entity
-    replaceSceneFacts(db, scenes[0]!, [
-      { entityId: mara.id, attribute: 'age', value: 'nineteen', quote: AGE },
-      // The sheet already says what she looks like: the author's word is the only one sent.
-      { entityId: mara.id, attribute: 'appearance', value: 'short', quote: 'Mara waited.' }
-    ])
+    applySceneFacts(
+      db,
+      scenes[0]!,
+      [
+        { entityId: mara.id, attribute: 'age', value: 'nineteen', quote: AGE },
+        // The sheet already says what she looks like: the author's word is the only one sent.
+        { entityId: mara.id, attribute: 'appearance', value: 'short', quote: 'Mara waited.' }
+      ],
+      ''
+    )
     const title = sceneTitles(db)(scenes[0]!)
     expect(rankCandidates(db, { question: 'How old is Mara?', nodeId: null }).bible).toEqual([
       {

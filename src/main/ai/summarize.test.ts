@@ -5,11 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { priceFor } from '@shared/ai'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { emptySceneMeta } from '@shared/sceneMeta'
-import {
-  OBSERVED_FACT_QUOTE_MAX,
-  OBSERVED_FACT_VALUE_MAX,
-  type ObservedFact
-} from '@shared/observedFacts'
+import type { Fact } from '@shared/facts'
+import { OBSERVED_FACT_QUOTE_MAX, OBSERVED_FACT_VALUE_MAX } from '@shared/observedFacts'
 import {
   SUMMARY_CHARACTER_MAX,
   SUMMARY_CHARACTERS_MAX,
@@ -26,7 +23,7 @@ import { saveDocument } from '../document/documentStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { getSummary, upsertSummary } from '../document/summaryStore'
 import { createEntity, deleteEntity, listEntities } from '../entity/entityStore'
-import { listFactsForEntity, setFactHidden } from '../entity/observedFactStore'
+import { listFactsForEntity, setFactHidden } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { setAiSettings } from '../project/settingsStore'
@@ -517,7 +514,7 @@ describe('summarizeScene logs the story bible (F-5.16)', () => {
   let changes: ObservedFactsChange[]
   const run = (): ReturnType<typeof summarizeScene> =>
     summarize({ onFactsChanged: (change) => void changes.push(change) })
-  const factsOf = (name: string): ObservedFact[] => {
+  const factsOf = (name: string): Fact[] => {
     const entity = listEntities(db).find((candidate) => candidate.name === name)
     return entity === undefined ? [] : listFactsForEntity(db, entity.id)
   }
@@ -546,6 +543,23 @@ describe('summarizeScene logs the story bible (F-5.16)', () => {
     // Nothing of it is in the stored summary row or the manuscript: facts live in their own table.
     expect(getSummary(db, scene)).toEqual(result.summary)
     expect(result.summary).not.toHaveProperty('facts')
+  })
+
+  it('never changes scene text: a run that logs facts, a sheet, and tags leaves every document byte-identical (F-9.13)', async () => {
+    const read = (): string =>
+      JSON.stringify(
+        db
+          .select({ id: node.id, content: node.content, notes: node.notes, meta: node.sceneMeta })
+          .from(node)
+          .all()
+      )
+    const before = read()
+    const logged: number[] = []
+    answers({ ...ANSWER, facts: [FACT, TOMAS] })
+    await summarize({ onChangesLogged: () => void logged.push(1) })
+    expect(listEntities(db).map((entity) => entity.name)).toEqual(['Mara', 'Tomas'])
+    expect(logged).toEqual([1])
+    expect(read()).toBe(before)
   })
 
   it('leaves the scene current after creating an entity from it: the run does not mark itself out of date', async () => {
@@ -614,7 +628,7 @@ describe('summarizeScene logs the story bible (F-5.16)', () => {
       'VALIDATION'
     )
     expect(factsOf('Mara')).toEqual([])
-    expect(changes).toEqual([{ entityIds: [mara?.id], created: [], skipped: 0 }])
+    expect(changes).toEqual([{ entityIds: [mara?.id], added: [], created: [], skipped: 0 }])
     // The entity itself stays: only the author removes an entity.
     expect(listEntities(db)).toHaveLength(1)
   })

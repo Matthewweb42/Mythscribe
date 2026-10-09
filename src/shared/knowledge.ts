@@ -16,12 +16,24 @@ import type { TagCategory } from './tags'
  */
 export const KNOWLEDGE_MODEL_KEY = 'knowledgeModel'
 export const KnowledgeModelState = z
-  .object({ index: z.number().int().nonnegative().default(0) })
+  .object({
+    index: z.number().int().nonnegative().default(0),
+    /** F-9.13's conversion: the old observed facts copied into `fact`, the sheets' text into author facts. */
+    facts: z.number().int().nonnegative().default(0),
+    /**
+     * The newest `observed_fact.created_at` already copied. An older build still writes that
+     * table (decision D9 keeps it), so every open copies the rows written after this.
+     */
+    factsImportedAt: z.string().default('')
+  })
   .loose()
 export type KnowledgeModelState = z.infer<typeof KnowledgeModelState>
 
 /** The version of F-9.12's conversion; a project whose `index` is below it is converted on open. */
 export const KNOWLEDGE_INDEX_VERSION = 1
+
+/** The version of F-9.13's fact conversion; a project whose `facts` is below it is converted on open. */
+export const KNOWLEDGE_FACTS_VERSION = 1
 
 /**
  * The tag categories whose tags name a thing and so get a record (decision D8), and the story-

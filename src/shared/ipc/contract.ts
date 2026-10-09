@@ -141,7 +141,8 @@ import { HierarchyLevel, NodeKind, SectionType } from '../labels'
 import { Layout } from '../layout'
 import { AccentId, SupporterStatus } from '../license'
 import { MatterTemplateId } from '../matterTemplates'
-import { ObservedFact } from '../observedFacts'
+import { Fact, FactStatus } from '../facts'
+import { CHANGES_PAGE, CHANGES_PAGE_MAX, ChangePage, ChangeUndoResult } from '../changes'
 import { TagMentions } from '../mentions'
 import { EditRole, MenuItemId } from '../menu'
 import { WritingPresets } from '../presets'
@@ -319,6 +320,8 @@ export const Entity = z.object({
    * page turns it to `author`. Never a patch field.
    */
   origin: EntityOrigin,
+  /** F-9.13 (D7): canon, plan, or idea; `entity:update` sets it. */
+  status: FactStatus,
   created: z.string(),
   modified: z.string()
 })
@@ -1538,7 +1541,16 @@ export const contract = {
        * template lacks moves into its Notes as "Label: value"; the name must be free there
        * (ALREADY_EXISTS); an unknown category is VALIDATION. `fields` are then the new template's.
        */
-      kind: EntityKind.optional()
+      kind: EntityKind.optional(),
+      /**
+       * F-9.13 (D4): the scene the given `fields` hold from. Omitted or null, they are the sheet's
+       * own undated text (`fields`); a document id writes each as an author line dated at that
+       * scene ('' removes that line) and leaves the sheet's text alone. VALIDATION for a node
+       * that is not a document, NOT_FOUND for an unknown one.
+       */
+      asOf: z.string().nullable().optional(),
+      /** F-9.13 (D7): canon, plan, or idea. */
+      status: FactStatus.optional()
     }),
     output: Entity
   },
@@ -1760,23 +1772,51 @@ export const contract = {
     })
   },
   /**
-   * What the manuscript states about one entity (F-5.16): every observed fact of it, oldest
-   * first, the hidden ones included and flagged so the page can offer to restore them. An
-   * unknown entity answers the empty list. `groupFacts` merges and marks them for display.
+   * The dated facts of one record (F-9.13, which replaced F-5.16's `observedFact:*`): the AI's,
+   * read from scenes with their quotes (the hidden ones included and flagged so the sheet can
+   * offer to restore them), and the author's lines dated at a scene, oldest first. The sheet's
+   * own text is `Entity.fields`, not listed here. `sheetAt` reads them as of a scene. An unknown
+   * record answers the empty list.
    */
-  'observedFact:listForEntity': {
+  'fact:listForEntity': {
     input: z.object({ entityId: z.string() }),
-    output: z.array(ObservedFact)
+    output: z.array(Fact)
   },
   /**
-   * Hides a wrong observed fact, or restores a hidden one (F-5.16). A hidden fact stays stored as
-   * a tombstone, so re-reading its scene does not bring it back. Answers the fact as stored and
-   * pushes `observedFact:changed`; NOT_FOUND for an unknown id.
+   * Hides a wrong fact, or restores a hidden one (F-9.13). A hidden fact stays stored as a
+   * tombstone, so no reading of any scene brings the statement back. Answers the fact as stored
+   * and pushes `fact:changed`; NOT_FOUND for an unknown id.
    */
-  'observedFact:setHidden': {
+  'fact:setHidden': {
     input: z.object({ id: z.string(), hidden: z.boolean() }),
-    output: ObservedFact
+    output: Fact
   },
+  /** Sets a fact's status (F-9.13, D7: canon, plan, idea); pushes `fact:changed`; NOT_FOUND for an unknown id. */
+  'fact:setStatus': {
+    input: z.object({ id: z.string(), status: FactStatus }),
+    output: Fact
+  },
+  /**
+   * One page of the Changes log (F-9.13), newest first: what the background reading applied on
+   * its own, each with the scene and passage behind it. `before` is the id of the last row the
+   * caller holds.
+   */
+  'changes:list': {
+    input: z.object({
+      before: z.string().optional(),
+      limit: z.number().int().min(1).max(CHANGES_PAGE_MAX).default(CHANGES_PAGE)
+    }),
+    output: ChangePage
+  },
+  /**
+   * Undoes one change (F-9.13) through its tombstone (a fact hidden, a sheet or tag deleted and
+   * its name remembered, a scene's tag removed), so the next reading does not redo it. A row
+   * already undone changes nothing. VALIDATION for a sheet the author has edited since (it is
+   * theirs now); NOT_FOUND for an unknown (pruned) id. Pushes `changes:changed`.
+   */
+  'changes:undo': { input: z.object({ id: z.string() }), output: ChangeUndoResult },
+  /** Undoes every change of one reading of a scene, in one transaction; refused whole when one change is. */
+  'changes:undoRun': { input: z.object({ runId: z.string() }), output: ChangeUndoResult },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
@@ -2823,8 +2863,10 @@ export const events = {
    * job met a name with no entity); the entity store merges it, as the tag store does a tag.
    */
   'entity:changed': Entity,
-  /** The observed facts of these entities changed (F-5.16): a scene was re-read, or a fact was hidden or restored. */
-  'observedFact:changed': z.object({ entityIds: z.array(z.string()) }),
+  /** The dated facts of these records changed (F-9.13): a scene was read or deleted, a fact hidden, restored, or re-statused, an author line dated, or a change undone. */
+  'fact:changed': z.object({ entityIds: z.array(z.string()) }),
+  /** The Changes log moved (F-9.13): a reading logged a run, or a change was undone. */
+  'changes:changed': z.object({}),
   /** The findings of these scenes changed (F-13.4): a check ran in the background or on demand, or one was settled; the store refetches `continuity:list`. */
   'continuity:changed': z.object({ nodeIds: z.array(z.string()) }),
   /**

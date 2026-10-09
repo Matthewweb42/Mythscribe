@@ -151,6 +151,16 @@ export function replaceAutoTags(db: TagDb, nodeId: string, tagIds: readonly stri
   })
 }
 
+/** The tags the background job has on this node (`source` ai), in no particular order (F-9.13). */
+export function aiLinkedTagIds(db: TagDb, nodeId: string): string[] {
+  return db
+    .select({ tagId: documentTag.tagId })
+    .from(documentTag)
+    .where(and(eq(documentTag.nodeId, nodeId), eq(documentTag.source, 'ai')))
+    .all()
+    .map((row) => row.tagId)
+}
+
 /** A linked tag as the whole-project reads below answer it: what a name match or a chip needs. */
 export interface LinkedTag {
   id: string

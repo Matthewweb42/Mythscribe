@@ -1,7 +1,7 @@
 import { count } from 'drizzle-orm'
 import type { StoryCategory } from '@shared/categories'
 import type { Entity, Tag } from '@shared/ipc/contract'
-import type { ObservedFact } from '@shared/observedFacts'
+import type { Fact } from '@shared/facts'
 import {
   findOrganiseCandidates,
   type CandidateSheet,
@@ -11,7 +11,7 @@ import {
 import { loadAgentProject, type AgentProject } from '../ai/agentTools'
 import { tagMention } from '../db/schema'
 import { listCategories } from '../entity/categoryStore'
-import { factsForEntities } from '../entity/observedFactStore'
+import { factsForEntities } from '../entity/factStore'
 import { listTags } from '../tag/tagStore'
 import type { TreeDb } from '../tree/treeStore'
 
@@ -36,8 +36,8 @@ export interface OrganiseProject {
   children: Map<string, number>
   /** Sheets linked to each tag (F-9.4), by tag id. */
   sheetsOfTag: Map<string, number>
-  /** The visible observed facts of each sheet (F-5.16), by sheet id. */
-  facts: Map<string, ObservedFact[]>
+  /** The visible AI facts of each sheet (F-5.16, F-9.13), by sheet id. */
+  facts: Map<string, Fact[]>
 }
 
 function refs<T extends { id: string }>(
@@ -74,11 +74,12 @@ export function loadOrganiseProject(db: TreeDb): OrganiseProject {
       .all()
       .map((row) => [row.tagId, row.n] as const)
   )
-  const facts = new Map<string, ObservedFact[]>()
+  const facts = new Map<string, Fact[]>()
   for (const fact of factsForEntities(
     db,
     sheets.map((sheet) => sheet.id)
   )) {
+    if (fact.origin !== 'ai') continue
     facts.set(fact.entityId, [...(facts.get(fact.entityId) ?? []), fact])
   }
   return {

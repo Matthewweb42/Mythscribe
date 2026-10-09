@@ -108,6 +108,21 @@ export function factKey(attribute: string, value: string): string {
   return `${attribute.trim().toLocaleLowerCase()}\u0000${normalized}`
 }
 
+/**
+ * What `groupFacts` reads of a fact: an F-5.16 observed fact, or an F-9.13 `Fact` (whose scene and
+ * quote may be null; a fact with no scene is not grouped).
+ */
+export interface GroupableFact {
+  id: string
+  entityId: string
+  nodeId: string | null
+  attribute: string
+  value: string
+  quote: string | null
+  hidden: boolean
+  createdAt: string
+}
+
 /** One passage a merged fact was read from. */
 export interface FactSource {
   /** The stored fact this passage belongs to. */
@@ -156,13 +171,15 @@ const ATTRIBUTE_ORDER: readonly string[] = [
  * source. Hidden facts are left out.
  */
 export function groupFacts(
-  facts: readonly ObservedFact[],
+  facts: readonly GroupableFact[],
   readingOrder: readonly string[]
 ): FactGroup[] {
   const position = new Map(readingOrder.map((nodeId, at) => [nodeId, at]))
   const at = (nodeId: string): number => position.get(nodeId) ?? readingOrder.length
   const ordered = facts
-    .filter((fact) => !fact.hidden)
+    .filter(
+      (fact): fact is GroupableFact & { nodeId: string } => !fact.hidden && fact.nodeId !== null
+    )
     .map((fact, input) => ({ fact, input }))
     .sort(
       (a, b) =>
@@ -190,7 +207,7 @@ export function groupFacts(
         attribute: fact.attribute,
         value: fact.value,
         factIds: [fact.id],
-        sources: [{ factId: fact.id, nodeId: fact.nodeId, quote: fact.quote }],
+        sources: [{ factId: fact.id, nodeId: fact.nodeId, quote: fact.quote ?? '' }],
         differs: false
       })
       perAttribute.set(attributeKey, (perAttribute.get(attributeKey) ?? 0) + 1)
@@ -198,7 +215,7 @@ export function groupFacts(
     }
     group.factIds.push(fact.id)
     if (!group.sources.some((source) => source.nodeId === fact.nodeId)) {
-      group.sources.push({ factId: fact.id, nodeId: fact.nodeId, quote: fact.quote })
+      group.sources.push({ factId: fact.id, nodeId: fact.nodeId, quote: fact.quote ?? '' })
     }
   }
 

@@ -11,7 +11,7 @@ import { toTagName, type TagCategory } from '@shared/tags'
 import type { EntityWrite } from '../entity/entityStore'
 import { ensureRecordForTag } from '../knowledge/records'
 import { getDismissedNames } from '../project/settingsStore'
-import { replaceAutoTags } from '../tag/documentTagStore'
+import { aiLinkedTagIds, replaceAutoTags } from '../tag/documentTagStore'
 import { createTag, getTagWithUsage, listTags } from '../tag/tagStore'
 import type { TreeDb } from '../tree/treeStore'
 import { sceneNamesTag } from './observedFacts'
@@ -58,6 +58,8 @@ export interface AutoTagsChange {
   moved: Tag[]
   /** F-9.12: the records (AI-made sheets) the created name tags got, in the same transaction. */
   records: EntityWrite[]
+  /** F-9.13: the tags newly put on the scene by this run (the Changes log lists them). */
+  linked: Tag[]
 }
 
 /**
@@ -112,12 +114,14 @@ export function applyAutoTags(
       createdIds.push(made.id)
       wanted.push(made.id)
     }
+    const before = new Set(aiLinkedTagIds(tx, nodeId))
     const movedIds = new Set([...replaceAutoTags(tx, nodeId, wanted), ...createdIds])
+    const after = aiLinkedTagIds(tx, nodeId).filter((id) => !before.has(id))
     const read = (ids: Iterable<string>): Tag[] =>
       [...ids].flatMap((id) => {
         const tag = getTagWithUsage(tx, id)
         return tag ? [tag] : []
       })
-    return { created: read(createdIds), moved: read(movedIds), records }
+    return { created: read(createdIds), moved: read(movedIds), records, linked: read(after) }
   })
 }

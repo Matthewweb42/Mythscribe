@@ -11,7 +11,8 @@ import {
 } from '@shared/observedFacts'
 import { SUMMARY_KNOWN_NAMES_MAX } from '@shared/summary'
 import { createEntity, listEntities, type EntityWrite } from '../entity/entityStore'
-import { replaceSceneFacts, type SceneFactInput } from '../entity/observedFactStore'
+import type { Fact, FactStatus } from '@shared/facts'
+import { applySceneFacts, type SceneFactInput } from '../entity/factStore'
 import { getObservedDismissed } from '../project/settingsStore'
 import { findTagByNameOrAlias, listTags } from '../tag/tagStore'
 import type { TreeDb } from '../tree/treeStore'
@@ -133,8 +134,10 @@ export function knownNames(db: TreeDb, sceneText: string): KnownNames {
 
 /** What a run did to the story bible: who to tell, and about what. */
 export interface ObservedFactsChange {
-  /** The entities whose visible facts may have changed, for `observedFact:changed`. */
+  /** The entities whose visible facts may have changed, for `fact:changed`. */
   entityIds: string[]
+  /** F-9.13: the facts the run added, as stored (what the Changes log lists). */
+  added: Fact[]
   /** The entities created for a name that had none, each with what its tag did to the bank. */
   created: EntityWrite[]
   /** Facts left out here: a dismissed name, or an attribute the resolved entity's kind does not carry. */
@@ -171,18 +174,21 @@ function resolveEntity(
 }
 
 /**
- * Stores what one scene states (F-5.16), in one transaction (it nests as a savepoint inside the
- * caller's): each fact's name is resolved to an entity (`resolveEntity`); a name with no entity
- * gets one — AI-made, blank template, with its tag through the F-9.4 link — unless the author
- * deleted an entity of that kind and name (`observedFacts.dismissed`), in which case the fact
- * is left out; a fact that landed on an entity of another kind is kept only when that kind
- * carries the attribute. Then the scene's visible facts are replaced, tombstones honoured
- * (`replaceSceneFacts`). An empty list clears the scene's facts and creates nothing.
+ * Stores what one scene states (F-5.16, F-9.13), in one transaction (it nests as a savepoint
+ * inside the caller's): each fact's name is resolved to an entity (`resolveEntity`); a name with
+ * no entity gets one — AI-made, blank template, with its tag through the F-9.4 link — unless the
+ * author deleted an entity of that kind and name (`observedFacts.dismissed`), in which case the
+ * fact is left out; a fact that landed on an entity of another kind is kept only when that kind
+ * carries the attribute. Then the scene's dated facts are applied, sticky (`applySceneFacts`):
+ * new statements added with `status`, tombstones honoured, and a fact whose quote left
+ * `sceneText` removed. An empty list with an empty text clears the scene's AI facts.
  */
 export function applyObservedFacts(
   db: TreeDb,
   nodeId: string,
-  facts: readonly ExtractedFact[]
+  facts: readonly ExtractedFact[],
+  sceneText: string,
+  status: FactStatus = 'canon'
 ): ObservedFactsChange {
   return db.transaction((tx) => {
     const entities = listEntities(tx)
@@ -217,6 +223,7 @@ export function applyObservedFacts(
         quote: fact.quote
       })
     }
-    return { entityIds: replaceSceneFacts(tx, nodeId, rows), created, skipped }
+    const diff = applySceneFacts(tx, nodeId, rows, sceneText, status)
+    return { entityIds: diff.entityIds, added: diff.added, created, skipped }
   })
 }

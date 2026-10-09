@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(23)
+    expect(result.version).toBe(24)
     expect(tables()).toContain('project')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
@@ -960,5 +960,59 @@ describe('tag_mention.paragraphs, mention_scan.passage_hash, passage_fts (0021, 
     expect(hits('"cafe"')).toBe(1)
     expect(hits('"mara"')).toBe(1)
     expect(hits('"lantern"')).toBe(0)
+  })
+})
+
+describe('fact, knowledge_change, entity.status (0023)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    // A database as the build before F-9.13 left it: migrations up to 0022, with a sheet, a
+    // scene, and an observed fact on record.
+    migrate(db, loadMigrations().slice(0, 23))
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, NULL, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '{"type":"doc"}', '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO entity (id, kind, name, fields, created, modified)
+       VALUES ('mara', 'character', 'Mara', '{"age":"31"}', '2026-01-01', '2026-01-01')`
+    ).run()
+    db.prepare(
+      `INSERT INTO observed_fact (id, entity_id, node_id, attribute, value, quote, created_at)
+       VALUES ('f1', 'mara', 'scene', 'appearance', 'Grey eyes', 'grey eyes', '2026-01-02')`
+    ).run()
+    migrate(db)
+  })
+  afterEach(() => db.close())
+
+  it('keeps every row of a 0022 database, adds empty tables, and makes every sheet canon', () => {
+    expect(db.prepare('SELECT fields, status FROM entity').get()).toEqual({
+      fields: '{"age":"31"}',
+      status: 'canon'
+    })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM observed_fact').get()).toEqual({ n: 1 })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM fact').get()).toEqual({ n: 0 })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM knowledge_change').get()).toEqual({ n: 0 })
+    expect(db.prepare('SELECT content FROM node WHERE id = ?').get('scene')).toEqual({
+      content: '{"type":"doc"}'
+    })
+  })
+
+  it('keeps a fact key unique per record, and keeps an author line when its scene goes', () => {
+    const insert = db.prepare(
+      `INSERT INTO fact (id, entity_id, attribute, value, node_id, origin, fact_key, created_at, updated_at)
+       VALUES (?, 'mara', 'age', '34', 'scene', 'author', 'k', '2026-01-03', '2026-01-03')`
+    )
+    insert.run('a')
+    expect(() => insert.run('b')).toThrow(/UNIQUE/)
+    db.prepare("DELETE FROM node WHERE id = 'scene'").run()
+    expect(db.prepare('SELECT node_id, status, hidden FROM fact').get()).toEqual({
+      node_id: null,
+      status: 'canon',
+      hidden: 0
+    })
   })
 })

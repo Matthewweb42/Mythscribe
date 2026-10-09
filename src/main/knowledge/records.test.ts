@@ -186,13 +186,18 @@ describe('convertKnowledgeIndex (F-9.12)', () => {
 
   it('keeps keys a later build stored beside its own', () => {
     db.run(
-      sql`INSERT INTO settings (key, value) VALUES ('knowledgeModel', '{"index":0,"facts":1}')`
+      sql`INSERT INTO settings (key, value) VALUES ('knowledgeModel', '{"index":0,"cards":1}')`
     )
     convertKnowledgeIndex(db)
     const row = db.all<{ value: string }>(
       sql`SELECT value FROM settings WHERE key = 'knowledgeModel'`
     )[0]
-    expect(JSON.parse(row?.value ?? '{}')).toEqual({ index: 1, facts: 1 })
+    expect(JSON.parse(row?.value ?? '{}')).toEqual({
+      index: 1,
+      cards: 1,
+      facts: 0,
+      factsImportedAt: ''
+    })
   })
 
   it('never changes scene text: the conversion and the full rescan leave every document byte-identical', () => {

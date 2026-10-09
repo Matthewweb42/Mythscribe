@@ -23,7 +23,7 @@ import {
 import type { Entity, EntityCreateInput, EntityUpdateInput, Tag } from '@shared/ipc/contract'
 import { withObservedDismissed, withoutObservedDismissed } from '@shared/observedFacts'
 import type * as schema from '../db/schema'
-import { entity, observedFact, tag, type EntityInsert, type EntityRow } from '../db/schema'
+import { entity, node, observedFact, tag, type EntityInsert, type EntityRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { getObservedDismissed, setObservedDismissed } from '../project/settingsStore'
 import {
@@ -37,7 +37,7 @@ import {
   type TagMergeResult
 } from '../tag/tagStore'
 import { listCategories, requireCategory } from './categoryStore'
-import { hasFacts } from './observedFactStore'
+import { hasAiFacts, moveFacts, writeAuthorFact, writeAuthorFields } from './factStore'
 
 /** Accepts both the connection's orm and a transaction handle (both extend this base). */
 export type EntityDb = BaseSQLiteDatabase<'sync', RunResult, typeof schema>
@@ -58,6 +58,7 @@ function rowToEntity(row: EntityRow, tagAliases: readonly string[] = []): Entity
     tagId: row.tagId,
     aliases: row.tagId === null ? parseAliases(row.aliases) : [...tagAliases],
     origin: row.origin,
+    status: row.status,
     created: row.created,
     modified: row.modified
   }
@@ -332,7 +333,6 @@ export function createEntity(
       kind: input.kind,
       name,
       template: input.template ?? 'structured',
-      fields: JSON.stringify(collectFields(category, {}, fields)),
       body: input.body ?? null,
       image: null,
       tagId: null,
@@ -341,6 +341,8 @@ export function createEntity(
       modified: now
     }
     const inserted = tx.insert(entity).values(row).returning().get()
+    // F-9.13: the one writer of `entity.fields`, so the author's text has its baseline facts.
+    writeAuthorFields(tx, inserted.id, collectFields(category, {}, fields))
     if (origin === 'author') {
       const dismissed = getObservedDismissed(tx)
       const kept = withoutObservedDismissed(dismissed, input.kind, name)
@@ -377,13 +379,15 @@ export function updateEntity(
     const changes: Partial<EntityInsert> = {}
     let category = categoryOf(existing.kind, listCategories(tx))
     let stored = parseEntityFields(existing.fields)
+    /** F-9.13: the baseline to write through `writeAuthorFields`, when it moves. */
+    let nextFields: EntityFields | null = null
     // F-9.10: a move into another category refiles the values its template lacks into Notes.
     const moved = patch.kind !== undefined && patch.kind !== existing.kind
     if (moved) {
       const target = requireCategory(tx, patch.kind ?? existing.kind)
       stored = refileFields(category, target, stored)
       changes.kind = target.id
-      changes.fields = JSON.stringify(stored)
+      nextFields = stored
       category = target
     }
     if (patch.name !== undefined || moved) {
@@ -394,12 +398,14 @@ export function updateEntity(
       if (patch.name !== undefined) changes.name = name
     }
     if (patch.template !== undefined) changes.template = patch.template
+    const asOf = patch.asOf ?? null
+    if (asOf !== null) assertSceneOf(tx, asOf)
     if (patch.fields !== undefined) {
       assertFieldsOf(category, patch.fields)
-      const merged = collectFields(category, stored, patch.fields)
-      changes.fields = JSON.stringify(merged)
+      if (asOf === null) nextFields = collectFields(category, stored, patch.fields)
     }
     if (patch.body !== undefined) changes.body = patch.body
+    if (patch.status !== undefined) changes.status = patch.status
     if (
       existing.origin === 'ai' &&
       (patch.name !== undefined ||
@@ -415,6 +421,13 @@ export function updateEntity(
       .where(eq(entity.id, id))
       .returning()
       .get()
+    if (nextFields !== null) writeAuthorFields(tx, id, nextFields)
+    // F-9.13 (D4): values given with `asOf` are author lines that hold from that scene on.
+    if (asOf !== null && patch.fields !== undefined) {
+      for (const [field, value] of Object.entries(patch.fields)) {
+        if (value !== undefined) writeAuthorFact(tx, id, field, value, asOf)
+      }
+    }
     const renamed = changes.name === undefined ? null : mirrorRename(tx, existing, updated)
     const tagChange =
       patch.aliases === undefined
@@ -422,6 +435,18 @@ export function updateEntity(
         : writeAliases(tx, requireRow(tx, id), patch.aliases, renamed)
     return { entity: toEntity(tx, requireRow(tx, id)), tagChange }
   })
+}
+
+/**
+ * Refuses an `asOf` that is not a document (F-9.13): an author line is dated at a scene. NOT_FOUND
+ * for an unknown node.
+ */
+function assertSceneOf(db: EntityDb, nodeId: string): void {
+  const row = db.select({ kind: node.kind }).from(node).where(eq(node.id, nodeId)).get()
+  if (row === undefined) throw new AppError('NOT_FOUND', 'Scene not found', { id: nodeId })
+  if (row.kind !== 'document') {
+    throw new AppError('VALIDATION', 'A sheet line can only be dated at a scene', { id: nodeId })
+  }
 }
 
 /** The row, read again after a write; NOT_FOUND only if it vanished inside the transaction. */
@@ -554,7 +579,7 @@ export function deleteEntity(db: EntityDb, id: string): Entity {
     // F-9.12: a sheet deleted while its tag stays was that tag's record; the name goes on the
     // list too, so no silent hook (the conversion, a new or edited tag) makes it again.
     const leftTag = row.tagId !== null && !tagIsShared(tx, id, row.tagId)
-    if (row.origin === 'ai' || leftTag || hasFacts(tx, id)) {
+    if (row.origin === 'ai' || leftTag || hasAiFacts(tx, id)) {
       setObservedDismissed(tx, withObservedDismissed(getObservedDismissed(tx), row.kind, row.name))
     }
     const deleted = toEntity(tx, row)
@@ -622,7 +647,6 @@ export function mergeEntities(
     }
     tx.update(entity)
       .set({
-        fields: JSON.stringify(fields),
         body: body === '' ? target.body : body,
         image,
         origin: 'author',
@@ -630,6 +654,9 @@ export function mergeEntities(
       })
       .where(eq(entity.id, targetId))
       .run()
+    writeAuthorFields(tx, targetId, fields)
+    // F-9.13: the dated facts move; the frozen F-5.16 rows too, for an older build (D9).
+    moveFacts(tx, sources, targetId)
     tx.update(observedFact)
       .set({ entityId: targetId })
       .where(inArray(observedFact.entityId, sources))

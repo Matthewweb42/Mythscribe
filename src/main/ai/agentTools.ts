@@ -21,6 +21,7 @@ import {
   type StoryCategory
 } from '@shared/categories'
 import { toEntityNameKey } from '@shared/entities'
+import { FACT_STATUS_LABEL, sheetAt } from '@shared/facts'
 import type { Entity } from '@shared/ipc/contract'
 import { SCENE_SYNOPSIS_MAX, parseStoredSceneMeta } from '@shared/sceneMeta'
 import { STORY_MAP_NOW_MARK, sceneProgress } from '@shared/storyTime'
@@ -29,6 +30,7 @@ import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
 import { listCategories } from '../entity/categoryStore'
 import { listEntities } from '../entity/entityStore'
+import { factsForEntities } from '../entity/factStore'
 import { nodesInTreeOrder } from '../search/searchStore'
 import { findTagByNameOrAlias, getTag, listTags } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
@@ -298,12 +300,35 @@ function readSheet(project: AgentProject, name: unknown): ToolOutcome {
     }
   }
   const lines = [`${entity.name} (${entity.kind}; ${SHEETS_ARE_PLANS})`]
-  for (const field of categoryOf(entity.kind, listCategories(project.db)).fields) {
+  const fields = categoryOf(entity.kind, listCategories(project.db)).fields
+  for (const field of fields) {
     const value = entity.fields[field.id]?.trim() ?? ''
     lines.push(`${field.id} (${field.label}): ${value || '(empty)'}`)
   }
   const body = entity.body?.trim() ?? ''
   if (body) lines.push(`Page:\n${body}`)
+  // F-9.13: what the scenes state, dated, as of now: quoted, so citable; later scenes left out.
+  const dated = sheetAt({
+    facts: factsForEntities(project.db, [entity.id]),
+    fields: {},
+    attributes: fields.map((field) => field.id),
+    order: project.time.order,
+    position: project.time.nowId
+  }).flatMap((field) =>
+    (field.mode === 'replace'
+      ? field.current === null
+        ? []
+        : [field.current]
+      : field.details
+    ).map((value) => {
+      const where = value.sources
+        .flatMap((source) => (source.nodeId === null ? [] : [project.refOf.get(source.nodeId)]))
+        .filter((ref): ref is string => ref !== undefined)
+      const status = value.status === 'canon' ? '' : ` [${FACT_STATUS_LABEL[value.status]}]`
+      return `${field.attribute}: ${value.value}${status}${where.length ? ` (${where.join(', ')})` : ''}`
+    })
+  )
+  if (dated.length > 0) lines.push('Stated in the scenes so far:', ...dated)
   return {
     step: { tool: 'read_sheet', label: `Reading ${entity.name}’s sheet…` },
     result: cap(lines.join('\n'))

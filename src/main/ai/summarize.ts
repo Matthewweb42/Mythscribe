@@ -31,15 +31,11 @@ import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../voice/profile'
 import type { NodeRow } from '../db/schema'
-import { applyAutoTags, bankTagNames, type AutoTagsChange } from './autoTags'
+import { applyDerivedKnowledge } from '../knowledge/derive'
+import { bankTagNames, type AutoTagsChange } from './autoTags'
 import { headTruncate } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
-import {
-  applyObservedFacts,
-  knownNames,
-  type KnownNames,
-  type ObservedFactsChange
-} from './observedFacts'
+import { knownNames, type KnownNames, type ObservedFactsChange } from './observedFacts'
 import { buildSummaryPromptV3, SUMMARY_PROMPT_V3_VERSION } from './prompts/summary.v3'
 import { AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
@@ -61,7 +57,8 @@ import { runAiRequest, sha256, type AiRequestDeps } from './request'
  * F-5.16: the same request logs the automatic story bible. The answer's `facts` are checked one
  * by one (`parseSummaryAnswer`: an attribute outside its kind's list or a quote that is not in
  * the scene as sent is dropped and counted — no fact without a passage) and stored with the
- * summary in one transaction (`applyObservedFacts`), apart from the author's own sheets
+ * summary in one transaction (`applyDerivedKnowledge`, F-9.13: dated facts and the Changes log),
+ * apart from the author's own sheets
  * (author-control rule 1). A scene that loses its summary loses its facts with it.
  *
  * F-4.13: and the same request tags the scene. The answer's `tags` are applied as `ai` links in
@@ -177,6 +174,8 @@ export interface SummarizeSceneInput {
   onFactsChanged?: (change: ObservedFactsChange) => void
   /** Told which tags the run linked, dropped, or created (F-4.13), under the same rule. */
   onTagsChanged?: (change: AutoTagsChange) => void
+  /** F-9.13: told when the run logged changes, so the Changes section refetches. */
+  onChangesLogged?: () => void
 }
 
 export interface SummarizeSceneResult {
@@ -211,10 +210,14 @@ export async function summarizeScene(
     // so do the tags the job applied (F-4.13); the author's own links stay.
     const cleared = db.transaction((tx) => {
       deleteSummary(tx, input.nodeId)
-      return {
-        facts: applyObservedFacts(tx, input.nodeId, []),
-        tags: applyAutoTags(tx, input.nodeId, [], '')
-      }
+      // F-9.13: with no text read, every AI fact of the scene has lost its quote; nothing is added.
+      return applyDerivedKnowledge(tx, {
+        nodeId: input.nodeId,
+        facts: [],
+        tags: [],
+        sceneText: '',
+        now: deps.now().toISOString()
+      })
     })
     if (cleared.facts.entityIds.length > 0) input.onFactsChanged?.(cleared.facts)
     if (cleared.tags.moved.length > 0) input.onTagsChanged?.(cleared.tags)
@@ -268,12 +271,20 @@ export async function summarizeScene(
   // was never sent, so the row keeps the hash of what was and reads as out of date.
   // The tags (F-4.13) follow the facts for the same reason: a name tag the job creates is a
   // known name of this scene from then on.
-  const { summary, change, tagged } = db.transaction((tx) => {
+  const { summary, change, tagged, logged } = db.transaction((tx) => {
     const unchanged =
       sourceHash(source.sceneText, source.meta, knownNames(tx, source.sceneText)) ===
       source.contentHash
-    const applied = applyObservedFacts(tx, input.nodeId, parsed.facts)
-    const tags = applyAutoTags(tx, input.nodeId, parsed.tags, source.sceneText)
+    // F-9.13: facts, sheets, tags, and the Changes log, together.
+    const derived = applyDerivedKnowledge(tx, {
+      nodeId: input.nodeId,
+      facts: parsed.facts,
+      tags: parsed.tags,
+      sceneText: source.sceneText,
+      now: deps.now().toISOString()
+    })
+    const applied = derived.facts
+    const tags = derived.tags
     const row: StoredSceneSummary = {
       ...parsed.summary,
       nodeId: input.nodeId,
@@ -287,10 +298,11 @@ export async function summarizeScene(
       createdAt: deps.now().toISOString()
     }
     upsertSummary(tx, row)
-    return { summary: row, change: applied, tagged: tags }
+    return { summary: row, change: applied, tagged: tags, logged: derived.logged }
   })
   if (change.entityIds.length > 0 || change.created.length > 0) input.onFactsChanged?.(change)
   if (tagged.moved.length > 0) input.onTagsChanged?.(tagged)
+  if (logged > 0) input.onChangesLogged?.()
 
   return {
     summary,

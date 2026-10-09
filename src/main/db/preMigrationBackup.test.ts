@@ -146,7 +146,7 @@ describe('writePreMigrationBackup (F-8.7)', () => {
 })
 
 describe('openProject writes the backup before an upgrade (F-8.7)', () => {
-  /** A real project put back to the schema before F-9.12: migrations 0021 and 0022 undone. */
+  /** A real project put back to the schema before F-9.12: migrations 0021 to 0023 undone. */
   function olderProject(): { folder: string; content: string } {
     const folder = path.join(tmp, 'Book.mythscribe')
     const session = createProject(folder, 'Book', 'novel')
@@ -157,7 +157,10 @@ describe('openProject writes the backup before an upgrade (F-8.7)', () => {
         name: string
       }[]
     ).map((row) => row.name)
-    expect(names).toEqual(['knowledge_index', 'passage_fts'])
+    expect(names).toEqual(['knowledge_index', 'passage_fts', 'facts'])
+    raw.exec('DROP TABLE fact')
+    raw.exec('DROP TABLE knowledge_change')
+    raw.exec('ALTER TABLE entity DROP COLUMN status')
     raw.exec('DROP TABLE passage_fts')
     raw.exec('ALTER TABLE tag_mention DROP COLUMN paragraphs')
     raw.exec('ALTER TABLE mention_scan DROP COLUMN passage_hash')
@@ -182,7 +185,7 @@ describe('openProject writes the backup before an upgrade (F-8.7)', () => {
     expect(asked[0]?.id).toBe(session.info.id)
     const [file] = listPreMigrationBackups(backups)
     if (file === undefined) throw new Error('no backup written')
-    expect(path.basename(file)).toMatch(/^pre-migration-21-23-/)
+    expect(path.basename(file)).toMatch(/^pre-migration-21-24-/)
     const copy = new Database(file, { readonly: true })
     const tables = copy.prepare("SELECT name FROM sqlite_master WHERE name = 'passage_fts'").all()
     expect(tables).toEqual([])

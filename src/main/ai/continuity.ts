@@ -22,7 +22,7 @@ import {
   factKey,
   groupFacts,
   observedAttributeLabel,
-  type ObservedFact
+  type GroupableFact
 } from '@shared/observedFacts'
 import type { SettledStatus } from '@shared/proposal'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
@@ -32,7 +32,7 @@ import { listCategories } from '../entity/categoryStore'
 import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { getDocumentContent } from '../document/documentStore'
 import { listEntities } from '../entity/entityStore'
-import { factsForEntities, factsForNode } from '../entity/observedFactStore'
+import { factsForEntities, factsForNode } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 import { getAiSettings, getProjectTimeline } from '../project/settingsStore'
 import { listDocumentTags } from '../tag/documentTagStore'
@@ -214,7 +214,7 @@ export function continuityRefs(db: TreeDb, nodeId: string, sceneText: string): C
     factsForEntities(
       db,
       entities.map((entity) => entity.id)
-    ).filter((fact) => fact.nodeId !== nodeId),
+    ).filter((fact) => fact.origin === 'ai' && fact.nodeId !== nodeId),
     documents.map((row) => row.id)
   )
   for (const entity of entities) {
@@ -314,13 +314,14 @@ export interface ContinuityCandidate {
  * when it has none ("about thirty" is the model's call); one stating that number is not.
  */
 export function localCandidates(
-  facts: readonly ObservedFact[],
+  facts: readonly GroupableFact[],
   refs: readonly ContinuityRef[],
   ages: ReadonlyMap<string, number> = new Map()
 ): ContinuityCandidate[] {
   const candidates: ContinuityCandidate[] = []
   for (const fact of facts) {
-    if (fact.hidden) continue
+    if (fact.hidden || fact.quote === null) continue
+    const quote = fact.quote
     for (const ref of refs) {
       if (ref.kind === 'timeline' || ref.entityId !== fact.entityId) continue
       if (ref.attribute !== fact.attribute) continue
@@ -329,7 +330,7 @@ export function localCandidates(
         if (firstWholeNumber(fact.value) === age) continue
       } else if (factKey(fact.attribute, fact.value) === factKey(fact.attribute, ref.value))
         continue
-      candidates.push({ quote: fact.quote, ref })
+      candidates.push({ quote, ref })
     }
   }
   return candidates

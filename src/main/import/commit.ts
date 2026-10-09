@@ -6,6 +6,7 @@ import { defaultNodeTitle, type HierarchyLevel, type SectionType } from '@shared
 import type { TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
 import { node, type NodeRow } from '../db/schema'
+import { deleteAiFactsUnder } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 import { insertNodes, listNodes, type TreeDb } from '../tree/treeStore'
 import { storedDocument } from './existing'
@@ -329,7 +330,11 @@ export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft)
         .where(eq(node.id, id))
         .run()
     }
-    if (deleted.length > 0) tx.delete(node).where(inArray(node.id, deleted)).run()
+    if (deleted.length > 0) {
+      // F-9.13: a replaced scene's AI facts go with it, as `deleteNode` does.
+      deleteAiFactsUnder(tx, deleted)
+      tx.delete(node).where(inArray(node.id, deleted)).run()
+    }
     return {
       rows,
       words,

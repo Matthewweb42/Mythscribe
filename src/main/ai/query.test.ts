@@ -19,7 +19,7 @@ import { saveNotes } from '../document/notesStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { upsertSummary } from '../document/summaryStore'
 import { createEntity } from '../entity/entityStore'
-import { replaceSceneFacts } from '../entity/observedFactStore'
+import { applySceneFacts } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { createSeededProject } from '../project/testProject'
@@ -612,9 +612,12 @@ describe('runQuery with the story bible (F-5.16)', () => {
       name: 'Mara',
       fields: { age: '31' }
     }).entity
-    replaceSceneFacts(db, scenes[0]!, [
-      { entityId: mara.id, attribute: 'goals', value: 'Keep a copy of the ledger', quote: QUOTE }
-    ])
+    applySceneFacts(
+      db,
+      scenes[0]!,
+      [{ entityId: mara.id, attribute: 'goals', value: 'Keep a copy of the ledger', quote: QUOTE }],
+      ''
+    )
     await ask()
     expect(system()).toContain(
       `${QUERY_BIBLE_HEADING_V3}\nMara (character): Age: 31. Seen in the manuscript: ` +
@@ -652,9 +655,12 @@ describe('runQuery with the story bible (F-5.16)', () => {
 
   it('does not count an entity with only observed facts as a sheet', async () => {
     const tomas = createEntity(db, { kind: 'character', name: 'Tomas' }).entity
-    replaceSceneFacts(db, scenes[0]!, [
-      { entityId: tomas.id, attribute: 'goals', value: 'Wants the ledger back', quote: QUOTE }
-    ])
+    applySceneFacts(
+      db,
+      scenes[0]!,
+      [{ entityId: tomas.id, attribute: 'goals', value: 'Wants the ledger back', quote: QUOTE }],
+      ''
+    )
     answers({ answer: 'He wants the ledger back.', citations: [], sheets: ['Tomas'] })
     const result = await ask({ message: 'What does Tomas want?' })
     expect(result).toMatchObject({ uncited: true, sheets: [] })
@@ -672,9 +678,12 @@ describe('runQuery with the story bible (F-5.16)', () => {
     await ask()
     expect((await ask()).cached).toBe(true)
     expect(complete).toHaveBeenCalledTimes(1)
-    replaceSceneFacts(db, scenes[1]!, [
-      { entityId: mara.id, attribute: 'personality', value: 'Patient', quote: 'Mara stood' }
-    ])
+    applySceneFacts(
+      db,
+      scenes[1]!,
+      [{ entityId: mara.id, attribute: 'personality', value: 'Patient', quote: 'Mara stood' }],
+      ''
+    )
     expect((await ask()).cached).toBe(false)
     expect(complete).toHaveBeenCalledTimes(2)
   })

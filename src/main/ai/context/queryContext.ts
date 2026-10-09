@@ -13,7 +13,7 @@ import type { StoryBibleEntity } from '@shared/storyBible'
 import type { StoredSceneSummary } from '@shared/summary'
 import { summariesFor } from '../../document/summaryStore'
 import { listEntities } from '../../entity/entityStore'
-import { factsForEntities } from '../../entity/observedFactStore'
+import { factsForEntities } from '../../entity/factStore'
 import { listAllDocumentTags } from '../../tag/documentTagStore'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../../voice/profile'
@@ -276,7 +276,7 @@ export function rankCandidates(db: TreeDb, input: RankCandidatesInput): QueryCan
     factsForEntities(
       db,
       named.map((entity) => entity.id)
-    ).map((fact) => fact.nodeId)
+    ).flatMap((fact) => (fact.origin === 'ai' && fact.nodeId !== null ? [fact.nodeId] : []))
   )
 
   const scored: QueryCandidate[] = []

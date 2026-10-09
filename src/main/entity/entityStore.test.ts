@@ -23,7 +23,7 @@ import {
   updateEntity,
   type EntityDb
 } from './entityStore'
-import { listFactsForEntity, replaceSceneFacts, setFactHidden } from './observedFactStore'
+import { listFactsForEntity, applySceneFacts, setFactHidden } from './factStore'
 
 let tmp: string
 let session: ProjectSession
@@ -87,6 +87,7 @@ describe('createEntity', () => {
       tagId: tagOf(id)?.id,
       aliases: [],
       origin: 'author',
+      status: 'canon',
       created: '2026-09-22T10:00:00.000Z',
       modified: '2026-09-22T10:00:00.000Z'
     })
@@ -285,9 +286,12 @@ describe('origin and dismissed names (F-5.16)', () => {
   function logFact(entityId: string): void {
     const scene = listNodes(db).find((row) => row.kind === 'document' && row.sectionType === null)
     if (scene === undefined) throw new Error('the seeded project has no scene')
-    replaceSceneFacts(db, scene.id, [
-      { entityId, attribute: 'age', value: 'nineteen', quote: 'She was nineteen.' }
-    ])
+    applySceneFacts(
+      db,
+      scene.id,
+      [{ entityId, attribute: 'age', value: 'nineteen', quote: 'She was nineteen.' }],
+      ''
+    )
   }
 
   it('marks an entity the story-bible job creates, with its tag, and the author’s own not', () => {
@@ -356,7 +360,7 @@ describe('origin and dismissed names (F-5.16)', () => {
     logFact(tash.id)
     // The scene was edited and re-read, and no longer states anything about Tash.
     const scene = listNodes(db).find((row) => row.kind === 'document' && row.sectionType === null)
-    replaceSceneFacts(db, scene?.id ?? '', [])
+    applySceneFacts(db, scene?.id ?? '', [], '')
     expect(listFactsForEntity(db, tash.id)).toEqual([])
     deleteEntity(db, tash.id)
     // Still the AI's entity, and the author deleted it: the next scene must not bring it back.
@@ -599,9 +603,12 @@ describe('mergeEntities (F-9.10)', () => {
     const scene = listNodes(db).find((node) => node.kind === 'document')
     const mill = create({ kind: 'setting', name: 'The Mill' })
     const other = create({ kind: 'character', name: 'Mill Keeper', fields: { age: '60' } })
-    replaceSceneFacts(db, scene?.id ?? '', [
-      { entityId: other.id, attribute: 'age', value: 'sixty', quote: 'He was sixty.' }
-    ])
+    applySceneFacts(
+      db,
+      scene?.id ?? '',
+      [{ entityId: other.id, attribute: 'age', value: 'sixty', quote: 'He was sixty.' }],
+      ''
+    )
     const write = mergeEntities(db, mill.id, [other.id])
     expect(write.entity.fields.notes).toBe('Age: 60')
     expect(listFactsForEntity(db, mill.id).map((f) => f.value)).toEqual(['sixty'])

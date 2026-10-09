@@ -66,6 +66,22 @@ export default tseslint.config(
     rules: { 'no-console': ['error', { allow: ['log', 'warn', 'error'] }] }
   },
   {
+    // F-9.13: the author's sheet text has one writer, so it and its baseline facts never disagree.
+    files: ['src/main/**/*.ts'],
+    ignores: ['src/main/entity/factStore.ts', '**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.property.name='set'][callee.object.callee.property.name='update'][callee.object.arguments.0.name='entity'] > ObjectExpression > Property[key.name='fields']",
+          message:
+            'entity.fields has one writer: writeAuthorFields in src/main/entity/factStore.ts.'
+        }
+      ]
+    }
+  },
+  {
     files: ['e2e/**/*.ts'],
     languageOptions: {
       parserOptions: { projectService: false, project: './tsconfig.e2e.json' }

@@ -17,7 +17,9 @@ export const SIDEBAR_TOOL_IDS = [
   // F-14.15: the edit passes and their reports.
   'edits',
   // F-9.8: the context library, the author's uploaded worldbuilding files.
-  'library'
+  'library',
+  // F-9.13: what the AI added to the story bible on its own, with Undo.
+  'changes'
 ] as const
 export type SidebarToolId = (typeof SIDEBAR_TOOL_IDS)[number]
 

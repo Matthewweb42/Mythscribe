@@ -8,6 +8,7 @@ import { matterTemplate } from '@shared/matterTemplates'
 import { countWords } from '@shared/wordCount'
 import type * as schema from '../db/schema'
 import { node, type NodeInsert, type NodeRow } from '../db/schema'
+import { deleteAiFactsUnder } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 
 /** Accepts both the connection's orm and a transaction handle (both extend this base). */
@@ -220,20 +221,24 @@ export function duplicateNode(db: TreeDb, id: string): NodeRow[] {
 /**
  * Deletes a node and everything inside it (F-2.3). Descendants go through the schema's
  * `ON DELETE CASCADE` (`foreign_keys` is on for every connection); later siblings shift up so
- * positions stay contiguous. The three section roots cannot be deleted.
+ * positions stay contiguous. The three section roots cannot be deleted. F-9.13: the AI facts the
+ * deleted scenes stated go with them; answers the records whose facts went.
  */
-export function deleteNode(db: TreeDb, id: string): void {
-  db.transaction((tx) => {
+export function deleteNode(db: TreeDb, id: string): string[] {
+  return db.transaction((tx) => {
     const existing = getNode(tx, id)
     if (!existing) throw new AppError('NOT_FOUND', 'Node not found', { id })
     if (existing.sectionType !== null || existing.parentId === null) {
       throw new AppError('VALIDATION', 'Sections cannot be deleted', { id })
     }
+    // F-9.13: what the scene (and every scene under it) stated goes with it; author lines stay.
+    const entityIds = deleteAiFactsUnder(tx, [id])
     tx.delete(node).where(eq(node.id, id)).run()
     tx.update(node)
       .set({ position: sql`${node.position} - 1` })
       .where(and(eq(node.parentId, existing.parentId), gt(node.position, existing.position)))
       .run()
+    return entityIds
   })
 }
 

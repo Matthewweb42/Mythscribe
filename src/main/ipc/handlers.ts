@@ -228,7 +228,10 @@ import {
   requireCategory,
   updateCategory
 } from '../entity/categoryStore'
-import { listFactsForEntity, setFactHidden } from '../entity/observedFactStore'
+import type { ChangeUndoResult } from '@shared/changes'
+import { listFactsForEntity, setFactHidden, setFactStatus } from '../entity/factStore'
+import { listChanges, undoChange, undoRun } from '../knowledge/changeLog'
+import { convertKnowledgeFacts } from '../knowledge/factConversion'
 import { importDraft, type ImportResult } from '../import/commit'
 import { withExisting } from '../import/existing'
 import { readManuscript } from '../import/read'
@@ -572,7 +575,8 @@ export function registerHandlers({
         nodeId: job.nodeId,
         requestId,
         onFactsChanged: (change) => publishObservedFacts(db, change),
-        onTagsChanged: (change) => publishAutoTags(db, job.nodeId, change)
+        onTagsChanged: (change) => publishAutoTags(db, job.nodeId, change),
+        onChangesLogged: () => emit(windows(), 'changes:changed', {})
       })
       // F-13.4: with the scene's facts in place, the quiet consistency check. Local unless a
       // fact of this scene differs from the sheet or from another scene, silent when the dial
@@ -852,9 +856,11 @@ export function registerHandlers({
   )
 
   register('tree:delete', ({ id }) => {
-    deleteNode(manager.require().connection.orm, id)
+    const entityIds = deleteNode(manager.require().connection.orm, id)
     // F-13.4: the scene's findings went with it (cascade), and the panel holds a copy.
     emit(windows(), 'continuity:changed', { nodeIds: [id] })
+    // F-9.13: and so did what it stated; the sheets that held its facts refetch.
+    if (entityIds.length > 0) emit(windows(), 'fact:changed', { entityIds })
     return null
   })
 
@@ -1749,7 +1755,7 @@ export function registerHandlers({
       publishTagChange(db, tagChange)
     }
     if (change.entityIds.length > 0) {
-      emit(windows(), 'observedFact:changed', { entityIds: change.entityIds })
+      emit(windows(), 'fact:changed', { entityIds: change.entityIds })
     }
     // F-3.14: a name the job logged is a story name like any other.
     if (change.created.length > 0) void syncSpelling()
@@ -1786,6 +1792,10 @@ export function registerHandlers({
     const { entity: updated, tagChange } = updateEntity(db, id, patch)
     publishTagChange(db, tagChange)
     void syncSpelling()
+    // F-9.13: an author line dated at a scene is a fact the sheet lists.
+    if (patch.asOf != null && patch.fields !== undefined) {
+      emit(windows(), 'fact:changed', { entityIds: [id] })
+    }
     return updated
   })
 
@@ -1810,7 +1820,7 @@ export function registerHandlers({
     }
     if (result.aliasedTag !== null) emit(windows(), 'tag:changed', result.aliasedTag)
     void syncSpelling()
-    emit(windows(), 'observedFact:changed', { entityIds: [targetId] })
+    emit(windows(), 'fact:changed', { entityIds: [targetId] })
     emit(windows(), 'continuity:changed', { nodeIds: [] })
     return {
       entity: result.entity,
@@ -1902,16 +1912,56 @@ export function registerHandlers({
     return null
   })
 
-  // F-5.16: what the manuscript states about an entity. The facts are written by the index job;
-  // the author only reads them and hides or restores one, which every window then hears about.
-  register('observedFact:listForEntity', ({ entityId }) =>
+  // F-9.13: a record's dated facts. The AI's are written by the index job; the author hides,
+  // restores, or re-statuses one, which every window then hears about.
+  register('fact:listForEntity', ({ entityId }) =>
     listFactsForEntity(manager.require().connection.orm, entityId)
   )
 
-  register('observedFact:setHidden', ({ id, hidden }) => {
+  register('fact:setHidden', ({ id, hidden }) => {
     const fact = setFactHidden(manager.require().connection.orm, id, hidden)
-    emit(windows(), 'observedFact:changed', { entityIds: [fact.entityId] })
+    emit(windows(), 'fact:changed', { entityIds: [fact.entityId] })
     return fact
+  })
+
+  register('fact:setStatus', ({ id, status }) => {
+    const fact = setFactStatus(manager.require().connection.orm, id, status)
+    emit(windows(), 'fact:changed', { entityIds: [fact.entityId] })
+    return fact
+  })
+
+  // F-9.13: the Changes log. An undo goes through the tombstones; what it removed or moved
+  // reaches the windows as the same events the original writes would have.
+  register('changes:list', ({ before, limit }) =>
+    listChanges(manager.require().connection.orm, { before, limit })
+  )
+
+  const publishUndo = (db: TreeDb, result: ChangeUndoResult): ChangeUndoResult => {
+    if (result.removedTagIds.length > 0) {
+      rescanManuscript(db)
+      publishProposed()
+    }
+    if (result.removedEntityIds.length > 0 || result.removedTagIds.length > 0) {
+      void syncSpelling()
+      emit(windows(), 'continuity:changed', { nodeIds: [] })
+    }
+    if (result.nodeIds.length > 0 || result.removedTagIds.length > 0) {
+      emit(windows(), 'documentTag:changed', { nodeIds: result.nodeIds })
+    }
+    if (result.entityIds.length > 0)
+      emit(windows(), 'fact:changed', { entityIds: result.entityIds })
+    emit(windows(), 'changes:changed', {})
+    return result
+  }
+
+  register('changes:undo', ({ id }) => {
+    const db = manager.require().connection.orm
+    return publishUndo(db, undoChange(db, id))
+  })
+
+  register('changes:undoRun', ({ runId }) => {
+    const db = manager.require().connection.orm
+    return publishUndo(db, undoRun(db, runId))
   })
 
   /**
@@ -3768,6 +3818,8 @@ export function registerHandlers({
       try {
         const db = manager.require().connection.orm
         convertKnowledgeIndex(db)
+        // F-9.13: old observed facts and the sheets' text into dated facts (every open, cheap).
+        convertKnowledgeFacts(db)
         prunePassages(db)
       } catch (err) {
         console.warn('Could not update the knowledge index', err)

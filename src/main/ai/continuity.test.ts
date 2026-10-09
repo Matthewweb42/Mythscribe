@@ -21,7 +21,7 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { createEntity, updateEntity } from '../entity/entityStore'
-import { replaceSceneFacts, setFactHidden, factsForNode } from '../entity/observedFactStore'
+import { applySceneFacts, setFactHidden, factsForNode } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { createSeededProject } from '../project/testProject'
@@ -148,9 +148,12 @@ const ageRef = (): ContinuityRef => ({
 
 /** What the summary job logs for the scene under check: its own statement of her age. */
 const logAge = (): void => {
-  replaceSceneFacts(db, scene, [
-    { entityId: mara, attribute: 'age', value: 'twenty-nine', quote: QUOTE }
-  ])
+  applySceneFacts(
+    db,
+    scene,
+    [{ entityId: mara, attribute: 'age', value: 'twenty-nine', quote: QUOTE }],
+    ''
+  )
 }
 
 const background = (): Promise<ContinuityRun | null> =>
@@ -207,14 +210,27 @@ describe('continuityRefs (F-13.4)', () => {
 
   it('lists the sheet first, then what other scenes state, then the previous scene’s timeline', () => {
     updateEntity(db, mara, { fields: { appearance: 'Grey eyes,\n  a burn scar.' } })
-    replaceSceneFacts(db, earlier, [
-      { entityId: mara, attribute: 'age', value: 'thirty-four', quote: 'She was thirty-four.' },
-      { entityId: mara, attribute: 'goals', value: 'Cross the river', quote: 'She meant to cross.' }
-    ])
+    applySceneFacts(
+      db,
+      earlier,
+      [
+        { entityId: mara, attribute: 'age', value: 'thirty-four', quote: 'She was thirty-four.' },
+        {
+          entityId: mara,
+          attribute: 'goals',
+          value: 'Cross the river',
+          quote: 'She meant to cross.'
+        }
+      ],
+      ''
+    )
     // The scene's own facts are what is checked, never what it is checked against.
-    replaceSceneFacts(db, scene, [
-      { entityId: mara, attribute: 'gender', value: 'woman', quote: 'She did not turn.' }
-    ])
+    applySceneFacts(
+      db,
+      scene,
+      [{ entityId: mara, attribute: 'gender', value: 'woman', quote: 'She did not turn.' }],
+      ''
+    )
     setSceneMeta(db, earlier, { ...emptySceneMeta(), timeline: 'Day 3, dusk' })
     setSceneMeta(db, scene, { ...emptySceneMeta(), timeline: 'Day 2, morning' })
 
@@ -256,9 +272,19 @@ describe('continuityRefs (F-13.4)', () => {
   })
 
   it('needs a timeline on both scenes, and leaves a hidden fact out', () => {
-    replaceSceneFacts(db, earlier, [
-      { entityId: mara, attribute: 'goals', value: 'Cross the river', quote: 'She meant to cross.' }
-    ])
+    applySceneFacts(
+      db,
+      earlier,
+      [
+        {
+          entityId: mara,
+          attribute: 'goals',
+          value: 'Cross the river',
+          quote: 'She meant to cross.'
+        }
+      ],
+      ''
+    )
     setFactHidden(db, factsForNode(db, earlier)[0]?.id ?? '', true)
     setSceneMeta(db, earlier, { ...emptySceneMeta(), timeline: 'Day 3, dusk' })
     expect(continuityRefs(db, scene, text())).toEqual({
@@ -276,9 +302,19 @@ describe('continuityRefs (F-13.4)', () => {
     createEntity(db, { kind: 'world', name: 'Thaw', fields: { rules: 'Comes late.' } })
     if (mill.entity.tagId === null) throw new Error('the entity has no tag')
     addDocumentTag(db, scene, mill.entity.tagId)
-    replaceSceneFacts(db, scene, [
-      { entityId: vell.entity.id, attribute: 'age', value: 'sixty', quote: 'the doctor was sixty' }
-    ])
+    applySceneFacts(
+      db,
+      scene,
+      [
+        {
+          entityId: vell.entity.id,
+          attribute: 'age',
+          value: 'sixty',
+          quote: 'the doctor was sixty'
+        }
+      ],
+      ''
+    )
     const names = continuityRefs(db, scene, text()).refs.map((ref) => ref.entityName)
     // Story-bible order; Tomas and the thaw are in neither the text, the tags, nor the facts.
     expect(names).toEqual(['Dr. Vell', 'Mara', 'The mill'])
@@ -339,9 +375,19 @@ describe('continuityRefs (F-13.4)', () => {
         }
       })
     }
-    replaceSceneFacts(db, earlier, [
-      { entityId: mara, attribute: 'goals', value: 'Cross the river', quote: 'She meant to cross.' }
-    ])
+    applySceneFacts(
+      db,
+      earlier,
+      [
+        {
+          entityId: mara,
+          attribute: 'goals',
+          value: 'Cross the river',
+          quote: 'She meant to cross.'
+        }
+      ],
+      ''
+    )
     setSceneMeta(db, earlier, { ...emptySceneMeta(), timeline: 'Day 3, dusk' })
     setSceneMeta(db, scene, { ...emptySceneMeta(), timeline: 'Day 2, morning' })
     const named = `${text()}\nTomas, Pell, Ansel, and Brann waited.`
@@ -377,9 +423,12 @@ describe('continuityRefs (F-13.4)', () => {
 
     it('adds the age where the sheet has none, and leaves other scenes’ ages out', () => {
       updateEntity(db, mara, { fields: { age: '' } })
-      replaceSceneFacts(db, earlier, [
-        { entityId: mara, attribute: 'age', value: 'twenty', quote: 'She was twenty.' }
-      ])
+      applySceneFacts(
+        db,
+        earlier,
+        [{ entityId: mara, attribute: 'age', value: 'twenty', quote: 'She was twenty.' }],
+        ''
+      )
       placeScene(1200, '1170')
       expect(continuityRefs(db, scene, text()).refs.map((ref) => ref.value)).toEqual([
         '30 at this scene (born 1170, scene year 1200)',
@@ -744,7 +793,12 @@ describe('runBackgroundContinuity (F-13.4)', () => {
   it('asks nothing when no fact of the scene differs from the story bible', async () => {
     // No facts at all, then a fact that agrees with the sheet.
     expect(await background()).toMatchObject({ findings: [], requested: false, references: 0 })
-    replaceSceneFacts(db, scene, [{ entityId: mara, attribute: 'age', value: '34.', quote: QUOTE }])
+    applySceneFacts(
+      db,
+      scene,
+      [{ entityId: mara, attribute: 'age', value: '34.', quote: QUOTE }],
+      ''
+    )
     expect(await background()).toMatchObject({ findings: [], requested: false })
     expect(complete).not.toHaveBeenCalled()
     expect(ledger).toHaveLength(0)
@@ -775,7 +829,12 @@ describe('runBackgroundContinuity (F-13.4)', () => {
   })
 
   it('checks a stated age against the computed age at the scene, not the sheet’s static age (F-11.2b)', async () => {
-    replaceSceneFacts(db, scene, [{ entityId: mara, attribute: 'age', value: '29', quote: QUOTE }])
+    applySceneFacts(
+      db,
+      scene,
+      [{ entityId: mara, attribute: 'age', value: '29', quote: QUOTE }],
+      ''
+    )
     setProjectTimeline(db, {
       events: [{ id: 'siege', label: 'The siege begins', when: '', year: 1200, note: '' }]
     })
@@ -795,9 +854,12 @@ describe('runBackgroundContinuity (F-13.4)', () => {
 
   it('finds a candidate in what another scene states when the sheet is silent', async () => {
     updateEntity(db, mara, { fields: { age: '' } })
-    replaceSceneFacts(db, earlier, [
-      { entityId: mara, attribute: 'age', value: 'thirty-four', quote: 'She was thirty-four.' }
-    ])
+    applySceneFacts(
+      db,
+      earlier,
+      [{ entityId: mara, attribute: 'age', value: 'thirty-four', quote: 'She was thirty-four.' }],
+      ''
+    )
     logAge()
     answers([found()])
     const run = await background()
@@ -815,9 +877,12 @@ describe('runBackgroundContinuity (F-13.4)', () => {
   it('labels a fact read from a later scene as this scene’s future, and sends continuity.v2 (F-5.23)', async () => {
     updateEntity(db, mara, { fields: { age: '' } })
     const later = manuscriptDocuments(db)[2]?.id ?? ''
-    replaceSceneFacts(db, later, [
-      { entityId: mara, attribute: 'age', value: 'forty', quote: 'She was forty by then.' }
-    ])
+    applySceneFacts(
+      db,
+      later,
+      [{ entityId: mara, attribute: 'age', value: 'forty', quote: 'She was forty by then.' }],
+      ''
+    )
     logAge()
     answers([found()])
     const run = await background()

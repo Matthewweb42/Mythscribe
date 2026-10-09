@@ -1,6 +1,7 @@
 import { categoryOf } from '@shared/categories'
 import type { Entity } from '@shared/ipc/contract'
-import { groupFacts, observedAttributeLabel } from '@shared/observedFacts'
+import { sheetAt } from '@shared/facts'
+import { observedAttributeLabel } from '@shared/observedFacts'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import {
   renderStoryBible,
@@ -15,7 +16,7 @@ import type { NodeRow } from '../../db/schema'
 import { summariesFor } from '../../document/summaryStore'
 import { listCategories } from '../../entity/categoryStore'
 import { listEntities } from '../../entity/entityStore'
-import { factsForEntities } from '../../entity/observedFactStore'
+import { factsForEntities } from '../../entity/factStore'
 import { listDocumentTags } from '../../tag/documentTagStore'
 import { listTags } from '../../tag/tagStore'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
@@ -108,7 +109,9 @@ function scenePart(
     entities: storyBibleEntities(
       db,
       tagged,
-      documents.map((row) => row.id)
+      documents.map((row) => row.id),
+      undefined,
+      nodeId
     )
   }
 }
@@ -116,27 +119,27 @@ function scenePart(
 /**
  * Entities as a prompt states them (F-5.16), in the order given: the filled fields of a
  * structured sheet in template order (a blank-template entity shows the author no fields, so
- * its page is sent as one `Notes` entry instead), then the visible observed facts merged by `groupFacts` in `readingOrder` —
- * two values that differ are both listed, earliest scene first — leaving out every attribute
- * the sheet already fills, because the author's own sheet wins every conflict (F-14.9). A
- * hidden fact never reaches a prompt (`factsForEntities`). `sceneTitle`, when given, names the
- * scenes a fact was read from after its value, which is how Story Intelligence points at them.
- * An entity with nothing stated either way is left out.
+ * its page is sent as one `Notes` entry instead), then the dated facts as of `position`
+ * (F-9.13, `sheetAt` over `readingOrder`: a replace field's newest value at that scene, an
+ * accumulate field's details stated so far; null is the end of the book) — leaving out every
+ * attribute the sheet already fills, because the author's own sheet wins every conflict
+ * (F-14.9). A hidden fact never reaches a prompt (`factsForEntities`), and nothing stated after
+ * the scene does. `sceneTitle`, when given, names the scenes a fact was read from after its
+ * value, which is how Story Intelligence points at them. An entity with nothing stated either
+ * way is left out.
  */
 export function storyBibleEntities(
   db: TreeDb,
   entities: readonly Entity[],
   readingOrder: readonly string[],
-  sceneTitle?: (nodeId: string) => string
+  sceneTitle?: (nodeId: string) => string,
+  position: string | null = null
 ): StoryBibleEntity[] {
   if (entities.length === 0) return []
   const categories = listCategories(db)
-  const groups = groupFacts(
-    factsForEntities(
-      db,
-      entities.map((entity) => entity.id)
-    ),
-    readingOrder
+  const facts = factsForEntities(
+    db,
+    entities.map((entity) => entity.id)
   )
   return entities.flatMap((entity) => {
     const fields =
@@ -153,17 +156,33 @@ export function storyBibleEntities(
         ? [{ label: 'Notes', value: page }]
         : fields.map(({ label, value }) => ({ label, value }))
     const filled = new Set<string>(fields.map((field) => field.id))
-    const observed = groups
-      .filter((group) => group.entityId === entity.id && !filled.has(group.attribute))
-      .map((group) => {
-        const scenes = sceneTitle
-          ? group.sources.map((source) => sceneTitle(source.nodeId)).filter((title) => title !== '')
-          : []
-        return {
-          label: observedAttributeLabel(entity.kind, group.attribute),
-          value: scenes.length ? `${group.value} (${scenes.join('; ')})` : group.value
-        }
-      })
+    const view = sheetAt({
+      facts: facts.filter((fact) => fact.entityId === entity.id),
+      fields: {},
+      attributes: categoryOf(entity.kind, categories).fields.map((field) => field.id),
+      order: readingOrder,
+      position
+    })
+    const observed = view
+      .filter((field) => !filled.has(field.attribute))
+      .flatMap((field) =>
+        (field.mode === 'replace'
+          ? field.current === null
+            ? []
+            : [field.current]
+          : field.details
+        ).map((value) => {
+          const scenes = sceneTitle
+            ? value.sources
+                .flatMap((source) => (source.nodeId === null ? [] : [sceneTitle(source.nodeId)]))
+                .filter((title) => title !== '')
+            : []
+          return {
+            label: observedAttributeLabel(entity.kind, field.attribute),
+            value: scenes.length ? `${value.value} (${scenes.join('; ')})` : value.value
+          }
+        })
+      )
     if (sheet.length === 0 && observed.length === 0) return []
     return [{ entityId: entity.id, name: entity.name, kind: entity.kind, sheet, observed }]
   })
