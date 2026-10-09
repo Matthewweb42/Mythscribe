@@ -151,7 +151,10 @@ describe('the plan model (F-9.10)', () => {
   })
 
   it('groups and describes each change', () => {
-    expect(groupOf(merge)).toBe('tags')
+    expect(groupOf(merge)).toBe('merges')
+    expect(groupOf({ kind: 'deleteTag', tagId: 'a', name: 'custom', notName: true })).toBe(
+      'notNames'
+    )
     expect(groupOf(rename)).toBe('binder')
     expect(describeOrganiseAction(merge)).toBe('Merge tags “#rynna” into #rynna-falsire')
     expect(describeOrganiseAction(rename)).toBe('Rename Untitled to “The mill”')

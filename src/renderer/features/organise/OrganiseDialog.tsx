@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { categoryFieldLabel, categoryOf } from '@shared/categories'
 import {
   canUndo,
@@ -6,17 +6,22 @@ import {
   groupOf,
   needsAsk,
   ORGANISE_GROUP_LABEL,
+  ORGANISE_GROUP_NOUN,
   ORGANISE_GROUPS,
   ORGANISE_SCOPE_LABEL,
   scopesOf,
   type OrganiseAction
 } from '@shared/organise'
+import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, TagCategory, toTagName } from '@shared/tags'
 import { AiWaitText } from '@renderer/features/ai/AiWaitText'
 import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
-import { useOrganiseStore, type OrganiseChangeView } from './organiseStore'
+import { ReviewDeck } from '@renderer/features/review/ReviewDeck'
+import type { ReviewDeckGroup, ReviewDeckItem } from '@renderer/features/review/reviewDeckModel'
+import { useTagStore } from '@renderer/features/tags/tagStore'
+import { useOrganiseStore } from './organiseStore'
 
 const BUTTON =
   'rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-60'
@@ -32,11 +37,13 @@ const clip = (text: string): string => {
 }
 
 /**
- * The Organise plan screen (F-9.10): every change of the plan grouped (new categories, tags,
- * story bible, notes, binder), each with what it does and why, and where it stands. Ask: a
- * checkbox per change and Apply. Auto: what could be undone is already applied, each with Undo,
- * and "Undo the whole reorganisation"; merges, deletions, and new categories still wait for
- * Apply. Plan: it only describes.
+ * The Organise plan screen (F-9.10; one decision at a time since 2026-10-08): the plan on the
+ * review deck, grouped in its rail (Merges, Not names, Categories, Tags, Story bible, Notes,
+ * Binder), one card per change with what it does, before → after, and why. Ask: Accept / Skip /
+ * Edit each (A / S / E), Accept group, and "Apply N accepted" (or reaching the end with nothing
+ * skipped) applies them. Auto: what could be undone is already applied, each with Undo, and
+ * "Undo the whole reorganisation"; merges, deletions, and new categories wait on the deck.
+ * Plan: the cards only describe.
  */
 export function OrganiseDialog(): React.JSX.Element | null {
   const open = useOrganiseStore((s) => s.open)
@@ -54,7 +61,8 @@ function Dialog(): React.JSX.Element {
   const stop = useOrganiseStore((s) => s.stop)
 
   useEffect(() => {
-    panel.current?.focus()
+    // The plan's deck takes the focus itself, so its keys work at once.
+    if (phase !== 'ready') panel.current?.focus()
   }, [phase])
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -88,7 +96,7 @@ function Dialog(): React.JSX.Element {
         tabIndex={-1}
         data-testid="organise-dialog"
         onKeyDown={onKeyDown}
-        className="flex max-h-[85vh] w-[760px] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none"
+        className="flex max-h-[85vh] w-[860px] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none"
       >
         <div className="shrink-0 border-b border-line px-5 pt-4 pb-3">
           <h2 id={titleId} className="m-0 text-base font-semibold">
@@ -153,6 +161,22 @@ function Status(): React.JSX.Element {
   )
 }
 
+const GROUPS: ReviewDeckGroup[] = ORGANISE_GROUPS.map((id) => ({
+  id,
+  label: ORGANISE_GROUP_LABEL[id],
+  noun: ORGANISE_GROUP_NOUN[id]
+}))
+
+/** The changes whose card has an edit form: another keeper, a new name, another category. */
+const EDITABLE: ReadonlySet<OrganiseAction['kind']> = new Set([
+  'mergeTags',
+  'mergeSheets',
+  'tag',
+  'sheet',
+  'createSheet',
+  'category'
+])
+
 function Plan(): React.JSX.Element {
   const plan = useOrganiseStore((s) => s.plan)
   const order = useOrganiseStore((s) => s.order)
@@ -164,218 +188,509 @@ function Plan(): React.JSX.Element {
   const usage = useOrganiseStore((s) => s.usage)
   const cached = useOrganiseStore((s) => s.cached)
   const close = useOrganiseStore((s) => s.close)
-  const applySelected = useOrganiseStore((s) => s.applySelected)
+  const decide = useOrganiseStore((s) => s.decide)
+  const setEditing = useOrganiseStore((s) => s.setEditing)
+  const applyAccepted = useOrganiseStore((s) => s.applyAccepted)
   const undoAll = useOrganiseStore((s) => s.undoAll)
-  const setAll = useOrganiseStore((s) => s.setAll)
-  const all = order.flatMap((id) => (views[id] === undefined ? [] : [views[id]]))
-  const ticked = all.filter((view) => view.status === 'pending' && view.checked).length
-  const pending = all.filter((view) => view.status === 'pending').length
-  const undoable = all.filter(
-    (view) => view.status === 'applied' && canUndo(view.change.action)
+  const items = useMemo<ReviewDeckItem[]>(
+    () =>
+      order.flatMap((id) => {
+        const view = views[id]
+        if (view === undefined) return []
+        return [
+          {
+            id,
+            group: groupOf(view.change.action),
+            decision: view.decision,
+            settled: mode === 'plan' || view.status !== 'pending'
+          }
+        ]
+      }),
+    [order, views, mode]
+  )
+  const pending = items.filter((item) => item.settled !== true).length
+  const undoable = order.filter(
+    (id) => views[id]?.status === 'applied' && canUndo(views[id].change.action)
   ).length
+
+  const closeButton = (
+    <button
+      type="button"
+      onClick={close}
+      disabled={busy}
+      className="rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-60"
+    >
+      {pending === 0 || mode === 'plan' ? 'Done' : 'Close'}
+    </button>
+  )
 
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3 text-sm">
-        {plan !== null && plan.reply !== '' ? (
-          <p className="mt-0 mb-2" data-testid="organise-reply">
-            {plan.reply}
-          </p>
-        ) : null}
-        <p className="mt-0 mb-3 text-xs text-fg-subtle tabular-nums" data-testid="organise-cost">
-          <RequestCost request={{ model: model ?? '', costUsd, usage, cached }} />
-        </p>
-        {all.length === 0 ? (
-          <p className="m-0 text-fg-muted" data-testid="organise-nothing">
+      {(plan !== null && plan.reply !== '') || (plan !== null && plan.skipped.length > 0) ? (
+        <div className="shrink-0 px-5 pt-3 text-sm">
+          {plan.reply !== '' ? (
+            <p className="m-0" data-testid="organise-reply">
+              {plan.reply}
+            </p>
+          ) : null}
+          {plan.skipped.length > 0 ? (
+            <details className="mt-1 text-xs text-fg-muted">
+              <summary>
+                {plan.skipped.length} suggestion{plan.skipped.length === 1 ? '' : 's'} could not be
+                used
+              </summary>
+              <ul className="mt-1 mb-0 pl-4">
+                {plan.skipped.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+      {items.length === 0 ? (
+        <>
+          <p className="m-0 px-5 py-4 text-sm text-fg-muted" data-testid="organise-nothing">
             Nothing to change: everything already looks organised.
           </p>
-        ) : (
-          ORGANISE_GROUPS.map((group) => {
-            const rows = all.filter((view) => groupOf(view.change.action) === group)
-            if (rows.length === 0) return null
-            return (
-              <section key={group} className="mb-3" aria-label={ORGANISE_GROUP_LABEL[group]}>
-                <h3 className="mt-0 mb-1 text-xs font-semibold tracking-wide text-fg-muted uppercase">
-                  {ORGANISE_GROUP_LABEL[group]}
-                </h3>
-                <ul className="m-0 list-none p-0">
-                  {rows.map((view) => (
-                    <ChangeRow key={view.change.id} view={view} />
-                  ))}
-                </ul>
-              </section>
-            )
-          })
-        )}
-        {plan !== null && plan.skipped.length > 0 ? (
-          <details className="mt-2 text-xs text-fg-muted">
-            <summary>
-              {plan.skipped.length} suggestion{plan.skipped.length === 1 ? '' : 's'} could not be
-              used
-            </summary>
-            <ul className="mt-1 mb-0 pl-4">
-              {plan.skipped.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
-          </details>
-        ) : null}
-      </div>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-line px-5 py-3">
-        <div className="flex gap-3">
-          {mode !== 'plan' && pending > 0 ? (
-            <>
-              <button type="button" className={LINK} disabled={busy} onClick={() => setAll(true)}>
-                Select all
-              </button>
-              <button type="button" className={LINK} disabled={busy} onClick={() => setAll(false)}>
-                Select none
-              </button>
-            </>
-          ) : null}
-          {undoable > 0 ? (
-            <button
-              type="button"
-              className={LINK}
-              disabled={busy}
-              data-testid="organise-undo-all"
-              onClick={() => void undoAll()}
-            >
-              Undo the whole reorganisation
-            </button>
-          ) : null}
-        </div>
-        <div className="flex gap-2">
-          <button type="button" onClick={close} disabled={busy} className={BUTTON}>
-            {pending === 0 || mode === 'plan' ? 'Done' : 'Close'}
-          </button>
-          {mode !== 'plan' && pending > 0 ? (
-            <button
-              type="button"
-              data-testid="organise-apply"
-              disabled={busy || ticked === 0}
-              onClick={() => void applySelected()}
-              className={PRIMARY}
-            >
-              {ticked === pending ? `Apply ${ticked}` : `Apply ${ticked} of ${pending}`}
-            </button>
-          ) : null}
-        </div>
-      </div>
+          <div className="flex shrink-0 justify-end border-t border-line px-5 py-3">
+            {closeButton}
+          </div>
+        </>
+      ) : (
+        <ReviewDeck
+          label="Organise changes"
+          items={items}
+          groups={GROUPS}
+          renderCard={(id) => <ChangeCard id={id} />}
+          onDecide={decide}
+          onEdit={mode === 'plan' ? undefined : setEditing}
+          canEdit={(id) => {
+            const kind = useOrganiseStore.getState().views[id]?.change.action.kind
+            return kind !== undefined && EDITABLE.has(kind)
+          }}
+          apply={
+            mode === 'plan'
+              ? undefined
+              : { label: (n) => `Apply ${n} accepted`, onApply: () => void applyAccepted() }
+          }
+          applyOnFinish
+          busy={busy}
+          autoFocus
+          footer={
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="tabular-nums" data-testid="organise-cost">
+                <RequestCost request={{ model: model ?? '', costUsd, usage, cached }} />
+              </span>
+              {undoable > 0 ? (
+                <button
+                  type="button"
+                  className={LINK}
+                  disabled={busy}
+                  data-testid="organise-undo-all"
+                  onClick={() => void undoAll()}
+                >
+                  Undo the whole reorganisation
+                </button>
+              ) : null}
+            </span>
+          }
+          actions={closeButton}
+        />
+      )}
     </>
   )
 }
 
-function ChangeRow({ view }: { view: OrganiseChangeView }): React.JSX.Element {
+const STATUS_TEXT = {
+  applied: 'Applied',
+  undone: 'Undone',
+  applying: 'Applying…',
+  failed: 'Failed'
+} as const
+
+/** One change on the deck: what it does, before → after, why, where it stands, and its edit form. */
+function ChangeCard({ id }: { id: string }): React.JSX.Element | null {
+  const view = useOrganiseStore((s) => s.views[id])
+  const views = useOrganiseStore((s) => s.views)
   const mode = useOrganiseStore((s) => s.mode)
   const busy = useOrganiseStore((s) => s.busy)
-  const views = useOrganiseStore((s) => s.views)
-  const toggle = useOrganiseStore((s) => s.toggle)
+  const editing = useOrganiseStore((s) => s.editingId === id)
   const undo = useOrganiseStore((s) => s.undo)
   const categories = useCategoryStore((s) => s.categories)
+  if (view === undefined) return null
   const { change, status } = view
-  const proposedName = (id: string): string | undefined => {
+  const proposedName = (categoryId: string): string | undefined => {
     const proposal = Object.values(views).find(
-      (other) => other.change.action.kind === 'category' && other.change.action.id === id
+      (other) => other.change.action.kind === 'category' && other.change.action.id === categoryId
     )?.change.action
     return proposal?.kind === 'category' ? proposal.name : undefined
   }
-  const categoryName = (id: string): string => proposedName(id) ?? categoryOf(id, categories).name
+  const categoryName = (categoryId: string): string =>
+    proposedName(categoryId) ?? categoryOf(categoryId, categories).name
   const label = describeOrganiseAction(change.action, categoryName)
-  const checkable = status === 'pending' && mode !== 'plan'
-  const asks = needsAsk(change.action)
   return (
-    <li
-      className="flex items-start gap-2 border-b border-line py-1.5 last:border-b-0"
-      data-testid="organise-change"
-      data-status={status}
-    >
-      {checkable ? (
-        <input
-          type="checkbox"
-          className="mt-1"
-          checked={view.checked}
-          disabled={busy}
-          aria-label={label}
-          onChange={() => toggle(change.id)}
-        />
-      ) : (
-        <span className="mt-0.5 w-[13px] shrink-0" aria-hidden="true" />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className={status === 'undone' ? 'text-fg-muted line-through' : ''}>{label}</span>
-          {status === 'applied' ? <span className="text-xs text-success">Applied</span> : null}
-          {status === 'undone' ? <span className="text-xs text-fg-muted">Undone</span> : null}
-          {status === 'applying' ? <span className="text-xs text-fg-muted">Applying…</span> : null}
-          {status === 'pending' && asks && mode === 'auto' ? (
-            <span className="text-xs text-fg-muted">Asks first</span>
-          ) : null}
-        </div>
-        {change.reason !== '' ? (
-          <div className="text-xs text-fg-subtle">{change.reason}</div>
-        ) : null}
-        <Detail action={change.action} />
-        {view.error !== null ? (
-          <div className="text-xs text-danger" role="alert">
-            {view.error}
-          </div>
-        ) : null}
-      </div>
-      {status === 'applied' && canUndo(change.action) ? (
-        <button
-          type="button"
-          className={LINK}
-          disabled={busy}
-          aria-label={`Undo: ${label}`}
-          onClick={() => void undo(change.id)}
-        >
-          Undo
-        </button>
+    <div className="flex flex-col gap-2" data-testid="organise-change" data-status={status}>
+      <p
+        className={`m-0 text-base font-medium ${status === 'undone' ? 'text-fg-muted line-through' : ''}`}
+      >
+        {label}
+      </p>
+      <Preview action={change.action} />
+      {change.reason !== '' ? (
+        <p className="m-0 text-sm text-fg-muted">
+          <span className="font-medium">Why: </span>
+          {change.reason}
+        </p>
       ) : null}
-    </li>
+      {status !== 'pending' ? (
+        <p className="m-0 flex items-center gap-2 text-xs">
+          <span className={status === 'applied' ? 'text-success' : 'text-fg-muted'}>
+            {STATUS_TEXT[status]}
+          </span>
+          {status === 'applied' && canUndo(change.action) ? (
+            <button
+              type="button"
+              className={LINK}
+              disabled={busy}
+              aria-label={`Undo: ${label}`}
+              onClick={() => void undo(change.id)}
+            >
+              Undo
+            </button>
+          ) : null}
+        </p>
+      ) : mode === 'auto' && needsAsk(change.action) ? (
+        <p className="m-0 text-xs text-fg-muted">Asks first: nothing undoes this one.</p>
+      ) : null}
+      {view.error !== null ? (
+        <p className="m-0 text-xs text-danger" role="alert">
+          {view.error}
+        </p>
+      ) : null}
+      {editing ? <EditForm id={id} action={change.action} /> : null}
+    </div>
   )
 }
 
-/** What a change replaces and with what, where that is worth showing: fields, page, notes. */
-function Detail({ action }: { action: OrganiseAction }): React.JSX.Element | null {
+const tagName = (name: string): string => `#${name}`
+const NO_ALIASES: readonly string[] = []
+
+/** Before → after, where a change has more to show than its one line. */
+function Preview({ action }: { action: OrganiseAction }): React.JSX.Element | null {
   const categories = useCategoryStore((s) => s.categories)
   const sheetKind = useEntityStore((s) =>
     action.kind === 'sheet' ? (s.byId[action.entityId]?.kind ?? null) : null
   )
-  if (action.kind === 'notes') {
-    return (
-      <ul className="mt-0.5 mb-0 pl-4 text-xs text-fg-muted">
-        {action.points.map((point, i) => (
-          <li key={i}>{clip(point)}</li>
-        ))}
-      </ul>
-    )
+  const targetAliases = useTagStore((s) =>
+    action.kind === 'mergeTags' ? (s.byId[action.target.id]?.aliases ?? NO_ALIASES) : NO_ALIASES
+  )
+  switch (action.kind) {
+    case 'mergeTags':
+    case 'mergeSheets': {
+      const name = action.kind === 'mergeTags' ? tagName : (n: string): string => n
+      const aliases = [
+        ...targetAliases,
+        ...action.sources.map((source) =>
+          source.name
+            .split('-')
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ')
+        )
+      ]
+      return (
+        <div className="flex flex-col items-start gap-1 rounded-md bg-surface-raised px-3 py-2 text-sm">
+          <span>{[action.target, ...action.sources].map((n) => name(n.name)).join(' + ')}</span>
+          <span aria-hidden="true" className="text-fg-muted">
+            ↓
+          </span>
+          <span className="font-medium">
+            {name(action.target.name)}
+            {action.kind === 'mergeTags' ? (
+              <span className="font-normal text-fg-muted">{` (aliases: ${aliases.join(', ')})`}</span>
+            ) : null}
+          </span>
+        </div>
+      )
+    }
+    case 'deleteTag':
+      return (
+        <p className="m-0 text-sm">
+          <del className="text-fg-subtle">{tagName(action.name)}</del>
+        </p>
+      )
+    case 'deleteSheet':
+      return (
+        <p className="m-0 text-sm">
+          <del className="text-fg-subtle">{action.name}</del>
+        </p>
+      )
+    case 'notes':
+      return (
+        <div className="flex flex-col gap-1 text-xs">
+          {action.before.trim() !== '' ? (
+            <del className="text-fg-subtle">{clip(action.before)}</del>
+          ) : null}
+          <ul className="m-0 pl-4 text-fg-muted">
+            {action.points.map((point, i) => (
+              <li key={i}>{clip(point)}</li>
+            ))}
+          </ul>
+        </div>
+      )
+    case 'tag': {
+      const rows: { label: string; before: string; after: string }[] = []
+      const { patch, before } = action
+      if (patch.name !== undefined) {
+        rows.push({ label: 'Name', before: tagName(before.name ?? ''), after: tagName(patch.name) })
+      }
+      if (patch.category !== undefined) {
+        rows.push({
+          label: 'Category',
+          before: before.category === undefined ? '' : TAG_CATEGORY_LABEL[before.category],
+          after: TAG_CATEGORY_LABEL[patch.category]
+        })
+      }
+      if (patch.parentId !== undefined) {
+        rows.push({
+          label: 'Under',
+          before: action.beforeParentName === null ? 'top level' : tagName(action.beforeParentName),
+          after: action.parentName === null ? 'top level' : tagName(action.parentName)
+        })
+      }
+      if (patch.aliases !== undefined) {
+        rows.push({
+          label: 'Aliases',
+          before: (before.aliases ?? []).join(', '),
+          after: patch.aliases.join(', ')
+        })
+      }
+      return <Rows rows={rows} />
+    }
+    case 'sheet': {
+      const category = categoryOf(action.patch.kind ?? sheetKind ?? '', categories)
+      const rows = Object.entries(action.patch.fields ?? {}).map(([fieldId, after]) => ({
+        label: categoryFieldLabel(category, fieldId),
+        before: action.before.fields?.[fieldId] ?? '',
+        after
+      }))
+      if (action.patch.name !== undefined) {
+        rows.unshift({ label: 'Name', before: action.before.name ?? '', after: action.patch.name })
+      }
+      if (action.patch.body !== undefined) {
+        rows.push({
+          label: 'Page',
+          before: action.before.body ?? '',
+          after: action.patch.body ?? ''
+        })
+      }
+      return <Rows rows={rows} />
+    }
+    case 'createSheet':
+      return (
+        <Rows
+          rows={Object.entries(action.fields).map(([fieldId, after]) => ({
+            label: categoryFieldLabel(categoryOf(action.category, categories), fieldId),
+            before: '',
+            after
+          }))}
+        />
+      )
+    case 'category':
+      return action.fields.length > 0 ? (
+        <p className="m-0 text-sm text-fg-muted">{`Fields: ${action.fields.join(', ')}`}</p>
+      ) : null
+    case 'binder':
+      return null
   }
-  if (action.kind !== 'sheet') return null
-  const category = categoryOf(action.patch.kind ?? sheetKind ?? '', categories)
-  const rows = Object.entries(action.patch.fields ?? {}).map(([id, after]) => ({
-    label: categoryFieldLabel(category, id),
-    before: action.before.fields?.[id] ?? '',
-    after
-  }))
-  if (action.patch.body !== undefined) {
-    rows.push({ label: 'Page', before: action.before.body ?? '', after: action.patch.body ?? '' })
-  }
+}
+
+function Rows({
+  rows
+}: {
+  rows: { label: string; before: string; after: string }[]
+}): React.JSX.Element | null {
   if (rows.length === 0) return null
   return (
-    <dl className="mt-0.5 mb-0 text-xs">
+    <dl className="m-0 flex flex-col gap-1 text-sm">
       {rows.map((row) => (
-        <div key={row.label} className="flex gap-1">
+        <div key={row.label} className="flex gap-1.5">
           <dt className="shrink-0 text-fg-muted">{row.label}:</dt>
           <dd className="m-0 min-w-0">
             {row.before.trim() !== '' ? (
-              <del className="text-fg-subtle">{clip(row.before)}</del>
-            ) : null}{' '}
+              <>
+                <del className="text-fg-subtle">{clip(row.before)}</del>
+                <span aria-hidden="true" className="text-fg-muted">
+                  {' → '}
+                </span>
+              </>
+            ) : null}
             <ins className="text-accent no-underline">{clip(row.after)}</ins>
           </dd>
         </div>
       ))}
     </dl>
+  )
+}
+
+const FIELD =
+  'min-w-0 rounded-md border border-line bg-surface px-2 py-1 text-sm outline-none focus:border-accent'
+
+/**
+ * The deck's Edit (E): adjust a change before accepting it — another keeper for a merge, another
+ * name, another tag category. Save replaces the change; the author still accepts it.
+ */
+function EditForm({ id, action }: { id: string; action: OrganiseAction }): React.JSX.Element {
+  const editChange = useOrganiseStore((s) => s.editChange)
+  const setEditing = useOrganiseStore((s) => s.setEditing)
+  const currentCategory = useTagStore((s) =>
+    action.kind === 'tag' ? (s.byId[action.tagId]?.category ?? null) : null
+  )
+  const merged =
+    action.kind === 'mergeTags' || action.kind === 'mergeSheets'
+      ? [action.target, ...action.sources]
+      : []
+  const [keep, setKeep] = useState(merged[0]?.id ?? '')
+  const initialName =
+    action.kind === 'tag'
+      ? (action.patch.name ?? action.name)
+      : action.kind === 'sheet'
+        ? (action.patch.name ?? action.name)
+        : action.kind === 'createSheet' || action.kind === 'category'
+          ? action.name
+          : ''
+  const [name, setName] = useState(initialName)
+  const [category, setCategory] = useState<TagCategory | null>(
+    action.kind === 'tag' ? (action.patch.category ?? currentCategory) : null
+  )
+  const nameId = useId()
+
+  const save = (): void => {
+    const trimmed = name.trim()
+    switch (action.kind) {
+      case 'mergeTags':
+      case 'mergeSheets': {
+        const target = merged.find((n) => n.id === keep) ?? action.target
+        const sources = merged.filter((n) => n.id !== target.id)
+        editChange(id, { ...action, target, sources })
+        return
+      }
+      case 'tag': {
+        const patch = { ...action.patch }
+        const before = { ...action.before }
+        const next = toTagName(trimmed)
+        if (next !== '' && next !== action.name) {
+          patch.name = next
+          before.name = action.name
+        } else {
+          delete patch.name
+          delete before.name
+        }
+        if (category !== null && category !== currentCategory) {
+          patch.category = category
+          if (currentCategory !== null) before.category = currentCategory
+        } else {
+          delete patch.category
+          delete before.category
+        }
+        editChange(id, { ...action, patch, before })
+        return
+      }
+      case 'sheet': {
+        const patch = { ...action.patch }
+        const before = { ...action.before }
+        if (trimmed !== '' && trimmed !== action.name) {
+          patch.name = trimmed
+          before.name = action.name
+        } else {
+          delete patch.name
+          delete before.name
+        }
+        editChange(id, { ...action, patch, before })
+        return
+      }
+      case 'createSheet':
+      case 'category':
+        if (trimmed !== '') editChange(id, { ...action, name: trimmed })
+        return
+      default:
+        setEditing(null)
+    }
+  }
+
+  return (
+    <form
+      className="flex flex-col gap-2 rounded-md border border-accent p-3"
+      data-testid="organise-edit"
+      onSubmit={(event) => {
+        event.preventDefault()
+        save()
+      }}
+    >
+      {merged.length > 0 ? (
+        <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
+          <legend className="mb-1 text-xs font-medium text-fg-muted">Keep</legend>
+          {merged.map((n) => (
+            <label key={n.id} className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name={`${id}-keep`}
+                checked={keep === n.id}
+                onChange={() => setKeep(n.id)}
+              />
+              {action.kind === 'mergeTags' ? tagName(n.name) : n.name}
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
+      {action.kind === 'tag' ||
+      action.kind === 'sheet' ||
+      action.kind === 'createSheet' ||
+      action.kind === 'category' ? (
+        <label htmlFor={nameId} className="flex flex-col gap-1 text-xs text-fg-muted">
+          Name
+          <input
+            id={nameId}
+            className={FIELD}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </label>
+      ) : null}
+      {action.kind === 'tag' ? (
+        <label className="flex flex-col gap-1 text-xs text-fg-muted">
+          Category
+          <select
+            className={FIELD}
+            value={category ?? ''}
+            onChange={(event) => {
+              const parsed = TagCategory.safeParse(event.target.value)
+              if (parsed.success) setCategory(parsed.data)
+            }}
+          >
+            {TAG_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {TAG_CATEGORY_LABEL[c]}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          className="rounded-md bg-accent px-3 py-1 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          className="rounded-md border border-line px-3 py-1 text-sm hover:bg-surface"
+          onClick={() => setEditing(null)}
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   )
 }

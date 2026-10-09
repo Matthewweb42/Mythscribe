@@ -255,27 +255,53 @@ export const OrganiseAction = z.discriminatedUnion('kind', [
 ])
 export type OrganiseAction = z.infer<typeof OrganiseAction>
 
-/** The part of the project a change belongs to, the plan screen's groups. */
-export const ORGANISE_GROUPS = ['categories', 'tags', 'sheets', 'notes', 'binder'] as const
+/**
+ * The plan screen's groups (the review deck's rail, 2026-10-08): merges first, then the tags that
+ * are not names, then the rest by the part of the project they change.
+ */
+export const ORGANISE_GROUPS = [
+  'merges',
+  'notNames',
+  'categories',
+  'tags',
+  'sheets',
+  'notes',
+  'binder'
+] as const
 export type OrganiseGroup = (typeof ORGANISE_GROUPS)[number]
 
 export const ORGANISE_GROUP_LABEL: Record<OrganiseGroup, string> = {
-  categories: 'New categories',
+  merges: 'Merges',
+  notNames: 'Not names',
+  categories: 'Categories',
   tags: 'Tags',
   sheets: 'Story bible',
   notes: 'Notes',
   binder: 'Binder'
 }
 
+/** What one change of a group is called in the card's heading ("Merge 3 of 12"). */
+export const ORGANISE_GROUP_NOUN: Record<OrganiseGroup, string> = {
+  merges: 'Merge',
+  notNames: 'Not a name',
+  categories: 'New category',
+  tags: 'Tag',
+  sheets: 'Sheet',
+  notes: 'Notes',
+  binder: 'Binder'
+}
+
 export function groupOf(action: OrganiseAction): OrganiseGroup {
   switch (action.kind) {
+    case 'mergeTags':
+    case 'mergeSheets':
+      return 'merges'
+    case 'deleteTag':
+      return action.notName ? 'notNames' : 'tags'
     case 'category':
       return 'categories'
-    case 'mergeTags':
     case 'tag':
-    case 'deleteTag':
       return 'tags'
-    case 'mergeSheets':
     case 'sheet':
     case 'createSheet':
     case 'deleteSheet':

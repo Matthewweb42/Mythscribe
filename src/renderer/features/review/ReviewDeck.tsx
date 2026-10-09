@@ -46,6 +46,8 @@ export interface ReviewDeckProps {
   onDecide: (ids: string[], decision: ReviewDecision) => void
   /** E: adjust the item before accepting (the screen shows its edit form); no Edit without it. */
   onEdit?: (id: string) => void
+  /** Whether the item has anything to adjust; every item when absent. */
+  canEdit?: (id: string) => boolean
   /** R: reject outright (edit passes); without it Skip is the only way past an item. */
   reject?: boolean
   /** The Skip button's word ("Skip", or "Later" where skipping keeps the item for later). */
@@ -64,6 +66,8 @@ export interface ReviewDeckProps {
   autoFocus?: boolean
   /** Left of the footer (the cost line). */
   footer?: ReactNode
+  /** Buttons of the footer before Apply (Close). */
+  actions?: ReactNode
   testId?: string
 }
 
@@ -96,10 +100,16 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
   // undefined: the first item still waiting; null: the end (everything reviewed).
   const [currentId, setCurrentId] = useState<string | null | undefined>(undefined)
   const current = ordered.find((item) => item.id === currentId) ?? null
-  // Not chosen yet, or an item that left the list (merged away, re-planned by the chat): the
-  // first one still waiting.
+  // Not chosen yet: the first one still waiting, or the first of all when none waits (a plan
+  // that only describes, an Auto run that applied everything). An item that left the list
+  // (merged away, re-planned by the chat): the first one still waiting.
   const shownId =
-    current !== null ? current.id : currentId === null ? null : nextOpen(ordered, null, filter)
+    current !== null
+      ? current.id
+      : currentId === null
+        ? null
+        : (nextOpen(ordered, null, filter) ??
+          (currentId === undefined ? (ordered[0]?.id ?? null) : null))
   const shown = ordered.find((item) => item.id === shownId) ?? null
   const counts = deckCounts(items)
   const stats = groupStats(items, groups)
@@ -161,6 +171,7 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
   }
 
   const decidable = shown !== null && shown.settled !== true
+  const editable = decidable && props.onEdit !== undefined && (props.canEdit?.(shown.id) ?? true)
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.ctrlKey || event.metaKey || event.altKey || typing(event)) return
@@ -172,7 +183,7 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
     else if (key === 'a') decide([shown.id], 'accepted')
     else if (key === 's') decide([shown.id], 'skipped')
     else if (key === 'r' && props.reject === true) decide([shown.id], 'rejected')
-    else if (key === 'e' && props.onEdit !== undefined && !busy) props.onEdit(shown.id)
+    else if (key === 'e' && editable && !busy) props.onEdit?.(shown.id)
     else handled = false
     if (handled) {
       event.preventDefault()
@@ -319,7 +330,9 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
                   <span className="text-xs text-fg-subtle">Skipped items</span>
                 ) : null}
               </header>
-              <div className="min-w-0">{props.renderCard(shown.id)}</div>
+              <div key={shown.id} className="min-w-0">
+                {props.renderCard(shown.id)}
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 {decidable ? (
                   <>
@@ -343,7 +356,7 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
                       <kbd className={KBD}>S</kbd>
                       {props.skipLabel ?? 'Skip'}
                     </button>
-                    {props.onEdit !== undefined ? (
+                    {editable ? (
                       <button
                         type="button"
                         className={BUTTON}
@@ -396,9 +409,10 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
           )}
         </section>
       </div>
-      {apply !== undefined || props.footer !== undefined ? (
+      {apply !== undefined || props.footer !== undefined || props.actions !== undefined ? (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line px-4 py-2.5">
           <div className="min-w-0 flex-1 text-xs text-fg-subtle">{props.footer}</div>
+          {props.actions}
           {apply !== undefined ? (
             <button
               type="button"

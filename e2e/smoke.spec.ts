@@ -6282,9 +6282,10 @@ test('create, close, reopen a project on disk', async () => {
   // F-9.10: Organise. A stray #reed tag beside #tomas-reed is what an upload leaves behind; the
   // local pass finds the look-alike and the Tags section offers to organise, quietly. Opening the
   // offer asks the AI for a plan (the fake merges the tags and fills The Landing's atmosphere).
-  // In Ask every change waits with a checkbox; Apply lands both through the stores, and Undo
-  // takes the sheet change back. In Auto the change that can be undone lands at once and "Undo
-  // the whole reorganisation" takes it back. No scene text changes.
+  // In Ask the plan is a review deck, one change at a time (2026-10-08): A accepts the merge, the
+  // sheet change is next, and accepting the last one applies both through the stores; the rail
+  // jumps back to the sheet change, whose Undo takes it back. In Auto the change that can be
+  // undone lands at once and "Undo the whole reorganisation" takes it back. No scene text changes.
   const organiseBodies = (): number =>
     openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(ORGANISE_SENTINEL))
       .length
@@ -6312,19 +6313,28 @@ test('create, close, reopen a project on disk', async () => {
   expect(organiseBodies()).toBe(0)
   await organiseOffer.getByRole('button', { name: 'Review' }).click()
   const organiseDialog = page.getByTestId('organise-dialog')
-  const organiseChanges = organiseDialog.getByTestId('organise-change')
-  await expect(organiseChanges).toHaveCount(2, { timeout: 15_000 })
+  const organiseCard = organiseDialog.getByTestId('organise-change')
+  await expect(organiseCard).toHaveCount(1, { timeout: 15_000 })
   expect(organiseBodies()).toBe(1)
   await expect(organiseDialog.getByTestId('organise-reply')).toHaveText(
     'One Tomas, and the Landing filled in.'
   )
-  await expect(organiseChanges.first()).toContainText('Merge tags “#reed” into #tomas-reed')
-  await expect(organiseChanges.nth(1)).toContainText('Sheet “The Landing”: 1 field')
-  await expect(organiseChanges.nth(1).locator('ins')).toHaveText(ORGANISE_ATMOSPHERE)
-  await expect(organiseDialog.getByRole('checkbox')).toHaveCount(2)
-  await organiseDialog.getByTestId('organise-apply').click()
-  await expect(organiseChanges.first()).toHaveAttribute('data-status', 'applied')
-  await expect(organiseChanges.nth(1)).toHaveAttribute('data-status', 'applied')
+  const organiseRail = organiseDialog.getByRole('navigation', { name: 'Groups' })
+  await expect(organiseRail.getByTestId('review-group')).toHaveText(['Merges0/1', 'Story bible0/1'])
+  await expect(organiseDialog.getByTestId('review-position')).toHaveText('Merge 1 of 1')
+  await expect(organiseCard).toContainText('Merge tags “#reed” into #tomas-reed')
+  await expect(organiseDialog.getByRole('checkbox')).toHaveCount(0)
+  await page.keyboard.press('a')
+  await expect(organiseCard).toContainText('Sheet “The Landing”: 1 field')
+  await expect(organiseCard.locator('ins')).toHaveText(ORGANISE_ATMOSPHERE)
+  await expect(organiseDialog.getByTestId('review-apply')).toHaveText('Apply 1 accepted')
+  await organiseDialog.getByTestId('review-accept').click()
+  await expect(organiseDialog.getByTestId('review-done')).toContainText('All 2 reviewed.')
+  await expect(organiseRail.getByTestId('review-group')).toHaveText(['Merges1/1', 'Story bible1/1'])
+  await organiseRail.getByRole('button', { name: /Merges/ }).click()
+  await expect(organiseCard).toHaveAttribute('data-status', 'applied')
+  await organiseRail.getByRole('button', { name: /Story bible/ }).click()
+  await expect(organiseCard).toHaveAttribute('data-status', 'applied')
   const afterOrganise = await page.evaluate(async () => {
     const tags = (await window.mythscribe.invoke('tag:list', undefined)) as IpcResult<Tag[]>
     if (!tags.ok) throw new Error('tag:list failed')
@@ -6333,11 +6343,8 @@ test('create, close, reopen a project on disk', async () => {
   expect(afterOrganise.map((tag) => tag.name)).not.toContain('reed')
   expect(afterOrganise.find((tag) => tag.name === 'tomas-reed')?.aliases).toContain('Reed')
   expect(await sheetField('The Landing', 'atmosphere')).toBe(ORGANISE_ATMOSPHERE)
-  await organiseChanges
-    .nth(1)
-    .getByRole('button', { name: /^Undo: / })
-    .click()
-  await expect(organiseChanges.nth(1)).toHaveAttribute('data-status', 'undone')
+  await organiseCard.getByRole('button', { name: /^Undo: / }).click()
+  await expect(organiseCard).toHaveAttribute('data-status', 'undone')
   await expect.poll(() => sheetField('The Landing', 'atmosphere')).toBeUndefined()
   await organiseDialog.getByRole('button', { name: 'Done' }).click()
   await expect(organiseDialog).toHaveCount(0)
@@ -6345,11 +6352,11 @@ test('create, close, reopen a project on disk', async () => {
   await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
   await expect.poll(async () => (await aiSettings()).chatMode).toBe('auto')
   await tagsSection.getByTestId('organise-button').click()
-  await expect(organiseChanges).toHaveCount(1, { timeout: 15_000 })
-  await expect(organiseChanges.first()).toHaveAttribute('data-status', 'applied')
+  await expect(organiseCard).toHaveAttribute('data-status', 'applied', { timeout: 15_000 })
+  await expect(organiseRail.getByTestId('review-group')).toHaveText(['Story bible1/1'])
   expect(await sheetField('The Landing', 'atmosphere')).toBe(ORGANISE_ATMOSPHERE)
   await organiseDialog.getByTestId('organise-undo-all').click()
-  await expect(organiseChanges.first()).toHaveAttribute('data-status', 'undone')
+  await expect(organiseCard).toHaveAttribute('data-status', 'undone')
   await expect.poll(() => sheetField('The Landing', 'atmosphere')).toBeUndefined()
   await organiseDialog.getByRole('button', { name: 'Done' }).click()
   await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
