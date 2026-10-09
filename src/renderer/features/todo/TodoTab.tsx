@@ -19,7 +19,8 @@ const run = (action: Promise<void>): void => {
  * The To do section (F-9.16): what the book leaves unexplained, contradicted, unfinished, or
  * unstated, grouped by kind with the counts. Each item says why it was flagged and jumps to its
  * passage; Done ("handled") and Dismiss ("not a problem") settle it for good, with an Undo for
- * the last one. Nothing here writes to a scene.
+ * the last one. "Go through one by one" (or a click on an item) shows them on the review deck
+ * above the editor (`TodoReviewStrip`). Nothing here writes to a scene.
  */
 export function TodoTab(): React.JSX.Element {
   const items = useTodoStore((s) => s.items)
@@ -41,6 +42,16 @@ export function TodoTab(): React.JSX.Element {
         What the book leaves unexplained, contradicted, unfinished, or unstated. Suggestions are
         options for you to choose from, never facts.
       </p>
+      {items.length > 0 ? (
+        <button
+          type="button"
+          data-testid="todo-go-through"
+          onClick={() => useTodoStore.getState().startReview()}
+          className="mb-2 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover"
+        >
+          Go through one by one ({items.length})
+        </button>
+      ) : null}
       {items.length > 0 ? (
         <label className="mb-2 flex items-center gap-1.5 text-xs text-fg-muted">
           Show
@@ -135,9 +146,14 @@ function TodoRow({ item, busy }: { item: TodoItem; busy: boolean }): React.JSX.E
             <Sparkles size={11} aria-label="Found by the AI check" />
           </span>
         ) : null}
-        <span title={item.subject} className="min-w-0 flex-1 truncate text-sm font-medium">
+        <button
+          type="button"
+          title={`Go through from ${item.subject}`}
+          onClick={() => useTodoStore.getState().startReview(item.id)}
+          className="min-w-0 flex-1 truncate text-left text-sm font-medium underline-offset-2 hover:underline"
+        >
           {item.subject}
-        </span>
+        </button>
       </div>
       <p className="m-0 text-xs text-fg-muted">{item.why}</p>
       {item.quote === null ? null : (

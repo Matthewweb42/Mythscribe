@@ -52,6 +52,14 @@ export interface ReviewDeckProps {
   reject?: boolean
   /** The Skip button's word ("Skip", or "Later" where skipping keeps the item for later). */
   skipLabel?: string
+  /** The Accept button's word ("Accept"; "Done" on the To do list, F-9.16). */
+  acceptLabel?: string
+  /** The Reject button's word ("Reject"; "Dismiss" on the To do list, F-9.16). */
+  rejectLabel?: string
+  /** The Edit button's word ("Edit"; "Write a line" on the To do list, F-9.16). */
+  editLabel?: string
+  /** Offer "Accept group" (the default); off where each item needs its own look (the To do list). */
+  groupAccept?: boolean
   /** The footer's Apply button; none where accepting applies at once (edit passes). */
   apply?: ReviewDeckApply
   /** Apply by itself once every item is decided and none was skipped. */
@@ -238,7 +246,7 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
     ) : null
 
   const acceptGroup =
-    shown !== null && group !== null ? (
+    shown !== null && group !== null && props.groupAccept !== false ? (
       <button
         type="button"
         className={LINK}
@@ -358,7 +366,7 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
                       onClick={() => decide([shown.id], 'accepted')}
                     >
                       <kbd className={KBD}>A</kbd>
-                      Accept
+                      {props.acceptLabel ?? 'Accept'}
                     </button>
                     <button
                       type="button"
@@ -379,7 +387,7 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
                         onClick={() => props.onEdit?.(shown.id)}
                       >
                         <kbd className={KBD}>E</kbd>
-                        Edit
+                        {props.editLabel ?? 'Edit'}
                       </button>
                     ) : null}
                     {props.reject === true ? (
@@ -391,7 +399,7 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
                         onClick={() => decide([shown.id], 'rejected')}
                       >
                         <kbd className={KBD}>R</kbd>
-                        Reject
+                        {props.rejectLabel ?? 'Reject'}
                       </button>
                     ) : null}
                   </>

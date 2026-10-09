@@ -178,7 +178,12 @@ export async function rewriteNotes(
   return stored
 }
 
-async function setSheetField(entityId: string, field: EntityFieldId, value: string): Promise<void> {
+/** Sets one field of a sheet through the entity store (the one owner), reading the sheet first if the store does not hold it. */
+export async function setSheetField(
+  entityId: string,
+  field: EntityFieldId,
+  value: string
+): Promise<void> {
   const store = useEntityStore.getState()
   const entity = store.byId[entityId] ?? (await ipc().invoke('entity:get', { id: entityId }))
   await store.update(entityId, { fields: { ...entity.fields, [field]: value } })

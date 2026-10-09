@@ -207,3 +207,36 @@ describe('ReviewDeck', () => {
     expect(within(card()).getByText('Card s1')).toBeTruthy()
   })
 })
+
+describe('ReviewDeck labels (F-9.16)', () => {
+  it('names Accept, Reject, and Edit as the screen asks, and can leave out Accept group', () => {
+    render(
+      <ReviewDeck
+        label="To do"
+        items={ITEMS}
+        groups={GROUPS}
+        renderCard={(id) => <p>{`Card ${id}`}</p>}
+        onDecide={() => undefined}
+        onEdit={() => undefined}
+        reject
+        acceptLabel="Done"
+        rejectLabel="Dismiss"
+        editLabel="Write a line"
+        groupAccept={false}
+        compact
+      />
+    )
+    expect(screen.getByTestId('review-accept')).toHaveTextContent(/^ADone$/)
+    expect(screen.getByTestId('review-reject')).toHaveTextContent(/^RDismiss$/)
+    expect(screen.getByTestId('review-edit')).toHaveTextContent(/^EWrite a line$/)
+    expect(screen.queryByTestId('review-accept-group')).toBeNull()
+  })
+
+  it('keeps Accept, Reject, Edit, and Accept group by default', () => {
+    render(<Harness reject compact onEdit={() => undefined} />)
+    expect(screen.getByTestId('review-accept')).toHaveTextContent(/^AAccept$/)
+    expect(screen.getByTestId('review-reject')).toHaveTextContent(/^RReject$/)
+    expect(screen.getByTestId('review-edit')).toHaveTextContent(/^EEdit$/)
+    expect(screen.getAllByTestId('review-accept-group').length).toBeGreaterThan(0)
+  })
+})

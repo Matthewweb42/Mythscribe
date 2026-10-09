@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { FileInput, FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
 import type { AiSource, AiSwitch } from '@shared/aiSettings'
-import type { NovelFormat } from '@shared/ipc/contract'
+import type { NovelFormat, TreeNode } from '@shared/ipc/contract'
 import { formatLabel, type HierarchyLevel } from '@shared/labels'
 import type { DockPanelId } from '@shared/dock'
 import { DEFAULT_THEME, THEME_TOKENS, THEME_TOKEN_VARS, resolveTheme } from '@shared/themes'
@@ -101,6 +101,7 @@ import { EditPassWorkspace } from '@renderer/features/editPass/EditPassWorkspace
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useFactStore } from '@renderer/features/entities/factStore'
 import { useChangesStore } from '@renderer/features/changes/changesStore'
+import { TodoReviewStrip } from '@renderer/features/todo/TodoReviewStrip'
 import { useTodoStore } from '@renderer/features/todo/todoStore'
 import {
   ReferencePanel,
@@ -1099,17 +1100,42 @@ function useMainNodeId(): string | null {
 }
 
 function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
-  const focus = useFocusStore((s) => s.active)
   // F-9.3: an entity picked in a tab takes the whole pane; selecting a document closes it again
   // (`treeStore.select`), so the manuscript comes back exactly where it was.
   const entityId = useEntityStore((s) => s.selectedId)
   const node = useTreeStore((s) => (s.selectedId === null ? undefined : s.byId[s.selectedId]))
-  const folderView = useOutlineViewStore((s) => s.folderView)
   // F-14.15: the Edits workspace or a pass's report; picking a document or an entity closes it.
   const editView = useEditPassViewStore((s) => s.view)
+  // F-9.16: going through the To do list puts its deck above whatever the pane shows.
+  const reviewing = useTodoStore((s) => s.review !== null)
   if (editView?.kind === 'workspace') return <EditPassWorkspace />
   if (editView?.kind === 'report')
     return <EditPassReport key={editView.passId} passId={editView.passId} />
+  if (reviewing) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <TodoReviewStrip />
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <PaneContent format={format} entityId={entityId} node={node} />
+        </div>
+      </div>
+    )
+  }
+  return <PaneContent format={format} entityId={entityId} node={node} />
+}
+
+/** What the main pane shows: a sheet, the empty state, a document, or a folder. */
+function PaneContent({
+  format,
+  entityId,
+  node
+}: {
+  format: NovelFormat
+  entityId: string | null
+  node: TreeNode | undefined
+}): React.JSX.Element {
+  const focus = useFocusStore((s) => s.active)
+  const folderView = useOutlineViewStore((s) => s.folderView)
   if (entityId !== null) return <EntityEditor key={entityId} id={entityId} />
   if (!node) {
     // F-3.5: the empty state, centered in the pane.
