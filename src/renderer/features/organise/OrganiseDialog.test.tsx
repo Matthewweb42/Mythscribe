@@ -56,7 +56,7 @@ beforeEach(() => {
         } as Output<C>
       }
       if (channel === 'organise:candidates') {
-        return { duplicates: [], unusedTags: [], emptySheets: [] } as Output<C>
+        return { duplicates: [], unusedTags: [], emptySheets: [], notNames: [] } as Output<C>
       }
       if (channel === 'proposal:settle') return null as Output<C>
       throw new Error(`unexpected ${channel}`)

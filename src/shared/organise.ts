@@ -196,7 +196,17 @@ export const OrganiseAction = z.discriminatedUnion('kind', [
     parentName: z.string().nullable().default(null),
     beforeParentName: z.string().nullable().default(null)
   }),
-  z.object({ kind: z.literal('deleteTag'), tagId: z.string(), name: z.string() }),
+  z.object({
+    kind: z.literal('deleteTag'),
+    tagId: z.string(),
+    name: z.string(),
+    /**
+     * The local "Not names — remove?" finding (the author's tag rule, 2026-10-08): an AI-made tag
+     * the manuscript uses as an ordinary word. Removing it also keeps background tagging from
+     * making it again (`DISMISSED_NAMES_KEY`).
+     */
+    notName: z.boolean().default(false)
+  }),
   z.object({
     kind: z.literal('mergeSheets'),
     target: Named,
@@ -355,7 +365,9 @@ export function describeOrganiseAction(
       return `Tag #${action.name}: ${parts.join('; ')}`
     }
     case 'deleteTag':
-      return `Delete the unused tag #${action.name}`
+      return action.notName
+        ? `Remove #${action.name}: not a name`
+        : `Delete the unused tag #${action.name}`
     case 'mergeSheets':
       return `Merge ${list(action.sources.map((s) => s.name))} into the sheet ${quoted(action.target.name)}`
     case 'sheet': {
@@ -413,6 +425,13 @@ export interface CandidateTag {
   children: number
   /** Sheets linked to it (F-9.4). */
   sheets: number
+  /**
+   * The author's tag rule (2026-10-08, `classifyTagTerm`): the manuscript uses the name as an
+   * ordinary word. Such a tag is never a duplicate of another; an AI-made one is offered for removal.
+   */
+  ordinary?: boolean
+  /** Made by background tagging (F-4.13) and not taken over by the author since. */
+  aiMade?: boolean
 }
 
 /** A sheet as the local pass reads it. */
@@ -437,7 +456,9 @@ export type OrganiseDuplicate = z.infer<typeof OrganiseDuplicate>
 export const OrganiseCandidates = z.object({
   duplicates: z.array(OrganiseDuplicate),
   unusedTags: z.array(Named),
-  emptySheets: z.array(Named)
+  emptySheets: z.array(Named),
+  /** AI-made tags the manuscript uses as ordinary words ("Not names — remove?", 2026-10-08). */
+  notNames: z.array(Named).default([])
 })
 export type OrganiseCandidates = z.infer<typeof OrganiseCandidates>
 
@@ -512,14 +533,18 @@ function alikeGroups(items: readonly NamedItem[]): NamedItem[][] {
 
 /**
  * The local pass: tags and sheets whose names or aliases look alike, tags nothing uses (no
- * document, mention, sheet, or child), and sheets with nothing in them.
+ * document, mention, sheet, or child), sheets with nothing in them, and AI-made tags that are
+ * ordinary words. A tag named by an ordinary word is never part of a duplicate ("custom" and
+ * "customs" are two words, not one character spelled twice), whoever made it.
  */
 export function findOrganiseCandidates(
   tags: readonly CandidateTag[],
   sheets: readonly CandidateSheet[]
 ): OrganiseCandidates {
+  const notNames = tags.filter((t) => t.ordinary === true && t.aiMade === true)
+  const isNotName = (id: string): boolean => notNames.some((t) => t.id === id)
   const duplicates: OrganiseDuplicate[] = [
-    ...alikeGroups(tags).map((group) => ({
+    ...alikeGroups(tags.filter((t) => t.ordinary !== true)).map((group) => ({
       of: 'tag' as const,
       ids: group.map((tag) => tag.id),
       names: group.map((tag) => tag.name)
@@ -534,8 +559,10 @@ export function findOrganiseCandidates(
     duplicates,
     unusedTags: tags
       .filter((t) => t.usageCount === 0 && t.mentions === 0 && t.children === 0 && t.sheets === 0)
+      .filter((t) => !isNotName(t.id))
       .map(({ id, name }) => ({ id, name })),
-    emptySheets: sheets.filter((s) => s.empty).map(({ id, name }) => ({ id, name }))
+    emptySheets: sheets.filter((s) => s.empty).map(({ id, name }) => ({ id, name })),
+    notNames: notNames.map(({ id, name }) => ({ id, name }))
   }
 }
 
@@ -546,7 +573,8 @@ export const ORGANISE_OFFER_LOOSE_ENDS = 3
 export function worthOffering(found: OrganiseCandidates): boolean {
   return (
     found.duplicates.length > 0 ||
-    found.unusedTags.length + found.emptySheets.length >= ORGANISE_OFFER_LOOSE_ENDS
+    found.unusedTags.length + found.emptySheets.length + found.notNames.length >=
+      ORGANISE_OFFER_LOOSE_ENDS
   )
 }
 
@@ -555,7 +583,8 @@ export function candidatesKey(found: OrganiseCandidates): string {
   return [
     ...found.duplicates.map((d) => `${d.of}:${[...d.ids].sort().join('+')}`),
     ...found.unusedTags.map((t) => `u:${t.id}`),
-    ...found.emptySheets.map((s) => `e:${s.id}`)
+    ...found.emptySheets.map((s) => `e:${s.id}`),
+    ...found.notNames.map((t) => `x:${t.id}`)
   ]
     .sort()
     .join('|')
@@ -569,6 +598,11 @@ export function describeCandidates(found: OrganiseCandidates): string {
   }
   if (found.unusedTags.length > 0) parts.push(plural(found.unusedTags.length, 'unused tag'))
   if (found.emptySheets.length > 0) parts.push(plural(found.emptySheets.length, 'empty sheet'))
+  if (found.notNames.length > 0) {
+    parts.push(
+      `${plural(found.notNames.length, 'tag')} that ${found.notNames.length === 1 ? 'is' : 'are'} not a name`
+    )
+  }
   return parts.join(', ')
 }
 

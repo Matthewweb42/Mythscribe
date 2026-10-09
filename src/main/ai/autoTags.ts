@@ -7,11 +7,13 @@ import {
   SUMMARY_NEW_TAGS_MAX,
   type ExtractedTag
 } from '@shared/summary'
+import { classifyTagTerm, mayAutoCreateTag } from '@shared/tagTerms'
 import { toTagName, type TagCategory } from '@shared/tags'
 import type { EntityWrite } from '../entity/entityStore'
 import { ensureRecordForTag } from '../knowledge/records'
 import { getDismissedNames } from '../project/settingsStore'
 import { replaceAutoTags } from '../tag/documentTagStore'
+import { manuscriptTexts } from '../tag/proposedTags'
 import { createTag, getTagWithUsage, listTags } from '../tag/tagStore'
 import type { TreeDb } from '../tree/treeStore'
 import { sceneNamesTag } from './observedFacts'
@@ -66,7 +68,10 @@ export interface AutoTagsChange {
  * missing one is created as AI-made in the answered category — only in a category the job may
  * add to, at most `SUMMARY_NEW_TAGS_MAX` per run, never a name the author dismissed or deleted
  * (`DISMISSED_NAMES_KEY`), and a character, place, or in-world term only when `sceneText` (the
- * scene as sent) names it. Then the scene's job links are replaced (`replaceAutoTags`: the
+ * scene as sent) names it. The author's tag rule (2026-10-08, `classifyTagTerm`) comes on top
+ * for every category: a new tag must be a name the manuscript always capitalises or a phrase it
+ * keeps repeating; an ordinary word ("custom", "trial") is never created, and one the text
+ * capitalises often ("the Trial") is left to the proposals (F-4.12b). Then the scene's job links are replaced (`replaceAutoTags`: the
  * author's links and removals win). An empty list clears the job's links and creates nothing.
  */
 export function applyAutoTags(
@@ -84,6 +89,12 @@ export function applyAutoTags(
       ])
     )
     const dismissed = new Set(getDismissedNames(tx).names)
+    // Read once, and only when a name is missing from the bank: the rule needs the whole text.
+    let texts: string[] | null = null
+    const isNameOrTerm = (name: string): boolean => {
+      texts ??= manuscriptTexts(tx, { nodeId, text: sceneText })
+      return mayAutoCreateTag(classifyTagTerm(name, texts))
+    }
     const createdIds: string[] = []
     const records: EntityWrite[] = []
     const wanted: string[] = []
@@ -100,7 +111,8 @@ export function applyAutoTags(
         !CREATABLE.includes(answered.category) ||
         dismissed.has(name) ||
         (NAME_CATEGORIES.includes(answered.category) &&
-          !sceneNamesTag(sceneText, name, answered.category === 'character'))
+          !sceneNamesTag(sceneText, name, answered.category === 'character')) ||
+        !isNameOrTerm(name)
       ) {
         continue
       }

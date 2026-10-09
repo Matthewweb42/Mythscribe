@@ -128,7 +128,7 @@ const PROOFREAD_SENTINEL = 'You are the proofreading feature inside a novel-writ
  */
 const EDIT_PASS_SENTINEL = 'You are the edit-pass feature inside a novel-writing app.'
 /** What the edit-pass step types at the end of Scene 1. */
-const EDIT_PASS_TYPED = ' The harbour bell rang very very slowly over the water.'
+const EDIT_PASS_TYPED = ' The Harbour Bell rang very very slowly over the water.'
 const EDIT_PASS_QUOTE = 'rang very very slowly'
 const EDIT_PASS_REPLACEMENT = 'rang slowly'
 const EDIT_PASS_ANSWER = JSON.stringify({
@@ -196,12 +196,15 @@ const SUMMARY_FACTS = [
   }
 ]
 /**
- * F-4.13: the tags the canned summary carries (`summary.v3` keeps the sentinel too). The tone is
- * new to the bank, so main creates it as AI-made and links it to the scene; "Zephyr" is a
- * character name Scene 1 never holds, so main must drop it.
+ * F-4.13: the tags the canned summary carries (`summary.v3` keeps the sentinel too). "Harbour
+ * Bell" is a name Scene 1 capitalises (the edit-pass sentence), new to the bank, so main creates
+ * it as AI-made and links it to the scene; by the author's tag rule (2026-10-08) the tone
+ * "stormbound", which the text never holds, is not a tag, and "Zephyr" is a character name
+ * Scene 1 never holds: main drops both.
  */
 const SUMMARY_TAGS = [
   { name: 'stormbound', category: 'tone' },
+  { name: 'Harbour Bell', category: 'custom' },
   { name: 'Zephyr', category: 'character' }
 ]
 const SUMMARY_ANSWER = JSON.stringify({
@@ -5028,14 +5031,16 @@ test('create, close, reopen a project on disk', async () => {
   const summarySystem = openAiChatBodies.at(-1)?.messages[0]
   expect(summarySystem?.role).toBe('system')
   expect(summarySystem?.content.startsWith(SUMMARY_SENTINEL)).toBe(true)
-  // F-4.13: the same request tagged the scene. The new tone is in the tag bar with the "Added
-  // by AI" mark, without a click; the character the scene never names was not created. One
-  // click takes the tag off, and it stays in the bank.
-  const aiChip = tagBar.locator('li[data-ai="true"]').filter({ hasText: 'stormbound' })
+  // F-4.13: the same request tagged the scene. The new name is in the tag bar with the "Added
+  // by AI" mark, without a click; the character the scene never names and the tone the text
+  // never holds (the author's tag rule) were not created. One click takes the tag off, and it
+  // stays in the bank.
+  const aiChip = tagBar.locator('li[data-ai="true"]').filter({ hasText: 'harbour-bell' })
   await expect(aiChip).toBeVisible()
   await expect(aiChip.getByTestId('tag-ai-mark')).toHaveText('Added by AI')
   expect((await listTags()).some((tag) => tag.name === 'zephyr')).toBe(false)
-  await aiChip.getByRole('button', { name: 'Remove stormbound' }).click()
+  expect((await listTags()).some((tag) => tag.name === 'stormbound')).toBe(false)
+  await aiChip.getByRole('button', { name: 'Remove harbour-bell' }).click()
   await expect(aiChip).toHaveCount(0)
   await caretToEnd(editor)
   await page.keyboard.type(' She counted the boats twice.')
@@ -5047,11 +5052,17 @@ test('create, close, reopen a project on disk', async () => {
   await expect(metadata.getByTestId('summary-text')).toHaveText(SUMMARY_TEXT)
   // F-4.13: the background run answered the same tag again; a tag the author took off this
   // scene is never re-applied to it, and nothing of it is in the manuscript.
-  await expect(tagBar.getByRole('listitem').filter({ hasText: 'stormbound' })).toHaveCount(0)
-  expect((await listTags()).find((tag) => tag.name === 'stormbound')).toMatchObject({
+  // (The Mentions list still names it: the scene says "Harbour Bell".)
+  await expect(
+    tagBar
+      .getByRole('list', { name: 'Document tags' })
+      .getByRole('listitem')
+      .filter({ hasText: 'harbour-bell' })
+  ).toHaveCount(0)
+  expect((await listTags()).find((tag) => tag.name === 'harbour-bell')).toMatchObject({
     usageCount: 0
   })
-  await expect(editor).not.toContainText('stormbound')
+  await expect(editor).not.toContainText('harbour-bell')
   const afterSummary = await usageSummary()
   expect(afterSummary.byFeature.find((f) => f.feature === 'summary')).toMatchObject({
     requests: 2

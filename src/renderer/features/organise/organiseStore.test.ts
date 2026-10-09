@@ -105,7 +105,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
       if (override) return override(input) as Output<C>
       if (channel === 'organise:plan') return planned() as Output<C>
       if (channel === 'organise:candidates') {
-        return { duplicates: [], unusedTags: [], emptySheets: [] } as Output<C>
+        return { duplicates: [], unusedTags: [], emptySheets: [], notNames: [] } as Output<C>
       }
       if (channel === 'tag:update') {
         const { id, ...patch } = input as Input<'tag:update'>
@@ -269,7 +269,8 @@ describe('useOrganiseStore (F-9.10)', () => {
       'organise:candidates': () => ({
         duplicates: [{ of: 'tag', ids: ['rynna', 'falseer'], names: ['rynna', 'rynna-falseer'] }],
         unusedTags: [],
-        emptySheets: []
+        emptySheets: [],
+        notNames: []
       })
     })
     await useOrganiseStore.getState().refreshCandidates()

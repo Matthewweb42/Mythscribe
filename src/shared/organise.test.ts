@@ -81,8 +81,32 @@ describe('findOrganiseCandidates (F-9.10)', () => {
     expect(describeCandidates(found)).toBe('1 unused tag, 1 empty sheet')
   })
 
+  it('keeps ordinary words out of the duplicates and offers AI-made ones for removal (2026-10-08)', () => {
+    const found = findOrganiseCandidates(
+      [
+        tag('t1', 'custom', { ordinary: true, aiMade: true }),
+        tag('t2', 'customs', { ordinary: true, aiMade: true, usageCount: 0, mentions: 0 }),
+        tag('t3', 'trial', { aiMade: true }),
+        tag('t4', 'trials', { ordinary: true }),
+        tag('t5', 'marta', { aiMade: true }),
+        tag('t6', 'martha')
+      ],
+      []
+    )
+    // custom/customs are close spellings and trial/trials one word apart: not duplicates now.
+    expect(found.duplicates).toEqual([{ of: 'tag', ids: ['t5', 't6'], names: ['marta', 'martha'] }])
+    // Only the AI's ordinary words are offered for removal; the author's own (t4) are left alone.
+    expect(found.notNames).toEqual([
+      { id: 't1', name: 'custom' },
+      { id: 't2', name: 'customs' }
+    ])
+    expect(found.unusedTags).toEqual([])
+    expect(describeCandidates(found)).toBe('1 possible duplicate, 2 tags that are not a name')
+    expect(candidatesKey(found)).toContain('x:t1')
+  })
+
   it('offers on any duplicate or three loose ends, keyed by what it found', () => {
-    const none = { duplicates: [], unusedTags: [], emptySheets: [] }
+    const none = { duplicates: [], unusedTags: [], emptySheets: [], notNames: [] }
     expect(worthOffering(none)).toBe(false)
     const loose = {
       ...none,
@@ -116,7 +140,7 @@ describe('the plan model (F-9.10)', () => {
 
   it('asks first for merges, deletions, and new categories; not for an edit with an undo', () => {
     expect(needsAsk(merge)).toBe(true)
-    expect(needsAsk({ kind: 'deleteTag', tagId: 'a', name: 'x' })).toBe(true)
+    expect(needsAsk({ kind: 'deleteTag', tagId: 'a', name: 'x', notName: false })).toBe(true)
     expect(
       needsAsk({ kind: 'category', id: 'c-ships', name: 'Ships', noun: 'ship', fields: [] })
     ).toBe(true)

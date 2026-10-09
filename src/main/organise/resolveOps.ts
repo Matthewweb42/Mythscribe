@@ -47,6 +47,25 @@ export class OrganiseResolver {
 
   constructor(private readonly project: OrganiseProject) {}
 
+  /**
+   * The local "Not names — remove?" group (the author's tag rule, 2026-10-08): one removal per
+   * AI-made tag the manuscript uses as an ordinary word, put first so that nothing the model
+   * answers about the same tag (a merge, a rename) lands beside it.
+   */
+  addNotNames(tags: readonly { id: string; name: string }[]): void {
+    for (const named of tags) {
+      const tag = this.project.tags.find((t) => t.id === named.id)
+      if (tag === undefined || this.gone.has(tag.id)) continue
+      this.gone.add(tag.id)
+      this.changes.push({
+        id: `c${++this.seq}`,
+        action: { kind: 'deleteTag', tagId: tag.id, name: tag.name, notName: true },
+        reason: `Added by AI, but your text uses “${tag.name.replace(/-/g, ' ')}” as an ordinary word, not as a name or a term of the story.`,
+        requires: []
+      })
+    }
+  }
+
   /** Resolves one answer's operations onto the plan. */
   add(ops: readonly OrganiseOp[]): void {
     for (const op of ops) {
@@ -112,6 +131,11 @@ export class OrganiseResolver {
       if (source.id !== target.id && !sources.some((s) => s.id === source.id)) sources.push(source)
     }
     if (sources.length === 0) return 'nothing to merge'
+    // The author's tag rule (2026-10-08): two ordinary words are not one thing spelled twice.
+    const ordinary = [target, ...sources].filter((t) => this.project.ordinaryTagIds.has(t.id))
+    if (ordinary.length > 0 && ordinary.length === sources.length + 1) {
+      return `#${target.name} and the tags to merge into it are ordinary words, not names`
+    }
     for (const source of sources) this.gone.add(source.id)
     return {
       action: {
@@ -208,7 +232,7 @@ export class OrganiseResolver {
       (this.project.sheetsOfTag.get(tag.id) ?? 0) > 0
     if (used) return `#${tag.name} is still used`
     this.gone.add(tag.id)
-    return { action: { kind: 'deleteTag', tagId: tag.id, name: tag.name } }
+    return { action: { kind: 'deleteTag', tagId: tag.id, name: tag.name, notName: false } }
   }
 
   // -- Sheets ---------------------------------------------------------------------------------

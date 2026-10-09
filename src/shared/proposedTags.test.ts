@@ -80,6 +80,16 @@ describe('proposeTags (F-4.12b)', () => {
     expect(proposeTags([document('sc-1', text)], [], [])).toEqual([])
   })
 
+  it('proposes an ordinary word the text keeps capitalising mid-sentence (2026-10-08)', () => {
+    const text =
+      'She stood her trial with the rest. They spoke of the Trial at supper, and of the Trial ' +
+      'again at dawn. Nobody survived the Trial twice, said Marta, and the Trial was coming.'
+    expect(proposeTags([document('sc-1', text)], [], []).map((p) => p.name)).toEqual(['trial'])
+    // Three capitalised uses beside a lower-case one are not enough for an ordinary word.
+    const fewer = 'A fair trial. They feared the Trial, the Trial, and then the Trial.'
+    expect(proposeTags([document('sc-1', fewer)], [], [])).toEqual([])
+  })
+
   it('drops the honorifics, the days, and the months', () => {
     const text = [thrice('Captain'), thrice('Tuesday'), thrice('August')].join('\n')
     expect(proposeTags([document('sc-1', text)], [], [])).toEqual([])

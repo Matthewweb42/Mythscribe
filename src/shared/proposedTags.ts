@@ -17,6 +17,13 @@ export const DISMISSED_NAMES_KEY = 'proposedTags'
 /** How often a name must stand mid-sentence in the manuscript before it is proposed. */
 export const PROPOSED_TAG_MIN_MENTIONS = 3
 
+/**
+ * How often an ordinary word — one the manuscript also writes in lower case ("trial") — must be
+ * capitalised mid-sentence ("the Trial") before it is proposed (2026-10-08, the author's tag
+ * rule): used that often in an abnormal way, it may be a named thing of the story.
+ */
+export const PROPOSED_ORDINARY_MIN_MENTIONS = 4
+
 /** Most proposals shown at once: the tag bar is a bar, and a long list is noise, not help. */
 export const PROPOSED_TAG_MAX = 10
 
@@ -71,7 +78,7 @@ export interface DocumentWordCounts {
  * months, and the one deity the heuristic meets in nearly every manuscript. They are excluded
  * rather than left to be dismissed, since every project would dismiss them.
  */
-const STOPLIST: ReadonlySet<string> = new Set([
+export const STOPLIST: ReadonlySet<string> = new Set([
   'mr',
   'mrs',
   'ms',
@@ -163,7 +170,7 @@ function isCapitalised(word: string): boolean {
  * `"Tash," she said` does not), which is the conservative way round: a name that only ever
  * opens sentences is not proposed, and one used in the middle of a line is.
  */
-function opensSentence(text: string, at: number): boolean {
+export function opensSentence(text: string, at: number): boolean {
   for (let i = at - 1; i >= 0; i--) {
     const char = text[i] ?? ''
     if (char === '\n' || char === '\r') return true
@@ -176,9 +183,11 @@ function opensSentence(text: string, at: number): boolean {
 /**
  * The names to propose (F-4.12b), most used first, at most `PROPOSED_TAG_MAX` of them. A word
  * is proposed when, across the whole manuscript, it stands mid-sentence at least
- * `PROPOSED_TAG_MIN_MENTIONS` times, never occurs in lower case (so it is a name and not a
- * noun the author also capitalises after a full stop), is not one of the words an existing tag
- * is already named by, is not on the stoplist, and was not dismissed. The count shown is every
+ * `PROPOSED_TAG_MIN_MENTIONS` times and never occurs in lower case (so it is a name and not a
+ * noun the author also capitalises after a full stop) — or, for a word that does occur in lower
+ * case, stands capitalised mid-sentence at least `PROPOSED_ORDINARY_MIN_MENTIONS` times ("the
+ * Trial" beside "a fair trial", 2026-10-08) —, is not one of the words an existing tag is
+ * already named by, is not on the stoplist, and was not dismissed. The count shown is every
  * occurrence, sentence openings included: the author counts words, not grammar.
  */
 export function proposeTags(
@@ -216,7 +225,8 @@ export function proposeTags(
   }
   const proposals: ProposedTag[] = []
   for (const [key, entry] of totals) {
-    if (entry.mid < PROPOSED_TAG_MIN_MENTIONS || entry.lower > 0 || STOPLIST.has(key)) continue
+    const needed = entry.lower > 0 ? PROPOSED_ORDINARY_MIN_MENTIONS : PROPOSED_TAG_MIN_MENTIONS
+    if (entry.mid < needed || STOPLIST.has(key)) continue
     const name = toTagName(key)
     if (name.length === 0 || taken.has(name) || skip.has(name)) continue
     proposals.push({
