@@ -77,6 +77,12 @@ export default tseslint.config(
             "CallExpression[callee.property.name='set'][callee.object.callee.property.name='update'][callee.object.arguments.0.name='entity'] > ObjectExpression > Property[key.name='fields']",
           message:
             'entity.fields has one writer: writeAuthorFields in src/main/entity/factStore.ts.'
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='values'][callee.object.callee.property.name='insert'][callee.object.arguments.0.name='entity'] ObjectExpression > Property[key.name='fields']",
+          message:
+            'entity.fields has one writer: writeAuthorFields in src/main/entity/factStore.ts.'
         }
       ]
     }

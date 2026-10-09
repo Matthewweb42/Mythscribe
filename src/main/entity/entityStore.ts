@@ -23,7 +23,14 @@ import {
 import type { Entity, EntityCreateInput, EntityUpdateInput, Tag } from '@shared/ipc/contract'
 import { withObservedDismissed, withoutObservedDismissed } from '@shared/observedFacts'
 import type * as schema from '../db/schema'
-import { entity, node, observedFact, tag, type EntityInsert, type EntityRow } from '../db/schema'
+import {
+  entity,
+  node,
+  observedFact,
+  tag,
+  type EntityInsertWithoutFields,
+  type EntityRow
+} from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { getObservedDismissed, setObservedDismissed } from '../project/settingsStore'
 import {
@@ -249,8 +256,15 @@ function setTagId(db: EntityDb, row: EntityRow, tagId: string): boolean {
  * before the character sheet — or a new one under the kind's category. Answers null, and writes
  * nothing, for a name no tag name can be made of ("???"): an entity is never refused over its tag.
  * Linking the tag the row already carries is a no-op that answers the pair all the same.
+ * F-9.13: a new tag made for a sheet the background reading made is `ai` too (`createEntity`
+ * passes the sheet's origin), so an Undo from the Changes log can tell whether the author has
+ * taken the tag over since.
  */
-function linkTag(db: EntityDb, row: EntityRow): EntityTagChange | null {
+function linkTag(
+  db: EntityDb,
+  row: EntityRow,
+  origin: EntityOrigin = 'author'
+): EntityTagChange | null {
   const name = entityTagName(row.name)
   if (name === '') return null
   const existing = findTagByName(db, name)
@@ -258,10 +272,11 @@ function linkTag(db: EntityDb, row: EntityRow): EntityTagChange | null {
     const aliased = row.tagId !== existing && setTagId(db, row, existing)
     return { tag: requireTagWithUsage(db, existing), created: false, renamed: false, aliased }
   }
-  const created = createTag(db, {
-    name,
-    category: categoryOf(row.kind, listCategories(db)).tagCategory
-  })
+  const created = createTag(
+    db,
+    { name, category: categoryOf(row.kind, listCategories(db)).tagCategory },
+    origin
+  )
   setTagId(db, row, created.id)
   return { tag: requireTagWithUsage(db, created.id), created: true, renamed: false, aliased: false }
 }
@@ -328,7 +343,7 @@ export function createEntity(
     const fields = input.fields ?? {}
     assertFieldsOf(category, fields)
     const now = new Date().toISOString()
-    const row: EntityInsert = {
+    const row: EntityInsertWithoutFields = {
       id: randomUUID(),
       kind: input.kind,
       name,
@@ -348,7 +363,7 @@ export function createEntity(
       const kept = withoutObservedDismissed(dismissed, input.kind, name)
       if (kept !== dismissed) setObservedDismissed(tx, kept)
     }
-    const tagChange = options.tag === false ? null : linkTag(tx, inserted)
+    const tagChange = options.tag === false ? null : linkTag(tx, inserted, origin)
     return {
       entity: toEntity(tx, requireRow(tx, inserted.id)),
       tagChange
@@ -376,7 +391,7 @@ export function updateEntity(
   return db.transaction((tx) => {
     const existing = getRow(tx, id)
     if (!existing) throw new AppError('NOT_FOUND', 'Entity not found', { id })
-    const changes: Partial<EntityInsert> = {}
+    const changes: Partial<EntityInsertWithoutFields> = {}
     let category = categoryOf(existing.kind, listCategories(tx))
     let stored = parseEntityFields(existing.fields)
     /** F-9.13: the baseline to write through `writeAuthorFields`, when it moves. */

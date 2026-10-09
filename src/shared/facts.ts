@@ -125,7 +125,9 @@ export interface SheetFieldAt {
   baseline: string | null
   /**
    * A replace field's value at the position: the newest canon value stated at or before it (an
-   * AI fact or an author line dated at a scene), restated counts as newer. Null when none is.
+   * AI fact or an author line dated at a scene), restated counts as newer. A value counts as canon
+   * when any of its statements at or before the position is canon; plan and idea statements never
+   * decide it. Null when none is.
    */
   current: FactValueAt | null
   /** An accumulate field's details stated at or before the position, earliest first. */
@@ -183,7 +185,7 @@ export function sheetAt(input: SheetAtInput): SheetFieldAt[] {
   return attributes.map((attribute) => {
     const groups = new Map<
       string,
-      { value: FactValueAt; first: number; last: number; lastAt: string }
+      { value: FactValueAt; first: number; canonLast: number; canonLastAt: string }
     >()
     for (const fact of dated) {
       if (fact.attribute !== attribute) continue
@@ -196,6 +198,8 @@ export function sheetAt(input: SheetAtInput): SheetFieldAt[] {
         origin: fact.origin
       }
       const held = groups.get(key)
+      // Only a canon statement at or before the position decides `current` (plan and idea never do).
+      const counts = fact.status === 'canon' && where <= position
       if (held === undefined) {
         groups.set(key, {
           value: {
@@ -206,17 +210,17 @@ export function sheetAt(input: SheetAtInput): SheetFieldAt[] {
             status: fact.status
           },
           first: where,
-          last: where <= position ? where : -2,
-          lastAt: fact.createdAt
+          canonLast: counts ? where : -2,
+          canonLastAt: counts ? fact.createdAt : ''
         })
         continue
       }
       held.value.factIds.push(fact.id)
       held.value.sources.push(source)
       if (fact.origin === 'author') held.value.origin = 'author'
-      if (where <= position && where >= held.last) {
-        held.last = where
-        held.lastAt = fact.createdAt
+      if (counts && where >= held.canonLast) {
+        held.canonLast = where
+        held.canonLastAt = fact.createdAt
       }
     }
     const values = [...groups.values()]
@@ -224,9 +228,10 @@ export function sheetAt(input: SheetAtInput): SheetFieldAt[] {
     const mode = fieldMode(attribute)
     const current =
       mode === 'replace'
-        ? (reached
-            .filter((group) => group.value.status === 'canon' && group.last >= 0)
-            .sort((a, b) => b.last - a.last || b.lastAt.localeCompare(a.lastAt))[0]?.value ?? null)
+        ? (values
+            .filter((group) => group.canonLast >= 0)
+            .sort((a, b) => b.canonLast - a.canonLast || b.canonLastAt.localeCompare(a.canonLastAt))
+            .map((group): FactValueAt => ({ ...group.value, status: 'canon' }))[0] ?? null)
         : null
     const baseline = input.fields[attribute]
     return {

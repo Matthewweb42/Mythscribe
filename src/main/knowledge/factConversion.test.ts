@@ -8,7 +8,7 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { entity, fact, observedFact } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
 import { createEntity } from '../entity/entityStore'
-import { listFactsForEntity } from '../entity/factStore'
+import { listFactsForEntity, setFactHidden } from '../entity/factStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { getKnowledgeModel } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
@@ -79,7 +79,7 @@ describe('convertKnowledgeFacts (F-9.13)', () => {
   it('copies the observed facts (hidden kept) and mirrors the sheets, once', () => {
     observed('o1', scenes[0] ?? '', 'Grey eyes', '2026-10-01T00:00:00.000Z')
     observed('o2', scenes[0] ?? '', 'Tall', '2026-10-02T00:00:00.000Z', true)
-    expect(convertKnowledgeFacts(db)).toEqual({ imported: 2, reconciled: 1 })
+    expect(convertKnowledgeFacts(db)).toEqual({ imported: 2, reconciled: 1, hidden: 0 })
     expect(stored()).toEqual([
       'ai:appearance=Grey eyes:shown',
       'ai:appearance=Tall:hidden',
@@ -90,7 +90,7 @@ describe('convertKnowledgeFacts (F-9.13)', () => {
       factsImportedAt: '2026-10-02T00:00:00.000Z'
     })
     // Idempotent: nothing new, nothing moves.
-    expect(convertKnowledgeFacts(db)).toEqual({ imported: 0, reconciled: 0 })
+    expect(convertKnowledgeFacts(db)).toEqual({ imported: 0, reconciled: 0, hidden: 0 })
     expect(stored()).toHaveLength(3)
   })
 
@@ -102,12 +102,39 @@ describe('convertKnowledgeFacts (F-9.13)', () => {
     observed('o3', scenes[0] ?? '', 'Grey eyes', '2026-10-05T00:00:00.000Z', true)
     observed('o4', scenes[0] ?? '', 'A scar', '2026-10-05T00:00:00.000Z')
     db.update(entity).set({ fields: '{"age":"32"}' }).where(eq(entity.id, mara)).run()
-    expect(convertKnowledgeFacts(db)).toEqual({ imported: 2, reconciled: 1 })
+    expect(convertKnowledgeFacts(db)).toEqual({ imported: 2, reconciled: 1, hidden: 0 })
     expect(stored()).toEqual([
       'ai:appearance=A scar:shown',
       'ai:appearance=Grey eyes:hidden',
       'author:age=32:shown'
     ])
+  })
+
+  it('mirrors an older build’s hide of a row it copied on an earlier open, once', () => {
+    observed('o1', scenes[0] ?? '', 'Grey eyes', '2026-10-01T00:00:00.000Z')
+    observed('o2', scenes[0] ?? '', 'Tall', '2026-10-01T00:00:00.000Z')
+    convertKnowledgeFacts(db)
+    // The older build hides the row it already had: no new row, so `createdAt` does not move.
+    db.update(observedFact).set({ hidden: true }).where(eq(observedFact.id, 'o1')).run()
+    expect(convertKnowledgeFacts(db)).toEqual({ imported: 0, reconciled: 0, hidden: 1 })
+    expect(stored()).toEqual([
+      'ai:appearance=Grey eyes:hidden',
+      'ai:appearance=Tall:shown',
+      'author:age=31:shown'
+    ])
+    expect(convertKnowledgeFacts(db)).toEqual({ imported: 0, reconciled: 0, hidden: 0 })
+  })
+
+  it('does not hide again a fact the author restored in this build', () => {
+    observed('o1', scenes[0] ?? '', 'Grey eyes', '2026-10-01T00:00:00.000Z')
+    convertKnowledgeFacts(db)
+    db.update(observedFact).set({ hidden: true }).where(eq(observedFact.id, 'o1')).run()
+    convertKnowledgeFacts(db)
+    const copy = listFactsForEntity(db, mara).find((row) => row.value === 'Grey eyes')
+    if (copy === undefined) throw new Error('not copied')
+    setFactHidden(db, copy.id, false)
+    expect(convertKnowledgeFacts(db)).toEqual({ imported: 0, reconciled: 0, hidden: 0 })
+    expect(stored()).toContain('ai:appearance=Grey eyes:shown')
   })
 
   it('never changes scene text: the conversion and a reading leave every document byte-identical', () => {

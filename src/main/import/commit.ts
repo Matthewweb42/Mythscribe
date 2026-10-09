@@ -44,6 +44,11 @@ export interface ImportResult {
   rewritten: { id: string; wordCount: number }[]
   /** Existing nodes deleted (removed or merged away in the review), descendants not listed. */
   deleted: string[]
+  /**
+   * F-9.13: the records that lost AI facts with the deleted scenes, sorted, for `fact:changed`;
+   * empty when nothing was deleted or the scenes stated nothing.
+   */
+  factEntityIds: string[]
   /** True when any existing node was moved, renamed, rewritten, or deleted. */
   changedExisting: boolean
 }
@@ -330,9 +335,10 @@ export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft)
         .where(eq(node.id, id))
         .run()
     }
+    let factEntityIds: string[] = []
     if (deleted.length > 0) {
       // F-9.13: a replaced scene's AI facts go with it, as `deleteNode` does.
-      deleteAiFactsUnder(tx, deleted)
+      factEntityIds = deleteAiFactsUnder(tx, deleted)
       tx.delete(node).where(inArray(node.id, deleted)).run()
     }
     return {
@@ -341,6 +347,7 @@ export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft)
       tagCandidates,
       rewritten,
       deleted,
+      factEntityIds,
       changedExisting: writes.length > 0 || deleted.length > 0
     }
   })

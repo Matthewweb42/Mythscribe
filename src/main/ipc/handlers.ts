@@ -3570,6 +3570,9 @@ export function registerHandlers({
     )
     if (result.deleted.length > 0)
       emit(windows(), 'continuity:changed', { nodeIds: result.deleted })
+    // F-9.13: the deleted scenes' AI facts went with them; the sheets that held them refetch.
+    if (result.factEntityIds.length > 0)
+      emit(windows(), 'fact:changed', { entityIds: result.factEntityIds })
     mentionQueue.indexAll('mentions', staleMentionNodeIds(db))
     backfillSummaries(false)
     // A project in a cloud-synced folder gets the import copied back now, not in three minutes.

@@ -6,6 +6,8 @@ import type { ImportChapter, ImportDraft, ImportPart, ImportScene } from '@share
 import { IMPORTED_ORIGIN, PARAGRAPH_ORIGIN_ATTR } from '@shared/provenance'
 import type { TiptapNodeT } from '@shared/tiptap'
 import type { NodeRow } from '../db/schema'
+import { createEntity } from '../entity/entityStore'
+import { applySceneFacts, listFactsForEntity } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { saveDocument } from '../document/documentStore'
@@ -403,6 +405,55 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
     expect(textOf(first.id)).toEqual(['One.', 'Two.'])
     // Only the imported words count: the merged-in existing text was already the author's.
     expect(result.words).toBe(1)
+  })
+
+  it('takes a deleted scene’s AI facts with it and names the records that lost them (F-9.13)', () => {
+    const chapterId = skeleton('chapter').id
+    const first = skeleton('scene')
+    write(first.id, 'One.')
+    const second = createNode(db, 'novel', {
+      parentId: chapterId,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'Two'
+    })
+    write(second.id, 'Mara is thirty.')
+    const mara = createEntity(db, { kind: 'character', name: 'Mara' }).entity
+    const kept = createEntity(db, { kind: 'character', name: 'Ilse' }).entity
+    applySceneFacts(
+      db,
+      second.id,
+      [{ entityId: mara.id, attribute: 'age', value: '30', quote: 'Mara is thirty.' }],
+      ''
+    )
+    applySceneFacts(
+      db,
+      first.id,
+      [{ entityId: kept.id, attribute: 'age', value: '50', quote: 'One.' }],
+      ''
+    )
+    const draft = combined([part('p1', [chapter('c1', [scene('s1', 'New.')])])])
+    const mine = existingPart(draft)
+    const chapterOne = mine.chapters[0]
+    const [s1] = chapterOne?.scenes ?? []
+    if (!chapterOne || !s1) throw new Error('fixture')
+    const result = importDraft(db, 'novel', {
+      ...draft,
+      parts: [{ ...mine, chapters: [{ ...chapterOne, scenes: [s1] }] }, ...draft.parts.slice(1)]
+    })
+    expect(result.deleted).toContain(second.id)
+    expect(result.factEntityIds).toEqual([mara.id])
+    expect(listFactsForEntity(db, mara.id).filter((each) => each.origin === 'ai')).toEqual([])
+    expect(listFactsForEntity(db, kept.id).filter((each) => each.origin === 'ai')).toHaveLength(1)
+  })
+
+  it('names no records when nothing deleted stated a fact', () => {
+    const result = importDraft(
+      db,
+      'novel',
+      combined([part('p1', [chapter('c1', [scene('s1', 'New text.')])])])
+    )
+    expect(result.factEntityIds).toEqual([])
   })
 
   it('moves a document the outline does not show out of a deleted chapter, to the manuscript', () => {

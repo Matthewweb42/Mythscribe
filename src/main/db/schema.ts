@@ -450,6 +450,12 @@ export const entity = sqliteTable(
 )
 export type EntityRow = typeof entity.$inferSelect
 export type EntityInsert = typeof entity.$inferInsert
+/**
+ * F-9.13: what the entity store may insert or patch. `fields` is left out on purpose: its one
+ * writer is `writeAuthorFields` (src/main/entity/factStore.ts), so the author's sheet text and
+ * its baseline facts never disagree.
+ */
+export type EntityInsertWithoutFields = Omit<EntityInsert, 'fields'>
 
 /**
  * The project's story-bible categories (F-9.11), beside the built-in library of

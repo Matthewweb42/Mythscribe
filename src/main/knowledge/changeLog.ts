@@ -8,7 +8,14 @@ import {
   type ChangePage,
   type ChangeUndoResult
 } from '@shared/changes'
-import { entity, fact, knowledgeChange, tag, type KnowledgeChangeRow } from '../db/schema'
+import {
+  documentTag,
+  entity,
+  fact,
+  knowledgeChange,
+  tag,
+  type KnowledgeChangeRow
+} from '../db/schema'
 import { deleteEntity, type EntityDb } from '../entity/entityStore'
 import { setFactHidden } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
@@ -176,8 +183,25 @@ function undoRow(db: EntityDb, row: KnowledgeChangeRow, tally: UndoTally): void 
       break
     }
     case 'deleteTag': {
-      const held = db.select({ name: tag.name }).from(tag).where(eq(tag.id, undo.tagId)).get()
+      const held = db
+        .select({ name: tag.name, origin: tag.origin })
+        .from(tag)
+        .where(eq(tag.id, undo.tagId))
+        .get()
       if (held === undefined) break
+      const authorLink = db
+        .select({ id: documentTag.id })
+        .from(documentTag)
+        .where(and(eq(documentTag.tagId, undo.tagId), eq(documentTag.source, 'author')))
+        .get()
+      // Edited by the author or put on a scene by hand: the tag is theirs, and so are its links.
+      if (held.origin !== 'ai' || authorLink !== undefined) {
+        throw new AppError(
+          'VALIDATION',
+          'You have edited or used this tag since the AI made it, so it is yours now. Delete it from the tag bank if you no longer want it.',
+          { id: row.id, tagId: undo.tagId }
+        )
+      }
       deleteTag(db, undo.tagId)
       // The name is remembered whoever made the tag, so the next reading does not make it again.
       const dismissed = getDismissedNames(db)
@@ -243,7 +267,7 @@ export function undoChange(db: EntityDb, id: string): ChangeUndoResult {
 
 /**
  * Undoes every applied change of one run (`changes:undoRun`), in one transaction: a change that
- * cannot be undone (a sheet the author has made theirs) refuses the whole run, so nothing is
+ * cannot be undone (a sheet or a tag the author has made theirs) refuses the whole run, so nothing is
  * half taken back. NOT_FOUND for a run with no rows.
  */
 export function undoRun(db: EntityDb, runId: string): ChangeUndoResult {
