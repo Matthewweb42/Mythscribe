@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, ne } from 'drizzle-orm'
 import { categoryFieldLabel, categoryOf, type StoryCategory } from '@shared/categories'
 import type { ContinuityFinding } from '@shared/continuity'
 import type { Entity } from '@shared/ipc/contract'
@@ -78,7 +78,15 @@ function targetSettled(target: TodoTarget, entities: ReadonlyMap<string, Entity>
  * was deleted or whose target field the author has since filled. Settled rows stay as they are.
  */
 export function syncLocalTodo(db: TreeDb, now: Date = new Date()): TodoSyncResult {
-  const candidates = localTodoCandidates(db)
+  const settled = new Set(
+    db
+      .select({ key: todoItem.key })
+      .from(todoItem)
+      .where(ne(todoItem.status, 'open'))
+      .all()
+      .map((row) => row.key)
+  )
+  const candidates = localTodoCandidates(db, settled)
   const entities = new Map(listEntities(db).map((entity) => [entity.id, entity]))
   const at = now.toISOString()
   return db.transaction((tx) => {

@@ -31,7 +31,7 @@ import {
   type TodoTarget
 } from '@shared/todo'
 import type { NodeRow } from '../db/schema'
-import { listOpenFindings } from '../ai/continuityFindingStore'
+import { findingFieldKey, findingFieldKeys } from '../ai/continuityFindingStore'
 import { summariesFor } from '../document/summaryStore'
 import { listCategories } from '../entity/categoryStore'
 import { listEntities } from '../entity/entityStore'
@@ -207,9 +207,13 @@ function candidate(
 /**
  * Every item the local rules find now, capped at `TODO_RULE_MAX` per rule and `TODO_LOCAL_MAX` in
  * all, ranked by how much the book leans on each. Records whose status is plan or idea, plan and
- * idea facts, and scenes marked idea are ignored (F-9.13: only canon decides).
+ * idea facts, and scenes marked idea are ignored (F-9.13: only canon decides). Keys in `settled`
+ * do not count toward the caps (`capCandidates`).
  */
-export function localTodoCandidates(db: TreeDb): TodoCandidate[] {
+export function localTodoCandidates(
+  db: TreeDb,
+  settled: ReadonlySet<string> = new Set()
+): TodoCandidate[] {
   const book = readBook(db)
   const categories = listCategories(db)
   const entities = listEntities(db).filter((entity) => entity.status === 'canon')
@@ -283,16 +287,11 @@ export function localTodoCandidates(db: TreeDb): TodoCandidate[] {
     )
   }
 
-  // Contradictions the dated facts show by themselves, unless the consistency checker has one.
-  const checked = new Set(
-    listOpenFindings(db).flatMap((finding) =>
-      finding.ref.entityId === null || finding.ref.attribute === null
-        ? []
-        : [`${finding.ref.entityId}\u0000${finding.ref.attribute}\u0000${finding.nodeId}`]
-    )
-  )
+  // Contradictions the dated facts show by themselves, unless the consistency checker has one
+  // (open, or dismissed: "Not a problem" there holds here too).
+  const checked = findingFieldKeys(db)
   for (const conflict of factConflicts(facts, book.order)) {
-    if (checked.has(`${conflict.entityId}\u0000${conflict.attribute}\u0000${conflict.nodeId}`))
+    if (checked.has(findingFieldKey(conflict.entityId, conflict.attribute, conflict.nodeId)))
       continue
     const entity = byId.get(conflict.entityId)
     if (entity === undefined) continue
@@ -424,11 +423,18 @@ export function localTodoCandidates(db: TreeDb): TodoCandidate[] {
     )
   }
 
-  return capCandidates(out)
+  return capCandidates(out, settled)
 }
 
-/** At most `TODO_RULE_MAX` per rule and `TODO_LOCAL_MAX` in all, the highest ranked first. */
-export function capCandidates(candidates: readonly TodoCandidate[]): TodoCandidate[] {
+/**
+ * At most `TODO_RULE_MAX` per rule and `TODO_LOCAL_MAX` in all, the highest ranked first. Keys in
+ * `settled` (items the author already marked done or dismissed) are dropped before the caps, so
+ * the caps count open items only and the next item of a rule shows once the first are settled.
+ */
+export function capCandidates(
+  candidates: readonly TodoCandidate[],
+  settled: ReadonlySet<string> = new Set()
+): TodoCandidate[] {
   const ranked = candidates
     .map((each, input) => ({ each, input }))
     .sort((a, b) => b.each.rank - a.each.rank || a.input - b.input)
@@ -437,7 +443,7 @@ export function capCandidates(candidates: readonly TodoCandidate[]): TodoCandida
   const seen = new Set<string>()
   const kept: TodoCandidate[] = []
   for (const each of ranked) {
-    if (seen.has(each.key)) continue
+    if (seen.has(each.key) || settled.has(each.key)) continue
     const count = perRule.get(each.rule) ?? 0
     if (count >= TODO_RULE_MAX) continue
     perRule.set(each.rule, count + 1)

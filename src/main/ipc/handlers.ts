@@ -248,7 +248,14 @@ import { confirmConversion, conversionPending, estimateConversion } from '../kno
 import { listChanges, undoChange, undoRun } from '../knowledge/changeLog'
 import { convertKnowledgeFacts } from '../knowledge/factConversion'
 import { listTodo, reopenTodo, settleTodo, syncLocalTodo } from '../knowledge/todoStore'
-import { runTodoPass, suggestTodo, todoCheckView, type TodoCheckContext } from '../ai/todoPass'
+import {
+  runTodoPass,
+  suggestTodo,
+  todoCheckEstimate,
+  todoCheckView,
+  type TodoCheckContext,
+  type TodoCheckEstimate
+} from '../ai/todoPass'
 import { importDraft, type ImportResult } from '../import/commit'
 import { withExisting } from '../import/existing'
 import { readManuscript } from '../import/read'
@@ -649,15 +656,40 @@ export function registerHandlers({
       } catch (err) {
         console.warn('Could not update the To do list', err)
       }
-      if (changed) emit(windows(), 'todo:changed', {})
+      if (changed) todoListMoved()
       return Promise.resolve({ requested: false, value: changed })
     },
     cancelRequest: () => undefined,
     debounceMs: TODO_DEBOUNCE_MS,
     minIntervalMs: 0
   })
+  /**
+   * F-9.16: what the To do header's check would send, priced, kept until the book moves: building
+   * it reads every scene card and sheet, too much for every `todo:list`. `todoBookVersion` moves
+   * with every trigger of the To do sync and every change to the list; the key also holds the
+   * model and price it was estimated on, and a project change empties it.
+   */
+  let todoBookVersion = 0
+  let todoEstimateMemo: { key: string; estimate: TodoCheckEstimate } | null = null
+  const todoBookMoved = (): void => {
+    todoBookVersion++
+    todoEstimateMemo = null
+  }
+  const memoTodoEstimate = (db: TreeDb, context: TodoCheckContext): TodoCheckEstimate => {
+    const key = JSON.stringify([todoBookVersion, context.source, context.model, context.pricing])
+    if (todoEstimateMemo?.key === key) return todoEstimateMemo.estimate
+    const estimate = todoCheckEstimate(db, context)
+    todoEstimateMemo = { key, estimate }
+    return estimate
+  }
+  /** F-9.16: the list moved; the windows re-read it. */
+  const todoListMoved = (): void => {
+    todoBookMoved()
+    emit(windows(), 'todo:changed', {})
+  }
   /** F-9.16: the knowledge moved (facts, records, tags, threads, findings, notes, metadata). */
   const queueTodo = (db: TreeDb): void => {
+    todoBookMoved()
     const root = manuscriptRootId(db)
     if (root !== null) todoQueue.touch('todo', root)
   }
@@ -904,9 +936,12 @@ export function registerHandlers({
     return toTreeNode(createNode(session.connection.orm, session.info.format, input))
   })
 
-  register('tree:rename', ({ id, title }) =>
-    toTreeNode(renameNode(manager.require().connection.orm, id, title))
-  )
+  register('tree:rename', ({ id, title }) => {
+    const renamed = toTreeNode(renameNode(manager.require().connection.orm, id, title))
+    // F-9.16: a scene's title is part of what the To do check sends.
+    todoBookMoved()
+    return renamed
+  })
 
   register('tree:duplicate', ({ id }) =>
     duplicateNode(manager.require().connection.orm, id).map(toTreeNode)
@@ -2086,7 +2121,10 @@ export function registerHandlers({
   // reaches the Tags panel's proposals, a dismissed contradiction the Continuity panel.
   register('todo:list', () => {
     const db = manager.require().connection.orm
-    return listTodo(db, todoCheckView(db, todoCheckContext(db)))
+    return listTodo(
+      db,
+      todoCheckView(db, todoCheckContext(db), (context) => memoTodoEstimate(db, context))
+    )
   })
 
   // F-9.16: Check the whole book, only on the author's click (the author's call, 2026-10-09:
@@ -2101,7 +2139,7 @@ export function registerHandlers({
       if (err instanceof AiProviderError) return { ...aiFailure(err.code, err.message), requestId }
       throw err
     } finally {
-      emit(windows(), 'todo:changed', {})
+      todoListMoved()
     }
   })
 
@@ -2125,7 +2163,7 @@ export function registerHandlers({
       emit(windows(), 'continuity:changed', { nodeIds: [result.continuityNodeId] })
     }
     if (result.namesChanged) publishProposed()
-    emit(windows(), 'todo:changed', {})
+    todoListMoved()
     return null
   })
 
@@ -2133,7 +2171,7 @@ export function registerHandlers({
     const db = manager.require().connection.orm
     const result = reopenTodo(db, id)
     if (result.namesChanged) publishProposed()
-    emit(windows(), 'todo:changed', {})
+    todoListMoved()
     return null
   })
 
@@ -3312,7 +3350,7 @@ export function registerHandlers({
     else if (proposal !== null && proposal !== 'regenerated') diagnostics.count('proposal.accept')
     emit(windows(), 'continuity:changed', { nodeIds: [finding.nodeId] })
     // F-9.16: the To do list lists the open findings.
-    emit(windows(), 'todo:changed', {})
+    todoListMoved()
     return finding
   })
 
@@ -4046,8 +4084,9 @@ export function registerHandlers({
     // F-14.14: the voice job and its failure memo belong to the project that left.
     voiceQueue.clear()
     voiceMemo.failedAtWords = null
-    // F-9.16: the To do sync belongs to the project that left.
+    // F-9.16: the To do sync and the check's estimate belong to the project that left.
     todoQueue.clear()
+    todoBookMoved()
     // F-14.15: a pass running in the project that left stops without writing; one left running
     // by a crash or a quit reads as stopped in the project that opened, ready to resume.
     editPasses.clear()

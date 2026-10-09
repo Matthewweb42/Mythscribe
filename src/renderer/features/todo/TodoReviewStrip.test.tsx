@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Channel, Input, Output } from '@shared/ipc/contract'
+import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
+import { resetEntityStore } from '@renderer/features/entities/entityStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { todoItem } from './todoFixture'
@@ -41,7 +42,10 @@ beforeEach(() => {
   })
   useTodoStore.getState().startReview()
 })
-afterEach(() => resetTodoStore())
+afterEach(() => {
+  resetTodoStore()
+  resetEntityStore()
+})
 
 const deck = (): HTMLElement => screen.getByRole('region', { name: 'Go through the To do list' })
 const press = (key: string): void => {
@@ -101,5 +105,60 @@ describe('TodoReviewStrip (F-9.16)', () => {
     expect(screen.getByTestId('todo-line')).toHaveValue('')
     await userEvent.click(screen.getByTestId('todo-review-close'))
     expect(useTodoStore.getState().review).toBeNull()
+  })
+
+  it('makes a new record in the category the author picks, the guess first', async () => {
+    setIpcClient({
+      async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
+        calls.push([channel, input])
+        if (channel === 'todo:settle') return null as Output<C>
+        if (channel === 'entity:create') {
+          const created = input as Input<'entity:create'>
+          const entity: Entity = {
+            id: 'e-new',
+            kind: created.kind,
+            name: created.name,
+            template: 'structured',
+            fields: {},
+            body: null,
+            image: null,
+            tagId: null,
+            aliases: [],
+            origin: 'author',
+            status: 'canon',
+            created: '2026-10-09',
+            modified: '2026-10-09'
+          }
+          return entity as Output<C>
+        }
+        throw new Error(`unexpected ${channel}`)
+      },
+      on: () => () => {}
+    })
+    useTodoStore.setState({
+      items: [
+        todoItem('c', {
+          nodeId: null,
+          subject: 'Saltmarch',
+          rule: 'unknownName',
+          target: { kind: 'newRecord', category: 'character', name: 'Saltmarch' },
+          targetLabel: 'New character: Saltmarch'
+        })
+      ]
+    })
+    useTodoStore.getState().startReview()
+    render(<TodoReviewStrip />)
+    press('e')
+    const picker = screen.getByTestId('todo-category')
+    expect(picker).toHaveValue('character')
+    expect(within(picker).queryByRole('option', { name: 'Threads' })).toBeNull()
+    await userEvent.selectOptions(picker, 'setting')
+    expect(screen.getByText(/^New place: Saltmarch/u)).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('todo-add'))
+    await waitFor(() => expect(calls).toContainEqual(['todo:settle', { id: 'c', status: 'done' }]))
+    expect(calls[0]).toEqual([
+      'entity:create',
+      { kind: 'setting', name: 'Saltmarch', template: 'structured' }
+    ])
   })
 })

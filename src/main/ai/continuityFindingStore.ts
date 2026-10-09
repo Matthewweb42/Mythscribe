@@ -83,6 +83,32 @@ export function listOpenFindings(db: TreeDb): ContinuityFinding[] {
     .map(({ finding }) => finding)
 }
 
+/**
+ * The (record, field, scene) of every finding about a sheet field, whatever its status: what the
+ * To do list's own contradiction rule skips (F-9.16), so a finding the author dismissed never
+ * comes back as a new item. Keys are `entityId\u0000attribute\u0000nodeId`.
+ */
+export function findingFieldKeys(db: TreeDb): Set<string> {
+  const keys = new Set<string>()
+  for (const row of db
+    .select({
+      nodeId: continuityFinding.nodeId,
+      entityId: continuityFinding.entityId,
+      attribute: continuityFinding.attribute
+    })
+    .from(continuityFinding)
+    .all()) {
+    if (row.entityId === null || row.attribute === null) continue
+    keys.add(findingFieldKey(row.entityId, row.attribute, row.nodeId))
+  }
+  return keys
+}
+
+/** The key `findingFieldKeys` answers for one record field in one scene. */
+export function findingFieldKey(entityId: string, attribute: string, nodeId: string): string {
+  return `${entityId}\u0000${attribute}\u0000${nodeId}`
+}
+
 /** The open findings of one scene, oldest first. */
 export function openFindingsForNode(db: TreeDb, nodeId: string): ContinuityFinding[] {
   return db

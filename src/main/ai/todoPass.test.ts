@@ -3,18 +3,21 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { priceFor } from '@shared/ai'
-import { defaultAiSettings } from '@shared/aiSettings'
+import { AI_DATA_SHARING, defaultAiSettings } from '@shared/aiSettings'
+import type { MentionRange } from '@shared/mentions'
 import type { AiSceneCard } from '@shared/sceneCard'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { TODO_AI_ITEMS_MAX, TODO_PASS_CHUNKS_MAX, continuityTodoId } from '@shared/todo'
 import { node, todoItem } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
+import { saveNotes } from '../document/notesStore'
 import { upsertSummary } from '../document/summaryStore'
 import { createEntity } from '../entity/entityStore'
 import { listTodo, settleTodo } from '../knowledge/todoStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { getTodoPassState, setAiSettings, setTodoPassState } from '../project/settingsStore'
 import { createSeededProject } from '../project/testProject'
+import { replaceNodeMentions } from '../tag/mentionStore'
 import type { TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { defaultAiUsageState, dayOf } from './dailyCap'
@@ -408,6 +411,69 @@ describe('todoCheckView', () => {
   })
 })
 
+describe('the book hash (F-9.16)', () => {
+  const context = { allowed: true, source: 'ownKey' as const, model: 'gpt-5.4-mini', pricing: null }
+  const fresh = (): boolean => todoCheckView(db, context).fresh
+
+  it('stays the same across a mention rescan of an unchanged book', async () => {
+    const mara = createEntity(db, { kind: 'character', name: 'Mara' }).entity.tagId ?? ''
+    const pell = createEntity(db, { kind: 'character', name: 'Pell' }).entity.tagId ?? ''
+    expect(mara).not.toBe('')
+    const scan = (counts: [string, number][]): void => {
+      const mentions = new Map(
+        counts.map(([tagId, count]): [string, MentionRange[]] => [
+          tagId,
+          Array.from({ length: count }, (_, at): MentionRange => [at * 10, at * 10 + 4])
+        ])
+      )
+      for (const nodeId of scenes.slice(0, 2)) replaceNodeMentions(db, nodeId, mentions, 'h', NOW)
+    }
+    scan([
+      [mara, 1],
+      [pell, 2]
+    ])
+    answers({ items: [], resolved: [] })
+    await runTodoPass(db, deps)
+    expect(fresh()).toBe(true)
+
+    // The same counts, written again in another row order.
+    scan([
+      [pell, 2],
+      [mara, 1]
+    ])
+    expect(fresh()).toBe(true)
+    // New totals reorder the same records: the same lines are sent.
+    scan([
+      [mara, 3],
+      [pell, 2]
+    ])
+    expect(buildTodoInput(db).digest[0]).toMatch(/^Mara/u)
+    expect(fresh()).toBe(true)
+    expect((await runTodoPass(db, deps)).unchanged).toBe(true)
+    expect(complete).toHaveBeenCalledTimes(1)
+
+    // A record the book starts naming is a change.
+    const kael = createEntity(db, { kind: 'character', name: 'Kael' }).entity.tagId ?? ''
+    scan([
+      [mara, 3],
+      [pell, 2],
+      [kael, 1]
+    ])
+    expect(fresh()).toBe(false)
+  })
+
+  it('takes the estimate from the caller, so a memo can stand in for building the check', () => {
+    const estimateOf = vi.fn(() => ({ hash: 'not-the-last', estimateUsd: 0.0123 }))
+    expect(todoCheckView(db, context, estimateOf)).toMatchObject({
+      allowed: true,
+      estimateUsd: 0.0123,
+      fresh: false
+    })
+    expect(todoCheckView(db, { ...context, allowed: false }, estimateOf).allowed).toBe(false)
+    expect(estimateOf).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('suggestTodo (F-9.16)', () => {
   async function oneItem(): Promise<string> {
     answers({
@@ -456,5 +522,27 @@ describe('suggestTodo (F-9.16)', () => {
     expect(() => parseTodoSuggestAnswer('{"suggestions":[""]}')).toThrow()
     expect(() => parseTodoSuggestAnswer('nope')).toThrow()
     expect(parseTodoSuggestAnswer('{"suggestions":["a","b","c","d"]}')).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('suggestTodo data sharing (F-9.16, verifier)', () => {
+  it('sends a scene’s notes only when the data-sharing row lists them', async () => {
+    answers({
+      items: [{ type: 'question', about: 'the ferry', scene: 'S2', why: 'Where did it go?' }],
+      resolved: []
+    })
+    await runTodoPass(db, deps)
+    const id = listTodo(db).items.find((item) => item.rule === 'question')?.id ?? ''
+    saveNotes(db, scenes[1]!, doc('PRIVATE-NOTE: the ferryman is my uncle.'))
+    answers({ suggestions: ['It sank in the storm.', 'Pell sold it.'] })
+    await suggestTodo(db, deps, { id })
+    const sent =
+      complete.mock.calls
+        .at(-1)?.[0]
+        ?.messages.map((m) => m.content)
+        .join('\n') ?? ''
+    // CLAUDE.md AI rule 3: a feature must not send text the data-sharing panel does not list.
+    expect(sent).toContain('PRIVATE-NOTE')
+    expect(AI_DATA_SHARING.todo.sends.toLowerCase()).toMatch(/notes|what the place holds/)
   })
 })

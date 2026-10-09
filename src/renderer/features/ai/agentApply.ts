@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import type { AgentEdit } from '@shared/agent'
-import type { EntityFieldId } from '@shared/entities'
+import type { EntityFieldId, EntityFields } from '@shared/entities'
 import { AI_ORIGIN_MARK } from '@shared/provenance'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { editorFor } from '@renderer/features/editor/activeEditorStore'
@@ -18,6 +18,7 @@ import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { patchSceneMeta } from '@renderer/features/editor/sceneMetaStore'
 import { appendNotePoints } from '@renderer/features/editor/sceneSuggestStore'
+import { useEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
@@ -178,15 +179,52 @@ export async function rewriteNotes(
   return stored
 }
 
-/** Sets one field of a sheet through the entity store (the one owner), reading the sheet first if the store does not hold it. */
+/** A sheet's text as its owner holds it now. */
+export interface SheetText {
+  fields: EntityFields
+  body: string
+}
+
+/**
+ * Changes a sheet through its one owner. When the sheet's page is open, that is the page's
+ * draft: the change is made there (the author's unsaved typing is kept, and the page shows the
+ * change) and written at once, so the draft never writes the old text back over it. Otherwise it
+ * is the entity store, reading the sheet first if the store does not hold it. `fields` is merged
+ * over the sheet's own; an empty `body` means no page.
+ */
+export async function patchSheet(
+  entityId: string,
+  change: (sheet: SheetText) => { fields?: EntityFields; body?: string }
+): Promise<void> {
+  const drafts = useEntityDraftStore.getState()
+  if (drafts.draft?.id === entityId) {
+    drafts.edit(change({ fields: drafts.draft.fields, body: drafts.draft.body }))
+    await useEntityDraftStore.getState().flush()
+    const after = useEntityDraftStore.getState()
+    // Written and not typed into since: the page starts again from the row as stored. A failed
+    // write keeps the change in the draft, which reports it and tries again on the next edit.
+    const stored = useEntityStore.getState().byId[entityId]
+    if (after.draft?.id === entityId && after.status === 'saved' && stored !== undefined) {
+      after.open(stored)
+    }
+    return
+  }
+  const store = useEntityStore.getState()
+  const entity = store.byId[entityId] ?? (await ipc().invoke('entity:get', { id: entityId }))
+  const patch = change({ fields: entity.fields, body: entity.body ?? '' })
+  await store.update(entityId, {
+    ...(patch.fields === undefined ? {} : { fields: { ...entity.fields, ...patch.fields } }),
+    ...(patch.body === undefined ? {} : { body: patch.body === '' ? null : patch.body })
+  })
+}
+
+/** Sets one field of a sheet through its one owner (`patchSheet`). */
 export async function setSheetField(
   entityId: string,
   field: EntityFieldId,
   value: string
 ): Promise<void> {
-  const store = useEntityStore.getState()
-  const entity = store.byId[entityId] ?? (await ipc().invoke('entity:get', { id: entityId }))
-  await store.update(entityId, { fields: { ...entity.fields, [field]: value } })
+  await patchSheet(entityId, () => ({ fields: { [field]: value } }))
 }
 
 /** Saves a document main has not had yet (a new scene) and records its word count in the tree. */

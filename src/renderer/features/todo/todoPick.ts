@@ -1,9 +1,10 @@
 import { categoryFieldIds, type StoryCategory } from '@shared/categories'
 import { REPLACE_FIELDS } from '@shared/facts'
+import type { EntityKind } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
 import { SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
 import { clipTodo, type TodoItem, type TodoTarget } from '@shared/todo'
-import { rewriteNotes, setSheetField } from '@renderer/features/ai/agentApply'
+import { patchSheet, rewriteNotes } from '@renderer/features/ai/agentApply'
 import { patchSceneMeta } from '@renderer/features/editor/sceneMetaStore'
 import { appendNotePoints } from '@renderer/features/editor/sceneSuggestStore'
 import { getCategory } from '@renderer/features/entities/categoryStore'
@@ -49,31 +50,33 @@ async function entityOf(id: string): Promise<Entity> {
  * page, a scene's notes, a field of its brief, or a new record, each through the renderer's own
  * owner of that record (the entity store, the notes write path, the scene-metadata store), so a
  * pending edit there is never overwritten. The line is the author's text: no AI mark, no proposal.
+ * A new record is made in `options.category` when the author picked one, else the item's guess.
  * Then the item is settled as done. Never touches a scene's text.
  */
-export async function applyPick(item: TodoItem, text: string): Promise<void> {
+export async function applyPick(
+  item: TodoItem,
+  text: string,
+  options: { category?: EntityKind } = {}
+): Promise<void> {
   const line = text.trim()
   const { target } = item
   switch (target.kind) {
     case 'field': {
       if (line === '') throw new Error('Write a line to add first')
-      const entity = await entityOf(target.entityId)
-      const category = getCategory(entity.kind)
-      const current = entity.fields[target.field] ?? ''
-      await setSheetField(
-        target.entityId,
-        target.field,
-        withLine(current, line, target.field, category)
-      )
+      const category = getCategory((await entityOf(target.entityId)).kind)
+      await patchSheet(target.entityId, (sheet) => ({
+        fields: {
+          [target.field]: withLine(sheet.fields[target.field] ?? '', line, target.field, category)
+        }
+      }))
       break
     }
     case 'page': {
       if (line === '') throw new Error('Write a line to add first')
-      const entity = await entityOf(target.entityId)
-      const body = (entity.body ?? '').trimEnd()
-      await useEntityStore
-        .getState()
-        .update(target.entityId, { body: body === '' ? line : `${body}\n\n${line}` })
+      await patchSheet(target.entityId, (sheet) => {
+        const body = sheet.body.trimEnd()
+        return { body: body === '' ? line : `${body}\n\n${line}` }
+      })
       break
     }
     case 'notes':
@@ -90,9 +93,10 @@ export async function applyPick(item: TodoItem, text: string): Promise<void> {
       break
     }
     case 'newRecord': {
-      const field = describeField(getCategory(target.category))
+      const kind = options.category ?? target.category
+      const field = describeField(getCategory(kind))
       await useEntityStore.getState().create({
-        kind: target.category,
+        kind,
         name: target.name,
         template: 'structured',
         ...(line !== '' && field !== null ? { fields: { [field]: line } } : {})

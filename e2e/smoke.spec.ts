@@ -19,10 +19,11 @@ import { bundledPricing, hostedPriceFor } from '../src/shared/hostedPricing'
 import { USAGE_PERIOD_DAYS } from '../src/shared/cloudUsage'
 import type { FocusSettings } from '../src/shared/focus'
 import { localDay } from '../src/shared/goals'
+import { MENTION_DEBOUNCE_MS } from '../src/shared/mentions'
 import { encodeLicensePayload, formatLicenseToken, LICENSE_GRACE_MS } from '../src/shared/license'
 import type { Entity, IpcResult, ProjectInfo, Tag, TreeNode } from '../src/shared/ipc/contract'
 import type { Layout } from '../src/shared/layout'
-import type { TodoView } from '../src/shared/todo'
+import { TODO_DEBOUNCE_MS, type TodoView } from '../src/shared/todo'
 import type { Fact } from '../src/shared/facts'
 import { PRESETS, type WritingPresets } from '../src/shared/presets'
 import type { ReferencePin, ReferencePins } from '../src/shared/references'
@@ -6457,6 +6458,21 @@ test('create, close, reopen a project on disk', async () => {
   const todoTab = page.getByTestId('todo-tab')
   const sentWith = (sentinel: string): number =>
     openAiChatBodies.filter((body) => body.messages[0]?.content.startsWith(sentinel)).length
+  // The mention scan and the To do sync are debounced and silent, and the check sends what they
+  // wrote: wait until the list (its items and the check's estimate) holds still across a full
+  // debounce of both, so the second check below reads the same book as the first.
+  const todoSnapshot = async (): Promise<string> =>
+    JSON.stringify(await page.evaluate(() => window.mythscribe.invoke('todo:list', undefined)))
+  await expect
+    .poll(
+      async () => {
+        const before = await todoSnapshot()
+        await page.waitForTimeout(TODO_DEBOUNCE_MS + MENTION_DEBOUNCE_MS + 500)
+        return (await todoSnapshot()) === before
+      },
+      { timeout: 60_000, intervals: [0] }
+    )
+    .toBe(true)
   await todoTab.getByTestId('todo-check-book').click()
   const todoRow = todoTab.getByTestId('todo-item').filter({ hasText: TODO_SUBJECT })
   await expect(todoRow).toHaveCount(1)
@@ -6466,7 +6482,9 @@ test('create, close, reopen a project on disk', async () => {
   await expect(todoTab.getByRole('region', { name: 'Gaps' })).toContainText('the winter crossing')
   await dismissToasts()
   await todoTab.getByTestId('todo-check-book').click()
-  await expect(page.getByText('Nothing changed since the last check.')).toBeVisible()
+  await expect(
+    page.getByText('Nothing changed since the last check.', { exact: true })
+  ).toBeVisible()
   expect(sentWith(TODO_SENTINEL)).toBe(1)
   await dismissToasts()
   const todoListed = await page.evaluate(() => window.mythscribe.invoke('todo:list', undefined))

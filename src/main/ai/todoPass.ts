@@ -248,11 +248,19 @@ export function todoChunks(input: TodoPassInput): TodoChunk[] {
 
 /**
  * The hash a check is remembered by: the book part of every request (the digest, the threads, and
- * the scene lines), not the lists of items, which move with every Done and Dismiss. An unchanged
- * book sends nothing.
+ * the scene lines), not the lists of items, which move with every Done and Dismiss. The digest is
+ * hashed as a set: its order follows the mention totals, which a rescan of the same book can
+ * shuffle among the same records without changing a word that is sent. An unchanged book sends
+ * nothing.
  */
-export function todoBookHash(chunks: readonly TodoChunk[]): string {
-  return sha256(JSON.stringify(chunks.map((chunk) => chunk.prompt.messages[1]?.content ?? '')))
+export function todoBookHash(input: TodoPassInput, chunks: readonly TodoChunk[]): string {
+  return sha256(
+    JSON.stringify({
+      digest: [...input.digest].sort(),
+      threads: input.threads,
+      windows: chunks.map((chunk) => chunk.scenes.map((scene) => scene.line))
+    })
+  )
 }
 
 /** One item the check flagged, ready to store. */
@@ -456,7 +464,7 @@ export async function runTodoPass(
     costUsd: 0
   }
   if (chunks.length === 0) return none
-  const hash = todoBookHash(chunks)
+  const hash = todoBookHash(built, chunks)
   if (getTodoPassState(db).lastPassHash === hash) return { ...none, unchanged: true }
 
   const book = readBook(db)
@@ -570,7 +578,12 @@ export interface TodoCheckContext extends Pick<ConversionContext, 'source' | 'mo
  * cost note's typical size per request); `fresh` when the book is unchanged since the last check,
  * so a click sends nothing.
  */
-export function todoCheckView(db: TreeDb, context: TodoCheckContext | null): TodoCheck {
+export function todoCheckView(
+  db: TreeDb,
+  context: TodoCheckContext | null,
+  estimateOf: (context: TodoCheckContext) => TodoCheckEstimate = (each) =>
+    todoCheckEstimate(db, each)
+): TodoCheck {
   const state = getTodoPassState(db)
   const idle: TodoCheck = {
     allowed: false,
@@ -580,9 +593,28 @@ export function todoCheckView(db: TreeDb, context: TodoCheckContext | null): Tod
     fresh: false
   }
   if (!context?.allowed) return idle
-  const chunks = todoChunks(buildTodoInput(db))
-  if (chunks.length === 0) return { ...idle, allowed: true }
-  if (todoBookHash(chunks) === state.lastPassHash) return { ...idle, allowed: true, fresh: true }
+  const { hash, estimateUsd } = estimateOf(context)
+  if (hash === null) return { ...idle, allowed: true }
+  if (hash === state.lastPassHash) return { ...idle, allowed: true, fresh: true }
+  return { ...idle, allowed: true, estimateUsd }
+}
+
+/** What a check would send now, reduced to what the header needs: its book hash and its price. */
+export interface TodoCheckEstimate {
+  /** `todoBookHash` of the requests; null when there is nothing to send (no scene card yet). */
+  hash: string | null
+  estimateUsd: number | null
+}
+
+/**
+ * Builds the check as it would be sent and prices it on `context`'s model (input as it would be
+ * sent, output at the cost note's typical size per request). The costly part of `todoCheckView`,
+ * which the caller may memoise until the book moves.
+ */
+export function todoCheckEstimate(db: TreeDb, context: TodoCheckContext): TodoCheckEstimate {
+  const input = buildTodoInput(db)
+  const chunks = todoChunks(input)
+  if (chunks.length === 0) return { hash: null, estimateUsd: null }
   const tokensIn = chunks.reduce(
     (sum, chunk) =>
       sum + estimateTokens(chunk.prompt.messages.map((message) => message.content).join('\n')),
@@ -590,7 +622,7 @@ export function todoCheckView(db: TreeDb, context: TodoCheckContext | null): Tod
   )
   const tokensOut = chunks.length * AI_COST_NOTES.todo.typicalOutTokens
   const { costUsd } = estimateCost(context, tokensIn, tokensOut)
-  return { ...idle, allowed: true, estimateUsd: costUsd }
+  return { hash: todoBookHash(input, chunks), estimateUsd: costUsd }
 }
 
 /** What a stored target holds now, as words; '' for nothing or a new record. */

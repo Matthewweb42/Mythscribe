@@ -1,5 +1,8 @@
 import { useState } from 'react'
+import { categoryOf } from '@shared/categories'
+import { THREAD_KIND } from '@shared/threads'
 import { TODO_LINE_MAX, type TodoItem } from '@shared/todo'
+import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { openContinuityFix } from './todoJump'
@@ -103,19 +106,51 @@ export function TodoCard({ id }: { id: string }): React.JSX.Element | null {
   )
 }
 
+/**
+ * The editable line and Add. A new record also gets its category: the item's guess first (a
+ * character for a name the book keeps using), any other one a pick away (threads are made on
+ * the Threads section, not here).
+ */
 function Composer({ item, text }: { item: TodoItem; text: string }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
-  const record = item.target.kind === 'newRecord'
+  const target = item.target
+  const record = target.kind === 'newRecord' ? target : null
+  const [category, setCategory] = useState(record?.category ?? '')
+  const categories = useCategoryStore((s) => s.categories)
   const add = (): void => {
     setBusy(true)
-    applyPick(item, text)
+    applyPick(item, text, record === null ? {} : { category })
       .catch((err: unknown) => toast.error(describeError(err)))
       .finally(() => setBusy(false))
   }
+  const label =
+    record === null
+      ? `Add to ${item.targetLabel}`
+      : `New ${categoryOf(category, categories).noun}: ${record.name} (a line about it, optional)`
   return (
     <div className="flex flex-col gap-1.5" data-testid="todo-composer">
+      {record === null ? null : (
+        <label className="flex items-center gap-2 text-xs text-fg-muted">
+          Category
+          <select
+            data-testid="todo-category"
+            value={category}
+            disabled={busy}
+            onChange={(event) => setCategory(event.target.value)}
+            className="min-w-0 rounded-md border border-line bg-bg px-2 py-1 text-sm text-fg"
+          >
+            {categories
+              .filter((each) => each.id !== THREAD_KIND)
+              .map((each) => (
+                <option key={each.id} value={each.id}>
+                  {each.name}
+                </option>
+              ))}
+          </select>
+        </label>
+      )}
       <label className="flex flex-col gap-1 text-xs text-fg-muted">
-        {record ? `${item.targetLabel} (a line about it, optional)` : `Add to ${item.targetLabel}`}
+        {label}
         <textarea
           data-testid="todo-line"
           value={text}

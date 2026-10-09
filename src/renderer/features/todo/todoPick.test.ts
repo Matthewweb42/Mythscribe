@@ -7,6 +7,10 @@ import { resetNotesStore } from '@renderer/features/editor/notesStore'
 import { resetSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
+import {
+  resetEntityDraftStore,
+  useEntityDraftStore
+} from '@renderer/features/entities/entityDraftStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { todoItem } from './todoFixture'
 import { applyPick, withLine } from './todoPick'
@@ -145,6 +149,18 @@ describe('applyPick (F-9.16)', () => {
     expect(useEntityStore.getState().byId['e-new']?.name).toBe('Hollowing')
   })
 
+  it('makes the new record in the category the author picked', async () => {
+    await applyPick(
+      todoItem('t1', { target: { kind: 'newRecord', category: 'character', name: 'Hollowing' } }),
+      '',
+      { category: 'world' }
+    )
+    expect(calls[0]).toEqual([
+      'entity:create',
+      { kind: 'world', name: 'Hollowing', template: 'structured' }
+    ])
+  })
+
   it('refuses an empty line for a field, and writes nothing', async () => {
     await expect(
       applyPick(
@@ -154,5 +170,47 @@ describe('applyPick (F-9.16)', () => {
     ).rejects.toThrowError(/Write a line/)
     expect(calls).toEqual([])
     expect(useTodoStore.getState().items).toHaveLength(1)
+  })
+})
+
+describe('applyPick beside an open sheet (F-9.16, verifier)', () => {
+  beforeEach(() => {
+    resetEntityDraftStore()
+    useEntityStore.setState({ byId: { [mara.id]: mara }, ids: [mara.id] })
+  })
+  afterEach(() => {
+    resetEntityDraftStore()
+  })
+
+  it('keeps the added line when the sheet page that was open writes its draft back', async () => {
+    // The author has Mara's sheet open in the pane (the strip sits above it) and adds a goal.
+    useEntityDraftStore.getState().open(mara)
+    await applyPick(
+      todoItem('t1', { target: { kind: 'field', entityId: 'e-mara', field: 'goals' } }),
+      'Find her brother'
+    )
+    // Leaving the sheet writes the page's draft back (close → flush).
+    await useEntityDraftStore.getState().flush()
+    const updates = calls.filter(([channel]) => channel === 'entity:update')
+    const last = updates.at(-1)?.[1] as { fields?: Record<string, string> } | undefined
+    expect(last?.fields?.goals ?? useEntityStore.getState().byId['e-mara']?.fields.goals).toContain(
+      'Find her brother'
+    )
+  })
+
+  it('keeps what the author typed on the open page and shows the added line there', async () => {
+    useEntityDraftStore.getState().open(mara)
+    useEntityDraftStore.getState().edit({ fields: { age: '32' } })
+    await applyPick(
+      todoItem('t1', { target: { kind: 'field', entityId: 'e-mara', field: 'goals' } }),
+      'Find her brother'
+    )
+    expect(calls).toContainEqual([
+      'entity:update',
+      { id: 'e-mara', fields: { goals: 'Pay the debt\nFind her brother', age: '32' } }
+    ])
+    expect(useEntityDraftStore.getState().draft?.fields.goals).toBe(
+      'Pay the debt\nFind her brother'
+    )
   })
 })

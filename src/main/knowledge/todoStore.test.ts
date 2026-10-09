@@ -9,7 +9,7 @@ import { node, todoItem } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
-import { createEntity, deleteEntity, updateEntity } from '../entity/entityStore'
+import { createEntity, deleteEntity, listEntities, updateEntity } from '../entity/entityStore'
 import { getDismissedNames } from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { listProposedTags, resetProposedTagCache } from '../tag/proposedTags'
@@ -325,5 +325,84 @@ describe('the local To do list (F-9.16)', () => {
         .where(eq(todoItem.id, 'kept'))
         .all()
     ).toEqual([{ id: 'kept', nodeId: null }])
+  })
+})
+
+describe('the local caps count open items only (F-9.16, verifier)', () => {
+  it('shows the next item of a rule once its first 20 are settled', () => {
+    const names = Array.from({ length: 21 }, (_, at) => `Zan${String.fromCharCode(97 + at)}ork`)
+    for (const name of names) createEntity(db, { kind: 'world', name })
+    const line = `${names.join(' and ')} were all there.${FILLER}`
+    write(first, line)
+    addScene('s2', line, 1)
+    syncLocalTodo(db)
+    const open = listTodo(db).items.filter((item) => item.rule === 'emptyRecord')
+    expect(open).toHaveLength(20)
+    for (const item of open) settleTodo(db, item.id, 'dismissed')
+    syncLocalTodo(db)
+    // Plan: "20 open items per rule". The 21st record is just as empty and named in two scenes.
+    expect(listTodo(db).items.filter((item) => item.rule === 'emptyRecord')).toHaveLength(1)
+  })
+})
+
+describe('a fact conflict the consistency checker already had (F-9.16, verifier)', () => {
+  it('does not come back as a new item once the author dismisses the finding', () => {
+    const text = `Mara was thirty that spring. Mara was thirty-four, said the clerk.${FILLER}`
+    write(first, text)
+    applyDerivedKnowledge(db, {
+      nodeId: first,
+      facts: [
+        {
+          entity: 'Mara',
+          kind: 'character',
+          attribute: 'age',
+          value: '30',
+          quote: 'Mara was thirty'
+        },
+        {
+          entity: 'Mara',
+          kind: 'character',
+          attribute: 'age',
+          value: '34',
+          quote: 'Mara was thirty-four'
+        }
+      ],
+      tags: [],
+      sceneText: text,
+      now: new Date().toISOString()
+    })
+    const mara = listEntities(db).find((entity) => entity.name === 'Mara')
+    const [finding] = insertFindings(
+      db,
+      first,
+      [
+        {
+          ref: {
+            kind: 'sheet',
+            entityId: mara?.id ?? '',
+            entityName: 'Mara',
+            entityKind: 'character',
+            attribute: 'age',
+            label: 'Age',
+            value: '30',
+            nodeId: null,
+            quote: null
+          },
+          quote: 'Mara was thirty-four',
+          why: 'Two ages in one scene.',
+          fix: null,
+          flagged: false,
+          violation: null
+        }
+      ],
+      { origin: 'background', proposalId: null, createdAt: new Date().toISOString() }
+    )
+    syncLocalTodo(db)
+    // The open finding stands for the conflict: no local duplicate.
+    expect(listTodo(db).items.map((each) => each.rule)).toEqual(['continuity'])
+    settleTodo(db, `c:${finding?.id ?? ''}`, 'dismissed')
+    syncLocalTodo(db)
+    // "Not a problem" holds: the same entity, field, and scene must not return as a new item.
+    expect(listTodo(db).items.filter((each) => each.rule === 'factConflict')).toEqual([])
   })
 })
