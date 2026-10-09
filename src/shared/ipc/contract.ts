@@ -145,6 +145,7 @@ import { Fact, FactStatus } from '../facts'
 import { KnowledgeConversion } from '../knowledge'
 import { RELATION_LABEL_MAX, RelationType } from '../relations'
 import { THREAD_NOTE_MAX, ThreadEvent, ThreadView } from '../threads'
+import { TodoView } from '../todo'
 import { CHANGES_PAGE, CHANGES_PAGE_MAX, ChangePage, ChangeUndoResult } from '../changes'
 import { TagMentions } from '../mentions'
 import { EditRole, MenuItemId } from '../menu'
@@ -1872,6 +1873,23 @@ export const contract = {
   'knowledge:convert': { input: z.undefined(), output: KnowledgeConversion },
   /** Later: the dialog stays closed until the project is opened again; held scenes stay held. */
   'knowledge:later': { input: z.undefined(), output: KnowledgeConversion },
+  /**
+   * The To do list (F-9.16): the open items the local rules found, the AI check added, and the
+   * open contradictions of the consistency checker (id `c:<findingId>`, read live), grouped by
+   * kind with the counts. Local; refetched on `todo:changed`.
+   */
+  'todo:list': { input: z.undefined(), output: TodoView },
+  /**
+   * Done ("handled") or Dismiss ("not a problem"): the item never comes back. A contradiction is
+   * dismissed in the consistency checker; an untagged name is dismissed in the Tags panel too.
+   * Pushes `todo:changed`. NOT_FOUND for an unknown or settled item.
+   */
+  'todo:settle': {
+    input: z.object({ id: z.string(), status: z.enum(['done', 'dismissed']) }),
+    output: z.null()
+  },
+  /** Undo of a Done or a Dismiss (the table's items only; VALIDATION for a contradiction). Pushes `todo:changed`. */
+  'todo:reopen': { input: z.object({ id: z.string() }), output: z.null() },
   /** The app-wide panel layout (F-7.2) from app-state.json; the defaults until one has been saved. */
   'layout:get': { input: z.undefined(), output: Layout },
   /** Replaces the panel layout (F-7.2); sizes outside the panel limits are refused with VALIDATION. */
@@ -2924,6 +2942,8 @@ export const events = {
   'changes:changed': z.object({}),
   /** The conversion pass's state moved (F-9.14): the project opened, the AI settings changed, or it started. */
   'knowledge:conversionChanged': KnowledgeConversion,
+  /** The To do list moved (F-9.16): a sync, a settle, a reopen, or the AI check; the store refetches `todo:list`. */
+  'todo:changed': z.object({}),
   /** The findings of these scenes changed (F-13.4): a check ran in the background or on demand, or one was settled; the store refetches `continuity:list`. */
   'continuity:changed': z.object({ nodeIds: z.array(z.string()) }),
   /**

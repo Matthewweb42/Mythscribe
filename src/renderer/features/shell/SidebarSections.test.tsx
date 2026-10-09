@@ -176,16 +176,18 @@ describe('buildSections (F-9.11)', () => {
     edits: 0,
     library: 0,
     changes: 0,
+    todo: 0,
     sheets: {}
   }
   const used = (built: SidebarSection[]): string[] => built.filter((s) => s.used).map((s) => s.id)
 
-  it('always uses Manuscript, Characters, Places, and Tags; the rest once they hold something', () => {
+  it('always uses Manuscript, Characters, Places, Tags, and To do; the rest once they hold something', () => {
     expect(used(buildSections(BUILTIN_CATEGORIES, counts))).toEqual([
       'manuscript',
       'character',
       'setting',
-      'tags'
+      'tags',
+      'todo'
     ])
     const busy = buildSections(BUILTIN_CATEGORIES, {
       documents: 4,
@@ -194,6 +196,7 @@ describe('buildSections (F-9.11)', () => {
       edits: 1,
       library: 3,
       changes: 2,
+      todo: 3,
       sheets: { magic: 2, world: 1 }
     })
     expect(used(busy)).toEqual([
@@ -207,6 +210,7 @@ describe('buildSections (F-9.11)', () => {
       'outline',
       'edits',
       'library',
+      'todo',
       'changes'
     ])
     expect(busy.find((s) => s.id === 'magic')).toMatchObject({
@@ -225,7 +229,15 @@ describe('buildSections (F-9.11)', () => {
     })
     const bible = built.filter((s) => s.group === 'bible').map((s) => s.label)
     expect(bible.slice(-2)).toEqual(['Ships', 'c-gone'])
-    expect(used(built)).toEqual(['manuscript', 'character', 'setting', 'c-ships', 'c-gone', 'tags'])
+    expect(used(built)).toEqual([
+      'manuscript',
+      'character',
+      'setting',
+      'c-ships',
+      'c-gone',
+      'tags',
+      'todo'
+    ])
   })
 
   it('shows Threads after the library once it has a thread, through the Threads section (F-9.14)', () => {

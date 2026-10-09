@@ -1678,6 +1678,8 @@ test('create, close, reopen a project on disk', async () => {
     /^Places\d*$/,
     /^Tags\d*$/,
     /^Outline\d*$/,
+    // F-9.16: To do is always shown.
+    /^To do\d*$/,
     /^Show unused sections \(\d+\)$/,
     'New category…'
   ])
@@ -6377,6 +6379,7 @@ test('create, close, reopen a project on disk', async () => {
     /^Outline\d+$/,
     /^Edits\d+$/,
     'Library2',
+    /^To do\d*$/,
     /^Changes\d+$/,
     /^Show unused sections \(\d+\)$/,
     'New category…'

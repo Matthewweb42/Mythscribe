@@ -33,6 +33,7 @@ import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { SNAPSHOT_KINDS, SNAPSHOT_SCOPES } from '../../shared/snapshots'
 import { TAG_CATEGORIES } from '../../shared/tags'
+import { TODO_KINDS, TODO_RULES, TODO_SOURCES, TODO_STATUSES } from '../../shared/todo'
 import { EXEMPLAR_KINDS, VOICE_EXEMPLAR_SOURCES } from '../../shared/voice'
 
 /**
@@ -818,3 +819,44 @@ export const contextFile = sqliteTable(
 )
 export type ContextFileRow = typeof contextFile.$inferSelect
 export type ContextFileInsert = typeof contextFile.$inferInsert
+
+/**
+ * One item of the To do list (F-9.16, migration `0025_todo`): something the book leaves
+ * unexplained, contradicted, unfinished, or unstated, found by a local rule or the author's
+ * whole-book AI check. Derived data, never in the manuscript (CLAUDE.md, AI rule 1): the
+ * author's Add writes a line to a sheet, notes, or a brief through the renderer's own owners,
+ * and the row only records that it was handled. `key` (`todoKey`) is unique: a `done` or
+ * `dismissed` row is the tombstone that keeps the same item from coming back, and a sync only
+ * ever upserts or deletes `open` rows. The contradictions of the consistency checker are not
+ * copied here; they are read live from `continuity_finding`. `target` is a JSON `TodoTarget`,
+ * `suggestions` a JSON array of strings (options for the author, never facts). The scene and the
+ * record are cleared, not cascaded; the sync drops an open row whose scene or record went.
+ */
+export const todoItem = sqliteTable(
+  'todo_item',
+  {
+    id: text('id').primaryKey(),
+    key: text('key').notNull().unique(),
+    kind: text('kind', { enum: TODO_KINDS }).notNull(),
+    rule: text('rule', { enum: TODO_RULES }).notNull(),
+    source: text('source', { enum: TODO_SOURCES }).notNull(),
+    subject: text('subject').notNull(),
+    entityId: text('entity_id').references(() => entity.id, { onDelete: 'set null' }),
+    nodeId: text('node_id').references(() => node.id, { onDelete: 'set null' }),
+    quote: text('quote'),
+    why: text('why').notNull(),
+    target: text('target').notNull(),
+    suggestions: text('suggestions').notNull().default('[]'),
+    suggestedAt: text('suggested_at'),
+    status: text('status', { enum: TODO_STATUSES }).notNull().default('open'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull()
+  },
+  (t) => [
+    index('todo_item_status_idx').on(t.status),
+    index('todo_item_entity_idx').on(t.entityId),
+    index('todo_item_node_idx').on(t.nodeId)
+  ]
+)
+export type TodoItemRow = typeof todoItem.$inferSelect
+export type TodoItemInsert = typeof todoItem.$inferInsert

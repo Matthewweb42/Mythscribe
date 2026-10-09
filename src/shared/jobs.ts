@@ -36,7 +36,11 @@ export const JobKind = z.enum([
   'voice',
   // F-11.1d: the plan-link job, one per project (keyed to the manuscript root): it ties planned
   // scenes and empty beats to the written scenes that fulfil them, after summaries change.
-  'planLinks'
+  'planLinks',
+  // F-9.16: the To do job, one per project (keyed to the manuscript root): the free local sync of
+  // the To do list after the knowledge moved. Never an AI request: the whole-book check runs only
+  // when the author asks for it.
+  'todo'
 ])
 export type JobKind = z.infer<typeof JobKind>
 

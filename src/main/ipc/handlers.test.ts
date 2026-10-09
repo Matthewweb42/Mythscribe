@@ -85,6 +85,7 @@ import { getProposal } from '../ai/proposalStore'
 import { insertUsage } from '../ai/usageStore'
 import { getSummary, upsertSummary } from '../document/summaryStore'
 import { applyDerivedKnowledge } from '../knowledge/derive'
+import { syncLocalTodo } from '../knowledge/todoStore'
 import { applySceneFacts } from '../entity/factStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { passageHash, replaceAutoExemplars } from '../voice/exemplarStore'
@@ -4693,6 +4694,56 @@ describe('relationships, threads, and the conversion pass (F-9.14)', () => {
     expect(await invoke('jobs:status', undefined)).toMatchObject({ queued: 0, running: null })
     expect(complete).not.toHaveBeenCalled()
     expect(getSummary(db, id)?.promptVersion).toBe('summary.v3')
+  })
+})
+
+describe('the To do list (F-9.16)', () => {
+  const doc = (text: string): Input<'document:save'>['content'] => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+  const sent = (channel: string): unknown[] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([name]) => name === channel)
+      .map(([, payload]) => payload)
+
+  it('reports NO_PROJECT when nothing is open', async () => {
+    await expect(invoke('todo:list', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
+    await expect(invoke('todo:settle', { id: 'x', status: 'done' })).rejects.toThrowError(
+      /^NO_PROJECT: /
+    )
+    await expect(invoke('todo:reopen', { id: 'x' })).rejects.toThrowError(/^NO_PROJECT: /)
+  })
+
+  it('lists, dismisses (in the Tags panel too), and reopens an item, telling the windows', async () => {
+    await invoke('project:create', { name: 'Todo', format: 'novel', directory: tmp })
+    const scene = (await invoke('tree:list', undefined)).find(
+      (node) => node.kind === 'document' && node.sectionType === null
+    )
+    const text =
+      'But Tash saw Tash, then Tash. The rain kept on through the evening, and the lamps along ' +
+      'the quay burned low while the boats knocked against the posts and nobody on the landing ' +
+      'said a word about the weather or the ferry.'
+    await invoke('document:save', { id: scene?.id ?? '', content: doc(text) })
+    const db = manager.require().connection.orm
+    const before = (await invoke('document:get', { id: scene?.id ?? '' })).content
+    syncLocalTodo(db)
+    const view = await invoke('todo:list', undefined)
+    expect(view.items).toMatchObject([{ rule: 'unknownName', subject: 'Tash' }])
+    expect(view.counts.undefined).toBe(1)
+    const id = view.items[0]?.id ?? ''
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    expect(await invoke('todo:settle', { id, status: 'dismissed' })).toBeNull()
+    expect(sent('todo:changed')).toEqual([{}])
+    expect(await invoke('tag:dismissedNames', undefined)).toEqual(['tash'])
+    expect((await invoke('todo:list', undefined)).items).toEqual([])
+    await expect(invoke('todo:settle', { id, status: 'done' })).rejects.toThrowError(/^NOT_FOUND: /)
+    expect(await invoke('todo:reopen', { id })).toBeNull()
+    expect(await invoke('tag:dismissedNames', undefined)).toEqual([])
+    expect((await invoke('todo:list', undefined)).items.map((item) => item.id)).toEqual([id])
+    // Nothing of this touched the scene.
+    expect((await invoke('document:get', { id: scene?.id ?? '' })).content).toEqual(before)
   })
 })
 

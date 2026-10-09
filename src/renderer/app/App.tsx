@@ -101,6 +101,7 @@ import { EditPassWorkspace } from '@renderer/features/editPass/EditPassWorkspace
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useFactStore } from '@renderer/features/entities/factStore'
 import { useChangesStore } from '@renderer/features/changes/changesStore'
+import { useTodoStore } from '@renderer/features/todo/todoStore'
 import {
   ReferencePanel,
   ReferencesToggleButton
@@ -307,6 +308,8 @@ export function App(): React.JSX.Element {
       useFactStore.getState().clear()
       // F-9.13: the Changes log belongs to the project that closed.
       useChangesStore.getState().clear()
+      // F-9.16: and so does its To do list.
+      useTodoStore.getState().clear()
       // F-9.14: and so do its threads and the conversion dialog.
       useThreadStore.getState().clear()
       useConversionStore.getState().clear()
@@ -353,6 +356,12 @@ export function App(): React.JSX.Element {
     useFactStore.getState().subscribe()
     // F-9.13: the background reading logs what it applied; the Changes section lists it.
     useChangesStore.getState().subscribe()
+    // F-9.16: main syncs the To do list in the background and says when it moved.
+    useTodoStore.getState().subscribe()
+    useTodoStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
     // F-9.14: the threads follow the facts; main says when the conversion pass wants the author.
     useThreadStore.getState().subscribe()
     useConversionStore.getState().subscribe()

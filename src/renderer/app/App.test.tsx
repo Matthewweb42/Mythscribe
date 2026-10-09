@@ -210,6 +210,9 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'category:list') return BUILTIN_CATEGORIES
     if (channel === 'fact:listForEntity') return []
     if (channel === 'changes:list') return { entries: [], more: false }
+    if (channel === 'todo:list') {
+      return { items: [], counts: { undefined: 0, contradiction: 0, looseEnd: 0, gap: 0 } }
+    }
     if (channel === 'documentTag:list') return []
     if (channel === 'tag:proposed') return []
     if (channel === 'tag:dismissedNames') return []
@@ -395,6 +398,7 @@ describe('App', () => {
       'Places',
       'Tags',
       'Outline',
+      'To do',
       'Show unused sections (15)',
       'New category…'
     ])

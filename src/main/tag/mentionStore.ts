@@ -28,6 +28,11 @@ export function listMentionsForNode(db: TreeDb, nodeId: string): TagMentions[] {
   return rows(db.select().from(tagMention).where(eq(tagMention.nodeId, nodeId)).all())
 }
 
+/** Every mention row of the project (F-9.16: the To do list counts the scenes each record is in). */
+export function listAllMentions(db: TreeDb): TagMentions[] {
+  return rows(db.select().from(tagMention).all())
+}
+
 /** What F-9.12 stores beside a scan: the paragraph of every range, and the passage index's hash. */
 export interface ScanIndex {
   /** Per tag, the paragraph index of each of its ranges, in the same order (`paragraphIndexes`). */

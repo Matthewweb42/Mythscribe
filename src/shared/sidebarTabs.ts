@@ -18,6 +18,8 @@ export const SIDEBAR_TOOL_IDS = [
   'edits',
   // F-9.8: the context library, the author's uploaded worldbuilding files.
   'library',
+  // F-9.16: what the book leaves unexplained, contradicted, unfinished, or unstated.
+  'todo',
   // F-9.13: what the AI added to the story bible on its own, with Undo.
   'changes'
 ] as const

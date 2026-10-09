@@ -109,8 +109,9 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(25)
+    expect(result.version).toBe(26)
     expect(tables()).toContain('project')
+    expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
     expect(tables()).toContain('tag')
     expect(tables()).toContain('document_tag')
@@ -1013,6 +1014,45 @@ describe('fact, knowledge_change, entity.status (0023)', () => {
       node_id: null,
       status: 'canon',
       hidden: 0
+    })
+  })
+})
+
+describe('todo_item (0025)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    // A database as the build before F-9.16 left it: migrations up to 0024, with a scene.
+    migrate(db, loadMigrations().slice(0, 25))
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, NULL, '2026-01-01', '2026-01-01'),
+              ('scene', 'ms', NULL, 'document', 'Scene 1', 0, '{"type":"doc"}', '2026-01-01', '2026-01-01')`
+    ).run()
+    migrate(db)
+  })
+  afterEach(() => db.close())
+
+  it('opens a 0024 database with an empty table and every scene as it was', () => {
+    expect(db.prepare('SELECT COUNT(*) AS n FROM todo_item').get()).toEqual({ n: 0 })
+    expect(db.prepare('SELECT content FROM node WHERE id = ?').get('scene')).toEqual({
+      content: '{"type":"doc"}'
+    })
+  })
+
+  it('keeps one row per key, and keeps a row whose scene was deleted', () => {
+    const insert = db.prepare(
+      `INSERT INTO todo_item (id, key, kind, rule, source, subject, node_id, why, target, created_at, updated_at)
+       VALUES (?, 'timeline:x', 'gap', 'timeline', 'ai', 'X', 'scene', 'why', '{"kind":"none"}', '2026-01-02', '2026-01-02')`
+    )
+    insert.run('a')
+    expect(() => insert.run('b')).toThrow(/UNIQUE/)
+    db.prepare("DELETE FROM node WHERE id = 'scene'").run()
+    expect(db.prepare('SELECT node_id, status, suggestions FROM todo_item').get()).toEqual({
+      node_id: null,
+      status: 'open',
+      suggestions: '[]'
     })
   })
 })

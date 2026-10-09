@@ -242,10 +242,12 @@ import {
   setFactStatus
 } from '../entity/factStore'
 import { listThreads } from '../knowledge/threads'
+import { TODO_DEBOUNCE_MS } from '@shared/todo'
 import { sceneCardFor } from '../knowledge/sceneCard'
 import { confirmConversion, conversionPending, estimateConversion } from '../knowledge/conversion'
 import { listChanges, undoChange, undoRun } from '../knowledge/changeLog'
 import { convertKnowledgeFacts } from '../knowledge/factConversion'
+import { listTodo, reopenTodo, settleTodo, syncLocalTodo } from '../knowledge/todoStore'
 import { importDraft, type ImportResult } from '../import/commit'
 import { withExisting } from '../import/existing'
 import { readManuscript } from '../import/read'
@@ -616,6 +618,8 @@ export function registerHandlers({
       // F-11.1d: a scene with a fresh summary may fulfil a plan; one debounced plan-link job per
       // burst, gated here so a project with the feature off never queues one.
       if (!result.cached) queuePlanLinks(db)
+      // F-9.16: the scene's facts, threads, and findings may have moved the To do list.
+      queueTodo(db)
       // A stored row whose hash still matches (or a cache hit) made no request, so the rate
       // limit must not charge it a turn; a check that went out is a request like any other.
       const asked = checked !== null && checked.requested && !checked.cached
@@ -626,6 +630,36 @@ export function registerHandlers({
     onChange: (status) => emit(windows(), 'jobs:changed', status),
     onNodeStatus: (nodeId, status) => emit(windows(), 'ai:summaryChanged', { nodeId, status })
   })
+
+  /**
+   * F-9.16: the To do list's own queue, one `todo` job per project keyed to the manuscript root,
+   * debounced past a burst of knowledge changes. Local and free: it syncs the open items the
+   * local rules find (`syncLocalTodo`) and tells the windows when the list moved. Never an AI
+   * request: the whole-book check runs only when the author clicks it (the author's call,
+   * 2026-10-09). Silent like the voice queue: a failure is dropped, the next change queues it.
+   */
+  const todoQueue = createIndexQueue<boolean>({
+    kind: 'todo',
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    run: () => {
+      let changed = false
+      try {
+        changed = syncLocalTodo(manager.require().connection.orm).changed
+      } catch (err) {
+        console.warn('Could not update the To do list', err)
+      }
+      if (changed) emit(windows(), 'todo:changed', {})
+      return Promise.resolve({ requested: false, value: changed })
+    },
+    cancelRequest: () => undefined,
+    debounceMs: TODO_DEBOUNCE_MS,
+    minIntervalMs: 0
+  })
+  /** F-9.16: the knowledge moved (facts, records, tags, threads, findings, notes, metadata). */
+  const queueTodo = (db: TreeDb): void => {
+    const root = manuscriptRootId(db)
+    if (root !== null) todoQueue.touch('todo', root)
+  }
 
   /**
    * F-4.12: the automatic mention scan's own queue. Everything it does is local — read the saved
@@ -651,6 +685,8 @@ export function registerHandlers({
     if (json === lastProposed) return
     lastProposed = json
     emit(windows(), 'tag:proposedChanged', proposals)
+    // F-9.16: the untagged names are To do items too.
+    queueTodo(manager.require().connection.orm)
   }
 
   /**
@@ -669,7 +705,11 @@ export function registerHandlers({
     db: () => (manager.current() === null ? null : manager.require().connection.orm),
     run: (job) => {
       const value = scanMentions(manager.require().connection.orm, job.nodeId, new Date())
-      if (value.changed) emit(windows(), 'mention:changed', { nodeIds: [job.nodeId] })
+      if (value.changed) {
+        emit(windows(), 'mention:changed', { nodeIds: [job.nodeId] })
+        // F-9.16: which scenes name which records is what most local To do rules count.
+        queueTodo(manager.require().connection.orm)
+      }
       // F-4.12b: a scan that read the document again may have changed which names are proposed,
       // whether or not any tag's mentions moved; one that short-circuited on the hash cannot.
       if (value.scanned) publishProposed()
@@ -877,12 +917,18 @@ export function registerHandlers({
     emit(windows(), 'continuity:changed', { nodeIds: [id] })
     // F-9.13: and so did what it stated; the sheets that held its facts refetch.
     if (entityIds.length > 0) emit(windows(), 'fact:changed', { entityIds })
+    // F-9.16: the scene's items lose their passage; the rules count one scene fewer.
+    queueTodo(manager.require().connection.orm)
     return null
   })
 
-  register('tree:move', ({ id, parentId, afterId }) =>
-    toTreeNode(moveNode(manager.require().connection.orm, id, parentId, afterId))
-  )
+  register('tree:move', ({ id, parentId, afterId }) => {
+    const db = manager.require().connection.orm
+    const moved = toTreeNode(moveNode(db, id, parentId, afterId))
+    // F-9.16: reading order decides loose ends and an age that goes down.
+    queueTodo(db)
+    return moved
+  })
 
   register('document:get', ({ id }) => getDocumentContent(manager.require().connection.orm, id))
 
@@ -991,7 +1037,13 @@ export function registerHandlers({
 
   register('notes:get', ({ id }) => getNotes(manager.require().connection.orm, id))
 
-  register('notes:save', ({ id, notes }) => saveNotes(manager.require().connection.orm, id, notes))
+  register('notes:save', ({ id, notes }) => {
+    const db = manager.require().connection.orm
+    const saved = saveNotes(db, id, notes)
+    // F-9.16: a name the notes explain is no longer undefined.
+    queueTodo(db)
+    return saved
+  })
 
   /**
    * The journal entries that still differ from what is stored (F-8.3). Entries whose node is gone
@@ -1060,9 +1112,13 @@ export function registerHandlers({
 
   register('sceneMeta:get', ({ id }) => getSceneMeta(manager.require().connection.orm, id))
 
-  register('sceneMeta:set', ({ id, meta }) =>
-    setSceneMeta(manager.require().connection.orm, id, meta)
-  )
+  register('sceneMeta:set', ({ id, meta }) => {
+    const db = manager.require().connection.orm
+    const stored = setSceneMeta(db, id, meta)
+    // F-9.16: a scene's point of view and its idea status feed the To do rules.
+    queueTodo(db)
+    return stored
+  })
 
   register('editorSettings:get', () => {
     const session = manager.require()
@@ -1600,6 +1656,7 @@ export function registerHandlers({
     if (json !== lastProposed) {
       lastProposed = json
       emit(windows(), 'tag:proposedChanged', proposals)
+      queueTodo(manager.require().connection.orm)
     }
     return proposals
   })
@@ -1822,6 +1879,7 @@ export function registerHandlers({
     const { entity: created, tagChange } = createEntity(db, input)
     publishTagChange(db, tagChange)
     void syncSpelling()
+    queueTodo(db)
     return created
   })
 
@@ -1830,6 +1888,8 @@ export function registerHandlers({
     const { entity: updated, tagChange } = updateEntity(db, id, patch)
     publishTagChange(db, tagChange)
     void syncSpelling()
+    // F-9.16: a filled field answers a gap.
+    queueTodo(db)
     // F-9.13: an author line dated at a scene is a fact the sheet lists.
     if (patch.asOf != null && patch.fields !== undefined) {
       emit(windows(), 'fact:changed', { entityIds: [id] })
@@ -1860,6 +1920,7 @@ export function registerHandlers({
     void syncSpelling()
     emit(windows(), 'fact:changed', { entityIds: [targetId] })
     emit(windows(), 'continuity:changed', { nodeIds: [] })
+    queueTodo(db)
     return {
       entity: result.entity,
       removedIds: result.removed.map((removed) => removed.id),
@@ -1947,6 +2008,7 @@ export function registerHandlers({
     void syncSpelling()
     // F-13.4: the findings against the entity's sheet and facts went with it (cascade).
     emit(windows(), 'continuity:changed', { nodeIds: [] })
+    queueTodo(session.connection.orm)
     return null
   })
 
@@ -1963,12 +2025,14 @@ export function registerHandlers({
   register('fact:setHidden', ({ id, hidden }) => {
     const fact = setFactHidden(manager.require().connection.orm, id, hidden)
     emit(windows(), 'fact:changed', { entityIds: factOwners(fact) })
+    queueTodo(manager.require().connection.orm)
     return fact
   })
 
   register('fact:setStatus', ({ id, status }) => {
     const fact = setFactStatus(manager.require().connection.orm, id, status)
     emit(windows(), 'fact:changed', { entityIds: factOwners(fact) })
+    queueTodo(manager.require().connection.orm)
     return fact
   })
 
@@ -1993,16 +2057,41 @@ export function registerHandlers({
           }
     )
     emit(windows(), 'fact:changed', { entityIds: factOwners(fact) })
+    queueTodo(manager.require().connection.orm)
     return fact
   })
 
   register('fact:delete', ({ id }) => {
     const fact = deleteAuthorStatement(manager.require().connection.orm, id)
     emit(windows(), 'fact:changed', { entityIds: factOwners(fact) })
+    queueTodo(manager.require().connection.orm)
     return fact
   })
 
   register('thread:list', () => listThreads(manager.require().connection.orm))
+
+  // F-9.16: the To do list. Settling or reopening an item is the author's; a dismissed name
+  // reaches the Tags panel's proposals, a dismissed contradiction the Continuity panel.
+  register('todo:list', () => listTodo(manager.require().connection.orm))
+
+  register('todo:settle', ({ id, status }) => {
+    const db = manager.require().connection.orm
+    const result = settleTodo(db, id, status)
+    if (result.continuityNodeId !== null) {
+      emit(windows(), 'continuity:changed', { nodeIds: [result.continuityNodeId] })
+    }
+    if (result.namesChanged) publishProposed()
+    emit(windows(), 'todo:changed', {})
+    return null
+  })
+
+  register('todo:reopen', ({ id }) => {
+    const db = manager.require().connection.orm
+    const result = reopenTodo(db, id)
+    if (result.namesChanged) publishProposed()
+    emit(windows(), 'todo:changed', {})
+    return null
+  })
 
   // F-9.13: the Changes log. An undo goes through the tombstones; what it removed or moved
   // reaches the windows as the same events the original writes would have.
@@ -2025,6 +2114,7 @@ export function registerHandlers({
     if (result.entityIds.length > 0)
       emit(windows(), 'fact:changed', { entityIds: result.entityIds })
     emit(windows(), 'changes:changed', {})
+    queueTodo(db)
     return result
   }
 
@@ -2101,6 +2191,7 @@ export function registerHandlers({
       for (const change of announce) emit(windows(), 'tag:changed', change.tag)
     }
     void syncSpelling()
+    queueTodo(db)
     return {
       entities: result.entities,
       added: result.added,
@@ -2234,6 +2325,7 @@ export function registerHandlers({
       for (const change of announce) emit(windows(), 'tag:changed', change.tag)
     }
     void syncSpelling()
+    queueTodo(db)
     return {
       entities: result.entities,
       files: result.files,
@@ -3139,7 +3231,11 @@ export function registerHandlers({
       const deps = requestDeps(db)
       const run = await runContinuity(db, deps, { nodeId, requestId })
       const stored = storeContinuityRun(db, nodeId, 'request', run, deps.now())
-      if (stored.changed) emit(windows(), 'continuity:changed', { nodeIds: [nodeId] })
+      if (stored.changed) {
+        emit(windows(), 'continuity:changed', { nodeIds: [nodeId] })
+        // F-9.16: the open findings are To do items (and a fact conflict may now defer to one).
+        queueTodo(db)
+      }
       return {
         ok: true,
         findings: stored.findings,
@@ -3171,6 +3267,8 @@ export function registerHandlers({
     if (proposal === 'rejected') diagnostics.count('proposal.reject')
     else if (proposal !== null && proposal !== 'regenerated') diagnostics.count('proposal.accept')
     emit(windows(), 'continuity:changed', { nodeIds: [finding.nodeId] })
+    // F-9.16: the To do list lists the open findings.
+    emit(windows(), 'todo:changed', {})
     return finding
   })
 
@@ -3904,6 +4002,8 @@ export function registerHandlers({
     // F-14.14: the voice job and its failure memo belong to the project that left.
     voiceQueue.clear()
     voiceMemo.failedAtWords = null
+    // F-9.16: the To do sync belongs to the project that left.
+    todoQueue.clear()
     // F-14.15: a pass running in the project that left stops without writing; one left running
     // by a crash or a quit reads as stopped in the project that opened, ready to resume.
     editPasses.clear()
@@ -3947,6 +4047,11 @@ export function registerHandlers({
       mentionQueue.load()
       mentionQueue.indexAll('mentions', staleMentionNodeIds(manager.require().connection.orm))
       voiceQueue.load()
+      // F-9.16: the To do list is brought up to date on every open (local, free).
+      todoQueue.load()
+      const opened = manager.require().connection.orm
+      const todoRoot = manuscriptRootId(opened)
+      if (todoRoot !== null) todoQueue.indexAll('todo', [todoRoot])
       backfillSummaries(false)
       publishProposed()
       try {

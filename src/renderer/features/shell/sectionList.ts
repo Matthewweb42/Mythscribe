@@ -5,6 +5,7 @@ import {
   FilePenLine,
   History,
   Library,
+  ListTodo,
   ListTree,
   Tag,
   type LucideIcon
@@ -31,6 +32,8 @@ import { TagsTab } from '@renderer/features/tags/TagsTab'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { ThreadsTab } from '@renderer/features/threads/ThreadsTab'
 import { TimelineTab } from '@renderer/features/timeline/TimelineTab'
+import { TodoTab } from '@renderer/features/todo/TodoTab'
+import { useTodoStore } from '@renderer/features/todo/todoStore'
 import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 
 /**
@@ -65,6 +68,8 @@ export interface SectionCounts {
   library: number
   /** F-9.13: the Changes log rows held (the newest page). */
   changes: number
+  /** F-9.16: the open To do items. */
+  todo: number
   /** Sheets per category id. */
   sheets: Readonly<Record<string, number>>
 }
@@ -87,7 +92,10 @@ const MANUSCRIPT: ToolDef = {
   used: () => true
 }
 
-/** The tools in picker order (the author's: Tags, Timeline, Outline, Edits, Library; then Changes, F-9.13). */
+/**
+ * The tools in picker order (the author's: Tags, Timeline, Outline, Edits, Library; then To do,
+ * F-9.16, always shown; then Changes, F-9.13).
+ */
 const TOOLS: readonly ToolDef[] = [
   {
     id: 'tags',
@@ -128,6 +136,14 @@ const TOOLS: readonly ToolDef[] = [
     render: () => createElement(LibraryTab),
     count: (c) => c.library,
     used: (c) => c.library > 0
+  },
+  {
+    id: 'todo',
+    label: 'To do',
+    icon: ListTodo,
+    render: () => createElement(TodoTab),
+    count: (c) => c.todo,
+    used: () => true
   },
   {
     id: 'changes',
@@ -206,6 +222,7 @@ export function useSidebarSections(): SidebarSection[] {
   const edits = useEditPassStore((s) => s.ids.length)
   const library = useLibraryStore((s) => s.files.length)
   const changes = useChangesStore((s) => s.entries.length)
+  const todo = useTodoStore((s) => s.items.length)
   const sheets = useEntityStore(
     useShallow((s) => {
       const counts: Record<string, number> = {}
@@ -216,5 +233,14 @@ export function useSidebarSections(): SidebarSection[] {
       return counts
     })
   )
-  return buildSections(categories, { documents, tags, timeline, edits, library, changes, sheets })
+  return buildSections(categories, {
+    documents,
+    tags,
+    timeline,
+    edits,
+    library,
+    changes,
+    todo,
+    sheets
+  })
 }
