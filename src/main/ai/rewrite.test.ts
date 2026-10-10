@@ -7,6 +7,7 @@ import { defaultAiSettings } from '@shared/aiSettings'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '@shared/rewrite'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
+import { upsertSummary } from '../document/summaryStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
 import { setAiSettings, setAuthorRules } from '../project/settingsStore'
@@ -182,7 +183,7 @@ afterEach(() => {
 })
 
 describe('runRewrite (F-14.10)', () => {
-  it('streams the draft through onDelta, resolves the post-processed passage, and logs one fast-tier rewrite.v3 row with no temperature', async () => {
+  it('streams the draft through onDelta, resolves the post-processed passage, and logs one fast-tier rewrite.v4 row with no temperature', async () => {
     chunks = [
       { delta: '"She turned back to the ridge ' },
       { delta: 'and he followed."', usage: { inputTokens: 90, outputTokens: 8 } }
@@ -196,7 +197,7 @@ describe('runRewrite (F-14.10)', () => {
       costUsd: priceFor('gpt-5.4-mini', 90, 8).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'rewrite.v3',
+      promptVersion: 'rewrite.v4',
       flagged: false,
       violation: null
     })
@@ -212,7 +213,7 @@ describe('runRewrite (F-14.10)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'rewrite',
       tier: 'fast',
-      promptVersion: 'rewrite.v3',
+      promptVersion: 'rewrite.v4',
       cached: false
     })
     expect(ledger[0]!.contextHash).toMatch(/^[0-9a-f]{64}$/)
@@ -257,6 +258,33 @@ describe('runRewrite (F-14.10)', () => {
       `${SCENE_STEER_HEADING}\nTone: tense\nWrite in this tone.\n\n` +
         `Passage to rewrite:\n"""\n${PASSAGE}\n"""\n\nRewrite the passage.`
     )
+    expect(ledger[1]?.contextHash).not.toBe(ledger[0]?.contextHash)
+  })
+
+  it("carries the scene's mood and theme from its reading, and misses the cache when they change (F-5.6)", async () => {
+    const reading = (mood: string): void =>
+      upsertSummary(db, {
+        nodeId: scene,
+        summary: 'Mara counts the storm.',
+        keyPoints: [],
+        characters: [],
+        contentHash: 'h',
+        promptVersion: 'summary.v5',
+        model: 'gpt-5.4-mini',
+        truncated: false,
+        createdAt: NOW.toISOString(),
+        card: { where: '', when: '', pov: '', changed: '', mood, theme: 'debts come due' }
+      })
+    reading('quiet dread')
+    await rewrite()
+    expect(stream.mock.calls[0]![0].messages[1]?.content).toBe(
+      'Scene mood: quiet dread\nScene theme: debts come due\nKeep the edit in line with them.\n\n' +
+        `Passage to rewrite:\n"""\n${PASSAGE}\n"""\n\nRewrite the passage.`
+    )
+    reading('fury')
+    await rewrite()
+    expect(stream).toHaveBeenCalledTimes(2)
+    expect(stream.mock.calls[1]![0].messages[1]?.content).toContain('Scene mood: fury\n')
     expect(ledger[1]?.contextHash).not.toBe(ledger[0]?.contextHash)
   })
 
@@ -334,7 +362,7 @@ describe('runRewrite (F-14.10)', () => {
 })
 
 describe('runRewrite fidelity check (F-14.7)', () => {
-  it('regenerates an off-voice draft once through rewriteRegen.v3, unstreamed, with the violation named, and shows the clean second draft with both calls summed', async () => {
+  it('regenerates an off-voice draft once through rewriteRegen.v4, unstreamed, with the violation named, and shows the clean second draft with both calls summed', async () => {
     strongProfile()
     streams(OFF_VOICE)
     answers(CLEAN)
@@ -348,7 +376,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
       `${REGEN_CLAUSE_PREFIX} switches to present tense. Rewrite it again, keeping the manuscript's voice.`
     )
     expect(second.messages.slice(1)).toEqual(stream.mock.calls[0]![0].messages.slice(1))
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewrite.v3', 'rewriteRegen.v3'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewrite.v4', 'rewriteRegen.v4'])
     expect(ledger[0]!.contextHash).not.toBe(ledger[1]!.contextHash)
     expect(result).toEqual({
       text: CLEAN,
@@ -356,7 +384,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
       costUsd: priceFor('gpt-5.4-mini', 90, 8).costUsd + priceFor('gpt-5.4-mini', 120, 12).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'rewriteRegen.v3',
+      promptVersion: 'rewriteRegen.v4',
       flagged: false,
       violation: null
     })
@@ -370,7 +398,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
       text: OFF_VOICE,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'rewriteRegen.v3'
+      promptVersion: 'rewriteRegen.v4'
     })
     // A different passage each time, so nothing answers from the cache.
     streams(OFF_VOICE)
@@ -379,7 +407,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
       text: OFF_VOICE,
       flagged: true,
       violation: 'switches to present tense',
-      promptVersion: 'rewrite.v3',
+      promptVersion: 'rewrite.v4',
       usage: { inputTokens: 90, outputTokens: 8 }
     })
     streams(OFF_VOICE)
@@ -387,7 +415,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
     expect(await rewrite({ text: `${PASSAGE} Once more.` })).toMatchObject({
       text: OFF_VOICE,
       flagged: true,
-      promptVersion: 'rewrite.v3',
+      promptVersion: 'rewrite.v4',
       usage: { inputTokens: 210, outputTokens: 20 }
     })
   })
@@ -431,7 +459,7 @@ describe('runRewrite fidelity check (F-14.7)', () => {
 })
 
 describe('runRewrite author regenerate (F-14.5)', () => {
-  it('sends rewriteRegen.v3 from the start with the note clause, and misses the cache on the note and the predecessor', async () => {
+  it('sends rewriteRegen.v4 from the start with the note clause, and misses the cache on the note and the predecessor', async () => {
     await rewrite()
     expect(stream).toHaveBeenCalledTimes(1)
     const note = 'Less lightning, more of the rope.'
@@ -440,8 +468,8 @@ describe('runRewrite author regenerate (F-14.5)', () => {
     expect(stream.mock.calls[1]![0].messages[0]?.content).toContain(
       `The writer asked for a different rewrite and said: "${note}".`
     )
-    expect(result.promptVersion).toBe('rewriteRegen.v3')
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewrite.v3', 'rewriteRegen.v3'])
+    expect(result.promptVersion).toBe('rewriteRegen.v4')
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewrite.v4', 'rewriteRegen.v4'])
     // A different note, and a predecessor with no note, are each their own request.
     await rewrite({ note: 'Colder.', regeneratedFrom: 'p-1' })
     expect(stream).toHaveBeenCalledTimes(3)
@@ -450,7 +478,7 @@ describe('runRewrite author regenerate (F-14.5)', () => {
     // A blank note with no predecessor is no regenerate at all: the plain prompt, cached.
     const plain = await rewrite({ note: '   ' })
     expect(stream).toHaveBeenCalledTimes(4)
-    expect(plain.promptVersion).toBe('rewrite.v3')
+    expect(plain.promptVersion).toBe('rewrite.v4')
   })
 
   it('carries the note clause and the violation clause together when the fidelity check fires on a regenerate', async () => {
@@ -462,6 +490,6 @@ describe('runRewrite author regenerate (F-14.5)', () => {
     const system = complete.mock.calls[0]![0].messages[0]?.content ?? ''
     expect(system).toContain(`The writer asked for a different rewrite and said: "${note}". `)
     expect(system.endsWith("Rewrite it again, keeping the manuscript's voice.")).toBe(true)
-    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewriteRegen.v3', 'rewriteRegen.v3'])
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewriteRegen.v4', 'rewriteRegen.v4'])
   })
 })

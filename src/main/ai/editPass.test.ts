@@ -8,6 +8,7 @@ import { normalizeForMatch } from '@shared/critique'
 import type { EditPassSummary } from '@shared/editPass'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
+import { upsertSummary } from '../document/summaryStore'
 import {
   getPresets,
   interruptRunningPasses,
@@ -285,6 +286,33 @@ describe('the edit pass runner (F-14.15)', () => {
     expect(complete.mock.calls[0]![0].messages[1]?.content).toContain(
       `The author's instruction:\n"""\nCut every adverb.\n"""`
     )
+  })
+
+  it("sends the scene's mood and theme to a line pass but not to a proofread (F-5.6)", async () => {
+    upsertSummary(db, {
+      nodeId: one,
+      summary: 'Mara waits at the ferry.',
+      keyPoints: [],
+      characters: [],
+      contentHash: 'h',
+      promptVersion: 'summary.v5',
+      model: 'gpt-5.4-mini',
+      truncated: false,
+      createdAt: NOW.toISOString(),
+      card: { where: '', when: '', pov: '', changed: '', mood: 'quiet dread', theme: '' }
+    })
+    complete.mockResolvedValue(reply({ changes: [] }))
+    runner.start({ type: 'line', instruction: null, nodeIds: [one] })
+    await runner.idle()
+    expect(ledger[0]?.promptVersion).toBe('editPass.v2')
+    expect(
+      complete.mock.calls[0]![0].messages[1]?.content.startsWith(
+        'Scene mood: quiet dread\nKeep the edit in line with it.\n\nScene: '
+      )
+    ).toBe(true)
+    runner.start({ type: 'proofread', instruction: null, nodeIds: [one] })
+    await runner.idle()
+    expect(complete.mock.calls[1]![0].messages[1]?.content).not.toContain('Scene mood')
   })
 
   it('refuses to start below Ask, and while another pass runs', async () => {

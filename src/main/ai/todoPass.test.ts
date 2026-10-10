@@ -63,6 +63,8 @@ const card = (over: Partial<AiSceneCard> = {}): AiSceneCard => ({
   when: 'the first night',
   pov: 'Mara',
   changed: 'Mara learns the Hollowing swallows sound.',
+  mood: '',
+  theme: '',
   ...over
 })
 

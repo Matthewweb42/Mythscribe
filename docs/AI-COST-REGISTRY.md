@@ -18,13 +18,13 @@ git history of this file is the log of each feature's cost over time (author req
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `ghostText` | Ghost text | while typing | ghostText.v4 | fast | 1024 / 2085 | 40 / 60 | $0.0000819 · $0.000139 | $0.000102 | $0.000948 | 1 | $0.0000819 |
 | `tags` | Tag suggestions | on request | tags.v1 | fast | 1204 / 1913 | 80 / 200 | $0.000139 · $0.000313 | $0.000173 | $0.00126 | 1 | $0.000139 |
-| `summary` | Scene summaries, story bible, and tags | background | summary.v4 | fast | 1096 / 6458 | 600 / 1000 | $0.000801 · $0.00147 | $0.00100 | $0.00352 | 1 | $0.000801 |
+| `summary` | Scene summaries, story bible, and tags | background | summary.v5 | fast | 1150 / 6512 | 600 / 1000 | $0.000803 · $0.00148 | $0.00100 | $0.00356 | 1 | $0.000803 |
 | `chat` | Assistant chat | on request | chat.v5 | fast | 1050 / 7782 | 400 / 1200 | $0.000544 · $0.00177 | $0.000679 | $0.00259 | 1 | $0.000544 |
 | `authorMode` | Author mode | on request | — | — | 0 / 8000 | 0 / 150 | $0 · $0.000432 | $0 | $0 | 0 | $0 |
 | `query` | Story Intelligence | on request | query.v4 | strong | 1587 / 11711 | 300 / 600 | $0.000459 · $0.00271 | $0.000574 | $0.00847 | 1 | $0.000459 |
 | `critique` | Editor's notes | on request | critique.v3 | strong | 1264 / 7025 | 900 / 1500 | $0.000643 · $0.00211 | $0.000804 | $0.0167 | 1 | $0.000643 |
 | `embeddings` | Search indexing | background | — | — | 0 / 8000 | 0 / 150 | $0 · $0.000432 | $0 | $0 | 0 | $0 |
-| `rewrite` | Rewrite in my voice | on request | rewrite.v3 | fast | 910 / 2756 | 250 / 1500 | $0.000347 · $0.00200 | $0.000434 | $0.00181 | 1 | $0.000347 |
+| `rewrite` | Rewrite in my voice | on request | rewrite.v4 | fast | 936 / 2802 | 250 / 1500 | $0.000348 · $0.00200 | $0.000435 | $0.00183 | 1 | $0.000348 |
 | `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000242 · $0.000418 | $0.000303 | $0.00276 | 1 | $0.000242 |
 | `betaReader` | Beta reader | on request | betaReader.v1 | strong | 673 / 11599 | 700 / 1200 | $0.000435 · $0.00294 | $0.000544 | $0.0122 | 1 | $0.000435 |
 | `importStructure` | Import structure detection | on request | importStructure.v1 | fast | 2428 / 4178 | 150 / 400 | $0.000265 · $0.000637 | $0.000331 | $0.00250 | 40 | $0.0106 |
@@ -35,7 +35,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `synopsis` | Synopsis suggestions | on request | synopsis.v1 | fast | 495 / 3400 | 120 / 350 | $0.000168 · $0.000550 | $0.000211 | $0.000911 | 1 | $0.000168 |
 | `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000413 · $0.000912 | $0.000516 | $0.00207 | 1 | $0.000413 |
 | `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000356 · $0.000568 | $0.000445 | $0.00202 | 1 | $0.000356 |
-| `editPass` | Edit passes | on request | editPass.v1 | strong | 620 / 5161 | 1500 / 4000 | $0.000760 · $0.00276 | $0.000950 | $0.0240 | 60 | $0.0456 |
+| `editPass` | Edit passes | on request | editPass.v2 | strong | 912 / 5161 | 1500 / 4000 | $0.000822 · $0.00276 | $0.00103 | $0.0248 | 60 | $0.0493 |
 | `agent` | Assistant lookups and edits | every chat message | agent.v7 | strong | 2239 / 11890 | 300 / 3000 | $0.000596 · $0.00376 | $0.000745 | $0.0101 | 3 | $0.00179 |
 | `contextImport` | Context library sorting | on request | contextImport.v2 | strong | 884 / 3490 | 1500 / 6000 | $0.000816 · $0.00325 | $0.00102 | $0.0247 | 10 | $0.00816 |
 | `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.000268 · $0.00244 | $0.000335 | $0.00619 | 1 | $0.000268 |
@@ -57,8 +57,8 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `summary` — Scene summaries, story bible, and tags
 
-- **When:** Indexing: once per scene after edits settle (content-hash cached), and for every stale scene after open; a new prompt version re-reads the book only after the author confirms the cost (F-9.14 conversion dialog).
-- **Ideas:** The biggest background spend on a large book: batch API when latency allows; skip tiny edits; cap scene text sent; one pass also yields facts, tags, the scene card, relationships, and thread events (summary.v4 added about 150 output tokens); drop empty lists from the JSON shape if the ledger shows cut-offs.
+- **When:** Indexing: once per scene after edits settle (content-hash cached), and for every stale scene after open; a new prompt version re-reads the book only after the author confirms the cost (F-9.14 conversion dialog); summary.v5 (mood and theme, F-5.6) re-reads nothing: a summary.v4 scene gets them with its next reading.
+- **Ideas:** The biggest background spend on a large book: batch API when latency allows; skip tiny edits; cap scene text sent; one pass also yields facts, tags, the scene card, relationships, and thread events (summary.v4 added about 150 output tokens, summary.v5 about 20 more for the mood and theme); drop empty lists from the JSON shape if the ledger shows cut-offs.
 
 ### `chat` — Assistant chat
 
@@ -88,7 +88,7 @@ git history of this file is the log of each feature's cost over time (author req
 ### `rewrite` — Rewrite in my voice
 
 - **When:** Rewrite a selection (bubble, chat, or agent edit).
-- **Ideas:** Answer length tracks the selection: set max_tokens from the selection size.
+- **Ideas:** Answer length tracks the selection: set max_tokens from the selection size. rewrite.v4 adds the scene mood and theme (about 25 input tokens, from the stored reading, no extra call).
 
 ### `brief` — Scene brief drafts
 
@@ -143,7 +143,7 @@ git history of this file is the log of each feature's cost over time (author req
 ### `editPass` — Edit passes
 
 - **When:** An Editor-tab pass: one request per scene piece across the chosen scenes.
-- **Ideas:** The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs.
+- **Ideas:** The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading).
 
 ### `agent` — Assistant lookups and edits
 

@@ -9,7 +9,9 @@ const CARD: SceneCard = {
   pov: null,
   changed: 'Mara decides to wait for dawn.',
   cast: ['Mara', 'Tomas'],
-  threads: [{ entityId: 't1', name: 'The Debt', event: 'opened' }]
+  threads: [{ entityId: 't1', name: 'The Debt', event: 'opened' }],
+  mood: '',
+  theme: ''
 }
 
 describe('SceneCardView (F-9.14)', () => {
@@ -23,6 +25,14 @@ describe('SceneCardView (F-9.14)', () => {
     expect(within(card).getByRole('list', { name: 'Threads in this scene' })).toHaveTextContent(
       'The Debt · opened'
     )
+  })
+
+  it("shows the scene's mood and theme as the AI's reading (F-5.6)", () => {
+    render(<SceneCardView card={{ ...CARD, mood: 'quiet dread', theme: 'debts come due' }} />)
+    const card = screen.getByRole('region', { name: 'Scene card' })
+    expect(card).toHaveTextContent('Moodquiet dread')
+    expect(card).toHaveTextContent('Themedebts come due')
+    expect(within(card).getAllByLabelText('AI')).toHaveLength(4)
   })
 
   it('has a one-line compact form for the Outline row', () => {

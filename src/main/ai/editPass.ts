@@ -46,7 +46,12 @@ import { assertFeatureAllowed } from './dial'
 import { cancelInflight } from './inflight'
 import { isCorrection, keepList } from './proofread'
 import { continuityRefLine } from './prompts/continuity.v1'
-import { buildEditPassPrompt, EDIT_PASS_PROMPT_VERSION } from './prompts/editPass.v1'
+import { buildSceneMood } from './context/sceneMood'
+import {
+  buildEditPassPromptV2,
+  EDIT_PASS_MOOD_TYPES,
+  EDIT_PASS_PROMPT_V2_VERSION
+} from './prompts/editPass.v2'
 import { createProposal } from './proposalStore'
 import {
   AiCancelledError,
@@ -376,9 +381,11 @@ export async function editScene(
         )
       : []
   if (input.type === 'continuity' && references.length === 0) return empty
+  // F-5.6: the scene's mood and theme from its last reading, for the passes that reshape prose.
+  const mood = EDIT_PASS_MOOD_TYPES.includes(input.type) ? buildSceneMood(db, input.nodeId) : null
 
   const build = (piece: string, part: { index: number; count: number }): AiMessage[] =>
-    buildEditPassPrompt({
+    buildEditPassPromptV2({
       type: input.type,
       text: piece,
       title,
@@ -386,7 +393,8 @@ export async function editScene(
       voice,
       keepWords,
       references,
-      instruction: input.instruction
+      instruction: input.instruction,
+      mood
     }).messages
   const pieces = fitPieces(sceneText, (piece) => build(piece, { index: 0, count: 2 }))
 
@@ -397,7 +405,7 @@ export async function editScene(
   for (const [index, piece] of pieces.entries()) {
     stopIfCancelled(input.signal)
     const part = { index, count: pieces.length }
-    const prompt = buildEditPassPrompt({
+    const prompt = buildEditPassPromptV2({
       type: input.type,
       text: piece,
       title,
@@ -405,7 +413,8 @@ export async function editScene(
       voice,
       keepWords,
       references,
-      instruction: input.instruction
+      instruction: input.instruction,
+      mood
     })
     const answer = await requestWithRetry(
       deps,
@@ -424,6 +433,7 @@ export async function editScene(
             part,
             keepWords,
             references,
+            mood,
             voiceVersion: voice === null ? null : voiceProfileVersion()
           })
         ),
@@ -475,7 +485,7 @@ export async function editScene(
       : createProposal(db, {
           feature: 'editPass',
           nodeId: input.nodeId,
-          promptVersion: EDIT_PASS_PROMPT_VERSION,
+          promptVersion: EDIT_PASS_PROMPT_V2_VERSION,
           model: result.model,
           promptTokens: result.usage.inputTokens,
           completionTokens: result.usage.outputTokens,
