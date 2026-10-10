@@ -144,16 +144,33 @@ describe('ContextUploadDialog (F-9.8)', () => {
     expect(screen.queryByTestId('library-panel')).toBeNull()
   })
 
-  it('applies nothing the author did not accept', async () => {
+  it('starts with every card accepted, steps through each one, and Skip leaves it out (2026-10-10)', async () => {
     useLibraryStore.setState({
       flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} },
       shown: true
     })
     render(<UploadReviewPanel />)
-    expect(screen.getByTestId('review-apply')).toBeDisabled()
-    await userEvent.keyboard('a')
+    const card = (): HTMLElement => screen.getByTestId('review-card')
     expect(screen.getByTestId('review-apply')).toBeEnabled()
-    expect(screen.getByTestId('review-apply')).toHaveTextContent('Apply 1 accepted')
+    expect(screen.getByTestId('review-apply')).toHaveTextContent('Apply 3 accepted')
+    expect(card()).toHaveAttribute('data-item-id', 'e2')
+    expect(within(card()).getByTestId('review-decision')).toHaveTextContent('Accepted')
+    expect(screen.getAllByTestId('review-progress')[0]).toHaveTextContent('0%')
+
+    await userEvent.keyboard('s')
+    expect(card()).toHaveAttribute('data-item-id', 'e1')
+    expect(screen.getByTestId('review-apply')).toHaveTextContent('Apply 2 accepted')
+    await userEvent.keyboard('a')
+    expect(card()).toHaveAttribute('data-item-id', 'notes')
+    await userEvent.keyboard('a')
+    // A card was skipped, so the end waits on the summary instead of applying.
+    expect(screen.getByTestId('review-done')).toHaveTextContent('2 accepted · 1 skipped')
+    const flow = useLibraryStore.getState().flow
+    expect(flow?.stage === 'review' ? flow.decisions : null).toEqual({
+      e2: 'skipped',
+      e1: 'accepted',
+      notes: 'accepted'
+    })
   })
 
   it('shows progress with Stop while the pass runs, and a failure with its next step', () => {

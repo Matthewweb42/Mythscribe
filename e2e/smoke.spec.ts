@@ -6448,14 +6448,14 @@ test('create, close, reopen a project on disk', async () => {
     '4 new sheets · 1 sheet to update · 1 conflict · 1 note for Project notes'
   )
   // The review is a deck since 2026-10-08: one card at a time, grouped (a dropdown in the side
-  // column), nothing accepted until the author says so.
+  // column). Since 2026-10-10 every card starts accepted; Skip leaves one out.
   await expect(uploadPanel.getByTestId('review-group-select').locator('option')).toHaveText([
-    'New categories 0/1',
-    'New sheets 0/4',
-    'Conflicts 0/1',
-    'Project notes 0/1'
+    'New categories 1/1',
+    'New sheets 4/4',
+    'Conflicts 1/1',
+    'Project notes 1/1'
   ])
-  await expect(uploadPanel.getByTestId('review-apply')).toHaveText('Apply 0 accepted')
+  await expect(uploadPanel.getByTestId('review-apply')).toHaveText('Apply 7 accepted')
   // F-9.9: the review chat. The author asks for a change; the fake server answers operations on
   // the listed review: Tomas Reed's card (further on) shows the new name and is marked Changed,
   // the reply lists each change with the one the review could not do (renaming an existing
@@ -6519,7 +6519,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(libraryReview.getByTestId('library-notes')).toContainText(
     'Theme: The book is about debts'
   )
-  await expect(uploadPanel.getByTestId('review-apply')).toHaveText('Apply 6 accepted')
+  await expect(uploadPanel.getByTestId('review-apply')).toHaveText('Apply 7 accepted')
   await page.keyboard.press('a')
   await expect(uploadPanel).toHaveCount(0)
   await expect(uploadStatus).toHaveCount(0)

@@ -14,8 +14,9 @@ import type {
 /**
  * The upload review on the review deck (F-9.8, 2026-10-08, one decision at a time): which cards
  * the review makes, in which groups, and what the review becomes once the author's decisions are
- * read into it at Apply. Nothing starts included: a sheet, a note, or a proposed category lands
- * only when accepted. Pure, so the rules are tested apart from the dialog.
+ * read into it at Apply. Everything starts accepted (changed by the author 2026-10-10): a card
+ * the author has not decided, including one the review chat adds, counts as accepted, and Skip
+ * leaves it out. Pure, so the rules are tested apart from the dialog.
  */
 
 export type UploadGroup = 'categories' | 'new' | 'updates' | 'conflicts' | 'notes'
@@ -36,6 +37,12 @@ export function categoryOfCard(id: string): string | null {
   return id.startsWith('category:') ? id.slice('category:'.length) : null
 }
 
+/** A card's decision: the author's, or accepted when they have not decided it. */
+const decisionOf = (
+  decisions: Readonly<Record<string, ReviewDecision>>,
+  id: string
+): ReviewDecision => decisions[id] ?? 'accepted'
+
 /** Whether a sheet of the review has a field whose value differs from the sheet's. */
 export const hasConflict = (item: ContextReviewEntity): boolean =>
   item.fields.some((field) => field.existing !== null)
@@ -50,7 +57,7 @@ export function uploadReviewItems(
   review: ContextReview,
   decisions: Readonly<Record<string, ReviewDecision>>
 ): ReviewDeckItem[] {
-  const decision = (id: string): ReviewDecision => decisions[id] ?? 'pending'
+  const decision = (id: string): ReviewDecision => decisionOf(decisions, id)
   return [
     ...review.categories
       .filter((category) => category.proposed)
@@ -71,7 +78,8 @@ export function uploadReviewItems(
 
 /**
  * The review as Apply writes it: a proposed category not accepted is declined (its sheets go to
- * World, as Decline does), and a sheet or the notes are included only when accepted.
+ * World, as Decline does), and a sheet or the notes are included only when accepted (the
+ * default; skipped leaves it out).
  */
 export function decidedReview(
   review: ContextReview,
@@ -80,7 +88,7 @@ export function decidedReview(
 ): ContextReview {
   let decided = review
   for (const category of review.categories) {
-    if (category.proposed && decisions[categoryCardId(category.id)] !== 'accepted') {
+    if (category.proposed && decisionOf(decisions, categoryCardId(category.id)) !== 'accepted') {
       decided = declineReviewCategory(decided, category.id, existing)
     }
   }
@@ -88,8 +96,8 @@ export function decidedReview(
     ...decided,
     entities: decided.entities.map((item) => ({
       ...item,
-      include: decisions[item.id] === 'accepted'
+      include: decisionOf(decisions, item.id) === 'accepted'
     })),
-    notes: { ...decided.notes, include: decisions[REVIEW_NOTES_ID] === 'accepted' }
+    notes: { ...decided.notes, include: decisionOf(decisions, REVIEW_NOTES_ID) === 'accepted' }
   }
 }
