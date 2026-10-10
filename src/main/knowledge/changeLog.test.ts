@@ -114,7 +114,11 @@ describe('applyDerivedKnowledge logs what it added (F-9.13)', () => {
       ]
     )
     // "stormbound" and "storm" are ordinary words the scene uses normally: never created.
-    expect(listTags(db).map((each) => each.name).sort()).toEqual(['greywater', 'kael'])
+    expect(
+      listTags(db)
+        .map((each) => each.name)
+        .sort()
+    ).toEqual(['greywater', 'kael'])
     expect(run.tags.created.map((each) => each.name)).toEqual(['greywater'])
     // The sheet a fact needs is still made, but "river" gets no tag of its own.
     const sheet = listEntities(db).find((each) => each.name === 'river')

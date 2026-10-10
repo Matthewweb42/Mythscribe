@@ -161,6 +161,9 @@ import { createSessionUsage } from '../ai/sessionUsage'
 import { staleSummaryNodeIds, summarizeScene, summarySource } from '../ai/summarize'
 import { ledgerSummary, recentUsage, usageHistory, type AiDb } from '../ai/usageStore'
 import { createIndexQueue } from '../jobs/indexQueue'
+import { createSheetSyncService } from '../ai/sheetSyncService'
+import { rebaseAuthorPage, staleWriteUpBase } from '../ai/sheetSync'
+import { setCategoryFields } from '../entity/categoryFields'
 import {
   confirmPlanLink,
   dismissPlanLink,
@@ -213,7 +216,9 @@ import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
 import { getSummary } from '../document/summaryStore'
 import { wordCountReport } from '../document/wordCountReport'
 import {
+  addEntityField,
   createEntity,
+  removeEntityField,
   deleteEntity,
   getEntity,
   linkEntityTag,
@@ -308,6 +313,8 @@ import { statsDashboard } from '../stats/dashboardStore'
 import {
   getAiSettings,
   getAuthorRules,
+  getStoryBibleSettings,
+  setStoryBibleSettings,
   getConversations,
   getDismissedNames,
   getKeptSpellings,
@@ -829,6 +836,26 @@ export function registerHandlers({
     debounceMs: PLAN_LINKS_DEBOUNCE_MS,
     minIntervalMs: 0
   })
+  /**
+   * F-9.18: a story-bible sheet's two views kept true. Each sheet the author edits waits out its
+   * own 30-second pause, then joins the due list that the `sheetSync` job works one by one (fast
+   * tier, nothing sent while the hashes agree). Nothing is scheduled while Use AI or the toggle is
+   * off or no provider is set up; the sheet then shows it is out of date instead.
+   */
+  const sheetSync = createSheetSyncService({
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    request: (db) => requestDeps(db),
+    ready: (db) => access.writable() && Boolean(ai.get(sourceOf(db))),
+    cancelRequest: (requestId) => void cancelInflight(requestId),
+    onStatuses: (statuses) => emit(windows(), 'sheetSync:changed', statuses),
+    onEntity: (entity) => {
+      emit(windows(), 'entity:changed', entity)
+      // The sheet's own text moved: its baseline facts did too.
+      emit(windows(), 'fact:changed', { entityIds: [entity.id] })
+    },
+    onChangesLogged: () => emit(windows(), 'changes:changed', {})
+  })
+
   const queuePlanLinks = (db: TreeDb): void => {
     if (!isFeatureAllowed(getAiSettings(db), 'planLinks')) return
     const root = manuscriptRootId(db)
@@ -1248,6 +1275,13 @@ export function registerHandlers({
 
   // F-14.2: the author's rules are part of the voice profile, so a write invalidates its cache.
   register('authorRules:get', () => getAuthorRules(manager.require().connection.orm))
+
+  // F-9.17, F-9.19: the story bible's view choice, default view, and write-up style.
+  register('storyBible:get', () => getStoryBibleSettings(manager.require().connection.orm))
+
+  register('storyBible:set', (value) =>
+    setStoryBibleSettings(manager.require().connection.orm, value)
+  )
 
   register('authorRules:set', (value) => {
     const stored = setAuthorRules(manager.require().connection.orm, value)
@@ -1949,12 +1983,23 @@ export function registerHandlers({
     publishTagChange(db, tagChange)
     void syncSpelling()
     queueTodo(db)
+    // F-9.18: a sheet made with text gets its other view after the pause.
+    if (created.sync.state !== 'none') sheetSync.touch(created.id)
     return created
   })
 
-  register('entity:update', ({ id, ...patch }) => {
+  register('entity:update', ({ id, baseModified, ...patch }) => {
     const db = manager.require().connection.orm
-    const { entity: updated, tagChange } = updateEntity(db, id, patch)
+    // F-9.18: a page save made from a draft older than a write-up that just landed wins as typed;
+    // the sync is then rebased so the next filing reads only the author's own edits.
+    const editedFrom =
+      patch.body !== undefined && baseModified !== undefined
+        ? staleWriteUpBase(db, id, baseModified)
+        : null
+    const written = updateEntity(db, id, patch)
+    if (editedFrom !== null) rebaseAuthorPage(db, id, editedFrom, new Date())
+    const updated = editedFrom === null ? written.entity : (getEntity(db, id) ?? written.entity)
+    const tagChange = written.tagChange
     publishTagChange(db, tagChange)
     void syncSpelling()
     // F-9.16: a filled field answers a gap.
@@ -1963,8 +2008,29 @@ export function registerHandlers({
     if (patch.asOf != null && patch.fields !== undefined) {
       emit(windows(), 'fact:changed', { entityIds: [id] })
     }
+    // F-9.18: the sheet's fields or page moved: its other view follows after the pause.
+    if ((patch.fields !== undefined && patch.asOf == null) || patch.body !== undefined) {
+      sheetSync.touch(id)
+    }
     return updated
   })
+
+  // F-9.18: the sheet's own fields, and its two views kept true.
+  register('entity:addField', ({ id, label }) => {
+    const updated = addEntityField(manager.require().connection.orm, id, label)
+    sheetSync.touch(id)
+    return updated
+  })
+
+  register('entity:removeField', ({ id, fieldId }) => {
+    const updated = removeEntityField(manager.require().connection.orm, id, fieldId)
+    sheetSync.touch(id)
+    return updated
+  })
+
+  register('sheetSync:status', () => sheetSync.statuses())
+
+  register('sheetSync:run', ({ id }) => sheetSync.runNow(id))
 
   /**
    * F-9.10: sheets merged by Organise. A tag merge inside it reaches the windows exactly as
@@ -2377,6 +2443,17 @@ export function registerHandlers({
   register('category:update', ({ id, ...patch }) =>
     updateCategory(manager.require().connection.orm, id, patch)
   )
+
+  // F-9.19: a category's fields from Settings › Story bible; moved text reaches the open windows.
+  register('category:setFields', ({ id, fields }) => {
+    const db = manager.require().connection.orm
+    const result = setCategoryFields(db, id, fields)
+    if (result.entities.length > 0) {
+      emit(windows(), 'fact:changed', { entityIds: result.entities.map((sheet) => sheet.id) })
+    }
+    queueTodo(db)
+    return result
+  })
 
   // F-9.8: the context library. Adding a file stores its original and reads its text; nothing is
   // sent anywhere until the author confirms the estimate, and nothing reaches the story bible
@@ -4181,6 +4258,8 @@ export function registerHandlers({
     // F-9.16: the To do sync and the check's estimate belong to the project that left.
     todoQueue.clear()
     todoBookMoved()
+    // F-9.18: every sheet's pause and status belong to the project that left.
+    sheetSync.clear()
     // F-14.15: a pass running in the project that left stops without writing; one left running
     // by a crash or a quit reads as stopped in the project that opened, ready to resume.
     editPasses.clear()
@@ -4226,6 +4305,8 @@ export function registerHandlers({
       voiceQueue.load()
       // F-9.16: the To do list is brought up to date on every open (local, free).
       todoQueue.load()
+      // F-9.18: the sheets left due when the project closed are synced (no new pauses start).
+      sheetSync.load()
       const opened = manager.require().connection.orm
       const todoRoot = manuscriptRootId(opened)
       if (todoRoot !== null) todoQueue.indexAll('todo', [todoRoot])

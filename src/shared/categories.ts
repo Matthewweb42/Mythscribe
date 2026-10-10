@@ -557,7 +557,10 @@ export function categoryFromInput(
  * when renamed), then the project's own in `custom` order.
  */
 export function mergeCategories(
-  renames: ReadonlyMap<string, { name: string; noun: string; icon: CategoryIcon }>,
+  renames: ReadonlyMap<
+    string,
+    { name: string; noun: string; icon: CategoryIcon; fields?: EntityFieldDef[] }
+  >,
   custom: readonly StoryCategory[]
 ): StoryCategory[] {
   return [

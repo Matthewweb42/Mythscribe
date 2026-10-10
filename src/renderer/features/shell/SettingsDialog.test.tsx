@@ -92,6 +92,7 @@ describe('SettingsDialog (F-7.5)', () => {
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
       'Editor',
       'AI',
+      'Story bible',
       'Backups',
       'Appearance',
       'Account',

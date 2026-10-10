@@ -2,6 +2,7 @@ import { createElement, type ReactNode } from 'react'
 import {
   Activity,
   Archive,
+  BookMarked,
   Download,
   Monitor,
   SlidersHorizontal,
@@ -17,12 +18,21 @@ import { BackupsSettingsTab } from '@renderer/features/backups/BackupsSettingsTa
 import { DiagnosticsSettingsTab } from '@renderer/features/diagnostics/DiagnosticsSettingsTab'
 import { AdvancedSettingsTab } from '@renderer/features/devtools/AdvancedSettingsTab'
 import { EditorSettingsTab } from '@renderer/features/editor/EditorSettingsTab'
+import { StoryBibleSettingsTab } from '@renderer/features/entities/StoryBibleSettingsTab'
 import { UpdatesSettingsTab } from '@renderer/features/updates/UpdatesSettingsTab'
 import { AppearanceSettingsTab } from './AppearanceSettingsTab'
 
 /** The ids of the Settings dialog tabs (F-7.5). Not persisted: the dialog opens on the first. */
 export type SettingsDialogTabId =
-  'editor' | 'ai' | 'backups' | 'appearance' | 'account' | 'updates' | 'diagnostics' | 'advanced'
+  | 'editor'
+  | 'ai'
+  | 'storyBible'
+  | 'backups'
+  | 'appearance'
+  | 'account'
+  | 'updates'
+  | 'diagnostics'
+  | 'advanced'
 
 interface SettingsDialogTabBase {
   id: SettingsDialogTabId
@@ -65,6 +75,14 @@ export const SETTINGS_DIALOG_TABS: SettingsDialogTabs = [
     icon: Sparkles,
     scope: 'project',
     render: () => createElement(AiSettingsTab)
+  },
+  {
+    // F-9.19: the category fields, the Blank page's write-up style, and the view new sheets open in.
+    id: 'storyBible',
+    label: 'Story bible',
+    icon: BookMarked,
+    scope: 'project',
+    render: () => createElement(StoryBibleSettingsTab)
   },
   {
     id: 'backups',

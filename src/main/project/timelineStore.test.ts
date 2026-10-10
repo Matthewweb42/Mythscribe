@@ -113,10 +113,7 @@ describe('setProjectTimeline', () => {
 
   it('refuses duplicate labels and blank labels with VALIDATION and writes nothing', () => {
     setProjectTimeline(db, { events: [event('a', 'The fall')] })
-    for (const events of [
-      [event('a', 'The fall'), event('b', 'the FALL')],
-      [event('a', '  ')]
-    ]) {
+    for (const events of [[event('a', 'The fall'), event('b', 'the FALL')], [event('a', '  ')]]) {
       try {
         setProjectTimeline(db, { events })
         throw new Error('expected VALIDATION')

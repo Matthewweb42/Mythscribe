@@ -15,6 +15,7 @@ import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { todoItem } from './todoFixture'
 import { applyPick, withLine } from './todoPick'
 import { resetTodoStore, useTodoStore } from './todoStore'
+import { NO_SHEET_SYNC } from '@shared/sheetSync'
 
 const mara: Entity = {
   id: 'e-mara',
@@ -28,6 +29,8 @@ const mara: Entity = {
   aliases: [],
   origin: 'author',
   status: 'canon',
+  extraFields: [],
+  sync: NO_SHEET_SYNC,
   created: '2026-10-09',
   modified: '2026-10-09'
 }

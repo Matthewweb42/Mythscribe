@@ -22,12 +22,15 @@ import { WRITING_PRESETS_KEY, builtinParams, defaultWritingPresets } from '@shar
 import { REFERENCE_PINS_KEY, REFERENCE_PINS_MAX, defaultReferencePins } from '@shared/references'
 import { SESSION_KEY, defaultProjectSession } from '@shared/session'
 import { STRUCTURE_KEY, defaultProjectStructure } from '@shared/structure'
+import { STORY_BIBLE_SETTINGS_KEY, defaultStoryBibleSettings } from '@shared/storyBibleSettings'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 import { createProject, projectFolderFor, type ProjectSession } from './projectStore'
 import {
   getAiSettings,
   getAuthorRules,
+  getStoryBibleSettings,
+  setStoryBibleSettings,
   getBookDetails,
   getCompileState,
   setBookDetails,
@@ -608,5 +611,34 @@ describe('getCompileState / setCompileState (Compile v2)', () => {
     expect(getCompileState(db)).toEqual(defaultCompileProjectState())
     setRaw(JSON.stringify({ formatId: '', output: null }), COMPILE_STATE_KEY)
     expect(getCompileState(db)).toEqual(defaultCompileProjectState())
+  })
+})
+
+describe('getStoryBibleSettings / setStoryBibleSettings (F-9.17, F-9.19)', () => {
+  it('answers the defaults with no row and round-trips the settings', () => {
+    open('novel')
+    expect(rows(STORY_BIBLE_SETTINGS_KEY)).toHaveLength(0)
+    expect(getStoryBibleSettings(db)).toEqual(defaultStoryBibleSettings())
+    const stored = setStoryBibleSettings(db, {
+      listView: 'list',
+      defaultTemplate: 'blank',
+      writeUp: { character: { length: 'short', roles: { age: 'heading' } } }
+    })
+    expect(getStoryBibleSettings(db)).toEqual(stored)
+    expect(stored.writeUp.character).toEqual({ length: 'short', roles: { age: 'heading' } })
+  })
+
+  it('reads a broken row as the defaults, and a broken part as its default', () => {
+    open('novel')
+    setRaw('{not json', STORY_BIBLE_SETTINGS_KEY)
+    expect(getStoryBibleSettings(db)).toEqual(defaultStoryBibleSettings())
+    setRaw(
+      JSON.stringify({
+        listView: 'grid',
+        writeUp: { character: { length: 'huge' }, 'Bad Id': {} }
+      }),
+      STORY_BIBLE_SETTINGS_KEY
+    )
+    expect(getStoryBibleSettings(db)).toEqual(defaultStoryBibleSettings())
   })
 })

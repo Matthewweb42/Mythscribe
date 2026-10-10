@@ -33,6 +33,40 @@ do. Review, then confirm, change, or delete the entry.
   10. Drops sit under the header (at the window's top in focus mode), 420 px wide, accent left edge; failures have a danger edge and title. The bar's hover strip is 6 px over the header's own bottom padding.
 - Alternatives: a linear crawl; keep the To do toasts and the edit pass toast beside the drop; drops that never auto-leave; Escape closing the run in the dialog too; To do opening its review deck over focus mode instead of the sidebar.
 - To change it: `src/renderer/features/activity/activityJobs.ts` (`CRAWL_MS`, `outcomeOf`, `noteStale`), `activityStore.ts` (`FOCUS_NOTE_MS`, focus parking), `activityRoutes.ts` (Open, Retry), `src/renderer/features/sideWork/SideWorkFrame.tsx` (the dialog's Escape).
+## 2026-10-10 · F-9.19 · Story bible settings: what each part does
+- Question: You asked for a Settings tab to edit each category's fields, the write-up style (headings vs paragraphs, order, length), and the default view of new sheets.
+- Chosen (decided by Claude, unconfirmed): (1) the page order is the field order you set in the same tab (one order, not two); (2) each field is Heading or Paragraph, one-line fields default to Paragraph and long ones to Heading; the length is per category; (3) fields are saved with a button (renames, reorders, additions and removals together) because a removal moves text into Notes on every sheet of the category, which asks first and names how many sheets; (4) Notes cannot be removed or renamed and stays last (removals need somewhere to go); (5) Threads are not editable here (their fields drive the thread view); (6) the default view applies to the New … dialog and the quick add; sheets the AI or an upload makes keep their own choice.
+- Alternatives: a separate page order; one length for the whole bible; instant saves with an Undo instead of a Save button.
+- To change it: `src/renderer/features/entities/StoryBibleSettingsTab.tsx`, `src/main/entity/categoryFields.ts`, `src/shared/storyBibleSettings.ts`.
+
+## 2026-10-10 · F-9.18 · Sheet sync lands on its own in every chat mode
+- Question: Should the sync follow the chat's Auto/Ask/Plan mode (held for Apply at Ask and Plan), or land on its own?
+- Decided by the author 2026-10-10: lands on its own in every mode, with Undo. Both directions (the page written up from the fields, and page edits filed into the fields) are applied at once in Auto, Ask, and Plan, each logged in Changes (source "Sheet sync") with an Undo. There is no Apply/Dismiss step; the out-of-date bar (Write up now / File now / Try again, and the AI-off message) stays.
+- To change it: `src/main/ai/sheetSync.ts` (`runSheetSync`).
+
+## 2026-10-10 · F-9.18 · How AI-written page text is marked, and why it fits AI rule 1
+- Question: The Blank page now holds prose the AI wrote. How is it marked, and is it allowed?
+- Chosen (decided by Claude, unconfirmed): the page is derived from the author's own sheet text (the fields), never from the manuscript, and never enters the manuscript — the same footing as the derived index data rule 1 already allows (summaries, facts), but stored in the sheet because it is the sheet's other view. Each paragraph the AI writes is remembered by hash (`entity.sync.aiParagraphs`); the page shows "Written up by AI from your fields" or "N of M paragraphs written up by AI…". A paragraph the author edits stops matching and counts as theirs. Every write-up is costed in the ledger and has an Undo in Changes. Rule 2 (voice profile, brief, exemplars, fidelity check) is not applied: this is story-bible reference text, not manuscript prose, and the voice block would multiply its cost.
+- Alternatives: mark AI paragraphs inline (the page would need a rich-text editor instead of the plain textarea); apply the voice block and fidelity check to write-ups.
+- To change it: `src/main/entity/sheetSyncState.ts` (`aiParagraphs`), `SheetSyncBar.tsx`, a new prompt version for rule 2.
+
+## 2026-10-10 · F-9.18 · Existing sheets: what the first sync does
+- Question: Sheets written before F-9.18 have fields, a page, or both, and no sync history. What happens to them?
+- Chosen (decided by Claude, unconfirmed): nothing runs on open (no bulk spend). A sheet syncs only after the author edits it (30 s pause) or clicks Write up now / File now. A **Blank page sheet** keeps its page exactly as written: the first sync only fills its fields from it. A sheet with **both** a page and fields keeps its page too (its fields are filled from the page; the page is written up only after a later field edit). A **Structured sheet** with no page gets its page written up. The migration adds two columns and touches no text; F-8.7's backup is taken before it, and every applied sync has an Undo.
+- Alternatives: a one-time "sync every sheet" pass after the update (with a cost estimate, like the F-9.14 conversion); write the page of a both-texts sheet up from its fields at once.
+- To change it: `src/main/ai/sheetSync.ts` (`pageStaleAfter`), `src/main/entity/sheetSyncState.ts` (`sheetSyncStateOf`).
+
+## 2026-10-10 · F-9.18 · Safety rules and smaller calls in the sync
+- Question: several details the request left open.
+- Chosen (decided by Claude, unconfirmed): (1) an emptied page never empties the fields, and fields with no text never empty the page (both just mark the views as agreeing); (2) an answer that comes back after the author edited the sheet again is dropped, and once a sync has landed the open page sends only what the author edited, so their typing wins in that view and nothing the sync wrote elsewhere is written back; (3) the pause is per sheet (editing another sheet does not hold this one back), and the due list is a settings row so a quit resumes it; (4) the page is plain text: headings are the field labels on a line of their own, laid out by the app (the model writes only prose), shown in the prose font; (5) the write-up length is a ceiling (short ≈ 120, medium ≈ 250, long ≈ 500 words) and never adds facts; (6) the page is marked out of date when the fields' labels, order, the sheet's own fields, or the category's write-up style change, but nothing re-runs until the sheet is edited or Write up now is clicked; (7) a filing sends only the paragraphs removed and added since the views last agreed and gets back compact edits (never whole field values); added text over 3,000 characters is filed in several requests; (8) a write-up over the input budget cuts the longest field values to fit; a filing over it is refused with the budget message (rare); (9) a page addition with no fitting field becomes a field of the sheet's own (at most 12; past that it goes into Notes as "Label: text"); (10) "Write up now" / "File now" / "Try again" skip the 30 s pause.
+- Alternatives: per-section incremental write-ups (cheaper on long sheets; listed in the cost registry ideas); a rich-text page with real headings.
+- To change it: `src/shared/sheetSync.ts`, `src/main/ai/sheetSync.ts`, `src/main/ai/sheetSyncService.ts`.
+
+## 2026-10-10 · F-9.17 · The List/Cards choice is kept with the project
+- Question: You asked for one List/Cards choice for every category tab, "until they click the other". Should it survive closing the project?
+- Chosen (decided by Claude, unconfirmed): yes. It is stored in the project's story-bible settings (`storyBible` settings row, the same row as the F-9.19 Settings tab), so it holds across tabs, restarts, and Settings changes, per project.
+- Alternatives: keep it for the session only (as before, but shared); make it app-wide for every project.
+- To change it: `src/shared/storyBibleSettings.ts` (`listView`), `src/renderer/features/entities/storyBibleSettingsStore.ts`, `EntityTab.tsx`.
 
 ## 2026-10-10 · F-5.25 · Chat tool audit: what was built and what waits
 - Question: The audit of the chat's tools listed eight fixes. Which ship with F-5.25?

@@ -9,6 +9,9 @@ import { EntityTab } from './EntityTab'
 import { entityFixture } from './entityFixture'
 import { resetEntityDraftStore, useEntityDraftStore } from './entityDraftStore'
 import { resetEntityStore, useEntityStore } from './entityStore'
+import { resetStoryBibleSettingsStore, useStoryBibleSettingsStore } from './storyBibleSettingsStore'
+import { defaultStoryBibleSettings } from '@shared/storyBibleSettings'
+import { NO_SHEET_SYNC } from '@shared/sheetSync'
 
 type Handler = (input: unknown) => unknown
 
@@ -36,12 +39,16 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
           aliases: [],
           origin: 'author',
           status: 'canon',
+          extraFields: [],
+          sync: NO_SHEET_SYNC,
           created: '2026-09-12T08:00:00.000Z',
           modified: '2026-09-12T08:00:00.000Z'
         }
         return entity as Output<C>
       }
       if (channel === 'entity:delete') return null as Output<C>
+      if (channel === 'storyBible:get') return defaultStoryBibleSettings() as Output<C>
+      if (channel === 'storyBible:set') return input as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -72,6 +79,7 @@ async function renderLoaded(
   const calls = install(overrides)
   await act(async () => {
     await useEntityStore.getState().load()
+    await useStoryBibleSettingsStore.getState().load()
   })
   render(<EntityTab kind={kind} />)
   return calls
@@ -81,11 +89,13 @@ describe('EntityTab (F-9.2)', () => {
   beforeEach(() => {
     resetEntityStore()
     resetEntityDraftStore()
+    resetStoryBibleSettingsStore()
     useDialogStore.setState({ modals: [], toasts: [] })
   })
   afterEach(() => {
     cleanup()
     resetEntityDraftStore()
+    resetStoryBibleSettingsStore()
   })
 
   it('lists only the entities of its kind, in list order, as cards with an excerpt', async () => {
@@ -116,13 +126,26 @@ describe('EntityTab (F-9.2)', () => {
     expect(row('Mara')).not.toHaveTextContent('Added by AI')
   })
 
-  it('the list view drops the excerpt and the choice is remembered per kind', async () => {
+  it('the list view drops the excerpt, and one choice holds for every category tab (F-9.17)', async () => {
     const user = userEvent.setup()
-    await renderLoaded('character')
+    const calls = await renderLoaded('character')
     await user.click(screen.getByRole('button', { name: 'List' }))
     expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true')
     expect(row('Aldous')).not.toHaveTextContent('cartographer')
-    expect(useEntityStore.getState().view).toEqual({ character: 'list' })
+    expect(useStoryBibleSettingsStore.getState().settings?.listView).toBe('list')
+    // Another category's tab opens in the same view, until the author clicks the other.
+    cleanup()
+    render(<EntityTab kind="setting" />)
+    expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(screen.getByRole('button', { name: 'Cards' }))
+    cleanup()
+    render(<EntityTab kind="character" />)
+    expect(screen.getByRole('button', { name: 'Cards' })).toHaveAttribute('aria-pressed', 'true')
+    // Kept with the project: written through the story-bible settings.
+    await act(async () => {
+      await useStoryBibleSettingsStore.getState().flush()
+    })
+    expect(calls.at(-1)).toEqual(['storyBible:set', { ...defaultStoryBibleSettings() }])
   })
 
   it('search matches the name, the fields, and the page; the empty message says so', async () => {

@@ -13,6 +13,7 @@ import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import { offerShowing, resetOrganiseStore, useOrganiseStore } from './organiseStore'
+import { NO_SHEET_SYNC } from '@shared/sheetSync'
 
 type Handler = (input: unknown) => unknown
 let calls: [Channel, unknown][]
@@ -41,6 +42,8 @@ const weave: Entity = {
   aliases: [],
   origin: 'author',
   status: 'canon',
+  extraFields: [],
+  sync: NO_SHEET_SYNC,
   created: '2026-10-08T09:00:00.000Z',
   modified: '2026-10-08T09:00:00.000Z'
 }

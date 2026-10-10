@@ -1,10 +1,14 @@
 import { categoryOf, type StoryCategory } from '@shared/categories'
 import type { EntityTemplate } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
+import { BIBLE_LIST_VIEWS, type BibleListView } from '@shared/storyBibleSettings'
 
-/** How an entity tab lays its rows out (F-9.2): one line each, or a card with an excerpt. */
-export type EntityView = 'list' | 'cards'
-export const ENTITY_VIEWS: readonly EntityView[] = ['list', 'cards']
+/**
+ * How an entity tab lays its rows out (F-9.2): one line each, or a card with an excerpt. F-9.17:
+ * one choice for every tab, a story-bible setting (`BibleListView`).
+ */
+export type EntityView = BibleListView
+export const ENTITY_VIEWS: readonly EntityView[] = BIBLE_LIST_VIEWS
 export const ENTITY_VIEW_LABEL: Record<EntityView, string> = { list: 'List', cards: 'Cards' }
 
 /** What the two templates are called wherever the author chooses or switches one (F-9.3). */

@@ -43,6 +43,8 @@ import { AccountStatus } from '../account'
 import { AliasList } from '../aliases'
 import { AppAccess } from '../appAccess'
 import { AuthorRules } from '../authorRules'
+import { StoryBibleSettings } from '../storyBibleSettings'
+import { SheetExtraFields, SheetSyncStatus, SheetSyncView } from '../sheetSync'
 import { BackupSettingsPatch, BackupState } from '../backups'
 import {
   CheckoutBody,
@@ -113,7 +115,14 @@ import {
   UpdateSnapshot
 } from '../snapshots'
 import { EditorSettings } from '../editorSettings'
-import { CategoryIcon, CATEGORY_NAME_MAX, NewCategoryInput, StoryCategory } from '../categories'
+import {
+  CATEGORY_FIELD_LABEL_MAX,
+  CATEGORY_FIELDS_MAX,
+  CategoryIcon,
+  CATEGORY_NAME_MAX,
+  NewCategoryInput,
+  StoryCategory
+} from '../categories'
 import {
   ENTITY_BODY_MAX,
   ENTITY_FIELD_MAX,
@@ -336,9 +345,24 @@ export const Entity = z.object({
   /** F-9.13 (D7): canon, plan, or idea; `entity:update` sets it. */
   status: FactStatus,
   created: z.string(),
-  modified: z.string()
+  modified: z.string(),
+  /**
+   * F-9.18: the sheet's own fields beside its category's template (what its page said that no
+   * field held), written by `entity:addField`/`entity:removeField` and by a filing of the page.
+   */
+  extraFields: SheetExtraFields,
+  /** F-9.18: where the sheet's two views stand (computed by main on every read; never a patch field). */
+  sync: SheetSyncView
 })
 export type Entity = z.infer<typeof Entity>
+
+/** F-9.19: one field of a category as Settings › Story bible sends it (no id: a new field). */
+export const CategoryFieldInput = z.object({
+  id: EntityFieldId.optional(),
+  label: z.string().trim().min(1).max(CATEGORY_FIELD_LABEL_MAX),
+  multiline: z.boolean()
+})
+export type CategoryFieldInput = z.infer<typeof CategoryFieldInput>
 
 /**
  * An undo of the Changes log as the windows get it (F-9.13): F-9.15 adds the sheets and tags it
@@ -1151,6 +1175,14 @@ export const contract = {
   'authorRules:get': { input: z.undefined(), output: AuthorRules },
   /** Replaces the author's rules (F-14.2); phrases are normalised and deduplicated, a value outside the schema is refused with VALIDATION. */
   'authorRules:set': { input: AuthorRules, output: AuthorRules },
+  /**
+   * The story-bible settings (F-9.17, F-9.19): the List/Cards choice every category tab shares,
+   * the view a new sheet opens in, and the write-up style per category. A missing or unreadable
+   * row answers the defaults.
+   */
+  'storyBible:get': { input: z.undefined(), output: StoryBibleSettings },
+  /** Replaces the story-bible settings; a value outside the schema is refused with VALIDATION. */
+  'storyBible:set': { input: StoryBibleSettings, output: StoryBibleSettings },
   /** Every focus-mode background of the open project (F-6.2): the files in `assets/backgrounds/`, by name. */
   'background:list': { input: z.undefined(), output: z.array(Background) },
   /**
@@ -1590,7 +1622,13 @@ export const contract = {
        */
       asOf: z.string().nullable().optional(),
       /** F-9.13 (D7): canon, plan, or idea. */
-      status: FactStatus.optional()
+      status: FactStatus.optional(),
+      /**
+       * F-9.18: the sheet's `modified` stamp the sent `body` was edited from (the open page's
+       * draft). When the sheet sync wrote the page up after it, the author's page still wins as
+       * sent, and the sync is rebased onto the page they edited from, so nothing is filed twice.
+       */
+      baseModified: z.string().optional()
     }),
     output: Entity
   },
@@ -1682,6 +1720,34 @@ export const contract = {
    */
   'category:list': { input: z.undefined(), output: z.array(StoryCategory) },
   /**
+   * F-9.18: adds a field of the sheet's own (its category's template is unchanged). The label is
+   * trimmed; one the sheet already has (any case) is ALREADY_EXISTS; past `SHEET_EXTRA_FIELDS_MAX`
+   * is VALIDATION. The field shows on the page at the next write-up.
+   */
+  'entity:addField': {
+    input: z.object({
+      id: z.string(),
+      label: z.string().trim().min(1).max(CATEGORY_FIELD_LABEL_MAX)
+    }),
+    output: Entity
+  },
+  /**
+   * F-9.18: removes a field of the sheet's own; its text moves into Notes as "Label: text"
+   * (nothing is lost). NOT_FOUND for a field the sheet does not have of its own.
+   */
+  'entity:removeField': {
+    input: z.object({ id: z.string(), fieldId: z.string() }),
+    output: Entity
+  },
+  /** F-9.18: every sheet whose sync is waiting, running, or failed (the rest are idle). */
+  'sheetSync:status': { input: z.undefined(), output: z.array(SheetSyncStatus) },
+  /**
+   * F-9.18: makes the sheet's two views true to each other now (Write up now, File now, Try
+   * again), skipping the pause. Runs in the background like the paused sync; the answer is only
+   * that it was queued (false when Use AI or the toggle is off, or the views already agree).
+   */
+  'sheetSync:run': { input: z.object({ id: z.string() }), output: z.boolean() },
+  /**
    * F-9.10, Organise's local pass (no AI): tags and sheets whose names or aliases look alike,
    * tags nothing uses (no document, mention, sheet, or child), and empty sheets. Feeds the quiet
    * offer after an upload is applied and as duplicates build up.
@@ -1721,6 +1787,20 @@ export const contract = {
       icon: CategoryIcon.optional()
     }),
     output: StoryCategory
+  },
+  /**
+   * F-9.19: replaces a category's fields from Settings › Story bible (add, remove, rename,
+   * reorder), for the library's categories and the project's own; Notes stays, last. A field with
+   * an `id` the category has keeps it (a rename keeps every sheet's text); one without is new. A
+   * removed field's text moves into Notes on every sheet of the category; those sheets come back.
+   * VALIDATION for Threads, a blank name, or too many fields; ALREADY_EXISTS for a repeated name.
+   */
+  'category:setFields': {
+    input: z.object({
+      id: z.string(),
+      fields: z.array(CategoryFieldInput).max(CATEGORY_FIELDS_MAX + 1)
+    }),
+    output: z.object({ category: StoryCategory, entities: z.array(Entity) })
   },
   /** The context library (F-9.8): every uploaded file, newest first, with its state. */
   'library:list': { input: z.undefined(), output: z.array(ContextFile) },
@@ -3026,6 +3106,8 @@ export const events = {
    * job met a name with no entity); the entity store merges it, as the tag store does a tag.
    */
   'entity:changed': Entity,
+  /** F-9.18: the sheets whose sync is waiting, running, or failed changed; the whole list. */
+  'sheetSync:changed': z.array(SheetSyncStatus),
   /** The dated facts of these records changed (F-9.13): a scene was read or deleted, a fact hidden, restored, or re-statused, an author line dated, or a change undone. */
   'fact:changed': z.object({ entityIds: z.array(z.string()) }),
   /** The Changes log moved (F-9.13): a reading logged a run, or a change was undone. */

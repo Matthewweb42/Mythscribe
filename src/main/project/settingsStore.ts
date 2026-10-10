@@ -1,4 +1,6 @@
 import { eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { SHEET_SYNC_DUE_KEY, SHEET_SYNC_DUE_MAX } from '@shared/sheetSync'
 import {
   AI_SETTINGS_KEY,
   AiSettings,
@@ -57,6 +59,12 @@ import {
   type ProjectSessionInput
 } from '@shared/session'
 import { STRUCTURE_KEY, ProjectStructure, defaultProjectStructure } from '@shared/structure'
+import {
+  STORY_BIBLE_SETTINGS_KEY,
+  StoryBibleSettings,
+  defaultStoryBibleSettings,
+  type StoryBibleSettingsInput
+} from '@shared/storyBibleSettings'
 import { TAG_ALIASES_KEY, TagAliases } from '@shared/tagExchange'
 import { TIMELINE_KEY, ProjectTimeline, defaultProjectTimeline } from '@shared/timeline'
 import {
@@ -749,6 +757,63 @@ export function setTodoPassState(db: TreeDb, patch: Partial<TodoPassState>): Tod
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: TODO_STATE_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Reads the story-bible settings (F-9.17, F-9.19: the List/Cards choice, the default view of a
+ * new sheet, the write-up style per category) from the `settings` row under
+ * `STORY_BIBLE_SETTINGS_KEY`. A missing or unreadable row answers the defaults.
+ */
+export function getStoryBibleSettings(db: TreeDb): StoryBibleSettings {
+  const row = db.select().from(settings).where(eq(settings.key, STORY_BIBLE_SETTINGS_KEY)).get()
+  if (!row) return defaultStoryBibleSettings()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultStoryBibleSettings()
+  }
+  const parsed = StoryBibleSettings.safeParse(json)
+  return parsed.success ? parsed.data : defaultStoryBibleSettings()
+}
+
+/** Writes the story-bible settings (upsert on the settings key; other keys kept) and returns them as stored. */
+export function setStoryBibleSettings(
+  db: TreeDb,
+  value: StoryBibleSettingsInput
+): StoryBibleSettings {
+  const stored = StoryBibleSettings.parse(value)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: STORY_BIBLE_SETTINGS_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/** F-9.18: the sheets whose sync waits its turn, oldest first; a missing or unreadable row is none. */
+export function getSheetSyncDue(db: TreeDb): string[] {
+  const row = db.select().from(settings).where(eq(settings.key, SHEET_SYNC_DUE_KEY)).get()
+  if (!row) return []
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return []
+  }
+  const parsed = z.array(z.string()).safeParse(json)
+  return parsed.success ? parsed.data : []
+}
+
+/** F-9.18: writes the due list (deduplicated, the newest `SHEET_SYNC_DUE_MAX` kept). */
+export function setSheetSyncDue(db: TreeDb, ids: readonly string[]): string[] {
+  const stored = [...new Set(ids)].slice(-SHEET_SYNC_DUE_MAX)
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: SHEET_SYNC_DUE_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

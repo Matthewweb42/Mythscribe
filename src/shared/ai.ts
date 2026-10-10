@@ -336,7 +336,10 @@ export const AI_FEATURE_IDS = [
   // F-9.10: organise, a plan of changes to the tags, the story bible, the notes, and the binder.
   'organise',
   // F-9.16: the To do list's whole-book check (on request only) and its per-item suggestions.
-  'todo'
+  'todo',
+  // F-9.18: a story-bible sheet's two views kept true: the page written up from the fields, and
+  // the page's edits filed back into the fields, in the background after the sheet is left alone.
+  'sheetSync'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -410,7 +413,10 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-9.16: the whole-book check's up to 8 gaps as JSON, each a type, a name, a scene label, a
   // reason, and up to 3 suggestions of 160 characters, plus resolved ids; a suggestion request
   // asks `TODO_SUGGEST_MAX_TOKENS` (300) under the same cap.
-  todo: 1_200
+  todo: 1_200,
+  // F-9.18: a write-up asks `WRITE_UP_MAX_TOKENS` by length (400 / 700 / 1,200, the JSON
+  // wrapping included); a filing asks `REFILE_MAX_TOKENS` (900) of compact edits.
+  sheetSync: 1_200
 }
 
 /**
@@ -486,7 +492,11 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-9.16: per request of the check: the rules, the sheet digest (names and blank fields, no
   // values, ≤ 6,000 characters), the open threads, one window of scene lines (≤ 200 characters
   // each), and what is already listed or settled; the window is cut to fit (far scenes first).
-  todo: 10_000
+  todo: 10_000,
+  // F-9.18: the rules, the sheet's name and category, the style line, and its fields (long values
+  // head-cut to fit for a write-up); a filing adds the page edits, at most `REFILE_CHUNK_CHARS`
+  // of added text per request.
+  sheetSync: 6_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

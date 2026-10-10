@@ -12,7 +12,8 @@ import { describeError } from '@renderer/lib/errors'
 import { EntityList } from './EntityList'
 import { EntityQuickAdd } from './EntityQuickAdd'
 import { useCategory, useCategoryStore } from './categoryStore'
-import { useEntityStore, viewOf } from './entityStore'
+import { useEntityStore } from './entityStore'
+import { useBibleListView, useStoryBibleSettingsStore } from './storyBibleSettingsStore'
 import {
   ALL_CATEGORIES,
   ENTITY_VIEWS,
@@ -36,16 +37,17 @@ const RENAME = 'rename'
  * `kind`, its category id).
  * The search box on top (name, fields, and page), the list/cards toggle beside it, the filtered
  * rows, and the quick-add form at the foot. The World tab adds a category filter once a category
- * is in use. The query and the category are local; the view and the selection live in the store
- * so they survive a switch to another sidebar tab.
+ * is in use. The query and the category are local; the selection lives in the entity store so it
+ * survives a switch to another sidebar tab, and the view is the one story-bible setting every tab
+ * shares (F-9.17).
  */
 export function EntityTab({ kind }: { kind: EntityKind }): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState(ALL_CATEGORIES)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
-  const view = useEntityStore((s) => viewOf(s.view, kind))
+  // F-9.17: one List/Cards choice for every category tab, kept with the project.
+  const view = useBibleListView()
   const section = useCategory(kind)
-  const setView = useEntityStore((s) => s.setView)
   const needle = query.trim().toLowerCase()
   const ofKind = useEntityStore(
     useShallow((s) =>
@@ -132,7 +134,7 @@ export function EntityTab({ kind }: { kind: EntityKind }): React.JSX.Element {
                 type="button"
                 aria-label={ENTITY_VIEW_LABEL[option]}
                 aria-pressed={option === view}
-                onClick={() => setView(kind, option)}
+                onClick={() => useStoryBibleSettingsStore.getState().update({ listView: option })}
                 className="flex size-7 items-center justify-center rounded-md text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:bg-surface-raised aria-pressed:text-fg"
               >
                 <Icon size={14} aria-hidden="true" />
