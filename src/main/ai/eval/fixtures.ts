@@ -246,6 +246,7 @@ import { buildAgentPromptV4 } from '../prompts/agent.v4'
 import { buildAgentPromptV5 } from '../prompts/agent.v5'
 import { buildAgentPromptV6 } from '../prompts/agent.v6'
 import { buildAgentPromptV7 } from '../prompts/agent.v7'
+import { buildAgentPromptV8 } from '../prompts/agent.v8'
 import {
   ORGANISE_CHUNK_CHARS,
   ORGANISE_INSTRUCTION_MAX,
@@ -3137,6 +3138,49 @@ function agentCaseV7(
   }
 }
 
+/** F-5.25 (fixes 5, 7, 8): an agent.v8 step, fitted as the feature fits it. */
+function agentCaseV8(
+  name: string,
+  note: string,
+  input: BuildAgentPromptV3Input,
+  scoring: EvalCase['scoring']
+): EvalCase {
+  const built = fitAgentPrompt(input, buildAgentPromptV8)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring
+  }
+}
+
+/** F-5.25 (agent.v8): `AGENT_TODO_STEP` as the tool prints it now, each item under its ref. */
+const AGENT_TODO_REFS_STEP = {
+  call: AGENT_TODO_STEP.call,
+  result:
+    'Result of todo:\nOpen To do items:\n' +
+    't1 [Undefined] The Hollowing: Named in 3 scenes, but its sheet is empty and your notes do not explain it. (n2)\n' +
+    't2 [Loose end] The mill ledger: Still open, and not moved in the last 8 scenes. Open question: who copied it? (n1)\n' +
+    't3 [Gap] Mara Vell: 3 scenes are told from Mara Vell\u2019s point of view, but no goal is stated. (n2)'
+}
+
+/** A write step of agent.v8 on the fixture book (the map, the open scene, no history). */
+const agentV8Write = (
+  message: string,
+  steps: BuildAgentPromptV3Input['steps']
+): BuildAgentPromptV3Input => ({
+  access: 'write',
+  voice: null,
+  map: STORY_MAP,
+  focus: AGENT_FOCUS,
+  history: [],
+  message,
+  steps,
+  final: false
+})
+
 /** F-5.25: the author's message that ran Organise instead of deleting (2026-10-10). */
 const AGENT_CLEAR_MESSAGE =
   'Delete everything in my story bible so I can start fresh and re-upload my character docs.'
@@ -5034,6 +5078,60 @@ export const EVAL_CASES: EvalCase[] = [
       message: 'Who copied the mill ledger, and where is the copy?',
       steps: [AGENT_LOOKUP_STEP, AGENT_PASSAGES_STEP],
       final: false,
+      retry: true
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  // agent.v8 (F-5.25, the audit's fixes 5, 7, 8): status, To do settle, notes clearing, and the
+  // answer actions, on the write edit list only (a read run sends v7's rules unchanged).
+  agentCaseV8(
+    'status',
+    'mark what the scenes state of a field an idea after a lookup: one status edit',
+    agentV8Write('Mara’s age is only an idea for now, mark it so.', [AGENT_LOOKUP_STEP]),
+    { kind: 'agentEdit', expected: 'status' }
+  ),
+  agentCaseV8(
+    'todo',
+    'settle a To do item the author says is handled, by the ref the todo tool printed',
+    agentV8Write('The mill ledger loose end is handled, tick it off.', [AGENT_TODO_REFS_STEP]),
+    { kind: 'agentEdit', expected: 'todo' }
+  ),
+  agentCaseV8(
+    'clearNotes',
+    'empty the open scene’s notes: one notes edit with empty text (it asks, as a deletion)',
+    agentV8Write('Clear the notes of this scene.', []),
+    { kind: 'agentEdit', expected: 'notes' }
+  ),
+  agentCaseV8(
+    'undo',
+    'an answer action: undo the last turn',
+    { ...agentV8Write('Undo what you just did.', []), history: CHAT_HISTORY },
+    { kind: 'agentEdit', expected: 'undo' }
+  ),
+  agentCaseV8(
+    'maxed',
+    'agent.v7’s maxed case with the v8 rules: the last step of a write run at every cap',
+    {
+      access: 'write',
+      voice: null,
+      map: MAXED_STORY_MAP,
+      focus: AGENT_MAXED_FOCUS,
+      history: CHAT_HISTORY,
+      message: FIXTURE_PASSAGE.repeat(3).slice(0, 2_000),
+      steps: Array.from({ length: AGENT_MAX_STEPS }, () => AGENT_MAXED_STEP),
+      final: true
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV8(
+    'retry',
+    'the one retry of a write step whose reply was cut off, with the v8 rules (compare agent.v7 retry)',
+    {
+      ...agentV8Write('Who copied the mill ledger, and where is the copy?', [
+        AGENT_LOOKUP_STEP,
+        AGENT_PASSAGES_STEP
+      ]),
+      history: CHAT_HISTORY,
       retry: true
     },
     { kind: 'agent', expected: 'answer' }

@@ -36,6 +36,13 @@ import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
+import { useFactStore } from '@renderer/features/entities/factStore'
+import { useFocusStore } from '@renderer/features/focus/focusStore'
+import { useLibraryStore } from '@renderer/features/library/libraryStore'
+import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { useTodoStore } from '@renderer/features/todo/todoStore'
+import { useIndexingStore } from '@renderer/features/ai/indexingStore'
 import { ipc } from '@renderer/lib/ipc'
 
 /**
@@ -358,7 +365,121 @@ export async function applyAgentEdit(
         proposalId,
         run
       )
+    case 'notesClear': {
+      // F-5.25 (agent.v8): the notes emptied through their write path; the Undo puts them back
+      // while they are still empty.
+      const before = await rewriteNotes(edit.nodeId, () => EMPTY_DOC)
+      return async () => {
+        await rewriteNotes(edit.nodeId, (stored) => {
+          if (JSON.stringify(stored) !== JSON.stringify(EMPTY_DOC)) {
+            throw new AgentEditError('The notes changed since; edit them by hand')
+          }
+          return before
+        })
+      }
+    }
+    case 'status':
+      return applyStatus(edit, label, run)
+    case 'todo': {
+      // F-5.25 (agent.v8): through the To do list's own settle; the Undo reopens them.
+      const todo = useTodoStore.getState()
+      const done: string[] = []
+      for (const item of edit.items) {
+        await todo.settle(item.id, edit.status)
+        done.push(item.id)
+      }
+      return () => useTodoStore.getState().reopen(done)
+    }
+    case 'summaries': {
+      // F-5.25 (agent.v8): the "Summarize all scenes" button; what it queued shows as a toast.
+      toast.success(await useIndexingStore.getState().queueAll())
+      return null
+    }
+    case 'open':
+      await openPlace(edit.dialog)
+      return null
+    case 'undoTurn':
+      // The chat's own turns are the assistant store's; it takes this edit back there.
+      throw new AgentEditError('Undo the last turn from the chat')
   }
+}
+
+type StatusEdit = Extract<AgentEdit, { kind: 'status' }>
+
+/**
+ * F-5.25 (agent.v8, the audit's fix 7): a status set through its owner. A document's notes go
+ * through the scene-metadata store with their own undo; a sheet's status through the entity store
+ * and the statements' through the fact store, each logged in Changes with its Undo
+ * (`restoreStatus`), as the author's own flips would be made.
+ */
+async function applyStatus(
+  edit: StatusEdit,
+  label: string,
+  run: ChangeRun
+): Promise<(() => Promise<void>) | null> {
+  const first = edit.items[0]
+  if (first === undefined) return null
+  if (edit.target === 'notes') {
+    await patchSceneMeta(edit.id, (meta) => ({ ...meta, notesStatus: edit.status }))
+    return () => patchSceneMeta(edit.id, (meta) => ({ ...meta, notesStatus: first.before }))
+  }
+  if (edit.target === 'record') {
+    await useEntityStore.getState().update(edit.id, { status: edit.status })
+    return logAppliedChange(
+      run,
+      {
+        kind: 'record',
+        label,
+        undo: {
+          type: 'restoreStatus',
+          entityId: edit.id,
+          facts: [],
+          before: first.before,
+          after: edit.status
+        }
+      },
+      async () => {
+        await useEntityStore.getState().update(edit.id, { status: first.before })
+      }
+    )
+  }
+  const facts = useFactStore.getState()
+  await facts.setStatus(
+    edit.items.map((item) => item.id),
+    edit.status
+  )
+  const putBack = async (): Promise<void> => {
+    for (const item of edit.items) await useFactStore.getState().setStatus([item.id], item.before)
+  }
+  return logAppliedChange(
+    run,
+    {
+      kind: 'fact',
+      label,
+      undo: {
+        type: 'restoreStatus',
+        entityId: edit.id,
+        facts: edit.items,
+        before: first.before,
+        after: edit.status
+      }
+    },
+    putBack
+  )
+}
+
+/** F-5.25 (agent.v8): opens the Library section, or the upload's file picker, out of focus mode. */
+async function openPlace(dialog: Extract<AgentEdit, { kind: 'open' }>['dialog']): Promise<void> {
+  const focus = useFocusStore.getState()
+  if (focus.active) await focus.exit()
+  if (dialog === 'upload') {
+    // The picker, then the estimate, are the Library's own flow; the turn does not wait for them.
+    void useLibraryStore.getState().add()
+    return
+  }
+  const layout = useLayoutStore.getState()
+  layout.setSidebarTab('library')
+  if (!layout.layout.sidebar.open) layout.toggle('sidebar')
 }
 
 /** Opens a document in the editor pane (the tree's selection drives it) and answers its live editor. */

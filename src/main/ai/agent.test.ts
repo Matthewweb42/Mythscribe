@@ -53,12 +53,8 @@ import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import { AGENT_FINAL_TURN } from './prompts/agent.v1'
 import { AGENT_RETRY_TURN } from './prompts/agent.v2'
 import { AGENT_LADDER_RULES, AGENT_STATUS_RULES } from './prompts/agent.v6'
-import {
-  AGENT_BULK_RULES,
-  AGENT_EDIT_RULES_V7,
-  AGENT_ORGANISE_RULES_V7,
-  AGENT_RULES_V7
-} from './prompts/agent.v7'
+import { AGENT_BULK_RULES, AGENT_ORGANISE_RULES_V7, AGENT_RULES_V7 } from './prompts/agent.v7'
+import { AGENT_EDIT_RULES_V8 } from './prompts/agent.v8'
 import { scanMentions } from '../tag/scanMentions'
 import { STORY_MAP_HEADING } from '@shared/storyTime'
 import {
@@ -216,13 +212,13 @@ describe('runAgent (F-5.22)', () => {
     // The open document is in every step; the tool results join as turns.
     const system = request(0).messages[0]?.content ?? ''
     expect(system.startsWith(AGENT_RULES_V7)).toBe(true)
-    expect(system).not.toContain(AGENT_EDIT_RULES_V7)
+    expect(system).not.toContain(AGENT_EDIT_RULES_V8)
     expect(system).toContain(`Open document ${ref(scenes[0])}:`)
     // F-5.23 (agent.v3): the story-time rule, then the story map with now on the open scene,
     // before the open document. F-9.10: version 4 adds the organise rule; F-5.24: version 6 the
     // lookup ladder and the status labels; F-5.25: version 7 the bulk rule and the narrowed
     // organise rule.
-    expect(result.promptVersion).toBe('agent.v7')
+    expect(result.promptVersion).toBe('agent.v8')
     expect(system).toContain(AGENT_BULK_RULES)
     expect(system).toContain(AGENT_ORGANISE_RULES_V7)
     expect(system).toContain(AGENT_LADDER_RULES)
@@ -349,7 +345,7 @@ describe('runAgent, write runs (F-5.22)', () => {
       ]
     })
     const result = await run({ access: 'write' })
-    expect(request(0).messages[0]?.content).toContain(AGENT_EDIT_RULES_V7)
+    expect(request(0).messages[0]?.content).toContain(AGENT_EDIT_RULES_V8)
     expect(result.query).toBeNull()
     expect(result.changes.map((c) => c.edit)).toEqual([
       {
@@ -731,8 +727,8 @@ describe('the agent tools (F-5.22)', () => {
     const all = runAgentTool(project, null, 'todo', { kind: '' }).result
     expect(all).toBe(
       'Open To do items:\n' +
-        `[Loose end] Item l1: Why l1. (${ref(scenes[0])})\n` +
-        `[Gap] Item g1: Why g1. (${ref(scenes[0])})`
+        `t1 [Loose end] Item l1: Why l1. (${ref(scenes[0])})\n` +
+        `t2 [Gap] Item g1: Why g1. (${ref(scenes[0])})`
     )
     expect(runAgentTool(project, null, 'todo', { kind: 'gap' }).result).not.toContain('l1')
     expect(runAgentTool(project, null, 'todo', { kind: 'contradiction' }).result).toBe(
@@ -740,7 +736,9 @@ describe('the agent tools (F-5.22)', () => {
     )
     for (let i = 0; i < AGENT_TODO_ITEMS + 5; i++) add(`x${i}`, 'gap')
     const capped = runAgentTool(loadAgentProject(db), null, 'todo', {}).result
-    expect(capped.split('\n').filter((line) => line.startsWith('['))).toHaveLength(AGENT_TODO_ITEMS)
+    expect(capped.split('\n').filter((line) => /^t\d+ \[/.test(line))).toHaveLength(
+      AGENT_TODO_ITEMS
+    )
     expect(capped).toContain('…and 7 more.')
   })
 

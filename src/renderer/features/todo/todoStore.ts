@@ -72,6 +72,11 @@ interface TodoState {
   settle: (id: string, status: 'done' | 'dismissed') => Promise<void>
   /** Undo of the last settle. */
   undo: () => Promise<void>
+  /**
+   * F-5.25 (agent.v8): reopens settled items (the chat's Undo of a settle); a contradiction,
+   * settled in the consistency checker, stays settled. Reads the list again.
+   */
+  reopen: (ids: readonly string[]) => Promise<void>
   /** Forgets the last settle (its Undo offer closes). */
   forgetSettled: () => void
   /** Starts going through the list at `id` (the first item when null) and jumps to its passage. */
@@ -253,6 +258,20 @@ export const useTodoStore = create<TodoState>((set, get) => {
         set({ settled: null })
         await get().load()
       })
+    },
+
+    async reopen(ids) {
+      const mine = generation
+      for (const id of ids) {
+        if (continuityFindingIdOf(id) !== null) continue
+        await track(id, async () => {
+          await ipc().invoke('todo:reopen', { id })
+        })
+        if (mine !== generation) return
+      }
+      const settled = get().settled
+      if (settled !== null && ids.includes(settled.id)) set({ settled: null })
+      await get().load()
     },
 
     forgetSettled() {

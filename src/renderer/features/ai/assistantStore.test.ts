@@ -34,6 +34,7 @@ import { locateText } from '@renderer/features/editor/locateText'
 import { SETTINGS_SAVE_DELAY_MS } from '@renderer/features/editor/settingsStore'
 import { flushPendingSaves, resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { entityFixture } from '@renderer/features/entities/entityFixture'
@@ -330,6 +331,7 @@ beforeEach(() => {
   resetProposalStore()
   resetPendingSaves()
   resetTagStore()
+  resetLayoutStore()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
   setIpcClient(deferredClient(STORED))
@@ -342,6 +344,7 @@ afterEach(() => {
   resetDocumentStore()
   resetActiveEditorStore()
   resetAiActivityStore()
+  resetLayoutStore()
   useTreeStore.getState().clear()
   vi.useRealTimers()
 })
@@ -1071,6 +1074,39 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
     expect(renames).toEqual([{ id: 'sc-1', title: 'The ridge' }])
     expect(changes().map((c) => c.status)).toEqual(['applied', 'pending'])
     expect(settles).toEqual([])
+  })
+
+  it('undoes the last turn when asked (it asks, as a deletion) and opens the Library at once in Ask (F-5.25, agent.v8)', async () => {
+    const firstId = await answerWithEdits(true)
+    expect(renames).toEqual([{ id: 'sc-1', title: 'The ridge' }])
+    inMode('ask')
+    const asking = store().send('Undo that, and open the Library.')
+    await settle()
+    const request = queries[1]
+    if (!request) throw new Error('nothing was asked')
+    const base = agentOk(request.input.requestId)
+    if (!base.ok) throw new Error('agentOk failed')
+    request.resolve({
+      ...base,
+      changes: [
+        { edit: { kind: 'undoTurn' }, violation: null },
+        { edit: { kind: 'open', dialog: 'library' }, violation: null }
+      ]
+    })
+    await asking
+    await settle()
+    const messageId = active().messages.at(-1)?.id ?? ''
+    expect(changes().map((c) => c.status)).toEqual(['pending', 'applied'])
+    expect(useLayoutStore.getState().layout.sidebar.tab).toBe('library')
+    const undoTurn = active().messages.at(-1)?.agent?.changes[0]
+    await store().applyChange(messageId, undoTurn?.id ?? '')
+    expect(renames.at(-1)).toEqual({ id: 'sc-1', title: 'Scene 1' })
+    const first = active().messages.find((m) => m.id === firstId)
+    expect(first?.agent?.changes.map((c) => c.status)).toEqual(['undone', 'pending'])
+    expect(changes().map((c) => c.status)).toEqual(['applied', 'applied'])
+    // An applied undo never runs twice.
+    await store().applyChange(messageId, undoTurn?.id ?? '')
+    expect(changes()[0]?.status).toBe('applied')
   })
 
   describe('insertions as ghost text (2026-10-07)', () => {

@@ -24,11 +24,16 @@ interface IndexingState {
   resume: () => Promise<void>
   /** Queues every scene whose summary is missing or out of date, and says how many. */
   indexAll: () => Promise<void>
+  /**
+   * `indexAll` without the toasts (F-5.25, the chat's `summaries` edit): answers what it did in a
+   * sentence, and throws with the cause and the next step when the dial or the toggle refuses.
+   */
+  queueAll: () => Promise<string>
   /** Forgets the queue (project close). */
   clear: () => void
 }
 
-export const useIndexingStore = create<IndexingState>((set) => ({
+export const useIndexingStore = create<IndexingState>((set, get) => ({
   status: IDLE_INDEX_QUEUE,
 
   async load() {
@@ -58,21 +63,20 @@ export const useIndexingStore = create<IndexingState>((set) => ({
 
   async indexAll() {
     try {
-      const result = await ipc().invoke('jobs:indexAll', undefined)
-      if (!result.ok) {
-        // The dial or the toggle refused: the message says which, the next step says what to do.
-        toast.error(`${result.message} ${result.nextStep}`.trim())
-        return
-      }
-      set({ status: result.status })
-      toast.success(
-        result.queued === 0
-          ? 'Every scene is up to date.'
-          : `Queued ${result.queued} ${result.queued === 1 ? 'scene' : 'scenes'} for a summary.`
-      )
+      toast.success(await get().queueAll())
     } catch (err: unknown) {
+      // The dial or the toggle refused: the message says which, the next step says what to do.
       toast.error(describeError(err))
     }
+  },
+
+  async queueAll() {
+    const result = await ipc().invoke('jobs:indexAll', undefined)
+    if (!result.ok) throw new Error(`${result.message} ${result.nextStep}`.trim())
+    set({ status: result.status })
+    return result.queued === 0
+      ? 'Every scene is up to date.'
+      : `Queued ${result.queued} ${result.queued === 1 ? 'scene' : 'scenes'} for a summary.`
   },
 
   clear() {

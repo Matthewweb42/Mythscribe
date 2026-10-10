@@ -26,7 +26,7 @@ import {
   type StoryCategory
 } from '@shared/categories'
 import { ENTITY_NAME_MAX, toEntityNameKey } from '@shared/entities'
-import { sheetAt, type Fact, type FactStatus } from '@shared/facts'
+import { FactStatus, isFieldFact, sheetAt, type Fact } from '@shared/facts'
 import type { Entity } from '@shared/ipc/contract'
 import { passageParagraphs } from '@shared/mentions'
 import { RELATION_INVERSE_LABEL, RELATION_LABEL, relationTypeOf } from '@shared/relations'
@@ -35,7 +35,7 @@ import { SCENE_SYNOPSIS_MAX, parseStoredSceneMeta } from '@shared/sceneMeta'
 import { STORY_MAP_NOW_MARK, sceneProgress } from '@shared/storyTime'
 import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, toTagName, type TagCategory } from '@shared/tags'
 import { THREAD_KIND, THREAD_STATUS_LABEL, deriveThreads, type ThreadView } from '@shared/threads'
-import { TODO_KINDS, TODO_KIND_NOUN, TodoKind } from '@shared/todo'
+import { TODO_KINDS, TODO_KIND_NOUN, TodoKind, type TodoItem } from '@shared/todo'
 import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
 import { listCategories } from '../entity/categoryStore'
@@ -73,6 +73,11 @@ export interface AgentProject {
   entities: Entity[]
   /** F-5.23: where now is, so every scene a tool returns says whether it has happened yet. */
   time: StoryTime
+  /**
+   * F-5.25 (agent.v8): the open To do items in the order the `todo` tool numbers them (`t1`, `t2`,
+   * …), read once per run so a settle edit names the item the model was shown.
+   */
+  todo?: TodoItem[]
 }
 
 /**
@@ -508,27 +513,35 @@ function findPassages(project: AgentProject, query: string): ToolOutcome {
 /** The most To do items one call lists. */
 export const AGENT_TODO_ITEMS = 30
 
+/** The open To do items grouped by kind in the list's order, as the run numbers them (read once). */
+function todoInOrder(project: AgentProject): TodoItem[] {
+  project.todo ??= (() => {
+    const items = listTodo(project.db).items
+    return TODO_KINDS.flatMap((each) => items.filter((item) => item.kind === each))
+  })()
+  return project.todo
+}
+
 /**
  * The open To do list (F-9.16, agent.v5), grouped by kind in the list's order, one line per item:
- * `[Gap] Mara: why (n3)`, the ref naming the item's scene when it has one. A known `kind` keeps
- * that kind only; anything else lists all. At most `AGENT_TODO_ITEMS` lines within the result cap.
- * The items are what the book leaves open, as the list states them: the agent reports them, it
- * never resolves one.
+ * `t3 [Gap] Mara: why (n3)`, the ref naming the item's scene when it has one. Since agent.v8
+ * (F-5.25) each line opens with the item's ref (`t1`, `t2`, … across the whole list), which a
+ * settle edit names. A known `kind` keeps that kind only; anything else lists all. At most
+ * `AGENT_TODO_ITEMS` lines within the result cap. The items are what the book leaves open, as the
+ * list states them: the agent reports them, and settles one only when the author says so.
  */
 function todo(project: AgentProject, kind: unknown): string {
   const wanted = TodoKind.safeParse(kind)
-  const items = listTodo(project.db).items.filter(
-    (item) => !wanted.success || item.kind === wanted.data
-  )
-  if (items.length === 0) {
+  const all = todoInOrder(project)
+  const ordered = all.filter((item) => !wanted.success || item.kind === wanted.data)
+  if (ordered.length === 0) {
     return wanted.success
       ? `The To do list has no open ${TODO_KIND_NOUN[wanted.data].toLowerCase()} items.`
       : 'The To do list is empty: nothing is left to figure out right now.'
   }
-  const ordered = TODO_KINDS.flatMap((each) => items.filter((item) => item.kind === each))
   const lines = ordered.slice(0, AGENT_TODO_ITEMS).map((item) => {
     const ref = item.nodeId === null ? undefined : project.refOf.get(item.nodeId)
-    return `[${TODO_KIND_NOUN[item.kind]}] ${item.subject}: ${item.why}${ref === undefined ? '' : ` (${ref})`}`
+    return `t${all.indexOf(item) + 1} [${TODO_KIND_NOUN[item.kind]}] ${item.subject}: ${item.why}${ref === undefined ? '' : ` (${ref})`}`
   })
   const more =
     ordered.length > AGENT_TODO_ITEMS ? `\n…and ${ordered.length - AGENT_TODO_ITEMS} more.` : ''
@@ -938,7 +951,12 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
       const row = nodeByRef(project, edit.id)
       if (!row?.parentId) return { error: 'not a document or folder' }
       const add = text(edit.text)
-      if (!add) return { error: 'no "text"' }
+      if (!add) {
+        // F-5.25 (agent.v8): `"text":""` empties the notes; it asks, as a deletion.
+        if (edit.text !== '') return { error: 'no "text"' }
+        if (notesText(row.notes, row.id).trim() === '') return { error: 'the notes are empty' }
+        return { edit: { kind: 'notesClear', nodeId: row.id, title: nameOf(row) } }
+      }
       return { edit: { kind: 'notes', nodeId: row.id, title: nameOf(row), add } }
     }
     case 'sheet': {
@@ -1073,6 +1091,20 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
       return resolveSheetMerge(project, edit)
     case 'create_sheet':
       return resolveSheetCreate(project, edit)
+    case 'status':
+      return resolveStatus(project, edit)
+    case 'todo':
+      return resolveTodoSettle(project, edit)
+    case 'undo':
+      return { edit: { kind: 'undoTurn' } }
+    case 'summaries':
+      return { edit: { kind: 'summaries' } }
+    case 'open': {
+      const dialog = str(edit.dialog).trim().toLowerCase()
+      if (dialog !== 'upload' && dialog !== 'library')
+        return { error: 'dialog is upload or library' }
+      return { edit: { kind: 'open', dialog } }
+    }
     default:
       return { error: `unknown edit "${kind}"` }
   }
@@ -1358,5 +1390,108 @@ function resolveSheetCreate(project: AgentProject, edit: Record<string, unknown>
   if (taken) return { error: `a sheet called "${name}" exists` }
   return {
     edit: { kind: 'sheetCreate', category: category.id, categoryName: category.noun, name }
+  }
+}
+
+/**
+ * F-5.25 (agent.v8, the audit's fix 7): `{"edit":"status","name","field","value","status"}` marks
+ * a record canon, plan, or idea (no field), or what the scenes state of one field (a field id or
+ * label, or a relationship type; `value` keeps the statements holding those words);
+ * `{"edit":"status","id","status"}` marks a document's notes. Only what would change is named.
+ */
+function resolveStatus(project: AgentProject, edit: Record<string, unknown>): ResolvedEdit {
+  const status = FactStatus.safeParse(str(edit.status).trim().toLowerCase())
+  if (!status.success) return { error: 'status must be canon, plan, or idea' }
+  const to = status.data
+  if (edit.name === undefined) {
+    const row = nodeByRef(project, edit.id)
+    if (!isDocument(row)) return { error: `${str(edit.id) || 'the id'} is not a document` }
+    const before = parseStoredSceneMeta(row.sceneMeta).notesStatus
+    if (before === to) return { error: 'no change' }
+    return {
+      edit: {
+        kind: 'status',
+        target: 'notes',
+        id: row.id,
+        name: project.titleOf(row.id) || row.title,
+        label: '',
+        status: to,
+        items: [{ id: row.id, before }]
+      }
+    }
+  }
+  const entity = recordByName(project, edit.name)
+  if (entity === undefined) return { error: `no record called "${str(edit.name)}"` }
+  const fieldArg = str(edit.field).trim()
+  if (fieldArg === '') {
+    if (entity.status === to) return { error: 'no change' }
+    return {
+      edit: {
+        kind: 'status',
+        target: 'record',
+        id: entity.id,
+        name: entity.name,
+        label: '',
+        status: to,
+        items: [{ id: entity.id, before: entity.status }]
+      }
+    }
+  }
+  const category = categoryOf(entity.kind, listCategories(project.db))
+  const key = fieldArg.toLowerCase()
+  const field = category.fields.find(
+    (f) => f.id.toLowerCase() === key || f.label.toLowerCase() === key
+  )
+  const attribute = field?.id.toLowerCase() ?? key
+  const words = normalizeForMatch(str(edit.value))
+  const facts = listFactsForEntity(project.db, entity.id).filter(
+    (fact) =>
+      fact.entityId === entity.id &&
+      !fact.hidden &&
+      (isFieldFact(fact)
+        ? fact.attribute.toLowerCase() === attribute
+        : relationTypeOf(fact.attribute) === key) &&
+      (words === '' || normalizeForMatch(fact.value).includes(words)) &&
+      fact.status !== to
+  )
+  if (facts.length === 0) {
+    return { error: `nothing stated of ${entity.name}'s ${fieldArg} would change` }
+  }
+  if (facts.length > AGENT_BULK_MAX) return { error: `more than ${AGENT_BULK_MAX} statements` }
+  return {
+    edit: {
+      kind: 'status',
+      target: 'facts',
+      id: entity.id,
+      name: entity.name,
+      label: field === undefined ? fieldArg : categoryFieldLabel(category, field.id),
+      status: to,
+      items: facts.map((fact) => ({ id: fact.id, before: fact.status }))
+    }
+  }
+}
+
+/**
+ * F-5.25 (agent.v8, the audit's fix 5): `{"edit":"todo","ids":["t2"],"done":true}` settles the
+ * To do items the `todo` tool numbered (`"done":false` dismisses them: "not a problem").
+ */
+function resolveTodoSettle(project: AgentProject, edit: Record<string, unknown>): ResolvedEdit {
+  const all = todoInOrder(project)
+  const refs: unknown[] = Array.isArray(edit.ids) ? edit.ids : [edit.ids]
+  const items: TodoItem[] = []
+  for (const ref of refs) {
+    const match = /^t?(\d+)$/i.exec(str(ref).trim())
+    const item = match === null ? undefined : all[Number(match[1]) - 1]
+    if (item === undefined) return { error: `${str(ref) || 'an id'} is not an open To do item` }
+    if (!items.includes(item)) items.push(item)
+  }
+  if (items.length === 0) return { error: 'no "ids"' }
+  if (items.length > AGENT_BULK_MAX) return { error: `more than ${AGENT_BULK_MAX} items` }
+  return {
+    edit: {
+      kind: 'todo',
+      items: items.map((item) => ({ id: item.id, subject: item.subject })),
+      status: edit.done === false ? 'dismissed' : 'done'
+    }
   }
 }
