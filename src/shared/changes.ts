@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ClearSnapshot } from './bibleClear'
 import { SheetPatch, TagPatch } from './organise'
 
 /**
@@ -23,7 +24,9 @@ export const CHANGE_KINDS = [
   'tagEdit',
   'merge',
   'delete',
-  'category'
+  'category',
+  /** F-5.25: the chat's Clear the story bible, one row for everything it removed. */
+  'clear'
 ] as const
 export const ChangeKind = z.enum(CHANGE_KINDS)
 export type ChangeKind = z.infer<typeof ChangeKind>
@@ -107,7 +110,12 @@ export const ChangeUndo = z.discriminatedUnion('type', [
   /** F-9.15: a tag the chat took off a scene put back on it. */
   z.object({ type: z.literal('linkTag'), nodeId: z.string(), tagId: z.string() }),
   /** F-9.15: a change that cannot be taken back here (a merge, a deletion); the undo refuses with `reason`. */
-  z.object({ type: z.literal('none'), reason: z.string().min(1).max(300) })
+  z.object({ type: z.literal('none'), reason: z.string().min(1).max(300) }),
+  /**
+   * F-5.25: what a clear removed, put back row for row; refused when something of the same name
+   * has been made since (a re-upload), so nothing is doubled. Only main writes it.
+   */
+  z.object({ type: z.literal('restoreCleared'), snapshot: ClearSnapshot })
 ])
 export type ChangeUndo = z.infer<typeof ChangeUndo>
 
@@ -121,7 +129,8 @@ export const RECORDED_UNDO_OF: Readonly<Record<ChangeKind, readonly ChangeUndo['
   tagEdit: ['restoreTag'],
   merge: ['none'],
   delete: ['none'],
-  category: ['none']
+  category: ['none'],
+  clear: []
 }
 
 export const CHANGE_LABEL_MAX = 300
@@ -211,5 +220,6 @@ export const CHANGE_KIND_LABEL: Readonly<Record<ChangeKind, string>> = {
   tagEdit: 'Tag',
   merge: 'Merge',
   delete: 'Deleted',
-  category: 'New category'
+  category: 'New category',
+  clear: 'Cleared'
 }

@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { describeEdit, type AgentEdit } from '@shared/agent'
+import { clearSelectionOf } from '@shared/bibleClear'
 import { NO_UNDO_REASON, changeLabel } from '@shared/changes'
 import type { EntityFieldId, EntityFields } from '@shared/entities'
 import { AI_ORIGIN_MARK } from '@shared/provenance'
@@ -19,7 +20,13 @@ import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { patchSceneMeta } from '@renderer/features/editor/sceneMetaStore'
 import { appendNotePoints } from '@renderer/features/editor/sceneSuggestStore'
-import { logAppliedChange, type ChangeRun } from '@renderer/features/changes/changesStore'
+import {
+  forgetRecords,
+  logAppliedChange,
+  refreshLibraryAndNotes,
+  useChangesStore,
+  type ChangeRun
+} from '@renderer/features/changes/changesStore'
 import { useEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -182,6 +189,24 @@ export async function applyAgentEdit(
         },
         null
       )
+    }
+    case 'clear': {
+      // F-5.25: the open sheet page and unsaved notes are saved first, so the backup and the
+      // Undo hold what is on screen. Main backs up, clears, and logs one row; its Undo is ours.
+      await useEntityDraftStore.getState().flush()
+      await useNotesStore.getState().flush()
+      const result = await ipc().invoke('bible:clear', {
+        selection: clearSelectionOf(edit.options),
+        run: run.run
+      })
+      const draft = useEntityDraftStore.getState().draft
+      if (draft !== null && result.removedEntityIds.includes(draft.id)) {
+        useEntityDraftStore.getState().close()
+      }
+      forgetRecords(result.removedEntityIds, result.removedTagIds)
+      refreshLibraryAndNotes()
+      const id = result.entry.id
+      return () => useChangesStore.getState().undo(id)
     }
   }
 }

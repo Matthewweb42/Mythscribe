@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CLEAR_OPTIONS_MAX, ClearOption, describeClearCounts, tickedCounts } from './bibleClear'
 import { EntityFieldId } from './entities'
 import { SCENE_SYNOPSIS_MAX } from './sceneMeta'
 
@@ -215,6 +216,15 @@ export const AgentEdit = z.discriminatedUnion('kind', [
     target: z.enum(['node', 'sheet', 'tag']),
     id: z.string(),
     name: z.string()
+  }),
+  /**
+   * F-5.25 (agent.v7): clear the story bible, whole kinds at once. One line per kind the project
+   * has (each sheet category, each tag category, the Library uploads, the notes), ticked as the
+   * request named them; the author unticks on the card before Delete. Never scenes or chapters.
+   */
+  z.object({
+    kind: z.literal('clear'),
+    options: z.array(ClearOption).min(1).max(CLEAR_OPTIONS_MAX)
   })
 ])
 export type AgentEdit = z.infer<typeof AgentEdit>
@@ -285,9 +295,9 @@ export const AgentTurn = z.object({
 })
 export type AgentTurn = z.infer<typeof AgentTurn>
 
-/** Deleting or merging away scenes, chapters, sheets, or tags: these ask even in Auto. */
+/** Deleting or merging away scenes, chapters, sheets, or tags, or clearing them (F-5.25): these ask even in Auto. */
 export function isDeletion(edit: AgentEdit): boolean {
-  return edit.kind === 'delete' || edit.kind === 'merge'
+  return edit.kind === 'delete' || edit.kind === 'merge' || edit.kind === 'clear'
 }
 
 /** Prose the edit puts into the book, which the voice check reads; empty for none. */
@@ -340,6 +350,8 @@ export function describeEdit(edit: AgentEdit): string {
         : `Removed #${edit.tag} from ${edit.title}`
     case 'delete':
       return `Delete ${TARGET_NOUN[edit.target]}${edit.name}`
+    case 'clear':
+      return `Delete ${describeClearCounts(tickedCounts(edit.options))} from the story bible`
   }
 }
 

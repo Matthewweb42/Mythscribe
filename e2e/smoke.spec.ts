@@ -543,6 +543,9 @@ let insertAnchor = ''
 const AGENT_EDIT_RULES_OPENING = 'To change the project, add "edits"'
 /** What the edit puts in place of a sentence Scene 1 holds once. */
 const AGENT_EDIT_REPLACEMENT = 'The storm came in at dusk.'
+/** F-5.25: a bulk delete, which the agent answers at once with one clear edit (agent.v7). */
+const AGENT_CLEAR_MESSAGE = 'Delete all my character sheets so I can start fresh.'
+const AGENT_CLEAR_ANSWER = 'Tick what should go; a backup comes first.'
 const QUERY_QUESTION = 'Where does the storm reach the ridge?'
 /** A recap asked in Query mode; its words rank Scene 1 first, as the question above does. */
 const RECAP_QUESTION = 'What happened on the ridge in the storm?'
@@ -585,6 +588,14 @@ function chatAgentReply(messages: { role: string; content: string }[]): string {
       found: true,
       answer: LOOKUP_ANSWER,
       citations: [{ id: hit?.[1] ?? 'n1', quote: lookupQuote }]
+    })
+  }
+  if (asked === AGENT_CLEAR_MESSAGE) {
+    return JSON.stringify({
+      answer: AGENT_CLEAR_ANSWER,
+      found: true,
+      citations: [],
+      edits: [{ edit: 'clear', sheets: ['characters'] }]
     })
   }
   if (looked.length === 0) {
@@ -5631,6 +5642,50 @@ test('create, close, reopen a project on disk', async () => {
   await expect.poll(() => documentTextWithoutGhost()).toBe(sceneBefore)
   await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
   await expect.poll(async () => (await aiSettings()).chatMode).toBe('ask')
+
+  // F-5.25: "delete all my character sheets" is one clear edit, never Organise. The card asks
+  // with a checkbox per kind the project has, Characters ticked as the message named it; Delete
+  // backs up, removes the sheets in one go, and its Undo puts them back.
+  const listSheets = (): Promise<string[]> =>
+    page.evaluate(async () => {
+      const listed = (await window.mythscribe.invoke('entity:list', undefined)) as IpcResult<
+        Entity[]
+      >
+      if (!listed.ok) throw new Error(listed.error.message)
+      return listed.data.filter((e) => e.kind === 'character').map((e) => e.name)
+    })
+  const clearMe = await page.evaluate(
+    () =>
+      window.mythscribe.invoke('entity:create', {
+        kind: 'character',
+        name: 'Clearme'
+      }) as Promise<IpcResult<Entity>>
+  )
+  if (!clearMe.ok) throw new Error(`entity:create failed: ${clearMe.error.message}`)
+  const charactersBefore = await listSheets()
+  expect(charactersBefore).toContain('Clearme')
+  await messageBox.fill(AGENT_CLEAR_MESSAGE)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(6)
+  const clearTurn = turns.nth(5)
+  await expect(clearTurn).toContainText(AGENT_CLEAR_ANSWER)
+  const clearCard = clearTurn.getByTestId('agent-change')
+  await expect(clearCard).toContainText('Are these the things you want to delete?')
+  await expect(clearCard.getByRole('checkbox', { name: /^Characters \(\d+\)$/ })).toBeChecked()
+  await expect(clearCard.getByTestId('agent-change-apply')).toContainText(
+    `Delete ${charactersBefore.length} ${charactersBefore.length === 1 ? 'sheet' : 'sheets'}`
+  )
+  await clearCard.getByTestId('agent-change-apply').click()
+  await expect(clearCard).toHaveAttribute('data-status', 'applied')
+  await expect.poll(listSheets).toEqual([])
+  await clearCard.getByTestId('agent-change-undo').click()
+  await expect(clearCard).toHaveAttribute('data-status', 'undone')
+  await expect.poll(async () => (await listSheets()).sort()).toEqual([...charactersBefore].sort())
+  const clearedAway = await page.evaluate(
+    (id) => window.mythscribe.invoke('entity:delete', { id }) as Promise<IpcResult<null>>,
+    clearMe.data.id
+  )
+  if (!clearedAway.ok) throw new Error(`entity:delete failed: ${clearedAway.error.message}`)
 
   // F-11.1d: the outline marks each row Planned, Drafted, or Revised (Scene 1 has text, the
   // empty scenes of the other chapters are plans). With Plan links on, Find links asks the fast

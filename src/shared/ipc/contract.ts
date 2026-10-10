@@ -26,6 +26,7 @@ import {
   AgentStep
 } from '../agent'
 import { AiModelChoice, AiRouting } from '../aiRouting'
+import { ClearCounts, ClearSelection } from '../bibleClear'
 import { AiSettings, AiSource, AiSwitch } from '../aiSettings'
 import { ExportProgress } from '../bookExport'
 import {
@@ -342,6 +343,17 @@ export type Entity = z.infer<typeof Entity>
  * An undo of the Changes log as the windows get it (F-9.13): F-9.15 adds the sheets and tags it
  * put back, as they now stand, so the stores and an open sheet page take them at once.
  */
+/** What `bible:clear` did (F-5.25): its one Changes row, the counts, and what went, for the stores. */
+export const BibleClearResult = z.object({
+  entry: ChangeEntry,
+  counts: ClearCounts,
+  removedEntityIds: z.array(z.string()),
+  removedTagIds: z.array(z.string()),
+  removedLibraryIds: z.array(z.string()),
+  notesNodeIds: z.array(z.string())
+})
+export type BibleClearResult = z.infer<typeof BibleClearResult>
+
 export const ChangeUndoReply = ChangeUndoResult.extend({
   entities: z.array(Entity),
   tags: z.array(Tag)
@@ -1850,6 +1862,20 @@ export const contract = {
    * Answers the logged rows; pushes `changes:changed`.
    */
   'changes:record': { input: RecordChangesInput, output: z.array(ChangeEntry) },
+  /**
+   * F-5.25: the chat's Clear the story bible, after the author's Delete on its card. Takes a full
+   * backup first (the Settings › Backups path; a failed backup refuses with its cause and nothing
+   * is deleted), then removes what `selection` ticks in one transaction: the sheets of those
+   * categories, the tags of those tag categories (off their scenes too; scene text is never
+   * touched), every Library upload, the notes of every document. Logs one Changes row under
+   * `chat:<run>` whose Undo puts it all back. Pushes `changes:changed`, `documentTag:changed`,
+   * `mention:changed`, `continuity:changed`, `fact:changed`. VALIDATION when nothing is ticked or
+   * nothing of the ticked kinds is left.
+   */
+  'bible:clear': {
+    input: z.object({ selection: ClearSelection, run: z.string().min(1).max(100) }),
+    output: BibleClearResult
+  },
   /**
    * The author's own relationship between two sheets, or event on a thread (F-9.14): a fact that
    * is no sheet field, undated (`nodeId` null, "from the start") or holding from a scene. The same

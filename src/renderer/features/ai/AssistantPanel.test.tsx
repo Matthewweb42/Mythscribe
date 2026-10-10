@@ -16,7 +16,9 @@ import {
 } from '@renderer/features/editor/activeEditorStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { entityFixture } from '@renderer/features/entities/entityFixture'
+import { resetChangesStore } from '@renderer/features/changes/changesStore'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
+import { resetLibraryStore } from '@renderer/features/library/libraryStore'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
@@ -55,6 +57,8 @@ let routeAction: RouteAction
 /** The zod input shape: a turn stored before F-5.7 carries no `query`. */
 let sets: Input<'conversations:set'>[]
 let cancels: string[]
+/** F-5.25: what the clear card's Delete sent. */
+let clears: Input<'bible:clear'>[]
 
 /**
  * `conversations:get` answers with `stored`; writes record; `ai:route` picks `routeAction` at
@@ -96,6 +100,30 @@ function install(stored: Conversations): void {
         cancels.push((input as Input<'ai:cancel'>).requestId)
         return { cancelled: true } as Output<C>
       }
+      if (channel === 'bible:clear') {
+        clears.push(input as Input<'bible:clear'>)
+        return {
+          entry: {
+            id: 'ch-1',
+            runId: 'chat:m-2',
+            createdAt: '2026-10-10T10:00:00.000Z',
+            nodeId: null,
+            quote: null,
+            kind: 'clear',
+            entityId: null,
+            label: 'Cleared 2 sheets',
+            status: 'applied',
+            source: 'chat',
+            undoable: true
+          },
+          counts: { sheets: 2, tags: 0, library: 0, notes: 0 },
+          removedEntityIds: [],
+          removedTagIds: [],
+          removedLibraryIds: [],
+          notesNodeIds: []
+        } as Output<C>
+      }
+      if (channel === 'library:list') return [] as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -210,6 +238,9 @@ beforeEach(() => {
   routeAction = 'chat'
   sets = []
   cancels = []
+  clears = []
+  resetChangesStore()
+  resetLibraryStore()
   resetLayoutStore()
   resetAssistantStore()
   resetContinuityStore()
@@ -221,6 +252,8 @@ beforeEach(() => {
   useDialogStore.setState({ modals: [], toasts: [] })
 })
 afterEach(() => {
+  resetChangesStore()
+  resetLibraryStore()
   resetLayoutStore()
   resetAssistantStore()
   resetContinuityStore()
@@ -801,6 +834,82 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
       'uses a banned phrase'
     )
     expect(within(turns()[1]!).getByTestId('agent-apply-all')).toBeInTheDocument()
+  })
+
+  it('F-5.25: a clear asks with a checkbox per kind, pre-ticked; unticking changes what Delete removes', async () => {
+    const CLEAR = {
+      kind: 'clear',
+      options: [
+        { group: 'sheets', id: 'character', label: 'Characters', count: 2, checked: true },
+        { group: 'sheets', id: 'setting', label: 'Places', count: 1, checked: true },
+        { group: 'tags', id: 'tone', label: 'Tone', count: 3, checked: true },
+        { group: 'library', id: 'library', label: 'Library uploads', count: 1, checked: true },
+        { group: 'notes', id: 'notes', label: 'Notes on scenes and chapters', count: 4, checked: false }
+      ]
+    } as const satisfies AgentChange['edit']
+    await mountOpen(withChanges([change('e-1', { ...CLEAR, options: [...CLEAR.options] })]))
+    const card = within(turns()[1]!).getByTestId('agent-change')
+    expect(card).toHaveTextContent('Are these the things you want to delete?')
+    expect(card).toHaveTextContent('A backup is taken first, and Undo puts everything back.')
+    const boxes = within(card).getAllByTestId('agent-clear-option')
+    expect(boxes.map((box) => (box as HTMLInputElement).checked)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false
+    ])
+    const apply = within(card).getByTestId('agent-change-apply')
+    expect(apply).toHaveTextContent('Delete 3 sheets, 3 tags, 1 upload')
+
+    // The author keeps the places and the uploads.
+    await userEvent.click(within(card).getByRole('checkbox', { name: 'Places (1)' }))
+    await userEvent.click(within(card).getByRole('checkbox', { name: 'Library uploads (1)' }))
+    expect(within(turns()[1]!).getByTestId('agent-change-apply')).toHaveTextContent(
+      'Delete 2 sheets, 3 tags'
+    )
+    // Kept on the turn (which is saved), so a reload shows the card as left.
+    const stored = useAssistantStore.getState().conversations?.items[0]?.messages[1]?.agent
+      ?.changes[0]?.edit
+    expect(stored?.kind === 'clear' ? stored.options.map((o) => o.checked) : null).toEqual([
+      true,
+      false,
+      true,
+      false,
+      false
+    ])
+
+    await userEvent.click(within(turns()[1]!).getByTestId('agent-change-apply'))
+    expect(clears).toEqual([
+      {
+        selection: { sheets: ['character'], tags: ['tone'], library: false, notes: false },
+        run: 'm-2'
+      }
+    ])
+    const done = within(turns()[1]!).getByTestId('agent-change')
+    expect(done).toHaveAttribute('data-status', 'applied')
+    expect(within(done).getByTestId('agent-change-undo')).toBeInTheDocument()
+  })
+
+  it('F-5.25: Delete waits for at least one tick, and a clear is never part of Apply all', async () => {
+    await mountOpen(
+      withChanges([
+        change('e-1', {
+          kind: 'clear',
+          options: [{ group: 'tags', id: 'tone', label: 'Tone', count: 3, checked: false }]
+        }),
+        change('e-2', TEXT_EDIT),
+        change('e-3', { ...TEXT_EDIT, find: 'Nobody followed.' })
+      ])
+    )
+    const cards = within(turns()[1]!).getAllByTestId('agent-change')
+    expect(within(cards[0]!).getByTestId('agent-change-apply')).toBeDisabled()
+    expect(within(turns()[1]!).getByTestId('agent-apply-all')).toBeInTheDocument()
+    await userEvent.click(within(cards[0]!).getByTestId('agent-change-skip'))
+    expect(within(turns()[1]!).getAllByTestId('agent-change')[0]).toHaveTextContent(
+      'Skipped: Delete nothing from the story bible'
+    )
+    expect(clears).toEqual([])
   })
 })
 

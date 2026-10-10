@@ -18,6 +18,7 @@ import {
   ROUTE_SELECTION_PREVIEW_CHARS,
   type RouteAction
 } from '@shared/assistantRoute'
+import type { ClearGroup } from '@shared/bibleClear'
 import { DEFAULT_ASSISTANT_MODE, type AssistantMode } from '@shared/aiSettings'
 import {
   CHAT_HISTORY_TURNS,
@@ -212,6 +213,16 @@ interface AssistantState {
   skipChange: (messageId: string, changeId: string) => void
   /** 2026-10-07: the card's Accept for an insertion showing in the editor as ghost text (Tab). */
   acceptChange: (messageId: string, changeId: string) => void
+  /**
+   * F-5.25: ticks or unticks one line of a pending clear's card ("are these the things you want
+   * to delete?"); kept on the turn, so a reload shows the card as the author left it.
+   */
+  tickClearOption: (
+    messageId: string,
+    changeId: string,
+    option: { group: ClearGroup; id: string },
+    checked: boolean
+  ) => void
   /**
    * Takes an applied edit back (this session only: the undo lives in memory; for a sheet or tag
    * edit it calls the Changes log's undo, F-9.15).
@@ -758,6 +769,21 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
 
   acceptChange(_messageId, changeId) {
     acceptLanding(changeId)
+  },
+
+  tickClearOption(messageId, changeId, option, checked) {
+    const found = findChange(messageId, changeId)
+    const edit = found?.change.edit
+    if (found?.change.status !== 'pending' || edit?.kind !== 'clear') return
+    if (get().changing[changeId]) return
+    patchChange(messageId, changeId, {
+      edit: {
+        ...edit,
+        options: edit.options.map((line) =>
+          line.group === option.group && line.id === option.id ? { ...line, checked } : line
+        )
+      }
+    })
   },
 
   async undoChange(messageId, changeId) {

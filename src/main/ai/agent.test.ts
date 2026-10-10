@@ -51,9 +51,13 @@ import { todoItem } from '../db/schema'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import { AGENT_FINAL_TURN } from './prompts/agent.v1'
-import { AGENT_EDIT_RULES_V2, AGENT_RETRY_TURN } from './prompts/agent.v2'
-import { AGENT_ORGANISE_RULES } from './prompts/agent.v4'
+import { AGENT_RETRY_TURN } from './prompts/agent.v2'
 import { AGENT_LADDER_RULES, AGENT_RULES_V6, AGENT_STATUS_RULES } from './prompts/agent.v6'
+import {
+  AGENT_BULK_RULES,
+  AGENT_EDIT_RULES_V7,
+  AGENT_ORGANISE_RULES_V7
+} from './prompts/agent.v7'
 import { scanMentions } from '../tag/scanMentions'
 import { STORY_MAP_HEADING } from '@shared/storyTime'
 import {
@@ -211,13 +215,15 @@ describe('runAgent (F-5.22)', () => {
     // The open document is in every step; the tool results join as turns.
     const system = request(0).messages[0]?.content ?? ''
     expect(system.startsWith(AGENT_RULES_V6)).toBe(true)
-    expect(system).not.toContain(AGENT_EDIT_RULES_V2)
+    expect(system).not.toContain(AGENT_EDIT_RULES_V7)
     expect(system).toContain(`Open document ${ref(scenes[0])}:`)
     // F-5.23 (agent.v3): the story-time rule, then the story map with now on the open scene,
     // before the open document. F-9.10: version 4 adds the organise rule; F-5.24: version 6 the
-    // lookup ladder and the status labels.
-    expect(result.promptVersion).toBe('agent.v6')
-    expect(system).toContain(AGENT_ORGANISE_RULES)
+    // lookup ladder and the status labels; F-5.25: version 7 the bulk rule and the narrowed
+    // organise rule.
+    expect(result.promptVersion).toBe('agent.v7')
+    expect(system).toContain(AGENT_BULK_RULES)
+    expect(system).toContain(AGENT_ORGANISE_RULES_V7)
     expect(system).toContain(AGENT_LADDER_RULES)
     expect(result.organise).toBeNull()
     expect(system).toContain(AGENT_STATUS_RULES)
@@ -342,7 +348,7 @@ describe('runAgent, write runs (F-5.22)', () => {
       ]
     })
     const result = await run({ access: 'write' })
-    expect(request(0).messages[0]?.content).toContain(AGENT_EDIT_RULES_V2)
+    expect(request(0).messages[0]?.content).toContain(AGENT_EDIT_RULES_V7)
     expect(result.query).toBeNull()
     expect(result.changes.map((c) => c.edit)).toEqual([
       {

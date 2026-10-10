@@ -441,6 +441,24 @@ function scoreAgent(expected: 'tool' | 'answer', answer: string): LiveResult['ve
 }
 
 /**
+ * An answer that must carry an edit of one kind (F-5.25): a bulk delete must come back as a
+ * `clear` edit, not as an organise request or a string of single deletes.
+ */
+function scoreAgentEdit(expected: string, answer: string): LiveResult['verdict'] {
+  const reply = parseAgentReply(answer)
+  if (reply.kind !== 'answer')
+    return { kind: 'json', ok: false, problem: 'a lookup, not an answer' }
+  if (reply.organise !== undefined && reply.organise !== null)
+    return { kind: 'json', ok: false, problem: 'asked to organise' }
+  const kinds = reply.edits.map((edit) =>
+    typeof edit === 'object' && edit !== null && 'edit' in edit ? String(edit.edit) : ''
+  )
+  return kinds.includes(expected)
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: `no ${expected} edit (edits: ${kinds.join(', ') || 'none'})` }
+}
+
+/**
  * A story-time answer (F-5.23) scores on the rule the feature turns on: it must be an answer (not
  * another lookup), and it must not state as happened an event the author's notes only plan.
  */
@@ -753,6 +771,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreAgent(c.scoring.expected, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'agentEdit') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreAgentEdit(c.scoring.expected, reply.text)
         })
         continue
       }

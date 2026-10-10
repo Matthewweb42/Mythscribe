@@ -7,8 +7,10 @@ import {
   type RecordedChangeSource
 } from '@shared/changes'
 import type { ChangeUndoReply } from '@shared/ipc/contract'
+import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useEntityDraftStore } from '@renderer/features/entities/entityDraftStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { ipc } from '@renderer/lib/ipc'
 
@@ -58,15 +60,9 @@ export const useChangesStore = create<ChangesState>((set, get) => {
     const draft = useEntityDraftStore.getState()
     const reopened = result.entities.find((entity) => entity.id === draft.draft?.id)
     if (reopened !== undefined) draft.open(reopened)
-    entities.forget(result.removedEntityIds)
-    // A sheet whose tag went keeps no tag, as main cleared it (F-9.4: the sheet outlives its tag).
-    const tags = new Set(result.removedTagIds)
-    for (const id of entities.ids) {
-      const entity = useEntityStore.getState().byId[id]
-      if (entity?.tagId != null && tags.has(entity.tagId))
-        entities.merge({ ...entity, tagId: null })
-    }
-    useTagStore.getState().forget(result.removedTagIds)
+    forgetRecords(result.removedEntityIds, result.removedTagIds)
+    // F-5.25: a clear's Undo also put back uploads and notes, which no event reports.
+    if (result.entries.some((entry) => entry.kind === 'clear')) refreshLibraryAndNotes()
   }
   const track = async (key: string, task: () => Promise<ChangeUndoReply>): Promise<void> => {
     const mine = generation
@@ -139,6 +135,38 @@ export const useChangesStore = create<ChangesState>((set, get) => {
     }
   }
 })
+
+/**
+ * Drops sheets and tags main deleted from their stores; a sheet whose tag went keeps no tag, as
+ * main cleared it (F-9.4: the sheet outlives its tag). Used by an undo and by a clear (F-5.25).
+ */
+export function forgetRecords(entityIds: readonly string[], tagIds: readonly string[]): void {
+  const entities = useEntityStore.getState()
+  entities.forget(entityIds)
+  const tags = new Set(tagIds)
+  for (const id of useEntityStore.getState().ids) {
+    const entity = useEntityStore.getState().byId[id]
+    if (entity?.tagId != null && tags.has(entity.tagId)) {
+      useEntityStore.getState().merge({ ...entity, tagId: null })
+    }
+  }
+  useTagStore.getState().forget(tagIds)
+}
+
+/** F-5.25: reads the Library and the held notes again after a clear or its Undo. */
+export function refreshLibraryAndNotes(): void {
+  void useLibraryStore
+    .getState()
+    .load()
+    .catch(() => undefined)
+  const held = Object.keys(useNotesStore.getState().docs)
+  if (held.length > 0) {
+    void useNotesStore
+      .getState()
+      .reload(held)
+      .catch(() => undefined)
+  }
+}
 
 /** Where a store's applied change is logged: the source and the run (an Organise plan, a chat turn). */
 export interface ChangeRun {

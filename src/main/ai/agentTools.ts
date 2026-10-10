@@ -32,12 +32,13 @@ import { RELATION_INVERSE_LABEL, RELATION_LABEL, relationTypeOf } from '@shared/
 import { renderCard } from '@shared/sceneCard'
 import { SCENE_SYNOPSIS_MAX, parseStoredSceneMeta } from '@shared/sceneMeta'
 import { STORY_MAP_NOW_MARK, sceneProgress } from '@shared/storyTime'
-import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, toTagName } from '@shared/tags'
+import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, toTagName, type TagCategory } from '@shared/tags'
 import { THREAD_KIND, THREAD_STATUS_LABEL, deriveThreads, type ThreadView } from '@shared/threads'
 import { TODO_KINDS, TODO_KIND_NOUN, TodoKind } from '@shared/todo'
 import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
 import { listCategories } from '../entity/categoryStore'
+import { clearOptions, type ClearWanted } from '../knowledge/bibleClear'
 import { listEntities } from '../entity/entityStore'
 import { allFactsForEntities, factsForEntities, listFactsForEntity } from '../entity/factStore'
 import { sceneCardFor } from '../knowledge/sceneCard'
@@ -1015,7 +1016,57 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
       if (!row?.parentId) return { error: 'not a deletable id' }
       return { edit: { kind: 'delete', target: 'node', id: row.id, name: nameOf(row) } }
     }
+    case 'clear':
+      return resolveClear(project, edit)
     default:
       return { error: `unknown edit "${kind}"` }
   }
+}
+
+/** Whether a model's argument means "all of it": `"all"`, `true`, or `["all"]`. */
+const meansAll = (value: unknown): boolean =>
+  value === true ||
+  (typeof value === 'string' && value.trim().toLowerCase() === 'all') ||
+  (Array.isArray(value) && value.some((each) => meansAll(each)))
+
+/** The names a model's argument lists: one string or an array of them. */
+const namesIn = (value: unknown): string[] =>
+  (Array.isArray(value) ? value : [value]).filter(
+    (each): each is string => typeof each === 'string' && each.trim() !== ''
+  )
+
+/**
+ * F-5.25 (agent.v7): a clear of the story bible, read leniently. `sheets` and `tags` are `"all"`
+ * or names (a category's id, name, or singular, any case: "characters", "Places", "thread"; a tag
+ * category's id or label); `library` and `notes` are true for all. The edit lists every kind the
+ * project has, ticked where the request named it, so the author can tick more or fewer.
+ */
+function resolveClear(project: AgentProject, edit: Record<string, unknown>): ResolvedEdit {
+  const categories = listCategories(project.db)
+  const sheetIds = new Set<string>()
+  for (const name of namesIn(edit.sheets)) {
+    const key = name.trim().toLowerCase()
+    const found =
+      categoryArg(categories, key) ??
+      categories.find((c) => `${c.noun.toLowerCase()}s` === key || c.name.toLowerCase() === `${key}s`)
+    if (found !== undefined) sheetIds.add(found.id)
+  }
+  const tagIds = new Set<TagCategory>()
+  for (const name of namesIn(edit.tags)) {
+    const key = name.trim().toLowerCase()
+    const found = TAG_CATEGORIES.find(
+      (c) => c.toLowerCase() === key || TAG_CATEGORY_LABEL[c].toLowerCase() === key
+    )
+    if (found !== undefined) tagIds.add(found)
+  }
+  const wanted: ClearWanted = {
+    sheets: meansAll(edit.sheets) ? 'all' : sheetIds,
+    tags: meansAll(edit.tags) ? 'all' : tagIds,
+    library: meansAll(edit.library),
+    notes: meansAll(edit.notes)
+  }
+  const options = clearOptions(project.db, wanted)
+  if (options.length === 0) return { error: 'the story bible is already empty' }
+  if (!options.some((option) => option.checked)) return { error: 'nothing of those kinds' }
+  return { edit: { kind: 'clear', options } }
 }

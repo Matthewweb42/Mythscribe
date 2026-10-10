@@ -158,6 +158,7 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'changes:undo': 'write',
   'changes:undoRun': 'write',
   'changes:record': 'write',
+  'bible:clear': 'write',
   'fact:create': 'write',
   'fact:delete': 'write',
   'thread:list': 'read',

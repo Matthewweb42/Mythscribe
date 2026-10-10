@@ -30,6 +30,7 @@ import {
 import { deleteEntity, getEntity, updateEntity, type EntityDb } from '../entity/entityStore'
 import { setFactHidden } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
+import { restoreCleared } from './clearSnapshot'
 import { getDismissedNames, setDismissedNames } from '../project/settingsStore'
 import { addDocumentTag, removeDocumentTag } from '../tag/documentTagStore'
 import { deleteTag, getTagWithUsage, updateTag } from '../tag/tagStore'
@@ -161,6 +162,16 @@ function insertChanges(
     .all()
   pruneChanges(db, CHANGES_MAX)
   return rows
+}
+
+/** `logChanges`, answering the rows as the log lists them (F-5.25: the clear's one row). */
+export function logChangeEntries(
+  db: EntityDb,
+  runId: string,
+  changes: readonly ChangeInput[],
+  now: string
+): ChangeEntry[] {
+  return insertChanges(db, runId, changes, now).map(rowToEntry)
 }
 
 /** The parts of a sheet a patch names, compared as the store keeps them (trimmed; names by key). */
@@ -391,6 +402,8 @@ interface UndoTally {
   restoredEntityIds: Set<string>
   restoredTagIds: Set<string>
   removedImages: string[]
+  restoredLibraryIds: Set<string>
+  restoredNotesNodeIds: Set<string>
 }
 
 /**
@@ -401,6 +414,9 @@ export interface UndoOutcome extends ChangeUndoResult {
   restoredEntityIds: string[]
   restoredTagIds: string[]
   removedImages: string[]
+  /** F-5.25: Library uploads and documents' notes a cleared run put back. */
+  restoredLibraryIds: string[]
+  restoredNotesNodeIds: string[]
 }
 
 /** Undoes one applied row inside the caller's transaction; a row already undone is left alone. */
@@ -554,6 +570,19 @@ function undoRow(db: EntityDb, { row, undo }: ReadRow, tally: UndoTally): void {
     }
     case 'none':
       throw new AppError('VALIDATION', undo.reason, { id: row.id })
+    case 'restoreCleared': {
+      // F-5.25: everything a clear removed, back in this transaction (or refused whole).
+      const restored = restoreCleared(db, undo.snapshot)
+      for (const id of restored.entityIds) {
+        tally.restoredEntityIds.add(id)
+        tally.entityIds.add(id)
+      }
+      for (const id of restored.tagIds) tally.restoredTagIds.add(id)
+      for (const id of restored.linkNodeIds) tally.nodeIds.add(id)
+      for (const id of restored.libraryIds) tally.restoredLibraryIds.add(id)
+      for (const id of restored.notesNodeIds) tally.restoredNotesNodeIds.add(id)
+      break
+    }
   }
   const updated = db
     .update(knowledgeChange)
@@ -570,6 +599,8 @@ function undoRow(db: EntityDb, { row, undo }: ReadRow, tally: UndoTally): void {
  * newest first (the caller's order), so two edits of one sheet unwind in turn.
  */
 const UNDO_ORDER: Readonly<Record<ChangeKind, number>> = {
+  // F-5.25: a clear comes back first, so the turn's other changes unwind against what it removed.
+  clear: -1,
   tagLink: 0,
   fact: 1,
   sheetEdit: 1,
@@ -590,7 +621,9 @@ function undoRows(db: EntityDb, rows: readonly ReadRow[]): UndoOutcome {
     nodeIds: new Set(),
     restoredEntityIds: new Set(),
     restoredTagIds: new Set(),
-    removedImages: []
+    removedImages: [],
+    restoredLibraryIds: new Set(),
+    restoredNotesNodeIds: new Set()
   }
   db.transaction((tx) => {
     for (const row of [...rows].sort((a, b) => UNDO_ORDER[a.kind] - UNDO_ORDER[b.kind])) {
@@ -605,7 +638,9 @@ function undoRows(db: EntityDb, rows: readonly ReadRow[]): UndoOutcome {
     nodeIds: [...tally.nodeIds],
     restoredEntityIds: [...tally.restoredEntityIds].filter((id) => !tally.removedEntityIds.has(id)),
     restoredTagIds: [...tally.restoredTagIds].filter((id) => !tally.removedTagIds.has(id)),
-    removedImages: tally.removedImages
+    removedImages: tally.removedImages,
+    restoredLibraryIds: [...tally.restoredLibraryIds],
+    restoredNotesNodeIds: [...tally.restoredNotesNodeIds]
   }
 }
 

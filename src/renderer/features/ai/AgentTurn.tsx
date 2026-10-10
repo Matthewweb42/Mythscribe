@@ -14,6 +14,13 @@ import {
   FixDiff,
   OffVoiceFlag
 } from '@renderer/features/editor/FixDiff'
+import {
+  CLEAR_GROUPS,
+  describeClearCounts,
+  tickedCounts,
+  type ClearGroup,
+  type ClearOption
+} from '@shared/bibleClear'
 import { AiWaitText } from './AiWaitText'
 import { AI_WAIT_PHRASES } from './aiWaitPhrases'
 import { canUndoChange, useAssistantStore } from './assistantStore'
@@ -181,6 +188,98 @@ function DraftCard({
   )
 }
 
+const CLEAR_GROUP_LABEL: Readonly<Record<ClearGroup, string>> = {
+  sheets: 'Story-bible sheets',
+  tags: 'Tags (taken off their scenes; the text stays)',
+  library: 'Library',
+  notes: 'Notes'
+}
+
+/**
+ * A pending clear of the story bible (F-5.25): "are these the things you want to delete?", one
+ * checkbox per kind the project has, ticked as the request named them, grouped by sheets, tags,
+ * Library, and notes. Delete says how much goes; it waits for at least one tick. Always asks,
+ * in every chat mode.
+ */
+function ClearCard({
+  messageId,
+  change,
+  busy
+}: {
+  messageId: string
+  change: AgentChange & { edit: { kind: 'clear'; options: ClearOption[] } }
+  busy: boolean
+}): React.JSX.Element {
+  const applyChange = useAssistantStore((s) => s.applyChange)
+  const skipChange = useAssistantStore((s) => s.skipChange)
+  const tick = useAssistantStore((s) => s.tickClearOption)
+  const { options } = change.edit
+  const counts = tickedCounts(options)
+  const none = options.every((option) => !option.checked)
+  return (
+    <div
+      data-testid="agent-change"
+      data-status="pending"
+      className="flex flex-col gap-1.5 rounded-md border border-warning p-2"
+    >
+      <p className="m-0 text-xs font-medium">Are these the things you want to delete?</p>
+      <p className="m-0 text-xs text-warning">
+        A backup is taken first, and Undo puts everything back. Scenes and chapters are never
+        part of it.
+      </p>
+      {CLEAR_GROUPS.map((group) => {
+        const lines = options.filter((option) => option.group === group)
+        if (lines.length === 0) return null
+        return (
+          <fieldset key={group} className="m-0 flex flex-col gap-0.5 border-0 p-0">
+            <legend className="mb-0.5 p-0 text-xs text-fg-muted">{CLEAR_GROUP_LABEL[group]}</legend>
+            {lines.map((option) => (
+              <label
+                key={`${option.group}:${option.id}`}
+                className="flex items-center gap-1.5 text-xs"
+              >
+                <input
+                  type="checkbox"
+                  data-testid="agent-clear-option"
+                  checked={option.checked}
+                  disabled={busy}
+                  onChange={(event) =>
+                    tick(messageId, change.id, option, event.currentTarget.checked)
+                  }
+                />
+                <span>
+                  {option.label} ({option.count})
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        )
+      })}
+      <div className="flex gap-1">
+        <button
+          type="button"
+          data-testid="agent-change-apply"
+          disabled={busy || none}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => void applyChange(messageId, change.id)}
+          className={FIX_PRIMARY_BUTTON}
+        >
+          {none ? 'Delete' : `Delete ${describeClearCounts(counts)}`}
+        </button>
+        <button
+          type="button"
+          data-testid="agent-change-skip"
+          disabled={busy}
+          onClick={() => skipChange(messageId, change.id)}
+          className={FIX_BUTTON}
+        >
+          Keep everything
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /** The line an applied, skipped, undone, or failed edit leaves in the chat. */
 function logLine(change: AgentChange): string {
   const { edit } = change
@@ -276,6 +375,16 @@ export function AgentChanges({
                 </button>
               ) : null}
             </div>
+          )
+        }
+        if (change.edit.kind === 'clear') {
+          return (
+            <ClearCard
+              key={change.id}
+              messageId={messageId}
+              change={{ ...change, edit: change.edit }}
+              busy={busy}
+            />
           )
         }
         const deletion = isDeletion(change.edit)

@@ -46,7 +46,7 @@ import { cancelInflight, registerInflight, releaseInflight } from './inflight'
 import { renderAgentFocus, type AgentTranscriptStep } from './prompts/agent.v1'
 import type { BuildAgentPromptV2Input } from './prompts/agent.v2'
 import type { BuildAgentPromptV3Input } from './prompts/agent.v3'
-import { buildAgentPromptV6, type BuiltAgentPromptV6 } from './prompts/agent.v6'
+import { buildAgentPromptV7, type BuiltAgentPromptV7 } from './prompts/agent.v7'
 import type { ChatTurn } from './prompts/chat.v1'
 import { AiCancelledError, type CompletionUsage } from './providers/types'
 import { runAiStream, sha256, type AiRequestDeps, type AiRequestResult } from './request'
@@ -331,7 +331,7 @@ export async function runAgent(
   let promptVersion = ''
   /** Sends one step (or its retry), streaming the answer text, and adds it to the run's totals. */
   const send = async (
-    prompt: BuiltAgentPromptV6,
+    prompt: BuiltAgentPromptV7,
     requestId: string | null
   ): Promise<AiRequestResult> => {
     if (outer?.signal.aborted === true) throw new AiCancelledError('The request was stopped.')
@@ -468,18 +468,19 @@ function brokenNote(
  * The prompt for one step within `inputBudget('agent')`, measured as `runAiRequest` measures:
  * the oldest tool results give way first (the call stays, so the model knows it looked), then
  * the oldest history turns. Whatever still does not fit is refused by the request path. The
- * builder is `agent.v6`'s (F-5.24); the eval harness passes the older builders for their cases.
+ * builder is `agent.v7`'s (F-5.25; v6's tools, F-5.24); the eval harness passes the older
+ * builders for their cases.
  */
 export function fitAgentPrompt<
   I extends BuildAgentPromptV2Input,
   T extends { messages: { content: string }[] }
 >(input: I, build: (input: I) => T): T
-export function fitAgentPrompt(input: BuildAgentPromptV3Input): BuiltAgentPromptV6
+export function fitAgentPrompt(input: BuildAgentPromptV3Input): BuiltAgentPromptV7
 export function fitAgentPrompt(
   input: BuildAgentPromptV3Input,
   build: (input: BuildAgentPromptV3Input) => {
     messages: { content: string }[]
-  } = buildAgentPromptV6
+  } = buildAgentPromptV7
 ): { messages: { content: string }[] } {
   const budget = inputBudget('agent')
   const estimate = (built: { messages: { content: string }[] }): number =>

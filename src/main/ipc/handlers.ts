@@ -253,6 +253,8 @@ import {
   undoRun,
   type UndoOutcome
 } from '../knowledge/changeLog'
+import { changeRunId } from '@shared/changes'
+import { clearStoryBible } from '../knowledge/bibleClear'
 import { convertKnowledgeFacts } from '../knowledge/factConversion'
 import { listTodo, reopenTodo, settleTodo, syncLocalTodo } from '../knowledge/todoStore'
 import {
@@ -2246,6 +2248,40 @@ export function registerHandlers({
     const entries = recordChanges(manager.require().connection.orm, input, new Date().toISOString())
     emit(windows(), 'changes:changed', {})
     return entries
+  })
+
+  // F-5.25: the chat's Clear the story bible. The backup comes first (a failure refuses with its
+  // cause and nothing is deleted); then one transaction, one Changes row, and the same events the
+  // one-by-one deletes send. Pictures and uploaded originals stay on disk for the Undo.
+  register('bible:clear', ({ selection, run }) => {
+    const db = manager.require().connection.orm
+    backups.backupNow()
+    const outcome = clearStoryBible(
+      db,
+      selection,
+      changeRunId('chat', run),
+      new Date().toISOString()
+    )
+    if (outcome.linkNodeIds.length > 0) {
+      emit(windows(), 'mention:changed', { nodeIds: outcome.linkNodeIds })
+      emit(windows(), 'documentTag:changed', { nodeIds: outcome.linkNodeIds })
+    }
+    if (outcome.removedTagIds.length > 0) publishProposed()
+    if (outcome.removedEntityIds.length > 0 || outcome.removedTagIds.length > 0) {
+      void syncSpelling()
+      emit(windows(), 'continuity:changed', { nodeIds: [] })
+      emit(windows(), 'fact:changed', { entityIds: outcome.removedEntityIds })
+    }
+    emit(windows(), 'changes:changed', {})
+    queueTodo(db)
+    return {
+      entry: outcome.entry,
+      counts: outcome.counts,
+      removedEntityIds: outcome.removedEntityIds,
+      removedTagIds: outcome.removedTagIds,
+      removedLibraryIds: outcome.removedLibraryIds,
+      notesNodeIds: outcome.notesNodeIds
+    }
   })
 
   /**

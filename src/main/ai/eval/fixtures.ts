@@ -245,6 +245,7 @@ import {
 import { buildAgentPromptV4 } from '../prompts/agent.v4'
 import { buildAgentPromptV5 } from '../prompts/agent.v5'
 import { buildAgentPromptV6 } from '../prompts/agent.v6'
+import { buildAgentPromptV7 } from '../prompts/agent.v7'
 import {
   ORGANISE_CHUNK_CHARS,
   ORGANISE_INSTRUCTION_MAX,
@@ -707,6 +708,11 @@ export interface EvalCase {
      * parser, as `expected` (a tool call while it still needs to look, or the reply).
      */
     | { kind: 'agent'; expected: 'tool' | 'answer' }
+    /**
+     * A chat agent answer that must carry an edit (F-5.25): it must be an answer whose edits
+     * include one of kind `expected` (a bulk delete is a `clear`), with no organise request.
+     */
+    | { kind: 'agentEdit'; expected: string }
     /**
      * An edit pass (F-14.15): the answer must parse, and every change or note must survive the
      * feature's own parser against the piece as sent (here the whole scene), nothing dropped.
@@ -3113,6 +3119,28 @@ function agentCaseV6(
   }
 }
 
+/** F-5.25: an agent.v7 step, fitted as the feature fits it. */
+function agentCaseV7(
+  name: string,
+  note: string,
+  input: BuildAgentPromptV3Input,
+  scoring: EvalCase['scoring']
+): EvalCase {
+  const built = fitAgentPrompt(input, buildAgentPromptV7)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring
+  }
+}
+
+/** F-5.25: the author's message that ran Organise instead of deleting (2026-10-10). */
+const AGENT_CLEAR_MESSAGE =
+  'Delete everything in my story bible so I can start fresh and re-upload my character docs.'
+
 /** F-5.24: what `lookup` hands back for Mara in the fixture book (the record at now, ~1,000 characters). */
 const AGENT_LOOKUP_STEP = {
   call: '{"tool":"lookup","args":{"name":"Mara"}}',
@@ -4919,6 +4947,84 @@ export const EVAL_CASES: EvalCase[] = [
   agentCaseV6(
     'retry',
     'the one retry of a write step whose reply was cut off: the fact case plus the retry turn, at the larger cap',
+    {
+      access: 'write',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: CHAT_HISTORY,
+      message: 'Who copied the mill ledger, and where is the copy?',
+      steps: [AGENT_LOOKUP_STEP, AGENT_PASSAGES_STEP],
+      final: false,
+      retry: true
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  // agent.v7 (F-5.25): bulk changes are one clear edit, never organising; organising only for
+  // tidying that needs judgment. The fact and maxed cases measure what the longer rules cost.
+  agentCaseV7(
+    'clear',
+    'the author’s 2026-10-10 message in Ask: one clear edit (sheets, tags, library), no organise request',
+    {
+      access: 'write',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: [],
+      message: AGENT_CLEAR_MESSAGE,
+      steps: [],
+      final: false
+    },
+    { kind: 'agentEdit', expected: 'clear' }
+  ),
+  agentCaseV7(
+    'clearPlan',
+    'the same message in Plan (no edit list): an answer that says what would go, no organise request',
+    {
+      access: 'read',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: [],
+      message: AGENT_CLEAR_MESSAGE,
+      steps: [],
+      final: false
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV7(
+    'fact',
+    'agent.v6’s fact case with the v7 rules (compare agent.v6 fact)',
+    {
+      access: 'read',
+      voice: null,
+      map: STORY_MAP,
+      focus: AGENT_FOCUS,
+      history: [],
+      message: 'Who copied the mill ledger, and where is the copy?',
+      steps: [AGENT_LOOKUP_STEP, AGENT_PASSAGES_STEP],
+      final: false
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV7(
+    'maxed',
+    'agent.v6’s maxed case with the v7 rules: the last step of a write run at every cap',
+    {
+      access: 'write',
+      voice: null,
+      map: MAXED_STORY_MAP,
+      focus: AGENT_MAXED_FOCUS,
+      history: CHAT_HISTORY,
+      message: FIXTURE_PASSAGE.repeat(3).slice(0, 2_000),
+      steps: Array.from({ length: AGENT_MAX_STEPS }, () => AGENT_MAXED_STEP),
+      final: true
+    },
+    { kind: 'agent', expected: 'answer' }
+  ),
+  agentCaseV7(
+    'retry',
+    'the one retry of a write step whose reply was cut off, with the v7 rules',
     {
       access: 'write',
       voice: null,
