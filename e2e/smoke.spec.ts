@@ -6747,18 +6747,16 @@ test('create, close, reopen a project on disk', async () => {
   await expect(organiseCard).toContainText('Sheet “The Landing”: 1 field')
   await expect(organiseCard.locator('ins')).toHaveText(ORGANISE_ATMOSPHERE)
   await expect(organisePanel.getByTestId('review-apply')).toHaveText('Apply 1 accepted')
+  // The last decision applies the accepted changes and closes the panel (2026-10-10); the
+  // toast's Undo takes back what can be undone (the merge has no undo).
   await organisePanel.getByTestId('review-accept').click()
-  await expect(organisePanel.getByTestId('review-done')).toContainText('All 2 reviewed.')
-  // At the end no group is on show, so the dropdown offers to choose one.
-  await expect(organiseRail.locator('option')).toHaveText([
-    'Choose a group',
-    'Merges 1/1',
-    'Story bible 1/1'
-  ])
-  await organiseRail.selectOption({ label: 'Merges 1/1' })
-  await expect(organiseCard).toHaveAttribute('data-status', 'applied')
-  await organiseRail.selectOption({ label: 'Story bible 1/1' })
-  await expect(organiseCard).toHaveAttribute('data-status', 'applied')
+  await expect(organisePanel).toHaveCount(0)
+  await expect(organiseStatus).toHaveCount(0)
+  const organiseToast = page
+    .getByRole('status')
+    .locator('div')
+    .filter({ hasText: 'Organise applied 2 changes' })
+  await expect(organiseToast).toBeVisible()
   const afterOrganise = await page.evaluate(async () => {
     const tags = (await window.mythscribe.invoke('tag:list', undefined)) as IpcResult<Tag[]>
     if (!tags.ok) throw new Error('tag:list failed')
@@ -6767,12 +6765,8 @@ test('create, close, reopen a project on disk', async () => {
   expect(afterOrganise.map((tag) => tag.name)).not.toContain('reed')
   expect(afterOrganise.find((tag) => tag.name === 'tomas-reed')?.aliases).toContain('Reed')
   expect(await sheetField('The Landing', 'atmosphere')).toBe(ORGANISE_ATMOSPHERE)
-  await organiseCard.getByRole('button', { name: /^Undo: / }).click()
-  await expect(organiseCard).toHaveAttribute('data-status', 'undone')
+  await organiseToast.getByRole('button', { name: 'Undo', exact: true }).click()
   await expect.poll(() => sheetField('The Landing', 'atmosphere')).toBeUndefined()
-  await organisePanel.getByRole('button', { name: 'Done' }).click()
-  await expect(organisePanel).toHaveCount(0)
-  await expect(organiseStatus).toHaveCount(0)
   // Auto: the button asks again; the sheet change lands at once, and one Undo takes it all back.
   await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
   await expect.poll(async () => (await aiSettings()).chatMode).toBe('auto')
