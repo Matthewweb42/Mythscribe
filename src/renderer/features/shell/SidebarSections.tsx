@@ -14,6 +14,8 @@ interface SidebarSectionsProps {
   format: NovelFormat
   /** The sections; defaults to the open project's. Injectable so tests can drive any set. */
   sections?: readonly SidebarSection[]
+  /** Shown on the picker's row after the button: the sidebar's dock grip and menu. */
+  controls?: React.ReactNode
 }
 
 /** The picker's two actions after the sections. */
@@ -44,9 +46,14 @@ interface Row {
  * is an ARIA listbox: ArrowUp/ArrowDown move (and wrap), Home/End jump, Enter or Space picks,
  * Escape closes and returns focus to the button. F-9.15: only the story bible carries a heading;
  * the tools follow it under a rule, so the list reads as Manuscript, the story bible, then the
- * rest.
+ * rest. `controls` (the dock grip and menu) share the button's row, so the sidebar spends no row
+ * on them.
  */
-export function SidebarSections({ format, sections }: SidebarSectionsProps): React.JSX.Element {
+export function SidebarSections({
+  format,
+  sections,
+  controls
+}: SidebarSectionsProps): React.JSX.Element {
   const projectSections = useSidebarSections()
   const all = sections ?? projectSections
   const stored = useLayoutStore((s) => s.layout.sidebar.tab)
@@ -254,7 +261,10 @@ export function SidebarSections({ format, sections }: SidebarSectionsProps): Rea
 
   return (
     <>
-      <div ref={wrapper} className="relative shrink-0 border-b border-line px-2 py-1.5">
+      <div
+        ref={wrapper}
+        className="relative flex shrink-0 items-center gap-1 border-b border-line py-1.5 pr-1 pl-2"
+      >
         <button
           ref={button}
           type="button"
@@ -264,7 +274,7 @@ export function SidebarSections({ format, sections }: SidebarSectionsProps): Rea
           aria-label={`Section: ${current?.label ?? ''}`}
           onClick={() => (open ? close(false) : openList())}
           onKeyDown={onButtonKeyDown}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm font-medium hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-sm font-medium hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
         >
           {Icon ? <Icon size={15} aria-hidden="true" className="shrink-0 text-fg-muted" /> : null}
           <span className="min-w-0 flex-1 truncate text-left">{current?.label}</span>
@@ -284,6 +294,7 @@ export function SidebarSections({ format, sections }: SidebarSectionsProps): Rea
             {grouped()}
           </div>
         ) : null}
+        {controls}
       </div>
       <div
         role="region"

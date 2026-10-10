@@ -13,11 +13,11 @@ const templateIds = (section: 'front' | 'end'): string[] =>
   matterTemplatesFor(section).map((template) => `template:${template.id}`)
 
 describe('treeContextMenuItems', () => {
-  it('offers every level plus the generic items on a chapter, labelled by format', () => {
+  it('offers every level, scene first, plus the generic items on a chapter, labelled by format', () => {
     expect(treeContextMenuItems(index, 'ch-1', 'webnovel')).toEqual([
-      { id: 'new-part', label: 'New Arc' },
-      { id: 'new-chapter', label: 'New Chapter' },
       { id: 'new-scene', label: 'New Scene' },
+      { id: 'new-chapter', label: 'New Chapter' },
+      { id: 'new-part', label: 'New Arc' },
       { id: 'new-generic-document', label: 'New document' },
       { id: 'new-generic-folder', label: 'New folder' },
       { id: 'rename', label: 'Rename' },
@@ -25,14 +25,14 @@ describe('treeContextMenuItems', () => {
       { id: 'delete', label: 'Delete' },
       { id: 'set-target', label: 'Set word target…' }
     ])
-    expect(treeContextMenuItems(index, 'ch-1', 'novel')[0]?.label).toBe('New Part')
+    expect(treeContextMenuItems(index, 'ch-1', 'novel')[2]?.label).toBe('New Part')
   })
 
   it('offers every level on a scene and on the manuscript root', () => {
     expect(ids('sc-3')).toEqual([
-      'new-part',
-      'new-chapter',
       'new-scene',
+      'new-chapter',
+      'new-part',
       'new-generic-document',
       'new-generic-folder',
       'rename',
@@ -41,9 +41,9 @@ describe('treeContextMenuItems', () => {
       'set-target'
     ])
     expect(ids('manuscript')).toEqual([
-      'new-part',
-      'new-chapter',
       'new-scene',
+      'new-chapter',
+      'new-part',
       'new-generic-document',
       'new-generic-folder'
     ])
@@ -54,9 +54,9 @@ describe('treeContextMenuItems', () => {
       treeFixture.filter((node) => node.parentId !== 'arc-2' && node.parentId !== 'ch-4')
     )
     expect(treeContextMenuItems(emptyArc, 'arc-2', 'novel').map((item) => item.id)).toEqual([
-      'new-part',
-      'new-chapter',
       'new-scene',
+      'new-chapter',
+      'new-part',
       'new-generic-document',
       'new-generic-folder',
       'rename',

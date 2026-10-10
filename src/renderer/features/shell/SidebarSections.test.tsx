@@ -70,6 +70,20 @@ describe('SidebarSections (F-9.11)', () => {
     )
   })
 
+  it("puts the controls on the picker button's row", () => {
+    render(
+      <SidebarSections
+        format="novel"
+        sections={sections}
+        controls={<button type="button">Move sidebar</button>}
+      />
+    )
+    const picker = screen.getByRole('button', { name: /^Section:/ })
+    expect(picker.parentElement).toContainElement(
+      screen.getByRole('button', { name: 'Move sidebar' })
+    )
+  })
+
   it('lists the used sections by name with their counts, grouped, the unused behind a toggle', async () => {
     const user = userEvent.setup()
     render(<SidebarSections format="novel" sections={sections} />)

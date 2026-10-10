@@ -1045,16 +1045,13 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
 }
 
 /**
- * The sidebar as a dock panel (F-7.3): a slim row with its grip and menu above the tabs, so it
- * moves like any panel without a title taking room from the tree.
+ * The sidebar as a dock panel (F-7.3): its grip and menu sit on the section picker's row, so it
+ * moves like any panel without a row of its own taking room from the tree.
  */
 function SidebarPanel({ format }: { format: NovelFormat }): React.JSX.Element {
   return (
     <aside className="flex min-h-0 flex-1 flex-col bg-surface">
-      <div className="flex shrink-0 items-center justify-end px-1 pt-1">
-        <DockPanelControls id="sidebar" />
-      </div>
-      <SidebarSections format={format} />
+      <SidebarSections format={format} controls={<DockPanelControls id="sidebar" />} />
     </aside>
   )
 }

@@ -439,9 +439,9 @@ describe('ManuscriptTree', () => {
       .getAllByRole('menuitem')
       .map((el) => el.textContent)
     expect(labels).toEqual([
-      'New Arc',
-      'New Chapter',
       'New Scene',
+      'New Chapter',
+      'New Arc',
       'New document',
       'New folder',
       'Rename',
@@ -450,7 +450,7 @@ describe('ManuscriptTree', () => {
       'Set word target…'
     ])
     expect(within(menu).queryByText(/template/i)).not.toBeInTheDocument()
-    expect(within(menu).getByRole('menuitem', { name: 'New Arc' })).toHaveFocus()
+    expect(within(menu).getByRole('menuitem', { name: 'New Scene' })).toHaveFocus()
     await userEvent.keyboard('{ArrowDown}')
     expect(within(menu).getByRole('menuitem', { name: 'New Chapter' })).toHaveFocus()
     await userEvent.keyboard('{ArrowUp}{ArrowUp}')

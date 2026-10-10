@@ -29,8 +29,8 @@ export function templateIdOf(itemId: string): MatterTemplateId | null {
 }
 
 /**
- * The right-click menu for a tree row (F-2.2), section-aware: manuscript rows offer the levels
- * that can be placed relative to them (`resolveMenuCreateTarget`: right inside a clicked root,
+ * The right-click menu for a tree row (F-2.2), section-aware: manuscript rows offer the levels,
+ * scene first, that can be placed relative to them (`resolveMenuCreateTarget`: right inside a clicked root,
  * part, or chapter when it can hold the level) plus a generic document and folder; front and
  * end matter rows offer the generic items followed by their section's templates as `New <Title>` (F-2.6).
  * Documents and folders (never sections) also offer Rename, Duplicate, and Delete (F-2.3), and
@@ -47,7 +47,8 @@ export function treeContextMenuItems(
 ): MenuItem[] {
   const items: MenuItem[] = []
   if (index.sectionOf[nodeId] === 'manuscript') {
-    for (const level of HIERARCHY_LEVELS) {
+    // Scene first: the order of how often each is made.
+    for (const level of [...HIERARCHY_LEVELS].reverse()) {
       if (resolveMenuCreateTarget(index, nodeId, level) !== null) {
         items.push({ id: `new-${level}`, label: `New ${levelLabel(format, level)}` })
       }

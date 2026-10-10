@@ -1,19 +1,13 @@
-import { BookOpen, File, FileText, Folder, FolderOpen, Layers } from 'lucide-react'
+import { File, Folder, FolderOpen } from 'lucide-react'
 import type { TreeNode } from '@shared/ipc/contract'
 import type { SectionType } from '@shared/labels'
+import { LEVEL_GLYPH } from './levelGlyph'
 
 function levelColor(node: TreeNode, section: SectionType): string {
   if (node.kind === 'document' && section !== 'manuscript') return 'text-matter'
-  switch (node.hierarchyLevel) {
-    case 'part':
-      return 'text-level-part'
-    case 'chapter':
-      return 'text-level-chapter'
-    case 'scene':
-      return 'text-level-scene'
-    case null:
-      return 'text-level-generic'
-  }
+  return node.hierarchyLevel === null
+    ? 'text-level-generic'
+    : LEVEL_GLYPH[node.hierarchyLevel].color
 }
 
 /**
@@ -40,14 +34,6 @@ export function LevelIcon({
   if (node.sectionType !== null || (node.kind === 'folder' && node.hierarchyLevel === null)) {
     return expanded ? <FolderOpen {...props} /> : <Folder {...props} />
   }
-  switch (node.hierarchyLevel) {
-    case 'part':
-      return <Layers {...props} />
-    case 'chapter':
-      return <BookOpen {...props} />
-    case 'scene':
-      return <FileText {...props} />
-    case null:
-      return <File {...props} />
-  }
+  const Icon = node.hierarchyLevel === null ? File : LEVEL_GLYPH[node.hierarchyLevel].icon
+  return <Icon {...props} />
 }
