@@ -170,7 +170,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   agent: {
     trigger: 'every chat message',
-    when: 'Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately. Since agent.v7 (F-5.25) a bulk delete is one clear edit answered without lookups (the clear itself runs locally, no AI); the bulk rules, the organise rule, and the bulk and story-bible edits add ~250 input tokens to a read request and ~470 to a write request (a cached prefix).',
+    when: 'Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately. Since agent.v7 (F-5.25) a bulk delete is one clear edit answered without lookups (the clear itself runs locally, no AI); the bulk rules, the organise rule, and the bulk and story-bible edits add ~250 input tokens to a read request and ~470 to a write request (a cached prefix). Since agent.v8 (F-5.25 fixes 5, 7, 8) the write edit list gains status, To do settle, notes clearing, undo, summaries, and open: ~110 more input tokens on a write request, none on a read request; the todo tool prints a short ref per item (~2 tokens each). The actions themselves run locally (summaries queue the existing summary jobs).',
     callsPerUse: 3,
     typicalOutTokens: 300,
     ideas:

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { CLEAR_OPTIONS_MAX, ClearOption, describeClearCounts, tickedCounts } from './bibleClear'
 import { ENTITY_NAME_MAX, EntityFieldId, EntityKind } from './entities'
+import { FactStatus } from './facts'
 import { TAG_NAME_MAX } from './tags'
 import { SCENE_SYNOPSIS_MAX } from './sceneMeta'
 
@@ -283,7 +284,45 @@ export const AgentEdit = z.discriminatedUnion('kind', [
     category: EntityKind,
     categoryName: z.string(),
     name: z.string().min(1).max(ENTITY_NAME_MAX)
-  })
+  }),
+  /** F-5.25 (agent.v8, the audit's fix 5): a document's notes emptied; it asks, as a deletion. */
+  z.object({ kind: z.literal('notesClear'), ...NodeRef }),
+  /**
+   * F-5.25 (agent.v8, fix 7): a status set (canon, plan, idea; D7). `record`: the sheet's own
+   * (`id` the entity); `facts`: what the scenes state of one field (`items` the facts, `id` their
+   * entity, `label` the field); `notes`: a document's notes (`id` the node). `items` holds each
+   * target's status before, for the undo.
+   */
+  z.object({
+    kind: z.literal('status'),
+    target: z.enum(['record', 'facts', 'notes']),
+    id: z.string(),
+    name: z.string(),
+    label: z.string(),
+    status: FactStatus,
+    items: z
+      .array(z.object({ id: z.string(), before: FactStatus }))
+      .min(1)
+      .max(AGENT_BULK_MAX)
+  }),
+  /** F-5.25 (agent.v8, fix 5): To do items settled, done ("handled") or dismissed ("not a problem"). */
+  z.object({
+    kind: z.literal('todo'),
+    items: z
+      .array(z.object({ id: z.string(), subject: z.string() }))
+      .min(1)
+      .max(AGENT_BULK_MAX),
+    status: z.enum(['done', 'dismissed'])
+  }),
+  /**
+   * F-5.25 (agent.v8, fix 8): the answer actions. `undoTurn` takes back what the conversation's
+   * latest earlier turn applied (it asks, as a deletion); `summaries` re-reads the scenes whose
+   * summaries are missing or stale (the "Summarize all scenes" button); `open` opens the upload
+   * picker or the Library, and runs at once in Ask too since it changes nothing.
+   */
+  z.object({ kind: z.literal('undoTurn') }),
+  z.object({ kind: z.literal('summaries') }),
+  z.object({ kind: z.literal('open'), dialog: z.enum(['upload', 'library']) })
 ])
 export type AgentEdit = z.infer<typeof AgentEdit>
 export type AgentEditKind = AgentEdit['kind']
@@ -353,14 +392,24 @@ export const AgentTurn = z.object({
 })
 export type AgentTurn = z.infer<typeof AgentTurn>
 
-/** Deleting or merging away scenes, chapters, sheets, or tags, or clearing them (F-5.25): these ask even in Auto. */
+/**
+ * Deleting or merging away scenes, chapters, sheets, or tags, or clearing them (F-5.25), emptying
+ * a document's notes, or undoing a turn (agent.v8): these ask even in Auto.
+ */
 export function isDeletion(edit: AgentEdit): boolean {
   return (
     edit.kind === 'delete' ||
     edit.kind === 'merge' ||
     edit.kind === 'clear' ||
-    edit.kind === 'sheetMerge'
+    edit.kind === 'sheetMerge' ||
+    edit.kind === 'notesClear' ||
+    edit.kind === 'undoTurn'
   )
+}
+
+/** F-5.25 (agent.v8): an edit that only opens a place in the app; it runs at once in Ask too. */
+export function isOpenAction(edit: AgentEdit): boolean {
+  return edit.kind === 'open'
 }
 
 /** Prose the edit puts into the book, which the voice check reads; empty for none. */
@@ -435,6 +484,27 @@ export function describeEdit(edit: AgentEdit): string {
       return `Merge ${edit.sources.map((s) => s.name).join(', ')} into ${edit.target.name}`
     case 'sheetCreate':
       return `New ${edit.categoryName} sheet: ${edit.name}`
+    case 'notesClear':
+      return `Clear the notes of ${edit.title}`
+    case 'status':
+      return edit.target === 'notes'
+        ? `Marked the notes of ${edit.name} ${edit.status}`
+        : edit.target === 'record'
+          ? `Marked ${edit.name} ${edit.status}`
+          : `Marked ${edit.name}: ${edit.label} ${edit.status}`
+    case 'todo': {
+      const what =
+        edit.items.length === 1
+          ? (edit.items[0]?.subject ?? '')
+          : `${edit.items.length} To do items`
+      return `${edit.status === 'done' ? 'Done' : 'Dismissed'}: ${what}`
+    }
+    case 'undoTurn':
+      return 'Undo the last turn'
+    case 'summaries':
+      return 'Re-read the scenes whose summaries are missing or stale'
+    case 'open':
+      return edit.dialog === 'library' ? 'Opened the Library' : 'Opened the upload'
   }
 }
 

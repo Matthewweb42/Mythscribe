@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { ClearCounts, ClearSnapshot } from './bibleClear'
+import { FactStatus } from './facts'
 import { SheetPatch, TagPatch } from './organise'
 
 /**
@@ -129,14 +130,26 @@ export const ChangeUndo = z.discriminatedUnion('type', [
    * F-5.25: a tag the chat made this session (to tag many scenes with a new name) deleted again;
    * refused once its `modified` stamp moved (the author has edited it since).
    */
-  z.object({ type: z.literal('removeMadeTag'), tagId: z.string(), modified: z.string() })
+  z.object({ type: z.literal('removeMadeTag'), tagId: z.string(), modified: z.string() }),
+  /**
+   * F-5.25 (agent.v8): a status the chat set put back (D7: canon, plan, idea). `facts` empty: the
+   * sheet's own status; else each fact's. Refused once any of them reads other than `after` (the
+   * author has changed it since).
+   */
+  z.object({
+    type: z.literal('restoreStatus'),
+    entityId: z.string(),
+    facts: z.array(z.object({ id: z.string(), before: FactStatus })).max(5000),
+    before: FactStatus,
+    after: FactStatus
+  })
 ])
 export type ChangeUndo = z.infer<typeof ChangeUndo>
 
 /** Which inverse each recorded kind may carry; `changes:record` refuses any other pairing. */
 export const RECORDED_UNDO_OF: Readonly<Record<ChangeKind, readonly ChangeUndo['type'][]>> = {
-  fact: [],
-  record: ['deleteSheet'],
+  fact: ['restoreStatus'],
+  record: ['deleteSheet', 'restoreStatus'],
   tag: ['removeMadeTag'],
   tagLink: ['unlinkTag', 'linkTag'],
   sheetEdit: ['restoreSheet'],

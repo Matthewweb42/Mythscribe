@@ -14,6 +14,7 @@ import {
   type RecordChangesInput
 } from '@shared/changes'
 import { toEntityNameKey } from '@shared/entities'
+import type { FactStatus } from '@shared/facts'
 import type { Entity, Tag } from '@shared/ipc/contract'
 import type { SheetPatch, TagPatch } from '@shared/organise'
 import { toTagName } from '@shared/tags'
@@ -28,7 +29,7 @@ import {
   type KnowledgeChangeRow
 } from '../db/schema'
 import { deleteEntity, getEntity, updateEntity, type EntityDb } from '../entity/entityStore'
-import { setFactHidden } from '../entity/factStore'
+import { setFactHidden, setFactStatus } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 import { restoreCleared } from './clearSnapshot'
 import { getDismissedNames, setDismissedNames } from '../project/settingsStore'
@@ -330,12 +331,35 @@ function recordedInput(
       landed(requireTag(db, undo.tagId).modified === undo.modified)
       return { ...base, entityId: null, targetId: undo.tagId }
     }
+    case 'restoreStatus': {
+      // F-5.25 (agent.v8): the sheet's own status for a record row, each fact's (of this sheet) for a fact row.
+      const sheet = requireSheet(db, undo.entityId)
+      landed((kind === 'record') === (undo.facts.length === 0))
+      if (undo.facts.length === 0) landed(sheet.status === undo.after)
+      for (const each of undo.facts) {
+        const held = statusOfFact(db, each.id)
+        landed(held?.entityId === undo.entityId && held.status === undo.after)
+      }
+      return { ...base, entityId: undo.entityId, targetId: undo.entityId }
+    }
     default:
       throw new AppError('VALIDATION', 'This change cannot be logged with that undo', {
         kind,
         undo: undo.type
       })
   }
+}
+
+/** A fact's owner and status, or undefined for one that is gone. */
+function statusOfFact(
+  db: EntityDb,
+  id: string
+): { entityId: string; status: FactStatus; objectEntityId: string | null } | undefined {
+  return db
+    .select({ entityId: fact.entityId, status: fact.status, objectEntityId: fact.objectEntityId })
+    .from(fact)
+    .where(eq(fact.id, id))
+    .get()
 }
 
 /**
@@ -552,6 +576,37 @@ function undoRow(db: EntityDb, { row, undo }: ReadRow, tally: UndoTally): void {
       const written = updateEntity(db, undo.entityId, undo.before)
       tally.restoredEntityIds.add(undo.entityId)
       if (written.tagChange !== null) tally.restoredTagIds.add(written.tagChange.tag.id)
+      break
+    }
+    case 'restoreStatus': {
+      // F-5.25 (agent.v8): put back only while every target still reads as the chat left it.
+      const sheet = getEntity(db, undo.entityId)
+      if (sheet === undefined) break
+      const facts = undo.facts.flatMap((each) => {
+        const held = statusOfFact(db, each.id)
+        return held === undefined ? [] : [{ ...each, held }]
+      })
+      const moved =
+        undo.facts.length === 0
+          ? sheet.status !== undo.after
+          : facts.some((each) => each.held.status !== undo.after)
+      if (moved) {
+        throw new AppError(
+          'VALIDATION',
+          `The status on "${sheet.name}" has changed since, so this cannot be undone. Set it by hand.`,
+          { id: row.id, entityId: undo.entityId }
+        )
+      }
+      if (undo.facts.length === 0) {
+        updateEntity(db, undo.entityId, { status: undo.before })
+        tally.restoredEntityIds.add(undo.entityId)
+        break
+      }
+      for (const each of facts) {
+        setFactStatus(db, each.id, each.before)
+        tally.entityIds.add(each.held.entityId)
+        if (each.held.objectEntityId !== null) tally.entityIds.add(each.held.objectEntityId)
+      }
       break
     }
     case 'restoreTag': {

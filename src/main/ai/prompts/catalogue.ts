@@ -73,6 +73,7 @@ import { AGENT_PROMPT_V4_VERSION } from './agent.v4'
 import { AGENT_PROMPT_V5_VERSION } from './agent.v5'
 import { AGENT_PROMPT_V6_VERSION } from './agent.v6'
 import { AGENT_PROMPT_V7_VERSION } from './agent.v7'
+import { AGENT_PROMPT_V8_VERSION } from './agent.v8'
 import { TODO_PROMPT_VERSION } from './todo.v1'
 import { TODO_SUGGEST_PROMPT_VERSION } from './todoSuggest.v1'
 
@@ -166,7 +167,8 @@ export const PROMPT_VERSIONS = [
   SUMMARY_PROMPT_V5_VERSION,
   REWRITE_PROMPT_V4_VERSION,
   REWRITE_REGEN_PROMPT_V4_VERSION,
-  EDIT_PASS_PROMPT_V2_VERSION
+  EDIT_PASS_PROMPT_V2_VERSION,
+  AGENT_PROMPT_V8_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -507,7 +509,8 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'strong',
     output: 'json',
     since: 'F-5.6'
-  }
+  },
+  [AGENT_PROMPT_V8_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-5.25' }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

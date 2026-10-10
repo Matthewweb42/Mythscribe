@@ -136,6 +136,8 @@ function EditPreview({ edit }: { edit: AgentEdit }): React.JSX.Element | null {
       return <NameList names={edit.nodes.map((node) => node.title)} />
     case 'sheetPatch':
       return edit.sheets.length > 1 ? <NameList names={edit.sheets.map((s) => s.name)} /> : null
+    case 'todo':
+      return edit.items.length > 1 ? <NameList names={edit.items.map((i) => i.subject)} /> : null
     default:
       return null
   }

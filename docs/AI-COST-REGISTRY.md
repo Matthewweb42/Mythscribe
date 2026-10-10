@@ -36,7 +36,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000413 · $0.000912 | $0.000516 | $0.00207 | 1 | $0.000413 |
 | `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000356 · $0.000568 | $0.000445 | $0.00202 | 1 | $0.000356 |
 | `editPass` | Edit passes | on request | editPass.v2 | strong | 912 / 5161 | 1500 / 4000 | $0.000822 · $0.00276 | $0.00103 | $0.0248 | 60 | $0.0493 |
-| `agent` | Assistant lookups and edits | every chat message | agent.v7 | strong | 2239 / 11890 | 300 / 3000 | $0.000596 · $0.00376 | $0.000745 | $0.0101 | 3 | $0.00179 |
+| `agent` | Assistant lookups and edits | every chat message | agent.v8 | strong | 2487 / 10684 | 300 / 3000 | $0.000648 · $0.00350 | $0.000810 | $0.0107 | 3 | $0.00194 |
 | `contextImport` | Context library sorting | on request | contextImport.v2 | strong | 884 / 3490 | 1500 / 6000 | $0.000816 · $0.00325 | $0.00102 | $0.0247 | 10 | $0.00816 |
 | `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.000268 · $0.00244 | $0.000335 | $0.00619 | 1 | $0.000268 |
 | `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000285 · $0.000690 | $0.000356 | $0.00299 | 1 | $0.000285 |
@@ -147,7 +147,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `agent` — Assistant lookups and edits
 
-- **When:** Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately. Since agent.v7 (F-5.25) a bulk delete is one clear edit answered without lookups (the clear itself runs locally, no AI); the bulk rules, the organise rule, and the bulk and story-bible edits add ~250 input tokens to a read request and ~470 to a write request (a cached prefix).
+- **When:** Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately. Since agent.v7 (F-5.25) a bulk delete is one clear edit answered without lookups (the clear itself runs locally, no AI); the bulk rules, the organise rule, and the bulk and story-bible edits add ~250 input tokens to a read request and ~470 to a write request (a cached prefix). Since agent.v8 (F-5.25 fixes 5, 7, 8) the write edit list gains status, To do settle, notes clearing, undo, summaries, and open: ~110 more input tokens on a write request, none on a read request; the todo tool prints a short ref per item (~2 tokens each). The actions themselves run locally (summaries queue the existing summary jobs).
 - **Ideas:** Check the agent.v6 ladder against the ledger (fixtures: a fact question: the answer step 44 % less input than v5, the whole three-request run 25 % less); fast tier for lookup steps, strong only for the answer; answer a lookup-only question in one step.
 
 ### `contextImport` — Context library sorting

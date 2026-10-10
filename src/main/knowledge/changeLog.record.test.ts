@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { planContextReview, type ContextReview } from '@shared/contextLibrary'
 import { NO_UNDO_REASON } from '@shared/changes'
 import { createEntity, getEntity, listEntities, updateEntity } from '../entity/entityStore'
+import { listFactsForEntity, setFactStatus, writeAuthorFact } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 import { addContextFiles } from '../library/libraryStore'
 import { applyContextReview } from '../library/apply'
@@ -471,5 +472,61 @@ describe('the context library’s Apply in the Changes log (F-9.15)', () => {
     expect(getEntity(db, mara.id)?.fields).toEqual({ age: '34' })
     expect(listEntities(db).map((entity) => entity.name)).not.toContain('Tomas')
     expect(listTags(db).map((tag) => tag.name)).not.toContain('tomas')
+  })
+})
+
+describe('statuses the chat set (F-5.25, agent.v8)', () => {
+  const statusRun = (
+    kind: 'record' | 'fact',
+    entityId: string,
+    facts: { id: string; before: 'canon' | 'plan' | 'idea' }[],
+    after: 'canon' | 'plan' | 'idea'
+  ): Parameters<typeof recordChanges>[1] => ({
+    source: 'chat',
+    run: 'm-status',
+    changes: [
+      {
+        kind,
+        label: 'Marked',
+        undo: { type: 'restoreStatus', entityId, facts, before: 'canon', after }
+      }
+    ]
+  })
+
+  it('logs a sheet’s status and puts it back; refuses once it moved again', () => {
+    const mara = createEntity(db, { kind: 'character', name: 'Mara' }).entity
+    expect(refusal(() => recordChanges(db, statusRun('record', mara.id, [], 'idea'), NOW))).toBe(
+      'VALIDATION: The change is not in the story bible'
+    )
+    updateEntity(db, mara.id, { status: 'idea' })
+    const [entry] = recordChanges(db, statusRun('record', mara.id, [], 'idea'), NOW)
+    expect(entry).toMatchObject({ kind: 'record', entityId: mara.id, undoable: true })
+    const undone = undoChange(db, entry!.id)
+    expect(getEntity(db, mara.id)?.status).toBe('canon')
+    expect(undone.restoredEntityIds).toEqual([mara.id])
+
+    updateEntity(db, mara.id, { status: 'idea' })
+    const [again] = recordChanges(db, statusRun('record', mara.id, [], 'idea'), NOW)
+    updateEntity(db, mara.id, { status: 'plan' })
+    expect(refusal(() => undoChange(db, again!.id))).toMatch(/^VALIDATION: The status on "Mara"/)
+  })
+
+  it('logs the statements’ status and puts each back; a fact row must name facts of the sheet', () => {
+    const mara = createEntity(db, { kind: 'character', name: 'Mara' }).entity
+    writeAuthorFact(db, mara.id, 'age', '19', scene)
+    const age = listFactsForEntity(db, mara.id).find((f) => f.attribute === 'age')
+    if (age === undefined) throw new Error('fact not written')
+    expect(refusal(() => recordChanges(db, statusRun('fact', mara.id, [], 'plan'), NOW))).toBe(
+      'VALIDATION: The change is not in the story bible'
+    )
+    setFactStatus(db, age.id, 'plan')
+    const [entry] = recordChanges(
+      db,
+      statusRun('fact', mara.id, [{ id: age.id, before: 'idea' }], 'plan'),
+      NOW
+    )
+    const undone = undoChange(db, entry!.id)
+    expect(listFactsForEntity(db, mara.id).find((f) => f.id === age.id)?.status).toBe('idea')
+    expect(undone.entityIds).toEqual([mara.id])
   })
 })

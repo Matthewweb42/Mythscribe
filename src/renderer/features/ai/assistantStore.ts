@@ -5,6 +5,7 @@ import {
   AGENT_SELECTION_CHARS,
   isDeletion,
   isDraftIntent,
+  isOpenAction,
   isRewriteIntent,
   settledAfterReload,
   type AgentAccess,
@@ -62,7 +63,7 @@ import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { applyAgentEdit, openEditor } from './agentApply'
-import { removeInsertedProse } from '@renderer/features/editor/agentEditing'
+import { AgentEditError, removeInsertedProse } from '@renderer/features/editor/agentEditing'
 import {
   acceptLanding,
   dismissLanding,
@@ -728,11 +729,14 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     setChanging(changeId, true)
     try {
       // F-9.15: story-bible edits are logged in Changes under the turn; their Undo is the log's.
-      const undo = await applyAgentEdit(
-        found.change.edit,
-        drafted ?? found.message.proposalId ?? '',
-        { source: 'chat', run: messageId }
-      )
+      // F-5.25 (agent.v8): undoing the last turn is the chat's own, here; it has no Undo itself.
+      const undo =
+        found.change.edit.kind === 'undoTurn'
+          ? await undoLastTurn(messageId)
+          : await applyAgentEdit(found.change.edit, drafted ?? found.message.proposalId ?? '', {
+              source: 'chat',
+              run: messageId
+            })
       if (undo !== null) undoers.set(changeId, undo)
       patchChange(messageId, changeId, { status: 'applied', error: null })
       if (drafted !== null) void proposalStore.settle(drafted, 'accepted', null)
@@ -1146,6 +1150,11 @@ async function runAgentTurn(
   // chat mode the turn was sent in.
   if (result.organise !== null) void useOrganiseStore.getState().start(result.organise)
   if (messageId === null) return
+  // F-5.25 (agent.v8): opening the Library or the upload changes nothing, so it runs in Ask too.
+  for (const change of changes) {
+    if (isOpenAction(change.edit))
+      await useAssistantStore.getState().applyChange(messageId, change.id)
+  }
   if (autoApply) {
     const store = useAssistantStore.getState()
     for (const change of changes) {
@@ -1259,6 +1268,39 @@ async function writeIntent(messageId: string, changeId: string, autoApply: boole
     skipped.delete(changeId)
     setDraft(changeId, null)
   }
+}
+
+/**
+ * F-5.25 (agent.v8): takes back what the latest earlier agent turn of `messageId`'s conversation
+ * applied and can still undo (its Undo lives in memory for the session), newest edit first, each
+ * marked undone on its turn. Answers null (an undo has no Undo); throws when there is nothing to
+ * take back, or with the first undo that fails (what came before it stays undone).
+ */
+async function undoLastTurn(messageId: string): Promise<null> {
+  const conversation = useAssistantStore
+    .getState()
+    .conversations?.items.find((c) => c.messages.some((m) => m.id === messageId))
+  const at = conversation?.messages.findIndex((m) => m.id === messageId) ?? -1
+  const earlier = conversation?.messages.slice(0, Math.max(0, at)).reverse() ?? []
+  const turn = earlier.find((m) =>
+    m.agent?.changes.some((c) => c.status === 'applied' && undoers.has(c.id))
+  )
+  const changes = (turn?.agent?.changes ?? []).filter(
+    (c) => c.status === 'applied' && undoers.has(c.id)
+  )
+  if (turn === undefined || changes.length === 0) {
+    throw new AgentEditError(
+      'Nothing from an earlier turn can still be undone here; use Changes or Ctrl+Z'
+    )
+  }
+  for (const change of [...changes].reverse()) {
+    const undo = undoers.get(change.id)
+    if (undo === undefined) continue
+    await undo()
+    undoers.delete(change.id)
+    patchChange(turn.id, change.id, { status: 'undone', error: null })
+  }
+  return null
 }
 
 /** The message `messageId` in whichever conversation holds it, or null. */
