@@ -5,17 +5,26 @@ import { AGENT_EDIT_RULES_V2, AGENT_RETRY_TURN } from './agent.v2'
 import { AGENT_ORGANISE_RULES } from './agent.v4'
 import { AGENT_LADDER_RULES, AGENT_RULES_V6, AGENT_STATUS_RULES } from './agent.v6'
 import {
+  AGENT_BIBLE_EDITS,
   AGENT_BULK_RULES,
   AGENT_CLEAR_EDIT,
   AGENT_EDIT_RULES_V7,
   AGENT_ORGANISE_RULES_V7,
   AGENT_PROMPT_V7_VERSION,
+  AGENT_RULES_V7,
   buildAgentPromptV7
 } from './agent.v7'
 
 describe('agent.v7 prompt (F-5.25 bulk clear and routing)', () => {
   it('keeps version 6’s rules and tools, and routes a bulk delete to clear, never organise', () => {
-    for (const tool of AGENT_TOOLS_V6) expect(AGENT_RULES_V6).toContain(`- ${tool} {`)
+    for (const tool of AGENT_TOOLS_V6) expect(AGENT_RULES_V7).toContain(`- ${tool} {`)
+    // Version 1's opening sentence (the e2e fake keys on it); only list_sheets' line differs.
+    expect(AGENT_RULES_V7.slice(0, 80)).toBe(AGENT_RULES_V6.slice(0, 80))
+    expect(AGENT_RULES_V7).not.toBe(AGENT_RULES_V6)
+    expect(AGENT_RULES_V7).toContain('- list_sheets {"kind"} or {"kind","field","empty"}')
+    expect(AGENT_RULES_V7.replace(/- list_sheets [^\n]*\n/, '')).toBe(
+      AGENT_RULES_V6.replace(/- list_sheets [^\n]*\n/, '')
+    )
     expect(AGENT_BULK_RULES).toContain('delete everything in my story bible')
     expect(AGENT_BULK_RULES).toContain('is a clear, never organising')
     expect(AGENT_BULK_RULES).toContain('{"edit":"clear"}')
@@ -26,14 +35,25 @@ describe('agent.v7 prompt (F-5.25 bulk clear and routing)', () => {
     expect(AGENT_ORGANISE_RULES_V7).not.toBe(AGENT_ORGANISE_RULES)
   })
 
-  it('adds the clear edit to version 2’s list, before its last line', () => {
+  it('adds the clear edit and the bulk and story-bible edits to version 2’s list, before its last line', () => {
     expect(AGENT_EDIT_RULES_V7).toBe(
       AGENT_EDIT_RULES_V2.replace(
         'Keep "answer" to a few sentences.',
-        `${AGENT_CLEAR_EDIT}Keep "answer" to a few sentences.`
+        `${AGENT_CLEAR_EDIT}${AGENT_BIBLE_EDITS}Keep "answer" to a few sentences.`
       )
     )
     expect(AGENT_EDIT_RULES_V7).toContain('{"edit":"clear","sheets","tags","library","notes"}')
+    for (const edit of [
+      'rename_tag',
+      'rename_sheet',
+      'recategorise',
+      'merge_sheets',
+      'create_sheet'
+    ]) {
+      expect(AGENT_BIBLE_EDITS).toContain(`{"edit":"${edit}"`)
+    }
+    expect(AGENT_BIBLE_EDITS).toContain('{"edit":"tag","ids","tag","add"}')
+    expect(AGENT_BULK_RULES).toContain('never one edit per item')
     expect(AGENT_EDIT_RULES_V7.endsWith('Keep "answer" to a few sentences.')).toBe(true)
   })
 
@@ -56,7 +76,7 @@ describe('agent.v7 prompt (F-5.25 bulk clear and routing)', () => {
       {
         role: 'system',
         content: [
-          AGENT_RULES_V6,
+          AGENT_RULES_V7,
           AGENT_STATUS_RULES,
           AGENT_LADDER_RULES,
           AGENT_BULK_RULES,
@@ -89,7 +109,7 @@ describe('agent.v7 prompt (F-5.25 bulk clear and routing)', () => {
     expect(built.messages).toEqual([
       {
         role: 'system',
-        content: `${AGENT_RULES_V6}\n\n${AGENT_STATUS_RULES}\n\n${AGENT_LADDER_RULES}\n\n${AGENT_BULK_RULES}\n\n${AGENT_ORGANISE_RULES_V7}\n\nNo document is open.`
+        content: `${AGENT_RULES_V7}\n\n${AGENT_STATUS_RULES}\n\n${AGENT_LADDER_RULES}\n\n${AGENT_BULK_RULES}\n\n${AGENT_ORGANISE_RULES_V7}\n\nNo document is open.`
       },
       { role: 'user', content: 'Delete everything in my story bible.' },
       { role: 'user', content: AGENT_RETRY_TURN }

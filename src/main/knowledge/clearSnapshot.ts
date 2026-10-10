@@ -1,10 +1,5 @@
 import { and, eq, isNull, sql, type SQL } from 'drizzle-orm'
-import {
-  ClearRow,
-  type ClearSnapshot,
-  type ClearTable,
-  type ClearValue
-} from '@shared/bibleClear'
+import { ClearRow, type ClearSnapshot, type ClearTable, type ClearValue } from '@shared/bibleClear'
 import { toEntityNameKey } from '@shared/entities'
 import { entity, knowledgeChange, node, tag, todoItem } from '../db/schema'
 import type { EntityDb } from '../entity/entityStore'
@@ -145,7 +140,13 @@ function assertRestorable(db: EntityDb, snapshot: ClearSnapshot): void {
   const rowsOf = (table: ClearTable): ClearRow[] =>
     snapshot.rows.filter((group) => group.table === table).flatMap((group) => group.rows)
   const taken: string[] = []
-  const liveTags = new Set(db.select({ name: tag.name }).from(tag).all().map((row) => row.name))
+  const liveTags = new Set(
+    db
+      .select({ name: tag.name })
+      .from(tag)
+      .all()
+      .map((row) => row.name)
+  )
   for (const row of rowsOf('tag')) {
     const name = str(row.name)
     if (name !== null && liveTags.has(name)) taken.push(`#${name}`)
@@ -179,11 +180,7 @@ function assertRestorable(db: EntityDb, snapshot: ClearSnapshot): void {
   }
   const written: string[] = []
   for (const held of snapshot.notes) {
-    const row = db
-      .select({ notes: node.notes })
-      .from(node)
-      .where(eq(node.id, held.nodeId))
-      .get()
+    const row = db.select({ notes: node.notes }).from(node).where(eq(node.id, held.nodeId)).get()
     if (row !== undefined && notesText(row.notes, held.nodeId) !== '') written.push(held.title)
   }
   if (written.length > 0) {

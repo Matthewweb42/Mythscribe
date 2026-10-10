@@ -116,9 +116,7 @@ export function clearOptions(db: EntityDb, wanted: ClearWanted): ClearOption[] {
 }
 
 /** The documents and folders below the sections whose notes hold any text. */
-function documentsWithNotes(
-  db: EntityDb
-): { id: string; title: string; notes: string }[] {
+function documentsWithNotes(db: EntityDb): { id: string; title: string; notes: string }[] {
   return db
     .select({ id: node.id, title: node.title, notes: node.notes, parentId: node.parentId })
     .from(node)
@@ -195,25 +193,25 @@ export function clearStoryBible(
     const removedEntities = new Set(entityIds)
     const removedTags = new Set(tagIds)
     const captured: ClearSnapshot['rows'] = [
-        { table: 'tag', rows: captureRows(tx, 'tag', ['id'], tagIds) },
-        { table: 'entity', rows: captureRows(tx, 'entity', ['id'], entityIds) },
-        {
-          table: 'fact',
-          rows: captureRows(tx, 'fact', ['entity_id', 'object_entity_id'], entityIds)
-        },
-        { table: 'observed_fact', rows: captureRows(tx, 'observed_fact', ['entity_id'], entityIds) },
-        {
-          table: 'continuity_finding',
-          rows: captureRows(tx, 'continuity_finding', ['entity_id'], entityIds)
-        },
-        { table: 'document_tag', rows: captureRows(tx, 'document_tag', ['tag_id'], tagIds) },
-        {
-          table: 'document_tag_dismissal',
-          rows: captureRows(tx, 'document_tag_dismissal', ['tag_id'], tagIds)
-        },
-        { table: 'tag_mention', rows: captureRows(tx, 'tag_mention', ['tag_id'], tagIds) },
-        { table: 'context_file', rows: captureRows(tx, 'context_file', ['id'], libraryIds) }
-      ]
+      { table: 'tag', rows: captureRows(tx, 'tag', ['id'], tagIds) },
+      { table: 'entity', rows: captureRows(tx, 'entity', ['id'], entityIds) },
+      {
+        table: 'fact',
+        rows: captureRows(tx, 'fact', ['entity_id', 'object_entity_id'], entityIds)
+      },
+      { table: 'observed_fact', rows: captureRows(tx, 'observed_fact', ['entity_id'], entityIds) },
+      {
+        table: 'continuity_finding',
+        rows: captureRows(tx, 'continuity_finding', ['entity_id'], entityIds)
+      },
+      { table: 'document_tag', rows: captureRows(tx, 'document_tag', ['tag_id'], tagIds) },
+      {
+        table: 'document_tag_dismissal',
+        rows: captureRows(tx, 'document_tag_dismissal', ['tag_id'], tagIds)
+      },
+      { table: 'tag_mention', rows: captureRows(tx, 'tag_mention', ['tag_id'], tagIds) },
+      { table: 'context_file', rows: captureRows(tx, 'context_file', ['id'], libraryIds) }
+    ]
     const snapshot: ClearSnapshot = {
       rows: captured.filter((group) => group.rows.length > 0),
       sheetTags:
@@ -286,7 +284,8 @@ export function clearStoryBible(
     const aliasesBefore = getTagAliases(tx)
     for (const id of entityIds) deleteEntity(tx, id)
     if (tagIds.length > 0) deleteTags(tx, tagIds)
-    if (libraryIds.length > 0) tx.delete(contextFile).where(inArray(contextFile.id, libraryIds)).run()
+    if (libraryIds.length > 0)
+      tx.delete(contextFile).where(inArray(contextFile.id, libraryIds)).run()
     for (const held of notes) saveNotes(tx, held.id, EMPTY_DOC)
     setDismissedNames(tx, dismissed)
     setObservedDismissed(tx, observed)

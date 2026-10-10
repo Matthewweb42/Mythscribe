@@ -844,7 +844,13 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
         { group: 'sheets', id: 'setting', label: 'Places', count: 1, checked: true },
         { group: 'tags', id: 'tone', label: 'Tone', count: 3, checked: true },
         { group: 'library', id: 'library', label: 'Library uploads', count: 1, checked: true },
-        { group: 'notes', id: 'notes', label: 'Notes on scenes and chapters', count: 4, checked: false }
+        {
+          group: 'notes',
+          id: 'notes',
+          label: 'Notes on scenes and chapters',
+          count: 4,
+          checked: false
+        }
       ]
     } as const satisfies AgentChange['edit']
     await mountOpen(withChanges([change('e-1', { ...CLEAR, options: [...CLEAR.options] })]))
@@ -869,8 +875,8 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
       'Delete 2 sheets, 3 tags'
     )
     // Kept on the turn (which is saved), so a reload shows the card as left.
-    const stored = useAssistantStore.getState().conversations?.items[0]?.messages[1]?.agent
-      ?.changes[0]?.edit
+    const stored =
+      useAssistantStore.getState().conversations?.items[0]?.messages[1]?.agent?.changes[0]?.edit
     expect(stored?.kind === 'clear' ? stored.options.map((o) => o.checked) : null).toEqual([
       true,
       false,

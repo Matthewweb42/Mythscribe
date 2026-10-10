@@ -169,7 +169,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   agent: {
     trigger: 'every chat message',
-    when: 'Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately. Since agent.v7 (F-5.25) a bulk delete is one clear edit answered without lookups (the clear itself runs locally, no AI); the bulk and organise rules add ~190 tokens to every request (a cached prefix).',
+    when: 'Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately. Since agent.v7 (F-5.25) a bulk delete is one clear edit answered without lookups (the clear itself runs locally, no AI); the bulk rules, the organise rule, and the bulk and story-bible edits add ~250 input tokens to a read request and ~470 to a write request (a cached prefix).',
     callsPerUse: 3,
     typicalOutTokens: 300,
     ideas:

@@ -455,7 +455,11 @@ function scoreAgentEdit(expected: string, answer: string): LiveResult['verdict']
   )
   return kinds.includes(expected)
     ? { kind: 'json', ok: true, problem: null }
-    : { kind: 'json', ok: false, problem: `no ${expected} edit (edits: ${kinds.join(', ') || 'none'})` }
+    : {
+        kind: 'json',
+        ok: false,
+        problem: `no ${expected} edit (edits: ${kinds.join(', ') || 'none'})`
+      }
 }
 
 /**

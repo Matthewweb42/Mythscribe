@@ -75,6 +75,20 @@ export function AgentSteps({
   )
 }
 
+/** How many names a bulk edit's card lists before "and N more" (F-5.25). */
+const NAME_LIST_SHOWN = 8
+
+/** The items a bulk edit covers (F-5.25), the first few by name. */
+function NameList({ names }: { names: readonly string[] }): React.JSX.Element {
+  const shown = names.slice(0, NAME_LIST_SHOWN).join(', ')
+  const more = names.length - NAME_LIST_SHOWN
+  return (
+    <p data-testid="agent-change-items" className="m-0 text-xs text-fg-muted">
+      {more > 0 ? `${shown}, and ${more} more` : shown}
+    </p>
+  )
+}
+
 /** What a pending edit shows under its heading: the current text with what goes struck through and what comes in colour. */
 function EditPreview({ edit }: { edit: AgentEdit }): React.JSX.Element | null {
   if (
@@ -117,6 +131,11 @@ function EditPreview({ edit }: { edit: AgentEdit }): React.JSX.Element | null {
           <ins>{edit.text}</ins>
         </p>
       ) : null
+    case 'tagMany':
+    case 'moveMany':
+      return <NameList names={edit.nodes.map((node) => node.title)} />
+    case 'sheetPatch':
+      return edit.sheets.length > 1 ? <NameList names={edit.sheets.map((s) => s.name)} /> : null
     default:
       return null
   }
@@ -224,8 +243,8 @@ function ClearCard({
     >
       <p className="m-0 text-xs font-medium">Are these the things you want to delete?</p>
       <p className="m-0 text-xs text-warning">
-        A backup is taken first, and Undo puts everything back. Scenes and chapters are never
-        part of it.
+        A backup is taken first, and Undo puts everything back. Scenes and chapters are never part
+        of it.
       </p>
       {CLEAR_GROUPS.map((group) => {
         const lines = options.filter((option) => option.group === group)

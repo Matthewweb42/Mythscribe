@@ -52,11 +52,12 @@ import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import { AGENT_FINAL_TURN } from './prompts/agent.v1'
 import { AGENT_RETRY_TURN } from './prompts/agent.v2'
-import { AGENT_LADDER_RULES, AGENT_RULES_V6, AGENT_STATUS_RULES } from './prompts/agent.v6'
+import { AGENT_LADDER_RULES, AGENT_STATUS_RULES } from './prompts/agent.v6'
 import {
   AGENT_BULK_RULES,
   AGENT_EDIT_RULES_V7,
-  AGENT_ORGANISE_RULES_V7
+  AGENT_ORGANISE_RULES_V7,
+  AGENT_RULES_V7
 } from './prompts/agent.v7'
 import { scanMentions } from '../tag/scanMentions'
 import { STORY_MAP_HEADING } from '@shared/storyTime'
@@ -214,7 +215,7 @@ describe('runAgent (F-5.22)', () => {
     expect(request(0)).toMatchObject({ tier: 'strong', json: true, maxTokens: 1_500 })
     // The open document is in every step; the tool results join as turns.
     const system = request(0).messages[0]?.content ?? ''
-    expect(system.startsWith(AGENT_RULES_V6)).toBe(true)
+    expect(system.startsWith(AGENT_RULES_V7)).toBe(true)
     expect(system).not.toContain(AGENT_EDIT_RULES_V7)
     expect(system).toContain(`Open document ${ref(scenes[0])}:`)
     // F-5.23 (agent.v3): the story-time rule, then the story map with now on the open scene,

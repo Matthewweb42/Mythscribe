@@ -146,8 +146,17 @@ describe('clearStoryBible (F-5.25)', () => {
 
   it('removes only the ticked categories', async () => {
     const ids = await seed()
-    clearStoryBible(db, { sheets: ['setting'], tags: ['tone'], library: false, notes: false }, 'chat:m2', NOW)
-    expect(listEntities(db).map((e) => e.id).sort()).toEqual([ids.mara, ids.tomas].sort())
+    clearStoryBible(
+      db,
+      { sheets: ['setting'], tags: ['tone'], library: false, notes: false },
+      'chat:m2',
+      NOW
+    )
+    expect(
+      listEntities(db)
+        .map((e) => e.id)
+        .sort()
+    ).toEqual([ids.mara, ids.tomas].sort())
     expect(getTagWithUsage(db, ids.tone)).toBeUndefined()
     expect(listContextFiles(db)).toHaveLength(1)
     expect(JSON.stringify(getNotes(db, scene).notes)).toContain('Mara lies here')
@@ -161,7 +170,12 @@ describe('clearStoryBible (F-5.25)', () => {
     ).toBe('VALIDATION: Nothing is ticked to delete')
     expect(
       refusal(() =>
-        clearStoryBible(db, { sheets: ['world'], tags: [], library: true, notes: false }, 'chat:m3', NOW)
+        clearStoryBible(
+          db,
+          { sheets: ['world'], tags: [], library: true, notes: false },
+          'chat:m3',
+          NOW
+        )
       )
     ).toBe('VALIDATION: There is nothing of that kind left to delete')
     expect(listChanges(db, { limit: 10 }).entries).toEqual([])
@@ -258,7 +272,9 @@ describe('the clear edit (agent.v7)', () => {
     })
     if (!('edit' in resolved) || resolved.edit.kind !== 'clear') throw new Error('not a clear')
     const ticked = resolved.edit.options.filter((o) => o.checked).map((o) => `${o.group}:${o.id}`)
-    expect(ticked).toEqual(expect.arrayContaining(['sheets:character', 'sheets:setting', 'library:library']))
+    expect(ticked).toEqual(
+      expect.arrayContaining(['sheets:character', 'sheets:setting', 'library:library'])
+    )
     expect(resolved.edit.options.find((o) => o.group === 'notes')?.checked).toBe(false)
   })
 

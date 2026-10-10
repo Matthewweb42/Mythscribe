@@ -1,4 +1,5 @@
 import {
+  AGENT_BULK_MAX,
   AGENT_BRIEF_MAX,
   AGENT_CARDS_MAX,
   AGENT_EDIT_TEXT_MAX,
@@ -24,7 +25,7 @@ import {
   isCategoryField,
   type StoryCategory
 } from '@shared/categories'
-import { toEntityNameKey } from '@shared/entities'
+import { ENTITY_NAME_MAX, toEntityNameKey } from '@shared/entities'
 import { sheetAt, type Fact, type FactStatus } from '@shared/facts'
 import type { Entity } from '@shared/ipc/contract'
 import { passageParagraphs } from '@shared/mentions'
@@ -39,6 +40,8 @@ import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
 import { listCategories } from '../entity/categoryStore'
 import { clearOptions, type ClearWanted } from '../knowledge/bibleClear'
+import { isEmptySheet } from '../organise/organiseProject'
+import { listDocumentTags } from '../tag/documentTagStore'
 import { listEntities } from '../entity/entityStore'
 import { allFactsForEntities, factsForEntities, listFactsForEntity } from '../entity/factStore'
 import { sceneCardFor } from '../knowledge/sceneCard'
@@ -178,7 +181,9 @@ export function runAgentTool(
     case 'read_sheet':
       return readSheet(project, args.name)
     case 'list_sheets':
-      return listSheets(project, str(args.kind))
+      return str(args.field).trim() === ''
+        ? listSheets(project, str(args.kind))
+        : listSheetField(project, str(args.kind), str(args.field), args.empty === true)
     case 'tags':
       return { step: { tool: 'tags', label: 'Reading the tags…' }, result: tags(project) }
     case 'todo':
@@ -772,6 +777,45 @@ function listSheets(project: AgentProject, kindArg: string): ToolOutcome {
   }
 }
 
+/**
+ * F-5.25 (agent.v7): `list_sheets {"kind","field","empty"}`, one field across the sheets: each
+ * sheet's value of it (a field id or its label, any case), or with `empty` only the sheets where
+ * it is blank. A category without that field is left out.
+ */
+function listSheetField(
+  project: AgentProject,
+  kindArg: string,
+  fieldArg: string,
+  emptyOnly: boolean
+): ToolOutcome {
+  const categories = listCategories(project.db)
+  const asked = categoryArg(categories, kindArg)
+  const shown = asked !== null ? [asked] : categories
+  const key = fieldArg.trim().toLowerCase()
+  const lines: string[] = []
+  for (const category of shown) {
+    const field = category.fields.find(
+      (f) => f.id.toLowerCase() === key || f.label.toLowerCase() === key
+    )
+    if (field === undefined) continue
+    const rows = project.entities
+      .filter((e) => e.kind === category.id)
+      .map((e) => ({ name: e.name, value: (e.fields[field.id] ?? '').trim() }))
+      .filter((row) => !emptyOnly || row.value === '')
+    if (rows.length === 0) continue
+    lines.push(`${category.name}, ${field.label}:`)
+    for (const row of rows) lines.push(`- ${row.name}: ${row.value === '' ? '(empty)' : row.value}`)
+  }
+  return {
+    step: { tool: 'list_sheets', label: `Listing ${fieldArg.trim()} across the sheets…` },
+    result: cap(
+      lines.length > 0
+        ? lines.join('\n')
+        : `No sheet ${emptyOnly ? 'leaves' : 'has'} a field called "${fieldArg.trim()}"${emptyOnly ? ' empty' : ''}.`
+    )
+  }
+}
+
 function tags(project: AgentProject): string {
   const all = listTags(project.db)
   const lines = TAG_CATEGORIES.map((category) => {
@@ -943,6 +987,7 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
       return { edit: { kind: 'rename', nodeId: row.id, title: row.title, after } }
     }
     case 'move': {
+      if (edit.ids !== undefined || edit.from !== undefined) return resolveMoveMany(project, edit)
       const row = nodeByRef(project, edit.id)
       const parent = nodeByRef(project, edit.in)
       if (!row?.parentId) return { error: 'not a movable id' }
@@ -989,6 +1034,7 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
       }
     }
     case 'tag': {
+      if (edit.ids !== undefined) return resolveTagMany(project, edit)
       const row = documentArg()
       if (typeof row === 'string') return { error: row }
       const typed = toTagName(str(edit.tag))
@@ -1018,6 +1064,15 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
     }
     case 'clear':
       return resolveClear(project, edit)
+    case 'rename_tag':
+      return resolveTagRename(project, edit)
+    case 'rename_sheet':
+    case 'recategorise':
+      return resolveSheetPatch(project, edit, kind)
+    case 'merge_sheets':
+      return resolveSheetMerge(project, edit)
+    case 'create_sheet':
+      return resolveSheetCreate(project, edit)
     default:
       return { error: `unknown edit "${kind}"` }
   }
@@ -1048,7 +1103,9 @@ function resolveClear(project: AgentProject, edit: Record<string, unknown>): Res
     const key = name.trim().toLowerCase()
     const found =
       categoryArg(categories, key) ??
-      categories.find((c) => `${c.noun.toLowerCase()}s` === key || c.name.toLowerCase() === `${key}s`)
+      categories.find(
+        (c) => `${c.noun.toLowerCase()}s` === key || c.name.toLowerCase() === `${key}s`
+      )
     if (found !== undefined) sheetIds.add(found.id)
   }
   const tagIds = new Set<TagCategory>()
@@ -1069,4 +1126,237 @@ function resolveClear(project: AgentProject, edit: Record<string, unknown>): Res
   if (options.length === 0) return { error: 'the story bible is already empty' }
   if (!options.some((option) => option.checked)) return { error: 'nothing of those kinds' }
   return { edit: { kind: 'clear', options } }
+}
+
+/** The manuscript's documents in reading order (the front and end matter left out). */
+function manuscriptDocuments(project: AgentProject): NodeRow[] {
+  // The project's rows leave the three section roots out (`nodesInTreeOrder`); read them here.
+  const all = new Map(listNodes(project.db).map((row) => [row.id, row]))
+  const sectionOf = (row: NodeRow): string | null => {
+    let at: NodeRow | undefined = row
+    while (at?.parentId) at = all.get(at.parentId)
+    return at?.sectionType ?? null
+  }
+  return project.rows.filter((row) => isDocument(row) && sectionOf(row) === 'manuscript')
+}
+
+/** Whether `row` is `ancestor` or sits anywhere under it. */
+function isUnder(project: AgentProject, row: NodeRow, ancestor: NodeRow): boolean {
+  let at: NodeRow | undefined = row
+  while (at !== undefined) {
+    if (at.id === ancestor.id) return true
+    at = at.parentId === null ? undefined : project.byId.get(at.parentId)
+  }
+  return false
+}
+
+/**
+ * The documents a bulk tag names (F-5.25): `"all"` for every manuscript document, a folder's ref
+ * for the documents under it, or a list of refs (a folder among them stands for its documents).
+ */
+function documentsNamed(project: AgentProject, ids: unknown): NodeRow[] | string {
+  if (meansAll(ids)) return manuscriptDocuments(project)
+  const refs: unknown[] = Array.isArray(ids) ? ids : [ids]
+  const out = new Map<string, NodeRow>()
+  for (const ref of refs) {
+    const row = nodeByRef(project, ref)
+    if (!row?.parentId) return `${str(ref) || 'an id'} is not in the binder`
+    if (isDocument(row)) {
+      out.set(row.id, row)
+      continue
+    }
+    for (const doc of project.rows) {
+      if (isDocument(doc) && isUnder(project, doc, row)) out.set(doc.id, doc)
+    }
+  }
+  return [...out.values()]
+}
+
+/** F-5.25: `{"edit":"tag","ids","tag","add"}`, one tag on (or off) many documents at once. */
+function resolveTagMany(project: AgentProject, edit: Record<string, unknown>): ResolvedEdit {
+  const docs = documentsNamed(project, edit.ids)
+  if (typeof docs === 'string') return { error: docs }
+  const typed = toTagName(str(edit.tag))
+  if (!typed) return { error: 'no "tag"' }
+  const known = findTagByNameOrAlias(project.db, typed)
+  const tag = known === undefined ? typed : (getTag(project.db, known)?.name ?? typed)
+  const add = edit.add !== false
+  if (!add && known === undefined) return { error: `no tag #${tag}` }
+  // Only the documents it changes, so the card's count is what happens.
+  const has = (row: NodeRow): boolean =>
+    known !== undefined && listDocumentTags(project.db, row.id).some((t) => t.id === known)
+  const changed = docs.filter((row) => (add ? !has(row) : has(row)))
+  if (changed.length === 0) return { error: 'no document would change' }
+  if (changed.length > AGENT_BULK_MAX) return { error: `more than ${AGENT_BULK_MAX} documents` }
+  return {
+    edit: {
+      kind: 'tagMany',
+      nodes: changed.map((row) => ({
+        nodeId: row.id,
+        title: project.titleOf(row.id) || row.title
+      })),
+      tag,
+      add
+    }
+  }
+}
+
+/**
+ * F-5.25: `{"edit":"move","ids":[…],"in"}` or `{"edit":"move","from","in"}` (every child of a
+ * folder), many items to the end of one folder in the order given. Never a section, and never a
+ * folder into itself or under itself.
+ */
+function resolveMoveMany(project: AgentProject, edit: Record<string, unknown>): ResolvedEdit {
+  const parent = nodeByRef(project, edit.in)
+  if (parent?.kind !== 'folder') return { error: '"in" is not a folder' }
+  const rows: NodeRow[] = []
+  if (edit.from !== undefined) {
+    const from = nodeByRef(project, edit.from)
+    if (from?.kind !== 'folder') return { error: '"from" is not a folder' }
+    rows.push(...project.rows.filter((row) => row.parentId === from.id))
+  } else {
+    const refs: unknown[] = Array.isArray(edit.ids) ? edit.ids : [edit.ids]
+    for (const ref of refs) {
+      const row = nodeByRef(project, ref)
+      if (!row?.parentId) return { error: `${str(ref) || 'an id'} is not a movable id` }
+      if (!rows.includes(row)) rows.push(row)
+    }
+  }
+  if (rows.some((row) => isUnder(project, parent, row))) {
+    return { error: 'cannot move a folder into itself' }
+  }
+  if (rows.length === 0) return { error: 'nothing to move' }
+  if (rows.length > AGENT_BULK_MAX) return { error: `more than ${AGENT_BULK_MAX} items` }
+  const nameOf = (row: NodeRow): string => project.titleOf(row.id) || row.title
+  return {
+    edit: {
+      kind: 'moveMany',
+      nodes: rows.map((row) => ({ nodeId: row.id, title: nameOf(row) })),
+      parentId: parent.id,
+      parentTitle: nameOf(parent)
+    }
+  }
+}
+
+/** F-5.25: `{"edit":"rename_tag","tag","title"}`, through the tag bank's own rename. */
+function resolveTagRename(project: AgentProject, edit: Record<string, unknown>): ResolvedEdit {
+  const typed = toTagName(str(edit.tag))
+  const id = findTagByNameOrAlias(project.db, typed)
+  const held = id === undefined ? undefined : getTag(project.db, id)
+  if (held === undefined) return { error: `no tag #${typed}` }
+  const after = toTagName(str(edit.title))
+  if (!after || after === held.name) return { error: 'no new name' }
+  if (findTagByNameOrAlias(project.db, after) !== undefined) return { error: `#${after} exists` }
+  return { edit: { kind: 'tagRename', tagId: held.id, name: held.name, after } }
+}
+
+/** The category a model's word names (id, name, singular, or plural; any case), or undefined. */
+function categoryNamed(
+  categories: readonly StoryCategory[],
+  value: unknown
+): StoryCategory | undefined {
+  const key = str(value).trim().toLowerCase()
+  if (key === '') return undefined
+  return (
+    categoryArg(categories, key) ??
+    categories.find((c) => `${c.noun.toLowerCase()}s` === key || c.name.toLowerCase() === `${key}s`)
+  )
+}
+
+const sameName = (a: string, b: string): boolean => toEntityNameKey(a) === toEntityNameKey(b)
+
+/**
+ * F-5.25: `{"edit":"rename_sheet","name","title"}` renames one sheet; `{"edit":"recategorise",
+ * "sheets":[names] or "from","to"}` moves sheets (or a whole category's) into another category.
+ */
+function resolveSheetPatch(
+  project: AgentProject,
+  edit: Record<string, unknown>,
+  kind: string
+): ResolvedEdit {
+  const categories = listCategories(project.db)
+  if (kind === 'rename_sheet') {
+    const sheet = sheetByName(project, edit.name)
+    if (sheet === undefined) return { error: `no sheet called "${str(edit.name)}"` }
+    const rename = text(edit.title, ENTITY_NAME_MAX)
+    if (!rename || sameName(rename, sheet.name)) return { error: 'no new name' }
+    const taken = project.entities.some(
+      (e) => e.id !== sheet.id && e.kind === sheet.kind && sameName(e.name, rename)
+    )
+    if (taken) return { error: `a sheet called "${rename}" exists` }
+    return {
+      edit: {
+        kind: 'sheetPatch',
+        sheets: [{ entityId: sheet.id, name: sheet.name, kind: sheet.kind }],
+        rename,
+        to: null,
+        toName: null
+      }
+    }
+  }
+  const to = categoryNamed(categories, edit.to)
+  if (to === undefined) return { error: `no category "${str(edit.to)}"` }
+  const sheets: Entity[] = []
+  if (edit.from !== undefined) {
+    const from = categoryNamed(categories, edit.from)
+    if (from === undefined) return { error: `no category "${str(edit.from)}"` }
+    sheets.push(...project.entities.filter((e) => e.kind === from.id))
+  } else {
+    for (const name of namesIn(edit.sheets)) {
+      const sheet = sheetByName(project, name)
+      if (sheet === undefined) return { error: `no sheet called "${name}"` }
+      if (!sheets.includes(sheet)) sheets.push(sheet)
+    }
+  }
+  const moving = sheets.filter((sheet) => sheet.kind !== to.id)
+  if (moving.length === 0) return { error: 'no sheet would move' }
+  if (moving.length > AGENT_BULK_MAX) return { error: `more than ${AGENT_BULK_MAX} sheets` }
+  const clash = moving.find((sheet) =>
+    project.entities.some((e) => e.kind === to.id && sameName(e.name, sheet.name))
+  )
+  if (clash !== undefined) return { error: `${to.name} already has a sheet called "${clash.name}"` }
+  return {
+    edit: {
+      kind: 'sheetPatch',
+      sheets: moving.map((sheet) => ({ entityId: sheet.id, name: sheet.name, kind: sheet.kind })),
+      rename: null,
+      to: to.id,
+      toName: to.name
+    }
+  }
+}
+
+/** F-5.25: `{"edit":"merge_sheets","sheets":[names],"into"}`, the story bible's own merge. */
+function resolveSheetMerge(project: AgentProject, edit: Record<string, unknown>): ResolvedEdit {
+  const target = sheetByName(project, edit.into)
+  if (target === undefined) return { error: `no sheet called "${str(edit.into)}"` }
+  const sources: Entity[] = []
+  for (const name of namesIn(edit.sheets)) {
+    const sheet = sheetByName(project, name)
+    if (sheet === undefined) return { error: `no sheet called "${name}"` }
+    if (sheet.id !== target.id && !sources.includes(sheet)) sources.push(sheet)
+  }
+  if (sources.length === 0) return { error: 'nothing to merge' }
+  if (sources.length > AGENT_BULK_MAX) return { error: `more than ${AGENT_BULK_MAX} sheets` }
+  return {
+    edit: {
+      kind: 'sheetMerge',
+      target: { id: target.id, name: target.name },
+      sources: sources.map((sheet) => ({ id: sheet.id, name: sheet.name })),
+      withText: sources.some((sheet) => !isEmptySheet(sheet))
+    }
+  }
+}
+
+/** F-5.25: `{"edit":"create_sheet","name","category"}`, a new empty sheet. */
+function resolveSheetCreate(project: AgentProject, edit: Record<string, unknown>): ResolvedEdit {
+  const category = categoryNamed(listCategories(project.db), edit.category)
+  if (category === undefined) return { error: `no category "${str(edit.category)}"` }
+  const name = text(edit.name, ENTITY_NAME_MAX)
+  if (!name) return { error: 'no "name"' }
+  const taken = project.entities.some((e) => e.kind === category.id && sameName(e.name, name))
+  if (taken) return { error: `a sheet called "${name}" exists` }
+  return {
+    edit: { kind: 'sheetCreate', category: category.id, categoryName: category.noun, name }
+  }
 }

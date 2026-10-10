@@ -198,6 +198,36 @@ export async function logAppliedChange(
   return () => useChangesStore.getState().undo(id)
 }
 
+/**
+ * F-5.25: `logAppliedChange` for a bulk edit, many rows under one run (in pages of 100, the log's
+ * cap per call); the Undo takes them back newest first. If the log refuses, `fallback` is the Undo.
+ */
+export async function logAppliedChanges(
+  run: ChangeRun,
+  changes: readonly RecordedChange[],
+  fallback: (() => Promise<void>) | null
+): Promise<(() => Promise<void>) | null> {
+  const ids: string[] = []
+  try {
+    for (let at = 0; at < changes.length; at += RECORD_PAGE) {
+      const logged = await useChangesStore
+        .getState()
+        .record({ ...run, changes: changes.slice(at, at + RECORD_PAGE) })
+      for (const entry of logged) if (entry.undoable) ids.push(entry.id)
+    }
+  } catch {
+    return ids.length === 0 ? fallback : undoAll(ids)
+  }
+  return ids.length === 0 ? null : undoAll(ids)
+}
+
+/** The most rows one `changes:record` call takes (`RecordChangesInput`). */
+const RECORD_PAGE = 100
+
+const undoAll = (ids: readonly string[]) => async (): Promise<void> => {
+  for (const id of [...ids].reverse()) await useChangesStore.getState().undo(id)
+}
+
 /** Empties the store and drops the subscription. For tests only. */
 export function resetChangesStore(): void {
   unsubscribe?.()

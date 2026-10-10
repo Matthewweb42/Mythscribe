@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { CLEAR_OPTIONS_MAX, ClearOption, describeClearCounts, tickedCounts } from './bibleClear'
-import { EntityFieldId } from './entities'
+import { ENTITY_NAME_MAX, EntityFieldId, EntityKind } from './entities'
+import { TAG_NAME_MAX } from './tags'
 import { SCENE_SYNOPSIS_MAX } from './sceneMeta'
 
 /**
@@ -49,6 +50,11 @@ export const AGENT_TITLE_MAX = 200
 export const AGENT_ANSWER_MAX = 4_000
 /** Citations kept per answer. */
 export const AGENT_MAX_CITATIONS = 6
+/**
+ * F-5.25: what one bulk edit (tag many, move many, move sheets to a category) may name. The cap
+ * on edits counts proposals, not the items one of them covers.
+ */
+export const AGENT_BULK_MAX = 200
 
 /**
  * 2026-10-07 (author report: a draft inside the JSON reply hit the cap and the raw JSON showed):
@@ -225,6 +231,58 @@ export const AgentEdit = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('clear'),
     options: z.array(ClearOption).min(1).max(CLEAR_OPTIONS_MAX)
+  }),
+  /** F-5.25: one tag added to or taken off many documents (only those it changes). */
+  z.object({
+    kind: z.literal('tagMany'),
+    nodes: z.array(z.object(NodeRef)).min(1).max(AGENT_BULK_MAX),
+    tag: z.string().min(1),
+    add: z.boolean()
+  }),
+  /** F-5.25: many documents or folders moved to the end of one folder, in the order given. */
+  z.object({
+    kind: z.literal('moveMany'),
+    nodes: z.array(z.object(NodeRef)).min(1).max(AGENT_BULK_MAX),
+    parentId: z.string(),
+    parentTitle: z.string()
+  }),
+  /** F-5.25: a tag renamed (its scenes, marks, and aliases follow it; the tag bank's own rename). */
+  z.object({
+    kind: z.literal('tagRename'),
+    tagId: z.string(),
+    name: z.string(),
+    after: z.string().min(1).max(TAG_NAME_MAX)
+  }),
+  /**
+   * F-5.25: sheets renamed or moved to another category. `rename` only with one sheet; `kind`
+   * (with its name) moves every sheet listed; `before` is each sheet's current name and kind.
+   */
+  z.object({
+    kind: z.literal('sheetPatch'),
+    sheets: z
+      .array(z.object({ entityId: z.string(), name: z.string(), kind: EntityKind }))
+      .min(1)
+      .max(AGENT_BULK_MAX),
+    rename: z.string().min(1).max(ENTITY_NAME_MAX).nullable(),
+    to: EntityKind.nullable(),
+    toName: z.string().nullable()
+  }),
+  /** F-5.25: sheets merged into one (the story bible's own merge); the sources go, so it asks. */
+  z.object({
+    kind: z.literal('sheetMerge'),
+    target: z.object({ id: z.string(), name: z.string() }),
+    sources: z
+      .array(z.object({ id: z.string(), name: z.string() }))
+      .min(1)
+      .max(AGENT_BULK_MAX),
+    withText: z.boolean()
+  }),
+  /** F-5.25: a new, empty story-bible sheet (it makes its #name tag, as the author's own does). */
+  z.object({
+    kind: z.literal('sheetCreate'),
+    category: EntityKind,
+    categoryName: z.string(),
+    name: z.string().min(1).max(ENTITY_NAME_MAX)
   })
 ])
 export type AgentEdit = z.infer<typeof AgentEdit>
@@ -297,7 +355,12 @@ export type AgentTurn = z.infer<typeof AgentTurn>
 
 /** Deleting or merging away scenes, chapters, sheets, or tags, or clearing them (F-5.25): these ask even in Auto. */
 export function isDeletion(edit: AgentEdit): boolean {
-  return edit.kind === 'delete' || edit.kind === 'merge' || edit.kind === 'clear'
+  return (
+    edit.kind === 'delete' ||
+    edit.kind === 'merge' ||
+    edit.kind === 'clear' ||
+    edit.kind === 'sheetMerge'
+  )
 }
 
 /** Prose the edit puts into the book, which the voice check reads; empty for none. */
@@ -352,7 +415,32 @@ export function describeEdit(edit: AgentEdit): string {
       return `Delete ${TARGET_NOUN[edit.target]}${edit.name}`
     case 'clear':
       return `Delete ${describeClearCounts(tickedCounts(edit.options))} from the story bible`
+    case 'tagMany':
+      return edit.add
+        ? `Tagged ${documents(edit.nodes.length)} #${edit.tag}`
+        : `Removed #${edit.tag} from ${documents(edit.nodes.length)}`
+    case 'moveMany':
+      return `Moved ${documents(edit.nodes.length, 'item')} into ${edit.parentTitle}`
+    case 'tagRename':
+      return `Renamed #${edit.name} to #${edit.after}`
+    case 'sheetPatch': {
+      const first = edit.sheets[0]?.name ?? ''
+      const what = edit.sheets.length === 1 ? first : `${edit.sheets.length} sheets`
+      if (edit.rename !== null && edit.to !== null)
+        return `Renamed ${what} to “${edit.rename}” in ${edit.toName ?? edit.to}`
+      if (edit.rename !== null) return `Renamed the sheet ${what} to “${edit.rename}”`
+      return `Moved ${what} to ${edit.toName ?? edit.to ?? ''}`
+    }
+    case 'sheetMerge':
+      return `Merge ${edit.sources.map((s) => s.name).join(', ')} into ${edit.target.name}`
+    case 'sheetCreate':
+      return `New ${edit.categoryName} sheet: ${edit.name}`
   }
+}
+
+/** "3 documents", "1 document". */
+function documents(n: number, noun = 'document'): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`
 }
 
 /** What the open document contributes to every run: the caret window and the selection. */
