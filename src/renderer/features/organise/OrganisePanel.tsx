@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { categoryFieldLabel, categoryOf } from '@shared/categories'
 import {
   canUndo,
@@ -20,6 +20,8 @@ import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { ReviewDeck } from '@renderer/features/review/ReviewDeck'
 import type { ReviewDeckGroup, ReviewDeckItem } from '@renderer/features/review/reviewDeckModel'
+import { SideWorkFrame } from '@renderer/features/sideWork/SideWorkFrame'
+import { useTakesFocus } from '@renderer/features/sideWork/sideWork'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { useOrganiseStore } from './organiseStore'
 
@@ -37,41 +39,31 @@ const clip = (text: string): string => {
 }
 
 /**
- * The Organise plan screen (F-9.10; one decision at a time since 2026-10-08): the plan on the
- * review deck, grouped in its rail (Merges, Not names, Categories, Tags, Story bible, Notes,
- * Binder), one card per change with what it does, before → after, and why. Ask: Accept / Skip /
- * Edit each (A / S / E), Accept group, and "Apply N accepted" (or reaching the end with nothing
- * skipped) applies them. Auto: what could be undone is already applied, each with Undo, and
- * "Undo the whole reorganisation"; merges, deletions, and new categories wait on the deck.
- * Plan: the cards only describe.
+ * The Organise plan screen (F-9.10; one decision at a time since 2026-10-08; side work since
+ * 2026-10-10): shown in the assistant column when the author opens the run from its status-bar
+ * item, never over the editor. While the AI works it shows the wait with Stop (Escape stops
+ * too); then the plan on the review deck, grouped (Merges, Not names, Categories, Tags, Story
+ * bible, Notes, Binder), one card per change with what it does, before → after, and why. Ask:
+ * Accept / Skip / Edit each (A / S / E), Accept group, and "Apply N accepted" (or reaching the
+ * end with nothing skipped) applies them. Auto: what could be undone is already applied, each
+ * with Undo, and "Undo the whole reorganisation"; merges, deletions, and new categories wait on
+ * the deck. Plan: the cards only describe. Close (or Escape) ends the run; "Back to the
+ * conversation" only hides it.
  */
-export function OrganiseDialog(): React.JSX.Element | null {
-  const open = useOrganiseStore((s) => s.open)
-  if (!open) return null
-  return <Dialog />
+export function OrganisePanel(): React.JSX.Element | null {
+  const shown = useOrganiseStore((s) => s.open && s.shown)
+  if (!shown) return null
+  return <Panel />
 }
 
-function Dialog(): React.JSX.Element {
-  const titleId = useId()
-  const panel = useRef<HTMLDivElement>(null)
+function Panel(): React.JSX.Element {
   const phase = useOrganiseStore((s) => s.phase)
   const mode = useOrganiseStore((s) => s.mode)
   const request = useOrganiseStore((s) => s.request)
+  const busy = useOrganiseStore((s) => s.busy)
   const close = useOrganiseStore((s) => s.close)
   const stop = useOrganiseStore((s) => s.stop)
-
-  useEffect(() => {
-    // The plan's deck takes the focus itself, so its keys work at once.
-    if (phase !== 'ready') panel.current?.focus()
-  }, [phase])
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== 'Escape') return
-    event.preventDefault()
-    event.stopPropagation()
-    if (phase === 'running') stop()
-    else close()
-  }
+  const hide = useOrganiseStore((s) => s.hide)
 
   const scope =
     request === null
@@ -87,31 +79,25 @@ function Dialog(): React.JSX.Element {
         : 'One change at a time: A accepts, S skips, E edits. Nothing changes until you apply. Scene text is never rewritten.'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
-      <div
-        ref={panel}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        data-testid="organise-dialog"
-        onKeyDown={onKeyDown}
-        className="flex max-h-[85vh] overflow-y-auto w-[860px] max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none"
-      >
-        <div className="shrink-0 border-b border-line px-5 pt-4 pb-3">
-          <h2 id={titleId} className="m-0 text-base font-semibold">
-            Organise {scope === '' ? '' : `· ${scope}`}
-          </h2>
-          <p className="mt-1 mb-0 text-sm text-fg-muted">{lead}</p>
-          {request !== null && request.instruction !== '' ? (
-            <p className="mt-1 mb-0 text-xs text-fg-subtle" data-testid="organise-instruction">
-              You asked: {request.instruction}
-            </p>
-          ) : null}
-        </div>
-        {phase === 'ready' ? <Plan /> : <Status />}
+    <SideWorkFrame
+      title={`Organise${scope === '' ? '' : ` · ${scope}`}`}
+      testId="organise-panel"
+      onEscape={() => {
+        if (phase === 'running') stop()
+        else if (!busy) close()
+      }}
+      onHide={hide}
+    >
+      <div className="shrink-0 px-3 pb-2">
+        <p className="mt-1 mb-0 text-xs text-fg-muted">{lead}</p>
+        {request !== null && request.instruction !== '' ? (
+          <p className="mt-1 mb-0 text-xs text-fg-subtle" data-testid="organise-instruction">
+            You asked: {request.instruction}
+          </p>
+        ) : null}
       </div>
-    </div>
+      {phase === 'ready' ? <Plan /> : <Status />}
+    </SideWorkFrame>
   )
 }
 
@@ -127,8 +113,8 @@ function Status(): React.JSX.Element {
       <div
         className={
           phase === 'running'
-            ? 'flex min-h-40 items-center justify-center px-5 py-10 text-center text-sm'
-            : 'px-5 py-4 text-sm'
+            ? 'flex min-h-32 items-center justify-center px-3 py-6 text-center text-sm'
+            : 'px-3 py-3 text-sm'
         }
       >
         {phase === 'running' ? (
@@ -139,7 +125,7 @@ function Status(): React.JSX.Element {
           </p>
         )}
       </div>
-      <div className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-3">
+      <div className="flex shrink-0 justify-end gap-2 border-t border-line px-3 py-2">
         {phase === 'running' ? (
           <button type="button" onClick={stop} className={BUTTON}>
             Stop
@@ -192,6 +178,7 @@ function Plan(): React.JSX.Element {
   const setEditing = useOrganiseStore((s) => s.setEditing)
   const applyAccepted = useOrganiseStore((s) => s.applyAccepted)
   const undoAll = useOrganiseStore((s) => s.undoAll)
+  const autoFocus = useTakesFocus()
   const items = useMemo<ReviewDeckItem[]>(
     () =>
       order.flatMap((id) => {
@@ -227,7 +214,7 @@ function Plan(): React.JSX.Element {
   return (
     <>
       {(plan !== null && plan.reply !== '') || (plan !== null && plan.skipped.length > 0) ? (
-        <div className="shrink-0 px-5 pt-3 text-sm">
+        <div className="shrink-0 px-3 pt-1 text-sm">
           {plan.reply !== '' ? (
             <p className="m-0" data-testid="organise-reply">
               {plan.reply}
@@ -250,10 +237,10 @@ function Plan(): React.JSX.Element {
       ) : null}
       {items.length === 0 ? (
         <>
-          <p className="m-0 px-5 py-4 text-sm text-fg-muted" data-testid="organise-nothing">
+          <p className="m-0 px-3 py-3 text-sm text-fg-muted" data-testid="organise-nothing">
             Nothing to change: everything already looks organised.
           </p>
-          <div className="flex shrink-0 justify-end border-t border-line px-5 py-3">
+          <div className="flex shrink-0 justify-end border-t border-line px-3 py-2">
             {closeButton}
           </div>
         </>
@@ -276,7 +263,8 @@ function Plan(): React.JSX.Element {
           }
           applyOnFinish
           busy={busy}
-          autoFocus
+          compact
+          autoFocus={autoFocus}
           footer={
             <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="tabular-nums" data-testid="organise-cost">

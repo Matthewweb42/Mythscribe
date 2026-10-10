@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings } from '@shared/aiSettings'
@@ -9,7 +9,7 @@ import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { resetEntityStore } from '@renderer/features/entities/entityStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient } from '@renderer/lib/ipc'
-import { ContextUploadDialog } from './ContextUploadDialog'
+import { ContextUploadDialog, UploadReviewPanel } from './ContextUploadDialog'
 import { contextFileFixture, contextReviewFixture } from './libraryFixture'
 import { resetLibraryStore, useLibraryStore } from './libraryStore'
 
@@ -70,9 +70,10 @@ describe('ContextUploadDialog (F-9.8)', () => {
 
   it('reviews one card at a time: conflicts side by side, finer picks on E, and applies what was accepted', async () => {
     useLibraryStore.setState({
-      flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} }
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} },
+      shown: true
     })
-    render(<ContextUploadDialog />)
+    render(<UploadReviewPanel />)
     expect(screen.getByTestId('library-review-summary')).toHaveTextContent(
       '1 new sheet · 1 sheet to update · 1 conflict · 1 note for Project notes'
     )
@@ -118,11 +119,37 @@ describe('ContextUploadDialog (F-9.8)', () => {
     expect(useLibraryStore.getState().flow).toBeNull()
   })
 
-  it('applies nothing the author did not accept', async () => {
+  it('runs and waits for review beside the editor: no dialog, and the panel only once shown (2026-10-10)', async () => {
     useLibraryStore.setState({
       flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} }
     })
-    render(<ContextUploadDialog />)
+    render(
+      <>
+        <ContextUploadDialog />
+        <UploadReviewPanel />
+      </>
+    )
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByTestId('library-panel')).toBeNull()
+    act(() => useLibraryStore.getState().show())
+    const panel = screen.getByTestId('library-panel')
+    expect(within(panel).getByTestId('review-card')).toBeInTheDocument()
+    // Back to the conversation keeps the review; Escape (like Cancel) drops it.
+    await userEvent.click(within(panel).getByTestId('side-work-hide'))
+    expect(screen.queryByTestId('library-panel')).toBeNull()
+    expect(useLibraryStore.getState().flow?.stage).toBe('review')
+    act(() => useLibraryStore.getState().show())
+    await userEvent.keyboard('{Escape}')
+    expect(useLibraryStore.getState().flow).toBeNull()
+    expect(screen.queryByTestId('library-panel')).toBeNull()
+  })
+
+  it('applies nothing the author did not accept', async () => {
+    useLibraryStore.setState({
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} },
+      shown: true
+    })
+    render(<UploadReviewPanel />)
     expect(screen.getByTestId('review-apply')).toBeDisabled()
     await userEvent.keyboard('a')
     expect(screen.getByTestId('review-apply')).toBeEnabled()
@@ -145,9 +172,10 @@ describe('ContextUploadDialog (F-9.8)', () => {
           model: 'gpt-5.4'
         },
         progress: { done: 1, total: 2, costUsd: 0.01 }
-      }
+      },
+      shown: true
     })
-    const { unmount } = render(<ContextUploadDialog />)
+    const { unmount } = render(<UploadReviewPanel />)
     expect(screen.getByTestId('library-progress')).toHaveTextContent(
       'Request 1 of 2 · $0.01 so far'
     )
@@ -156,7 +184,7 @@ describe('ContextUploadDialog (F-9.8)', () => {
     useLibraryStore.setState({
       flow: { stage: 'failed', fileIds: ['f1'], message: 'No key.', nextStep: 'Add one.' }
     })
-    render(<ContextUploadDialog />)
+    render(<UploadReviewPanel />)
     expect(screen.getByTestId('library-error')).toHaveTextContent('No key. Add one.')
   })
 
@@ -187,9 +215,10 @@ describe('ContextUploadDialog (F-9.8)', () => {
       on: () => () => {}
     })
     useLibraryStore.setState({
-      flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} }
+      flow: { stage: 'review', review: contextReviewFixture(), busy: false, decisions: {} },
+      shown: true
     })
-    render(<ContextUploadDialog />)
+    render(<UploadReviewPanel />)
     expect(screen.getByTestId('library-item')).toHaveAttribute('data-item-name', 'Tomas')
     expect(screen.getByTestId('review-chat-send')).toBeDisabled()
     await userEvent.type(screen.getByTestId('review-chat-input'), 'Tomas is also Tom{Enter}')
