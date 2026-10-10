@@ -12,6 +12,7 @@ import type { MenuItem } from '@renderer/features/manuscript/contextMenuItems'
 import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
 import { OVERLAY_WIDTH } from '@shared/focus'
 import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusStore'
+import { centreCaret } from './typewriter'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useSessionStore } from '@renderer/features/project/sessionStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -340,6 +341,40 @@ function RegionEditor({
   useEffect(() => {
     editor?.commands.setTypewriter(typewriter)
   }, [editor, typewriter])
+
+  // Entering or leaving focus mode keeps the caret where it was, focused, at the middle of the
+  // screen; a document the author never placed a caret in starts at its end (author, 2026-10-10).
+  const focusSeen = useRef(focus)
+  useEffect(() => {
+    if (focusSeen.current === focus) return
+    focusSeen.current = focus
+    if (!ready || editor.isDestroyed) return
+    // In a stack only the region the author last wrote in acts.
+    const active = useActiveEditorStore.getState().active?.editor === editor
+    if (!toolbar && !active) return
+    const end = editor.state.doc.content.size
+    // The session records every caret the author places (F-1.7); none means never placed.
+    const placed = toolbar
+      ? (useSessionStore.getState().positionOf(id)?.selection ?? { anchor: end, head: end })
+      : editor.state.selection
+    const { anchor, head } = placed
+    editor.commands.setTextSelection({ from: anchor, to: head })
+    editor.commands.focus(null, { scrollIntoView: false })
+    // The column changes width and padding with the mode, so the caret is centred once the new
+    // layout has painted; taking the focus can also reset the caret, so it is placed again,
+    // unless the author has already typed.
+    const doc = editor.state.doc
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        if (editor.isDestroyed) return
+        const now = editor.state.selection
+        if (editor.state.doc === doc && (now.anchor !== anchor || now.head !== head))
+          editor.commands.setTextSelection({ from: anchor, to: head })
+        centreCaret(editor.view)
+      })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [editor, focus, id, ready, toolbar])
 
   const { error: ghostError } = useGhostTextController({
     editor,

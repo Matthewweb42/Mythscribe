@@ -162,6 +162,9 @@ interface AssistantState {
   /** Attaches a passage to the next message (cut to `ATTACHMENT_MAX`); blank text detaches. */
   attach: (text: string) => void
   detach: () => void
+  /** The unsent message in the composer: it outlives the composer while side work shows (2026-10-10). */
+  composerText: string
+  setComposerText: (text: string) => void
   /** Cancels any pending write, drops the step subscription, and empties the store. */
   clear: () => void
   /** Opens a fresh conversation as the active tab; a no-op at the conversation cap. */
@@ -541,6 +544,10 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     })
   },
 
+  composerText: '',
+  setComposerText(text) {
+    set({ composerText: text })
+  },
   detach() {
     set({ attachment: null })
   },
@@ -578,7 +585,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       changing: {},
       agentAnswer: {},
       drafts: {},
-      attachment: null
+      attachment: null,
+      composerText: ''
     })
   },
 
@@ -1202,7 +1210,10 @@ async function writeIntent(messageId: string, changeId: string, autoApply: boole
         patchChange(messageId, changeId, { status: 'skipped', notice: outcome.notice })
       } else {
         const text = outcome.text
-        undoers.set(changeId, async () => removeInsertedProse(await openEditor(edit.nodeId), text))
+        const { proposalId } = outcome
+        undoers.set(changeId, async () =>
+          removeInsertedProse(await openEditor(edit.nodeId), text, proposalId)
+        )
         patchChange(messageId, changeId, {
           status: 'applied',
           error: null,

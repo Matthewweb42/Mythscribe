@@ -19,7 +19,9 @@ import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { ReviewDeck } from '@renderer/features/review/ReviewDeck'
 import type { ReviewDecision } from '@renderer/features/review/reviewDeckModel'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
-import { useLibraryStore, type LibraryFlow } from './libraryStore'
+import { SideWorkFrame } from '@renderer/features/sideWork/SideWorkFrame'
+import { useTakesFocus } from '@renderer/features/sideWork/sideWork'
+import { uploadInPanel, useLibraryStore, type LibraryFlow } from './libraryStore'
 import { categoryOfCard, decidedReview, UPLOAD_GROUPS, uploadReviewItems } from './uploadReview'
 
 const BUTTON =
@@ -73,38 +75,36 @@ function summaryLine(review: ContextReview): string {
 }
 
 /**
- * The context library's sorting dialog (F-9.8), open while `libraryStore.flow` is set: the
- * estimate to confirm, the pass's progress with Stop, a failure with its next step, and the
- * review — since 2026-10-08 on the review deck, one card at a time: each proposed category, each
- * sheet to create or fill (its fields, each conflict with both values side by side, the matches
- * merged across files with Split, its tag and picture), and Project notes. A accepts, S skips
- * for later, E opens the card's finer choices (which fields, details, pictures, the tag). Nothing
- * starts accepted and nothing is written until Apply (or the last card, with nothing skipped);
- * Cancel and Escape drop it all.
+ * The context library's sorting dialog (F-9.8): only the estimate now, worked out and shown for
+ * the author to confirm (cost is visible before anything is sent). Once confirmed, the pass is
+ * side work (2026-10-10): it runs in the background under its status-bar item, and the pass, a
+ * failure, and the review show in the assistant column (`UploadReviewPanel`) when the author
+ * opens them there, never over the editor.
  */
 export function ContextUploadDialog(): React.JSX.Element | null {
   const flow = useLibraryStore((s) => s.flow)
-  if (flow === null) return null
+  if (flow === null || (flow.stage !== 'estimating' && flow.stage !== 'confirm')) return null
   return <Dialog flow={flow} />
 }
 
-function Dialog({ flow }: { flow: LibraryFlow }): React.JSX.Element {
+function Dialog({
+  flow
+}: {
+  flow: Extract<LibraryFlow, { stage: 'estimating' | 'confirm' }>
+}): React.JSX.Element {
   const titleId = useId()
   const panel = useRef<HTMLDivElement>(null)
   const discard = useLibraryStore((s) => s.discard)
-  const cancelRun = useLibraryStore((s) => s.cancelRun)
 
   useEffect(() => {
-    // The review's deck takes the focus itself, so its keys work at once.
-    if (flow.stage !== 'review') panel.current?.focus()
-  }, [flow.stage])
+    panel.current?.focus()
+  }, [])
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key !== 'Escape') return
     event.preventDefault()
     event.stopPropagation()
-    if (flow.stage === 'running') cancelRun()
-    else discard()
+    discard()
   }
 
   return (
@@ -117,31 +117,70 @@ function Dialog({ flow }: { flow: LibraryFlow }): React.JSX.Element {
         tabIndex={-1}
         data-testid="library-dialog"
         onKeyDown={onKeyDown}
-        className={`flex max-h-[85vh] overflow-y-auto max-w-[95vw] flex-col rounded-lg border border-line bg-surface-raised shadow-panel outline-none ${flow.stage === 'review' ? 'w-[860px]' : 'w-[520px]'}`}
+        className="flex max-h-[85vh] w-[520px] max-w-[95vw] flex-col overflow-y-auto rounded-lg border border-line bg-surface-raised shadow-panel outline-none"
       >
         <div className="shrink-0 border-b border-line px-5 pt-4 pb-3">
           <h2 id={titleId} className="m-0 text-base font-semibold">
-            {flow.stage === 'review' ? 'Review before it lands' : 'Sort into the story bible'}
+            Sort into the story bible
           </h2>
-          {flow.stage === 'review' ? (
-            <>
-              <p className="mt-1 mb-0 text-sm text-fg-muted">
-                One card at a time: A accepts, S skips, E picks the details. Nothing is written
-                until you apply.
-              </p>
-              <p className="mt-1 mb-0 text-xs text-fg-subtle" data-testid="library-review-summary">
-                {summaryLine(flow.review)}
-              </p>
-            </>
-          ) : null}
         </div>
-        {flow.stage === 'review' ? (
-          <Review review={flow.review} busy={flow.busy} decisions={flow.decisions} />
-        ) : (
-          <Status flow={flow} />
-        )}
+        <Status flow={flow} />
       </div>
     </div>
+  )
+}
+
+/**
+ * The upload's pass, failure, and review as side work in the assistant column (2026-10-10; the
+ * review on the deck since 2026-10-08, one card at a time: each proposed category, each sheet to
+ * create or fill (its fields, each conflict with both values side by side, the matches merged
+ * across files with Split, its tag and picture), and Project notes). A accepts, S skips for
+ * later, E opens the card's finer choices (which fields, details, pictures, the tag). Nothing
+ * starts accepted and nothing is written until Apply (or the last card, with nothing skipped).
+ * Escape stops the pass while it runs, and drops the failure or the review after, like Cancel;
+ * "Back to the conversation" only hides it.
+ */
+export function UploadReviewPanel(): React.JSX.Element | null {
+  const flow = useLibraryStore((s) => (s.shown && uploadInPanel(s.flow) ? s.flow : null))
+  if (flow === null) return null
+  return <Panel flow={flow} />
+}
+
+function Panel({
+  flow
+}: {
+  flow: Extract<LibraryFlow, { stage: 'running' | 'review' | 'failed' }>
+}): React.JSX.Element {
+  const discard = useLibraryStore((s) => s.discard)
+  const cancelRun = useLibraryStore((s) => s.cancelRun)
+  const hide = useLibraryStore((s) => s.hide)
+  return (
+    <SideWorkFrame
+      title={flow.stage === 'review' ? 'Review before it lands' : 'Sort into the story bible'}
+      testId="library-panel"
+      onEscape={() => {
+        if (flow.stage === 'running') cancelRun()
+        else discard()
+      }}
+      onHide={hide}
+    >
+      {flow.stage === 'review' ? (
+        <>
+          <div className="shrink-0 px-3 pb-2">
+            <p className="mt-1 mb-0 text-xs text-fg-muted">
+              One card at a time: A accepts, S skips, E picks the details. Nothing is written until
+              you apply.
+            </p>
+            <p className="mt-1 mb-0 text-xs text-fg-subtle" data-testid="library-review-summary">
+              {summaryLine(flow.review)}
+            </p>
+          </div>
+          <Review review={flow.review} busy={flow.busy} decisions={flow.decisions} />
+        </>
+      ) : (
+        <Status flow={flow} />
+      )}
+    </SideWorkFrame>
   )
 }
 
@@ -150,9 +189,11 @@ function Status({ flow }: { flow: Exclude<LibraryFlow, { stage: 'review' }> }): 
   const confirm = useLibraryStore((s) => s.confirm)
   const cancelRun = useLibraryStore((s) => s.cancelRun)
   const sort = useLibraryStore((s) => s.sort)
+  // In the dialog (the estimate) the padding is the dialog's; in the side column, narrower.
+  const pad = flow.stage === 'estimating' || flow.stage === 'confirm' ? 'px-5' : 'px-3'
   return (
     <>
-      <div className="px-5 py-4 text-sm">
+      <div className={`${pad} py-4 text-sm`}>
         {flow.stage === 'estimating' ? (
           <p className={`m-0 ${AI_WAIT_CLASS}`} role="status">
             Working out what sorting would cost…
@@ -191,7 +232,7 @@ function Status({ flow }: { flow: Exclude<LibraryFlow, { stage: 'review' }> }): 
           </p>
         )}
       </div>
-      <div className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-3">
+      <div className={`flex shrink-0 justify-end gap-2 border-t border-line ${pad} py-3`}>
         {flow.stage === 'running' ? (
           <button type="button" data-testid="library-stop" onClick={cancelRun} className={BUTTON}>
             Stop
@@ -242,6 +283,7 @@ function Review({
   const decide = useLibraryStore((s) => s.decide)
   const asking = useLibraryStore((s) => s.chat.requestId !== null)
   const [editing, setEditing] = useState<string | null>(null)
+  const autoFocus = useTakesFocus()
   const items = useMemo(() => uploadReviewItems(review, decisions), [review, decisions])
   const existing = useEntityStore((s) => s.byId)
   const writes = reviewHasChanges(decidedReview(review, decisions, Object.values(existing)))
@@ -280,7 +322,8 @@ function Review({
         }}
         applyOnFinish
         busy={busy}
-        autoFocus
+        compact
+        autoFocus={autoFocus}
         footer={
           <span className="tabular-nums" data-testid="library-review-cost">
             <RequestCost
@@ -701,7 +744,7 @@ function ReviewChat({ busy }: { busy: boolean }): React.JSX.Element {
   }
 
   return (
-    <div className="shrink-0 border-t border-line px-5 pt-2 pb-3" data-testid="review-chat">
+    <div className="shrink-0 border-t border-line px-3 pt-2 pb-3" data-testid="review-chat">
       {chat.entries.length > 0 ? (
         <ol
           ref={log}

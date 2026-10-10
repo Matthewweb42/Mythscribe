@@ -1,6 +1,6 @@
 import { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { aiOriginStats } from '@shared/provenance'
+import { AI_ORIGIN_MARK, aiOriginStats } from '@shared/provenance'
 import type { TiptapNodeT } from '@shared/tiptap'
 import {
   AgentEditError,
@@ -8,6 +8,7 @@ import {
   cutFromParagraph,
   insertParagraphs,
   paragraphsFrom,
+  removeInsertedProse,
   replacePassage,
   undoInsertParagraphs,
   undoReplacePassage
@@ -87,5 +88,39 @@ describe('the chat agent’s text edits (F-5.22)', () => {
     expect(() => cutFromParagraph(editor, 'The storm')).toThrow(
       'Splitting there would leave the scene empty'
     )
+  })
+})
+
+describe('removeInsertedProse', () => {
+  const marked = (text: string, proposalId: string): TiptapNodeT => ({
+    type: 'paragraph',
+    content: [
+      { type: 'text', text, marks: [{ type: AI_ORIGIN_MARK, attrs: { proposalId, accepted: 1 } }] }
+    ]
+  })
+
+  it('takes out the copy its proposal marked when the same words sit there twice', () => {
+    // Loaded, not set: the AI-origin plugin strips marks no insertion vouched for.
+    editor.destroy()
+    editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' }),
+      content: {
+        type: 'doc',
+        content: [
+          marked(SECOND, 'p-1'),
+          { type: 'paragraph', content: [{ type: 'text', text: FIRST }] },
+          marked(SECOND, 'p-2')
+        ]
+      }
+    })
+    removeInsertedProse(editor, SECOND, 'p-2')
+    expect(paragraphs()).toEqual([SECOND, FIRST])
+    expect(aiOriginStats(editor.getJSON()).aiChars).toBe(SECOND.length)
+  })
+
+  it('refuses when no single copy is its own', () => {
+    editor.commands.setContent(doc(SECOND, FIRST, SECOND))
+    expect(() => removeInsertedProse(editor, SECOND, 'p-2')).toThrow(AgentEditError)
+    expect(() => removeInsertedProse(editor, SECOND)).toThrow(AgentEditError)
   })
 })

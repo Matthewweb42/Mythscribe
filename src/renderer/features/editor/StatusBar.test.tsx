@@ -4,6 +4,8 @@ import { resetAccountStore } from '@renderer/features/account/accountStore'
 import { resetAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { goalsStatusFixture } from '@renderer/features/goals/goalsFixture'
 import { resetGoalsStore, useGoalsStore } from '@renderer/features/goals/goalsStore'
+import { resetLibraryStore } from '@renderer/features/library/libraryStore'
+import { resetOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { StatusBar } from './StatusBar'
 import { formatDelta, formatWords } from './wordFormat'
 
@@ -13,11 +15,17 @@ beforeEach(() => {
   resetAccountStore()
   resetAiSettingsStore()
   resetGoalsStore()
+  // The side-work item (2026-10-10) reads the Organise and upload runs.
+  resetOrganiseStore()
+  resetLibraryStore()
 })
 afterEach(() => {
   resetAccountStore()
   resetAiSettingsStore()
   resetGoalsStore()
+  // The side-work item (2026-10-10) reads the Organise and upload runs.
+  resetOrganiseStore()
+  resetLibraryStore()
 })
 
 describe('StatusBar (F-3.3)', () => {

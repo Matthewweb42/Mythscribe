@@ -40,21 +40,29 @@ export function NotesToggleButton(): React.JSX.Element {
  * (`MetadataPane`: location, POV, timeline, status, beat, brief, AI summary). Its open state
  * lives in the layout store (F-7.2), so it is back after a restart. Renders nothing while closed,
  * so the editor gets the whole pane and no notes are loaded. Not mounted in focus mode, where
- * `NotesBody` floats instead (F-6.6).
+ * `NotesColumn` floats instead (F-6.6).
  */
 export function NotesPanel({ id }: { id: string | null }): React.JSX.Element | null {
   const notes = useLayoutStore((s) => s.layout.notes)
-  // Held in the project's session (F-1.7), not in the disclosure, so it stays open across an
-  // entity page or a front-matter document in between and comes back with the project.
-  const detailsOpen = useSessionStore((s) => s.sceneDetailsOpen)
-  const setDetailsOpen = useSessionStore((s) => s.setSceneDetailsOpen)
   if (!notes.open) return null
   return (
     <div data-testid="notes-panel" className="flex min-h-0 flex-1 flex-col bg-surface">
       <NotesHeading id={id} />
-      <NotesContent id={id} detailsOpen={detailsOpen} onDetailsOpen={setDetailsOpen} />
+      <NotesColumn id={id} />
     </div>
   )
+}
+
+/**
+ * The synopsis, the notes, and the scene details together: the docked panel's body and focus
+ * mode's floating Notes window, so the two are never apart (author, 2026-10-10).
+ */
+export function NotesColumn({ id }: { id: string | null }): React.JSX.Element {
+  // Held in the project's session (F-1.7), not in the disclosure, so it stays open across an
+  // entity page or a front-matter document in between and comes back with the project.
+  const detailsOpen = useSessionStore((s) => s.sceneDetailsOpen)
+  const setDetailsOpen = useSessionStore((s) => s.setSceneDetailsOpen)
+  return <NotesContent id={id} detailsOpen={detailsOpen} onDetailsOpen={setDetailsOpen} />
 }
 
 /** The panel's heading: the dock grip and menu, the title, and Suggest and the pin button while a node is shown. */

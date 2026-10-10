@@ -32,10 +32,13 @@ import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStor
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import { UploadReviewPanel } from '@renderer/features/library/ContextUploadDialog'
+import { OrganisePanel } from '@renderer/features/organise/OrganisePanel'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { DockPanelControls } from '@renderer/features/shell/Dock'
 import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { useShownSideWork } from '@renderer/features/sideWork/sideWork'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { prefersReducedMotion } from '@renderer/lib/motion'
 import { CONVERSATION_BUSY_MESSAGE, useOpenScene } from './aiActions'
@@ -139,10 +142,21 @@ export function AssistantPanel(): React.JSX.Element | null {
  * so the same store, so a conversation started in one continues in the other. While the
  * Continuity link is pressed (F-13.4) the findings view takes the place of the chat. The
  * results of the scene features (`AiResults`, 2026-10-06) sit above both views, and the
- * Continuity link under them while there are findings.
+ * Continuity link under them while there are findings. Side work the author opened from the
+ * status bar (2026-10-10: Organise, the upload review) takes the place of both until it closes
+ * or the author goes back to the conversation.
  */
 export function AssistantBody(): React.JSX.Element {
   const continuity = useContinuityStore((s) => s.viewOpen)
+  const sideWork = useShownSideWork()
+  if (sideWork !== null) {
+    return (
+      <>
+        <AiResults />
+        {sideWork === 'organise' ? <OrganisePanel /> : <UploadReviewPanel />}
+      </>
+    )
+  }
   return (
     <>
       <AiResults />
@@ -704,7 +718,8 @@ function Composer(): React.JSX.Element {
   const attachment = useAssistantStore((s) => s.attachment)
   const detach = useAssistantStore((s) => s.detach)
   const settings = useAiSettingsStore((s) => s.settings)
-  const [draft, setDraft] = useState('')
+  const draft = useAssistantStore((s) => s.composerText)
+  const setDraft = useAssistantStore((s) => s.setComposerText)
   const [focusCount, setFocusCount] = useState(0)
   const messageBox = useRef<HTMLTextAreaElement>(null)
 

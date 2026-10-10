@@ -2,6 +2,7 @@ import { BalanceNotice } from '@renderer/features/account/BalanceNotice'
 import { DraftStatus } from '@renderer/features/drafts/DraftStatus'
 import { GoalsStrip } from '@renderer/features/goals/GoalsStrip'
 import { CloudSyncLine } from '@renderer/features/project/CloudSyncLine'
+import { SideWorkStatus } from '@renderer/features/sideWork/SideWorkStatus'
 import { formatDelta, formatWords } from './wordFormat'
 
 /**
@@ -16,6 +17,8 @@ import { formatDelta, formatWords } from './wordFormat'
  * the Goals dialog) and `BalanceNotice` (F-15.5, AI-BILLING-SPEC E1), pushed to the far end: the
  * MythScribe Cloud balance whenever this project spends it, nothing otherwise. `CloudSyncLine`
  * (2026-10-08) says when a project in Google Drive or another synced folder was last copied there.
+ * `SideWorkStatus` (2026-10-10) shows Organise and an upload's sort while they run in the
+ * background, and opens them in the assistant column.
  */
 export function StatusBar({
   words,
@@ -44,6 +47,7 @@ export function StatusBar({
         </span>
       ) : null}
       <DraftStatus />
+      <SideWorkStatus />
       <GoalsStrip />
       <CloudSyncLine />
       <BalanceNotice />

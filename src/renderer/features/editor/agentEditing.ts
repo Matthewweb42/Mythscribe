@@ -2,9 +2,9 @@ import type { Editor } from '@tiptap/core'
 import { Fragment, type Node as PmNode } from '@tiptap/pm/model'
 import { TextSelection, type Transaction } from '@tiptap/pm/state'
 import type { TiptapNodeT } from '@shared/tiptap'
-import { AI_ORIGIN_KEY, markAiOrigin } from './aiOrigin'
+import { AI_ORIGIN_KEY, aiOriginOf, markAiOrigin } from './aiOrigin'
 import { insertProse } from './insertProse'
-import { locateUniqueText, type TextRange } from './locateText'
+import { locateEvery, locateUniqueText, type TextRange } from './locateText'
 
 /**
  * The chat agent's text edits in a live editor (F-5.22): every change is one ordinary
@@ -25,6 +25,29 @@ function locate(doc: PmNode, passage: string, what: string): TextRange {
   if (range === 'missing') throw new AgentEditError(`${what} is no longer in the scene`)
   if (range === 'ambiguous') throw new AgentEditError(`${what} now occurs more than once`)
   return range
+}
+
+/** Whether every character of `range` carries the AI-origin mark of `proposalId`. */
+function markedBy(doc: PmNode, range: TextRange, proposalId: string): boolean {
+  let all = true
+  doc.nodesBetween(range.from, range.to, (node) => {
+    if (!node.isText) return true
+    if (!node.marks.some((mark) => aiOriginOf(mark)?.proposalId === proposalId)) all = false
+    return false
+  })
+  return all
+}
+
+/**
+ * `locate` for text a proposal put in: when the same words sit in the scene more than once,
+ * the copy marked with the proposal's AI origin is the one (2026-10-10).
+ */
+function locateOwn(doc: PmNode, passage: string, what: string, proposalId: string): TextRange {
+  const ranges = locateEvery(doc, passage)
+  if (ranges.length <= 1) return locate(doc, passage, what)
+  const own = ranges.filter((range) => markedBy(doc, range, proposalId))
+  if (own.length === 1 && own[0]) return own[0]
+  throw new AgentEditError(`${what} now occurs more than once`)
 }
 
 function finish(editor: Editor, tr: Transaction, caret: number): void {
@@ -150,9 +173,16 @@ export function undoInsertParagraphs(editor: Editor, text: string): void {
  * Takes out prose a chat insertion put in through its ghost text (2026-10-07): the text itself,
  * and the paragraphs it made when it filled them whole (never the document's only content).
  */
-export function removeInsertedProse(editor: Editor, text: string): void {
+export function removeInsertedProse(
+  editor: Editor,
+  text: string,
+  proposalId: string | null = null
+): void {
   const { doc } = editor.state
-  const range = locate(doc, text, 'The added text')
+  const range =
+    proposalId === null
+      ? locate(doc, text, 'The added text')
+      : locateOwn(doc, text, 'The added text', proposalId)
   const $from = doc.resolve(range.from)
   const $to = doc.resolve(range.to)
   const whole = $from.parentOffset === 0 && $to.parentOffset === $to.parent.content.size

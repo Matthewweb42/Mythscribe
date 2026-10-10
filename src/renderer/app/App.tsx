@@ -89,7 +89,7 @@ import { CategoryCreateDialog } from '@renderer/features/entities/CategoryCreate
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { EntityImportDialog } from '@renderer/features/entities/EntityImportDialog'
 import { ContextUploadDialog } from '@renderer/features/library/ContextUploadDialog'
-import { OrganiseDialog } from '@renderer/features/organise/OrganiseDialog'
+import { SideWorkBar } from '@renderer/features/sideWork/SideWorkStatus'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { DropOverlay } from '@renderer/features/library/DropOverlay'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
@@ -1028,9 +1028,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <CategoryCreateDialog />
       {/* F-9.5: the entity import review, open only while a plan is under review. */}
       <EntityImportDialog />
-      {/* F-9.8: the context library's estimate, progress, and review, open while it sorts. */}
+      {/* F-9.8: the context library's estimate; the pass and its review are side work. */}
       <ContextUploadDialog />
-      <OrganiseDialog />
       {/* F-9.8: files dropped anywhere on the window go to the Library. */}
       <DropOverlay />
       {/* F-10.1: the project search, open while the search store says so. */}
@@ -1108,9 +1107,20 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
   const editView = useEditPassViewStore((s) => s.view)
   // F-9.16: going through the To do list puts its deck above whatever the pane shows.
   const reviewing = useTodoStore((s) => s.review !== null)
-  if (editView?.kind === 'workspace') return <EditPassWorkspace />
-  if (editView?.kind === 'report')
-    return <EditPassReport key={editView.passId} passId={editView.passId} />
+  if (editView?.kind === 'workspace') {
+    return (
+      <WithSideWorkBar>
+        <EditPassWorkspace />
+      </WithSideWorkBar>
+    )
+  }
+  if (editView?.kind === 'report') {
+    return (
+      <WithSideWorkBar>
+        <EditPassReport key={editView.passId} passId={editView.passId} />
+      </WithSideWorkBar>
+    )
+  }
   if (reviewing) {
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -1136,13 +1146,21 @@ function PaneContent({
 }): React.JSX.Element {
   const focus = useFocusStore((s) => s.active)
   const folderView = useOutlineViewStore((s) => s.folderView)
-  if (entityId !== null) return <EntityEditor key={entityId} id={entityId} />
+  if (entityId !== null) {
+    return (
+      <WithSideWorkBar>
+        <EntityEditor key={entityId} id={entityId} />
+      </WithSideWorkBar>
+    )
+  }
   if (!node) {
     // F-3.5: the empty state, centered in the pane.
     return (
-      <div className="flex flex-1 items-center justify-center p-6" data-testid="empty-state">
-        <p className="m-0 text-sm text-fg-muted">Select a document to start writing.</p>
-      </div>
+      <WithSideWorkBar>
+        <div className="flex flex-1 items-center justify-center p-6" data-testid="empty-state">
+          <p className="m-0 text-sm text-fg-muted">Select a document to start writing.</p>
+        </div>
+      </WithSideWorkBar>
     )
   }
   // F-11.1: a folder shows as a stack of its documents or as a cork board of its children; focus
@@ -1158,11 +1176,27 @@ function PaneContent({
         {!folder ? (
           <EditorPane id={node.id} format={format} />
         ) : cork ? (
-          <CorkBoard folderId={node.id} format={format} />
+          <WithSideWorkBar>
+            <CorkBoard folderId={node.id} format={format} />
+          </WithSideWorkBar>
         ) : (
           <StackedEditor folderId={node.id} format={format} />
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * A main pane with no status bar of its own (a sheet, the cork board, the empty state, the Edits
+ * workspace) gets the side-work line under it while Organise or an upload runs (2026-10-10), so
+ * its status-bar item is always within reach. Nothing extra otherwise.
+ */
+function WithSideWorkBar({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1">{children}</div>
+      <SideWorkBar />
     </div>
   )
 }
