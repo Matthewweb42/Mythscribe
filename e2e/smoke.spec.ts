@@ -7330,6 +7330,9 @@ test('a project in a Google Drive folder works on a local copy and is copied bac
   expect(fs.existsSync(path.join(folder, 'project.db-wal'))).toBe(false)
   expect(fs.existsSync(path.join(folder, '.mythscribe-open'))).toBe(false)
 
+  // The cloud version as it is now: opening writes `lastOpened`, so the next copy back differs.
+  const older = fs.readFileSync(path.join(folder, 'project.db'))
+
   // Reopening finds the text again.
   const reopened = await page.evaluate(
     (target) =>
@@ -7341,6 +7344,37 @@ test('a project in a Google Drive folder works on a local copy and is copied bac
   expect(reopened.ok).toBe(true)
   await expect(page.getByTestId('project-name')).toHaveText('Drive Novel')
   expect(await documentText(scene.id)).toContain(phrase)
+
+  // 2026-10-10: both versions changed (this computer's copy back failed, then the cloud folder
+  // received another computer's version). Opening asks which to keep; the other is kept beside.
+  await page.evaluate(() => window.mythscribe.invoke('project:close', undefined))
+  await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
+  fs.writeFileSync(path.join(folder, 'project.db'), older)
+  const later = new Date(Date.now() + 60_000)
+  fs.utimesSync(path.join(folder, 'project.db'), later, later)
+  const [record] = fs.readdirSync(working)
+  if (!record) throw new Error('the working copy is gone')
+  const stateFile = path.join(working, record, 'working.json')
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf8')) as Record<string, unknown>
+  fs.writeFileSync(stateFile, JSON.stringify({ ...state, dirty: true }))
+
+  await page
+    .getByRole('list', { name: 'Recent projects' })
+    .getByRole('button', { name: 'Drive Novel', exact: true })
+    .click()
+  const question = page.getByRole('dialog', { name: 'Which version do you want to keep?' })
+  await expect(question).toContainText('This computer: changed')
+  await expect(question).toContainText('Google Drive: changed')
+  // The Drive version is newer here, so it is the highlighted answer.
+  await expect(question.getByRole('button', { name: "Keep Google Drive's" })).toBeFocused()
+  await question.getByRole('button', { name: "Keep this computer's" }).click()
+  await expect(page.getByTestId('project-name')).toHaveText('Drive Novel')
+  await expect(page.getByRole('status')).toContainText('(conflict ')
+  const kept = fs.readdirSync(drive).filter((name) => name.includes('(conflict '))
+  expect(kept).toHaveLength(1)
+  expect(fs.readFileSync(path.join(drive, kept[0] ?? '', 'project.db')).equals(older)).toBe(true)
+  expect(await documentText(scene.id)).toContain(phrase)
+  await dismissToasts()
 })
 
 /** The single-document editor's text with the ghost-text widget (F-5.3) left out. */

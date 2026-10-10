@@ -53,6 +53,36 @@ describe('DialogHost', () => {
     await expect(promise).resolves.toBeNull()
   })
 
+  it('choose shows every answer, Enter picks the primary, and Escape cancels', async () => {
+    render(<DialogHost />)
+    const options = {
+      title: 'Which version?',
+      message: 'Both changed.',
+      details: ['This computer: today', 'Drive: yesterday'],
+      choices: [
+        { value: 'mine' as const, label: 'Keep mine' },
+        { value: 'theirs' as const, label: 'Keep theirs' }
+      ],
+      primary: 'theirs' as const
+    }
+    const first = dialogs.choose(options)
+    const dialog = await screen.findByRole('dialog', { name: 'Which version?' })
+    expect(dialog).toHaveTextContent('This computer: today')
+    expect(screen.getByRole('button', { name: 'Keep theirs' })).toHaveFocus()
+    await userEvent.click(screen.getByRole('button', { name: 'Keep mine' }))
+    await expect(first).resolves.toBe('mine')
+
+    const second = dialogs.choose(options)
+    await screen.findByRole('dialog')
+    await userEvent.keyboard('{Enter}')
+    await expect(second).resolves.toBe('theirs')
+
+    const third = dialogs.choose(options)
+    await screen.findByRole('dialog')
+    await userEvent.keyboard('{Escape}')
+    await expect(third).resolves.toBeNull()
+  })
+
   it('shows toasts and lets the user dismiss them', async () => {
     render(<DialogHost />)
     toast.error('Could not open project')

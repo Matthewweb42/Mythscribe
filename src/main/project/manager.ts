@@ -1,5 +1,5 @@
 import path from 'node:path'
-import type { CloudProvider } from '@shared/cloudSync'
+import type { CloudProvider, CloudSide } from '@shared/cloudSync'
 import type { NovelFormat, ProjectInfo } from '@shared/ipc/contract'
 import { AppError } from '../ipc/errors'
 import { cloudProviderFor } from './cloudFolder'
@@ -67,11 +67,15 @@ export class ProjectManager {
     return next.info
   }
 
-  open(folder: string): ProjectInfo {
+  /**
+   * `keep` answers a conflict between a cloud project's two versions (2026-10-10); without it
+   * such an open throws `CLOUD_CONFLICT` and the project open before stays open.
+   */
+  open(folder: string, keep?: CloudSide): ProjectInfo {
     this.closeIfOpen(folder)
     const next = openProject(
       folder,
-      (target) => this.workingCopyFor(target, 'open'),
+      (target) => this.workingCopyFor(target, 'open', keep),
       this.backupDirFor
     )
     this.replace(next)
@@ -79,12 +83,16 @@ export class ProjectManager {
   }
 
   /** A local working copy for a project in a cloud-synced folder; null for a plain folder. */
-  private workingCopyFor(folder: string, mode: 'open' | 'create'): WorkingCopy | null {
+  private workingCopyFor(
+    folder: string,
+    mode: 'open' | 'create',
+    keep?: CloudSide
+  ): WorkingCopy | null {
     if (this.workingRoot === null) return null
     const provider = this.detectCloud(folder)
     if (provider === null) return null
     return mode === 'open'
-      ? WorkingCopy.open(folder, this.workingRoot(), provider)
+      ? WorkingCopy.open(folder, this.workingRoot(), provider, undefined, keep)
       : WorkingCopy.create(folder, this.workingRoot(), provider)
   }
 

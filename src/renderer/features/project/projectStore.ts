@@ -3,7 +3,7 @@ import type { AiSwitch, AiSource } from '@shared/aiSettings'
 import type { ImportDraft } from '@shared/import'
 import type { NovelFormat, ProjectInfo, RecentProject } from '@shared/ipc/contract'
 import { ipc } from '@renderer/lib/ipc'
-import { confirmCloudCopy } from './cloudSyncStore'
+import { chooseCloudVersion, cloudConflictOf, confirmCloudCopy } from './cloudSyncStore'
 import { flushPendingSaves } from './pendingSaves'
 import { offerRecovery } from './recovery'
 
@@ -62,6 +62,21 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     await flushPendingSaves()
     if (get().current !== null) await confirmCloudCopy(going)
   }
+  /**
+   * Opens a project; when its cloud folder and this computer both changed it (2026-10-10), asks
+   * which version to keep and opens again with the answer. Cancel opens nothing.
+   */
+  const openAsking = async (path: string | undefined): Promise<ProjectInfo | null> => {
+    try {
+      return await ipc().invoke('project:open', { path })
+    } catch (err) {
+      const conflict = cloudConflictOf(err)
+      if (conflict === null) throw err
+      const keep = await chooseCloudVersion(conflict)
+      if (keep === null) return null
+      return ipc().invoke('project:open', { path: conflict.folder, cloudConflict: keep })
+    }
+  }
   const run = async <T>(fn: () => Promise<T>): Promise<T> => {
     set({ busy: true })
     try {
@@ -113,7 +128,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     open(path) {
       return run(async () => {
         await settle('switch')
-        const info = await ipc().invoke('project:open', { path })
+        const info = await openAsking(path)
         if (info) {
           set({ current: info })
           void offerRecovery() // F-8.3; a new project (`create`) has no journal

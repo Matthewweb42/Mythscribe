@@ -8,7 +8,8 @@ import type {
   ProjectInfo,
   RecentProject
 } from '@shared/ipc/contract'
-import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import type { CloudConflict } from '@shared/cloudSync'
+import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { registerPendingSave, resetPendingSaves } from './pendingSaves'
 import { useProjectStore } from './projectStore'
@@ -103,6 +104,72 @@ describe('projectStore', () => {
     expect(invoke).toHaveBeenCalledWith('recovery:list', undefined)
   })
 
+  describe('a cloud project changed in both places (2026-10-10)', () => {
+    const conflict: CloudConflict = {
+      folder: '/drive/My Drive/Book.mythscribe',
+      provider: 'googleDrive',
+      computer: { modifiedAt: '2026-10-10T09:00:00.000Z', bytes: 2_400_000 },
+      cloud: { modifiedAt: '2026-10-10T11:00:00.000Z', bytes: 2_300_000 }
+    }
+    const refused = new IpcRequestError({
+      code: 'CLOUD_CONFLICT',
+      message: 'This project changed both on this computer and in Google Drive.',
+      details: conflict
+    })
+
+    function conflicted(): ReturnType<typeof vi.fn> {
+      const { client, invoke } = fakeClient()
+      invoke.mockImplementation(async (channel: string, input?: unknown) => {
+        if (channel === 'project:open') {
+          const asked = input as { cloudConflict?: string }
+          if (asked.cloudConflict === undefined) throw refused
+          return info
+        }
+        if (channel === 'recovery:list') return []
+        return null
+      })
+      setIpcClient(client)
+      return invoke
+    }
+
+    it('asks which version to keep, newer first, and opens again with the answer', async () => {
+      const invoke = conflicted()
+      // Opened from the native dialog: the second open names the folder main reported.
+      const opening = useProjectStore.getState().open()
+      await vi.waitFor(() => expect(useDialogStore.getState().modals).toHaveLength(1))
+      const modal = useDialogStore.getState().modals[0]
+      if (modal?.kind !== 'choose') throw new Error('expected a choose dialog')
+      expect(modal.options.choices.map((c) => c.label)).toEqual([
+        "Keep this computer's",
+        "Keep Google Drive's"
+      ])
+      expect(modal.options.primary).toBe('cloud')
+      expect(modal.options.message).toContain('"Book"')
+      expect(modal.options.details?.[0]).toMatch(/^This computer: changed .+, 2\.3 MB$/)
+      expect(modal.options.details?.[1]).toMatch(/^Google Drive: changed .+, 2\.2 MB$/)
+      useDialogStore.getState().resolveChoose(modal.id, 'computer')
+      await expect(opening).resolves.toEqual(info)
+      expect(invoke).toHaveBeenCalledWith('project:open', {
+        path: conflict.folder,
+        cloudConflict: 'computer'
+      })
+      expect(useProjectStore.getState().current).toEqual(info)
+    })
+
+    it('opens nothing when the author cancels', async () => {
+      const invoke = conflicted()
+      useProjectStore.setState({ current: null })
+      const opening = useProjectStore.getState().open(conflict.folder)
+      await vi.waitFor(() => expect(useDialogStore.getState().modals).toHaveLength(1))
+      const modal = useDialogStore.getState().modals[0]
+      if (modal?.kind !== 'choose') throw new Error('expected a choose dialog')
+      useDialogStore.getState().resolveChoose(modal.id, null)
+      await expect(opening).resolves.toBeNull()
+      expect(invoke).toHaveBeenCalledTimes(1)
+      expect(useProjectStore.getState().current).toBeNull()
+    })
+  })
+
   it('restoreBackup flushes, opens the restored copy, and offers no recovery (F-8.4)', async () => {
     const { client, invoke } = fakeClient()
     const restored = { ...info, path: '/tmp/Book (restored 2026-10-04 1200).mythscribe' }
@@ -186,7 +253,8 @@ describe('projectStore', () => {
             state: 'failed',
             lastSyncedAt: null,
             error: 'Could not copy the project to Google Drive: EBUSY',
-            conflictCopy: null
+            conflictCopy: null,
+            conflictCopyHolds: null
           }
         : null
     )
