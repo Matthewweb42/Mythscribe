@@ -129,7 +129,11 @@ describe('entityDraftStore (F-9.3)', () => {
     draft().open(stored('e-aldous'))
     draft().edit({ body: '' })
     await runDebounce()
-    expect(updates(calls).at(-1)).toEqual({ id: 'e-aldous', body: null })
+    expect(updates(calls).at(-1)).toEqual({
+      id: 'e-aldous',
+      body: null,
+      baseModified: '2026-09-01T10:00:00.000Z'
+    })
   })
 
   it('a rename is trimmed, and a cleared name box is never sent', async () => {
@@ -211,7 +215,9 @@ describe('entityDraftStore (F-9.3)', () => {
     draft().open(stored('e-mara'))
     draft().edit({ body: 'Notes on the scar.' })
     await flushPendingSaves()
-    expect(updates(calls)).toEqual([{ id: 'e-mara', body: 'Notes on the scar.' }])
+    expect(updates(calls)).toEqual([
+      { id: 'e-mara', body: 'Notes on the scar.', baseModified: '2026-09-03T11:30:00.000Z' }
+    ])
     draft().close()
     await flushPendingSaves() // unregistered: nothing left to write
     expect(updates(calls)).toHaveLength(1)
@@ -224,5 +230,84 @@ describe('entityDraftStore (F-9.3)', () => {
     await useEntityStore.getState().remove('e-mara')
     await runDebounce()
     expect(updates(calls)).toEqual([])
+  })
+})
+
+describe('entityDraftStore and a sheet sync that lands mid-edit (F-9.18)', () => {
+  beforeEach(async () => {
+    vi.useFakeTimers()
+    resetPendingSaves()
+    resetEntityDraftStore()
+    resetEntityStore()
+    useDialogStore.setState({ modals: [], toasts: [] })
+    install()
+    await useEntityStore.getState().load()
+  })
+  afterEach(() => {
+    resetEntityDraftStore()
+    resetPendingSaves()
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
+
+  /** The sync lands in main and reaches the page (`entity:changed` → merge → the editor adopts). */
+  const land = (patch: Partial<Entity>): void => {
+    const next = { ...stored('e-mara'), ...patch, modified: '2026-10-10T10:00:30.000Z' }
+    useEntityStore.getState().merge(next)
+    draft().adopt(next)
+  }
+
+  it('never writes back a view the sync rewrote while the author was typing in the other one', async () => {
+    const calls = install()
+    const opened = stored('e-mara')
+    draft().open(opened)
+    draft().edit({ body: 'She hates boats.' })
+    // Before the 500 ms save goes out, a filing lands in the fields.
+    land({ fields: { age: '28', appearance: 'A scar.' } })
+    // The page shows the landed fields at once, and keeps the author's typing.
+    expect(draft().draft?.fields).toEqual({ age: '28', appearance: 'A scar.' })
+    expect(draft().draft?.body).toBe('She hates boats.')
+    await runDebounce()
+    // Only the page the author typed is sent: the landed fields are not written back.
+    expect(updates(calls)).toEqual([
+      { id: 'e-mara', body: 'She hates boats.', baseModified: opened.modified }
+    ])
+    expect(stored('e-mara').fields).toEqual({ age: '28', appearance: 'A scar.' })
+    expect(stored('e-mara').body).toBe('She hates boats.')
+  })
+
+  it('lets the author’s typing win in the view the sync rewrote, naming the version it was typed on', async () => {
+    const calls = install()
+    const opened = stored('e-mara')
+    draft().open(opened)
+    draft().edit({ fields: { age: '29' } })
+    land({ fields: { age: '28', appearance: 'Landed.' }, body: 'Written up.' })
+    // Age is the author's; the rest of the fields and the page take what landed.
+    expect(draft().draft).toMatchObject({
+      fields: { age: '29', appearance: 'Landed.' },
+      body: 'Written up.'
+    })
+    await runDebounce()
+    expect(updates(calls)).toEqual([{ id: 'e-mara', fields: { age: '29' } }])
+    // A page typed on the version from before the write-up says so, and main rebases on it.
+    draft().open(opened)
+    draft().edit({ body: 'Typed before the write-up showed.' })
+    land({ body: 'Written up again.' })
+    expect(draft().draft?.body).toBe('Typed before the write-up showed.')
+    await runDebounce()
+    expect(updates(calls).at(-1)).toEqual({
+      id: 'e-mara',
+      body: 'Typed before the write-up showed.',
+      baseModified: opened.modified
+    })
+  })
+
+  it('takes everything that landed once the author’s edit is saved', async () => {
+    install()
+    draft().open(stored('e-mara'))
+    draft().edit({ body: 'Mine.' })
+    await runDebounce()
+    land({ body: 'Written up.' })
+    expect(draft().draft?.body).toBe('Written up.')
   })
 })

@@ -27,6 +27,7 @@ import {
   type EntityDb
 } from '../entity/entityStore'
 import {
+  pageKey,
   paragraphHash,
   sheetBasis,
   sheetSyncContext,
@@ -273,6 +274,8 @@ function agreed(
   return {
     aiParagraphs: previous?.aiParagraphs ?? [],
     writtenUpAt: previous?.writtenUpAt ?? null,
+    // Only a write-up records the page it replaced (`staleWriteUpBase`).
+    pageBefore: null,
     ...patch
   }
 }
@@ -417,6 +420,7 @@ export async function runSheetSync(
       page: writeUp.page,
       aiParagraphs,
       writtenUpAt: at,
+      pageBefore: basis.page,
       at
     })
   )
@@ -436,4 +440,44 @@ export function sheetNeedsSync(db: EntityDb, entityId: string): boolean {
   const basis = sheetBasis(sheet, sheetSyncContext(db))
   const state = sheetSyncStateOf(basis, raw.sync)
   return state !== 'none' && state !== 'synced'
+}
+
+/**
+ * The page an author's page save was edited from, when that save was made from a draft older than
+ * the write-up the sync just landed (`baseModified`, the sheet's `modified` stamp the draft's page
+ * was read at, no longer the sheet's, while the page is still exactly the AI's write-up). Null
+ * otherwise. The author's typing wins over the write-up (the save goes through as it is), and
+ * `rebaseAuthorPage` then makes the next filing read only the author's own edits.
+ */
+export function staleWriteUpBase(
+  db: EntityDb,
+  entityId: string,
+  baseModified: string
+): string | null {
+  const sheet = getEntity(db, entityId)
+  const raw = sheetSyncRow(db, entityId)
+  if (sheet === undefined || raw?.sync == null) return null
+  const stored = raw.sync
+  if (stored.writtenUpAt === null || stored.pageBefore === null) return null
+  if (sheet.modified === baseModified) return null
+  return pageKey(sheet.body) === pageKey(stored.page) ? stored.pageBefore : null
+}
+
+/**
+ * After an author's page save that replaced a write-up they had not seen (`staleWriteUpBase`):
+ * the views now agree on the fields as they stand and on the page the author edited from, so the
+ * next sync files exactly the author's edits into the fields and leaves their page as written.
+ */
+export function rebaseAuthorPage(db: EntityDb, entityId: string, page: string, now: Date): void {
+  const sheet = getEntity(db, entityId)
+  const raw = sheetSyncRow(db, entityId)
+  if (sheet === undefined || raw?.sync == null) return
+  const basis = sheetBasis(sheet, sheetSyncContext(db))
+  writeSheetSync(db, entityId, {
+    ...raw.sync,
+    fieldsHash: basis.fieldsHash,
+    page,
+    pageBefore: null,
+    at: now.toISOString()
+  })
 }

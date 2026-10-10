@@ -47,16 +47,30 @@ interface EntityDraftState {
   close: () => void
   /**
    * F-9.18: the open sheet changed in main without this page (its other view was written by the
-   * sheet sync, or a change was undone): the draft takes the row, unless it holds an edit not yet
-   * written, which wins (main drops a sync the author has edited past).
+   * sheet sync, or a change was undone): every part the author has not edited since it was last
+   * written takes the row's value at once; a part they are editing keeps their text, which wins
+   * when it is saved (only the parts they edited are ever sent, so nothing else is written back).
    */
   adopt: (entity: Entity) => void
+}
+
+/** The parts of the draft the author edited since they were last written (or read from main). */
+interface Touched {
+  name: boolean
+  body: boolean
+  fields: Set<string>
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
 /** The write on the wire, so a flush (and the close/quit path) waits for it instead of racing it. */
 let inflight: Promise<void> | null = null
 let unregister: (() => void) | null = null
+/** F-9.18: what the author edited and has not had written yet; only these parts are ever sent. */
+let touched: Touched = { name: false, body: false, fields: new Set() }
+/** F-9.18: the sheet's `modified` stamp the draft's page was read at (sent with a page save). */
+let bodyBase: string | null = null
+
+const untouched = (): Touched => ({ name: false, body: false, fields: new Set() })
 
 function cancelTimer(): void {
   if (timer !== null) {
@@ -69,15 +83,17 @@ function cancelTimer(): void {
  * The patch that turns the stored row into the draft: only the parts that really differ, so a
  * page opened and closed without an edit writes nothing. An empty field value is kept on purpose
  * (main reads `''` as "remove this field"); an empty name is dropped, because the stored name is
- * the better answer to a cleared name box.
+ * the better answer to a cleared name box. F-9.18: with `edited`, only the parts the author
+ * edited are compared, so a part main rewrote meanwhile (the sheet sync) is never written back.
  */
 export function draftPatch(
   draft: EntityDraft,
-  stored: Entity
+  stored: Entity,
+  edited?: { name: boolean; body: boolean; fields: ReadonlySet<string> }
 ): Omit<EntityUpdateInput, 'id'> | null {
   const patch: Omit<EntityUpdateInput, 'id'> = {}
   const name = draft.name.trim()
-  if (name.length > 0 && name !== stored.name) patch.name = name
+  if ((edited?.name ?? true) && name.length > 0 && name !== stored.name) patch.name = name
   const fields: EntityFields = {}
   // F-9.18: the sheet's own fields are written like its category's.
   const ids = [
@@ -85,13 +101,26 @@ export function draftPatch(
     ...stored.extraFields.map((f) => f.id)
   ]
   for (const id of ids) {
+    if (edited !== undefined && !edited.fields.has(id)) continue
     const next = draft.fields[id] ?? ''
     if (next !== (stored.fields[id] ?? '')) fields[id] = next
   }
   if (Object.keys(fields).length > 0) patch.fields = fields
   const body = draft.body.length > 0 ? draft.body : null
-  if (body !== stored.body) patch.body = body
+  if ((edited?.body ?? true) && body !== stored.body) patch.body = body
   return Object.keys(patch).length > 0 ? patch : null
+}
+
+/** Forgets the edits that are now stored as typed; an edit made since the send stays to be written. */
+function settleTouched(draft: EntityDraft, stored: Entity): void {
+  if (draft.name.trim() === stored.name) touched.name = false
+  if ((draft.body.length > 0 ? draft.body : null) === stored.body) {
+    touched.body = false
+    bodyBase = stored.modified
+  }
+  for (const id of [...touched.fields]) {
+    if ((draft.fields[id] ?? '') === (stored.fields[id] ?? '')) touched.fields.delete(id)
+  }
 }
 
 /**
@@ -106,7 +135,7 @@ async function write(fallback: EntityDraft | null): Promise<void> {
   if (draft === null) return
   const stored = useEntityStore.getState().byId[draft.id]
   if (!stored) return // deleted, or the project closed, while the draft was open
-  const patch = draftPatch(draft, stored)
+  const patch = draftPatch(draft, stored, touched)
   if (patch === null) {
     if (useEntityDraftStore.getState().status === 'dirty') {
       useEntityDraftStore.setState({ status: 'idle' })
@@ -114,10 +143,13 @@ async function write(fallback: EntityDraft | null): Promise<void> {
     return
   }
   useEntityDraftStore.setState({ status: 'saving' })
+  // F-9.18: a page save says which version of the sheet it was edited from.
+  if (patch.body !== undefined && bodyBase !== null) patch.baseModified = bodyBase
   try {
-    await useEntityStore.getState().update(draft.id, patch)
+    const saved = await useEntityStore.getState().update(draft.id, patch)
     const current = useEntityDraftStore.getState()
     if (current.draft?.id !== draft.id) return // another entity opened while this was in flight
+    if (current.draft !== null) settleTouched(current.draft, saved)
     if (current.status === 'saving') useEntityDraftStore.setState({ status: 'saved' })
   } catch (err) {
     toast.error(describeError(err))
@@ -160,6 +192,8 @@ export const useEntityDraftStore = create<EntityDraftState>((set, get) => ({
     if (previous !== null && previous.id !== entity.id) void flushNow()
     unregister ??= registerPendingSave(flushNow)
     cancelTimer()
+    touched = untouched()
+    bodyBase = entity.modified
     set({
       draft: {
         id: entity.id,
@@ -174,6 +208,9 @@ export const useEntityDraftStore = create<EntityDraftState>((set, get) => ({
   edit(patch) {
     const draft = get().draft
     if (draft === null) return
+    if (patch.name !== undefined) touched.name = true
+    if (patch.body !== undefined) touched.body = true
+    for (const id of Object.keys(patch.fields ?? {})) touched.fields.add(id)
     set({
       draft: {
         ...draft,
@@ -197,20 +234,26 @@ export const useEntityDraftStore = create<EntityDraftState>((set, get) => ({
   adopt(entity) {
     const draft = get().draft
     if (draft?.id !== entity.id) return
-    if (
-      timer !== null ||
-      inflight !== null ||
-      get().status === 'dirty' ||
-      get().status === 'saving'
-    )
-      return
-    const body = entity.body ?? ''
+    const fields: EntityFields = {}
+    for (const [id, value] of Object.entries(entity.fields)) {
+      if (!touched.fields.has(id) && value !== undefined) fields[id] = value
+    }
+    for (const id of touched.fields) {
+      const value = draft.fields[id]
+      if (value !== undefined) fields[id] = value
+    }
+    const next: EntityDraft = {
+      id: draft.id,
+      name: touched.name ? draft.name : entity.name,
+      fields,
+      body: touched.body ? draft.body : (entity.body ?? '')
+    }
+    if (!touched.body) bodyBase = entity.modified
     const same =
-      draft.name === entity.name &&
-      draft.body === body &&
-      JSON.stringify(draft.fields) === JSON.stringify(entity.fields)
-    if (same) return
-    set({ draft: { id: entity.id, name: entity.name, fields: { ...entity.fields }, body } })
+      next.name === draft.name &&
+      next.body === draft.body &&
+      JSON.stringify(next.fields) === JSON.stringify(draft.fields)
+    if (!same) set({ draft: next })
   },
 
   close() {
@@ -226,6 +269,8 @@ export const useEntityDraftStore = create<EntityDraftState>((set, get) => ({
 export function resetEntityDraftStore(): void {
   cancelTimer()
   inflight = null
+  touched = untouched()
+  bodyBase = null
   unregister?.()
   unregister = null
   useEntityDraftStore.setState({ draft: null, status: 'idle' })

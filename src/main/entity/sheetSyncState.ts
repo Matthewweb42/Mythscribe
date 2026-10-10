@@ -38,6 +38,11 @@ export const StoredSheetSync = z.object({
   aiParagraphs: z.array(z.string()).default([]),
   /** When the AI last wrote the page up; null when it never did. */
   writtenUpAt: z.string().nullable().default(null),
+  /**
+   * The page as it was just before the last write-up landed: what an author's page edit made from
+   * a draft older than that write-up was edited from (`staleWriteUpBase`).
+   */
+  pageBefore: z.string().nullable().default(null),
   at: z.string()
 })
 export type StoredSheetSync = z.infer<typeof StoredSheetSync>

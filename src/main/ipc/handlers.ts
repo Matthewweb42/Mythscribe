@@ -161,6 +161,7 @@ import { staleSummaryNodeIds, summarizeScene, summarySource } from '../ai/summar
 import { ledgerSummary, recentUsage, usageHistory, type AiDb } from '../ai/usageStore'
 import { createIndexQueue } from '../jobs/indexQueue'
 import { createSheetSyncService } from '../ai/sheetSyncService'
+import { rebaseAuthorPage, staleWriteUpBase } from '../ai/sheetSync'
 import { setCategoryFields } from '../entity/categoryFields'
 import {
   confirmPlanLink,
@@ -1980,9 +1981,18 @@ export function registerHandlers({
     return created
   })
 
-  register('entity:update', ({ id, ...patch }) => {
+  register('entity:update', ({ id, baseModified, ...patch }) => {
     const db = manager.require().connection.orm
-    const { entity: updated, tagChange } = updateEntity(db, id, patch)
+    // F-9.18: a page save made from a draft older than a write-up that just landed wins as typed;
+    // the sync is then rebased so the next filing reads only the author's own edits.
+    const editedFrom =
+      patch.body !== undefined && baseModified !== undefined
+        ? staleWriteUpBase(db, id, baseModified)
+        : null
+    const written = updateEntity(db, id, patch)
+    if (editedFrom !== null) rebaseAuthorPage(db, id, editedFrom, new Date())
+    const updated = editedFrom === null ? written.entity : (getEntity(db, id) ?? written.entity)
+    const tagChange = written.tagChange
     publishTagChange(db, tagChange)
     void syncSpelling()
     // F-9.16: a filled field answers a gap.

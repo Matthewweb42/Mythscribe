@@ -250,7 +250,11 @@ describe('EntityEditor (F-9.3)', () => {
     await user.clear(body)
     await user.type(body, 'A mapmaker.')
     await flushDraft()
-    expect(calls.at(-1)).toEqual(['entity:update', { id: 'e-aldous', body: 'A mapmaker.' }])
+    expect(calls.at(-1)).toEqual([
+      'entity:update',
+      // F-9.18: a page save names the version it was edited from.
+      { id: 'e-aldous', body: 'A mapmaker.', baseModified: '2026-09-01T10:00:00.000Z' }
+    ])
     expect(screen.queryByRole('textbox', { name: 'Age' })).toBeNull()
   })
 

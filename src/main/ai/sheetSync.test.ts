@@ -13,7 +13,14 @@ import { defaultAiUsageState, dayOf } from './dailyCap'
 import { resetInflight } from './inflight'
 import type { CompletionRequest, CompletionResult, Provider } from './providers/types'
 import type { AiRequestDeps } from './request'
-import { parseRefileAnswer, parseWriteUpAnswer, runSheetSync, sheetNeedsSync } from './sheetSync'
+import {
+  parseRefileAnswer,
+  parseWriteUpAnswer,
+  rebaseAuthorPage,
+  runSheetSync,
+  sheetNeedsSync,
+  staleWriteUpBase
+} from './sheetSync'
 import type { UsageEntry } from './usageStore'
 
 const NOW = new Date(2026, 9, 10, 10, 0, 0)
@@ -293,5 +300,45 @@ describe('runSheetSync (F-9.18)', () => {
     await runSheetSync(db, deps, { entityId: id })
     setStoryBibleSettings(db, { writeUp: { character: { length: 'short', roles: {} } } })
     expect(sheet(id).sync.state).toBe('pageStale')
+  })
+})
+
+describe('an author page save made before a write-up showed (F-9.18)', () => {
+  it('keeps the author’s page and files only their own edits, nothing of the write-up', async () => {
+    const id = createEntity(db, {
+      kind: 'character',
+      name: 'Kael',
+      template: 'blank',
+      body: 'Kael is a smuggler.'
+    }).entity.id
+    answer({ edits: [{ f: 'background', old: '', new: 'A smuggler.' }] })
+    await runSheetSync(db, deps, { entityId: id })
+    // The author's draft was read at an older version; then a field edit and a write-up land.
+    const draftBase = '2026-01-01T00:00:00.000Z'
+    updateEntity(db, id, { fields: { age: '40' } })
+    answer({ intro: 'Kael, forty, is a smuggler.', parts: { background: 'A smuggler.' } })
+    await runSheetSync(db, deps, { entityId: id })
+    expect(sheet(id).body).toContain('Kael, forty, is a smuggler.')
+    // The author's page save, typed on the page from before the write-up, goes through as typed.
+    const editedFrom = staleWriteUpBase(db, id, draftBase)
+    expect(editedFrom).toBe('Kael is a smuggler.')
+    updateEntity(db, id, { body: 'Kael is a smuggler.\n\nHe owes the guild.' })
+    rebaseAuthorPage(db, id, editedFrom ?? '', NOW)
+    expect(sheet(id).body).toBe('Kael is a smuggler.\n\nHe owes the guild.')
+    expect(sheet(id).sync.state).toBe('fieldsStale')
+    // The next filing reads only what the author added; the write-up's paragraphs are not "removed".
+    answer({ edits: [{ f: 'notes', old: '', new: 'Owes the guild.' }] })
+    await runSheetSync(db, deps, { entityId: id })
+    const user = complete.mock.calls.at(-1)?.[0].messages[1]?.content ?? ''
+    expect(user).not.toContain('Removed from the page')
+    expect(user).toContain('Added to the page:\n"""\nHe owes the guild.\n"""')
+    expect(sheet(id).fields).toMatchObject({
+      age: '40',
+      background: 'A smuggler.',
+      notes: 'Owes the guild.'
+    })
+    expect(sheet(id).body).toBe('Kael is a smuggler.\n\nHe owes the guild.')
+    // A save from the current version is no stale base.
+    expect(staleWriteUpBase(db, id, sheet(id).modified)).toBeNull()
   })
 })

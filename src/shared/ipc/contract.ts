@@ -1615,7 +1615,13 @@ export const contract = {
        */
       asOf: z.string().nullable().optional(),
       /** F-9.13 (D7): canon, plan, or idea. */
-      status: FactStatus.optional()
+      status: FactStatus.optional(),
+      /**
+       * F-9.18: the sheet's `modified` stamp the sent `body` was edited from (the open page's
+       * draft). When the sheet sync wrote the page up after it, the author's page still wins as
+       * sent, and the sync is rebased onto the page they edited from, so nothing is filed twice.
+       */
+      baseModified: z.string().optional()
     }),
     output: Entity
   },
