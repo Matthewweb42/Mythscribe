@@ -145,7 +145,7 @@ export const BUILT_IN_THEMES: readonly BuiltInTheme[] = [
       surfaceRaised: '#f7eedb',
       line: '#d3c29d',
       fg: '#3b2f22',
-      fgMuted: '#6e5d48',
+      fgMuted: '#5e4e3a',
       desk: '#efe4cc',
       sheet: '#f7eedb'
     },

@@ -209,7 +209,7 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     loadTree()
     render(<StackedEditor folderId="arc-1" format="webnovel" />)
     const stack = regions()[0]?.parentElement
-    expect(stack).toHaveClass('bg-desk')
+    expect(stack).toHaveClass('bg-page')
     for (const region of regions()) expect(region).toHaveClass('ms-sheet')
     for (const sep of screen.getAllByRole('separator', { name: 'Scene break' })) {
       expect(sep).not.toHaveClass('ms-sheet')
@@ -217,14 +217,14 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
     // Focus mode keeps the plain stack; off keeps the column.
     act(() => useFocusStore.setState({ active: true }))
     for (const region of regions()) expect(region).not.toHaveClass('ms-sheet')
-    expect(stack).not.toHaveClass('bg-desk')
+    expect(stack).not.toHaveClass('bg-page')
     act(() => useFocusStore.setState({ active: false }))
     act(() => useViewStore.setState({ pageEdges: false }))
     for (const region of regions()) {
       expect(region).not.toHaveClass('ms-sheet')
       expect(region).toHaveClass('max-w-(--ms-editor-max-width)')
     }
-    expect(stack).not.toHaveClass('bg-desk')
+    expect(stack).not.toHaveClass('bg-page')
   })
 
   it('sets the same column class on the page-break separator between matter documents (F-3.4)', () => {

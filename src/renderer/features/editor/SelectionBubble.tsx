@@ -7,6 +7,7 @@ import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { captureRewriteText } from './rewriteTarget'
 import { useRewriteStore } from './rewriteStore'
 import { askAboutSelection, rewriteSelection, selectionOffer } from './selectionActions'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
 
 const BUTTON =
   'flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-fg hover:bg-surface disabled:opacity-40 disabled:hover:bg-transparent'
@@ -48,6 +49,7 @@ export function SelectionBubble({
       (a !== null && b !== null && a.from === b.from && a.to === b.to && a.length === b.length)
   })
   const settings = useAiSettingsStore((s) => s.settings)
+  const assistantName = useAssistantName()
   // Subscribed so the Rewrite button follows a rewrite starting and ending.
   useRewriteStore((s) => s.session !== null)
   const offer = selectionOffer(settings)
@@ -98,7 +100,7 @@ export function SelectionBubble({
         <button
           type="button"
           data-testid="selection-ask"
-          title="Ask the assistant about the selection"
+          title={`Ask ${assistantName} about the selection`}
           onClick={() => askAboutSelection(editor)}
           className={BUTTON}
         >

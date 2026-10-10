@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { normalizeAssistantName } from '@shared/assistantName'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import {
   THEME_NEEDS_LICENSE_MESSAGE,
@@ -10,7 +11,7 @@ import { defaultViewSettings, nextZoom, type ViewSettings } from '@shared/zoom'
 import { resetAppAccessStore, useAppAccessStore } from '@renderer/features/account/appAccessStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
-import { resetViewStore, useViewStore } from './viewStore'
+import { currentAssistantName, resetViewStore, useViewStore } from './viewStore'
 
 interface Fake {
   client: IpcClient
@@ -68,6 +69,11 @@ function fakeClient(): Fake {
               theme: fake.view.theme === id && gone ? gone.base : fake.view.theme,
               customThemes: fake.view.customThemes.filter((t) => t.id !== id)
             }
+            return fake.view as Output<C>
+          }
+          case 'view:setAssistantName': {
+            const { name } = input as { name: string }
+            fake.view = { ...fake.view, assistantName: normalizeAssistantName(name) }
             return fake.view as Output<C>
           }
           default:
@@ -246,5 +252,21 @@ describe('viewStore themes (F-7.8)', () => {
       input: { id: 'custom-a1b2c3d4e5f6' }
     })
     expect(useViewStore.getState()).toMatchObject({ theme: 'sepia', customThemes: [] })
+  })
+
+  it('renames the assistant through main and mirrors the answer; a failure toasts and keeps the name (F-7.13)', async () => {
+    expect(currentAssistantName()).toBe('Ms Scribe')
+    await useViewStore.getState().setAssistantName('  Quill ')
+    expect(fake.calls.at(-1)).toEqual({
+      channel: 'view:setAssistantName',
+      input: { name: '  Quill ' }
+    })
+    expect(currentAssistantName()).toBe('Quill')
+    await useViewStore.getState().setAssistantName('')
+    expect(currentAssistantName()).toBe('Ms Scribe')
+    fake.fail = new Error('disk full')
+    await useViewStore.getState().setAssistantName('Nib')
+    expect(currentAssistantName()).toBe('Ms Scribe')
+    expect(toasts()).toEqual(['disk full'])
   })
 })

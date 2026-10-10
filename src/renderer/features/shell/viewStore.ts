@@ -16,7 +16,8 @@ import { ipc } from '@renderer/lib/ipc'
  * (`editor/column.ts`), which is why they live in a store rather than in the window. The
  * interface size needs nothing here; the window is already scaled when main answers. App-wide,
  * not per project, so `load()` runs once at app start and there is no per-project clear. The
- * theme (F-7.8) is the same: main keeps the choice and the custom themes, App.tsx paints them.
+ * theme (F-7.8) is the same: main keeps the choice and the custom themes, App.tsx paints them. So is
+ * the assistant's name (F-7.13), which every surface that names the assistant reads.
  */
 interface ViewState {
   /** The defaults until `load` resolves, so the shell renders before app-state.json is read. */
@@ -26,6 +27,8 @@ interface ViewState {
   /** The chosen theme (F-7.8), kept even while locked; `resolveTheme` says what is painted. */
   theme: string
   customThemes: CustomTheme[]
+  /** The assistant's name (F-7.13); "Ms Scribe" until `load` resolves. */
+  assistantName: string
   /** False until the first answer arrives; the Appearance tab waits on it. */
   loaded: boolean
   load: () => Promise<void>
@@ -45,6 +48,8 @@ interface ViewState {
   saveCustomTheme: (theme: CustomThemeInput) => Promise<boolean>
   /** Deletes a custom theme; when it was current, main falls back to its base. */
   deleteCustomTheme: (id: string) => Promise<void>
+  /** Renames the assistant (F-7.13); blank goes back to the default. Main rebuilds the menu. */
+  setAssistantName: (name: string) => Promise<void>
 }
 
 /** Whether the paid themes (Sepia, custom themes) are on; unknown counts as locked. */
@@ -165,6 +170,17 @@ export const useViewStore = create<ViewState>((set, get) => ({
     } catch (err) {
       toast.error(describeError(err))
     }
+  },
+
+  async setAssistantName(name) {
+    const mine = generation
+    try {
+      const view = await ipc().invoke('view:setAssistantName', { name })
+      if (mine !== generation) return
+      set({ ...view, loaded: true })
+    } catch (err) {
+      toast.error(describeError(err))
+    }
   }
 }))
 
@@ -188,4 +204,17 @@ export function useEditorZoom(): number {
  */
 export function usePageEdges(): boolean {
   return useViewStore((s) => s.pageEdges)
+}
+
+/**
+ * The assistant's name (F-7.13) for a component: the panel heading, the toggles, the menus, and
+ * every help text that names it re-render when the author renames it.
+ */
+export function useAssistantName(): string {
+  return useViewStore((s) => s.assistantName)
+}
+
+/** The assistant's name outside a component (a toast, a label built in a store). */
+export function currentAssistantName(): string {
+  return useViewStore.getState().assistantName
 }

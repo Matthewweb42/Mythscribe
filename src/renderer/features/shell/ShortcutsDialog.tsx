@@ -8,6 +8,8 @@ import {
   type Chord,
   type ShortcutGroup
 } from '@renderer/features/shell/shortcuts'
+import { useAssistantName } from './viewStore'
+import { nameAssistant } from '@shared/assistantName'
 
 interface ShortcutsDialogProps {
   onClose: () => void
@@ -37,6 +39,7 @@ function shortcutTables(): { label: string; rows: ShortcutRow[] }[] {
  */
 export function ShortcutsDialog({ onClose }: ShortcutsDialogProps): React.JSX.Element {
   const titleId = useId()
+  const assistantName = useAssistantName()
   const closeButton = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -92,7 +95,7 @@ export function ShortcutsDialog({ onClose }: ShortcutsDialogProps): React.JSX.El
                     className="border-t border-line"
                   >
                     <th scope="row" className="py-1 pr-4 text-left font-normal">
-                      {row.label}
+                      {nameAssistant(row.label, assistantName)}
                     </th>
                     <td className="py-1 text-right">
                       <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-xs">

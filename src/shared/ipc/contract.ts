@@ -204,6 +204,7 @@ import { WordCountReport } from '../wordCount'
 import { StartupSettings } from '../windowState'
 import { UiScale, ViewSettings, ZoomStep } from '../zoom'
 import { CustomThemeId, CustomThemeInput, ThemeId } from '../themes'
+import { AssistantNameInput } from '../assistantName'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -2913,6 +2914,14 @@ export const contract = {
    */
   'view:deleteCustomTheme': {
     input: z.object({ id: CustomThemeId }),
+    output: ViewSettings
+  },
+  /**
+   * The assistant's name (F-7.13): main stores it (blank means the default, Ms Scribe), rebuilds
+   * the native menu so View shows it, and answers the set the renderer mirrors.
+   */
+  'view:setAssistantName': {
+    input: z.object({ name: AssistantNameInput }),
     output: ViewSettings
   },
   /** Startup (F-7.9): whether the project open at the last quit opens again on launch. */

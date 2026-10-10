@@ -1485,7 +1485,7 @@ test('create, close, reopen a project on disk', async () => {
   // is disabled with "Coming soon", so no Cloud rate shows beside the models.
   expect((await aiSettings()).source).toBe('ownKey')
   expect((await aiSettings()).dial).toBe(0)
-  await expect(page.getByRole('complementary', { name: 'Assistant' })).toHaveCount(0)
+  await expect(page.getByRole('complementary', { name: 'Ms Scribe' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Settings' }).click()
   const firstSettings = page.getByRole('dialog', { name: 'Settings' })
   await firstSettings.getByRole('tab', { name: 'AI' }).click()
@@ -1498,6 +1498,26 @@ test('create, close, reopen a project on disk', async () => {
   await expect(firstSettings.getByTestId('ai-model-rate-fast')).toHaveCount(0)
   await firstSettings.getByRole('button', { name: 'Close settings' }).click()
   await expect(firstSettings).toHaveCount(0)
+  // F-7.13: the assistant is Ms Scribe until renamed in Settings › AI; the header toggle follows
+  // the name, and a blank name goes back to Ms Scribe.
+  const assistantToggle = (name: string): Locator =>
+    page.locator('header').getByRole('button', { name, exact: true })
+  await expect(assistantToggle('Ms Scribe')).toBeVisible()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await firstSettings.getByRole('tab', { name: 'AI' }).click()
+  const assistantNameField = firstSettings.getByRole('textbox', { name: 'Assistant name' })
+  await expect(assistantNameField).toHaveValue('Ms Scribe')
+  await assistantNameField.fill('Quill')
+  await assistantNameField.press('Enter')
+  await firstSettings.getByRole('button', { name: 'Close settings' }).click()
+  await expect(assistantToggle('Quill')).toBeVisible()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await firstSettings.getByRole('tab', { name: 'AI' }).click()
+  await assistantNameField.fill('')
+  await assistantNameField.press('Enter')
+  await expect(assistantNameField).toHaveValue('Ms Scribe')
+  await firstSettings.getByRole('button', { name: 'Close settings' }).click()
+  await expect(assistantToggle('Ms Scribe')).toBeVisible()
   // F-1.5: the shell header and window title carry the project name and format.
   await expect(page).toHaveTitle(`MythScribe — ${projectPath}`)
   await expect(page.locator('header')).toContainText('Web novel')
@@ -1676,7 +1696,8 @@ test('create, close, reopen a project on disk', async () => {
     uiScale: 'medium',
     pageEdges: true,
     theme: 'dark',
-    customThemes: []
+    customThemes: [],
+    assistantName: 'Ms Scribe'
   })
 
   // F-7.11: the column is a sheet on the desk by default (the edge is the column element's own
@@ -4529,13 +4550,13 @@ test('create, close, reopen a project on disk', async () => {
   const referencesWindow = page.getByRole('dialog', { name: 'References' })
   await expect(referencesWindow).toBeVisible()
   await expect(page.getByTestId('references-panel')).toHaveCount(0)
-  const focusAssistant = controlBar.getByRole('button', { name: 'AI assistant' })
+  const focusAssistant = controlBar.getByRole('button', { name: 'Ms Scribe' })
   await focusAssistant.click()
-  await expect(page.getByRole('dialog', { name: 'Assistant' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Ms Scribe' })).toBeVisible()
   await focusReferences.click()
   await focusAssistant.click()
   await expect(referencesWindow).toHaveCount(0)
-  await expect(page.getByRole('dialog', { name: 'Assistant' })).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: 'Ms Scribe' })).toHaveCount(0)
   await focusNotes.click()
   await expect(notesWindow).toHaveCount(0)
   await page.mouse.move(screenSize.w / 2, screenSize.h / 2)
@@ -4684,7 +4705,7 @@ test('create, close, reopen a project on disk', async () => {
   await page.keyboard.press('Control+k')
   const assistant = page.getByTestId('assistant-panel')
   await expect(assistant).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Assistant', exact: true })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: 'Ms Scribe', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true'
   )
@@ -4735,7 +4756,7 @@ test('create, close, reopen a project on disk', async () => {
   await messageBox.fill(`${SLOW_SENTINEL}: what happens next?`)
   await messageBox.press('Enter')
   await expect(assistant.getByTestId('chat-pending')).toBeVisible()
-  await expect(page.getByTestId('ai-activity')).toContainText('Assistant routing')
+  await expect(page.getByTestId('ai-activity')).toContainText('Ms Scribe routing')
   await assistant.getByTestId('assistant-stop').click()
   await expect(assistant.getByTestId('chat-pending')).toHaveCount(0)
   await expect(turns).toHaveCount(3)
@@ -5787,8 +5808,8 @@ test('create, close, reopen a project on disk', async () => {
   const focusSize = await fullscreenViewport()
   await page.mouse.move(focusSize.w / 2, focusSize.h - 8)
   await expect(focusBar).toHaveAttribute('data-visible', 'true')
-  await focusBar.getByRole('button', { name: 'AI assistant' }).click()
-  const floatingAssistant = page.getByRole('dialog', { name: 'Assistant' })
+  await focusBar.getByRole('button', { name: 'Ms Scribe' }).click()
+  const floatingAssistant = page.getByRole('dialog', { name: 'Ms Scribe' })
   await expect(floatingAssistant).toBeVisible()
   const floatingTurns = floatingAssistant.locator('[data-testid="chat-turn"]')
   const turnsBeforeFocus = await floatingTurns.count()
@@ -5810,7 +5831,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect.poll(() => documentTextWithoutGhost()).toBe(beforeInsert)
   await page.mouse.move(focusSize.w / 2, focusSize.h - 8)
   await expect(focusBar).toHaveAttribute('data-visible', 'true')
-  await focusBar.getByRole('button', { name: 'AI assistant' }).click()
+  await focusBar.getByRole('button', { name: 'Ms Scribe' }).click()
   await focusBar.getByRole('button', { name: 'Exit focus mode' }).click()
   await expect.poll(isFullScreen).toBe(false)
   await expect(assistant).toBeVisible()

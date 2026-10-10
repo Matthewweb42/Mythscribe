@@ -7,6 +7,7 @@ import {
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { FloatingWindow } from './FloatingWindow'
 import { useFocusStore } from './focusStore'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
 
 /**
  * The floating Notes, References, and AI assistant windows of focus mode (F-6.6; References
@@ -21,6 +22,7 @@ import { useFocusStore } from './focusStore'
 export function FocusFloatingPanels(): React.JSX.Element {
   const panels = useFocusStore((s) => s.panels)
   const togglePanel = useFocusStore((s) => s.togglePanel)
+  const assistantName = useAssistantName()
   const selectedId = useTreeStore((s) => s.selectedId)
   return (
     <>
@@ -44,7 +46,11 @@ export function FocusFloatingPanels(): React.JSX.Element {
         </FloatingWindow>
       ) : null}
       {panels.assistant ? (
-        <FloatingWindow name="assistant" title="Assistant" onClose={() => togglePanel('assistant')}>
+        <FloatingWindow
+          name="assistant"
+          title={assistantName}
+          onClose={() => togglePanel('assistant')}
+        >
           <AssistantBody />
         </FloatingWindow>
       ) : null}

@@ -13,10 +13,14 @@ import {
 import { emit, type EmitTarget } from './ipc/registry'
 import type { ProjectManager } from './project/manager'
 
-/** What the native template depends on: the open project's format (null when none) and the OS. */
+/**
+ * What the native template depends on: the open project's format (null when none), the OS, and
+ * the assistant's name (F-7.13), which View's item carries.
+ */
 export interface MenuContext {
   format: NovelFormat | null
   platform: NodeJS.Platform
+  assistantName: string
 }
 
 /**
@@ -39,7 +43,7 @@ export function buildMenuTemplate(
       const chord = menuItemChord(entry)
       const base: MenuItemConstructorOptions = {
         id: entry.id,
-        label: menuItemLabel(entry, context.format),
+        label: menuItemLabel(entry, context.format, context.assistantName),
         enabled: isMenuItemEnabled(entry, context.format !== null),
         ...(chord ? { accelerator: menuAccelerator(chord) } : {})
       }
@@ -55,6 +59,8 @@ export interface InstallMenuDeps {
   manager: Pick<ProjectManager, 'current' | 'onChange'>
   /** Whether developer tools are on (Help › Developer items); read on every rebuild. */
   devTools: () => boolean
+  /** The assistant's name (F-7.13), read on every rebuild. */
+  assistantName: () => string
   platform: NodeJS.Platform
   /** The window a click goes to: the focused one, else the first. */
   target: () => EmitTarget | null
@@ -64,16 +70,23 @@ export interface InstallMenuDeps {
  * Builds and sets the application menu, and rebuilds it whenever the project changes so the
  * `project` items enable and the Insert labels follow the format. Each click emits
  * `menu:action` to the target window; the renderer's `runMenuAction` does the work. Returns
- * the unsubscribe from the manager and `rebuild`, which the developer tools switch calls.
+ * the unsubscribe from the manager and `rebuild`, which the developer tools switch and a new
+ * assistant name (F-7.13) call.
  */
-export function installApplicationMenu({ manager, devTools, platform, target }: InstallMenuDeps): {
+export function installApplicationMenu({
+  manager,
+  devTools,
+  assistantName,
+  platform,
+  target
+}: InstallMenuDeps): {
   dispose: () => void
   rebuild: () => void
 } {
   const apply = (): void => {
     const template = buildMenuTemplate(
       menuFor({ devTools: devTools() }),
-      { format: manager.current()?.format ?? null, platform },
+      { format: manager.current()?.format ?? null, platform, assistantName: assistantName() },
       (id) => {
         const win = target()
         if (win) emit([win], 'menu:action', { id })

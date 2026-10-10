@@ -26,7 +26,7 @@ function Screen(): React.JSX.Element {
     <div>
       {columns.map((column, index) =>
         column.includes('editor') ? (
-          <DockSlot key="editor" id="editor" first>
+          <DockSlot key="editor" id="editor">
             <Body id="editor" />
           </DockSlot>
         ) : (
@@ -56,7 +56,12 @@ const dataTransfer = (): Partial<DataTransfer> => ({
 })
 /** Starts a drag on `id`'s grip. */
 const grab = (id: DockPanelId): void => {
-  const label = id === 'editor' ? 'Move Editor' : `Move ${id[0]?.toUpperCase()}${id.slice(1)}`
+  const label =
+    id === 'editor'
+      ? 'Move Editor'
+      : id === 'assistant'
+        ? 'Move Ms Scribe'
+        : `Move ${id[0]?.toUpperCase()}${id.slice(1)}`
   fireEvent.dragStart(screen.getByRole('button', { name: label }), { dataTransfer: dataTransfer() })
 }
 /**

@@ -47,6 +47,7 @@ import { useAccountStore } from '@renderer/features/account/accountStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { AiDialSection } from './AiDialSection'
+import { AssistantNameField } from './AssistantNameField'
 import { AuthorRulesSection } from './AuthorRulesSection'
 import { ProvenanceSection } from './ProvenanceSection'
 import { VoiceSection } from './VoiceSection'
@@ -202,6 +203,8 @@ export function AiSettingsTab({
 
   return (
     <div className="flex flex-col gap-4 text-sm">
+      <AssistantNameField />
+
       <AiDialSection />
 
       <div className="flex items-center justify-between gap-3">

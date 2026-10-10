@@ -263,7 +263,7 @@ export function SidebarSections({
     <>
       <div
         ref={wrapper}
-        className="relative flex shrink-0 items-center gap-1 border-b border-line py-1.5 pr-1 pl-2"
+        className="relative flex shrink-0 items-center gap-1 border-b border-line bg-panel-title py-1.5 pr-1 pl-2"
       >
         <button
           ref={button}

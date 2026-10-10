@@ -29,8 +29,10 @@
   --color-status-draft: var(--ms-status-draft);
   --color-status-revised: var(--ms-status-revised);
   --color-status-final: var(--ms-status-final);
-  --color-desk: var(--ms-desk);
-  --color-sheet: var(--ms-sheet);
+  --color-panel: var(--ms-surface-panel);
+  --color-panel-title: var(--ms-surface-panel-title);
+  --color-page: var(--ms-surface-page);
+  --color-gap: var(--ms-surface-gap);
   --radius-md: var(--ms-radius);
   --radius-lg: var(--ms-radius-lg);
   --shadow-panel: var(--ms-shadow);
@@ -396,7 +398,8 @@ select {
 .ms-sheet {
   border: 1px solid var(--ms-line);
   border-radius: 2px;
-  background: var(--ms-sheet);
+  /* F-7.14: the sheet lifted with the page, so the two keep their step. */
+  background: var(--ms-surface-sheet);
   box-shadow: 0 2px 12px rgb(0 0 0 / 0.35);
 }
 

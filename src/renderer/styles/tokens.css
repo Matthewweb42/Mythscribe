@@ -62,6 +62,19 @@
   --ms-desk: #1b1b1f;
   --ms-sheet: #26262b;
 
+  /*
+   * Sections (F-7.14): how far the side panels sink below `--ms-surface` (toward black), how far
+   * the writing page lifts above the desk and the sheet (toward white), and how much text colour
+   * tints a panel's title strip, and how far the gap between stacked panels sinks below the
+   * background. Each theme sets its own; the colours are derived at the end of
+   * this file, so a custom theme gets them from its own eight colours.
+   */
+  --ms-panel-shade: 14%;
+  --ms-page-lift: 5%;
+  --ms-title-tint: 7%;
+  /* The gap between stacked panels is the background, deepened where the panels are as dark. */
+  --ms-gap-shade: 35%;
+
   /* Focus mode (F-6.2): the scrim over a background image and the panel behind the column. */
   --ms-focus-scrim: rgb(0 0 0);
   --ms-focus-surface: rgb(27 27 31 / 0.72);
@@ -121,6 +134,11 @@
   --ms-desk: #eeeef0;
   --ms-sheet: #f8f8f9;
 
+  --ms-panel-shade: 5%;
+  --ms-page-lift: 45%;
+  --ms-title-tint: 5%;
+  --ms-gap-shade: 0%;
+
   --ms-focus-scrim: rgb(238 238 240);
   --ms-focus-surface: rgb(248 248 249 / 0.8);
   --ms-focus-bar: rgb(228 228 232 / 0.9);
@@ -170,6 +188,11 @@
   --ms-desk: #000000;
   --ms-sheet: #121212;
 
+  --ms-panel-shade: 0%;
+  --ms-page-lift: 6%;
+  --ms-title-tint: 9%;
+  --ms-gap-shade: 0%;
+
   --ms-focus-surface: rgb(0 0 0 / 0.85);
   --ms-focus-bar: rgb(10 10 10 / 0.95);
 
@@ -188,7 +211,8 @@
   --ms-line-strong: #b8a47a;
 
   --ms-fg: #3b2f22;
-  --ms-fg-muted: #6e5d48;
+  /* F-7.14: a shade darker than before, so it holds AA on the darker panels and their title strips. */
+  --ms-fg-muted: #5e4e3a;
   --ms-fg-subtle: #85725a;
 
   --ms-accent: #9b5f2a;
@@ -214,6 +238,11 @@
 
   --ms-desk: #efe4cc;
   --ms-sheet: #f7eedb;
+
+  --ms-panel-shade: 5%;
+  --ms-page-lift: 40%;
+  --ms-title-tint: 5%;
+  --ms-gap-shade: 0%;
 
   --ms-focus-scrim: rgb(239 228 204);
   --ms-focus-surface: rgb(247 238 219 / 0.8);
@@ -297,4 +326,31 @@
   --ms-accent: #ffd60a;
   --ms-accent-hover: #ffe45c;
   --ms-accent-fg: #000000;
+}
+
+/*
+ * Sections (F-7.14, requested by the author 2026-10-10): the three areas of the project screen
+ * told apart at a glance in every theme. Derived here from each theme's own colours (a custom
+ * theme's inline ones included, since they sit on the same element) and the theme's amounts
+ * above:
+ * - `--ms-surface-panel`: the side columns (sidebar, notes, tags, references, the assistant), a
+ *   little darker than `--ms-surface`;
+ * - `--ms-surface-page` and `--ms-surface-sheet`: the writing pane and its sheet (F-7.11), a touch
+ *   lighter than `--ms-desk` and `--ms-sheet`;
+ * - `--ms-surface-panel-title`: a panel's title strip, the panel tinted toward the text colour
+ *   (lighter on a dark theme, darker on a light one);
+ * - `--ms-surface-gap`: what shows between panels stacked in one column, the app background
+ *   (deepened on Dark, where the darker panels would otherwise melt into it).
+ * `themes.test.ts` checks the steps and the text contrast of every built-in theme.
+ */
+:root {
+  --ms-surface-panel: color-mix(in srgb, var(--ms-surface), black var(--ms-panel-shade));
+  --ms-surface-panel-title: color-mix(
+    in srgb,
+    var(--ms-surface-panel),
+    var(--ms-fg) var(--ms-title-tint)
+  );
+  --ms-surface-page: color-mix(in srgb, var(--ms-desk), white var(--ms-page-lift));
+  --ms-surface-sheet: color-mix(in srgb, var(--ms-sheet), white var(--ms-page-lift));
+  --ms-surface-gap: color-mix(in srgb, var(--ms-bg), black var(--ms-gap-shade));
 }

@@ -8,15 +8,36 @@ import {
   type DockPanelId,
   type DockTarget
 } from '@shared/dock'
+import { nameAssistant } from '@shared/assistantName'
 import { columnLimits, columnWidth, type LayoutPanel } from '@shared/layout'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
 import { DOCK_DRAG_TYPE, resetDockDrag, useDockDragStore } from './dockDragStore'
 import { isColumnShown, resizePanelBy, useLayoutStore } from './layoutStore'
 import { ResizeHandle } from './ResizeHandle'
+import { useAssistantName } from './viewStore'
 
+// Muted, not subtle (F-7.14): the grips sit on the title strips, where subtle falls under 3:1.
 const CONTROL =
-  'rounded p-0.5 text-fg-subtle hover:bg-surface-raised hover:text-fg focus-visible:text-fg'
-const COMPACT = 'rounded text-fg-subtle hover:text-fg focus-visible:text-fg'
+  'rounded p-0.5 text-fg-muted hover:bg-surface-raised hover:text-fg focus-visible:text-fg'
+const COMPACT = 'rounded text-fg-muted hover:text-fg focus-visible:text-fg'
+
+/**
+ * A side panel's title strip (F-7.14): the grip, the menu, and the heading on a band a shade off
+ * the panel (`--ms-surface-panel-title`), so panels stacked in one column read as separate
+ * panels at a glance. Every docked side panel's heading row takes it.
+ */
+export const PANEL_TITLE = 'flex shrink-0 items-center gap-2 bg-panel-title py-1.5 pr-3 pl-2'
+
+/** What a panel's grip, menu, and resize handle call it: the assistant goes by its name (F-7.13). */
+function panelLabel(id: DockPanelId, assistantName: string): string {
+  return nameAssistant(DOCK_PANEL_LABEL[id], assistantName)
+}
+
+/** The label inside a sentence ("Drag to move notes"); a name keeps its capitals. */
+function panelNoun(id: DockPanelId, assistantName: string): string {
+  const label = panelLabel(id, assistantName)
+  return id === 'assistant' ? label : label.toLowerCase()
+}
 
 /**
  * A panel's grip and menu (layout 3c). The grip is the drag handle: drop on the gap beside
@@ -33,7 +54,8 @@ export function DockPanelControls({
 }): React.JSX.Element {
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
   const layout = useLayoutStore((s) => s.layout)
-  const label = DOCK_PANEL_LABEL[id]
+  const assistantName = useAssistantName()
+  const label = panelLabel(id, assistantName)
   const shown = (column: readonly DockPanelId[]): boolean => isColumnShown(layout, column)
   const canMove = (direction: 'left' | 'right'): boolean =>
     stepPanel(layout.dock.columns, id, direction, shown) !== layout.dock.columns
@@ -54,7 +76,7 @@ export function DockPanelControls({
         type="button"
         draggable
         aria-label={`Move ${label}`}
-        title={`Drag to move ${label.toLowerCase()}`}
+        title={`Drag to move ${panelNoun(id, assistantName)}`}
         onDragStart={(event) => {
           event.dataTransfer.effectAllowed = 'move'
           event.dataTransfer.setData(DOCK_DRAG_TYPE, id)
@@ -114,11 +136,9 @@ function indicatorOf(target: DockTarget): string {
  */
 export function DockSlot({
   id,
-  first,
   children
 }: {
   id: DockPanelId
-  first: boolean
   children: React.ReactNode
 }): React.JSX.Element {
   const dragging = useDockDragStore((s) => s.dragging)
@@ -133,7 +153,7 @@ export function DockSlot({
   return (
     <div
       data-dock-panel={id}
-      className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${first ? '' : 'border-t border-line'}`}
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
       onDragOverCapture={(event) => {
         if (dragging === null) return
         event.preventDefault()
@@ -169,7 +189,9 @@ export function DockSlot({
 /**
  * A side column (layout 3c): as wide as its first open panel (a fraction of the window rendered
  * in `vw`), with the resize handle on the edge that faces the editor (`side`), and its open
- * panels stacked top to bottom, each in a `DockSlot`.
+ * panels stacked top to bottom, each in a `DockSlot`. The column itself is the gap colour (the
+ * app background, F-7.14): stacked panels sit a small gap apart with it showing between them,
+ * and each panel paints its own `bg-panel`.
  */
 export function DockColumn({
   column,
@@ -181,6 +203,7 @@ export function DockColumn({
   render: (id: DockPanelId) => React.ReactNode
 }): React.JSX.Element | null {
   const layout = useLayoutStore((s) => s.layout)
+  const assistantName = useAssistantName()
   if (!isColumnShown(layout, column)) return null
   const open = column.filter((id): id is LayoutPanel => id !== 'editor' && layout[id].open)
   const first = open[0]
@@ -190,11 +213,11 @@ export function DockColumn({
   return (
     <div
       data-testid="dock-column"
-      className={`relative flex shrink-0 flex-col border-line bg-surface ${side === 'left' ? 'border-l' : 'border-r'}`}
+      className={`relative flex shrink-0 flex-col gap-1.5 border-line bg-gap ${side === 'left' ? 'border-l' : 'border-r'}`}
       style={{ width: `${width * 100}vw` }}
     >
-      {open.map((id, index) => (
-        <DockSlot key={id} id={id} first={index === 0}>
+      {open.map((id) => (
+        <DockSlot key={id} id={id}>
           {render(id)}
         </DockSlot>
       ))}
@@ -203,7 +226,7 @@ export function DockColumn({
         value={width}
         min={min}
         max={max}
-        ariaLabel={`Resize ${DOCK_PANEL_LABEL[first].toLowerCase()}`}
+        ariaLabel={`Resize ${panelNoun(first, assistantName)}`}
         onChange={(deltaPx) => resizePanelBy(first, deltaPx)}
       />
     </div>

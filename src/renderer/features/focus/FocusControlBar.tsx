@@ -9,6 +9,7 @@ import { SHOW_ZONE_PX, useAutoHide } from './autoHide'
 import { BackgroundManager } from './BackgroundManager'
 import { useBackgroundStore } from './backgroundStore'
 import { useFocusStore } from './focusStore'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
 
 const BUTTON =
   'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 aria-pressed:bg-surface-raised aria-pressed:text-accent'
@@ -36,6 +37,7 @@ export function FocusControlBar(): React.JSX.Element {
   const panels = useFocusStore((s) => s.panels)
   const togglePanel = useFocusStore((s) => s.togglePanel)
   const exit = useFocusStore((s) => s.exit)
+  const assistantName = useAssistantName()
   const activeEditor = useActiveEditorStore((s) => s.active?.editor ?? null)
   const live = useLiveDocStats(activeEditor)
   const [managerOpen, setManagerOpen] = useState(false)
@@ -119,7 +121,7 @@ export function FocusControlBar(): React.JSX.Element {
           className={BUTTON}
         >
           <MessageSquare size={14} aria-hidden="true" />
-          AI assistant
+          {assistantName}
         </button>
         <span className={SLIDER}>
           <label htmlFor={darknessId}>Darkness</label>

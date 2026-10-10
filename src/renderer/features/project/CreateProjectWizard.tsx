@@ -14,6 +14,8 @@ import { CLOUD_AI_AVAILABLE } from '@shared/cloudApi'
 import { PROJECT_NAME_MAX, type NovelFormat } from '@shared/ipc/contract'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { PROJECT_FORMATS } from './formats'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
+import { nameAssistant } from '@shared/assistantName'
 
 type Step = 'name' | 'format' | 'source' | 'dial' | 'context'
 
@@ -103,6 +105,7 @@ export function CreateProjectWizard({
   cloudAvailable?: boolean
 }): React.JSX.Element {
   const titleId = useId()
+  const assistantName = useAssistantName()
   const [step, setStep] = useState<Step>('name')
   const [name, setName] = useState('')
   const [format, setFormat] = useState<NovelFormat>('novel')
@@ -335,8 +338,8 @@ export function CreateProjectWizard({
               <p data-testid="wizard-dial-explainer" className="mt-4 mb-0 text-sm text-fg-muted">
                 You write; with AI on, it works behind you. When you pause typing it summarizes the
                 scene, notes what it states about your characters, places, and world in the story
-                bible, tags it, and flags contradictions. The assistant panel opens beside the
-                editor for questions and one-click actions. It starts in{' '}
+                bible, tags it, and flags contradictions. {assistantName} opens beside the editor
+                for questions and one-click actions. It starts in{' '}
                 {ASSISTANT_MODE_LABEL[DEFAULT_ASSISTANT_MODE]}: every change it wants to make asks
                 you first. Switch to Auto or Plan under the chat box.
               </p>
@@ -360,7 +363,9 @@ export function CreateProjectWizard({
                         </span>
                       ) : null}
                     </span>
-                    <span className="block text-sm text-fg-muted">{USE_AI_MEANING[option]}</span>
+                    <span className="block text-sm text-fg-muted">
+                      {nameAssistant(USE_AI_MEANING[option], assistantName)}
+                    </span>
                   </label>
                 ))}
               </fieldset>

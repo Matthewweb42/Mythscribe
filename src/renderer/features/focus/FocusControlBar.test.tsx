@@ -182,7 +182,7 @@ describe('FocusControlBar (F-6.5)', () => {
     install()
     render(<FocusControlBar />)
     const notes = within(bar()).getByRole('button', { name: 'Notes' })
-    const assistant = within(bar()).getByRole('button', { name: 'AI assistant' })
+    const assistant = within(bar()).getByRole('button', { name: 'Ms Scribe' })
     expect(notes).toHaveAttribute('aria-pressed', 'false')
     expect(assistant).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(notes)

@@ -6,6 +6,8 @@ import {
   type AssistantMode
 } from '@shared/aiSettings'
 import { useAiSettingsStore } from './aiSettingsStore'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
+import { nameAssistant } from '@shared/assistantName'
 
 /** One segment of the switch. */
 const MODE_RADIO =
@@ -22,6 +24,7 @@ const MODE_RADIO =
 export function AssistantModeControl(): React.JSX.Element | null {
   const settings = useAiSettingsStore((s) => s.settings)
   const update = useAiSettingsStore((s) => s.update)
+  const assistantName = useAssistantName()
   const radios = useRef(new Map<AssistantMode, HTMLButtonElement>())
   if (settings === null) return null
   const current = settings.chatMode
@@ -79,7 +82,7 @@ export function AssistantModeControl(): React.JSX.Element | null {
           aria-checked={mode === current}
           tabIndex={mode === current ? 0 : -1}
           disabled={off}
-          title={`${ASSISTANT_MODE_LABEL[mode]}: ${ASSISTANT_MODE_MEANING[mode]}`}
+          title={`${ASSISTANT_MODE_LABEL[mode]}: ${nameAssistant(ASSISTANT_MODE_MEANING[mode], assistantName)}`}
           onClick={() => select(mode)}
           className={MODE_RADIO}
         >

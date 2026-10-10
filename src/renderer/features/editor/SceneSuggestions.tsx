@@ -13,6 +13,7 @@ import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useBriefDraftStore } from './briefDraftStore'
 import { useDocumentStore } from './documentStore'
 import { useSceneSuggestStore, type SuggestionCost, type SuggestionKind } from './sceneSuggestStore'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
 
 const SUGGEST_BUTTON =
   'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
@@ -95,6 +96,7 @@ export function BriefDraftButton({ id }: { id: string }): React.JSX.Element | nu
   const content = useDocumentStore((s) => s.docs[id]?.content ?? null)
   const length = useMemo(() => (content ? docToText(content).length : null), [content])
   const pending = useBriefDraftStore((s) => s.draft?.status === 'pending')
+  const assistantName = useAssistantName()
   if (!scene || settings === null || !isFeatureAllowed(settings, 'brief')) return null
   let reason: string | null = null
   if (pending) reason = 'A brief draft is already on the way'
@@ -107,7 +109,9 @@ export function BriefDraftButton({ id }: { id: string }): React.JSX.Element | nu
       data-testid="draft-brief"
       aria-label="Draft scene brief"
       disabled={reason !== null}
-      title={reason ?? 'Draft the brief from the scene, shown in the assistant to use or discard'}
+      title={
+        reason ?? `Draft the brief from the scene, shown in ${assistantName} to use or discard`
+      }
       onClick={() => {
         useBriefDraftStore.getState().start(id)
         openAssistant()

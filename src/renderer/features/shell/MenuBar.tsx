@@ -22,6 +22,7 @@ import { useDevToolsStore } from '@renderer/features/devtools/devToolsStore'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { runMenuAction } from '@renderer/features/shell/menuActions'
 import { formatShortcut } from '@renderer/features/shell/shortcuts'
+import { useAssistantName } from './viewStore'
 
 /**
  * The in-app menu bar (F-7.1), rendered from the same definition as the native menu and
@@ -272,6 +273,7 @@ function MenuEntryButton({ item, format, onActivate }: MenuEntryButtonProps): Re
   const chord = menuItemChord(item)
   const shortcut = chord ? formatShortcut(chord) : null
   const enabled = isMenuItemEnabled(item, format !== null)
+  const assistantName = useAssistantName()
   return (
     <li role="none" className="m-0 p-0">
       <button
@@ -284,7 +286,7 @@ function MenuEntryButton({ item, format, onActivate }: MenuEntryButtonProps): Re
         onClick={() => onActivate(item)}
         className="flex w-full items-center justify-between gap-6 rounded px-2 py-1 text-left text-sm hover:bg-surface focus:bg-surface focus:outline-none aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent"
       >
-        <span>{menuItemLabel(item, format)}</span>
+        <span>{menuItemLabel(item, format, assistantName)}</span>
         {shortcut ? (
           <span aria-hidden="true" className="text-xs text-fg-muted">
             {shortcut}

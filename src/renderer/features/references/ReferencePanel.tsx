@@ -3,7 +3,7 @@ import { ImagePlus, Pin } from 'lucide-react'
 import { hasPin, pinKey, type ReferencePin } from '@shared/references'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
-import { DockPanelControls } from '@renderer/features/shell/Dock'
+import { DockPanelControls, PANEL_TITLE } from '@renderer/features/shell/Dock'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
@@ -48,16 +48,18 @@ export function ReferencePanel(): React.JSX.Element | null {
     <aside
       aria-label="References"
       data-testid="references-panel"
-      className="flex min-h-0 flex-1 flex-col bg-surface"
+      className="flex min-h-0 flex-1 flex-col bg-panel"
     >
-      <div className="flex shrink-0 items-center gap-2 pt-3 pr-4 pb-2 pl-2">
+      <div className={PANEL_TITLE}>
         <DockPanelControls id="references" />
         <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">
           References
         </h2>
         <AddReferenceImageButton />
       </div>
-      <ReferencesBody />
+      <div className="flex min-h-0 flex-1 flex-col pt-2">
+        <ReferencesBody />
+      </div>
     </aside>
   )
 }

@@ -10,6 +10,8 @@ import {
 } from '@shared/aiSettings'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { providerOf, useAiStore } from './aiStore'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
+import { nameAssistant } from '@shared/assistantName'
 
 const FIELD = 'w-24 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 
@@ -26,6 +28,7 @@ const FIELD = 'w-24 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 export function AiDialSection(): React.JSX.Element | null {
   const settings = useAiSettingsStore((s) => s.settings)
   const update = useAiSettingsStore((s) => s.update)
+  const assistantName = useAssistantName()
   // F-15.4: the Provider column names where the text actually goes, which is the project's
   // AI source, not a fixed provider id.
   const source = useAiSettingsStore((s) => s.settings?.source ?? 'ownKey')
@@ -63,7 +66,7 @@ export function AiDialSection(): React.JSX.Element | null {
           <span>{USE_AI_LABEL}</span>
         </label>
         <p id={useAiHintId} className="m-0 text-xs text-fg-muted">
-          {dial === 0 ? USE_AI_MEANING.off : USE_AI_MEANING.on}
+          {nameAssistant(dial === 0 ? USE_AI_MEANING.off : USE_AI_MEANING.on, assistantName)}
         </p>
       </div>
 
@@ -83,7 +86,7 @@ export function AiDialSection(): React.JSX.Element | null {
                 disabled={locked}
                 onChange={(event) => toggle(id, event.target.checked)}
               />
-              <span>{label}</span>
+              <span>{nameAssistant(label, assistantName)}</span>
             </label>
           )
         })}
@@ -114,9 +117,9 @@ export function AiDialSection(): React.JSX.Element | null {
             return (
               <tr key={id}>
                 <th scope="row" className="pr-2 text-left font-normal whitespace-nowrap">
-                  {label}
+                  {nameAssistant(label, assistantName)}
                 </th>
-                <td className="pr-2">{sends}</td>
+                <td className="pr-2">{nameAssistant(sends, assistantName)}</td>
                 <td className="whitespace-nowrap">{AI_PROVIDER_LABEL[provider]}</td>
               </tr>
             )

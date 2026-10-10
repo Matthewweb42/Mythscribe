@@ -61,7 +61,7 @@ describe('AiActivityIndicator (F-5.10)', () => {
     await tick(1)
     const status = screen.getByRole('status', { name: 'AI activity' })
     expect(status).toHaveAttribute('data-testid', 'ai-activity')
-    expect(status).toHaveTextContent('Assistant chat')
+    expect(status).toHaveTextContent('Ms Scribe chat')
     expect(status.querySelector('.animate-spin')).not.toBeNull()
     await act(async () => {
       chat.resolve()
@@ -89,13 +89,13 @@ describe('AiActivityIndicator (F-5.10)', () => {
     const chat = start('chat', 'r-3')
     const again = start('chat', 'r-4')
     await tick(AI_ACTIVITY_DELAY_MS - 100)
-    expect(indicator()).toHaveTextContent('Ghost text, Assistant chat')
+    expect(indicator()).toHaveTextContent('Ghost text, Ms Scribe chat')
     await act(async () => {
       ghost.resolve()
       await ghost.done
     })
     await tick(0)
-    expect(indicator()).toHaveTextContent('Assistant chat')
+    expect(indicator()).toHaveTextContent('Ms Scribe chat')
     expect(indicator()).not.toHaveTextContent('Ghost text')
     await act(async () => {
       chat.resolve()

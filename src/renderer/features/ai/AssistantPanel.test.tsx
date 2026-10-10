@@ -26,6 +26,7 @@ import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { DockColumn } from '@renderer/features/shell/Dock'
+import { resetViewStore, useViewStore } from '@renderer/features/shell/viewStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetAiActivityStore } from './aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
@@ -196,7 +197,7 @@ const ok = (requestId: string, answer: string): AiAgentResult => ({
   requestId
 })
 
-const panel = (): HTMLElement => screen.getByRole('complementary', { name: 'Assistant' })
+const panel = (): HTMLElement => screen.getByRole('complementary', { name: 'Ms Scribe' })
 const log = (): HTMLElement => screen.getByRole('log', { name: 'Messages' })
 const tabs = (): HTMLElement[] =>
   within(screen.getByRole('tablist', { name: 'Conversations' })).getAllByRole('tab')
@@ -250,9 +251,11 @@ beforeEach(() => {
   resetActiveEditorStore()
   resetProposalStore()
   resetPendingSaves()
+  resetViewStore()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
 afterEach(() => {
+  resetViewStore()
   resetChangesStore()
   resetLibraryStore()
   resetLayoutStore()
@@ -267,7 +270,7 @@ describe('AssistantPanel (F-5.4)', () => {
   it('starts closed; the header button and Ctrl+K toggle it and report aria-pressed', async () => {
     install({ active: null, items: [] })
     render(<Host />)
-    const button = screen.getByRole('button', { name: 'Assistant' })
+    const button = screen.getByRole('button', { name: 'Ms Scribe' })
     expect(button).toHaveAttribute('aria-pressed', 'false')
     expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
 
@@ -277,7 +280,7 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(screen.getByTestId('dock-column').style.width).toBe(
       `${defaultLayout().assistant.size * 100}vw`
     )
-    expect(screen.getByRole('heading', { name: 'Assistant' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Ms Scribe' })).toBeInTheDocument()
 
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(button).toHaveAttribute('aria-pressed', 'false')
@@ -287,9 +290,20 @@ describe('AssistantPanel (F-5.4)', () => {
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
   })
 
+  it('goes by the name set in Settings: the toggle, the panel, its heading, grip, and resize handle (F-7.13)', async () => {
+    install({ active: null, items: [] })
+    useViewStore.setState({ assistantName: 'Quill' })
+    render(<Host />)
+    await userEvent.click(screen.getByRole('button', { name: 'Quill' }))
+    expect(screen.getByRole('complementary', { name: 'Quill' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Quill' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Move Quill' })).toBeInTheDocument()
+    expect(screen.getByRole('separator', { name: 'Resize Quill' })).toBeInTheDocument()
+  })
+
   it('resizes by its left-edge handle with the arrow keys, clamped to its limits', async () => {
     await mountOpen()
-    const handle = screen.getByRole('separator', { name: 'Resize assistant' })
+    const handle = screen.getByRole('separator', { name: 'Resize Ms Scribe' })
     expect(handle).toHaveAttribute('aria-orientation', 'vertical')
     expect(handle).toHaveAttribute('aria-valuenow', '30')
     expect(handle).toHaveAttribute('aria-valuemin', '20')
@@ -448,7 +462,9 @@ describe('AssistantPanel (F-5.4)', () => {
 
   it('says AI is off and where to turn it on, with Send and the modes disabled (2026-10-07)', async () => {
     await mountOpen({ active: 'c-1', items: [conversation()] }, settings({ dial: 0 }))
-    expect(screen.getByTestId('assistant-disabled')).toHaveTextContent(AI_OFF_MESSAGE)
+    expect(screen.getByTestId('assistant-disabled')).toHaveTextContent(
+      'AI is off for this project. Turn on Use AI in Settings › AI to use Ms Scribe.'
+    )
     expect(AI_OFF_MESSAGE).toContain('Turn on Use AI in Settings › AI')
     for (const radio of within(screen.getByRole('radiogroup', { name: 'Mode' })).getAllByRole(
       'radio'
@@ -468,7 +484,7 @@ describe('AssistantPanel (F-5.4)', () => {
       })
     )
     expect(screen.getByTestId('assistant-disabled')).toHaveTextContent(
-      'Assistant lookups and edits is turned off for this project (Settings, AI tab).'
+      'Ms Scribe lookups and edits is turned off for this project (Settings, AI tab).'
     )
     expect(sendButton()).toBeDisabled()
   })
@@ -532,7 +548,7 @@ describe('AssistantPanel (F-5.4)', () => {
 
   it('has no actions in its header and no way to clear a conversation (2026-10-06)', async () => {
     await mountOpen()
-    const header = screen.getByRole('heading', { name: 'Assistant' }).parentElement!
+    const header = screen.getByRole('heading', { name: 'Ms Scribe' }).parentElement!
     expect(within(header).queryByRole('button', { name: 'New conversation' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'AI actions' })).not.toBeInTheDocument()
     expect(screen.queryByTestId('continuity-button')).not.toBeInTheDocument()
@@ -1013,7 +1029,7 @@ describe('AssistantPanel quick actions (F-5.17)', () => {
     expect(writes()[0]).toBeDisabled()
     expect(writes()[0]).toHaveAttribute(
       'title',
-      'Write this needs Use AI turned on, with Assistant lookups and edits on (Settings, AI tab)'
+      'Write this needs Use AI turned on, with Ms Scribe lookups and edits on (Settings, AI tab)'
     )
     const on = settings()
     act(() =>
@@ -1021,7 +1037,7 @@ describe('AssistantPanel quick actions (F-5.17)', () => {
         settings: { ...on, features: { ...on.features, agent: false } }
       })
     )
-    expect(writes()[0]?.getAttribute('title')).toContain('with Assistant lookups and edits on')
+    expect(writes()[0]?.getAttribute('title')).toContain('with Ms Scribe lookups and edits on')
     act(() => useAiSettingsStore.setState({ settings: { ...on, chatMode: 'plan' } }))
     expect(writes()[0]).toHaveAttribute('title', PLAN_NO_EDITS_MESSAGE)
     act(() => useAiSettingsStore.setState({ settings: on }))

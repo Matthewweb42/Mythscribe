@@ -2,7 +2,7 @@ import { useId } from 'react'
 import { ChevronDown, ChevronRight, Pin, StickyNote } from 'lucide-react'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useSessionStore } from '@renderer/features/project/sessionStore'
-import { DockPanelControls } from '@renderer/features/shell/Dock'
+import { DockPanelControls, PANEL_TITLE } from '@renderer/features/shell/Dock'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { MetadataPane, NotesStatusSelect, SynopsisBox } from './MetadataPane'
@@ -46,7 +46,7 @@ export function NotesPanel({ id }: { id: string | null }): React.JSX.Element | n
   const notes = useLayoutStore((s) => s.layout.notes)
   if (!notes.open) return null
   return (
-    <div data-testid="notes-panel" className="flex min-h-0 flex-1 flex-col bg-surface">
+    <div data-testid="notes-panel" className="flex min-h-0 flex-1 flex-col bg-panel">
       <NotesHeading id={id} />
       <NotesColumn id={id} />
     </div>
@@ -68,7 +68,7 @@ export function NotesColumn({ id }: { id: string | null }): React.JSX.Element {
 /** The panel's heading: the dock grip and menu, the title, and Suggest and the pin button while a node is shown. */
 function NotesHeading({ id }: { id: string | null }): React.JSX.Element {
   return (
-    <div className="flex shrink-0 items-center gap-2 pt-3 pr-4 pb-2 pl-2">
+    <div className={PANEL_TITLE}>
       <DockPanelControls id="notes" />
       <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Notes</h2>
       {id === null ? null : <PinNotesButton id={id} />}
@@ -94,7 +94,9 @@ function NotesContent({
     id === null ? false : (s.byId[id]?.hierarchyLevel ?? null) !== null
   )
   if (id === null)
-    return <p className="m-0 px-4 text-sm text-fg-muted">Select a document to see its notes.</p>
+    return (
+      <p className="m-0 px-4 pt-2 text-sm text-fg-muted">Select a document to see its notes.</p>
+    )
   return (
     <>
       {withMetadata ? <SynopsisBox id={id} /> : null}

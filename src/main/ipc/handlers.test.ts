@@ -124,6 +124,7 @@ let fakeWin: ClosableWindow
 /** The fake window's fullscreen flag (F-6.1); `setFullScreen` writes it unless a test pins it. */
 let fullScreen: boolean
 let onCloseCancelled: ReturnType<typeof vi.fn<() => void>>
+let onAssistantNameChanged: ReturnType<typeof vi.fn<() => void>>
 /** The window `menu:edit` should use (F-7.1); null means none has the focus. */
 let focusedWindow: ClosableWindow | null
 let openExternal: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>
@@ -306,6 +307,7 @@ beforeEach(() => {
     isFullScreen: () => fullScreen
   }
   onCloseCancelled = vi.fn<() => void>()
+  onAssistantNameChanged = vi.fn<() => void>()
   focusedWindow = null
   openExternal = vi.fn<(url: string) => Promise<void>>(() => Promise.resolve())
   openPath = vi.fn<(folder: string) => Promise<string>>(() => Promise.resolve(''))
@@ -414,7 +416,8 @@ beforeEach(() => {
     spellDictionary: { sync: spellSync },
     openExternal,
     openPath,
-    onCloseCancelled
+    onCloseCancelled,
+    onAssistantNameChanged
   })
   const handlers = new Map<string, (event: unknown, raw: unknown) => Promise<IpcResult<unknown>>>()
   for (const [channel, fn] of vi.mocked(ipcMain.handle).mock.calls) {
@@ -6166,7 +6169,8 @@ describe('view (F-7.10)', () => {
       uiScale: 'medium',
       pageEdges: true,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
   })
 
@@ -6176,7 +6180,8 @@ describe('view (F-7.10)', () => {
       uiScale: 'medium',
       pageEdges: true,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
     expect(storedView().editorZoom).toBe(1.1)
     // The document zoom is the renderer's to apply; the window keeps the interface size.
@@ -6202,7 +6207,8 @@ describe('view (F-7.10)', () => {
       uiScale: 'large',
       pageEdges: true,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
     expect(fakeWin.webContents.setZoomFactor).toHaveBeenLastCalledWith(1.15)
     expect(storedView().uiScale).toBe('large')
@@ -6218,14 +6224,16 @@ describe('view (F-7.10)', () => {
       uiScale: 'small',
       pageEdges: true,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
     expect(await invoke('view:zoomDocument', { step: 'reset' })).toEqual({
       editorZoom: 1,
       uiScale: 'small',
       pageEdges: true,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
   })
 
@@ -6243,7 +6251,8 @@ describe('view (F-7.10)', () => {
       uiScale: 'medium',
       pageEdges: false,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
     expect(storedView().pageEdges).toBe(false)
     expect(fakeWin.webContents.setZoomFactor).not.toHaveBeenCalled()
@@ -6253,9 +6262,24 @@ describe('view (F-7.10)', () => {
       uiScale: 'medium',
       pageEdges: true,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
     const bad = await handlerFor('view:setPageEdges')(null, { on: 'yes' })
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(bad.error.code).toBe('VALIDATION')
+  })
+
+  it('renames the assistant, trims it, takes blank back to Ms Scribe, and rebuilds the menu (F-7.13)', async () => {
+    expect(
+      (await invoke('view:setAssistantName', { name: '  Professor   Quill ' })).assistantName
+    ).toBe('Professor Quill')
+    expect(storedView().assistantName).toBe('Professor Quill')
+    expect(onAssistantNameChanged).toHaveBeenCalledTimes(1)
+    expect((await invoke('view:setAssistantName', { name: '   ' })).assistantName).toBe('Ms Scribe')
+    expect(storedView().assistantName).toBe('Ms Scribe')
+    expect(onAssistantNameChanged).toHaveBeenCalledTimes(2)
+    const bad = await handlerFor('view:setAssistantName')(null, { name: 7 })
     expect(bad.ok).toBe(false)
     if (!bad.ok) expect(bad.error.code).toBe('VALIDATION')
   })

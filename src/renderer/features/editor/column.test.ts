@@ -47,6 +47,6 @@ describe('columnClass / deskClass (F-7.11)', () => {
     expect(columnClass(true)).toBe(`${COLUMN} ${SHEET}`)
     expect(columnClass(true)).toContain('px-6')
     expect(deskClass(false)).toBe('')
-    expect(deskClass(true)).toContain('bg-desk')
+    expect(deskClass(true)).toContain('bg-page')
   })
 })

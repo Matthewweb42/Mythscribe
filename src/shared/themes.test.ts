@@ -59,6 +59,55 @@ describe('themes (F-7.8)', () => {
     }
   })
 
+  it('tells the sections apart with text at WCAG AA in every built-in theme (F-7.14)', () => {
+    const css = fs.readFileSync(path.join(__dirname, '../renderer/styles/tokens.css'), 'utf8')
+    const rgb = (hex: string): number[] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+    // `color-mix(in srgb, a, b p%)`: a straight mix of the encoded channels.
+    const mix = (a: number[], b: number[], p: number): number[] =>
+      a.map((v, i) => v * (1 - p) + (b[i] ?? 0) * p)
+    const luminance = (c: number[]): number => {
+      const [r = 0, g = 0, b = 0] = c.map((v) => {
+        const s = v / 255
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const contrast = (a: number[], b: number[]): number => {
+      const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+      return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05)
+    }
+    const BLACK = [0, 0, 0]
+    const WHITE = [255, 255, 255]
+    for (const theme of BUILT_IN_THEMES) {
+      const selector = theme.id === 'dark' ? ':root' : `:root[data-theme='${theme.id}']`
+      const start = css.indexOf(`${selector} {`)
+      const body = css.slice(start, css.indexOf('}', start))
+      const amount = (name: string): number => {
+        const match = new RegExp(`--ms-${name}:\\s*([0-9.]+)%;`).exec(body)
+        expect(match, `${theme.id} sets --ms-${name}`).not.toBeNull()
+        return Number(match?.[1]) / 100
+      }
+      const c = theme.colors
+      const panel = mix(rgb(c.surface), BLACK, amount('panel-shade'))
+      const title = mix(panel, rgb(c.fg), amount('title-tint'))
+      const page = mix(rgb(c.desk), WHITE, amount('page-lift'))
+      const sheet = mix(rgb(c.sheet), WHITE, amount('page-lift'))
+      const gap = mix(rgb(c.bg), BLACK, amount('gap-shade'))
+      // The side panels no lighter than the old panels, the page lighter than the panels.
+      expect(luminance(panel), theme.id).toBeLessThanOrEqual(luminance(rgb(c.surface)))
+      expect(luminance(page), theme.id).toBeGreaterThan(luminance(panel))
+      expect(luminance(sheet), theme.id).toBeGreaterThan(luminance(page))
+      expect(luminance(title), theme.id).not.toBe(luminance(panel))
+      // The gap between stacked panels shows against them.
+      expect(contrast(gap, panel), `${theme.id} gap`).toBeGreaterThan(1.05)
+      for (const [name, ground] of Object.entries({ panel, title, page, sheet })) {
+        for (const text of [c.fg, c.fgMuted]) {
+          expect(contrast(rgb(text), ground), `${theme.id} ${text} on ${name}`).toBeGreaterThan(4.5)
+        }
+      }
+    }
+  })
+
   it('locks Sepia and custom themes behind the license, and nothing else', () => {
     expect(['dark', 'light', 'high-contrast'].map(themeNeedsLicense)).toEqual([false, false, false])
     expect(themeNeedsLicense('sepia')).toBe(true)

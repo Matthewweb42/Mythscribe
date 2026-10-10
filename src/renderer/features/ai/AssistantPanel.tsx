@@ -26,6 +26,7 @@ import {
   type QuerySceneRef,
   type QueryTurn
 } from '@shared/query'
+import { nameAssistant } from '@shared/assistantName'
 import { docToText } from '@shared/docText'
 import type { WhatNextDirection } from '@shared/whatNext'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
@@ -35,9 +36,10 @@ import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { UploadReviewPanel } from '@renderer/features/library/ContextUploadDialog'
 import { OrganisePanel } from '@renderer/features/organise/OrganisePanel'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
-import { DockPanelControls } from '@renderer/features/shell/Dock'
+import { DockPanelControls, PANEL_TITLE } from '@renderer/features/shell/Dock'
 import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
 import { useShownSideWork } from '@renderer/features/sideWork/sideWork'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { prefersReducedMotion } from '@renderer/lib/motion'
@@ -61,7 +63,10 @@ import { RequestCost } from './RequestCost'
 
 const ICON_BUTTON =
   'rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
-/** What the panel says while Use AI is off; the chat no longer carries an Off position (2026-10-07). */
+/**
+ * What the panel says while Use AI is off; the chat no longer carries an Off position (2026-10-07).
+ * Shown through `nameAssistant`, so it names the assistant (F-7.13).
+ */
 export const AI_OFF_MESSAGE =
   'AI is off for this project. Turn on Use AI in Settings › AI to use the assistant.'
 const LINK_BUTTON =
@@ -86,6 +91,7 @@ export const NO_DIRECTIONS_MESSAGE = 'No directions came back. Try again.'
 export function AssistantToggleButton(): React.JSX.Element {
   const open = useLayoutStore((s) => s.layout.assistant.open)
   const toggle = useLayoutStore((s) => s.toggle)
+  const assistantName = useAssistantName()
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -101,8 +107,8 @@ export function AssistantToggleButton(): React.JSX.Element {
   return (
     <button
       type="button"
-      aria-label="Assistant"
-      title="Assistant (Ctrl+K)"
+      aria-label={assistantName}
+      title={`${assistantName} (Ctrl+K)`}
       aria-pressed={open}
       onClick={() => toggle('assistant')}
       className="rounded-md p-1.5 text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:text-fg"
@@ -123,12 +129,13 @@ export function AssistantToggleButton(): React.JSX.Element {
  */
 export function AssistantPanel(): React.JSX.Element | null {
   const assistant = useLayoutStore((s) => s.layout.assistant)
+  const assistantName = useAssistantName()
   if (!assistant.open) return null
   return (
     <aside
-      aria-label="Assistant"
+      aria-label={assistantName}
       data-testid="assistant-panel"
-      className="flex min-h-0 flex-1 flex-col bg-surface"
+      className="flex min-h-0 flex-1 flex-col bg-panel"
     >
       <PanelHeader />
       <AssistantBody />
@@ -180,10 +187,13 @@ export function AssistantBody(): React.JSX.Element {
  * above the message box).
  */
 function PanelHeader(): React.JSX.Element {
+  const assistantName = useAssistantName()
   return (
-    <div className="flex shrink-0 items-center gap-1 pt-3 pr-3 pb-1 pl-2">
+    <div className={PANEL_TITLE}>
       <DockPanelControls id="assistant" />
-      <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Assistant</h2>
+      <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">
+        {assistantName}
+      </h2>
     </div>
   )
 }
@@ -361,6 +371,7 @@ function ConversationTabs(): React.JSX.Element {
 /** The turns of the open conversation, newest at the bottom and kept in view. */
 function MessageLog(): React.JSX.Element {
   const conversation = useActiveConversation()
+  const assistantName = useAssistantName()
   const pending = useAssistantStore((s) =>
     conversation ? s.pending[conversation.id] !== undefined : false
   )
@@ -394,7 +405,7 @@ function MessageLog(): React.JSX.Element {
     >
       {messages.length === 0 ? (
         <p className="m-auto max-w-64 text-center text-xs leading-relaxed text-fg-subtle">
-          Ask about your story or ask for a change. The assistant looks things up in your project,
+          Ask about your story or ask for a change. {assistantName} looks things up in your project,
           then answers or edits: in Auto it makes its edits itself, in Ask every change waits for
           your Apply, and in Plan it only talks. Editor&apos;s notes, a proofread, or a rewrite of
           the selection work too.
@@ -440,12 +451,13 @@ function Turn({
   /** 2026-10-07: the agent's answer as it streams, shown in place of "Thinking…". */
   liveAnswer: string
 }): React.JSX.Element {
+  const assistantName = useAssistantName()
   const mine = message.role === 'user'
   return (
     <article
       data-testid="chat-turn"
       data-role={message.role}
-      aria-label={mine ? 'You' : 'Assistant'}
+      aria-label={mine ? 'You' : assistantName}
       className={`flex flex-col gap-1 text-sm leading-relaxed ${mine ? 'max-w-[85%] self-end rounded-lg rounded-br-sm bg-surface-raised px-3 py-1.5' : 'max-w-full self-start px-0.5'}`}
     >
       {!mine && message.action !== null && message.action !== 'chat' ? (
@@ -525,11 +537,12 @@ function Directions({
   busy: boolean
 }): React.JSX.Element {
   const settings = useAiSettingsStore((s) => s.settings)
+  const assistantName = useAssistantName()
   const hasEditor = useActiveEditorStore((s) => s.active !== null && !s.active.editor.isDestroyed)
   const writeDirection = useAssistantStore((s) => s.writeDirection)
   let reason: string | null = null
   if (settings === null || !isFeatureAllowed(settings, 'agent')) {
-    reason = `${needsSwitchText('Write this')}, with ${AI_DATA_SHARING.agent.label} on (Settings, AI tab)`
+    reason = `${needsSwitchText('Write this')}, with ${nameAssistant(AI_DATA_SHARING.agent.label, assistantName)} on (Settings, AI tab)`
   } else if (settings.chatMode === 'plan') {
     reason = PLAN_NO_EDITS_MESSAGE
   } else if (!hasEditor) {
@@ -555,7 +568,7 @@ function Directions({
             data-testid="what-next-write"
             disabled={reason !== null}
             title={
-              reason ?? 'Continue the scene this way: the assistant proposes the text as an edit'
+              reason ?? `Continue the scene this way: ${assistantName} proposes the text as an edit`
             }
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => void writeDirection(direction)}
@@ -724,6 +737,7 @@ function answerParts(
  */
 function Composer(): React.JSX.Element {
   const conversation = useActiveConversation()
+  const assistantName = useAssistantName()
   const pending = useAssistantStore((s) =>
     conversation ? s.pending[conversation.id] !== undefined : false
   )
@@ -757,9 +771,12 @@ function Composer(): React.JSX.Element {
   const warning =
     settings !== null && !chatAllowed ? (
       <p data-testid="assistant-disabled" className="m-0 text-xs text-warning">
-        {settings.dial === 0
-          ? AI_OFF_MESSAGE
-          : `${isFeatureAllowed(settings, 'chat') ? AI_DATA_SHARING.agent.label : AI_DATA_SHARING.chat.label} is turned off for this project (Settings, AI tab).`}
+        {nameAssistant(
+          settings.dial === 0
+            ? AI_OFF_MESSAGE
+            : `${isFeatureAllowed(settings, 'chat') ? AI_DATA_SHARING.agent.label : AI_DATA_SHARING.chat.label} is turned off for this project (Settings, AI tab).`,
+          assistantName
+        )}
       </p>
     ) : null
 

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { NovelFormat } from './ipc/contract'
+import { DEFAULT_ASSISTANT_NAME, nameAssistant } from './assistantName'
 import { levelLabel, type HierarchyLevel } from './labels'
 import { APP_SHORTCUTS, type Chord, type ShortcutId } from './shortcuts'
 
@@ -266,10 +267,17 @@ export function menuItems(menu: readonly MenuSection[] = MENU): MenuItem[] {
   return menu.flatMap((section) => section.entries.filter((e): e is MenuItem => !isSeparator(e)))
 }
 
-/** The item's label for this project: Insert items take the format's level name (Episode, Arc…). */
-export function menuItemLabel(item: MenuItem, format: NovelFormat | null): string {
+/**
+ * The item's label for this project: Insert items take the format's level name (Episode, Arc…),
+ * and View's assistant item the assistant's name (F-7.13).
+ */
+export function menuItemLabel(
+  item: MenuItem,
+  format: NovelFormat | null,
+  assistantName: string = DEFAULT_ASSISTANT_NAME
+): string {
   if (item.level && format) return levelLabel(format, item.level)
-  return item.label
+  return nameAssistant(item.label, assistantName)
 }
 
 /** Whether the item can run now: `project` items need an open project. */

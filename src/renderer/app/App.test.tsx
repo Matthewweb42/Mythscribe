@@ -975,7 +975,7 @@ describe('App', () => {
       aiSource: 'ownKey',
       aiSwitch: 'ask'
     })
-    const panel = await screen.findByRole('complementary', { name: 'Assistant' })
+    const panel = await screen.findByRole('complementary', { name: 'Ms Scribe' })
     const modes = await within(panel).findByRole('radiogroup', { name: 'Mode' })
     expect(
       within(modes)
@@ -1012,13 +1012,13 @@ describe('App', () => {
     await screen.findByRole('treeitem', { name: 'Scene 1' })
     expect(invoke).toHaveBeenCalledWith('conversations:get', undefined)
     await waitFor(() => expect(useAssistantStore.getState().conversations).toEqual(stored))
-    const toggle = screen.getByRole('button', { name: 'Assistant' })
+    const toggle = screen.getByRole('button', { name: 'Ms Scribe' })
     expect(toggle).toHaveAttribute('aria-pressed', 'false')
     expect(screen.queryByTestId('assistant-panel')).not.toBeInTheDocument()
 
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
-    const panel = screen.getByRole('complementary', { name: 'Assistant' })
+    const panel = screen.getByRole('complementary', { name: 'Ms Scribe' })
     expect(panel.closest<HTMLElement>('[data-testid="dock-column"]')?.style.width).toBe('30vw')
     expect(within(panel).getByRole('tab', { name: 'Why the ridge?' })).toBeInTheDocument()
     // Docked at the right edge: after the main pane, full height.
@@ -1031,7 +1031,7 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     await screen.findByRole('button', { name: /new project/i })
     expect(useAssistantStore.getState().conversations).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ms Scribe' })).not.toBeInTheDocument()
     // The panel's open state is app-wide (F-7.2), so it is still open for the next project.
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
   })
@@ -1361,7 +1361,7 @@ describe('App', () => {
       await userEvent.click(within(scene).getByText('Scene 1'))
       const toolbar = await screen.findByRole('toolbar', { name: 'Formatting' })
       await userEvent.click(within(toolbar).getByRole('button', { name: 'Notes' }))
-      await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Ms Scribe' }))
       expect(screen.getByTestId('notes-panel')).toBeInTheDocument()
       expect(screen.getByTestId('assistant-panel')).toBeInTheDocument()
 
@@ -1487,7 +1487,7 @@ describe('App', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
       const notes = within(bar).getByRole('button', { name: 'Notes' })
-      const assistant = within(bar).getByRole('button', { name: 'AI assistant' })
+      const assistant = within(bar).getByRole('button', { name: 'Ms Scribe' })
       await userEvent.click(notes)
       expect(notes).toHaveAttribute('aria-pressed', 'true')
       const notesWindow = await screen.findByRole('dialog', { name: 'Notes' })
@@ -1503,7 +1503,7 @@ describe('App', () => {
       expect(notesWindow.style.width).toBe(`${rect.width}px`)
       await userEvent.click(assistant)
       expect(assistant).toHaveAttribute('aria-pressed', 'true')
-      const assistantWindow = await screen.findByRole('dialog', { name: 'Assistant' })
+      const assistantWindow = await screen.findByRole('dialog', { name: 'Ms Scribe' })
       expect(assistantWindow).toHaveAttribute('data-testid', 'floating-assistant')
       expect(within(assistantWindow).getByRole('textbox', { name: 'Message' })).toBeInTheDocument()
       expect(
@@ -1536,10 +1536,10 @@ describe('App', () => {
       await waitFor(() =>
         expect(screen.queryByRole('dialog', { name: 'Notes' })).not.toBeInTheDocument()
       )
-      expect(screen.getByRole('dialog', { name: 'Assistant' })).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: 'Ms Scribe' })).toBeInTheDocument()
       await userEvent.click(assistant)
       expect(assistant).toHaveAttribute('aria-pressed', 'false')
-      expect(screen.queryByRole('dialog', { name: 'Assistant' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: 'Ms Scribe' })).not.toBeInTheDocument()
 
       // Escape inside a window closes the window and keeps focus mode.
       await userEvent.click(notes)

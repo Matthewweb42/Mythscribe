@@ -151,7 +151,7 @@ export function CorkBoard({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <ol
         aria-label="Cork board"
-        className="m-0 grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4 overflow-y-auto bg-desk p-4"
+        className="m-0 grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4 overflow-y-auto bg-page p-4"
         onDragLeave={(event) => {
           if (
             !(event.relatedTarget instanceof Node) ||

@@ -4,6 +4,8 @@ import { useShallow } from 'zustand/react/shallow'
 import { AI_DATA_SHARING } from '@shared/aiSettings'
 import { useAiActivityStore } from './aiActivityStore'
 import { AI_WAIT_CLASS } from './aiWaitPhrases'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
+import { nameAssistant } from '@shared/assistantName'
 
 /** How long a request must be in flight before the indicator shows, so a cache hit never flickers it. */
 export const AI_ACTIVITY_DELAY_MS = 300
@@ -16,10 +18,12 @@ export const AI_ACTIVITY_DELAY_MS = 300
  * indicator stays up until the last request has settled, however young that request is.
  */
 export function AiActivityIndicator(): React.JSX.Element | null {
+  const assistantName = useAssistantName()
   const labels = useAiActivityStore(
     useShallow((s) => {
       const seen = new Set<string>()
-      for (const { feature } of Object.values(s.inflight)) seen.add(AI_DATA_SHARING[feature].label)
+      for (const { feature } of Object.values(s.inflight))
+        seen.add(nameAssistant(AI_DATA_SHARING[feature].label, assistantName))
       return [...seen]
     })
   )

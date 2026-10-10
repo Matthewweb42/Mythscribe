@@ -1,14 +1,20 @@
 import { AiFeatureId, type AiUsage, type UsageTotals } from '@shared/ai'
 import { AI_DATA_SHARING } from '@shared/aiSettings'
+import { currentAssistantName } from '@renderer/features/shell/viewStore'
+import { nameAssistant } from '@shared/assistantName'
 
 /**
- * The author-facing name of one AI feature, from the data-sharing table (F-14.4). Shared by the
- * AI tab's ledger (F-5.14) and the Account tab's Cloud spend (F-15.3); a ledger key from a newer
- * build shows as itself rather than blanking the row.
+ * The author-facing name of one AI feature, from the data-sharing table (F-14.4), with the
+ * assistant called by its name (F-7.13). Shared by the AI tab's ledger (F-5.14) and the Account
+ * tab's Cloud spend (F-15.3); a ledger key from a newer build shows as itself rather than
+ * blanking the row.
  */
-export const featureLabel = (feature: string): string => {
+export const featureLabel = (
+  feature: string,
+  assistantName: string = currentAssistantName()
+): string => {
   const parsed = AiFeatureId.safeParse(feature)
-  return parsed.success ? AI_DATA_SHARING[parsed.data].label : feature
+  return parsed.success ? nameAssistant(AI_DATA_SHARING[parsed.data].label, assistantName) : feature
 }
 
 /** Two decimals, with a floor so a fraction of a cent never reads as free. */

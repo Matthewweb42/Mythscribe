@@ -1072,7 +1072,7 @@ function ActivityWatch(): null {
  */
 function SidebarPanel({ format }: { format: NovelFormat }): React.JSX.Element {
   return (
-    <aside className="flex min-h-0 flex-1 flex-col bg-surface">
+    <aside className="flex min-h-0 flex-1 flex-col bg-panel">
       <SidebarSections format={format} controls={<DockPanelControls id="sidebar" />} />
     </aside>
   )
@@ -1086,8 +1086,10 @@ function SidebarPanel({ format }: { format: NovelFormat }): React.JSX.Element {
 function EditorColumn({ format }: { format: NovelFormat }): React.JSX.Element {
   const focus = useFocusStore((s) => s.active)
   return (
-    <section className="flex min-w-0 flex-1 overflow-hidden">
-      <DockSlot id="editor" first>
+    // F-7.14: the writing page a touch lighter than the side panels (`--ms-surface-page`); focus
+    // mode leaves it clear, so the background image shows behind the column.
+    <section className={`flex min-w-0 flex-1 overflow-hidden ${focus ? '' : 'bg-page'}`}>
+      <DockSlot id="editor">
         {focus ? null : (
           <div className="absolute top-1.5 left-0 z-20 flex w-3 flex-col items-center">
             <DockPanelControls id="editor" vertical />
