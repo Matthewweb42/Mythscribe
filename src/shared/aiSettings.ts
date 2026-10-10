@@ -458,6 +458,16 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'plan, in the background after a scene summary changes or when you ask the outline to find links.',
     minDial: 1
   },
+  sheetSync: {
+    label: 'Sheet write-ups: Structured and Blank page kept in step',
+    sends:
+      'Thirty seconds after you stop editing a story-bible sheet (or when you click Write up now ' +
+      'or File now on it): that sheet only — its name, its category, its field labels and ' +
+      'values, and the write-up style of its category; when you edited its page, also the ' +
+      'paragraphs you removed and added. Nothing from the manuscript, other sheets, or the rest ' +
+      'of the project.',
+    minDial: 1
+  },
   todo: {
     label: 'To do list: gaps and suggestions',
     sends:

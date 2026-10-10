@@ -42,6 +42,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000285 · $0.000690 | $0.000356 | $0.00299 | 1 | $0.000285 |
 | `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00104 · $0.00385 | $0.00130 | $0.0244 | 4 | $0.00418 |
 | `todo` | To do list: gaps and suggestions | on request | todo.v1 | fast | 415 / 9965 | 600 / 1200 | $0.000780 · $0.00183 | $0.000976 | $0.00301 | 1 | $0.000780 |
+| `sheetSync` | Sheet write-ups: Structured and Blank page kept in step | background | sheetWriteUp.v1 | fast | 308 / 4743 | 350 / 1200 | $0.000457 · $0.00168 | $0.000572 | $0.00181 | 1 | $0.000457 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -174,3 +175,8 @@ git history of this file is the log of each feature's cost over time (author req
 
 - **When:** Only when you click Check the whole book (one request per window of scene cards, at most 3); and one small request per To do card when its suggestions are first shown.
 - **Ideas:** Fold suggestions into the check for the top items; skip the check when no card changed meaningfully (an identical input already sends nothing).
+
+### `sheetSync` — Sheet write-ups: Structured and Blank page kept in step
+
+- **When:** Thirty seconds after the author stops editing a sheet whose fields or page changed (or on Write up now / File now): one write-up when the fields moved, one filing per 3,000 characters of added page text when the page moved; nothing while the hashes say both views agree; identical requests answer from the local cache.
+- **Ideas:** Write up only the sections whose fields changed (keep the rest of the page); skip a filing when the page edit is whitespace or punctuation only; batch several sheets edited in one sitting into one request.

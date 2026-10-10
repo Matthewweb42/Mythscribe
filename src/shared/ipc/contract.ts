@@ -44,6 +44,7 @@ import { AliasList } from '../aliases'
 import { AppAccess } from '../appAccess'
 import { AuthorRules } from '../authorRules'
 import { StoryBibleSettings } from '../storyBibleSettings'
+import { SheetExtraFields, SheetSyncStatus, SheetSyncView } from '../sheetSync'
 import { BackupSettingsPatch, BackupState } from '../backups'
 import {
   CheckoutBody,
@@ -114,7 +115,13 @@ import {
   UpdateSnapshot
 } from '../snapshots'
 import { EditorSettings } from '../editorSettings'
-import { CategoryIcon, CATEGORY_NAME_MAX, NewCategoryInput, StoryCategory } from '../categories'
+import {
+  CATEGORY_FIELD_LABEL_MAX,
+  CategoryIcon,
+  CATEGORY_NAME_MAX,
+  NewCategoryInput,
+  StoryCategory
+} from '../categories'
 import {
   ENTITY_BODY_MAX,
   ENTITY_FIELD_MAX,
@@ -336,7 +343,14 @@ export const Entity = z.object({
   /** F-9.13 (D7): canon, plan, or idea; `entity:update` sets it. */
   status: FactStatus,
   created: z.string(),
-  modified: z.string()
+  modified: z.string(),
+  /**
+   * F-9.18: the sheet's own fields beside its category's template (what its page said that no
+   * field held), written by `entity:addField`/`entity:removeField` and by a filing of the page.
+   */
+  extraFields: SheetExtraFields,
+  /** F-9.18: where the sheet's two views stand (computed by main on every read; never a patch field). */
+  sync: SheetSyncView
 })
 export type Entity = z.infer<typeof Entity>
 
@@ -1684,6 +1698,42 @@ export const contract = {
    */
   'category:list': { input: z.undefined(), output: z.array(StoryCategory) },
   /**
+   * F-9.18: adds a field of the sheet's own (its category's template is unchanged). The label is
+   * trimmed; one the sheet already has (any case) is ALREADY_EXISTS; past `SHEET_EXTRA_FIELDS_MAX`
+   * is VALIDATION. The field shows on the page at the next write-up.
+   */
+  'entity:addField': {
+    input: z.object({
+      id: z.string(),
+      label: z.string().trim().min(1).max(CATEGORY_FIELD_LABEL_MAX)
+    }),
+    output: Entity
+  },
+  /**
+   * F-9.18: removes a field of the sheet's own; its text moves into Notes as "Label: text"
+   * (nothing is lost). NOT_FOUND for a field the sheet does not have of its own.
+   */
+  'entity:removeField': {
+    input: z.object({ id: z.string(), fieldId: z.string() }),
+    output: Entity
+  },
+  /** F-9.18: every sheet whose sync is waiting, running, or failed (the rest are idle). */
+  'sheetSync:status': { input: z.undefined(), output: z.array(SheetSyncStatus) },
+  /**
+   * F-9.18: makes the sheet's two views true to each other now (Write up now, File now, Try
+   * again), skipping the pause. Runs in the background like the paused sync; the answer is only
+   * that it was queued (false when Use AI or the toggle is off, or the views already agree).
+   */
+  'sheetSync:run': { input: z.object({ id: z.string() }), output: z.boolean() },
+  /**
+   * F-9.18: applies the sync held for the author (chat mode Ask or Plan), logged in Changes with
+   * an Undo. VALIDATION when the sheet changed since it was made (it is dropped, and the sheet is
+   * synced again).
+   */
+  'sheetSync:apply': { input: z.object({ id: z.string() }), output: Entity },
+  /** F-9.18: drops the sync held for the author; the sheet stays as it is (and shows it is out of date). */
+  'sheetSync:dismiss': { input: z.object({ id: z.string() }), output: Entity },
+  /**
    * F-9.10, Organise's local pass (no AI): tags and sheets whose names or aliases look alike,
    * tags nothing uses (no document, mention, sheet, or child), and empty sheets. Feeds the quiet
    * offer after an upload is applied and as duplicates build up.
@@ -3020,6 +3070,8 @@ export const events = {
    * job met a name with no entity); the entity store merges it, as the tag store does a tag.
    */
   'entity:changed': Entity,
+  /** F-9.18: the sheets whose sync is waiting, running, or failed changed; the whole list. */
+  'sheetSync:changed': z.array(SheetSyncStatus),
   /** The dated facts of these records changed (F-9.13): a scene was read or deleted, a fact hidden, restored, or re-statused, an author line dated, or a change undone. */
   'fact:changed': z.object({ entityIds: z.array(z.string()) }),
   /** The Changes log moved (F-9.13): a reading logged a run, or a change was undone. */

@@ -1,4 +1,5 @@
 import { useStoryBibleSettingsStore } from '@renderer/features/entities/storyBibleSettingsStore'
+import { useSheetSyncStore } from '@renderer/features/entities/sheetSyncStore'
 import { useEffect } from 'react'
 import { FileInput, FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
 import type { AiSource, AiSwitch } from '@shared/aiSettings'
@@ -285,6 +286,8 @@ export function App(): React.JSX.Element {
       useAuthorRulesStore.getState().clear()
       // F-9.17: the story-bible settings belong to the project that closed.
       useStoryBibleSettingsStore.getState().clear()
+      // F-9.18: and the sheets' sync statuses.
+      useSheetSyncStore.getState().clear()
       usePresetsStore.getState().clear()
       // F-11.1b: and the structure template.
       useStructureStore.getState().clear()
@@ -403,6 +406,11 @@ export function App(): React.JSX.Element {
       .catch((err: unknown) => toast.error(describeError(err)))
     // F-9.17, F-9.19: the List/Cards choice, the default view, the write-up style.
     useStoryBibleSettingsStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    // F-9.18: which sheets are waiting, updating, or failed.
+    useSheetSyncStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))

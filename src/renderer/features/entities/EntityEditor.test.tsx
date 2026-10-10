@@ -27,6 +27,10 @@ import { entityFixture } from './entityFixture'
 import { resetEntityStore, useEntityStore } from './entityStore'
 import { factFixture } from './factFixture'
 import { resetFactStore } from './factStore'
+import { resetSheetSyncStore } from './sheetSyncStore'
+import { defaultAiSettings } from '@shared/aiSettings'
+import { NO_SHEET_SYNC } from '@shared/sheetSync'
+import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 
 type Handler = (input: unknown) => unknown
 
@@ -569,5 +573,153 @@ describe('EntityEditor (F-9.3)', () => {
         { id: 'e-mara', fields: { age: '35' }, asOf: 'sc-2' }
       ])
     })
+  })
+})
+
+describe('EntityEditor: the sheet’s own fields and its two views (F-9.18)', () => {
+  beforeEach(() => {
+    resetPendingSaves()
+    resetEntityDraftStore()
+    resetEntityStore()
+    resetFactStore()
+    resetTagStore()
+    resetTimelineStore()
+    resetAiSettingsStore()
+    resetSheetSyncStore()
+    useTreeStore.getState().clear()
+    useDialogStore.setState({ modals: [], toasts: [] })
+  })
+  afterEach(() => {
+    cleanup()
+    resetActiveEditorStore()
+    resetEntityDraftStore()
+    resetPendingSaves()
+    resetTagStore()
+    resetLayoutStore()
+    resetTimelineStore()
+    resetAiSettingsStore()
+    resetSheetSyncStore()
+  })
+
+  const withOwnField: Entity[] = entityFixture.map((entity) =>
+    entity.id === 'e-mara'
+      ? {
+          ...entity,
+          extraFields: [{ id: 'weapon', label: 'Weapon', multiline: true }],
+          fields: { ...entity.fields, weapon: 'A bone bow.' }
+        }
+      : entity
+  )
+
+  it('shows the sheet’s own fields after the template, and removes one into Notes', async () => {
+    const user = userEvent.setup()
+    const calls = await openPage('e-mara', {
+      'entity:list': () => withOwnField,
+      'entity:removeField': () => ({
+        ...withOwnField.find((entity) => entity.id === 'e-mara'),
+        extraFields: [],
+        fields: { notes: 'Weapon: A bone bow.' }
+      })
+    })
+    expect(field('Weapon')).toHaveValue('A bone bow.')
+    expect(page()).toHaveTextContent('this sheet only')
+    await user.click(screen.getByRole('button', { name: 'Remove the field Weapon' }))
+    expect(
+      calls.some(
+        ([channel, input]) =>
+          channel === 'entity:removeField' &&
+          JSON.stringify(input) === '{"id":"e-mara","fieldId":"weapon"}'
+      )
+    ).toBe(true)
+    expect(useEntityStore.getState().byId['e-mara']?.extraFields).toEqual([])
+  })
+
+  it('adds a field to this sheet only', async () => {
+    const user = userEvent.setup()
+    const calls = await openPage('e-mara', {
+      'entity:addField': (input) => {
+        const { label } = input as Input<'entity:addField'>
+        const mara = entityFixture.find((entity) => entity.id === 'e-mara')
+        return { ...mara, extraFields: [{ id: 'weapon', label, multiline: true }] }
+      }
+    })
+    await user.click(screen.getByRole('button', { name: 'Add a field to this sheet…' }))
+    const modal = useDialogStore.getState().modals[0]
+    if (modal?.kind !== 'prompt') throw new Error('expected a prompt')
+    expect(modal.options.title).toBe('Add a field to this sheet')
+    await act(async () => {
+      useDialogStore.getState().resolvePrompt(modal.id, ' Weapon ')
+      await Promise.resolve()
+    })
+    expect(calls.some(([channel]) => channel === 'entity:addField')).toBe(true)
+    expect(await screen.findByRole('textbox', { name: 'Weapon' })).toHaveValue('')
+  })
+
+  it('takes a row the sync wrote in main, unless the author has an edit still to save', async () => {
+    await openPage('e-mara')
+    const mara = useEntityStore.getState().byId['e-mara']
+    if (mara === undefined) throw new Error('no Mara')
+    act(() => useEntityStore.getState().merge({ ...mara, body: 'Written up.' }))
+    expect(useEntityDraftStore.getState().draft?.body).toBe('Written up.')
+    act(() => useEntityDraftStore.getState().edit({ body: 'My own words.' }))
+    act(() => useEntityStore.getState().merge({ ...mara, body: 'Written up again.' }))
+    expect(useEntityDraftStore.getState().draft?.body).toBe('My own words.')
+  })
+
+  it('says the page is out of date and how to fix it when AI is off', async () => {
+    const stale: Entity[] = entityFixture.map((entity) =>
+      entity.id === 'e-mara'
+        ? { ...entity, template: 'blank', sync: { ...NO_SHEET_SYNC, state: 'pageStale' } }
+        : entity
+    )
+    await openPage('e-mara', { 'entity:list': () => stale })
+    expect(screen.getByTestId('sheet-sync-stale')).toHaveTextContent(
+      'This page does not have your latest field edits yet.'
+    )
+    expect(screen.getByTestId('sheet-sync-stale')).toHaveTextContent('Turn on Use AI')
+    expect(screen.queryByRole('button', { name: 'Write up now' })).toBeNull()
+  })
+
+  it('writes up now on request, applies a held write-up, and marks what the AI wrote', async () => {
+    const user = userEvent.setup()
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
+    const stale: Entity[] = entityFixture.map((entity) =>
+      entity.id === 'e-mara'
+        ? { ...entity, template: 'blank', sync: { ...NO_SHEET_SYNC, state: 'pageStale' } }
+        : entity
+    )
+    const held: Entity[] = stale.map((entity) =>
+      entity.id === 'e-mara'
+        ? {
+            ...entity,
+            sync: {
+              ...entity.sync,
+              pending: { direction: 'page', at: 'now', page: 'Mara is 27.', changes: [] }
+            }
+          }
+        : entity
+    )
+    let list = stale
+    const calls = await openPage('e-mara', {
+      'entity:list': () => list,
+      'sheetSync:run': () => true,
+      'sheetSync:apply': () => ({
+        ...stale.find((entity) => entity.id === 'e-mara'),
+        body: 'Mara is 27.',
+        sync: { ...NO_SHEET_SYNC, state: 'synced', aiParagraphs: 1, paragraphs: 1 }
+      })
+    })
+    await user.click(screen.getByRole('button', { name: 'Write up now' }))
+    expect(calls.some(([channel]) => channel === 'sheetSync:run')).toBe(true)
+    list = held
+    await act(async () => {
+      await useEntityStore.getState().load()
+    })
+    expect(screen.getByTestId('sheet-sync-pending')).toHaveTextContent('A new write-up of the page')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(field('Page')).toHaveValue('Mara is 27.')
+    expect(screen.getByTestId('sheet-provenance')).toHaveTextContent(
+      'Written up by AI from your fields.'
+    )
   })
 })

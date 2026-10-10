@@ -10,6 +10,7 @@ import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import { contextFileFixture, contextReviewFixture } from './libraryFixture'
 import { resetLibraryStore, useLibraryStore } from './libraryStore'
+import { NO_SHEET_SYNC } from '@shared/sheetSync'
 
 type Handler = (input: unknown) => unknown
 let calls: [Channel, unknown][]
@@ -44,6 +45,8 @@ const tomas: Entity = {
   aliases: [],
   origin: 'author',
   status: 'canon',
+  extraFields: [],
+  sync: NO_SHEET_SYNC,
   created: '2026-10-07T09:00:00.000Z',
   modified: '2026-10-07T09:00:00.000Z'
 }

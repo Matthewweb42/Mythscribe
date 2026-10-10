@@ -43,6 +43,10 @@ interface EntityState {
   create: (input: EntityCreateInput) => Promise<Entity>
   /** Patches an entity and replaces it in place; a rename re-sorts the list. */
   update: (id: string, patch: Omit<EntityUpdateInput, 'id'>) => Promise<Entity>
+  /** F-9.18: adds a field of the sheet's own (`entity:addField`) and merges the row. */
+  addField: (id: string, label: string) => Promise<Entity>
+  /** F-9.18: removes a field of the sheet's own; its text moves into Notes. */
+  removeField: (id: string, fieldId: string) => Promise<Entity>
   /** Deletes an entity and drops it from the list (and from the selection). */
   remove: (id: string) => Promise<void>
   /**
@@ -262,6 +266,18 @@ export const useEntityStore = create<EntityState>((set, get) => ({
       ids: get().ids.filter((other) => !gone.has(other)),
       selectedId: selectedId !== null && gone.has(selectedId) ? null : selectedId
     })
+  },
+
+  async addField(id, label) {
+    const entity = await ipc().invoke('entity:addField', { id, label })
+    get().merge(entity)
+    return entity
+  },
+
+  async removeField(id, fieldId) {
+    const entity = await ipc().invoke('entity:removeField', { id, fieldId })
+    get().merge(entity)
+    return entity
   },
 
   merge(entity) {

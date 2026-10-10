@@ -452,7 +452,19 @@ export const entity = sqliteTable(
     created: text('created').notNull(),
     modified: text('modified').notNull(),
     /** F-9.13 (D7): canon, plan, or idea; the author flips it on the sheet. */
-    status: text('status', { enum: FACT_STATUSES }).notNull().default('canon')
+    status: text('status', { enum: FACT_STATUSES }).notNull().default('canon'),
+    /**
+     * F-9.18: JSON array of the sheet's own fields `[{ id, label, multiline }]`, beside its
+     * category's template: what the page said that no field of the category holds. `[]` for a
+     * sheet with none (every sheet written before F-9.18).
+     */
+    extraFields: text('extra_fields').notNull().default('[]'),
+    /**
+     * F-9.18: JSON `StoredSheetSync` (src/main/entity/sheetSync.ts), main-only: the fields hash
+     * and the page as of the last time the two views were made true to each other, which page
+     * paragraphs the AI wrote, and a write-up held for the author at Ask. Null until the first.
+     */
+    sync: text('sync')
   },
   (t) => [index('entity_kind_name_idx').on(t.kind, t.name)]
 )

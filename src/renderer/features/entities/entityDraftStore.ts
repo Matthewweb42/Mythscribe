@@ -45,6 +45,12 @@ interface EntityDraftState {
   flush: () => Promise<void>
   /** Flushes, unregisters from the pending-save registry, and drops the draft. */
   close: () => void
+  /**
+   * F-9.18: the open sheet changed in main without this page (its other view was written by the
+   * sheet sync, or a change was undone): the draft takes the row, unless it holds an edit not yet
+   * written, which wins (main drops a sync the author has edited past).
+   */
+  adopt: (entity: Entity) => void
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -73,7 +79,12 @@ export function draftPatch(
   const name = draft.name.trim()
   if (name.length > 0 && name !== stored.name) patch.name = name
   const fields: EntityFields = {}
-  for (const id of categoryFieldIds(getCategory(stored.kind))) {
+  // F-9.18: the sheet's own fields are written like its category's.
+  const ids = [
+    ...categoryFieldIds(getCategory(stored.kind)),
+    ...stored.extraFields.map((f) => f.id)
+  ]
+  for (const id of ids) {
     const next = draft.fields[id] ?? ''
     if (next !== (stored.fields[id] ?? '')) fields[id] = next
   }
@@ -181,6 +192,25 @@ export const useEntityDraftStore = create<EntityDraftState>((set, get) => ({
 
   async flush() {
     await flushNow()
+  },
+
+  adopt(entity) {
+    const draft = get().draft
+    if (draft?.id !== entity.id) return
+    if (
+      timer !== null ||
+      inflight !== null ||
+      get().status === 'dirty' ||
+      get().status === 'saving'
+    )
+      return
+    const body = entity.body ?? ''
+    const same =
+      draft.name === entity.name &&
+      draft.body === body &&
+      JSON.stringify(draft.fields) === JSON.stringify(entity.fields)
+    if (same) return
+    set({ draft: { id: entity.id, name: entity.name, fields: { ...entity.fields }, body } })
   },
 
   close() {

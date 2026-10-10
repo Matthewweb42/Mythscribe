@@ -35,7 +35,8 @@ export const DEFAULT_ROUTING_TABLE: Partial<Record<AiFeatureId, Tier>> = {
   notesSuggest: 'fast',
   voiceNotes: 'fast',
   agent: 'strong',
-  todo: 'fast'
+  todo: 'fast',
+  sheetSync: 'fast'
 }
 
 /** A stored table read leniently: a feature id or a tier this build does not know is dropped. */

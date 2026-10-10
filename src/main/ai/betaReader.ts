@@ -187,12 +187,17 @@ export async function runBetaReader(
       current: { title: currentTitle, text: sceneText },
       honesty
     }
-    return isRegenerate ? buildBetaReaderRegenPrompt({ ...base, note }) : buildBetaReaderPrompt(base)
+    return isRegenerate
+      ? buildBetaReaderRegenPrompt({ ...base, note })
+      : buildBetaReaderPrompt(base)
   }
 
   // Token rule 8: count before sending, and trim the read-through rather than overspend or fail.
-  const fit = fitReadThrough(fullText, read, inputBudget('betaReader'), (sceneText, scenes) =>
-    build(sceneText, scenes).messages
+  const fit = fitReadThrough(
+    fullText,
+    read,
+    inputBudget('betaReader'),
+    (sceneText, scenes) => build(sceneText, scenes).messages
   )
   const prompt = build(fit.sceneText, fit.scenes)
 

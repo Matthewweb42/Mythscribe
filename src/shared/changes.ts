@@ -37,11 +37,12 @@ export type ChangeStatus = z.infer<typeof ChangeStatus>
 
 /**
  * F-9.15: who made a run. `reading` is the background reading of a scene (main logs it); the
- * others write their runs through `changes:record` (Organise, the chat) or in main (`library`).
+ * others write their runs through `changes:record` (Organise, the chat) or in main (`library`,
+ * and F-9.18's `sync`).
  * The source is the prefix of the run id (`organise:<key>`), so the stored log needs no new
  * column; a run id without a known prefix is a reading's.
  */
-export const CHANGE_SOURCES = ['reading', 'organise', 'library', 'chat'] as const
+export const CHANGE_SOURCES = ['reading', 'organise', 'library', 'chat', 'sync'] as const
 export const ChangeSource = z.enum(CHANGE_SOURCES)
 export type ChangeSource = z.infer<typeof ChangeSource>
 
@@ -65,7 +66,9 @@ export const CHANGE_SOURCE_LABEL: Readonly<Record<ChangeSource, string>> = {
   reading: 'Reading',
   organise: 'Organise',
   library: 'Library upload',
-  chat: 'Chat'
+  chat: 'Chat',
+  // F-9.18: a sheet's page written up from its fields, or its page edits filed into them.
+  sync: 'Sheet sync'
 }
 
 /** The log keeps this many rows; older ones are pruned when a run is logged. */

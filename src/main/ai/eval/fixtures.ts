@@ -388,6 +388,17 @@ import { buildPlanLinksPrompt, type BuildPlanLinksPromptInput } from '../prompts
 import { fitAgentPrompt } from '../agent'
 import { PLAN_LINKS_PLANS_MAX, PLAN_LINKS_SCENES_MAX, PLAN_LINKS_TEXT_MAX } from '@shared/planLinks'
 import { buildTodoPrompt, type BuildTodoPromptInput } from '../prompts/todo.v1'
+import {
+  buildSheetRefilePrompt,
+  SHEET_REFILE_PROMPT_VERSION,
+  type BuildSheetRefilePromptInput
+} from '../prompts/sheetRefile.v1'
+import {
+  buildSheetWriteUpPrompt,
+  SHEET_WRITE_UP_PROMPT_VERSION,
+  type BuildSheetWriteUpPromptInput
+} from '../prompts/sheetWriteUp.v1'
+import { REFILE_CHUNK_CHARS } from '@shared/sheetSync'
 import { buildTodoSuggestPrompt, type BuildTodoSuggestPromptInput } from '../prompts/todoSuggest.v1'
 import {
   TODO_DIGEST_MAX,
@@ -748,6 +759,16 @@ export interface EvalCase {
      * no operation dropped, and hold an operation of each kind in `expected`.
      */
     | { kind: 'organise'; expected: OrganiseOp['op'][] }
+    /**
+     * A sheet write-up (F-9.18): the answer must parse through the feature's own parser, and every
+     * part must be keyed by one of the heading fields that were sent.
+     */
+    | { kind: 'sheetWriteUp'; headings: string[] }
+    /**
+     * A sheet filing (F-9.18): the answer must parse through the feature's own parser, keep at
+     * least one edit or addition, and every edit must name a field that was sent.
+     */
+    | { kind: 'sheetRefile'; fields: string[] }
 }
 
 const general = builtinParams('general')
@@ -3218,6 +3239,78 @@ const AGENT_PLAN_LOOKUP_STEP = {
     'Named in 6 scenes (2 up to now): first n3 ¶0, last n15 ¶2'
 }
 
+/** The fixture sheet (F-9.18): a character with some fields filled, as the prompts send it. */
+const SHEET_FIELDS = [
+  { id: 'age', label: 'Age', value: '27', heading: false },
+  { id: 'born', label: 'Born (story year)', value: '', heading: false },
+  { id: 'gender', label: 'Gender', value: 'Woman', heading: false },
+  {
+    id: 'appearance',
+    label: 'Appearance',
+    value: 'Tall and wiry, with a scar over her left eye from the mill fire.',
+    heading: true
+  },
+  {
+    id: 'personality',
+    label: 'Personality',
+    value: 'Watchful; slow to trust; laughs rarely.',
+    heading: true
+  },
+  {
+    id: 'background',
+    label: 'Background',
+    value: 'Raised at the mill by her uncle Pell after the fire took her parents.',
+    heading: true
+  },
+  {
+    id: 'goals',
+    label: 'Goals / motivations',
+    value: 'Find the copied ledger and clear Pell.',
+    heading: true
+  },
+  { id: 'relationships', label: 'Relationships', value: '', heading: true },
+  { id: 'notes', label: 'Notes', value: '', heading: true }
+]
+
+/** Sixteen long fields (a template of 12 + Notes and three of its own): about the most a sheet weighs within the input budget. */
+const MAXED_SHEET_FIELDS = Array.from({ length: 16 }, (_, i) => ({
+  id: `field${i}`,
+  label: `Field number ${i}`,
+  value: FIXTURE_PASSAGE.replace(/\s+/g, ' ').slice(0, 1_100),
+  heading: i % 2 === 0
+}))
+
+function sheetWriteUpCase(
+  name: string,
+  note: string,
+  input: BuildSheetWriteUpPromptInput
+): EvalCase {
+  const built = buildSheetWriteUpPrompt(input)
+  return {
+    version: SHEET_WRITE_UP_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: {
+      kind: 'sheetWriteUp',
+      headings: input.fields.filter((field) => field.heading).map((field) => field.id)
+    }
+  }
+}
+
+function sheetRefileCase(name: string, note: string, input: BuildSheetRefilePromptInput): EvalCase {
+  const built = buildSheetRefilePrompt(input)
+  return {
+    version: SHEET_REFILE_PROMPT_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'sheetRefile', fields: input.fields.map((field) => field.id) }
+  }
+}
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -5037,5 +5130,59 @@ export const EVAL_CASES: EvalCase[] = [
       retry: true
     },
     { kind: 'agent', expected: 'answer' }
-  )
+  ),
+  sheetRefileCase(
+    'fresh',
+    'one paragraph of the written-up page changed and one added: the age moves, a weapon has no field',
+    {
+      name: 'Mara',
+      noun: 'character',
+      fields: SHEET_FIELDS,
+      removed: ['Mara is a twenty-seven-year-old woman.'],
+      added: ['Mara is a twenty-eight-year-old woman.', 'She carries a bone bow her uncle carved.']
+    }
+  ),
+  sheetRefileCase(
+    'first',
+    'an existing Blank page sheet filed for the first time: empty fields, the whole page added',
+    {
+      name: 'Kael',
+      noun: 'character',
+      fields: SHEET_FIELDS.map((field) => ({ ...field, value: '' })),
+      removed: [],
+      added: [
+        'Kael is a smuggler on the lower river, forty or so, with a limp from a bad landing.',
+        'He owes the harbour guild more than he can pay and hides it behind jokes.',
+        'He wants out of the trade before his daughter learns what he does.'
+      ]
+    }
+  ),
+  sheetRefileCase(
+    'maxed',
+    'the worst input: sixteen long fields and one full chunk of added page text',
+    {
+      name: 'Mara',
+      noun: 'character',
+      fields: MAXED_SHEET_FIELDS,
+      removed: [FIXTURE_PASSAGE.slice(0, 600)],
+      added: [FIXTURE_PASSAGE.repeat(3).slice(0, REFILE_CHUNK_CHARS)]
+    }
+  ),
+  sheetWriteUpCase(
+    'fresh',
+    'the fixture character at the default style: one-line fields flow, long ones under headings',
+    { name: 'Mara', noun: 'character', length: 'medium', fields: SHEET_FIELDS }
+  ),
+  sheetWriteUpCase('short', 'the fixture character, short, every field flowing (no headings)', {
+    name: 'Mara',
+    noun: 'character',
+    length: 'short',
+    fields: SHEET_FIELDS.map((field) => ({ ...field, heading: false }))
+  }),
+  sheetWriteUpCase('maxed', 'the worst input after the fit: sixteen long fields, long length', {
+    name: 'Mara',
+    noun: 'character',
+    length: 'long',
+    fields: MAXED_SHEET_FIELDS
+  })
 ]

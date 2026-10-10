@@ -33,6 +33,7 @@ import { draftFixture } from '@renderer/features/import/draftFixture'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetAuthorRulesStore, useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
 import { resetStoryBibleSettingsStore } from '@renderer/features/entities/storyBibleSettingsStore'
+import { resetSheetSyncStore } from '@renderer/features/entities/sheetSyncStore'
 import { resetAssistantStore, useAssistantStore } from '@renderer/features/ai/assistantStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
@@ -128,6 +129,7 @@ beforeEach(() => {
   resetAiSettingsStore()
   resetAuthorRulesStore()
   resetStoryBibleSettingsStore()
+  resetSheetSyncStore()
   resetAssistantStore()
   resetTagStore()
   // F-9.3: the entity page is part of the main pane, so its stores belong to the fixture too.
@@ -183,6 +185,7 @@ afterEach(() => {
   resetAiSettingsStore()
   resetAuthorRulesStore()
   resetStoryBibleSettingsStore()
+  resetSheetSyncStore()
   resetAssistantStore()
   resetBackgroundStore()
   resetIndexingStore()
@@ -232,6 +235,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'aiSettings:get') return defaultAiSettings()
     if (channel === 'authorRules:get') return defaultAuthorRules()
     if (channel === 'storyBible:get') return defaultStoryBibleSettings()
+    if (channel === 'sheetSync:status') return []
     if (channel === 'layout:get') return defaultLayout()
     if (channel === 'layout:set') return input
     if (channel === 'session:get') return defaultProjectSession()

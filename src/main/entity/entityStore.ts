@@ -7,6 +7,7 @@ import {
   categoryFieldIds,
   categoryOf,
   compareCategoryIds,
+  fieldIdFromLabel,
   isCategoryField,
   joinSheetText,
   refileFields,
@@ -16,6 +17,7 @@ import {
   entityTagName,
   parseEntityFields,
   toEntityNameKey,
+  type EntityFieldDef,
   type EntityFields,
   type EntityKind,
   type EntityOrigin
@@ -45,6 +47,15 @@ import {
 } from '../tag/tagStore'
 import { listCategories, requireCategory } from './categoryStore'
 import { hasAiFacts, moveFacts, writeAuthorFact, writeAuthorFields } from './factStore'
+import {
+  parseExtraFields,
+  parseStoredSheetSync,
+  sheetSyncContext,
+  sheetSyncViewOf,
+  type SheetSyncContext,
+  type StoredSheetSync
+} from './sheetSyncState'
+import { SHEET_EXTRA_FIELDS_MAX, sheetFieldDefs } from '@shared/sheetSync'
 
 /** Accepts both the connection's orm and a transaction handle (both extend this base). */
 export type EntityDb = BaseSQLiteDatabase<'sync', RunResult, typeof schema>
@@ -53,13 +64,19 @@ export type EntityDb = BaseSQLiteDatabase<'sync', RunResult, typeof schema>
  * The stored row as the contract's entity: the only place `fields` is parsed. `tagAliases` is
  * the linked tag's alias list (F-4.14, one owner); a row with no tag answers its own.
  */
-function rowToEntity(row: EntityRow, tagAliases: readonly string[] = []): Entity {
+function rowToEntity(
+  row: EntityRow,
+  ctx: SheetSyncContext,
+  tagAliases: readonly string[] = []
+): Entity {
+  const fields = parseEntityFields(row.fields)
+  const extraFields = parseExtraFields(row.extraFields)
   return {
     id: row.id,
     kind: row.kind,
     name: row.name,
     template: row.template,
-    fields: parseEntityFields(row.fields),
+    fields,
     body: row.body,
     image: row.image,
     tagId: row.tagId,
@@ -67,7 +84,10 @@ function rowToEntity(row: EntityRow, tagAliases: readonly string[] = []): Entity
     origin: row.origin,
     status: row.status,
     created: row.created,
-    modified: row.modified
+    modified: row.modified,
+    // F-9.18: the sheet's own fields and where its two views stand.
+    extraFields,
+    sync: sheetSyncViewOf({ kind: row.kind, fields, extraFields, body: row.body }, row.sync, ctx)
   }
 }
 
@@ -90,8 +110,9 @@ function tagAliasesById(db: EntityDb, tagIds: readonly string[]): Map<string, st
 
 /** The row as the contract's entity, its linked tag's aliases read for it (F-4.14). */
 function toEntity(db: EntityDb, row: EntityRow): Entity {
-  if (row.tagId === null) return rowToEntity(row)
-  return rowToEntity(row, tagAliasesById(db, [row.tagId]).get(row.tagId))
+  const ctx = sheetSyncContext(db)
+  if (row.tagId === null) return rowToEntity(row, ctx)
+  return rowToEntity(row, ctx, tagAliasesById(db, [row.tagId]).get(row.tagId))
 }
 
 /**
@@ -115,8 +136,9 @@ export function listEntities(db: EntityDb): Entity[] {
     db,
     rows.flatMap((row) => (row.tagId === null ? [] : [row.tagId]))
   )
+  const ctx = sheetSyncContext(db)
   return rows
-    .map((row) => rowToEntity(row, row.tagId === null ? [] : aliases.get(row.tagId)))
+    .map((row) => rowToEntity(row, ctx, row.tagId === null ? [] : aliases.get(row.tagId)))
     .sort(compareEntities)
 }
 
@@ -174,10 +196,17 @@ function assertNameFree(
   }
 }
 
-/** Refuses a field that is not of the category's template ("age" on a place). */
-function assertFieldsOf(category: StoryCategory, fields: EntityFields): void {
+/**
+ * Refuses a field that is neither of the category's template ("age" on a place) nor one of the
+ * sheet's own (F-9.18).
+ */
+function assertFieldsOf(
+  category: StoryCategory,
+  fields: EntityFields,
+  extra: readonly EntityFieldDef[] = []
+): void {
   for (const id of Object.keys(fields)) {
-    if (!isCategoryField(category, id)) {
+    if (!isCategoryField(category, id) && !extra.some((field) => field.id === id)) {
       throw new AppError('VALIDATION', `"${id}" is not a field of a ${category.noun}`, {
         kind: category.id,
         field: id
@@ -193,10 +222,11 @@ function assertFieldsOf(category: StoryCategory, fields: EntityFields): void {
 function collectFields(
   category: StoryCategory,
   base: EntityFields,
-  patch: EntityFields
+  patch: EntityFields,
+  extra: readonly EntityFieldDef[] = []
 ): EntityFields {
   const merged: EntityFields = { ...base }
-  for (const id of categoryFieldIds(category)) {
+  for (const id of [...categoryFieldIds(category), ...extra.map((field) => field.id)]) {
     const value = patch[id]
     if (value === undefined) continue
     // An empty value is how a patch removes a field, and is never stored.
@@ -394,6 +424,8 @@ export function updateEntity(
     const changes: Partial<EntityInsertWithoutFields> = {}
     let category = categoryOf(existing.kind, listCategories(tx))
     let stored = parseEntityFields(existing.fields)
+    // F-9.18: the sheet's own fields take values like its category's.
+    const extra = parseExtraFields(existing.extraFields)
     /** F-9.13: the baseline to write through `writeAuthorFields`, when it moves. */
     let nextFields: EntityFields | null = null
     // F-9.10: a move into another category refiles the values its template lacks into Notes.
@@ -416,8 +448,8 @@ export function updateEntity(
     const asOf = patch.asOf ?? null
     if (asOf !== null) assertSceneOf(tx, asOf)
     if (patch.fields !== undefined) {
-      assertFieldsOf(category, patch.fields)
-      if (asOf === null) nextFields = collectFields(category, stored, patch.fields)
+      assertFieldsOf(category, patch.fields, extra)
+      if (asOf === null) nextFields = collectFields(category, stored, patch.fields, extra)
     }
     if (patch.body !== undefined) changes.body = patch.body
     if (patch.status !== undefined) changes.status = patch.status
@@ -706,4 +738,101 @@ export function mergeEntities(
     }
     return { entity: toEntity(tx, requireRow(tx, targetId)), removed, tagMerge, aliasedTag }
   })
+}
+
+/**
+ * F-9.18: adds a field of the sheet's own (the category's template is untouched): the label
+ * trimmed, the id minted from it. A label the sheet already has (its category's or its own, any
+ * case) is ALREADY_EXISTS; more than `SHEET_EXTRA_FIELDS_MAX` is VALIDATION. Stamps `modified`.
+ */
+export function addEntityField(db: EntityDb, id: string, label: string): Entity {
+  return db.transaction((tx) => {
+    const row = requireRow(tx, id)
+    const category = categoryOf(row.kind, listCategories(tx))
+    const extra = parseExtraFields(row.extraFields)
+    const name = label.replace(/\s+/g, ' ').trim()
+    const all = sheetFieldDefs(category, extra)
+    if (name === '') throw new AppError('VALIDATION', 'A field needs a name', { id })
+    if (all.some((field) => field.label.toLowerCase() === name.toLowerCase())) {
+      throw new AppError('ALREADY_EXISTS', `This sheet already has a field named "${name}"`, {
+        id,
+        label: name
+      })
+    }
+    if (extra.length >= SHEET_EXTRA_FIELDS_MAX) {
+      throw new AppError(
+        'VALIDATION',
+        `A sheet can have at most ${SHEET_EXTRA_FIELDS_MAX} fields of its own`,
+        { id }
+      )
+    }
+    const fieldId = fieldIdFromLabel(
+      name,
+      all.map((field) => field.id)
+    )
+    writeExtraFields(tx, id, [...extra, { id: fieldId, label: name, multiline: true }])
+    return toEntity(tx, requireRow(tx, id))
+  })
+}
+
+/**
+ * F-9.18: removes a field of the sheet's own; its text moves into the sheet's Notes as
+ * "Label: text" (or stays stored, unseen, on a category without Notes), so nothing is lost.
+ * NOT_FOUND for a field the sheet does not have of its own. Stamps `modified`.
+ */
+export function removeEntityField(db: EntityDb, id: string, fieldId: string): Entity {
+  return db.transaction((tx) => {
+    const row = requireRow(tx, id)
+    const category = categoryOf(row.kind, listCategories(tx))
+    const extra = parseExtraFields(row.extraFields)
+    const field = extra.find((each) => each.id === fieldId)
+    if (field === undefined) {
+      throw new AppError('NOT_FOUND', 'This sheet has no such field of its own', { id, fieldId })
+    }
+    const fields = parseEntityFields(row.fields)
+    const value = (fields[fieldId] ?? '').trim()
+    if (value !== '' && isCategoryField(category, 'notes')) {
+      const next: EntityFields = {
+        ...fields,
+        notes: joinSheetText(fields.notes, `${field.label}: ${value}`)
+      }
+      delete next[fieldId]
+      writeAuthorFields(tx, id, next)
+    }
+    writeExtraFields(
+      tx,
+      id,
+      extra.filter((each) => each.id !== fieldId)
+    )
+    return toEntity(tx, requireRow(tx, id))
+  })
+}
+
+/** F-9.18: writes the sheet's own fields and stamps `modified`. */
+export function writeExtraFields(db: EntityDb, id: string, extra: readonly EntityFieldDef[]): void {
+  db.update(entity)
+    .set({ extraFields: JSON.stringify(extra), modified: new Date().toISOString() })
+    .where(eq(entity.id, id))
+    .run()
+}
+
+/**
+ * F-9.18: writes the sheet's sync column (`StoredSheetSync`, or null to forget it). Not a change
+ * the author made, so `modified` is left alone (a Changes Undo keys on it).
+ */
+export function writeSheetSync(db: EntityDb, id: string, sync: StoredSheetSync | null): void {
+  db.update(entity)
+    .set({ sync: sync === null ? null : JSON.stringify(sync) })
+    .where(eq(entity.id, id))
+    .run()
+}
+
+/** F-9.18: the stored sync column and the sheet's own fields of a sheet, raw, or undefined for an unknown id. */
+export function sheetSyncRow(
+  db: EntityDb,
+  id: string
+): { sync: StoredSheetSync | null; extra: EntityFieldDef[] } | undefined {
+  const row = getRow(db, id)
+  if (row === undefined) return undefined
+  return { sync: parseStoredSheetSync(row.sync), extra: parseExtraFields(row.extraFields) }
 }

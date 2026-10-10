@@ -12,6 +12,7 @@ import {
   type EntityTemplate
 } from '@shared/entities'
 import { categoryOf } from '@shared/categories'
+import { sheetFieldDefs } from '@shared/sheetSync'
 import {
   FACT_STATUSES,
   FACT_STATUS_LABEL,
@@ -36,6 +37,7 @@ import { agesOnTimeline, ageText } from '@renderer/features/timeline/timelineVie
 import { describeError } from '@renderer/lib/errors'
 import { AsOfPicker, FieldFacts, HiddenFacts } from './SheetFacts'
 import { SceneRowButton } from './SceneRowButton'
+import { SheetSyncBar } from './SheetSyncBar'
 import { UsageLog } from './UsageLog'
 import { Relationships } from './Relationships'
 import { ThreadEvents } from '@renderer/features/threads/ThreadEvents'
@@ -91,18 +93,27 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
     if (missing) useEntityStore.getState().select(null)
   }, [missing])
 
+  // F-9.18: the sheet sync (or an Undo) rewrote a view in main: the page shows it, unless the
+  // author has an edit of their own still to save.
+  useEffect(() => {
+    if (entity) useEntityDraftStore.getState().adopt(entity)
+  }, [entity])
+
   if (!entity) return null
   const category = categoryOf(entity.kind, categories)
+  // F-9.18: the category's fields, then the sheet's own.
+  const fieldDefs = sheetFieldDefs(category, entity.extraFields)
+  const ownIds = new Set(entity.extraFields.map((field) => field.id))
   const sheet = sheetAt({
     facts,
     fields: entity.template === 'structured' ? entity.fields : {},
-    attributes: category.fields.map((field) => field.id),
+    attributes: fieldDefs.map((field) => field.id),
     order: clock.order,
     position: positionOf(asOf, clock)
   })
   const factsOf = (attribute: string): SheetFieldAt | undefined =>
     sheet.find((field) => field.attribute === attribute)
-  const templateIds = new Set<string>(category.fields.map((field) => field.id))
+  const templateIds = new Set<string>(fieldDefs.map((field) => field.id))
   // Attributes only the scenes carry (a sheet moved to another category), and, on a blank page,
   // every attribute: shown with their label below the page.
   const loose = sheet.filter(
@@ -150,6 +161,26 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
   const editField = (field: keyof EntityFields, value: string): void => {
     const fields: EntityFields = { [field]: value }
     edit({ fields })
+  }
+
+  /** F-9.18: a field of this sheet's own; the page has it at the next write-up. */
+  const addField = async (): Promise<void> => {
+    const label = await dialogs.prompt({
+      title: 'Add a field to this sheet',
+      message: `Only "${entity.name}" gets it; the ${category.noun} template stays as it is.`,
+      confirmLabel: 'Add field',
+      validate: (value) => (value.trim() === '' ? 'A field needs a name.' : null)
+    })
+    if (label === null) return
+    await useEntityDraftStore.getState().flush()
+    await run(() => useEntityStore.getState().addField(id, label.trim()))
+  }
+
+  /** F-9.18: removes a field of this sheet's own; its text moves into Notes. */
+  const removeField = async (fieldId: string, label: string): Promise<void> => {
+    await useEntityDraftStore.getState().flush()
+    await run(() => useEntityStore.getState().removeField(id, fieldId))
+    toast.success(`Removed "${label}"; its text is in Notes.`)
   }
 
   return (
@@ -302,17 +333,37 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
           </section>
         )}
 
+        {/* F-9.18: how this view stands against the other one. */}
+        <SheetSyncBar entity={entity} view={entity.template} />
+
         {entity.template === 'structured' ? (
           <div className="flex flex-col gap-3">
-            {category.fields.map((field) => {
+            {fieldDefs.map((field) => {
               const stated = factsOf(field.id)
               const controlId = `${uid}-${field.id}`
               const value = values.fields[field.id] ?? ''
               return (
                 <div key={field.id} className="flex flex-col gap-1">
-                  <label htmlFor={controlId} className={LABEL}>
-                    {field.label}
-                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <label htmlFor={controlId} className={LABEL}>
+                      {field.label}
+                    </label>
+                    {ownIds.has(field.id) ? (
+                      <>
+                        <span className="text-xs text-fg-subtle">· this sheet only</span>
+                        <button
+                          type="button"
+                          aria-label={`Remove the field ${field.label}`}
+                          title="Remove this field (its text moves into Notes)"
+                          disabled={busy}
+                          onClick={() => void removeField(field.id, field.label)}
+                          className="rounded p-0.5 text-fg-subtle hover:bg-surface-raised hover:text-danger"
+                        >
+                          <X size={12} aria-hidden="true" />
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
                   {field.multiline ? (
                     <AutoTextarea
                       id={controlId}
@@ -335,6 +386,16 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
                 </div>
               )
             })}
+            <div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void addField()}
+                className={BUTTON}
+              >
+                Add a field to this sheet…
+              </button>
+            </div>
             {entity.kind === 'world' ? (
               <datalist id={`${uid}-categories`}>
                 {WORLD_CATEGORY_SUGGESTIONS.map((suggestion) => (
@@ -349,7 +410,7 @@ export function EntityEditor({ id }: { id: string }): React.JSX.Element | null {
             value={values.body}
             maxLength={ENTITY_BODY_MAX}
             onChange={(event) => edit({ body: event.target.value })}
-            className={`${CONTROL} min-h-[60vh] resize-none leading-relaxed`}
+            className={`${CONTROL} min-h-[60vh] resize-none font-prose text-base leading-relaxed`}
           />
         )}
 

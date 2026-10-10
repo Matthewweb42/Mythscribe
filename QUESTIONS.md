@@ -12,6 +12,30 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-10 · F-9.18 · Sheet sync follows the chat mode: Auto lands with Undo, Ask and Plan hold it
+- Question: You said the sync "lands on its own (it is the author's own words re-filed), logged in Changes with Undo; it follows the chat's Auto/Ask mode like other story-bible edits if that is the existing pattern".
+- Chosen (decided by Claude, unconfirmed): it is the existing pattern (the background plan links apply at Auto and only suggest at Ask and Plan; Organise and the chat agent follow the mode too), so: at **Auto** a write-up or a filing lands on the sheet at once and is logged in Changes (source "Sheet sync") with an Undo; at **Ask** and **Plan** (the default is Ask) it is computed in the background and held on the sheet with **Apply** and **Dismiss** and a preview of the new page or of each field change. AI rule 1 (CLAUDE.md): both are Proposals except in Auto, as the rule allows; Plan never edits.
+- Alternatives: always land on its own (it is the author's own text) at every mode; at Ask, land filings (the author's words) but hold write-ups (AI prose).
+- To change it: `src/main/ai/sheetSync.ts` (`runSheetSync`, the `auto` branch).
+
+## 2026-10-10 · F-9.18 · How AI-written page text is marked, and why it fits AI rule 1
+- Question: The Blank page now holds prose the AI wrote. How is it marked, and is it allowed?
+- Chosen (decided by Claude, unconfirmed): the page is derived from the author's own sheet text (the fields), never from the manuscript, and never enters the manuscript — the same footing as the derived index data rule 1 already allows (summaries, facts), but stored in the sheet because it is the sheet's other view. Each paragraph the AI writes is remembered by hash (`entity.sync.aiParagraphs`); the page shows "Written up by AI from your fields" or "N of M paragraphs written up by AI…". A paragraph the author edits stops matching and counts as theirs. Every applied write-up is costed in the ledger and has an Undo in Changes. Rule 2 (voice profile, brief, exemplars, fidelity check) is not applied: this is story-bible reference text, not manuscript prose, and the voice block would multiply its cost.
+- Alternatives: mark AI paragraphs inline (the page would need a rich-text editor instead of the plain textarea); apply the voice block and fidelity check to write-ups.
+- To change it: `src/main/entity/sheetSyncState.ts` (`aiParagraphs`), `SheetSyncBar.tsx`, a new prompt version for rule 2.
+
+## 2026-10-10 · F-9.18 · Existing sheets: what the first sync does
+- Question: Sheets written before F-9.18 have fields, a page, or both, and no sync history. What happens to them?
+- Chosen (decided by Claude, unconfirmed): nothing runs on open (no bulk spend). A sheet syncs only after the author edits it (30 s pause) or clicks Write up now / File now. A **Blank page sheet** keeps its page exactly as written: the first sync only fills its fields from it. A sheet with **both** a page and fields keeps its page too (its fields are filled from the page; the page is written up only after a later field edit). A **Structured sheet** with no page gets its page written up. The migration adds two columns and touches no text; F-8.7's backup is taken before it, and every applied sync has an Undo.
+- Alternatives: a one-time "sync every sheet" pass after the update (with a cost estimate, like the F-9.14 conversion); write the page of a both-texts sheet up from its fields at once.
+- To change it: `src/main/ai/sheetSync.ts` (`pageStaleAfter`), `src/main/entity/sheetSyncState.ts` (`sheetSyncStateOf`).
+
+## 2026-10-10 · F-9.18 · Safety rules and smaller calls in the sync
+- Question: several details the request left open.
+- Chosen (decided by Claude, unconfirmed): (1) an emptied page never empties the fields, and fields with no text never empty the page (both just mark the views as agreeing); (2) an answer that comes back after the author edited the sheet again is dropped; (3) the pause is per sheet (editing another sheet does not hold this one back), and the due list is a settings row so a quit resumes it; (4) the page is plain text: headings are the field labels on a line of their own, laid out by the app (the model writes only prose), shown in the prose font; (5) the write-up length is a ceiling (short ≈ 120, medium ≈ 250, long ≈ 500 words) and never adds facts; (6) the page is marked out of date when the fields' labels, order, the sheet's own fields, or the category's write-up style change, but nothing re-runs until the sheet is edited or Write up now is clicked; (7) a filing sends only the paragraphs removed and added since the views last agreed and gets back compact edits (never whole field values); added text over 3,000 characters is filed in several requests; (8) a write-up over the input budget cuts the longest field values to fit; a filing over it is refused with the budget message (rare); (9) a page addition with no fitting field becomes a field of the sheet's own (at most 12; past that it goes into Notes as "Label: text"); (10) "Write up now" / "File now" / "Try again" skip the 30 s pause.
+- Alternatives: per-section incremental write-ups (cheaper on long sheets; listed in the cost registry ideas); a rich-text page with real headings.
+- To change it: `src/shared/sheetSync.ts`, `src/main/ai/sheetSync.ts`, `src/main/ai/sheetSyncService.ts`.
+
 ## 2026-10-10 · F-9.17 · The List/Cards choice is kept with the project
 - Question: You asked for one List/Cards choice for every category tab, "until they click the other". Should it survive closing the project?
 - Chosen (decided by Claude, unconfirmed): yes. It is stored in the project's story-bible settings (`storyBible` settings row, the same row as the F-9.19 Settings tab), so it holds across tabs, restarts, and Settings changes, per project.

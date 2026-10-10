@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(26)
+    expect(result.version).toBe(27)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1054,5 +1054,37 @@ describe('todo_item (0025)', () => {
       status: 'open',
       suggestions: '[]'
     })
+  })
+})
+
+describe('entity.extra_fields and entity.sync (0026)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    // A database as the build before F-9.18 left it: migrations up to 0025, with two sheets.
+    migrate(db, loadMigrations().slice(0, 26))
+    db.prepare(
+      `INSERT INTO entity (id, kind, name, template, fields, body, created, modified)
+       VALUES ('mara', 'character', 'Mara', 'structured', '{"age":"27"}', NULL, '2026-01-01', '2026-01-01'),
+              ('kael', 'character', 'Kael', 'blank', '{}', 'Kael is a smuggler.', '2026-01-01', '2026-01-01')`
+    ).run()
+    migrate(db)
+  })
+  afterEach(() => db.close())
+
+  it('keeps every sheet as written, with no field of its own and never synced', () => {
+    expect(
+      db.prepare('SELECT id, fields, body, extra_fields, sync FROM entity ORDER BY id').all()
+    ).toEqual([
+      { id: 'kael', fields: '{}', body: 'Kael is a smuggler.', extra_fields: '[]', sync: null },
+      { id: 'mara', fields: '{"age":"27"}', body: null, extra_fields: '[]', sync: null }
+    ])
+  })
+
+  it('refuses a null list of the sheet’s own fields', () => {
+    expect(() =>
+      db.prepare("UPDATE entity SET extra_fields = NULL WHERE id = 'mara'").run()
+    ).toThrow(/NOT NULL/)
   })
 })

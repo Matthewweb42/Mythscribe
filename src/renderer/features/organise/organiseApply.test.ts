@@ -8,6 +8,7 @@ import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStor
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import { applyOrganiseAction } from './organiseApply'
+import { NO_SHEET_SYNC } from '@shared/sheetSync'
 
 let calls: [Channel, unknown][]
 /** Whether main logs `changes:record` (F-9.15); off, the log refuses and the old undo stays. */
@@ -26,6 +27,8 @@ const sheet: Entity = {
   aliases: [],
   origin: 'author',
   status: 'canon',
+  extraFields: [],
+  sync: NO_SHEET_SYNC,
   created: '2026-10-08T09:00:00.000Z',
   modified: '2026-10-08T09:00:00.000Z'
 }

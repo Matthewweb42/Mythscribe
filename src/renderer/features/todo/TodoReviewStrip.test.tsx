@@ -9,6 +9,7 @@ import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { todoItem } from './todoFixture'
 import { TodoReviewStrip } from './TodoReviewStrip'
 import { resetTodoStore, useTodoStore } from './todoStore'
+import { NO_SHEET_SYNC } from '@shared/sheetSync'
 
 let calls: [Channel, unknown][]
 
@@ -130,6 +131,8 @@ describe('TodoReviewStrip (F-9.16)', () => {
             aliases: [],
             origin: 'author',
             status: 'canon',
+            extraFields: [],
+            sync: NO_SHEET_SYNC,
             created: '2026-10-09',
             modified: '2026-10-09'
           }

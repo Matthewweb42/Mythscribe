@@ -160,6 +160,7 @@ import { createSessionUsage } from '../ai/sessionUsage'
 import { staleSummaryNodeIds, summarizeScene, summarySource } from '../ai/summarize'
 import { ledgerSummary, recentUsage, usageHistory, type AiDb } from '../ai/usageStore'
 import { createIndexQueue } from '../jobs/indexQueue'
+import { createSheetSyncService } from '../ai/sheetSyncService'
 import {
   confirmPlanLink,
   dismissPlanLink,
@@ -212,7 +213,9 @@ import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
 import { getSummary } from '../document/summaryStore'
 import { wordCountReport } from '../document/wordCountReport'
 import {
+  addEntityField,
   createEntity,
+  removeEntityField,
   deleteEntity,
   getEntity,
   linkEntityTag,
@@ -824,6 +827,26 @@ export function registerHandlers({
     debounceMs: PLAN_LINKS_DEBOUNCE_MS,
     minIntervalMs: 0
   })
+  /**
+   * F-9.18: a story-bible sheet's two views kept true. Each sheet the author edits waits out its
+   * own 30-second pause, then joins the due list that the `sheetSync` job works one by one (fast
+   * tier, nothing sent while the hashes agree). Nothing is scheduled while Use AI or the toggle is
+   * off or no provider is set up; the sheet then shows it is out of date instead.
+   */
+  const sheetSync = createSheetSyncService({
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    request: (db) => requestDeps(db),
+    ready: (db) => access.writable() && Boolean(ai.get(sourceOf(db))),
+    cancelRequest: (requestId) => void cancelInflight(requestId),
+    onStatuses: (statuses) => emit(windows(), 'sheetSync:changed', statuses),
+    onEntity: (entity) => {
+      emit(windows(), 'entity:changed', entity)
+      // The sheet's own text moved: its baseline facts did too.
+      emit(windows(), 'fact:changed', { entityIds: [entity.id] })
+    },
+    onChangesLogged: () => emit(windows(), 'changes:changed', {})
+  })
+
   const queuePlanLinks = (db: TreeDb): void => {
     if (!isFeatureAllowed(getAiSettings(db), 'planLinks')) return
     const root = manuscriptRootId(db)
@@ -1951,6 +1974,8 @@ export function registerHandlers({
     publishTagChange(db, tagChange)
     void syncSpelling()
     queueTodo(db)
+    // F-9.18: a sheet made with text gets its other view after the pause.
+    if (created.sync.state !== 'none') sheetSync.touch(created.id)
     return created
   })
 
@@ -1965,8 +1990,33 @@ export function registerHandlers({
     if (patch.asOf != null && patch.fields !== undefined) {
       emit(windows(), 'fact:changed', { entityIds: [id] })
     }
+    // F-9.18: the sheet's fields or page moved: its other view follows after the pause.
+    if ((patch.fields !== undefined && patch.asOf == null) || patch.body !== undefined) {
+      sheetSync.touch(id)
+    }
     return updated
   })
+
+  // F-9.18: the sheet's own fields, and its two views kept true.
+  register('entity:addField', ({ id, label }) => {
+    const updated = addEntityField(manager.require().connection.orm, id, label)
+    sheetSync.touch(id)
+    return updated
+  })
+
+  register('entity:removeField', ({ id, fieldId }) => {
+    const updated = removeEntityField(manager.require().connection.orm, id, fieldId)
+    sheetSync.touch(id)
+    return updated
+  })
+
+  register('sheetSync:status', () => sheetSync.statuses())
+
+  register('sheetSync:run', ({ id }) => sheetSync.runNow(id))
+
+  register('sheetSync:apply', ({ id }) => sheetSync.apply(id))
+
+  register('sheetSync:dismiss', ({ id }) => sheetSync.dismiss(id))
 
   /**
    * F-9.10: sheets merged by Organise. A tag merge inside it reaches the windows exactly as
@@ -4173,6 +4223,8 @@ export function registerHandlers({
     // F-9.16: the To do sync and the check's estimate belong to the project that left.
     todoQueue.clear()
     todoBookMoved()
+    // F-9.18: every sheet's pause and status belong to the project that left.
+    sheetSync.clear()
     // F-14.15: a pass running in the project that left stops without writing; one left running
     // by a crash or a quit reads as stopped in the project that opened, ready to resume.
     editPasses.clear()
@@ -4218,6 +4270,8 @@ export function registerHandlers({
       voiceQueue.load()
       // F-9.16: the To do list is brought up to date on every open (local, free).
       todoQueue.load()
+      // F-9.18: the sheets left due when the project closed are synced (no new pauses start).
+      sheetSync.load()
       const opened = manager.require().connection.orm
       const todoRoot = manuscriptRootId(opened)
       if (todoRoot !== null) todoQueue.indexAll('todo', [todoRoot])

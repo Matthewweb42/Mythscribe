@@ -40,7 +40,10 @@ export const JobKind = z.enum([
   // F-9.16: the To do job, one per project (keyed to the manuscript root): the free local sync of
   // the To do list after the knowledge moved. Never an AI request: the whole-book check runs only
   // when the author asks for it.
-  'todo'
+  'todo',
+  // F-9.18: the sheet sync job, one per project (keyed to the manuscript root): the sheets left
+  // alone for 30 seconds since an edit (the due list, a settings row) are made true to each other.
+  'sheetSync'
 ])
 export type JobKind = z.infer<typeof JobKind>
 

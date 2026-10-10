@@ -198,6 +198,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     ideas:
       'Send only the local findings for a quick tidy; skip sections the instruction does not name (already); fast tier for tag-only runs.'
   },
+  sheetSync: {
+    trigger: 'background',
+    when: 'Thirty seconds after the author stops editing a sheet whose fields or page changed (or on Write up now / File now): one write-up when the fields moved, one filing per 3,000 characters of added page text when the page moved; nothing while the hashes say both views agree; identical requests answer from the local cache.',
+    callsPerUse: 1,
+    typicalOutTokens: 350,
+    ideas:
+      'Write up only the sections whose fields changed (keep the rest of the page); skip a filing when the page edit is whitespace or punctuation only; batch several sheets edited in one sitting into one request.'
+  },
   todo: {
     trigger: 'on request',
     when: 'Only when you click Check the whole book (one request per window of scene cards, at most 3); and one small request per To do card when its suggestions are first shown.',

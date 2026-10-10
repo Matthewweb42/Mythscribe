@@ -25,6 +25,7 @@ import { parseRouteAnswer } from '../route'
 import { parseNotesSuggestAnswer, parseSynopsisAnswer } from '../sceneSuggest'
 import { parseSummaryAnswer } from '../summarize'
 import { parseVoiceNotesAnswer } from '../voiceNotes'
+import { parseRefileAnswer, parseWriteUpAnswer } from '../sheetSync'
 import { parseWhatNextAnswer } from '../whatNext'
 import { parseTodoAnswer, parseTodoSuggestAnswer } from '../todoPass'
 import { EVAL_CASES, FIXTURE_PROFILE, type EvalCase } from './fixtures'
@@ -573,6 +574,42 @@ function scoreNotesSuggest(answer: string): LiveResult['verdict'] {
 }
 
 /** Learned style notes (F-14.14) score like the other JSON answers: they must parse to at least one note. */
+/** F-9.18: a write-up parses, and every part is one of the heading fields sent. */
+function scoreSheetWriteUp(headings: readonly string[], answer: string): LiveResult['verdict'] {
+  try {
+    const parsed = parseWriteUpAnswer(answer)
+    const stray = Object.keys(parsed.parts).filter((id) => !headings.includes(id))
+    if (parsed.intro.trim() === '' && Object.keys(parsed.parts).length === 0) {
+      return { kind: 'json', ok: false, problem: 'an empty write-up' }
+    }
+    return stray.length === 0
+      ? { kind: 'json', ok: true, problem: null }
+      : {
+          kind: 'json',
+          ok: false,
+          problem: `parts for fields that are not headings: ${stray.join(', ')}`
+        }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not { intro, parts }' }
+  }
+}
+
+/** F-9.18: a filing parses, keeps something, and names only fields that were sent. */
+function scoreSheetRefile(fields: readonly string[], answer: string): LiveResult['verdict'] {
+  try {
+    const parsed = parseRefileAnswer(answer)
+    const stray = parsed.edits.filter((edit) => !fields.includes(edit.f)).map((edit) => edit.f)
+    if (parsed.edits.length + parsed.adds.length === 0) {
+      return { kind: 'json', ok: false, problem: 'nothing filed' }
+    }
+    return stray.length === 0
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `edits of fields not sent: ${stray.join(', ')}` }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not { edits, add }' }
+  }
+}
+
 function scoreVoiceNotes(answer: string): LiveResult['verdict'] {
   try {
     const notes = parseVoiceNotesAnswer(answer)
@@ -820,6 +857,22 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
       }
       if (c.scoring.kind === 'notesSuggest') {
         results.push({ ...base, answer: reply.text, verdict: scoreNotesSuggest(reply.text) })
+        continue
+      }
+      if (c.scoring.kind === 'sheetWriteUp') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreSheetWriteUp(c.scoring.headings, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'sheetRefile') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreSheetRefile(c.scoring.fields, reply.text)
+        })
         continue
       }
       if (c.scoring.kind === 'voiceNotes') {

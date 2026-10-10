@@ -157,7 +157,8 @@ function classify(err: unknown): Outcome {
   return 'transient'
 }
 
-function failureOf(err: unknown): JobFailure {
+/** What a failed job records (and what F-9.18's sheet sync shows on the sheet): the code, message, and next step. */
+export function failureOf(err: unknown): JobFailure {
   const { code, message, nextStep } =
     err instanceof AiProviderError
       ? aiFailure(err.code, err.message)

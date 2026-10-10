@@ -13,6 +13,8 @@ import { listNodes } from '../tree/treeStore'
 import { createTag, deleteTag, getTagWithUsage, listTags, updateTag } from '../tag/tagStore'
 import {
   addEntityAliases,
+  addEntityField,
+  removeEntityField,
   createEntity,
   deleteEntity,
   getEntity,
@@ -89,7 +91,10 @@ describe('createEntity', () => {
       origin: 'author',
       status: 'canon',
       created: '2026-09-22T10:00:00.000Z',
-      modified: '2026-09-22T10:00:00.000Z'
+      modified: '2026-09-22T10:00:00.000Z',
+      // F-9.18: no field of its own; fields with text and no page yet: the page is out of date.
+      extraFields: [],
+      sync: { state: 'pageStale', aiParagraphs: 0, paragraphs: 0, writtenUpAt: null, pending: null }
     })
     expect(tagOf(id)?.name).toBe('ada-lovelace')
     expect(listEntities(db)).toEqual([{ id, ...created }])
@@ -614,5 +619,31 @@ describe('mergeEntities (F-9.10)', () => {
     expect(listFactsForEntity(db, mill.id).map((f) => f.value)).toEqual(['sixty'])
     expectCode(() => mergeEntities(db, mill.id, [mill.id]), 'VALIDATION')
     expectCode(() => mergeEntities(db, mill.id, ['nope']), 'NOT_FOUND')
+  })
+})
+
+describe('a sheet’s own fields (F-9.18)', () => {
+  it('adds one beside the template, takes values in it, and keeps the template as it was', () => {
+    const mara = create({ kind: 'character', name: 'Mara' })
+    const added = addEntityField(db, mara.id, '  Weapon  ')
+    expect(added.extraFields).toEqual([{ id: 'weapon', label: 'Weapon', multiline: true }])
+    expect(update(mara.id, { fields: { weapon: 'A bone bow.' } }).fields.weapon).toBe('A bone bow.')
+    // Another character has no such field.
+    const kael = create({ kind: 'character', name: 'Kael' })
+    expectCode(() => update(kael.id, { fields: { weapon: 'x' } }), 'VALIDATION')
+    // A label the sheet already has, of its category or its own, is refused.
+    expectCode(() => addEntityField(db, mara.id, 'weapon'), 'ALREADY_EXISTS')
+    expectCode(() => addEntityField(db, mara.id, 'Age'), 'ALREADY_EXISTS')
+  })
+
+  it('removes one by moving its text into Notes, so nothing is lost', () => {
+    const mara = create({ kind: 'character', name: 'Mara', fields: { notes: 'Fears boats.' } })
+    addEntityField(db, mara.id, 'Weapon')
+    update(mara.id, { fields: { weapon: 'A bone bow.' } })
+    const after = removeEntityField(db, mara.id, 'weapon')
+    expect(after.extraFields).toEqual([])
+    expect(after.fields).toEqual({ notes: 'Fears boats.\n\nWeapon: A bone bow.' })
+    expectCode(() => removeEntityField(db, mara.id, 'weapon'), 'NOT_FOUND')
+    expectCode(() => removeEntityField(db, mara.id, 'age'), 'NOT_FOUND')
   })
 })

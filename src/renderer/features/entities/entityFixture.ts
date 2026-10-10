@@ -1,4 +1,5 @@
 import type { Entity } from '@shared/ipc/contract'
+import { NO_SHEET_SYNC } from '@shared/sheetSync'
 
 /** Five entities across the three kinds, in `entity:list` order, for the entity tests (F-9.2). */
 export const entityFixture: Entity[] = [
@@ -14,6 +15,8 @@ export const entityFixture: Entity[] = [
     aliases: [],
     origin: 'author',
     status: 'canon',
+    extraFields: [],
+    sync: NO_SHEET_SYNC,
     created: '2026-09-01T10:00:00.000Z',
     modified: '2026-09-01T10:00:00.000Z'
   },
@@ -29,6 +32,8 @@ export const entityFixture: Entity[] = [
     aliases: [],
     origin: 'author',
     status: 'canon',
+    extraFields: [],
+    sync: NO_SHEET_SYNC,
     created: '2026-09-02T10:00:00.000Z',
     modified: '2026-09-03T11:30:00.000Z'
   },
@@ -44,6 +49,8 @@ export const entityFixture: Entity[] = [
     aliases: [],
     origin: 'author',
     status: 'canon',
+    extraFields: [],
+    sync: NO_SHEET_SYNC,
     created: '2026-09-02T10:00:00.000Z',
     modified: '2026-09-02T10:00:00.000Z'
   },
@@ -59,6 +66,8 @@ export const entityFixture: Entity[] = [
     aliases: [],
     origin: 'author',
     status: 'canon',
+    extraFields: [],
+    sync: NO_SHEET_SYNC,
     created: '2026-09-04T10:00:00.000Z',
     modified: '2026-09-04T10:00:00.000Z'
   },
@@ -74,6 +83,8 @@ export const entityFixture: Entity[] = [
     aliases: [],
     origin: 'author',
     status: 'canon',
+    extraFields: [],
+    sync: NO_SHEET_SYNC,
     created: '2026-09-05T10:00:00.000Z',
     modified: '2026-09-05T10:00:00.000Z'
   }

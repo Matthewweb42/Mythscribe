@@ -18,7 +18,6 @@ import {
   type EntityFields
 } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
-import type { SheetPatch } from '@shared/organise'
 import { createCategory, listCategories } from '../entity/categoryStore'
 import {
   addEntityAliases,
@@ -31,7 +30,7 @@ import {
   type EntityTagChange
 } from '../entity/entityStore'
 import { AppError } from '../ipc/errors'
-import { logChanges, type ChangeInput } from '../knowledge/changeLog'
+import { logChanges, sheetEditChange, type ChangeInput } from '../knowledge/changeLog'
 import { addImageAsset, removeImageAsset } from '../project/imageAssets'
 import {
   listContextFiles,
@@ -73,35 +72,7 @@ function createdChange(sheet: Entity, madeTagId: string | null): ChangeInput {
  * tag link or a picture, which Undo does not take back).
  */
 function updatedChange(before: Entity, after: Entity): ChangeInput | null {
-  const was = new Map(Object.entries(before.fields))
-  const now = new Map(Object.entries(after.fields))
-  const fields = [...new Set([...was.keys(), ...now.keys()])].filter(
-    (field) => (was.get(field) ?? '') !== (now.get(field) ?? '')
-  )
-  const body = (before.body ?? '') !== (after.body ?? '')
-  const aliases = JSON.stringify(before.aliases) !== JSON.stringify(after.aliases)
-  if (fields.length === 0 && !body && !aliases) return null
-  const pick = (sheet: Entity, values: ReadonlyMap<string, string | undefined>): SheetPatch => ({
-    ...(fields.length > 0
-      ? { fields: Object.fromEntries(fields.map((field) => [field, values.get(field) ?? ''])) }
-      : {}),
-    ...(body ? { body: sheet.body } : {}),
-    ...(aliases ? { aliases: sheet.aliases } : {})
-  })
-  return {
-    kind: 'sheetEdit',
-    nodeId: null,
-    quote: null,
-    entityId: after.id,
-    targetId: after.id,
-    label: changeLabel(`${after.name}: filled from the upload`),
-    undo: {
-      type: 'restoreSheet',
-      entityId: after.id,
-      before: pick(before, was),
-      after: pick(after, now)
-    }
-  }
+  return sheetEditChange(before, after, `${after.name}: filled from the upload`)
 }
 
 /** `existing` with `paragraphs` appended as paragraphs, or VALIDATION when it would be over `max`. */

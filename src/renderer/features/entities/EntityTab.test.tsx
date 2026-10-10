@@ -11,6 +11,7 @@ import { resetEntityDraftStore, useEntityDraftStore } from './entityDraftStore'
 import { resetEntityStore, useEntityStore } from './entityStore'
 import { resetStoryBibleSettingsStore, useStoryBibleSettingsStore } from './storyBibleSettingsStore'
 import { defaultStoryBibleSettings } from '@shared/storyBibleSettings'
+import { NO_SHEET_SYNC } from '@shared/sheetSync'
 
 type Handler = (input: unknown) => unknown
 
@@ -38,6 +39,8 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): [Channel, u
           aliases: [],
           origin: 'author',
           status: 'canon',
+          extraFields: [],
+          sync: NO_SHEET_SYNC,
           created: '2026-09-12T08:00:00.000Z',
           modified: '2026-09-12T08:00:00.000Z'
         }

@@ -6,6 +6,7 @@ import {
   ChangeKind,
   ChangeUndo,
   RECORDED_UNDO_OF,
+  changeLabel,
   changeRunId,
   changeSourceOf,
   type ChangeEntry,
@@ -182,6 +183,43 @@ export function logChangeEntries(
   now: string
 ): ChangeEntry[] {
   return insertChanges(db, runId, changes, now).map(rowToEntry)
+}
+
+/**
+ * F-9.15: a sheet edit for the log, with the Undo that puts back the fields, page, and aliases
+ * that moved between `before` and `after`, while they still read as `after`. Null when none of
+ * them moved. The context library's Apply and the sheet sync (F-9.18) log their edits with it.
+ */
+export function sheetEditChange(before: Entity, after: Entity, label: string): ChangeInput | null {
+  const was = new Map(Object.entries(before.fields))
+  const now = new Map(Object.entries(after.fields))
+  const fields = [...new Set([...was.keys(), ...now.keys()])].filter(
+    (field) => (was.get(field) ?? '') !== (now.get(field) ?? '')
+  )
+  const body = (before.body ?? '') !== (after.body ?? '')
+  const aliases = JSON.stringify(before.aliases) !== JSON.stringify(after.aliases)
+  if (fields.length === 0 && !body && !aliases) return null
+  const pick = (sheet: Entity, values: ReadonlyMap<string, string | undefined>): SheetPatch => ({
+    ...(fields.length > 0
+      ? { fields: Object.fromEntries(fields.map((field) => [field, values.get(field) ?? ''])) }
+      : {}),
+    ...(body ? { body: sheet.body } : {}),
+    ...(aliases ? { aliases: sheet.aliases } : {})
+  })
+  return {
+    kind: 'sheetEdit',
+    nodeId: null,
+    quote: null,
+    entityId: after.id,
+    targetId: after.id,
+    label: changeLabel(label),
+    undo: {
+      type: 'restoreSheet',
+      entityId: after.id,
+      before: pick(before, was),
+      after: pick(after, now)
+    }
+  }
 }
 
 /** The parts of a sheet a patch names, compared as the store keeps them (trimmed; names by key). */
