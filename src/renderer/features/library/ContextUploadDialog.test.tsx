@@ -6,6 +6,7 @@ import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { resetAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
+import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import { resetEntityStore } from '@renderer/features/entities/entityStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient } from '@renderer/lib/ipc'
@@ -23,6 +24,7 @@ beforeEach(() => {
         applied = input as Input<'library:apply'>
         return {
           entities: [],
+          categories: [],
           files: [contextFileFixture({ state: 'processed' })],
           created: 1,
           updated: 1,
@@ -36,6 +38,7 @@ beforeEach(() => {
   })
   resetLibraryStore()
   resetEntityStore()
+  resetCategoryStore()
   resetAiSettingsStore()
   resetAiActivityStore()
   resetProposalStore()

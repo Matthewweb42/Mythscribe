@@ -5,6 +5,7 @@ import type { Channel, Entity, Input, Output } from '@shared/ipc/contract'
 import { resetAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
+import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient } from '@renderer/lib/ipc'
@@ -64,6 +65,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
       if (channel === 'library:apply') {
         return {
           entities: [tomas],
+          categories: [],
           files: [contextFileFixture({ state: 'processed' })],
           created: 1,
           updated: 1,
@@ -85,6 +87,7 @@ beforeEach(() => {
   install()
   resetLibraryStore()
   resetEntityStore()
+  resetCategoryStore()
   resetAiSettingsStore()
   resetAiActivityStore()
   resetProposalStore()
