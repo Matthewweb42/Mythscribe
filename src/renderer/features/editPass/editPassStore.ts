@@ -8,7 +8,6 @@ import type {
   EditPassSummary,
   EditPassType
 } from '@shared/editPass'
-import { EDIT_PASS_LABEL } from '@shared/editPass'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { locateAll } from '@renderer/features/editor/locateText'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
@@ -265,12 +264,11 @@ function onChanged(summary: EditPassSummary): void {
     }
     if (state.startedHere === summary.id) {
       useEditPassStore.setState({ startedHere: null })
-      const label = EDIT_PASS_LABEL[summary.type]
-      if (summary.status === 'done') {
-        toast.success(`${label} finished. The report is open.`)
+      // F-7.12: the drop notification says it finished or why it stopped. The report opens on its
+      // own only while the author still watches the pass in the workspace; elsewhere the
+      // notification's Open does it, so the pane is never taken from the author's writing.
+      if (summary.status === 'done' && useEditPassViewStore.getState().view?.kind === 'workspace') {
         void state.openReport(summary.id)
-      } else if (summary.status === 'failed') {
-        toast.error(`${label} stopped: ${summary.error ?? 'the pass failed.'}`)
       }
     }
   }

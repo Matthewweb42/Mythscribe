@@ -163,8 +163,9 @@ afterEach(() => {
 })
 
 describe('editPassStore (F-14.15)', () => {
-  it('loads the passes, starts one, and opens its report when main says it finished', async () => {
+  it('loads the passes, starts one, and opens its report when main says it finished while the workspace shows', async () => {
     await store().load()
+    store().openWorkspace()
     expect(store().loaded).toBe(true)
     expect(await store().start({ type: 'proofread', instruction: null, nodeIds: ['sc-1'] })).toBe(
       true
@@ -180,9 +181,18 @@ describe('editPassStore (F-14.15)', () => {
     expect(runningPass(store())).toBeNull()
     expect(useEditPassViewStore.getState().view).toEqual({ kind: 'report', passId: 'p1' })
     expect(store().detail?.changes).toHaveLength(1)
-    expect(useDialogStore.getState().toasts.at(-1)?.message).toBe(
-      'Proofread finished. The report is open.'
-    )
+    // F-7.12: the drop notification says it finished; no toast of its own.
+    expect(useDialogStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('leaves the pane alone when the pass finishes while the author is elsewhere (F-7.12)', async () => {
+    await store().load()
+    await store().start({ type: 'proofread', instruction: null, nodeIds: ['sc-1'] })
+    passes = [pass({ status: 'done', doneNodeIds: ['sc-1'], currentNodeId: null })]
+    changed?.(passes[0]!)
+    await flush()
+    expect(useEditPassViewStore.getState().view).toBeNull()
+    expect(store().startedHere).toBeNull()
   })
 
   it('accepts a change in the mounted editor, AI-origin marked, and settles it', async () => {

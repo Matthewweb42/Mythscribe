@@ -18,6 +18,22 @@ do. Review, then confirm, change, or delete the entry.
 - Alternatives: re-read the whole book once for them (one summary request per scene, about $0.0008 each on the fast tier); also send them to ghost text (every suggestion pays about 25 more input tokens); let you edit or override them on the scene card.
 - To change it: `src/main/ai/prompts/summary.v5.ts`, `SUMMARY_CURRENT_MIN_VERSION` in `src/main/ai/summarize.ts`, `EDIT_PASS_MOOD_TYPES` in `src/main/ai/prompts/editPass.v2.ts`, `renderSceneMood` in `src/shared/sceneCard.ts`.
 
+## 2026-10-10 · F-7.12 · Activity bar and drop notifications: details you did not specify
+- Question: You described the bar, the drop, focus-mode behaviour, and Open. Several details were open.
+- Chosen (decided by Claude, unconfirmed):
+  1. The crawl: an exponential creep toward 90 % with a time constant per job (Organise 25 s, upload 20 s per step, edit pass 15 s per scene, book check 30 s, consistency check 15 s, re-read 8 s per scene); with real steps it crawls through the current step only, so a one-scene pass still moves.
+  2. "Check consistency on demand" today checks one scene (`Check this scene`); that check is tracked.
+  3. The conversion re-read is tracked from Update now until the index queue settles (empty, paused, or only failures left); its progress is the whole queue's, so a summary queued meanwhile counts too. A paused or failed queue is a failure with Retry (the queue's Resume).
+  4. The book check's result toasts ("To do: 2 new items.", "Nothing changed since the last check.") are now the drop's second line instead of toasts, so the result is said once.
+  5. Edit pass: the finish toast is gone (the drop says it). The report still opens on its own when the author is still watching the pass in the Edits workspace; anywhere else the pane is left alone and the drop's Open opens it.
+  6. A drop leaves on its own once its result shows another way (run opened from the status bar, report open, findings view open) or is gone (run closed, pass deleted), and a new run of the same job clears its earlier drop.
+  7. Entering focus mode hides drops already showing (they come back on exit), like the ones that arrive in focus mode after their 6 s.
+  8. In the big review dialog Escape and a click outside only hide it ("Back to writing"); the run stays under its status-bar item. In the column Escape still stops or closes the run.
+  9. Open on the book check leaves focus mode (the To do list is in the sidebar, which focus mode hides); the scene-card re-read has no Open (nothing to show).
+  10. Drops sit under the header (at the window's top in focus mode), 420 px wide, accent left edge; failures have a danger edge and title. The bar's hover strip is 6 px over the header's own bottom padding.
+- Alternatives: a linear crawl; keep the To do toasts and the edit pass toast beside the drop; drops that never auto-leave; Escape closing the run in the dialog too; To do opening its review deck over focus mode instead of the sidebar.
+- To change it: `src/renderer/features/activity/activityJobs.ts` (`CRAWL_MS`, `outcomeOf`, `noteStale`), `activityStore.ts` (`FOCUS_NOTE_MS`, focus parking), `activityRoutes.ts` (Open, Retry), `src/renderer/features/sideWork/SideWorkFrame.tsx` (the dialog's Escape).
+
 ## 2026-10-10 · F-5.25 · Chat tool audit: what was built and what waits
 - Question: The audit of the chat's tools listed eight fixes. Which ship with F-5.25?
 - Chosen (decided by Claude, unconfirmed): built 1 (clear the story bible), 2 (routing: a bulk delete is a clear, never Organise; scenes and chapters never in bulk; unclear nouns are asked about), 3 (one tag on many documents; many items moved at once), 4 (rename a tag; rename a sheet; move sheets to another category; merge sheets; new empty sheet; all through Organise's own apply and the Changes log), 6 (the sheet list reads one field across the sheets). Not built: 5 (clear one document's notes; settle To do items from the chat), 7 (set a fact's status from the chat), 8 (answer actions: undo the last turn, re-run summaries, open the upload or Library dialog). They each need a new tool result format (fact and To do ids the model can name) or new renderer actions, and every extra edit line costs about 20 tokens on every write request.

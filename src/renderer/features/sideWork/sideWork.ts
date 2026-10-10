@@ -1,4 +1,5 @@
 import { createContext, useContext, useState } from 'react'
+import { create } from 'zustand'
 import { uploadInPanel, useLibraryStore } from '@renderer/features/library/libraryStore'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 
@@ -10,15 +11,27 @@ import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
  */
 export type SideWork = 'organise' | 'upload'
 
-/** The side work showing in the assistant column, or null for the conversation. */
-export function useShownSideWork(): SideWork | null {
+/**
+ * Where the shown side work sits (F-7.12): the assistant column (the status-bar item), or the
+ * big review dialog in the middle of the window (a drop notification's Open, also over focus
+ * mode). Only one piece of side work shows at a time, so one place serves both.
+ */
+export type SideWorkPlace = 'column' | 'dialog'
+
+export const useSideWorkPlaceStore = create<{ place: SideWorkPlace }>(() => ({ place: 'column' }))
+
+/** The side work showing in `place` (the assistant column by default), or null. */
+export function useShownSideWork(place: SideWorkPlace = 'column'): SideWork | null {
   const organise = useOrganiseStore((s) => s.open && s.shown)
   const upload = useLibraryStore((s) => s.shown && uploadInPanel(s.flow))
+  const here = useSideWorkPlaceStore((s) => s.place === place)
+  if (!here) return null
   return organise ? 'organise' : upload ? 'upload' : null
 }
 
-/** Shows one piece of side work in the assistant column and hides the other. */
-export function showSideWork(work: SideWork): void {
+/** Shows one piece of side work in `place` (the assistant column by default) and hides the other. */
+export function showSideWork(work: SideWork, place: SideWorkPlace = 'column'): void {
+  useSideWorkPlaceStore.setState({ place })
   if (work === 'organise') {
     useLibraryStore.getState().hide()
     useOrganiseStore.getState().show()
@@ -28,8 +41,16 @@ export function showSideWork(work: SideWork): void {
   }
 }
 
+/** Back to the column for the next show. For tests only. */
+export function resetSideWorkPlace(): void {
+  useSideWorkPlaceStore.setState({ place: 'column' })
+}
+
 /** Whether the author is in the side-work frame now (the frame answers; outside one, false). */
 export const SideWorkFocus = createContext<() => boolean>(() => false)
+
+/** Where the frame being rendered sits; the dialog wraps it as a centred window (F-7.12). */
+export const SideWorkPlaceContext = createContext<SideWorkPlace>('column')
 
 /**
  * Whether a review deck mounting in the frame takes the focus: only when the author is in the

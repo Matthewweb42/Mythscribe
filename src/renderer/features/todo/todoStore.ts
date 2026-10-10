@@ -3,14 +3,45 @@ import {
   continuityFindingIdOf,
   todoCounts,
   type TodoCheck,
+  type TodoCheckResult,
   type TodoCounts,
   type TodoItem
 } from '@shared/todo'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
-import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { goToTodo } from './todoJump'
+
+/** How a Check the whole book ended, in the words the drop notification shows. */
+export interface TodoCheckOutcome {
+  status: 'done' | 'failed' | 'cancelled'
+  message: string
+}
+
+/** What a check's answer means for the author, in the drop notification's words. */
+export function checkOutcome(result: TodoCheckResult): TodoCheckOutcome {
+  if (!result.ok) {
+    return result.code === 'CANCELLED'
+      ? { status: 'cancelled', message: '' }
+      : { status: 'failed', message: `${result.message} ${result.nextStep}`.trim() }
+  }
+  if (!result.requested) {
+    return {
+      status: 'done',
+      message: result.unchanged
+        ? 'Nothing changed since the last check.'
+        : 'No scene has a card yet: the check reads the scene cards.'
+    }
+  }
+  if (result.added === 0 && result.resolved === 0) {
+    return { status: 'done', message: 'The check found nothing new.' }
+  }
+  const parts = [
+    result.added > 0 ? `${result.added} new ${result.added === 1 ? 'item' : 'items'}` : '',
+    result.resolved > 0 ? `${result.resolved} answered` : ''
+  ].filter((part) => part !== '')
+  return { status: 'done', message: `To do: ${parts.join(', ')}.` }
+}
 
 /** The last Done or Dismiss, for its Undo; a contradiction's dismissal cannot be undone. */
 export interface TodoSettled {
@@ -57,12 +88,17 @@ interface TodoState {
   check: TodoCheck
   /** True while Check the whole book runs. */
   checking: boolean
+  /**
+   * How the last Check the whole book ended, set as `checking` goes false (F-7.12: the drop
+   * notification says it; a stopped check is `cancelled`, which says nothing). Null before any.
+   */
+  checkResult: TodoCheckOutcome | null
   /** Items whose suggestions are being asked for. */
   suggesting: string[]
   /** Why an item's suggestions could not be had, by item id (shown on its card). */
   suggestErrors: Record<string, string>
   load: () => Promise<void>
-  /** Check the whole book (only ever on the author's click); toasts what it found. */
+  /** Check the whole book (only ever on the author's click); `checkResult` says what it found (F-7.12 drops it down). */
   runCheck: () => Promise<void>
   /**
    * Asks for an item's suggestions once, when its card is shown (and for the next card, ahead):
@@ -132,6 +168,7 @@ export const useTodoStore = create<TodoState>((set, get) => {
     composer: null,
     check: IDLE_CHECK,
     checking: false,
+    checkResult: null,
     suggesting: [],
     suggestErrors: {},
 
@@ -146,37 +183,22 @@ export const useTodoStore = create<TodoState>((set, get) => {
     async runCheck() {
       if (get().checking) return
       const mine = generation
-      set({ checking: true })
+      set({ checking: true, checkResult: null })
       const requestId = nextRequestId('check')
+      // F-7.12: the outcome goes out with `checking: false` in one write, so the activity watch
+      // reads it the moment the job ends and drops it down from the top (no toast of its own).
+      let checkResult: TodoCheckOutcome
       try {
         const result = await useAiActivityStore
           .getState()
           .track('todo', requestId, ipc().invoke('todo:check', { requestId }))
         if (mine !== generation) return
-        if (!result.ok) {
-          if (result.code !== 'CANCELLED') {
-            toast.error(`${result.message} ${result.nextStep}`.trim())
-          }
-        } else if (!result.requested) {
-          toast.info(
-            result.unchanged
-              ? 'Nothing changed since the last check.'
-              : 'No scene has a card yet: the check reads the scene cards.'
-          )
-        } else if (result.added === 0 && result.resolved === 0) {
-          toast.info('The check found nothing new.')
-        } else {
-          const parts = [
-            result.added > 0 ? `${result.added} new ${result.added === 1 ? 'item' : 'items'}` : '',
-            result.resolved > 0 ? `${result.resolved} answered` : ''
-          ].filter((part) => part !== '')
-          toast.info(`To do: ${parts.join(', ')}.`)
-        }
+        checkResult = checkOutcome(result)
       } catch (err) {
-        if (mine === generation) toast.error(describeError(err))
-      } finally {
-        if (mine === generation) set({ checking: false })
+        if (mine !== generation) return
+        checkResult = { status: 'failed', message: describeError(err) }
       }
+      set({ checking: false, checkResult })
     },
 
     async suggest(id) {
@@ -340,6 +362,7 @@ export const useTodoStore = create<TodoState>((set, get) => {
         composer: null,
         check: IDLE_CHECK,
         checking: false,
+        checkResult: null,
         suggesting: [],
         suggestErrors: {}
       })

@@ -6696,6 +6696,19 @@ test('create, close, reopen a project on disk', async () => {
   // it in the assistant column.
   const organiseStatus = page.getByTestId('side-work-organise')
   await expect(organiseStatus).toHaveText('Organise: ready to review', { timeout: 15_000 })
+  // F-7.12: the finished run drops a notification from the top centre; its Open shows the plan
+  // in the big review dialog over the editor, and "Back to writing" hides it again (the run
+  // stays under its status-bar item, which opens it in the assistant column as before).
+  const organiseDrop = page
+    .getByTestId('activity-drop')
+    .filter({ hasText: 'Organise is ready to review' })
+  await expect(organiseDrop).toBeVisible()
+  await organiseDrop.getByRole('button', { name: 'Open' }).click()
+  const reviewDialog = page.getByTestId('side-work-dialog')
+  await expect(reviewDialog.getByTestId('organise-change')).toHaveCount(1)
+  await expect(organiseDrop).toHaveCount(0)
+  await reviewDialog.getByTestId('side-work-hide').click()
+  await expect(reviewDialog).toHaveCount(0)
   await organiseStatus.click()
   const organisePanel = page.getByTestId('organise-panel')
   const organiseCard = organisePanel.getByTestId('organise-change')

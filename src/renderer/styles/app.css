@@ -500,3 +500,97 @@ select {
     transition: none;
   }
 }
+
+/*
+ * Background activity (F-7.12): a 2 px hairline in the accent over the header's bottom border
+ * (or along the window's top edge in focus mode), inside a 6 px hover strip that sits on the
+ * header's own bottom padding, so nothing below is covered and no height changes. The fill eases
+ * between readings; a pulse swims left to right every few seconds while anything runs; once the
+ * last job ends the full bar fades out. Reduced motion: no pulse and no easing, progress still
+ * shows. The drop notifications slide down from the top centre (none with reduced motion).
+ */
+.activity-bar {
+  height: 6px;
+}
+
+.activity-bar-track {
+  position: absolute;
+  inset-inline: 0;
+  height: 2px;
+  pointer-events: none;
+}
+
+.activity-bar[data-placement='header'] .activity-bar-track {
+  bottom: 0;
+}
+
+.activity-bar[data-placement='window'] .activity-bar-track {
+  top: 0;
+}
+
+.activity-bar-fill {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ms-accent);
+  transition: width 300ms linear;
+}
+
+.activity-bar[data-state='done'] {
+  animation: activity-bar-fade 600ms ease 300ms forwards;
+}
+
+.activity-bar-pulse {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 30%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--ms-accent) 35%, white) 50%,
+    transparent
+  );
+  animation: activity-bar-pulse 3.5s ease-in-out infinite;
+}
+
+@keyframes activity-bar-pulse {
+  from {
+    transform: translateX(-100%);
+  }
+  60%,
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@keyframes activity-bar-fade {
+  to {
+    opacity: 0;
+  }
+}
+
+.activity-drop {
+  animation: activity-drop-in 220ms ease-out;
+}
+
+@keyframes activity-drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-bar-pulse {
+    display: none;
+  }
+
+  .activity-bar-fill {
+    transition: none;
+  }
+
+  .activity-drop {
+    animation: none;
+  }
+}
