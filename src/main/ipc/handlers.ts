@@ -902,7 +902,7 @@ export function registerHandlers({
     return info
   })
 
-  register('project:open', async ({ path }) => {
+  register('project:open', async ({ path, cloudConflict }) => {
     const chosen = path ?? (await dialogs.chooseProjectToOpen())
     if (!chosen) return null
     let folder = chosen
@@ -914,7 +914,7 @@ export function registerHandlers({
       if (!(await dialogs.confirmLegacyConversion(location.source, backup))) return null
       folder = convertLegacyProject(location).folder
     }
-    const info = manager.open(folder)
+    const info = manager.open(folder, cloudConflict)
     diagnostics.count('project.open')
     return info
   })

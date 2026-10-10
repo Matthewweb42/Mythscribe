@@ -19,6 +19,7 @@ function ModalView({ modal }: { modal: Modal }): React.JSX.Element {
   const descId = useId()
   const resolveConfirm = useDialogStore((s) => s.resolveConfirm)
   const resolvePrompt = useDialogStore((s) => s.resolvePrompt)
+  const resolveChoose = useDialogStore((s) => s.resolveChoose)
   const [value, setValue] = useState(
     modal.kind === 'prompt' ? (modal.options.initialValue ?? '') : ''
   )
@@ -33,12 +34,20 @@ function ModalView({ modal }: { modal: Modal }): React.JSX.Element {
 
   const cancel = (): void => {
     if (modal.kind === 'confirm') resolveConfirm(modal.id, false)
+    else if (modal.kind === 'choose') resolveChoose(modal.id, null)
     else resolvePrompt(modal.id, null)
   }
+
+  const primaryChoice =
+    modal.kind === 'choose' ? (modal.options.primary ?? modal.options.choices[0]?.value) : undefined
 
   const submit = (): void => {
     if (modal.kind === 'confirm') {
       resolveConfirm(modal.id, true)
+      return
+    }
+    if (modal.kind === 'choose') {
+      resolveChoose(modal.id, primaryChoice ?? null)
       return
     }
     const problem = modal.options.validate?.(value) ?? null
@@ -62,8 +71,14 @@ function ModalView({ modal }: { modal: Modal }): React.JSX.Element {
   }
 
   const danger = modal.kind === 'confirm' && modal.options.danger
-  const confirmLabel = modal.options.confirmLabel ?? (modal.kind === 'confirm' ? 'OK' : 'Save')
+  const confirmLabel =
+    modal.kind === 'choose'
+      ? ''
+      : (modal.options.confirmLabel ?? (modal.kind === 'confirm' ? 'OK' : 'Save'))
   const cancelLabel = modal.options.cancelLabel ?? 'Cancel'
+  const primaryClass =
+    'rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover'
+  const secondaryClass = 'rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface'
 
   return (
     <div
@@ -89,6 +104,13 @@ function ModalView({ modal }: { modal: Modal }): React.JSX.Element {
             {modal.options.message}
           </p>
         ) : null}
+        {modal.kind === 'choose' && modal.options.details?.length ? (
+          <ul className="mt-3 mb-0 list-disc pl-5 text-sm">
+            {modal.options.details.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
         {modal.kind === 'prompt' ? (
           <div className="mt-4">
             <input
@@ -110,25 +132,40 @@ function ModalView({ modal }: { modal: Modal }): React.JSX.Element {
             ) : null}
           </div>
         ) : null}
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={cancel}
-            className="rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface"
-          >
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <button type="button" onClick={cancel} className={secondaryClass}>
             {cancelLabel}
           </button>
-          <button
-            ref={primaryRef}
-            type="submit"
-            className={
-              danger
-                ? 'rounded-md bg-danger px-3 py-1.5 text-sm font-medium text-danger-fg hover:opacity-90'
-                : 'rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover'
-            }
-          >
-            {confirmLabel}
-          </button>
+          {modal.kind === 'choose' ? (
+            modal.options.choices.map((choice) =>
+              choice.value === primaryChoice ? (
+                <button key={choice.value} ref={primaryRef} type="submit" className={primaryClass}>
+                  {choice.label}
+                </button>
+              ) : (
+                <button
+                  key={choice.value}
+                  type="button"
+                  onClick={() => resolveChoose(modal.id, choice.value)}
+                  className={secondaryClass}
+                >
+                  {choice.label}
+                </button>
+              )
+            )
+          ) : (
+            <button
+              ref={primaryRef}
+              type="submit"
+              className={
+                danger
+                  ? 'rounded-md bg-danger px-3 py-1.5 text-sm font-medium text-danger-fg hover:opacity-90'
+                  : primaryClass
+              }
+            >
+              {confirmLabel}
+            </button>
+          )}
         </div>
       </form>
     </div>

@@ -1,7 +1,14 @@
 import { create } from 'zustand'
-import { CLOUD_PROVIDER_LABEL, type CloudSyncStatus } from '@shared/cloudSync'
+import {
+  CLOUD_PROVIDER_LABEL,
+  CloudConflict,
+  formatBytes,
+  type CloudSide,
+  type CloudSyncStatus,
+  type CloudVersion
+} from '@shared/cloudSync'
 import { describeError } from '@renderer/lib/errors'
-import { ipc } from '@renderer/lib/ipc'
+import { IpcRequestError, ipc } from '@renderer/lib/ipc'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 
 /**
@@ -30,9 +37,16 @@ export const useCloudSyncStore = create<CloudSyncStoreState>((set) => {
     if (status !== null && conflict !== null && conflict !== announcedConflict) {
       announcedConflict = conflict
       const label = CLOUD_PROVIDER_LABEL[status.provider]
-      toast.warning(
-        `${label} had a different version of this project. Yours stays open; the other is kept beside it as "${fileName(conflict)}".`
-      )
+      const name = fileName(conflict)
+      if (status.conflictCopyHolds === 'computer') {
+        toast.info(
+          `${label}'s version is open. The version from this computer is kept beside it as "${name}".`
+        )
+      } else {
+        toast.warning(
+          `${label} had a different version of this project. Yours stays open; the other is kept beside it as "${name}".`
+        )
+      }
     }
     set({ status })
   }
@@ -81,6 +95,47 @@ export async function confirmCloudCopy(going: 'close' | 'switch'): Promise<void>
     })
     if (goOn) return
   }
+}
+
+/** The conflict an open was refused for (`CLOUD_CONFLICT`), or null for any other failure. */
+export function cloudConflictOf(err: unknown): CloudConflict | null {
+  if (!(err instanceof IpcRequestError) || err.code !== 'CLOUD_CONFLICT') return null
+  const parsed = CloudConflict.safeParse(err.details)
+  return parsed.success ? parsed.data : null
+}
+
+function describeVersion(version: CloudVersion): string {
+  const when = new Date(version.modifiedAt).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  })
+  return `changed ${when}, ${formatBytes(version.bytes)}`
+}
+
+/**
+ * Asks which version of a cloud project to keep when both changed (the author's decision
+ * 2026-10-10). The newer one is the highlighted answer. Null = Cancel: nothing was opened or
+ * changed. The version not kept is saved beside the project by main, so neither answer loses work.
+ */
+export async function chooseCloudVersion(conflict: CloudConflict): Promise<CloudSide | null> {
+  const label = CLOUD_PROVIDER_LABEL[conflict.provider]
+  const newer: CloudSide =
+    Date.parse(conflict.cloud.modifiedAt) > Date.parse(conflict.computer.modifiedAt)
+      ? 'cloud'
+      : 'computer'
+  return dialogs.choose<CloudSide>({
+    title: 'Which version do you want to keep?',
+    message: `"${fileName(conflict.folder).replace(/\.mythscribe$/i, '')}" changed on this computer and in ${label} since they last matched. The version you do not keep is saved beside the project as a conflict copy, so nothing is lost.`,
+    details: [
+      `This computer: ${describeVersion(conflict.computer)}`,
+      `${label}: ${describeVersion(conflict.cloud)}`
+    ],
+    choices: [
+      { value: 'computer', label: "Keep this computer's" },
+      { value: 'cloud', label: `Keep ${label}'s` }
+    ],
+    primary: newer
+  })
 }
 
 /** Empties the store. For tests only. */

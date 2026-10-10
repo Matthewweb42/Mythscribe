@@ -59,7 +59,8 @@ export class CloudSyncService {
       state: this.running !== null ? 'copying' : this.error !== null ? 'failed' : 'synced',
       lastSyncedAt: copy.lastSyncedAt,
       error: this.error,
-      conflictCopy: copy.conflictCopy
+      conflictCopy: copy.conflictCopy,
+      conflictCopyHolds: copy.conflictCopyHolds
     }
   }
 

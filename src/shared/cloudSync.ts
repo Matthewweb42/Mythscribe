@@ -32,6 +32,15 @@ export const CLOUD_SYNC_RETRY_MS = 30_000
 export const CloudSyncState = z.enum(['synced', 'copying', 'failed'])
 export type CloudSyncState = z.infer<typeof CloudSyncState>
 
+/**
+ * The two versions of a project in a synced folder: the working copy on this computer and the
+ * database in the cloud folder. When both changed since they last agreed, opening the project
+ * asks which to keep (author's decision 2026-10-10); the other is saved beside the project as
+ * its conflict copy, so nothing is lost.
+ */
+export const CloudSide = z.enum(['computer', 'cloud'])
+export type CloudSide = z.infer<typeof CloudSide>
+
 /** What the status bar shows for a project in a synced folder; null for any other project. */
 export const CloudSyncStatus = z.object({
   provider: CloudProvider,
@@ -41,12 +50,40 @@ export const CloudSyncStatus = z.object({
   /** Why the last copy failed, while `state` is `failed`. */
   error: z.string().nullable(),
   /**
-   * A copy of the cloud version saved beside the project this session, because it had changed
-   * elsewhere while this computer also had changes. Both are kept; the author decides.
+   * The version not kept, saved beside the project this session because both versions had
+   * changed: the one the author did not choose on open, or the cloud version found changed under
+   * a copy back while the project was open.
    */
-  conflictCopy: z.string().nullable()
+  conflictCopy: z.string().nullable(),
+  /** Which version the conflict copy holds; null while there is none. */
+  conflictCopyHolds: CloudSide.nullable()
 })
 export type CloudSyncStatus = z.infer<typeof CloudSyncStatus>
+
+/** One version as the question shows it: when it last changed and how big it is. */
+export const CloudVersion = z.object({
+  /** ISO time the database (or its `-wal`) last changed. */
+  modifiedAt: z.string(),
+  bytes: z.number()
+})
+export type CloudVersion = z.infer<typeof CloudVersion>
+
+/** The details of a `CLOUD_CONFLICT` refusal of `project:open`. */
+export const CloudConflict = z.object({
+  /** The project folder, so the renderer can open it again with the author's answer. */
+  folder: z.string(),
+  provider: CloudProvider,
+  computer: CloudVersion,
+  cloud: CloudVersion
+})
+export type CloudConflict = z.infer<typeof CloudConflict>
+
+/** "2.4 MB", "830 KB": the sizes in the question. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} bytes`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 /** The status line: "Copied to Google Drive 2 min ago", "Copying to Google Drive…", and so on. */
 export function describeCloudSync(status: CloudSyncStatus, now: Date = new Date()): string {

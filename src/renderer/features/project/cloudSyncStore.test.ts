@@ -1,16 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CloudSyncStatus } from '@shared/cloudSync'
+import type { CloudConflict, CloudSyncStatus } from '@shared/cloudSync'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
-import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
-import { confirmCloudCopy, resetCloudSyncStore, useCloudSyncStore } from './cloudSyncStore'
+import {
+  chooseCloudVersion,
+  cloudConflictOf,
+  confirmCloudCopy,
+  resetCloudSyncStore,
+  useCloudSyncStore
+} from './cloudSyncStore'
 
 const synced: CloudSyncStatus = {
   provider: 'googleDrive',
   state: 'synced',
   lastSyncedAt: '2026-10-08T12:00:00.000Z',
   error: null,
-  conflictCopy: null
+  conflictCopy: null,
+  conflictCopyHolds: null
 }
 const failed: CloudSyncStatus = {
   ...synced,
@@ -107,9 +114,10 @@ describe('useCloudSyncStore', () => {
     install([])
     const off = useCloudSyncStore.getState().subscribe()
     await vi.waitFor(() => expect(pushed).not.toBeNull())
-    const conflict = {
+    const conflict: CloudSyncStatus = {
       ...synced,
-      conflictCopy: 'G:\\My Drive\\Book (conflict 2026-10-08 1405).mythscribe'
+      conflictCopy: 'G:\\My Drive\\Book (conflict 2026-10-08 1405).mythscribe',
+      conflictCopyHolds: 'cloud'
     }
     pushed?.(conflict)
     pushed?.({ ...conflict, state: 'copying' })
@@ -117,8 +125,58 @@ describe('useCloudSyncStore', () => {
     const toasts = useDialogStore.getState().toasts
     expect(toasts).toHaveLength(1)
     expect(toasts[0]?.message).toContain('"Book (conflict 2026-10-08 1405).mythscribe"')
+    expect(toasts[0]?.message).toContain('Yours stays open')
     pushed?.(null)
     expect(useCloudSyncStore.getState().status).toBeNull()
     off()
+  })
+
+  it('says the cloud version is open when the author kept it (2026-10-10)', async () => {
+    install([])
+    const off = useCloudSyncStore.getState().subscribe()
+    await vi.waitFor(() => expect(pushed).not.toBeNull())
+    pushed?.({
+      ...synced,
+      conflictCopy: 'G:\\My Drive\\Book (conflict 2026-10-10 0905).mythscribe',
+      conflictCopyHolds: 'computer'
+    })
+    const toasts = useDialogStore.getState().toasts
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]?.message).toBe(
+      'Google Drive\'s version is open. The version from this computer is kept beside it as "Book (conflict 2026-10-10 0905).mythscribe".'
+    )
+    off()
+  })
+})
+
+describe('cloudConflictOf', () => {
+  const details: CloudConflict = {
+    folder: 'G:\\My Drive\\Book.mythscribe',
+    provider: 'oneDrive',
+    computer: { modifiedAt: '2026-10-10T12:00:00.000Z', bytes: 900 },
+    cloud: { modifiedAt: '2026-10-10T08:00:00.000Z', bytes: 2048 }
+  }
+
+  it('reads the details of a CLOUD_CONFLICT refusal and nothing else', () => {
+    expect(
+      cloudConflictOf(new IpcRequestError({ code: 'CLOUD_CONFLICT', message: 'm', details }))
+    ).toEqual(details)
+    expect(cloudConflictOf(new IpcRequestError({ code: 'IO', message: 'm', details }))).toBeNull()
+    expect(
+      cloudConflictOf(new IpcRequestError({ code: 'CLOUD_CONFLICT', message: 'm', details: {} }))
+    ).toBeNull()
+    expect(cloudConflictOf(new Error('m'))).toBeNull()
+  })
+
+  it('highlights the newer version and resolves to the one picked', async () => {
+    const picking = chooseCloudVersion(details)
+    await vi.waitFor(() => expect(useDialogStore.getState().modals).toHaveLength(1))
+    const modal = useDialogStore.getState().modals[0]
+    if (modal?.kind !== 'choose') throw new Error('expected a choose dialog')
+    expect(modal.options.primary).toBe('computer')
+    expect(modal.options.details?.[0]).toMatch(/, 900 bytes$/)
+    expect(modal.options.details?.[1]).toMatch(/^OneDrive: changed .+, 2 KB$/)
+    useDialogStore.getState().resolveChoose(modal.id, 'cloud')
+    await expect(picking).resolves.toBe('cloud')
   })
 })

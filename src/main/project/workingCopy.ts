@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { z } from 'zod'
-import type { CloudProvider } from '@shared/cloudSync'
+import type { CloudConflict, CloudProvider, CloudSide, CloudVersion } from '@shared/cloudSync'
 import { CLOUD_PROVIDER_LABEL } from '@shared/cloudSync'
 import { rollbackSnapshot } from '../db/snapshot'
 import { AppError } from '../ipc/errors'
@@ -25,9 +25,13 @@ import { RECOVERY_DIR } from './recoveryJournal'
  * - no working copy yet, or a clean one and the cloud changed: copy the cloud version in;
  * - clean and unchanged: open the working copy as it is;
  * - dirty and the cloud unchanged: open the working copy and copy it back at once;
- * - dirty and the cloud changed too: keep both. The cloud version is saved beside the project
- *   as `<Name> (conflict YYYY-MM-DD HHmm).mythscribe`, the working copy opens, and the author is
- *   told. A copy back that finds the cloud changed under it does the same before it writes.
+ * - dirty and the cloud changed too (or a working copy without its record): the author is asked
+ *   which version to keep (2026-10-10, the author's decision; before, both were kept without
+ *   asking). Without an answer `open` throws `CLOUD_CONFLICT` and changes nothing; with one, the
+ *   version not kept is saved beside the project as `<Name> (conflict YYYY-MM-DD HHmm).mythscribe`
+ *   and the chosen one opens. A copy back that finds the cloud changed under it while the project
+ *   is open keeps the cloud version beside it the same way, without asking, and the author is
+ *   told.
  */
 
 export const WORKING_STATE_FILE = 'working.json'
@@ -150,12 +154,24 @@ function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
 
+/** When a version last changed and its size, for the question on a conflict. */
+function versionOf(folder: string): CloudVersion {
+  const print = fingerprintOf(folder)
+  if (print === null) return { modifiedAt: new Date(0).toISOString(), bytes: 0 }
+  return {
+    modifiedAt: new Date(Math.max(print.mtimeMs, print.walMtimeMs ?? 0)).toISOString(),
+    bytes: print.size + (print.walSize ?? 0)
+  }
+}
+
 /**
  * Copies the cloud folder's current project beside it as `<Name> (conflict YYYY-MM-DD HHmm)`
  * (` 2`, ` 3` on collision): a whole project the author can open, minus the open marker, the
- * crash journal, and temp files. Throws when it cannot, and then nothing gets overwritten.
+ * crash journal, and temp files. `database`, when given, is a self-contained database file
+ * (no `-wal`) that stands in for the cloud folder's: the working copy's version with the
+ * folder's assets. Throws when it cannot, and then nothing gets overwritten.
  */
-export function saveConflictCopy(cloudFolder: string, now: Date): string {
+export function saveConflictCopy(cloudFolder: string, now: Date, database?: string): string {
   const ext = path.extname(cloudFolder)
   const base = path.basename(cloudFolder, ext)
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}${pad(now.getMinutes())}`
@@ -175,6 +191,9 @@ export function saveConflictCopy(cloudFolder: string, now: Date): string {
         if (rel === '') return true
         const top = rel.split(path.sep)[0]
         const name = path.basename(src)
+        if (database !== undefined && top === name && (name === DB || name === `${DB}-wal`)) {
+          return false
+        }
         return (
           top !== OPEN_LOCK_FILE &&
           top !== RECOVERY_DIR &&
@@ -183,6 +202,7 @@ export function saveConflictCopy(cloudFolder: string, now: Date): string {
         )
       }
     })
+    if (database !== undefined) fs.copyFileSync(database, path.join(target, DB))
   } catch (err) {
     fs.rmSync(target, { recursive: true, force: true })
     throw new AppError(
@@ -223,6 +243,27 @@ function copyIn(cloudFolder: string, dir: string, dest: string): void {
   }
 }
 
+/**
+ * Saves the working copy's version beside the project as the conflict copy (the author kept the
+ * cloud's): its database as one rollback-journal file (any `-wal` a crash left is read in), plus
+ * the project folder's assets. The working copy is about to be replaced, so opening it here is
+ * safe; no session holds it.
+ */
+function saveWorkingConflictCopy(cloudFolder: string, dir: string, now: Date): string {
+  const own = path.join(dir, `conflict-${randomUUID()}.db`)
+  try {
+    const db = new Database(path.join(dir, DB))
+    try {
+      fs.writeFileSync(own, rollbackSnapshot(db))
+    } finally {
+      db.close()
+    }
+    return saveConflictCopy(cloudFolder, now, own)
+  } finally {
+    fs.rmSync(own, { force: true })
+  }
+}
+
 function syncError(provider: CloudProvider, err: unknown): AppError {
   if (err instanceof AppError) return err
   const cause = err instanceof Error ? err.message : String(err)
@@ -237,6 +278,8 @@ export class WorkingCopy {
   readonly dbFile: string
   /** A conflict copy saved this session (on open or on a copy back), for the author to see. */
   conflictCopy: string | null = null
+  /** Which version `conflictCopy` holds. */
+  conflictCopyHolds: CloudSide | null = null
   /** The working copy holds changes from before this session that the cloud folder lacks. */
   private carried: boolean
   /** `total_changes()` on the session's connection at the last copy back; 0 = since it opened. */
@@ -257,12 +300,16 @@ export class WorkingCopy {
     this.carried = carried
   }
 
-  /** Prepares the working copy of an existing cloud project (see the class comment). */
+  /**
+   * Prepares the working copy of an existing cloud project (see the class comment). `keep` is
+   * the author's answer to a conflict; without it a conflict throws `CLOUD_CONFLICT`.
+   */
   static open(
     cloudFolder: string,
     root: string,
     provider: CloudProvider,
-    deps: WorkingCopyDeps = defaultDeps
+    deps: WorkingCopyDeps = defaultDeps,
+    keep?: CloudSide
   ): WorkingCopy {
     const dir = workingDirFor(root, cloudFolder)
     fs.mkdirSync(dir, { recursive: true })
@@ -271,6 +318,7 @@ export class WorkingCopy {
     let state = readState(dir, cloudFolder)
     let carried = false
     let conflict: string | null = null
+    let holds: CloudSide | null = null
     const now = deps.now()
 
     const takeCloud = (lastSyncedAt: string | null): WorkingState => {
@@ -283,29 +331,51 @@ export class WorkingCopy {
       return { version: 1, cloudFolder, cloud, cloudHash, lastSyncedAt, dirty: false }
     }
 
-    if (!fs.existsSync(dbFile)) {
-      state = takeCloud(state?.lastSyncedAt ?? now.toISOString())
-    } else if (state === null) {
-      // A working copy without its record: whether it is ahead is unknown, so keep both.
+    /** Both versions changed: the author's answer decides; none yet, nothing is touched. */
+    const settle = (lastSyncedAt: string | null): WorkingState => {
+      if (keep === undefined) {
+        const details: CloudConflict = {
+          folder: cloudFolder,
+          provider,
+          computer: versionOf(dir),
+          cloud: versionOf(cloudFolder)
+        }
+        throw new AppError(
+          'CLOUD_CONFLICT',
+          `This project changed both on this computer and in ${CLOUD_PROVIDER_LABEL[provider]}. Choose which version to keep.`,
+          details
+        )
+      }
+      if (keep === 'cloud') {
+        conflict = saveWorkingConflictCopy(cloudFolder, dir, now)
+        holds = 'computer'
+        return takeCloud(now.toISOString())
+      }
       conflict = saveConflictCopy(cloudFolder, now)
-      state = {
+      holds = 'cloud'
+      carried = true
+      // The copy back may now replace what was kept, without keeping it a second time.
+      return {
         version: 1,
         cloudFolder,
         cloud: fingerprintOf(cloudFolder),
         cloudHash: hashOf(cloudFolder),
-        lastSyncedAt: null,
+        lastSyncedAt,
         dirty: true
       }
-      carried = true
+    }
+
+    if (!fs.existsSync(dbFile)) {
+      state = takeCloud(state?.lastSyncedAt ?? now.toISOString())
+    } else if (state === null) {
+      // A working copy without its record: whether it is ahead is unknown, so it counts as both.
+      state = settle(null)
     } else {
       const unchanged = cloudMatches(cloudFolder, state)
       if (!state.dirty && !unchanged) {
         state = takeCloud(now.toISOString())
       } else if (state.dirty && !unchanged) {
-        conflict = saveConflictCopy(cloudFolder, now)
-        // The copy back may now replace what was kept, without keeping it a second time.
-        state = { ...state, cloud: fingerprintOf(cloudFolder), cloudHash: hashOf(cloudFolder) }
-        carried = true
+        state = settle(state.lastSyncedAt)
       } else if (state.dirty) {
         carried = true
       }
@@ -316,6 +386,7 @@ export class WorkingCopy {
     writeState(dir, state)
     const copy = new WorkingCopy(provider, cloudFolder, dir, state, deps, carried)
     copy.conflictCopy = conflict
+    copy.conflictCopyHolds = holds
     return copy
   }
 
@@ -451,6 +522,7 @@ export class WorkingCopy {
     const cloudDb = path.join(this.cloudFolder, DB)
     if (!cloudMatches(this.cloudFolder, this.state)) {
       this.conflictCopy = saveConflictCopy(this.cloudFolder, this.deps.now())
+      this.conflictCopyHolds = 'cloud'
     }
     const sides = SIDE_FILES.map((side) => `${cloudDb}${side}`).filter((f) => fs.existsSync(f))
     if (sides.length > 0) {

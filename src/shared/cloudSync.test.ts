@@ -6,7 +6,8 @@ const base: CloudSyncStatus = {
   state: 'synced',
   lastSyncedAt: '2026-10-08T12:00:00.000Z',
   error: null,
-  conflictCopy: null
+  conflictCopy: null,
+  conflictCopyHolds: null
 }
 
 describe('describeCloudSync', () => {

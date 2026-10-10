@@ -3,7 +3,9 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CloudConflict } from '@shared/cloudSync'
 import { openDatabase } from '../db/connection'
+import { AppError } from '../ipc/errors'
 import { ProjectManager } from './manager'
 import { DB_FILE, createProject, projectFolderFor } from './projectStore'
 import { RECOVERY_DIR, stashRecovery } from './recoveryJournal'
@@ -182,24 +184,66 @@ describe('working copies of projects in cloud-synced folders', () => {
     expect(cloudName(folder)).toBe('Unsynced')
   })
 
-  it('keeps both when this computer and the cloud both changed', () => {
+  /** This computer's copy is ahead (its copy back failed) and the cloud changed too. */
+  function bothChanged(folder: string): void {
+    manager.create(folder, 'Book', 'novel')
+    rename('Mine')
+    vi.spyOn(WorkingCopy.prototype, 'syncNow').mockImplementationOnce(() => {
+      throw new Error('Drive is offline')
+    })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    manager.close()
+    changeInCloud(folder, 'Theirs')
+  }
+
+  function refusal(run: () => unknown): AppError {
+    try {
+      run()
+    } catch (err) {
+      if (err instanceof AppError) return err
+      throw err
+    }
+    throw new Error('expected the open to be refused')
+  }
+
+  it('asks which version to keep when this computer and the cloud both changed', () => {
+    const folder = projectFolderFor(drive, 'Book')
+    bothChanged(folder)
+    const other = projectFolderFor(tmp, 'Other')
+    manager.create(other, 'Other', 'novel')
+    const before = fs.readFileSync(
+      path.join(workingDirFor(workingRoot, folder), WORKING_STATE_FILE)
+    )
+
+    const err = refusal(() => manager.open(folder))
+    expect(err.code).toBe('CLOUD_CONFLICT')
+    const details = CloudConflict.parse(err.details)
+    expect(details).toMatchObject({ folder, provider: 'googleDrive' })
+    expect(details.cloud.bytes).toBe(fs.statSync(path.join(folder, DB_FILE)).size)
+    expect(Date.parse(details.cloud.modifiedAt)).toBeGreaterThan(Date.now())
+    expect(details.computer.bytes).toBeGreaterThan(0)
+    // Nothing changed: the project open before stays open, no copy was made, the record is as it was.
+    expect(manager.require().info.name).toBe('Other')
+    expect(siblings()).toEqual(['Book.mythscribe'])
+    expect(cloudName(folder)).toBe('Theirs')
+    expect(fs.existsSync(path.join(folder, '.mythscribe-open'))).toBe(false)
+    expect(
+      fs.readFileSync(path.join(workingDirFor(workingRoot, folder), WORKING_STATE_FILE))
+    ).toEqual(before)
+  })
+
+  it("keeps this computer's version when asked, with the cloud's beside it", () => {
     const now = new Date(2026, 9, 8, 14, 5)
     vi.useFakeTimers({ now, toFake: ['Date'] })
     try {
       const folder = projectFolderFor(drive, 'Book')
-      manager.create(folder, 'Book', 'novel')
-      rename('Mine')
-      vi.spyOn(WorkingCopy.prototype, 'syncNow').mockImplementationOnce(() => {
-        throw new Error('Drive is offline')
-      })
-      vi.spyOn(console, 'warn').mockImplementation(() => {})
-      manager.close()
-      changeInCloud(folder, 'Theirs')
+      bothChanged(folder)
 
-      manager.open(folder)
+      manager.open(folder, 'computer')
       const conflict = path.join(drive, 'Book (conflict 2026-10-08 1405).mythscribe')
       expect(manager.require().info.name).toBe('Mine')
       expect(manager.require().workingCopy?.conflictCopy).toBe(conflict)
+      expect(manager.require().workingCopy?.conflictCopyHolds).toBe('cloud')
       expect(cloudName(conflict)).toBe('Theirs')
       expect(fs.existsSync(path.join(conflict, '.mythscribe-open'))).toBe(false)
       manager.close()
@@ -211,6 +255,46 @@ describe('working copies of projects in cloud-synced folders', () => {
     }
   })
 
+  it("keeps the cloud's version when asked, with this computer's beside it", () => {
+    const now = new Date(2026, 9, 10, 9, 5)
+    vi.useFakeTimers({ now, toFake: ['Date'] })
+    try {
+      const folder = projectFolderFor(drive, 'Book')
+      bothChanged(folder)
+      fs.mkdirSync(path.join(folder, 'assets'), { recursive: true })
+      fs.writeFileSync(path.join(folder, 'assets', 'map.png'), 'png')
+
+      manager.open(folder, 'cloud')
+      const conflict = path.join(drive, 'Book (conflict 2026-10-10 0905).mythscribe')
+      expect(manager.require().info.name).toBe('Theirs')
+      expect(manager.require().workingCopy?.conflictCopy).toBe(conflict)
+      expect(manager.require().workingCopy?.conflictCopyHolds).toBe('computer')
+      expect(manager.require().workingCopy?.carriesChanges).toBe(false)
+      // This computer's version, as a whole project: its database (no -wal) and the assets.
+      expect(cloudName(conflict)).toBe('Mine')
+      expect(cloudIntegrity(conflict)).toBe('ok')
+      expect(fs.existsSync(path.join(conflict, `${DB_FILE}-wal`))).toBe(false)
+      expect(fs.readFileSync(path.join(conflict, 'assets', 'map.png'), 'utf8')).toBe('png')
+      manager.close()
+      expect(cloudName(folder)).toBe('Theirs')
+      expect(state(folder).dirty).toBe(false)
+      expect(siblings()).toEqual(['Book (conflict 2026-10-10 0905).mythscribe', 'Book.mythscribe'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('asks too when the working copy lost its record', () => {
+    const folder = projectFolderFor(drive, 'Book')
+    manager.create(folder, 'Book', 'novel')
+    manager.close()
+    fs.rmSync(path.join(workingDirFor(workingRoot, folder), WORKING_STATE_FILE))
+    expect(refusal(() => manager.open(folder)).code).toBe('CLOUD_CONFLICT')
+    manager.open(folder, 'cloud')
+    expect(manager.require().workingCopy?.conflictCopyHolds).toBe('computer')
+    expect(siblings()).toHaveLength(2)
+  })
+
   it('keeps the cloud version beside it when it changed while the project was open', () => {
     const folder = projectFolderFor(drive, 'Book')
     manager.create(folder, 'Book', 'novel')
@@ -220,6 +304,7 @@ describe('working copies of projects in cloud-synced folders', () => {
     session.workingCopy?.syncNow(session.connection.sqlite)
     const kept = session.workingCopy?.conflictCopy ?? ''
     expect(kept).toMatch(/Book \(conflict .+\)\.mythscribe$/)
+    expect(session.workingCopy?.conflictCopyHolds).toBe('cloud')
     expect(cloudName(kept)).toBe('Theirs')
     expect(cloudName(folder)).toBe('Mine')
   })

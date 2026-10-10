@@ -53,7 +53,7 @@ import {
   RefundResult,
   UsageResult
 } from '../cloudApi'
-import { CloudSyncStatus } from '../cloudSync'
+import { CloudSide, CloudSyncStatus } from '../cloudSync'
 import { BetaReaderItems, BetaReaderScene } from '../betaReader'
 import { BookDetails } from '../bookDetails'
 import { CompiledManuscript } from '../compile'
@@ -948,7 +948,13 @@ export const contract = {
   'project:open': {
     input: z.object({
       /** When omitted, main shows a native open dialog. */
-      path: z.string().optional()
+      path: z.string().optional(),
+      /**
+       * 2026-10-10: the author's answer when a project in a synced folder changed both on this
+       * computer and in the cloud folder: which version to keep. Without it such an open fails
+       * with `CLOUD_CONFLICT` (details: `CloudConflict`) and changes nothing.
+       */
+      cloudConflict: CloudSide.optional()
     }),
     output: ProjectInfo.nullable()
   },
@@ -3071,7 +3077,9 @@ export const IpcErrorCode = z.enum([
   'ALREADY_EXISTS',
   'NO_PROJECT',
   'IO',
-  'INTERNAL'
+  'INTERNAL',
+  /** `project:open` needs the author to pick a version first (details: `CloudConflict`). */
+  'CLOUD_CONFLICT'
 ])
 export type IpcErrorCode = z.infer<typeof IpcErrorCode>
 
