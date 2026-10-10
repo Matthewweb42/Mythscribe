@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ClearSnapshot } from './bibleClear'
+import { ClearCounts, ClearSnapshot } from './bibleClear'
 import { SheetPatch, TagPatch } from './organise'
 
 /**
@@ -115,7 +115,21 @@ export const ChangeUndo = z.discriminatedUnion('type', [
    * F-5.25: what a clear removed, put back row for row; refused when something of the same name
    * has been made since (a re-upload), so nothing is doubled. Only main writes it.
    */
-  z.object({ type: z.literal('restoreCleared'), snapshot: ClearSnapshot })
+  z.object({
+    type: z.literal('restoreCleared'),
+    /** The light summary the Changes list reads. */
+    counts: ClearCounts,
+    /**
+     * The rows themselves. The list reads the row without them (`listChanges` strips them in
+     * SQL), so a page never parses a snapshot; only an Undo reads and checks it.
+     */
+    snapshot: ClearSnapshot.optional()
+  }),
+  /**
+   * F-5.25: a tag the chat made this session (to tag many scenes with a new name) deleted again;
+   * refused once its `modified` stamp moved (the author has edited it since).
+   */
+  z.object({ type: z.literal('removeMadeTag'), tagId: z.string(), modified: z.string() })
 ])
 export type ChangeUndo = z.infer<typeof ChangeUndo>
 
@@ -123,7 +137,7 @@ export type ChangeUndo = z.infer<typeof ChangeUndo>
 export const RECORDED_UNDO_OF: Readonly<Record<ChangeKind, readonly ChangeUndo['type'][]>> = {
   fact: [],
   record: ['deleteSheet'],
-  tag: [],
+  tag: ['removeMadeTag'],
   tagLink: ['unlinkTag', 'linkTag'],
   sheetEdit: ['restoreSheet'],
   tagEdit: ['restoreTag'],

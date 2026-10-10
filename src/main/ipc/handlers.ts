@@ -248,6 +248,7 @@ import { confirmConversion, conversionPending, estimateConversion } from '../kno
 import {
   listChanges,
   noteCreatedSheet,
+  noteCreatedTag,
   recordChanges,
   undoChange,
   undoRun,
@@ -1446,6 +1447,8 @@ export function registerHandlers({
       const tag = createTag(tx, input)
       return { created: tag, record: ensureRecordForTag(tx, tag, 'author') }
     })
+    // F-5.25: a chat run may log the tag as made by it, so its Undo deletes it again.
+    noteCreatedTag(db, created.id)
     if (record !== null) emit(windows(), 'entity:changed', record.entity)
     rescanManuscript(db)
     // F-4.12b: the new name is a tag now, so it is proposed no longer — which is what accepting

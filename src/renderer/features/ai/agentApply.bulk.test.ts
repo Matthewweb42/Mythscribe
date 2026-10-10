@@ -16,6 +16,8 @@ import { applyAgentEdit } from './agentApply'
  */
 
 let calls: [Channel, unknown][]
+/** A move or sheet change of this id fails, as main would refuse it. */
+let refuseId: string | null = null
 const RUN = { source: 'chat', run: 'm-1' } as const
 
 const storm: Tag = {
@@ -48,13 +50,34 @@ const node = (id: string, parentId: string | null, kind: 'folder' | 'document'):
 
 function install(): void {
   calls = []
+  refuseId = null
   setIpcClient({
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
       calls.push([channel, input])
       if (channel === 'documentTag:add' || channel === 'documentTag:remove') {
         return storm as Output<C>
       }
+      if (channel === 'entity:update') {
+        const { id, kind } = input as Input<'entity:update'>
+        if (id === refuseId) throw new Error('Refused')
+        return {
+          id,
+          kind: kind ?? 'character',
+          name: id,
+          template: 'structured',
+          fields: {},
+          body: null,
+          image: null,
+          tagId: null,
+          aliases: [],
+          origin: 'author',
+          status: 'canon',
+          created: '2026-10-10T09:00:00.000Z',
+          modified: '2026-10-10T09:00:00.000Z'
+        } as Output<C>
+      }
       if (channel === 'tree:move') {
+        if ((input as Input<'tree:move'>).id === refuseId) throw new Error('Refused')
         // Main answers the node where it landed: right after `afterId`, or first.
         const { id, parentId, afterId } = input as Input<'tree:move'>
         const after = afterId == null ? -1 : (useTreeStore.getState().byId[afterId]?.position ?? -1)
@@ -158,6 +181,56 @@ describe('bulk agent edits (F-5.25)', () => {
     expect((sent('changes:undo') as { id: string }[]).map((u) => u.id)).toHaveLength(2)
     const ids = (sent('changes:undo') as { id: string }[]).map((u) => u.id)
     expect(ids).toEqual([...ids].sort().reverse())
+  })
+
+  it('a recategorise that fails part-way takes back the sheets it changed, then reports', async () => {
+    refuseId = 'tomas'
+    await expect(
+      applyAgentEdit(
+        {
+          kind: 'sheetPatch',
+          sheets: [
+            { entityId: 'mara', name: 'Mara', kind: 'character' },
+            { entityId: 'tomas', name: 'Tomas', kind: 'character' }
+          ],
+          rename: null,
+          to: 'world',
+          toName: 'World'
+        },
+        'p-1',
+        RUN
+      )
+    ).rejects.toThrow('Refused')
+    // Mara moved and was logged; her change is undone through the log.
+    expect(sent('entity:update')).toEqual([
+      { id: 'mara', kind: 'world' },
+      { id: 'tomas', kind: 'world' }
+    ])
+    expect(sent('changes:undo')).toHaveLength(1)
+  })
+
+  it('a move that fails part-way puts back what it moved, then reports', async () => {
+    refuseId = 's3'
+    await expect(
+      applyAgentEdit(
+        {
+          kind: 'moveMany',
+          nodes: [
+            { nodeId: 's2', title: 's2' },
+            { nodeId: 's3', title: 's3' }
+          ],
+          parentId: 'c1',
+          parentTitle: 'c1'
+        },
+        'p-1',
+        RUN
+      )
+    ).rejects.toThrow('Refused')
+    expect(sent('tree:move')).toEqual([
+      { id: 's2', parentId: 'c1', afterId: 's1' },
+      { id: 's3', parentId: 'c1', afterId: 's2' },
+      { id: 's2', parentId: 'c2', afterId: null }
+    ])
   })
 
   it('moves many items to the end of a folder in order, and Undo moves them back newest first', async () => {

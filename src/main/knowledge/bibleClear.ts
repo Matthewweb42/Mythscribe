@@ -1,5 +1,6 @@
 import { inArray, isNotNull } from 'drizzle-orm'
 import {
+  CLEAR_IDS_MAX,
   CLEAR_OPTIONS_MAX,
   clearLabel,
   isEmptyClear,
@@ -53,66 +54,64 @@ const named = <T extends string>(wanted: 'all' | ReadonlySet<T>, id: T): boolean
  */
 export function clearOptions(db: EntityDb, wanted: ClearWanted): ClearOption[] {
   const categories = listCategories(db)
-  const sheetCounts = new Map<string, number>()
-  for (const row of db.select({ kind: entity.kind }).from(entity).all()) {
-    sheetCounts.set(row.kind, (sheetCounts.get(row.kind) ?? 0) + 1)
-  }
   const order = new Map(categories.map((category, index) => [category.id, index]))
-  const sheets: ClearOption[] = [...sheetCounts.entries()]
-    .sort(([a], [b]) => (order.get(a) ?? Infinity) - (order.get(b) ?? Infinity))
-    .map(([kind, count]) => ({
-      group: 'sheets',
-      id: kind,
-      label: categoryOf(kind, categories).name,
-      count,
-      checked: named(wanted.sheets, kind)
-    }))
-  const tagCounts = new Map<TagCategory, number>()
-  for (const row of db.select({ category: tag.category }).from(tag).all()) {
-    tagCounts.set(row.category, (tagCounts.get(row.category) ?? 0) + 1)
+  const sheetIds = new Map<string, string[]>()
+  for (const row of db.select({ id: entity.id, kind: entity.kind }).from(entity).all()) {
+    sheetIds.set(row.kind, [...(sheetIds.get(row.kind) ?? []), row.id])
   }
-  const tags: ClearOption[] = TAG_CATEGORIES.flatMap((category) => {
-    const count = tagCounts.get(category) ?? 0
-    return count === 0
+  const tagIds = new Map<TagCategory, string[]>()
+  for (const row of db.select({ id: tag.id, category: tag.category }).from(tag).all()) {
+    tagIds.set(row.category, [...(tagIds.get(row.category) ?? []), row.id])
+  }
+  const line = (
+    group: ClearOption['group'],
+    id: string,
+    label: string,
+    ids: readonly string[],
+    checked: boolean
+  ): ClearOption[] => {
+    const listed = ids.slice(0, CLEAR_IDS_MAX)
+    return listed.length === 0
       ? []
-      : [
-          {
-            group: 'tags' as const,
-            id: category,
-            label: TAG_CATEGORY_LABEL[category],
-            count,
-            checked: named(wanted.tags, category)
-          }
-        ]
-  })
-  const uploads = db.select({ id: contextFile.id }).from(contextFile).all().length
-  const notes = documentsWithNotes(db).length
-  return [
-    ...sheets,
-    ...tags,
-    ...(uploads > 0
-      ? [
-          {
-            group: 'library' as const,
-            id: 'library',
-            label: 'Library uploads',
-            count: uploads,
-            checked: wanted.library
-          }
-        ]
-      : []),
-    ...(notes > 0
-      ? [
-          {
-            group: 'notes' as const,
-            id: 'notes',
-            label: 'Notes on scenes and chapters',
-            count: notes,
-            checked: wanted.notes
-          }
-        ]
-      : [])
-  ].slice(0, CLEAR_OPTIONS_MAX)
+      : [{ group, id, label, count: listed.length, ids: listed, checked }]
+  }
+  const tags = TAG_CATEGORIES.flatMap((category) =>
+    line(
+      'tags',
+      category,
+      TAG_CATEGORY_LABEL[category],
+      tagIds.get(category) ?? [],
+      named(wanted.tags, category)
+    )
+  )
+  const rest = [
+    ...line(
+      'library',
+      'library',
+      'Library uploads',
+      db
+        .select({ id: contextFile.id })
+        .from(contextFile)
+        .all()
+        .map((row) => row.id),
+      wanted.library
+    ),
+    ...line(
+      'notes',
+      'notes',
+      'Notes on scenes and chapters',
+      documentsWithNotes(db).map((held) => held.id),
+      wanted.notes
+    )
+  ]
+  // The card's cap falls on the sheet categories; the tags, uploads, and notes lines always show.
+  const sheets = [...sheetIds.entries()]
+    .sort(([a], [b]) => (order.get(a) ?? Infinity) - (order.get(b) ?? Infinity))
+    .flatMap(([kind, ids]) =>
+      line('sheets', kind, categoryOf(kind, categories).name, ids, named(wanted.sheets, kind))
+    )
+    .slice(0, CLEAR_OPTIONS_MAX - tags.length - rest.length)
+  return [...sheets, ...tags, ...rest]
 }
 
 /** The documents and folders below the sections whose notes hold any text. */
@@ -142,7 +141,7 @@ export interface ClearOutcome {
 }
 
 /**
- * Clears what `selection` ticks (F-5.25) in one transaction and logs it as one Changes row under
+ * Clears the items `selection` lists (F-5.25, the ids the card showed) in one transaction and logs it as one Changes row under
  * `runId`, whose Undo puts it all back (`restoreCleared`). The caller takes the backup first.
  * Sheets go through `deleteEntity` and tags through the tag bank's `deleteTags`, so their
  * cascades are the usual ones; the names those paths remember as dismissed are forgotten again,
@@ -158,28 +157,30 @@ export function clearStoryBible(
 ): ClearOutcome {
   if (isEmptyClear(selection)) throw new AppError('VALIDATION', 'Nothing is ticked to delete')
   return db.transaction((tx) => {
-    const kinds = new Set(selection.sheets)
-    const tagCategories = new Set(selection.tags)
+    // Only what the card listed and still exists: never what was added since it was made.
+    const sheetsWanted = new Set(selection.sheets)
+    const tagsWanted = new Set(selection.tags)
+    const libraryWanted = new Set(selection.library)
+    const notesWanted = new Set(selection.notes)
     const entityIds = tx
-      .select({ id: entity.id, kind: entity.kind })
+      .select({ id: entity.id })
       .from(entity)
       .all()
-      .filter((row) => kinds.has(row.kind))
       .map((row) => row.id)
+      .filter((id) => sheetsWanted.has(id))
     const tagIds = tx
-      .select({ id: tag.id, category: tag.category })
+      .select({ id: tag.id })
       .from(tag)
       .all()
-      .filter((row) => tagCategories.has(row.category))
       .map((row) => row.id)
-    const libraryIds = selection.library
-      ? tx
-          .select({ id: contextFile.id })
-          .from(contextFile)
-          .all()
-          .map((row) => row.id)
-      : []
-    const notes = selection.notes ? documentsWithNotes(tx) : []
+      .filter((id) => tagsWanted.has(id))
+    const libraryIds = tx
+      .select({ id: contextFile.id })
+      .from(contextFile)
+      .all()
+      .map((row) => row.id)
+      .filter((id) => libraryWanted.has(id))
+    const notes = documentsWithNotes(tx).filter((held) => notesWanted.has(held.id))
     const counts: ClearCounts = {
       sheets: entityIds.length,
       tags: tagIds.length,
@@ -305,7 +306,7 @@ export function clearStoryBible(
           entityId: null,
           targetId: 'clear',
           label: clearLabel(counts),
-          undo: { type: 'restoreCleared', snapshot }
+          undo: { type: 'restoreCleared', counts, snapshot }
         }
       ],
       now

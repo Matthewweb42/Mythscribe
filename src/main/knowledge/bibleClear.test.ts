@@ -1,8 +1,9 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { ClearSelection } from '@shared/bibleClear'
+import { eq } from 'drizzle-orm'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CLEAR_OPTIONS_MAX, clearSelectionOf, type ClearSelection } from '@shared/bibleClear'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { resolveAgentEdit, loadAgentProject } from '../ai/agentTools'
 import { getDocumentContent, saveDocument } from '../document/documentStore'
@@ -16,8 +17,17 @@ import { getDismissedNames, getObservedDismissed } from '../project/settingsStor
 import { addDocumentTag, listDocumentTags } from '../tag/documentTagStore'
 import { createTag, deleteTag, getTagWithUsage, listTags } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
-import { clearOptions, clearStoryBible } from './bibleClear'
-import { listChanges, undoChange, undoRun } from './changeLog'
+import { clearOptions, clearStoryBible, type ClearWanted } from './bibleClear'
+import { knowledgeChange } from '../db/schema'
+import { createCategory } from '../entity/categoryStore'
+import {
+  listChanges,
+  noteCreatedTag,
+  pruneChanges,
+  recordChanges,
+  undoChange,
+  undoRun
+} from './changeLog'
 
 /**
  * F-5.25: Clear the story bible. One transaction removes whole kinds (sheets by category, tags by
@@ -82,12 +92,12 @@ async function seed(): Promise<{ mara: string; tomas: string; elm: string; tone:
   return { mara: mara.id, tomas: tomas.id, elm: elm.id, tone: tone.id }
 }
 
-const ALL: ClearSelection = {
-  sheets: ['character', 'setting'],
-  tags: ['character', 'setting', 'worldBuilding', 'tone', 'content', 'plotThread', 'custom'],
-  library: true,
-  notes: true
-}
+/** The selection a card makes as listed now, ticked as `want` names it (nothing by default). */
+const pick = (want: Partial<ClearWanted>): ClearSelection =>
+  clearSelectionOf(
+    clearOptions(db, { sheets: new Set(), tags: new Set(), library: false, notes: false, ...want })
+  )
+const ALL = (): ClearSelection => pick({ sheets: 'all', tags: 'all', library: true, notes: true })
 
 describe('clearOptions (F-5.25)', () => {
   it('lists each kind the project has with its count, ticked as the request named it', async () => {
@@ -116,7 +126,7 @@ describe('clearStoryBible (F-5.25)', () => {
     const nodesBefore = listNodes(db).map((row) => row.id)
     const dismissedBefore = getDismissedNames(db)
     const observedBefore = getObservedDismissed(db)
-    const outcome = clearStoryBible(db, ALL, 'chat:m1', NOW)
+    const outcome = clearStoryBible(db, ALL(), 'chat:m1', NOW)
 
     expect(outcome.counts).toMatchObject({ sheets: 3, library: 1, notes: 1 })
     expect(outcome.counts.tags).toBe(listTags(db).length + outcome.removedTagIds.length)
@@ -148,7 +158,7 @@ describe('clearStoryBible (F-5.25)', () => {
     const ids = await seed()
     clearStoryBible(
       db,
-      { sheets: ['setting'], tags: ['tone'], library: false, notes: false },
+      pick({ sheets: new Set(['setting']), tags: new Set(['tone']) }),
       'chat:m2',
       NOW
     )
@@ -165,14 +175,14 @@ describe('clearStoryBible (F-5.25)', () => {
   it('refuses an empty selection, and one whose kinds are already empty', async () => {
     expect(
       refusal(() =>
-        clearStoryBible(db, { sheets: [], tags: [], library: false, notes: false }, 'chat:m3', NOW)
+        clearStoryBible(db, { sheets: [], tags: [], library: [], notes: [] }, 'chat:m3', NOW)
       )
     ).toBe('VALIDATION: Nothing is ticked to delete')
     expect(
       refusal(() =>
         clearStoryBible(
           db,
-          { sheets: ['world'], tags: [], library: true, notes: false },
+          { sheets: ['gone-sheet'], tags: [], library: ['gone-upload'], notes: [] },
           'chat:m3',
           NOW
         )
@@ -189,7 +199,7 @@ describe('clearStoryBible (F-5.25)', () => {
     const linksBefore = listDocumentTags(db, scene)
     const filesBefore = listContextFiles(db)
     const notesBefore = getNotes(db, scene).notes
-    const outcome = clearStoryBible(db, ALL, 'chat:m4', NOW)
+    const outcome = clearStoryBible(db, ALL(), 'chat:m4', NOW)
 
     const undone = undoChange(db, outcome.entry.id)
     expect(undone.entries[0]).toMatchObject({ kind: 'clear', status: 'undone' })
@@ -210,12 +220,7 @@ describe('clearStoryBible (F-5.25)', () => {
     const ids = await seed()
     const before = getEntity(db, ids.mara)
     expect(before?.tagId).not.toBeNull()
-    const outcome = clearStoryBible(
-      db,
-      { sheets: [], tags: ['character'], library: false, notes: false },
-      'chat:m5',
-      NOW
-    )
+    const outcome = clearStoryBible(db, pick({ tags: new Set(['character']) }), 'chat:m5', NOW)
     expect(getEntity(db, ids.mara)?.tagId).toBeNull()
     undoRun(db, outcome.entry.runId)
     expect(getEntity(db, ids.mara)?.tagId).toBe(before?.tagId)
@@ -223,7 +228,7 @@ describe('clearStoryBible (F-5.25)', () => {
 
   it('refuses the Undo whole when something of the same name was made again since', async () => {
     const ids = await seed()
-    const outcome = clearStoryBible(db, ALL, 'chat:m6', NOW)
+    const outcome = clearStoryBible(db, ALL(), 'chat:m6', NOW)
     createTag(db, { name: 'dread', category: 'tone' })
     expect(refusal(() => undoChange(db, outcome.entry.id))).toMatch(
       /^VALIDATION: #dread was made again since the clear/
@@ -235,26 +240,127 @@ describe('clearStoryBible (F-5.25)', () => {
 
   it('refuses the Undo when the cleared notes have been written in since', async () => {
     await seed()
-    const outcome = clearStoryBible(
-      db,
-      { sheets: [], tags: [], library: false, notes: true },
-      'chat:m7',
-      NOW
-    )
+    const outcome = clearStoryBible(db, pick({ notes: true }), 'chat:m7', NOW)
     saveNotes(db, scene, NOTES_DOC)
     expect(refusal(() => undoChange(db, outcome.entry.id))).toMatch(
       /^VALIDATION: You have written notes in .* since the clear/
     )
   })
 
+  it('deletes only what the card listed, never a sheet made after it', async () => {
+    const ids = await seed()
+    const selection = pick({ sheets: new Set(['character']) })
+    const later = createEntity(db, { kind: 'character', name: 'Pell' }).entity
+    const outcome = clearStoryBible(db, selection, 'chat:m10', NOW)
+    expect(outcome.removedEntityIds.sort()).toEqual([ids.mara, ids.tomas].sort())
+    expect(getEntity(db, later.id)?.name).toBe('Pell')
+  })
+
+  it('never prunes an applied clear from the log, and lists it without its snapshot', async () => {
+    await seed()
+    const outcome = clearStoryBible(db, ALL(), 'chat:m11', NOW)
+    // Newer rows push the clear past the cap: it stays, an older plain row would not.
+    const tag = createTag(db, { name: 'later', category: 'custom' })
+    addDocumentTag(db, scene, tag.id)
+    recordChanges(
+      db,
+      {
+        source: 'chat',
+        run: 'm12',
+        changes: [
+          {
+            kind: 'tagLink',
+            label: 'Tagged',
+            undo: { type: 'unlinkTag', nodeId: scene, tagId: tag.id }
+          }
+        ]
+      },
+      '2026-10-10T11:00:00.000Z'
+    )
+    pruneChanges(db, 1)
+    const ids = listChanges(db, { limit: 10 }).entries.map((entry) => entry.id)
+    expect(ids).toContain(outcome.entry.id)
+    // The stored row keeps the snapshot; a page reads it without.
+    const stored = db
+      .select({ undo: knowledgeChange.undo })
+      .from(knowledgeChange)
+      .where(eq(knowledgeChange.id, outcome.entry.id))
+      .get()
+    expect(stored?.undo).toContain('"snapshot"')
+    // What the page hands to JSON.parse never holds the snapshot (SQL strips it first).
+    const parse = vi.spyOn(JSON, 'parse')
+    const page = listChanges(db, { limit: 10 })
+    const parsed = parse.mock.calls.map(([text]) => String(text))
+    parse.mockRestore()
+    expect(page.entries.find((entry) => entry.id === outcome.entry.id)).toMatchObject({
+      kind: 'clear',
+      undoable: true
+    })
+    expect(parsed.some((text) => text.includes('"restoreCleared"'))).toBe(true)
+    expect(parsed.some((text) => text.includes('"snapshot"'))).toBe(false)
+    // An undone clear may go like any row.
+    undoChange(db, outcome.entry.id)
+    pruneChanges(db, 1)
+    expect(listChanges(db, { limit: 10 }).entries.map((entry) => entry.id)).not.toContain(
+      outcome.entry.id
+    )
+  })
+
+  it('a turn that cleared the tags and then tagged every scene with a cleared name undoes whole', async () => {
+    const ids = await seed()
+    const outcome = clearStoryBible(db, pick({ tags: 'all' }), 'chat:m13', NOW)
+    // The same turn then tags the scene #dread again, a new tag of a cleared name.
+    const remade = createTag(db, { name: 'dread', category: 'tone' })
+    noteCreatedTag(db, remade.id)
+    addDocumentTag(db, scene, remade.id)
+    const made = getTagWithUsage(db, remade.id)
+    recordChanges(
+      db,
+      {
+        source: 'chat',
+        run: 'm13',
+        changes: [
+          {
+            kind: 'tag',
+            label: 'New tag #dread',
+            undo: { type: 'removeMadeTag', tagId: remade.id, modified: made?.modified ?? '' }
+          },
+          {
+            kind: 'tagLink',
+            label: 'Tagged',
+            undo: { type: 'unlinkTag', nodeId: scene, tagId: remade.id }
+          }
+        ]
+      },
+      '2026-10-10T10:00:01.000Z'
+    )
+    const undone = undoRun(db, outcome.entry.runId)
+    expect(undone.entries).toHaveLength(3)
+    expect(getTagWithUsage(db, remade.id)).toBeUndefined()
+    expect(getTagWithUsage(db, ids.tone)?.name).toBe('dread')
+    expect(listDocumentTags(db, scene).map((t) => t.id)).toContain(ids.tone)
+  })
+
+  it('keeps the uploads and notes lines when sheet categories fill the card', async () => {
+    await seed()
+    for (let i = 0; i < CLEAR_OPTIONS_MAX; i++) {
+      const made = createCategory(
+        db,
+        { name: `Kind ${i}`, noun: `kind ${i}`, fields: [] },
+        'author'
+      )
+      createEntity(db, { kind: made.id, name: `Thing ${i}` })
+    }
+    const options = clearOptions(db, { sheets: 'all', tags: 'all', library: true, notes: true })
+    expect(options).toHaveLength(CLEAR_OPTIONS_MAX)
+    expect(options.some((o) => o.group === 'library')).toBe(true)
+    expect(options.some((o) => o.group === 'notes')).toBe(true)
+    expect(options.some((o) => o.group === 'tags')).toBe(true)
+  })
+
   it('puts a sheet back without the links to a tag deleted since', async () => {
     const ids = await seed()
-    const outcome = clearStoryBible(
-      db,
-      { sheets: ['character'], tags: [], library: false, notes: false },
-      'chat:m8',
-      NOW
-    )
+    const outcome = clearStoryBible(db, pick({ sheets: new Set(['character']) }), 'chat:m8', NOW)
     deleteTag(db, ids.tone)
     undoChange(db, outcome.entry.id)
     expect(getEntity(db, ids.mara)?.name).toBe('Mara')

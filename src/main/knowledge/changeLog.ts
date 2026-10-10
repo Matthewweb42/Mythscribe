@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, desc, eq, lt, ne, or, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, lt, ne, or, sql } from 'drizzle-orm'
 import { aliasKey } from '@shared/aliases'
 import {
   CHANGES_MAX,
@@ -118,6 +118,16 @@ export function noteCreatedSheet(db: EntityDb, entityId: string, madeTagId: stri
   }
   made.sheets.add(entityId)
   if (madeTagId !== null) made.tags.add(madeTagId)
+}
+
+/** F-5.25: remembers a tag `tag:create` made this session, so a chat run may log it as made. */
+export function noteCreatedTag(db: EntityDb, tagId: string): void {
+  let made = createdHere.get(db)
+  if (made === undefined) {
+    made = { sheets: new Set(), tags: new Set() }
+    createdHere.set(db, made)
+  }
+  made.tags.add(tagId)
 }
 
 /**
@@ -314,6 +324,12 @@ function recordedInput(
       return { ...base, nodeId: undo.nodeId, entityId: null, targetId: undo.tagId }
     case 'none':
       return { ...base, entityId: null, targetId: change.targetId ?? kind }
+    case 'removeMadeTag': {
+      // Only a tag made this session and untouched since its stamp.
+      landed(made?.tags.has(undo.tagId) === true)
+      landed(requireTag(db, undo.tagId).modified === undo.modified)
+      return { ...base, entityId: null, targetId: undo.tagId }
+    }
     default:
       throw new AppError('VALIDATION', 'This change cannot be logged with that undo', {
         kind,
@@ -337,11 +353,22 @@ export function recordChanges(db: EntityDb, input: RecordChangesInput, now: stri
 
 /** Drops the oldest rows past `max`. */
 export function pruneChanges(db: EntityDb, max: number): void {
+  // F-5.25: an applied clear holds the only in-app copy of what it removed; it stays until undone.
   db.run(
     sql`DELETE FROM knowledge_change WHERE rowid IN (
       SELECT rowid FROM knowledge_change ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ${max}
-    )`
+    ) AND NOT (kind = 'clear' AND status = 'applied')`
   )
+}
+
+/**
+ * The log's columns as a page reads them: a clear's inverse without its snapshot (F-5.25), cut
+ * in SQL so a page never carries or parses the rows a clear keeps for its Undo.
+ */
+const LISTED_COLUMNS = {
+  ...getTableColumns(knowledgeChange),
+  undo: sql<string>`CASE WHEN ${knowledgeChange.kind} = 'clear' AND json_valid(${knowledgeChange.undo})
+    THEN json_remove(${knowledgeChange.undo}, '$.snapshot') ELSE ${knowledgeChange.undo} END`
 }
 
 /**
@@ -367,7 +394,7 @@ export function listChanges(
   for (;;) {
     const from = after
     const rows = db
-      .select({ row: knowledgeChange, rowid })
+      .select({ row: LISTED_COLUMNS, rowid })
       .from(knowledgeChange)
       .where(
         from === undefined
@@ -570,8 +597,31 @@ function undoRow(db: EntityDb, { row, undo }: ReadRow, tally: UndoTally): void {
     }
     case 'none':
       throw new AppError('VALIDATION', undo.reason, { id: row.id })
+    case 'removeMadeTag': {
+      const held = getTagWithUsage(db, undo.tagId)
+      if (held === undefined) break
+      // The run's own links unwind first (rank 0); a link left is the author's use since.
+      const used = db
+        .select({ id: documentTag.id })
+        .from(documentTag)
+        .where(eq(documentTag.tagId, undo.tagId))
+        .get()
+      if (held.modified !== undo.modified || used !== undefined) {
+        throw new AppError(
+          'VALIDATION',
+          `You have edited or used #${held.name} since, so it is yours now. Delete it from the tag bank if you no longer want it.`,
+          { id: row.id, tagId: undo.tagId }
+        )
+      }
+      deleteTag(db, undo.tagId)
+      tally.removedTagIds.add(undo.tagId)
+      break
+    }
     case 'restoreCleared': {
       // F-5.25: everything a clear removed, back in this transaction (or refused whole).
+      if (undo.snapshot === undefined) {
+        throw new AppError('VALIDATION', 'This change cannot be undone', { id: row.id })
+      }
       const restored = restoreCleared(db, undo.snapshot)
       for (const id of restored.entityIds) {
         tally.restoredEntityIds.add(id)
@@ -599,8 +649,6 @@ function undoRow(db: EntityDb, { row, undo }: ReadRow, tally: UndoTally): void {
  * newest first (the caller's order), so two edits of one sheet unwind in turn.
  */
 const UNDO_ORDER: Readonly<Record<ChangeKind, number>> = {
-  // F-5.25: a clear comes back first, so the turn's other changes unwind against what it removed.
-  clear: -1,
   tagLink: 0,
   fact: 1,
   sheetEdit: 1,
@@ -609,7 +657,10 @@ const UNDO_ORDER: Readonly<Record<ChangeKind, number>> = {
   tag: 3,
   merge: 4,
   delete: 4,
-  category: 4
+  category: 4,
+  // F-5.25: a clear comes back last, once what the turn did after it (a tag made again with a
+  // cleared name, scenes tagged with it) has unwound, so nothing it restores is taken already.
+  clear: 5
 }
 
 function undoRows(db: EntityDb, rows: readonly ReadRow[]): UndoOutcome {

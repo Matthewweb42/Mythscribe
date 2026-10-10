@@ -6,6 +6,7 @@ import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import { SUGGESTION_ROTATE_MS } from '@shared/assistantSuggestions'
 import type { Conversation, Conversations } from '@shared/chat'
 import type { AgentChange } from '@shared/agent'
+import type { ClearOption } from '@shared/bibleClear'
 import type { RouteAction } from '@shared/assistantRoute'
 import type { AiAgentResult, Channel, Input, Output } from '@shared/ipc/contract'
 import { QUERY_NOT_FOUND, type QueryTurn } from '@shared/query'
@@ -836,24 +837,33 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
     expect(within(turns()[1]!).getByTestId('agent-apply-all')).toBeInTheDocument()
   })
 
+  /** One line of a clear card: the items it covers, by id. */
+  const line = (
+    group: ClearOption['group'],
+    id: string,
+    label: string,
+    ids: string[],
+    checked: boolean
+  ): ClearOption => ({ group, id, label, count: ids.length, ids, checked })
+
   it('F-5.25: a clear asks with a checkbox per kind, pre-ticked; unticking changes what Delete removes', async () => {
     const CLEAR = {
       kind: 'clear',
       options: [
-        { group: 'sheets', id: 'character', label: 'Characters', count: 2, checked: true },
-        { group: 'sheets', id: 'setting', label: 'Places', count: 1, checked: true },
-        { group: 'tags', id: 'tone', label: 'Tone', count: 3, checked: true },
-        { group: 'library', id: 'library', label: 'Library uploads', count: 1, checked: true },
-        {
-          group: 'notes',
-          id: 'notes',
-          label: 'Notes on scenes and chapters',
-          count: 4,
-          checked: false
-        }
+        line('sheets', 'character', 'Characters', ['mara', 'tomas'], true),
+        line('sheets', 'setting', 'Places', ['elm'], true),
+        line('tags', 'tone', 'Tone', ['dread', 'calm', 'storm'], true),
+        line('library', 'library', 'Library uploads', ['up-1'], true),
+        line(
+          'notes',
+          'notes',
+          'Notes on scenes and chapters',
+          ['sc-1', 'sc-2', 'sc-3', 'sc-4'],
+          false
+        )
       ]
-    } as const satisfies AgentChange['edit']
-    await mountOpen(withChanges([change('e-1', { ...CLEAR, options: [...CLEAR.options] })]))
+    } satisfies AgentChange['edit']
+    await mountOpen(withChanges([change('e-1', CLEAR)]))
     const card = within(turns()[1]!).getByTestId('agent-change')
     expect(card).toHaveTextContent('Are these the things you want to delete?')
     expect(card).toHaveTextContent('A backup is taken first, and Undo puts everything back.')
@@ -888,7 +898,13 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
     await userEvent.click(within(turns()[1]!).getByTestId('agent-change-apply'))
     expect(clears).toEqual([
       {
-        selection: { sheets: ['character'], tags: ['tone'], library: false, notes: false },
+        // Exactly the items the card listed, by id.
+        selection: {
+          sheets: ['mara', 'tomas'],
+          tags: ['dread', 'calm', 'storm'],
+          library: [],
+          notes: []
+        },
         run: 'm-2'
       }
     ])
@@ -902,7 +918,7 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
       withChanges([
         change('e-1', {
           kind: 'clear',
-          options: [{ group: 'tags', id: 'tone', label: 'Tone', count: 3, checked: false }]
+          options: [line('tags', 'tone', 'Tone', ['dread', 'calm', 'storm'], false)]
         }),
         change('e-2', TEXT_EDIT),
         change('e-3', { ...TEXT_EDIT, find: 'Nobody followed.' })

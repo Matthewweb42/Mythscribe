@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/core'
 import { describeEdit, type AgentEdit } from '@shared/agent'
 import { clearSelectionOf } from '@shared/bibleClear'
-import { NO_UNDO_REASON, changeLabel } from '@shared/changes'
+import { NO_UNDO_REASON, changeLabel, type RecordedChange } from '@shared/changes'
 import type { EntityFieldId, EntityFields } from '@shared/entities'
 import { AI_ORIGIN_MARK } from '@shared/provenance'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
@@ -215,6 +215,7 @@ export async function applyAgentEdit(
     case 'tagMany': {
       // F-5.25: one tag on or off many documents; each link is a row of the turn's run, and the
       // Undo takes them all back. A failure part-way puts back what it did, then reports.
+      const existed = Object.values(useTagStore.getState().byId).some((t) => t.name === edit.tag)
       const tagId = await tagIdFor(edit.tag, edit.add)
       const set = (nodeId: string, on: boolean): Promise<void> =>
         on
@@ -228,11 +229,22 @@ export async function applyAgentEdit(
         }
       } catch (err) {
         for (const nodeId of done.reverse()) await set(nodeId, !edit.add)
+        if (!existed) await useTagStore.getState().remove(tagId)
         throw err
       }
-      return logAppliedChanges(
-        run,
-        edit.nodes.map((node) => ({
+      // A tag this edit made is logged too, so the turn's Undo deletes it again (after its links).
+      const made = existed ? undefined : useTagStore.getState().byId[tagId]
+      const changes: RecordedChange[] = [
+        ...(made === undefined
+          ? []
+          : [
+              {
+                kind: 'tag' as const,
+                label: changeLabel(`New tag #${made.name}`),
+                undo: { type: 'removeMadeTag' as const, tagId, modified: made.modified }
+              }
+            ]),
+        ...edit.nodes.map((node) => ({
           kind: 'tagLink' as const,
           label: changeLabel(describeEdit({ kind: 'tag', ...node, tag: edit.tag, add: edit.add })),
           undo: {
@@ -240,32 +252,42 @@ export async function applyAgentEdit(
             nodeId: node.nodeId,
             tagId
           }
-        })),
-        async () => {
-          for (const node of [...edit.nodes].reverse()) await set(node.nodeId, !edit.add)
-        }
-      )
+        }))
+      ]
+      return logAppliedChanges(run, changes, async () => {
+        for (const node of [...edit.nodes].reverse()) await set(node.nodeId, !edit.add)
+        if (made !== undefined) await useTagStore.getState().remove(tagId)
+      })
     }
     case 'moveMany': {
       // F-5.25: each item to the end of the folder in turn; the Undo moves them back newest first.
+      // A failure part-way moves back what it moved, then reports.
       const back: { nodeId: string; parentId: string; previous: string | null }[] = []
-      for (const node of edit.nodes) {
-        const tree = useTreeStore.getState()
-        const parentId = tree.byId[node.nodeId]?.parentId ?? null
-        if (parentId === null) throw new AgentEditError(`${node.title} is no longer in the project`)
-        const siblings = tree.childrenOf[parentId] ?? []
-        const index = siblings.indexOf(node.nodeId)
-        const previous = index > 0 ? (siblings[index - 1] ?? null) : null
-        const last =
-          (tree.childrenOf[edit.parentId] ?? []).filter((id) => id !== node.nodeId).at(-1) ?? null
-        await tree.move(node.nodeId, edit.parentId, last)
-        back.push({ nodeId: node.nodeId, parentId, previous })
-      }
-      return async () => {
+      const moveBack = async (): Promise<void> => {
         for (const step of [...back].reverse()) {
           await useTreeStore.getState().move(step.nodeId, step.parentId, step.previous)
         }
       }
+      try {
+        for (const node of edit.nodes) {
+          const tree = useTreeStore.getState()
+          const parentId = tree.byId[node.nodeId]?.parentId ?? null
+          if (parentId === null) {
+            throw new AgentEditError(`${node.title} is no longer in the project`)
+          }
+          const siblings = tree.childrenOf[parentId] ?? []
+          const index = siblings.indexOf(node.nodeId)
+          const previous = index > 0 ? (siblings[index - 1] ?? null) : null
+          const last =
+            (tree.childrenOf[edit.parentId] ?? []).filter((id) => id !== node.nodeId).at(-1) ?? null
+          await tree.move(node.nodeId, edit.parentId, last)
+          back.push({ nodeId: node.nodeId, parentId, previous })
+        }
+      } catch (err) {
+        await moveBack()
+        throw err
+      }
+      return moveBack
     }
     case 'tagRename':
       return applyOrganiseAction(
@@ -284,33 +306,38 @@ export async function applyAgentEdit(
       )
     case 'sheetPatch': {
       // One logged change per sheet (Organise's own sheet change); the Undo takes them back in turn.
+      // A failure part-way takes back the sheets already changed, then reports.
       const undos: (() => Promise<void>)[] = []
-      for (const sheet of edit.sheets) {
-        const undo = await applyOrganiseAction(
-          {
-            kind: 'sheet',
-            entityId: sheet.entityId,
-            name: sheet.name,
-            patch: {
-              ...(edit.rename === null ? {} : { name: edit.rename }),
-              ...(edit.to === null ? {} : { kind: edit.to })
-            },
-            before: {
-              ...(edit.rename === null ? {} : { name: sheet.name }),
-              ...(edit.to === null ? {} : { kind: sheet.kind })
-            }
-          },
-          new Map(),
-          proposalId,
-          run
-        )
-        if (undo !== null) undos.push(undo)
+      const undoAll = async (): Promise<void> => {
+        for (const undo of [...undos].reverse()) await undo()
       }
-      return undos.length === 0
-        ? null
-        : async () => {
-            for (const undo of [...undos].reverse()) await undo()
-          }
+      try {
+        for (const sheet of edit.sheets) {
+          const undo = await applyOrganiseAction(
+            {
+              kind: 'sheet',
+              entityId: sheet.entityId,
+              name: sheet.name,
+              patch: {
+                ...(edit.rename === null ? {} : { name: edit.rename }),
+                ...(edit.to === null ? {} : { kind: edit.to })
+              },
+              before: {
+                ...(edit.rename === null ? {} : { name: sheet.name }),
+                ...(edit.to === null ? {} : { kind: sheet.kind })
+              }
+            },
+            new Map(),
+            proposalId,
+            run
+          )
+          if (undo !== null) undos.push(undo)
+        }
+      } catch (err) {
+        await undoAll()
+        throw err
+      }
+      return undos.length === 0 ? null : undoAll
     }
     case 'sheetMerge':
       return applyOrganiseAction(

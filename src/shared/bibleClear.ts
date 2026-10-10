@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { TagCategory } from './tags'
 
 /**
  * Clear the story bible (F-5.25, 2026-10-10; the author asked the chat to "delete everything in my
@@ -17,7 +16,14 @@ export const CLEAR_GROUPS = ['sheets', 'tags', 'library', 'notes'] as const
 export const ClearGroup = z.enum(CLEAR_GROUPS)
 export type ClearGroup = z.infer<typeof ClearGroup>
 
-/** One line of the card: a kind the project has, how many, and whether it goes. */
+/** The most items one card line lists (a category of sheets, the uploads, the documents with notes). */
+export const CLEAR_IDS_MAX = 5_000
+
+/**
+ * One line of the card: a kind the project has, the items it covers (`ids`, as the card was
+ * made: the author deletes exactly what they saw, never what was added since), how many, and
+ * whether it goes.
+ */
 export const ClearOption = z.object({
   group: ClearGroup,
   /** The category id (sheets), the tag category (tags), or the group's own name (library, notes). */
@@ -25,6 +31,7 @@ export const ClearOption = z.object({
   /** "Characters", "Tone tags", "Library uploads", "Notes". */
   label: z.string().min(1).max(200),
   count: z.number().int().min(1),
+  ids: z.array(z.string().min(1)).min(1).max(CLEAR_IDS_MAX),
   checked: z.boolean()
 })
 export type ClearOption = z.infer<typeof ClearOption>
@@ -32,39 +39,31 @@ export type ClearOption = z.infer<typeof ClearOption>
 /** The card holds at most this many lines (the categories in use, seven tag categories, two more). */
 export const CLEAR_OPTIONS_MAX = 60
 
-/** What the author ticked, as main deletes it. */
+/** The ticked items, as main deletes them: ids of sheets, tags, uploads, and documents whose notes go. */
+const Ids = z.array(z.string().min(1)).max(CLEAR_IDS_MAX * CLEAR_OPTIONS_MAX)
 export const ClearSelection = z.object({
-  /** Category ids whose sheets go. */
-  sheets: z.array(z.string().min(1).max(100)).max(CLEAR_OPTIONS_MAX),
-  tags: z.array(TagCategory).max(CLEAR_OPTIONS_MAX),
-  library: z.boolean(),
-  notes: z.boolean()
+  sheets: Ids,
+  tags: Ids,
+  library: Ids,
+  notes: Ids
 })
 export type ClearSelection = z.infer<typeof ClearSelection>
 
 /** The selection the ticked lines of a card make. */
 export function clearSelectionOf(options: readonly ClearOption[]): ClearSelection {
-  const ticked = options.filter((option) => option.checked)
+  const ticked = (group: ClearGroup): string[] =>
+    options.filter((o) => o.checked && o.group === group).flatMap((o) => o.ids)
   return {
-    sheets: ticked.filter((o) => o.group === 'sheets').map((o) => o.id),
-    tags: ticked.flatMap((o) => {
-      if (o.group !== 'tags') return []
-      const parsed = TagCategory.safeParse(o.id)
-      return parsed.success ? [parsed.data] : []
-    }),
-    library: ticked.some((o) => o.group === 'library'),
-    notes: ticked.some((o) => o.group === 'notes')
+    sheets: ticked('sheets'),
+    tags: ticked('tags'),
+    library: ticked('library'),
+    notes: ticked('notes')
   }
 }
 
 /** Whether a selection names nothing at all. */
 export function isEmptyClear(selection: ClearSelection): boolean {
-  return (
-    selection.sheets.length === 0 &&
-    selection.tags.length === 0 &&
-    !selection.library &&
-    !selection.notes
-  )
+  return CLEAR_GROUPS.every((group) => selection[group].length === 0)
 }
 
 /** "12 sheets, 30 tags, 3 uploads, notes of 5 documents": what a card's ticks remove. */
