@@ -718,7 +718,8 @@ function Composer(): React.JSX.Element {
   const attachment = useAssistantStore((s) => s.attachment)
   const detach = useAssistantStore((s) => s.detach)
   const settings = useAiSettingsStore((s) => s.settings)
-  const [draft, setDraft] = useState('')
+  const draft = useAssistantStore((s) => s.composerText)
+  const setDraft = useAssistantStore((s) => s.setComposerText)
   const [focusCount, setFocusCount] = useState(0)
   const messageBox = useRef<HTMLTextAreaElement>(null)
 
