@@ -154,12 +154,16 @@ describe('TodoTab (F-9.16)', () => {
 
     await userEvent.click(button)
     expect(calls.filter(([channel]) => channel === 'todo:check')).toHaveLength(1)
-    expect(useDialogStore.getState().toasts.map((toast) => toast.message)).toEqual([
-      'To do: 2 new items.'
-    ])
+    // F-7.12: the result is the drop notification's (read from `checkResult`), not a toast.
+    expect(useTodoStore.getState().checkResult).toEqual({
+      status: 'done',
+      message: 'To do: 2 new items.'
+    })
+    expect(useTodoStore.getState().checking).toBe(false)
+    expect(useDialogStore.getState().toasts).toEqual([])
   })
 
-  it('toasts a failed check with its next step', async () => {
+  it('records a failed check with its next step', async () => {
     check = todoCheck({ allowed: true, estimateUsd: 0.001 })
     checkResult = {
       ok: false,
@@ -170,9 +174,10 @@ describe('TodoTab (F-9.16)', () => {
     }
     render(<TodoTab />)
     await userEvent.click(await screen.findByTestId('todo-check-book'))
-    expect(useDialogStore.getState().toasts.map((toast) => toast.message)).toEqual([
-      'No API key. Add one in Settings › AI.'
-    ])
+    expect(useTodoStore.getState().checkResult).toEqual({
+      status: 'failed',
+      message: 'No API key. Add one in Settings › AI.'
+    })
   })
 })
 

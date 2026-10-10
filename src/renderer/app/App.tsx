@@ -14,6 +14,10 @@ import { useDiagnosticsStore } from '@renderer/features/diagnostics/diagnosticsS
 import { DEVTOOLS_CHORD } from '@shared/devtools'
 import { DevToolsPanel } from '@renderer/features/devtools/DevToolsPanel'
 import { useDevToolsStore } from '@renderer/features/devtools/devToolsStore'
+import { ActivityBar } from '@renderer/features/activity/ActivityBar'
+import { ActivityDrops } from '@renderer/features/activity/ActivityDrops'
+import { startActivityWatch } from '@renderer/features/activity/activityStore'
+import { SideWorkDialog } from '@renderer/features/sideWork/SideWorkDialog'
 import { AboutDialog } from '@renderer/features/shell/AboutDialog'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -497,8 +501,10 @@ export function App(): React.JSX.Element {
         // The welcome screen's bar is only Settings (and an update notice) at the right; the
         // menus live in the native menu (Alt) until a project is open.
         <header
-          className={`flex h-11 items-center gap-2 px-4 text-sm ${current ? 'border-b border-line bg-surface' : ''}`}
+          className={`relative flex h-11 items-center gap-2 px-4 text-sm ${current ? 'border-b border-line bg-surface' : ''}`}
         >
+          {/* F-7.12: the background activity hairline, on the header's bottom border. */}
+          {current ? <ActivityBar placement="header" /> : null}
           {current ? (
             <>
               <SidebarToggleButton />
@@ -527,6 +533,8 @@ export function App(): React.JSX.Element {
           </div>
         </header>
       )}
+      {/* F-7.12: with the header hidden, the activity hairline runs along the window's top. */}
+      {focus ? <ActivityBar placement="window" /> : null}
       {/* M1: the trial's last week, and the read-only state after it. */}
       {focus ? null : <TrialBanner />}
       {current ? <FocusShortcuts /> : null}
@@ -1040,8 +1048,22 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <GoalsDialog />
       {/* F-9.14: the conversion pass's cost and go-ahead, open while main says scenes wait. */}
       <ConversionDialog />
+      {/* F-7.12: the long jobs' finished / failed drops, and Open's big review dialog. */}
+      <ActivityWatch />
+      <ActivityDrops />
+      <SideWorkDialog />
     </>
   )
+}
+
+/**
+ * Watches the long jobs while the project is open (F-7.12): the activity bar and the drop
+ * notifications read what it derives; closing the project stops it and empties them. Renders
+ * nothing.
+ */
+function ActivityWatch(): null {
+  useEffect(() => startActivityWatch(), [])
+  return null
 }
 
 /**
