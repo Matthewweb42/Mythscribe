@@ -25,9 +25,8 @@ const RUN_LABEL: Record<EntityTemplate, string> = {
 /**
  * F-9.18: how a sheet's view stands against the other one, over the fields or the page. Out of
  * date (with why: waiting out the pause, updating, failed with the cause and next step, or AI
- * off), a sync held for the author at Ask or Plan (Apply or Dismiss, with what it would change),
- * and on the page, how much of it the AI wrote (provenance, AI rule 1). Nothing when the views
- * agree.
+ * off), and on the page, how much of it the AI wrote (provenance, AI rule 1). A sync lands on its
+ * own in every chat mode, with an Undo in Changes. Nothing when the views agree.
  */
 export function SheetSyncBar({
   entity,
@@ -73,60 +72,6 @@ export function SheetSyncBar({
         Edit freely: your changes are filed back into the fields.
       </p>
     ) : null
-
-  if (sync.pending !== null) {
-    const pending = sync.pending
-    return (
-      <section
-        aria-label="Sheet sync"
-        data-testid="sheet-sync-pending"
-        className="flex flex-col gap-2 rounded-md border border-line bg-surface-raised p-3 text-sm"
-      >
-        <p className="m-0">
-          {pending.direction === 'page'
-            ? 'A new write-up of the page from your fields is ready.'
-            : 'Your page edits are ready to file into the fields:'}
-        </p>
-        {pending.direction === 'page' ? (
-          <details>
-            <summary className="cursor-pointer text-xs text-fg-muted">Show the new page</summary>
-            <p className="m-0 mt-2 whitespace-pre-wrap text-sm leading-relaxed">{pending.page}</p>
-          </details>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
-            {pending.changes.map((change) => (
-              <li key={change.fieldId}>
-                <span className="font-medium">{change.label}:</span>{' '}
-                {change.before === '' ? null : (
-                  <span className="text-fg-subtle line-through">{change.before}</span>
-                )}{' '}
-                {change.after === '' ? <em>(emptied)</em> : <span>{change.after}</span>}
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void act(() => useSheetSyncStore.getState().apply(entity.id))}
-            className={BUTTON}
-          >
-            Apply
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void act(() => useSheetSyncStore.getState().dismiss(entity.id))}
-            className={BUTTON}
-          >
-            Dismiss
-          </button>
-        </div>
-        {provenance}
-      </section>
-    )
-  }
 
   if (!stale) return provenance
 

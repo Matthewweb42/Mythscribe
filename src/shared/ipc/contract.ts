@@ -1735,14 +1735,6 @@ export const contract = {
    */
   'sheetSync:run': { input: z.object({ id: z.string() }), output: z.boolean() },
   /**
-   * F-9.18: applies the sync held for the author (chat mode Ask or Plan), logged in Changes with
-   * an Undo. VALIDATION when the sheet changed since it was made (it is dropped, and the sheet is
-   * synced again).
-   */
-  'sheetSync:apply': { input: z.object({ id: z.string() }), output: Entity },
-  /** F-9.18: drops the sync held for the author; the sheet stays as it is (and shows it is out of date). */
-  'sheetSync:dismiss': { input: z.object({ id: z.string() }), output: Entity },
-  /**
    * F-9.10, Organise's local pass (no AI): tags and sheets whose names or aliases look alike,
    * tags nothing uses (no document, mention, sheet, or child), and empty sheets. Feeds the quiet
    * offer after an upload is applied and as duplicates build up.

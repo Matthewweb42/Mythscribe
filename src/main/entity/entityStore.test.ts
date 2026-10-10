@@ -94,7 +94,7 @@ describe('createEntity', () => {
       modified: '2026-09-22T10:00:00.000Z',
       // F-9.18: no field of its own; fields with text and no page yet: the page is out of date.
       extraFields: [],
-      sync: { state: 'pageStale', aiParagraphs: 0, paragraphs: 0, writtenUpAt: null, pending: null }
+      sync: { state: 'pageStale', aiParagraphs: 0, paragraphs: 0, writtenUpAt: null }
     })
     expect(tagOf(id)?.name).toBe('ada-lovelace')
     expect(listEntities(db)).toEqual([{ id, ...created }])

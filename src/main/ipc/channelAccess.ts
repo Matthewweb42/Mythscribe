@@ -144,8 +144,6 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'entity:removeField': 'write',
   'sheetSync:status': 'read',
   'sheetSync:run': 'ai',
-  'sheetSync:apply': 'write',
-  'sheetSync:dismiss': 'write',
   'organise:candidates': 'read',
   'organise:plan': 'ai',
   'category:create': 'write',

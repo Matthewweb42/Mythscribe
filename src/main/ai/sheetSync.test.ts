@@ -13,14 +13,7 @@ import { defaultAiUsageState, dayOf } from './dailyCap'
 import { resetInflight } from './inflight'
 import type { CompletionRequest, CompletionResult, Provider } from './providers/types'
 import type { AiRequestDeps } from './request'
-import {
-  applyHeldSheetSync,
-  dismissHeldSheetSync,
-  parseRefileAnswer,
-  parseWriteUpAnswer,
-  runSheetSync,
-  sheetNeedsSync
-} from './sheetSync'
+import { parseRefileAnswer, parseWriteUpAnswer, runSheetSync, sheetNeedsSync } from './sheetSync'
 import type { UsageEntry } from './usageStore'
 
 const NOW = new Date(2026, 9, 10, 10, 0, 0)
@@ -231,37 +224,25 @@ describe('runSheetSync (F-9.18)', () => {
     expect(sheet(id).sync.state).toBe('synced')
   })
 
-  it('holds the write-up at Ask until Apply, and Dismiss leaves the sheet out of date', async () => {
-    mode('ask')
-    const id = mara()
-    answer({ intro: 'Mara is twenty-seven.', parts: {} })
-    expect((await runSheetSync(db, deps, { entityId: id })).outcome).toBe('held')
-    expect(sheet(id).body).toBeNull()
-    expect(sheet(id).sync.pending).toMatchObject({
-      direction: 'page',
-      page: 'Mara is twenty-seven.'
-    })
-    // A held sync that still matches is not asked for again.
-    await runSheetSync(db, deps, { entityId: id })
-    expect(complete).toHaveBeenCalledTimes(1)
-    dismissHeldSheetSync(db, id)
-    expect(sheet(id).sync).toMatchObject({ state: 'pageStale', pending: null })
-    answer({ intro: 'Mara is twenty-seven.', parts: {} })
-    await runSheetSync(db, deps, { entityId: id })
-    const applied = applyHeldSheetSync(db, id, NOW)
-    expect(applied.entity.body).toBe('Mara is twenty-seven.')
-    expect(applied.entity.sync.state).toBe('synced')
-    expect(listChanges(db, { limit: 10 }).entries[0]).toMatchObject({ source: 'sync' })
-  })
-
-  it('refuses to apply a held sync once the sheet moved, and drops it', async () => {
-    mode('plan')
-    const id = mara()
-    answer({ intro: 'Mara is twenty-seven.', parts: {} })
-    await runSheetSync(db, deps, { entityId: id })
-    updateEntity(db, id, { fields: { age: '29' } })
-    expect(sheet(id).sync.pending).toBeNull()
-    expect(() => applyHeldSheetSync(db, id, NOW)).toThrow(/changed since/)
+  it('lands on its own in every chat mode, each direction logged with an Undo', async () => {
+    for (const chatMode of ['ask', 'plan'] as const) {
+      mode(chatMode)
+      const id = createEntity(db, {
+        kind: 'character',
+        name: `Mara ${chatMode}`,
+        fields: { age: '27' }
+      }).entity.id
+      answer({ intro: 'Mara is twenty-seven.', parts: {} })
+      expect((await runSheetSync(db, deps, { entityId: id })).outcome).toBe('applied')
+      expect(sheet(id).body).toBe('Mara is twenty-seven.')
+      updateEntity(db, id, { body: 'Mara is twenty-eight.' })
+      answer({ edits: [{ f: 'age', old: '27', new: '28' }] })
+      expect((await runSheetSync(db, deps, { entityId: id })).outcome).toBe('applied')
+      expect(sheet(id).fields.age).toBe('28')
+      expect(sheet(id).sync.state).toBe('synced')
+    }
+    const sources = listChanges(db, { limit: 10 }).entries.map((entry) => entry.source)
+    expect(sources).toEqual(['sync', 'sync', 'sync', 'sync'])
   })
 
   it('drops an answer that comes back after the author edited the sheet again', async () => {

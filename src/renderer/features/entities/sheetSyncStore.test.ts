@@ -19,10 +19,6 @@ function install(): [Channel, unknown][] {
       if (channel === 'entity:list') return entityFixture as Output<C>
       if (channel === 'sheetSync:status') return [WAITING] as Output<C>
       if (channel === 'sheetSync:run') return true as Output<C>
-      if (channel === 'sheetSync:dismiss') {
-        const mara = entityFixture.find((entity) => entity.id === 'e-mara')
-        return { ...mara, body: 'Dismissed.' } as Output<C>
-      }
       throw new Error(`unexpected ${channel}`)
     },
     on: (event, listener) => {
@@ -59,12 +55,10 @@ describe('sheetSyncStore (F-9.18)', () => {
     expect(push).toBeNull()
   })
 
-  it('runs a sheet now and merges what a dismiss answers into the entity store', async () => {
+  it('runs a sheet now', async () => {
     const calls = install()
     await useEntityStore.getState().load()
     expect(await useSheetSyncStore.getState().run('e-mara')).toBe(true)
     expect(calls).toContainEqual(['sheetSync:run', { id: 'e-mara' }])
-    await useSheetSyncStore.getState().dismiss('e-mara')
-    expect(useEntityStore.getState().byId['e-mara']?.body).toBe('Dismissed.')
   })
 })

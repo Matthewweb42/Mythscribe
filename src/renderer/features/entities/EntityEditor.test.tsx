@@ -680,7 +680,7 @@ describe('EntityEditor: the sheet’s own fields and its two views (F-9.18)', ()
     expect(screen.queryByRole('button', { name: 'Write up now' })).toBeNull()
   })
 
-  it('writes up now on request, applies a held write-up, and marks what the AI wrote', async () => {
+  it('writes up now on request, and marks what the AI wrote once the sync lands', async () => {
     const user = userEvent.setup()
     useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
     const stale: Entity[] = entityFixture.map((entity) =>
@@ -688,38 +688,26 @@ describe('EntityEditor: the sheet’s own fields and its two views (F-9.18)', ()
         ? { ...entity, template: 'blank', sync: { ...NO_SHEET_SYNC, state: 'pageStale' } }
         : entity
     )
-    const held: Entity[] = stale.map((entity) =>
-      entity.id === 'e-mara'
-        ? {
-            ...entity,
-            sync: {
-              ...entity.sync,
-              pending: { direction: 'page', at: 'now', page: 'Mara is 27.', changes: [] }
-            }
-          }
-        : entity
-    )
-    let list = stale
     const calls = await openPage('e-mara', {
-      'entity:list': () => list,
-      'sheetSync:run': () => true,
-      'sheetSync:apply': () => ({
-        ...stale.find((entity) => entity.id === 'e-mara'),
-        body: 'Mara is 27.',
-        sync: { ...NO_SHEET_SYNC, state: 'synced', aiParagraphs: 1, paragraphs: 1 }
-      })
+      'entity:list': () => stale,
+      'sheetSync:run': () => true
     })
     await user.click(screen.getByRole('button', { name: 'Write up now' }))
     expect(calls.some(([channel]) => channel === 'sheetSync:run')).toBe(true)
-    list = held
-    await act(async () => {
-      await useEntityStore.getState().load()
-    })
-    expect(screen.getByTestId('sheet-sync-pending')).toHaveTextContent('A new write-up of the page')
-    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    const mara = stale.find((entity) => entity.id === 'e-mara')
+    if (mara === undefined) throw new Error('no Mara')
+    // The sync lands in main and reaches the page as entity:changed.
+    act(() =>
+      useEntityStore.getState().merge({
+        ...mara,
+        body: 'Mara is 27.',
+        sync: { ...NO_SHEET_SYNC, state: 'synced', aiParagraphs: 1, paragraphs: 1 }
+      })
+    )
     expect(field('Page')).toHaveValue('Mara is 27.')
     expect(screen.getByTestId('sheet-provenance')).toHaveTextContent(
       'Written up by AI from your fields.'
     )
+    expect(screen.queryByTestId('sheet-sync-stale')).toBeNull()
   })
 })

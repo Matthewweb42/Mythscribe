@@ -9,7 +9,7 @@ import { getAiSettings, getSheetSyncDue, setSheetSyncDue } from '../project/sett
 import { manuscriptRootId } from '../voice/voiceJob'
 import { AiCancelledError } from './providers/types'
 import type { AiRequestDeps } from './request'
-import { applyHeldSheetSync, dismissHeldSheetSync, runSheetSync, sheetNeedsSync } from './sheetSync'
+import { runSheetSync, sheetNeedsSync } from './sheetSync'
 
 /**
  * The sheet sync's scheduling (F-9.18): the 30-second pause per sheet (`sheetSyncScheduler`), the
@@ -24,9 +24,6 @@ export interface SheetSyncService {
   touch(entityId: string): void
   /** Write up now / File now / Try again: skip the pause. False when there is nothing to do or AI is off. */
   runNow(entityId: string): boolean
-  /** Applies the held sync; a filing that leaves the page out of date queues its write-up. */
-  apply(entityId: string): Entity
-  dismiss(entityId: string): Entity
   statuses(): SheetSyncStatus[]
   /** A project opened: take up the job it left behind. */
   load(): void
@@ -149,28 +146,6 @@ export function createSheetSyncService(options: SheetSyncServiceOptions): SheetS
     },
 
     runNow,
-
-    apply(entityId) {
-      const db = options.db()
-      if (db === null) throw new AppError('NOT_FOUND', 'No project is open', { id: entityId })
-      let applied: ReturnType<typeof applyHeldSheetSync>
-      try {
-        applied = applyHeldSheetSync(db, entityId, now())
-      } catch (err) {
-        // The sheet moved since the held sync was made: bring it up to date again.
-        if (err instanceof AppError && err.code === 'VALIDATION') runNow(entityId)
-        throw err
-      }
-      options.onChangesLogged()
-      if (applied.pageStaleAfter) runNow(entityId)
-      return applied.entity
-    },
-
-    dismiss(entityId) {
-      const db = options.db()
-      if (db === null) throw new AppError('NOT_FOUND', 'No project is open', { id: entityId })
-      return dismissHeldSheetSync(db, entityId)
-    },
 
     statuses() {
       return [...statuses.values()]

@@ -54,33 +54,6 @@ export const SHEET_SYNC_STATES = ['none', 'synced', 'pageStale', 'fieldsStale', 
 export const SheetSyncState = z.enum(SHEET_SYNC_STATES)
 export type SheetSyncState = z.infer<typeof SheetSyncState>
 
-/** Which view a sync rewrites: the page (a write-up) or the fields (a filing). */
-export const SheetSyncDirection = z.enum(['page', 'fields'])
-export type SheetSyncDirection = z.infer<typeof SheetSyncDirection>
-
-/** One field a held filing would change, as the sheet shows it before Apply. */
-export const SheetSyncChange = z.object({
-  fieldId: z.string(),
-  label: z.string(),
-  before: z.string(),
-  after: z.string()
-})
-export type SheetSyncChange = z.infer<typeof SheetSyncChange>
-
-/**
- * A sync held for the author (chat mode Ask or Plan): the new page, or the field changes, shown
- * with Apply and Dismiss. Nothing of it is in the sheet until Apply.
- */
-export const SheetSyncPendingView = z.object({
-  direction: SheetSyncDirection,
-  at: z.string(),
-  /** The page a held write-up would put in place; null for a filing. */
-  page: z.string().nullable(),
-  /** The fields a held filing would change; empty for a write-up. */
-  changes: z.array(SheetSyncChange)
-})
-export type SheetSyncPendingView = z.infer<typeof SheetSyncPendingView>
-
 /** What the sheet page shows about its two views (`Entity.sync`), computed by main on every read. */
 export const SheetSyncView = z.object({
   state: SheetSyncState,
@@ -89,8 +62,7 @@ export const SheetSyncView = z.object({
   /** Paragraphs of the page as it stands. */
   paragraphs: z.number().int().nonnegative(),
   /** When the page was last written up by the AI; null when it never was. */
-  writtenUpAt: z.string().nullable(),
-  pending: SheetSyncPendingView.nullable()
+  writtenUpAt: z.string().nullable()
 })
 export type SheetSyncView = z.infer<typeof SheetSyncView>
 
@@ -98,8 +70,7 @@ export const NO_SHEET_SYNC: SheetSyncView = {
   state: 'none',
   aiParagraphs: 0,
   paragraphs: 0,
-  writtenUpAt: null,
-  pending: null
+  writtenUpAt: null
 }
 
 /** A sheet's own fields as stored and sent: the category's field shape. */

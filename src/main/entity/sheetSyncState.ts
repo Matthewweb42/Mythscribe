@@ -5,11 +5,9 @@ import type { EntityFieldDef, EntityFields } from '@shared/entities'
 import {
   NO_SHEET_SYNC,
   SheetExtraFields,
-  SheetSyncDirection,
   paragraphKey,
   paragraphsOf,
   sheetFieldDefs,
-  sheetFieldLabel,
   type SheetSyncState,
   type SheetSyncView
 } from '@shared/sheetSync'
@@ -30,25 +28,6 @@ import type { EntityDb } from './entityStore'
  * with its state and the sync can tell, without asking anything, that there is nothing to do.
  */
 
-/** A sync held for the author (chat mode Ask or Plan), with what it was made from. */
-export const StoredPending = z.object({
-  direction: SheetSyncDirection,
-  /** The fields hash and the page the sync was made from; Apply refuses once either moved. */
-  basisFields: z.string(),
-  basisPage: z.string(),
-  at: z.string(),
-  /** A held write-up: the new page, and the hashes of the paragraphs the AI wrote. */
-  page: z.string().nullable().default(null),
-  aiParagraphs: z.array(z.string()).default([]),
-  /** A held filing: the new value of every field it changes ('' empties one). */
-  values: z.record(z.string(), z.string()).nullable().default(null),
-  /** A held filing: the sheet's own fields after it (new ones appended). */
-  extra: SheetExtraFields.nullable().default(null),
-  /** A held filing made while the fields had moved too: the page is written up again after Apply. */
-  pageStaleAfter: z.boolean().default(false)
-})
-export type StoredPending = z.infer<typeof StoredPending>
-
 /** The `entity.sync` column. */
 export const StoredSheetSync = z.object({
   /** The fields hash (`fieldsHashOf`) the two views last agreed on; '' marks the page out of date on purpose. */
@@ -59,8 +38,7 @@ export const StoredSheetSync = z.object({
   aiParagraphs: z.array(z.string()).default([]),
   /** When the AI last wrote the page up; null when it never did. */
   writtenUpAt: z.string().nullable().default(null),
-  at: z.string(),
-  pending: StoredPending.nullable().default(null)
+  at: z.string()
 })
 export type StoredSheetSync = z.infer<typeof StoredSheetSync>
 
@@ -187,13 +165,6 @@ export function sheetSyncStateOf(
   return stored === null ? 'none' : 'synced'
 }
 
-/** Whether a held sync was made from the sheet as it stands (else it is obsolete and ignored). */
-export function pendingHolds(pending: StoredPending, basis: SheetBasis): boolean {
-  return (
-    pending.basisFields === basis.fieldsHash && pageKey(pending.basisPage) === pageKey(basis.page)
-  )
-}
-
 /** The contract's `Entity.sync` for a sheet. */
 export function sheetSyncViewOf(
   sheet: SheetParts,
@@ -208,25 +179,10 @@ export function sheetSyncViewOf(
   const aiParagraphs = paragraphs.filter((paragraph) => ai.has(paragraphHash(paragraph))).length
   if (stored === null && state === 'none')
     return { ...NO_SHEET_SYNC, paragraphs: paragraphs.length }
-  const pending = stored?.pending ?? null
   return {
     state,
     aiParagraphs,
     paragraphs: paragraphs.length,
-    writtenUpAt: stored?.writtenUpAt ?? null,
-    pending:
-      pending === null || !pendingHolds(pending, basis)
-        ? null
-        : {
-            direction: pending.direction,
-            at: pending.at,
-            page: pending.page,
-            changes: Object.entries(pending.values ?? {}).map(([fieldId, after]) => ({
-              fieldId,
-              label: sheetFieldLabel(basis.category, pending.extra ?? sheet.extraFields, fieldId),
-              before: sheet.fields[fieldId] ?? '',
-              after
-            }))
-          }
+    writtenUpAt: stored?.writtenUpAt ?? null
   }
 }

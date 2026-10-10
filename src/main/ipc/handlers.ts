@@ -2015,10 +2015,6 @@ export function registerHandlers({
 
   register('sheetSync:run', ({ id }) => sheetSync.runNow(id))
 
-  register('sheetSync:apply', ({ id }) => sheetSync.apply(id))
-
-  register('sheetSync:dismiss', ({ id }) => sheetSync.dismiss(id))
-
   /**
    * F-9.10: sheets merged by Organise. A tag merge inside it reaches the windows exactly as
    * `tag:merge` does; the merged-away sheets' pictures that did not move go with them.

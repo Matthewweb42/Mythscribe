@@ -28,12 +28,10 @@ import {
 } from '../entity/entityStore'
 import {
   paragraphHash,
-  pendingHolds,
   sheetBasis,
   sheetSyncContext,
   sheetSyncStateOf,
   type SheetBasis,
-  type StoredPending,
   type StoredSheetSync
 } from '../entity/sheetSyncState'
 import { AppError } from '../ipc/errors'
@@ -53,17 +51,17 @@ import { runAiRequest, sha256, type AiRequestDeps } from './request'
  * (`sheetWriteUp.v1`). Fast tier, JSON, cached by context (`runAiRequest`). An answer that comes
  * back after the author changed the sheet again is dropped: their next pause queues a fresh run.
  *
- * At chat mode Auto the result lands on the sheet at once, logged in the Changes log (source
- * `sync`) with an Undo; at Ask and Plan it is held on the sheet for Apply or Dismiss (the
- * existing pattern: plan links apply at Auto and suggest otherwise). Two safety rules: an emptied
+ * The result lands on the sheet on its own in every chat mode (decided by the author 2026-10-10:
+ * it is the author's own text in the other view), logged in the Changes log (source `sync`) with
+ * an Undo. Two safety rules: an emptied
  * page never empties the fields, and fields with no text never empty the page.
  */
 
 export interface SheetSyncRunResult {
   /** Whether a provider request was made (a cache hit is not one). */
   requested: boolean
-  /** What happened: nothing to do, applied to the sheet, held for the author, or dropped as stale. */
-  outcome: 'nothing' | 'applied' | 'held' | 'dropped'
+  /** What happened: nothing to do, applied to the sheet, or dropped as stale. */
+  outcome: 'nothing' | 'applied' | 'dropped'
   /** The sheet as it now stands, when the run wrote anything to it (its state included). */
   entity: Entity | null
   /** Whether the Changes log moved. */
@@ -275,7 +273,6 @@ function agreed(
   return {
     aiParagraphs: previous?.aiParagraphs ?? [],
     writtenUpAt: previous?.writtenUpAt ?? null,
-    pending: null,
     ...patch
   }
 }
@@ -343,7 +340,6 @@ export async function runSheetSync(
 ): Promise<SheetSyncRunResult> {
   const settings = getAiSettings(db)
   assertFeatureAllowed(settings, 'sheetSync')
-  const auto = settings.chatMode === 'auto'
   const run = changeRunId('sync', randomUUID())
   const result: SheetSyncRunResult = {
     requested: false,
@@ -353,7 +349,6 @@ export async function runSheetSync(
   }
   let read = readSheet(db, input.entityId)
   if (read.state === 'none' || read.state === 'synced') return result
-  if (read.stored?.pending != null && pendingHolds(read.stored.pending, read.basis)) return result
 
   if (read.state === 'fieldsStale' || read.state === 'both') {
     const { sheet, basis, stored } = read
@@ -375,22 +370,6 @@ export async function runSheetSync(
       const now = unchanged(db, sheet.id, basis)
       if (now === null) return { ...result, outcome: 'dropped' }
       const values = changedValues(now, filing.values, sheetFieldDefs(basis.category, filing.extra))
-      if (!auto) {
-        const base = stored ?? agreed(null, { fieldsHash: basis.fieldsHash, page: '', at })
-        const pending: StoredPending = {
-          direction: 'fields',
-          basisFields: basis.fieldsHash,
-          basisPage: basis.page,
-          at,
-          page: null,
-          aiParagraphs: [],
-          values,
-          extra: filing.extra,
-          pageStaleAfter
-        }
-        writeSheetSync(db, sheet.id, { ...base, pending })
-        return { ...result, outcome: 'held', entity: getEntity(db, sheet.id) ?? null }
-      }
       const written = writeFiling(db, now, values, filing.extra, run, at)
       const after = sheetBasis(written.entity, sheetSyncContext(db))
       writeSheetSync(
@@ -429,22 +408,6 @@ export async function runSheetSync(
   const now = unchanged(db, sheet.id, basis)
   if (now === null) return { ...result, outcome: 'dropped' }
   const aiParagraphs = paragraphsOf(writeUp.page).map(paragraphHash)
-  if (!auto) {
-    const base = stored ?? agreed(null, { fieldsHash: '', page: basis.page, at })
-    const pending: StoredPending = {
-      direction: 'page',
-      basisFields: basis.fieldsHash,
-      basisPage: basis.page,
-      at,
-      page: writeUp.page,
-      aiParagraphs,
-      values: null,
-      extra: null,
-      pageStaleAfter: false
-    }
-    writeSheetSync(db, sheet.id, { ...base, pending })
-    return { ...result, outcome: 'held', entity: getEntity(db, sheet.id) ?? null }
-  }
   const written = writePage(db, now, writeUp.page, run, at)
   writeSheetSync(
     db,
@@ -465,93 +428,12 @@ export async function runSheetSync(
   }
 }
 
-/**
- * Applies the sync held for the author (Ask or Plan), logged in Changes with an Undo. VALIDATION
- * when the sheet moved since it was made: the held sync is dropped, and the caller syncs again.
- * Answers the sheet and whether its page must now be written up (a filing made while the fields
- * had moved too).
- */
-export function applyHeldSheetSync(
-  db: EntityDb,
-  entityId: string,
-  now: Date
-): { entity: Entity; pageStaleAfter: boolean } {
-  const sheet = getEntity(db, entityId)
-  const raw = sheetSyncRow(db, entityId)
-  if (sheet === undefined || raw === undefined) {
-    throw new AppError('NOT_FOUND', 'Entity not found', { id: entityId })
-  }
-  const stored = raw.sync
-  const pending = stored?.pending ?? null
-  if (stored === null || pending === null) {
-    throw new AppError('NOT_FOUND', 'There is nothing waiting to be applied on this sheet', {
-      id: entityId
-    })
-  }
-  const basis = sheetBasis(sheet, sheetSyncContext(db))
-  if (!pendingHolds(pending, basis)) {
-    writeSheetSync(db, entityId, { ...stored, pending: null })
-    throw new AppError(
-      'VALIDATION',
-      `"${sheet.name}" has changed since; it will be brought up to date again.`,
-      {
-        id: entityId
-      }
-    )
-  }
-  const run = changeRunId('sync', randomUUID())
-  const at = now.toISOString()
-  if (pending.direction === 'page') {
-    const page = pending.page ?? ''
-    writePage(db, sheet, page, run, at)
-    writeSheetSync(
-      db,
-      entityId,
-      agreed(stored, {
-        fieldsHash: basis.fieldsHash,
-        page,
-        aiParagraphs: pending.aiParagraphs,
-        writtenUpAt: at,
-        at
-      })
-    )
-    return { entity: getEntity(db, entityId) ?? sheet, pageStaleAfter: false }
-  }
-  const extra = pending.extra ?? sheet.extraFields
-  const written = writeFiling(db, sheet, pending.values ?? {}, extra, run, at)
-  const after = sheetBasis(written.entity, sheetSyncContext(db))
-  writeSheetSync(
-    db,
-    entityId,
-    agreed(stored, {
-      fieldsHash: pending.pageStaleAfter ? '' : after.fieldsHash,
-      page: basis.page,
-      at
-    })
-  )
-  return {
-    entity: getEntity(db, entityId) ?? written.entity,
-    pageStaleAfter: pending.pageStaleAfter
-  }
-}
-
-/** Drops the sync held for the author; the sheet stays as it is and reads as out of date. */
-export function dismissHeldSheetSync(db: EntityDb, entityId: string): Entity {
-  const raw = sheetSyncRow(db, entityId)
-  if (raw === undefined) throw new AppError('NOT_FOUND', 'Entity not found', { id: entityId })
-  if (raw.sync?.pending != null) writeSheetSync(db, entityId, { ...raw.sync, pending: null })
-  const sheet = getEntity(db, entityId)
-  if (sheet === undefined) throw new AppError('NOT_FOUND', 'Entity not found', { id: entityId })
-  return sheet
-}
-
-/** Whether a sheet has anything to sync now (its views disagree and no held sync still matches). */
+/** Whether a sheet has anything to sync now (its views disagree). */
 export function sheetNeedsSync(db: EntityDb, entityId: string): boolean {
   const sheet = getEntity(db, entityId)
   const raw = sheetSyncRow(db, entityId)
   if (sheet === undefined || raw === undefined) return false
   const basis = sheetBasis(sheet, sheetSyncContext(db))
   const state = sheetSyncStateOf(basis, raw.sync)
-  if (state === 'none' || state === 'synced') return false
-  return !(raw.sync?.pending != null && pendingHolds(raw.sync.pending, basis))
+  return state !== 'none' && state !== 'synced'
 }
