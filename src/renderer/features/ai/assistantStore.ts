@@ -1176,7 +1176,10 @@ async function writeIntent(messageId: string, changeId: string, autoApply: boole
         patchChange(messageId, changeId, { status: 'skipped', notice: outcome.notice })
       } else {
         const text = outcome.text
-        undoers.set(changeId, async () => removeInsertedProse(await openEditor(edit.nodeId), text))
+        const { proposalId } = outcome
+        undoers.set(changeId, async () =>
+          removeInsertedProse(await openEditor(edit.nodeId), text, proposalId)
+        )
         patchChange(messageId, changeId, {
           status: 'applied',
           error: null,

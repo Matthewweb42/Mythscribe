@@ -117,3 +117,22 @@ export function locateUniqueText(
   if (!first || !last || first.pos < 0 || last.pos < 0) return 'missing'
   return { from: first.pos, to: last.pos + 1 }
 }
+
+/**
+ * Every place `passage` sits, in document order, with `locateUniqueText`'s normalization: for
+ * a caller that can tell its own copy apart (the chat's Undo by its AI-origin mark).
+ */
+export function locateEvery(doc: PmNode, passage: string): TextRange[] {
+  const needle = normalizeForMatch(passage)
+  if (needle === '') return []
+  const entries = scan(doc)
+  const haystack = entries.map((entry) => entry.char).join('')
+  const ranges: TextRange[] = []
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+    const first = entries[at]
+    const last = entries[at + needle.length - 1]
+    if (first && last && first.pos >= 0 && last.pos >= 0)
+      ranges.push({ from: first.pos, to: last.pos + 1 })
+  }
+  return ranges
+}

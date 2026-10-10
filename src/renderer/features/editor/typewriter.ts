@@ -42,6 +42,14 @@ export function findScroller(start: Element): HTMLElement | null {
   return null
 }
 
+/** Scrolls the editor's scroller so the caret sits at its vertical middle (F-6.7). */
+export function centreCaret(view: EditorView, target: ScrollTarget | null = findScroller(view.dom)): void {
+  if (!target) return
+  const caret = view.coordsAtPos(view.state.selection.head)
+  const delta = centerDelta(caret.top, target.getBoundingClientRect())
+  if (delta !== 0) target.scrollTop += delta
+}
+
 export const TYPEWRITER_KEY = new PluginKey('typewriter')
 
 export const Typewriter = Extension.create<TypewriterOptions, TypewriterStorage>({
@@ -80,11 +88,7 @@ export const Typewriter = Extension.create<TypewriterOptions, TypewriterStorage>
             if (!storage.enabled) return
             // A transaction that leaves the document alone keeps the same doc object.
             if (view.state.doc === prevState.doc) return
-            const target = scroller(view)
-            if (!target) return
-            const caret = view.coordsAtPos(view.state.selection.head)
-            const delta = centerDelta(caret.top, target.getBoundingClientRect())
-            if (delta !== 0) target.scrollTop += delta
+            centreCaret(view, scroller(view))
           }
         })
       })

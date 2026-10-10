@@ -4398,6 +4398,14 @@ test('create, close, reopen a project on disk', async () => {
   await focusButton.click()
   await expect.poll(isFullScreen).toBe(true)
   await expect(formatting).toHaveCount(0)
+  // The button took the focus, yet the editor has it back with the caret where it was
+  // (author, 2026-10-10): typing at once lands after the last words, no click needed.
+  await expect(editor).toBeFocused()
+  await page.keyboard.type(' Kept.')
+  await expect(editor).toContainText('In focus. Kept.')
+  // Taken out again: later steps pick Scene 1 sentences the fake finds exactly once.
+  for (const _ of ' Kept.') await page.keyboard.press('Backspace')
+  await expect(editor).not.toContainText('Kept.')
 
   // F-6.5: the control bar. It shows on entry (the intro, 2 s, checked in the unit tests: the
   // fullscreen transition can outlast it here) and hides once the pointer is away from the
