@@ -8,7 +8,7 @@ import {
   type CustomThemeInput,
   type ThemeColors
 } from '@shared/themes'
-import { useAccountStore } from '@renderer/features/account/accountStore'
+import { useExtrasUnlocked } from '@renderer/features/account/appAccessStore'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { ThemeEditor } from './ThemeEditor'
 import { useViewStore } from './viewStore'
@@ -50,7 +50,8 @@ function Preview({ colors, accent }: { colors: ThemeColors; accent: string }): R
  * The theme choice (F-7.8) on the Appearance tab: a card per built-in theme and per custom theme,
  * each with a preview drawn from its colours. The checked card is the theme being painted, so a
  * locked choice kept from a lapsed license shows Dark checked. Sepia and custom themes are
- * Supporter extras: shown, but disabled without the license. The custom theme editor opens in
+ * paid extras: on during the trial and with the license, shown but disabled after the trial
+ * ends unpaid (changed by the author 2026-10-10). The custom theme editor opens in
  * place for New and Edit; Delete asks first and is allowed without the license, so a lapsed
  * author can still tidy up.
  */
@@ -60,11 +61,11 @@ export function ThemePicker(): React.JSX.Element {
   const setTheme = useViewStore((s) => s.setTheme)
   const saveCustomTheme = useViewStore((s) => s.saveCustomTheme)
   const deleteCustomTheme = useViewStore((s) => s.deleteCustomTheme)
-  const licensed = useAccountStore((s) => s.supporter?.licensed === true)
+  const unlocked = useExtrasUnlocked()
   const [editing, setEditing] = useState<CustomThemeInput | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const resolved = resolveTheme({ theme, customThemes }, licensed)
+  const resolved = resolveTheme({ theme, customThemes }, unlocked)
   // Edit and Delete act on the stored custom theme, painted or not.
   const selectedCustom = customThemes.find((t) => t.id === theme) ?? null
   const full = customThemes.length >= CUSTOM_THEMES_MAX
@@ -113,7 +114,7 @@ export function ThemePicker(): React.JSX.Element {
       <span className="text-xs text-fg-muted">Theme</span>
       <div role="radiogroup" aria-label="Theme" className="flex flex-wrap gap-2">
         {cards.map((card) => {
-          const locked = !licensed && themeNeedsLicense(card.id)
+          const locked = !unlocked && themeNeedsLicense(card.id)
           return (
             <button
               key={card.id}
@@ -139,9 +140,9 @@ export function ThemePicker(): React.JSX.Element {
           <button
             type="button"
             data-testid="appearance-theme-new"
-            disabled={!licensed || full}
+            disabled={!unlocked || full}
             title={
-              !licensed ? LOCKED : full ? `At most ${CUSTOM_THEMES_MAX} custom themes` : undefined
+              !unlocked ? LOCKED : full ? `At most ${CUSTOM_THEMES_MAX} custom themes` : undefined
             }
             onClick={startNew}
             className={BUTTON}
@@ -153,8 +154,8 @@ export function ThemePicker(): React.JSX.Element {
               <button
                 type="button"
                 data-testid="appearance-theme-edit"
-                disabled={!licensed}
-                title={licensed ? undefined : LOCKED}
+                disabled={!unlocked}
+                title={unlocked ? undefined : LOCKED}
                 onClick={() =>
                   setEditing({ ...selectedCustom, colors: { ...selectedCustom.colors } })
                 }
@@ -172,7 +173,7 @@ export function ThemePicker(): React.JSX.Element {
               </button>
             </>
           )}
-          {licensed ? null : (
+          {unlocked ? null : (
             <span className="text-xs text-fg-muted">{`Sepia and custom themes — ${LOCKED}`}</span>
           )}
         </div>

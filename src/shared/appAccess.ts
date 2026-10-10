@@ -86,6 +86,16 @@ export function canWrite(access: AppAccess | null): boolean {
   return access?.state !== 'expired'
 }
 
+/**
+ * Whether the paid extras (Sepia, custom themes, accent colours) are on: during the trial and
+ * with the license, and locked only once the trial has ended unpaid (changed by the author
+ * 2026-10-10; they were license-only before). Unknown (main has not answered) counts as locked,
+ * so an extra never flashes on for an install that turns out to be read-only.
+ */
+export function extrasUnlocked(access: AppAccess | null): boolean {
+  return access !== null && access.state !== 'expired'
+}
+
 /** The trial line for the banner and the Account tab: "12 days left in your trial". */
 export function trialDaysText(daysLeft: number): string {
   return daysLeft === 1 ? '1 day left in your trial' : `${daysLeft} days left in your trial`

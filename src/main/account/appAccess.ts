@@ -20,6 +20,20 @@ import { defaultSchedule, type Schedule } from '../schedule'
  * clock's `lastSeenAt` forward, which is what makes turning the system clock back useless.
  */
 
+/**
+ * The author's own exemption (decided by the author 2026-10-10): with this environment variable
+ * set to `1` on their machine, the app answers as licensed, so their copy never turns read-only
+ * from the trial or from a license check that expired offline. It is read in main only, at
+ * launch; no setting, menu, or channel reads or writes it, so nothing in the UI can turn it on.
+ * Documented for the author in `docs/PERSONAL-USE.md`.
+ */
+export const DEV_LICENSE_ENV = 'MYTHSCRIBE_DEV_LICENSE'
+
+/** Whether the developer exemption is on: exactly `1` (spaces trimmed), nothing looser. */
+export function devLicenseExempt(env: Record<string, string | undefined>): boolean {
+  return env[DEV_LICENSE_ENV]?.trim() === '1'
+}
+
 /** How often the state is recomputed while the app runs: a token's `exp` passes without an event. */
 export const ACCESS_RECHECK_MS = 60 * 60_000
 
@@ -30,7 +44,8 @@ export interface AppAccessServiceOptions {
   onChange: (access: AppAccess) => void
   /**
    * Whether the trial can end. False in a build that cannot verify a license (the placeholder
-   * key, `licenseVerifiable`): the app then answers as licensed and never turns read-only.
+   * key, `licenseVerifiable`) and under the developer exemption (`devLicenseExempt`): the app
+   * then answers as licensed and never turns read-only.
    */
   enforced?: boolean
   now?: () => number

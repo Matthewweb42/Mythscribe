@@ -1730,8 +1730,8 @@ test('create, close, reopen a project on disk', async () => {
     'aria-checked',
     'true'
   )
-  // Sepia is a Supporter extra; nothing is licensed yet.
-  await expect(appearance.getByTestId('appearance-theme-sepia')).toBeDisabled()
+  // Sepia is a paid extra, on during the trial (changed by the author 2026-10-10).
+  await expect(appearance.getByTestId('appearance-theme-sepia')).toBeEnabled()
   await appearance.getByTestId('appearance-theme-high-contrast').click()
   await expect(html).toHaveAttribute('data-theme', 'high-contrast')
   await expect(html).toHaveAttribute('data-scheme', 'dark')
@@ -2159,7 +2159,9 @@ test('create, close, reopen a project on disk', async () => {
     'true'
   )
   await expect(
-    settingsDialog.getByText('Optional. You never need an account to write.')
+    settingsDialog.getByText(
+      'The account holds your MythScribe license and connects MythScribe Cloud.'
+    )
   ).toBeVisible()
   await settingsDialog.getByLabel('Email').fill('author@example.com')
   await settingsDialog.getByRole('button', { name: 'Send sign-in link' }).click()
@@ -2218,8 +2220,8 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('tab', { name: 'Account' }).click()
   // F-15.9: the Supporter license. The fake Worker signs a token for this account, main verifies
   // it against the fixture public key and caches it, and the background refresh that follows the
-  // sign-in is what puts the badge on the tab — nothing here clicks Refresh. The extras the
-  // license unlocks are on the Appearance tab (F-7.8): the accent lands on <html> and is written
+  // sign-in is what puts the badge on the tab — nothing here clicks Refresh. The extras (on in
+  // the trial and with the license) are on the Appearance tab (F-7.8): the accent lands on <html> and is written
   // to app-state.json; Sepia unlocks; a custom theme (its Background changed) is saved, selected,
   // and laid over its base as inline variables. Both are still there after the window is
   // reloaded from main's state alone.
@@ -2277,14 +2279,15 @@ test('create, close, reopen a project on disk', async () => {
   await settingsDialog.getByRole('tab', { name: 'Account' }).click()
   await settingsDialog.getByRole('button', { name: 'Sign out' }).click()
   await expect(settingsDialog.getByLabel('Email')).toBeVisible()
-  // F-7.8: signed out, the license is gone, so the custom theme paints Dark while main keeps the
-  // choice; the Appearance tab then picks Dark for the rest of the test.
-  await expect.poll(inlineBg, { timeout: 5000 }).toBe('')
-  await expect(page.locator('html')).not.toHaveAttribute('data-theme')
+  // F-7.8: signed out, the license is gone but the trial still runs, so the extras stay on
+  // (changed by the author 2026-10-10; locked only after the trial ends unpaid, a unit-tested
+  // path); the Appearance tab then picks Dark for the rest of the test.
+  await expect.poll(inlineBg, { timeout: 5000 }).toBe('#102030')
   expect(storedTheme().theme).toBe(midnightId)
   await settingsDialog.getByRole('tab', { name: 'Appearance' }).click()
-  await expect(settingsDialog.getByTestId(`appearance-theme-${midnightId}`)).toBeDisabled()
+  await expect(settingsDialog.getByTestId(`appearance-theme-${midnightId}`)).toBeEnabled()
   await settingsDialog.getByTestId('appearance-theme-dark').click()
+  await expect.poll(inlineBg, { timeout: 3000 }).toBe('')
   await expect.poll(() => storedTheme().theme, { timeout: 3000 }).toBe('dark')
   expect(cloudAiRequests).toEqual([])
   await settingsDialog.getByRole('button', { name: 'Close settings' }).click()

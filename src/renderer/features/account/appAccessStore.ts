@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { canWrite, type AppAccess } from '@shared/appAccess'
+import { canWrite, extrasUnlocked, type AppAccess } from '@shared/appAccess'
 import { ipc } from '@renderer/lib/ipc'
 
 /**
@@ -28,6 +28,14 @@ export const useAppAccessStore = create<AppAccessState>((set) => ({
 /** Whether the open project may change; false only after the trial without the license. */
 export function useCanWrite(): boolean {
   return useAppAccessStore((s) => canWrite(s.access))
+}
+
+/**
+ * Whether Sepia, custom themes, and the accent colours are on: during the trial and with the
+ * license, not after the trial ends unpaid (changed by the author 2026-10-10).
+ */
+export function useExtrasUnlocked(): boolean {
+  return useAppAccessStore((s) => extrasUnlocked(s.access))
 }
 
 /** Empties the store. For tests only. */

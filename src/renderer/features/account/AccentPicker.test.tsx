@@ -6,6 +6,7 @@ import type { SupporterStatus } from '@shared/license'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { AccentPicker } from './AccentPicker'
 import { resetAccountStore, useAccountStore } from './accountStore'
+import { resetAppAccessStore, useAppAccessStore } from './appAccessStore'
 
 const UNLICENSED: SupporterStatus = {
   licensed: false,
@@ -15,6 +16,11 @@ const UNLICENSED: SupporterStatus = {
   product: { variantId: 'supporter-39', priceCents: 3900 },
   accent: 'default'
 }
+const ENDS = '2026-11-07T00:00:00.000Z'
+/** The accents follow the access (changed by the author 2026-10-10): on in the trial. */
+const access = (state: 'trial' | 'licensed' | 'expired'): void =>
+  useAppAccessStore.setState({ access: { state, trialEndsAt: ENDS, daysLeft: 0 } })
+
 const LICENSED: SupporterStatus = {
   licensed: true,
   since: '2026-09-20T10:00:00.000Z',
@@ -51,16 +57,19 @@ let fake: Fake
 
 beforeEach(() => {
   resetAccountStore()
+  resetAppAccessStore()
   fake = fakeClient()
   setIpcClient(fake.client)
 })
 afterEach(() => {
   resetAccountStore()
+  resetAppAccessStore()
 })
 
 describe('AccentPicker (F-15.9)', () => {
-  it('locks every accent but the default without a license, and says why', () => {
+  it('locks every accent but the default after the trial ends unpaid, and says why', () => {
     useAccountStore.setState({ supporter: UNLICENSED })
+    access('expired')
     render(<AccentPicker />)
     expect(screen.getByText('Accent colour — MythScribe license needed')).toBeInTheDocument()
     const moss = screen.getByTestId('account-accent-default')
@@ -82,6 +91,7 @@ describe('AccentPicker (F-15.9)', () => {
 
   it('marks the chosen accent and sends a pick to main with a license', async () => {
     useAccountStore.setState({ supporter: LICENSED })
+    access('licensed')
     render(<AccentPicker />)
     expect(screen.getByText('Accent colour')).toBeInTheDocument()
     const ember = screen.getByTestId('account-accent-ember')
@@ -96,6 +106,14 @@ describe('AccentPicker (F-15.9)', () => {
     expect(useAccountStore.getState().supporter?.accent).toBe('violet')
   })
 
+  it('unlocks the accents during the trial, without a license', () => {
+    useAccountStore.setState({ supporter: UNLICENSED })
+    access('trial')
+    render(<AccentPicker />)
+    expect(screen.getByText('Accent colour')).toBeInTheDocument()
+    expect(screen.getByTestId('account-accent-violet')).toBeEnabled()
+  })
+
   it('paints each swatch in the colour it stands for', () => {
     useAccountStore.setState({ supporter: LICENSED })
     render(<AccentPicker />)
@@ -105,6 +123,7 @@ describe('AccentPicker (F-15.9)', () => {
 
   it('disables the swatches while a pick is in flight', () => {
     useAccountStore.setState({ supporter: LICENSED, supporterBusy: true })
+    access('licensed')
     render(<AccentPicker />)
     expect(screen.getByTestId('account-accent-default')).toBeDisabled()
     expect(screen.getByTestId('account-accent-violet')).toBeDisabled()

@@ -5,9 +5,9 @@ import { parseLicenseToken, type LicenseClaims, type LicensePublicKeyJwk } from 
  * Verifies a Supporter license token (F-15.9) against the Worker's public key. The only place in
  * the app that decides whether a license is real: everything else reads the claims this answers.
  *
- * Nothing here reaches the network or the disk, so the extras keep working offline for as long as
- * the token says they may (`exp`, 14 days from the last refresh). A token that is malformed,
- * signed with another key, or past its expiry is null — there is no partial trust.
+ * Nothing here reaches the network or the disk, so the license keeps working offline for as long
+ * as the token says it may (`exp`, `LICENSE_GRACE_DAYS` from the last refresh). A token that is
+ * malformed, signed with another key, or past its expiry is null — there is no partial trust.
  */
 export function verifyLicenseToken(
   token: string,

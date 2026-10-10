@@ -68,6 +68,12 @@ export interface AccountServiceOptions {
    * a sign-out (`account:supporterChanged`).
    */
   onSupporterChange: (status: SupporterStatus) => void
+  /**
+   * Whether the paid extras (the accent colours) are on. Main passes the app's access
+   * (`extrasUnlocked`: during the trial and with the license; changed by the author 2026-10-10);
+   * left out, it is the license alone.
+   */
+  extrasUnlocked?: () => boolean
   now?: () => number
   schedule?: Schedule
   pollIntervalMs?: number
@@ -116,6 +122,7 @@ export class AccountService {
   private readonly licensePublicKey: LicensePublicKeyJwk
   private readonly onChange: (status: AccountStatus) => void
   private readonly onSupporterChange: (status: SupporterStatus) => void
+  private readonly extrasUnlocked: (() => boolean) | null
   private readonly now: () => number
   private readonly schedule: Schedule
   private readonly pollIntervalMs: number
@@ -127,6 +134,7 @@ export class AccountService {
     this.licensePublicKey = options.licensePublicKey
     this.onChange = options.onChange
     this.onSupporterChange = options.onSupporterChange
+    this.extrasUnlocked = options.extrasUnlocked ?? null
     this.now = options.now ?? (() => Date.now())
     this.schedule = options.schedule ?? defaultSchedule
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS
@@ -297,7 +305,7 @@ export class AccountService {
         validUntil: null,
         offline: false,
         product: this.product,
-        accent: 'default'
+        accent: this.extrasOn(false) ? settings.accent : 'default'
       }
     }
     const { refreshedAt } = settings
@@ -308,8 +316,13 @@ export class AccountService {
       offline: refreshedAt === null || this.now() - refreshedAt >= LICENSE_REFRESH_INTERVAL_MS,
       // Nothing to buy while the license is held; the Buy button belongs to the unlicensed state.
       product: null,
-      accent: settings.accent
+      accent: this.extrasOn(true) ? settings.accent : 'default'
     }
+  }
+
+  /** Whether the extras are on, given whether the license is held now. */
+  private extrasOn(licensed: boolean): boolean {
+    return this.extrasUnlocked === null ? licensed : this.extrasUnlocked()
   }
 
   /**
@@ -339,10 +352,11 @@ export class AccountService {
 
   /**
    * Picks the app-wide accent (F-15.9). `default` is every install's; the rest are the cosmetic
-   * extra the license unlocks, so they are refused without one rather than stored and ignored.
+   * extra the trial and the license unlock, so they are refused after the trial ends unpaid
+   * rather than stored and ignored. A stored pick is kept while locked and comes back with them.
    */
   setAccent(accent: AccentId): SupporterStatus {
-    if (accent !== 'default' && !this.supporter().licensed) {
+    if (accent !== 'default' && !this.extrasOn(this.supporter().licensed)) {
       throw new AppError('VALIDATION', ACCENT_NEEDS_LICENSE_MESSAGE)
     }
     this.writeSupporter({ accent })

@@ -1,5 +1,6 @@
 import { ACCENTS } from '@shared/license'
 import { useAccountStore } from './accountStore'
+import { useExtrasUnlocked } from './appAccessStore'
 
 const SWATCH =
   'size-6 rounded-full border border-line-strong hover:border-fg aria-pressed:border-fg aria-pressed:ring-2 aria-pressed:ring-accent disabled:cursor-not-allowed disabled:opacity-40'
@@ -8,20 +9,22 @@ const SWATCH =
 const LOCKED = 'MythScribe license needed'
 
 /**
- * The accent colour (F-15.9): the one cosmetic extra the Supporter license unlocks. Six swatches
- * from `ACCENTS`; the pick goes to main, which writes it to `app-state.json` and answers the new
- * status, so `<html data-accent>` follows it app-wide (App.tsx) and `tokens.css` swaps the three
- * accent variables. Shown to everyone, with the five presets disabled without a license, because
- * a locked extra the author can see is the honest version of what the purchase is for. It sits on
- * the Appearance tab beside the theme choice (F-7.8), which gates on the same flag; the light
- * themes get darker shades of each accent from `tokens.css`, and High contrast keeps its own.
+ * The accent colour (F-15.9): a cosmetic extra, on during the trial and with the license. Six
+ * swatches from `ACCENTS`; the pick goes to main, which writes it to `app-state.json` and answers
+ * the new status, so `<html data-accent>` follows it app-wide (App.tsx) and `tokens.css` swaps the
+ * three accent variables. Shown to everyone, with the five presets disabled after the trial ends
+ * unpaid, because a locked extra the author can see is the honest version of what the purchase is
+ * for. It sits on the Appearance tab beside the theme choice (F-7.8), which gates on the same
+ * flag; the light themes get darker shades of each accent from `tokens.css`, and High contrast
+ * keeps its own.
  */
 export function AccentPicker(): React.JSX.Element {
   const supporter = useAccountStore((s) => s.supporter)
   const busy = useAccountStore((s) => s.supporterBusy)
   const setAccent = useAccountStore((s) => s.setAccent)
-  // Unknown (nothing loaded yet) counts as locked: the extras only ever appear on a real license.
-  const locked = supporter?.licensed !== true
+  // On during the trial and with the license (changed by the author 2026-10-10); unknown (main
+  // has not answered) counts as locked.
+  const locked = !useExtrasUnlocked()
   const current = supporter?.accent ?? 'default'
 
   return (

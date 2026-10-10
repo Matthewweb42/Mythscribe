@@ -1,7 +1,8 @@
 import { create } from 'zustand'
+import { extrasUnlocked } from '@shared/appAccess'
 import { nextTheme, resolveTheme, type CustomTheme, type CustomThemeInput } from '@shared/themes'
 import { defaultViewSettings, formatZoom, type UiScale, type ZoomStep } from '@shared/zoom'
-import { useAccountStore } from '@renderer/features/account/accountStore'
+import { useAppAccessStore } from '@renderer/features/account/appAccessStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -46,9 +47,9 @@ interface ViewState {
   deleteCustomTheme: (id: string) => Promise<void>
 }
 
-/** Whether the Supporter extras (Sepia, custom themes) are unlocked; unknown counts as locked. */
+/** Whether the paid themes (Sepia, custom themes) are on; unknown counts as locked. */
 function licensed(): boolean {
-  return useAccountStore.getState().supporter?.licensed === true
+  return extrasUnlocked(useAppAccessStore.getState().access)
 }
 
 /** Bumped by every load and reset so a response from a superseded request is dropped. */

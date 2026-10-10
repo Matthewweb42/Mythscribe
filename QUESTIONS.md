@@ -548,6 +548,7 @@ Plan: `plan-knowledge-model.md`. P0 (F-8.7), P1 (F-9.12), and P2 (F-9.13) are bu
 - Question: No build can verify a license yet: `LICENSE_PUBLIC_KEY_JWK` in `src/shared/license.ts` is still the placeholder, and the $30 product is not on sale. The trial starts on the first launch of this version, so in 30 days every install (yours included) opens projects read-only.
 - Chosen: nothing bypasses the trial (you asked for no assumptions, and a hidden switch would be a user-settable bypass). Export and backup keep working.
 - To do before then: `npm run cloud:license-keygen`, `wrangler secret put LICENSE_SIGNING_KEY`, paste the public JWK into `src/shared/license.ts`, create the $30 product and `LEMONSQUEEZY_APP_LICENSE`, deploy; then buy (or grant yourself) the license. Alternatives: a developer exemption (say how you want it gated), or a longer trial for existing installs.
+- **Changed by the author 2026-10-10:** a developer exemption. With the environment variable `MYTHSCRIBE_DEV_LICENSE=1` set on the author's machine the app answers as licensed, so that copy never turns read-only (neither from the trial nor from an expired license check). Read once in main at launch (`devLicenseExempt` in `src/main/account/appAccess.ts`); no setting, menu, or channel reads or writes it. Setup: `docs/PERSONAL-USE.md` (One-time setup, step 3). The operator steps above still apply for everyone else.
 
 ## 2026-10-07 · F-15.13 (billing B3a) · What "read-only" refuses
 - Question: Which actions stop after the trial?
@@ -564,12 +565,14 @@ Plan: `plan-knowledge-model.md`. P0 (F-8.7), P1 (F-9.12), and P2 (F-9.13) are bu
 ## 2026-10-07 · F-15.13 (billing B3a) · Themes and accents during the trial
 - Question: The Supporter extras "become part of the paid app". Do trial users get them?
 - Chosen: no change to the gate: Sepia, custom themes, and accent colours unlock with the license (now called the MythScribe license), not during the trial.
+- **Changed by the author 2026-10-10:** they are on during the trial too, and locked only after the trial ends unpaid (the read-only state). The gate is `extrasUnlocked(AppAccess)` in `src/shared/appAccess.ts`, used by `handlers.ts` (themes), `AccountService` (accent, through its `extrasUnlocked` option), and the renderer (`useExtrasUnlocked`).
 - Alternatives: unlock them during the trial too (the gate would follow `AppAccess` instead of the license); make them free for everyone.
 - To change it: `themeNeedsLicense` callers (`handlers.ts`, `ThemePicker.tsx`, `viewStore.ts`, `App.tsx`) and `AccountService.setAccent`.
 
 ## 2026-10-07 · F-15.13 (billing B3a) · A paid license offline for more than 14 days
 - Question: The F-15.9 token expires 14 days after the last refresh that reached the Worker (it was built for cosmetics). It now also keeps projects writable.
 - Chosen: unchanged: a licensed install that cannot reach MythScribe Cloud for more than 14 days turns read-only until it reconnects (Refresh on the Account tab). Export and backup still work.
+- **Changed by the author 2026-10-10:** 90 days (`LICENSE_GRACE_DAYS`, shared with the Worker, which signs `exp` with it; tokens signed before the Worker's next deploy keep their 14 days).
 - Alternatives: a longer grace (e.g. 90 days) for the app license; trust an expired but genuine token for writing and use expiry only for refunds.
 - To change it: `LICENSE_GRACE_DAYS` in `src/shared/license.ts` (also the Worker's), or `verifyLicenseToken` in `src/main/account/licenseVerifier.ts`.
 
@@ -582,6 +585,7 @@ Plan: `plan-knowledge-model.md`. P0 (F-8.7), P1 (F-9.12), and P2 (F-9.13) are bu
 ## 2026-10-07 · F-15.13 (billing B3a) · Account tab intro now overstates "no account needed"
 - Question: The Account tab still opens with "Optional. You never need an account to write." After the trial, writing needs the license, which belongs to an account.
 - Chosen: left as it is in B3a (the intro is the hosted-AI copy slice B3b rewrites); the license section below it explains the trial and the purchase.
+- **Changed by the author 2026-10-10:** the intro reads "The account holds your MythScribe license and connects MythScribe Cloud."
 - Alternatives: "The account holds your MythScribe license and connects MythScribe Cloud."
 - To change it: `INTRO` in `src/renderer/features/account/AccountSettingsTab.tsx` (and its unit test and the smoke test's check).
 
