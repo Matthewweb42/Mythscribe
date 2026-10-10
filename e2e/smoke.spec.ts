@@ -6346,7 +6346,9 @@ test('create, close, reopen a project on disk', async () => {
   // sent until Sort with AI; the fake server answers each file by name (Mara at 35 with a
   // nickname, Tomas Reed, The Landing, a theme). The review shows the conflict side by side with
   // the sheet's value kept by default; the author picks the upload's, applies, and the sheets,
-  // their tags, and the Project notes page are there, and both files read "Sorted".
+  // their tags, and the Project notes page are there, and both files read "Sorted". Since
+  // 2026-10-10 the pass is side work: no window over the editor, a status-bar item instead, and
+  // the review opens in the assistant column from it.
   const contextDir = path.join(tmp, 'context')
   fs.mkdirSync(contextDir, { recursive: true })
   const peopleFile = path.join(contextDir, 'people.md')
@@ -6372,24 +6374,32 @@ test('create, close, reopen a project on disk', async () => {
   await expect(libraryDialog.getByTestId('library-estimate')).toContainText('2 files · 2 requests')
   expect(contextBodies()).toHaveLength(0)
   await libraryDialog.getByTestId('library-confirm').click()
-  const libraryReview = libraryDialog.getByTestId('review-deck')
-  await expect(libraryReview).toBeVisible({ timeout: 15_000 })
+  await expect(libraryDialog).toHaveCount(0)
+  const uploadStatus = page.getByTestId('side-work-upload')
+  await expect(uploadStatus).toHaveText('Upload: ready to review', { timeout: 15_000 })
+  await uploadStatus.click()
+  const uploadPanel = page.getByTestId('library-panel')
+  const libraryReview = uploadPanel.getByTestId('review-deck')
+  await expect(libraryReview).toBeVisible()
   expect(contextBodies()).toHaveLength(2)
   expect(contextBodies()[0]).toMatch(/^Existing sheets by kind:\ncharacter: .*\bMara\b/)
-  await expect(libraryDialog.getByTestId('library-review-summary')).toHaveText(
+  await expect(uploadPanel.getByTestId('library-review-summary')).toHaveText(
     '4 new sheets · 1 sheet to update · 1 conflict · 1 note for Project notes'
   )
-  // The review is a deck since 2026-10-08: one card at a time, grouped in the rail, nothing
-  // accepted until the author says so.
-  await expect(
-    libraryDialog.getByRole('navigation', { name: 'Groups' }).getByTestId('review-group')
-  ).toHaveText(['New categories0/1', 'New sheets0/4', 'Conflicts0/1', 'Project notes0/1'])
-  await expect(libraryDialog.getByTestId('review-apply')).toHaveText('Apply 0 accepted')
+  // The review is a deck since 2026-10-08: one card at a time, grouped (a dropdown in the side
+  // column), nothing accepted until the author says so.
+  await expect(uploadPanel.getByTestId('review-group-select').locator('option')).toHaveText([
+    'New categories 0/1',
+    'New sheets 0/4',
+    'Conflicts 0/1',
+    'Project notes 0/1'
+  ])
+  await expect(uploadPanel.getByTestId('review-apply')).toHaveText('Apply 0 accepted')
   // F-9.9: the review chat. The author asks for a change; the fake server answers operations on
   // the listed review: Tomas Reed's card (further on) shows the new name and is marked Changed,
   // the reply lists each change with the one the review could not do (renaming an existing
   // sheet) and why, and the cost line is there. Nothing was written: the deck still decides.
-  const reviewChat = libraryDialog.getByTestId('review-chat')
+  const reviewChat = uploadPanel.getByTestId('review-chat')
   await reviewChat.getByTestId('review-chat-input').fill('Tomas Reed is also called Tom.')
   await reviewChat.getByTestId('review-chat-send').click()
   await expect(reviewChat.getByTestId('review-chat-change')).toHaveText(
@@ -6448,9 +6458,10 @@ test('create, close, reopen a project on disk', async () => {
   await expect(libraryReview.getByTestId('library-notes')).toContainText(
     'Theme: The book is about debts'
   )
-  await expect(libraryDialog.getByTestId('review-apply')).toHaveText('Apply 6 accepted')
+  await expect(uploadPanel.getByTestId('review-apply')).toHaveText('Apply 6 accepted')
   await page.keyboard.press('a')
-  await expect(libraryDialog).toHaveCount(0)
+  await expect(uploadPanel).toHaveCount(0)
+  await expect(uploadStatus).toHaveCount(0)
   await expect(libraryPanel.getByTestId('library-file-state')).toHaveText(['Sorted', 'Sorted'])
   const afterLibrary = await page.evaluate(async () => {
     const listed = (await window.mythscribe.invoke('entity:list', undefined)) as IpcResult<Entity[]>
@@ -6617,28 +6628,38 @@ test('create, close, reopen a project on disk', async () => {
   await expect(organiseOffer).toContainText('possible duplicate', { timeout: 10_000 })
   expect(organiseBodies()).toBe(0)
   await organiseOffer.getByRole('button', { name: 'Review' }).click()
-  const organiseDialog = page.getByTestId('organise-dialog')
-  const organiseCard = organiseDialog.getByTestId('organise-change')
-  await expect(organiseCard).toHaveCount(1, { timeout: 15_000 })
+  // Side work (2026-10-10): the plan is worked out in the background; the status-bar item opens
+  // it in the assistant column.
+  const organiseStatus = page.getByTestId('side-work-organise')
+  await expect(organiseStatus).toHaveText('Organise: ready to review', { timeout: 15_000 })
+  await organiseStatus.click()
+  const organisePanel = page.getByTestId('organise-panel')
+  const organiseCard = organisePanel.getByTestId('organise-change')
+  await expect(organiseCard).toHaveCount(1)
   expect(organiseBodies()).toBe(1)
-  await expect(organiseDialog.getByTestId('organise-reply')).toHaveText(
+  await expect(organisePanel.getByTestId('organise-reply')).toHaveText(
     'One Tomas, and the Landing filled in.'
   )
-  const organiseRail = organiseDialog.getByRole('navigation', { name: 'Groups' })
-  await expect(organiseRail.getByTestId('review-group')).toHaveText(['Merges0/1', 'Story bible0/1'])
-  await expect(organiseDialog.getByTestId('review-position')).toHaveText('Merge 1 of 1')
+  const organiseRail = organisePanel.getByTestId('review-group-select')
+  await expect(organiseRail.locator('option')).toHaveText(['Merges 0/1', 'Story bible 0/1'])
+  await expect(organisePanel.getByTestId('review-position')).toHaveText('Merge 1 of 1')
   await expect(organiseCard).toContainText('Merge tags “#reed” into #tomas-reed')
-  await expect(organiseDialog.getByRole('checkbox')).toHaveCount(0)
+  await expect(organisePanel.getByRole('checkbox')).toHaveCount(0)
   await page.keyboard.press('a')
   await expect(organiseCard).toContainText('Sheet “The Landing”: 1 field')
   await expect(organiseCard.locator('ins')).toHaveText(ORGANISE_ATMOSPHERE)
-  await expect(organiseDialog.getByTestId('review-apply')).toHaveText('Apply 1 accepted')
-  await organiseDialog.getByTestId('review-accept').click()
-  await expect(organiseDialog.getByTestId('review-done')).toContainText('All 2 reviewed.')
-  await expect(organiseRail.getByTestId('review-group')).toHaveText(['Merges1/1', 'Story bible1/1'])
-  await organiseRail.getByRole('button', { name: /Merges/ }).click()
+  await expect(organisePanel.getByTestId('review-apply')).toHaveText('Apply 1 accepted')
+  await organisePanel.getByTestId('review-accept').click()
+  await expect(organisePanel.getByTestId('review-done')).toContainText('All 2 reviewed.')
+  // At the end no group is on show, so the dropdown offers to choose one.
+  await expect(organiseRail.locator('option')).toHaveText([
+    'Choose a group',
+    'Merges 1/1',
+    'Story bible 1/1'
+  ])
+  await organiseRail.selectOption({ label: 'Merges 1/1' })
   await expect(organiseCard).toHaveAttribute('data-status', 'applied')
-  await organiseRail.getByRole('button', { name: /Story bible/ }).click()
+  await organiseRail.selectOption({ label: 'Story bible 1/1' })
   await expect(organiseCard).toHaveAttribute('data-status', 'applied')
   const afterOrganise = await page.evaluate(async () => {
     const tags = (await window.mythscribe.invoke('tag:list', undefined)) as IpcResult<Tag[]>
@@ -6651,19 +6672,22 @@ test('create, close, reopen a project on disk', async () => {
   await organiseCard.getByRole('button', { name: /^Undo: / }).click()
   await expect(organiseCard).toHaveAttribute('data-status', 'undone')
   await expect.poll(() => sheetField('The Landing', 'atmosphere')).toBeUndefined()
-  await organiseDialog.getByRole('button', { name: 'Done' }).click()
-  await expect(organiseDialog).toHaveCount(0)
+  await organisePanel.getByRole('button', { name: 'Done' }).click()
+  await expect(organisePanel).toHaveCount(0)
+  await expect(organiseStatus).toHaveCount(0)
   // Auto: the button asks again; the sheet change lands at once, and one Undo takes it all back.
   await assistant.getByRole('radio', { name: 'Auto', exact: true }).click()
   await expect.poll(async () => (await aiSettings()).chatMode).toBe('auto')
   await tagsSection.getByTestId('organise-button').click()
-  await expect(organiseCard).toHaveAttribute('data-status', 'applied', { timeout: 15_000 })
-  await expect(organiseRail.getByTestId('review-group')).toHaveText(['Story bible1/1'])
+  await expect(organiseStatus).toHaveText('Organise: ready to review', { timeout: 15_000 })
+  await organiseStatus.click()
+  await expect(organiseCard).toHaveAttribute('data-status', 'applied')
+  await expect(organiseRail.locator('option')).toHaveText(['Story bible 1/1'])
   expect(await sheetField('The Landing', 'atmosphere')).toBe(ORGANISE_ATMOSPHERE)
-  await organiseDialog.getByTestId('organise-undo-all').click()
+  await organisePanel.getByTestId('organise-undo-all').click()
   await expect(organiseCard).toHaveAttribute('data-status', 'undone')
   await expect.poll(() => sheetField('The Landing', 'atmosphere')).toBeUndefined()
-  await organiseDialog.getByRole('button', { name: 'Done' }).click()
+  await organisePanel.getByRole('button', { name: 'Done' }).click()
   // F-9.15: both runs are in the one Changes log, newest first. The plan screen's Undo was the
   // log's, so each sheet change reads as undone there; the merge is listed without an Undo.
   await showSection('Changes')

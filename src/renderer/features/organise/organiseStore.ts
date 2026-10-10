@@ -23,7 +23,9 @@ import { applyOrganiseAction } from './organiseApply'
 
 /**
  * Organise (F-9.10): one run at a time, its plan, and where each change stands. The plan screen
- * (`OrganiseDialog`, one decision at a time on the review deck since 2026-10-08) reads it; the
+ * (`OrganisePanel`, one decision at a time on the review deck since 2026-10-08; since 2026-10-10
+ * side work in the assistant column, never over the editor, opened from its status-bar item
+ * while the run goes on in the background) reads it; the
  * Organise button, the quiet offer, and the chat (agent.v4's organise request) start it. The run
  * follows the chat mode it was started in (F-5.21): in Ask every change waits for the author's
  * Accept and is applied with "Apply accepted" (or on reaching the end); in Auto every change that can be undone is
@@ -51,8 +53,10 @@ export interface OrganiseChangeView {
 export type OrganisePhase = 'idle' | 'running' | 'ready' | 'failed'
 
 interface OrganiseState {
-  /** Whether the plan screen is showing. */
+  /** Whether a run is under way or waiting (its status-bar item shows), from start to close. */
   open: boolean
+  /** Whether the plan screen shows in the side panel (the author clicked the status-bar item). */
+  shown: boolean
   phase: OrganisePhase
   request: OrganiseRequest | null
   /** The chat mode the run was started in. */
@@ -77,8 +81,12 @@ interface OrganiseState {
   /** The findings key the author waved away; the offer stays hidden while it is the same. */
   dismissedKey: string | null
 
-  /** Opens the plan screen and asks the AI for a plan (the chat mode decides how it lands). */
+  /** Asks the AI for a plan in the background (the chat mode decides how it lands). */
   start: (request: OrganiseRequest) => Promise<void>
+  /** Shows the run's plan screen in the side panel. */
+  show: () => void
+  /** Hides the plan screen; the run and its plan stay, under the status-bar item. */
+  hide: () => void
   /** Stops the run in flight (`ai:cancel`). */
   stop: () => void
   /** Closes the plan screen and settles the run's proposal. */
@@ -114,6 +122,7 @@ const nextRequestId = (): string => `org-${Date.now().toString(36)}-${++counter}
 
 const empty = {
   open: false,
+  shown: false,
   phase: 'idle' as OrganisePhase,
   request: null,
   mode: DEFAULT_ASSISTANT_MODE,
@@ -194,7 +203,9 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
       const requestId = nextRequestId()
       runKey = requestId
       const mode = useAiSettingsStore.getState().settings?.chatMode ?? DEFAULT_ASSISTANT_MODE
-      set({ ...empty, open: true, phase: 'running', request, mode, requestId })
+      // Try again from the plan screen keeps it showing; a fresh run starts in the background.
+      const shown = get().open && get().shown
+      set({ ...empty, open: true, shown, phase: 'running', request, mode, requestId })
       let result
       try {
         // Main lists what is saved: the notes and words typed just before asking go first.
@@ -254,6 +265,14 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
         )
       }
       void get().refreshCandidates()
+    },
+
+    show() {
+      if (get().open) set({ shown: true })
+    },
+
+    hide() {
+      set({ shown: false, editingId: null })
     },
 
     stop() {

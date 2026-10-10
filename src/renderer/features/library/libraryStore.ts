@@ -95,6 +95,11 @@ interface LibraryState {
   files: ContextFile[]
   loaded: boolean
   flow: LibraryFlow | null
+  /**
+   * Whether the pass, its failure, or its review shows in the side panel (2026-10-10: side work,
+   * opened from the status-bar item; the estimate alone is a dialog). Every sort starts hidden.
+   */
+  shown: boolean
   chat: ReviewChatState
   load: () => Promise<void>
   clear: () => void
@@ -114,6 +119,10 @@ interface LibraryState {
   confirm: () => Promise<void>
   /** Stops a running pass. */
   cancelRun: () => void
+  /** Shows the pass, its failure, or its review in the side panel. */
+  show: () => void
+  /** Hides it again; the pass and the review stay, under the status-bar item. */
+  hide: () => void
   /** Closes the estimate, the failure, or the review; nothing is written. */
   discard: () => void
   /** Records the author's decision on cards of the review deck (2026-10-08). */
@@ -239,6 +248,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
     files: [],
     loaded: false,
     flow: null,
+    shown: false,
     chat: emptyReviewChat(),
 
     async load() {
@@ -253,7 +263,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
       if (flow?.stage === 'review') settle(flow.review, 'rejected')
       if (flow?.stage === 'running') void useAiActivityStore.getState().cancel(flow.requestId)
       dropChat(get().chat)
-      set({ files: [], loaded: false, flow: null, chat: emptyReviewChat() })
+      set({ files: [], loaded: false, flow: null, shown: false, chat: emptyReviewChat() })
     },
 
     async choosePaths() {
@@ -302,7 +312,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
       }
       const mine = generation
       const ids = [...fileIds]
-      set({ flow: { stage: 'estimating', fileIds: ids } })
+      set({ flow: { stage: 'estimating', fileIds: ids }, shown: false })
       try {
         const estimate = await ipc().invoke('library:estimate', { fileIds: ids })
         if (mine !== generation || get().flow?.stage !== 'estimating') return
@@ -400,6 +410,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
       const flow = get().flow
       if (flow?.stage !== 'running') return
       void useAiActivityStore.getState().cancel(flow.requestId)
+    },
+
+    show() {
+      if (uploadInPanel(get().flow)) set({ shown: true })
+    },
+
+    hide() {
+      set({ shown: false })
     },
 
     discard() {
@@ -602,5 +620,21 @@ export function resetLibraryStore(): void {
   generation++
   unsubscribe?.()
   unsubscribe = null
-  useLibraryStore.setState({ files: [], loaded: false, flow: null, chat: emptyReviewChat() })
+  useLibraryStore.setState({
+    files: [],
+    loaded: false,
+    flow: null,
+    shown: false,
+    chat: emptyReviewChat()
+  })
+}
+
+/** The stages that are side work (the pass, its failure, the review); the estimate is a dialog. */
+export function uploadInPanel(
+  flow: LibraryFlow | null
+): flow is Extract<LibraryFlow, { stage: 'running' | 'review' | 'failed' }> {
+  return (
+    flow !== null &&
+    (flow.stage === 'running' || flow.stage === 'review' || flow.stage === 'failed')
+  )
 }
