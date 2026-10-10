@@ -133,7 +133,7 @@ export async function runRewrite(
   }
   const request = {
     feature: 'rewrite' as const,
-    tier: 'fast' as const,
+    tier: 'strong' as const,
     maxTokens: prompt.maxTokens
   }
   const requestId = input.requestId === undefined ? {} : { requestId: input.requestId }

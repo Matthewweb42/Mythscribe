@@ -85,7 +85,8 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     when: 'Rewrite a selection (bubble, chat, or agent edit).',
     callsPerUse: 1,
     typicalOutTokens: 250,
-    ideas: 'Answer length tracks the selection: set max_tokens from the selection size.'
+    ideas:
+      'Strong tier since 2026-10-10 (author: voice matters more than cost here); on an OpenAI key that is about 3x the fast tier, on the OpenRouter defaults about the same. Answer length tracks the selection: set max_tokens from the selection size.'
   },
   brief: {
     trigger: 'on request',

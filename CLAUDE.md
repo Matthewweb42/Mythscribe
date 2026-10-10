@@ -65,7 +65,7 @@ apply to all of `FEATURES.md` §2.5, §2.14, §2.15 and are checked in review.
 4. Grounded answers only: Story Intelligence answers cite manuscript passages or say "not found" (F-5.7). Critique cites a passage for every claim; no uncited praise (F-14.8).
 
 **Token efficiency** (measure with the usage ledger, F-5.14; budgets are per feature)
-1. **Tiers, not names.** Request `fast` or `strong` (F-5.11). Ghost text, tags, summaries, embeddings, and classification use `fast`. Only Author mode, critique, queries (the chat agent, F-5.22), and Check consistency on demand (F-13.4) may use `strong`.
+1. **Tiers, not names.** Request `fast` or `strong` (F-5.11). Ghost text, tags, summaries, embeddings, and classification use `fast`. Only Author mode, Rewrite in my voice (F-14.10; author's choice 2026-10-10), critique, queries (the chat agent, F-5.22), and Check consistency on demand (F-13.4) may use `strong`.
 2. **Retrieve, do not dump.** Never send the whole manuscript. Context is built from scene summaries (~100 tokens each), entity sheets, and the top-k retrieved chunks within a fixed budget (default: 3 full scenes + 10 summaries, hard cap per feature). Recent text at the caret is capped (~500 characters for ghost text).
 3. **Stable prefix first.** Order prompts as: system rules → voice profile → story bible → task-specific context → user turn, so provider prompt caching applies to the stable part. Do not interleave dynamic text into the prefix.
 4. **Cache locally.** Identical (feature, prompt version, context hash) requests return the cached proposal. Summaries and embeddings are invalidated by content hash, not by time.
