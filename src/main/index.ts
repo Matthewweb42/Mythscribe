@@ -376,7 +376,7 @@ if (!primaryInstance) {
     access = new AppAccessService({
       appState,
       licensed: () => licensedAccount.supporter().licensed,
-      // The author's machine sets MYTHSCRIBE_DEV_LICENSE=1 (docs/PERSONAL-USE.md): never read-only.
+      // The author's machine sets MYTHSCRIBE_DEV_LICENSE to their secret (docs/PERSONAL-USE.md): never read-only.
       enforced: licenseVerifiable(licensePublicKey(process.env)) && !devLicenseExempt(process.env),
       onChange: (status) => {
         const windows = BrowserWindow.getAllWindows()

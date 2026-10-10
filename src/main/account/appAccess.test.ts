@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -132,17 +133,24 @@ describe('AppAccessService (AI-BILLING-SPEC M1)', () => {
 })
 
 describe('devLicenseExempt (changed by the author 2026-10-10)', () => {
-  it('is on only for MYTHSCRIBE_DEV_LICENSE=1', () => {
-    expect(devLicenseExempt({ [DEV_LICENSE_ENV]: '1' })).toBe(true)
-    expect(devLicenseExempt({ [DEV_LICENSE_ENV]: ' 1\n' })).toBe(true)
-    for (const value of [undefined, '', '0', 'true', 'yes', '11']) {
-      expect(devLicenseExempt({ [DEV_LICENSE_ENV]: value })).toBe(false)
+  // SHA-256 of 'test-secret'.
+  const HASH = createHash('sha256').update('test-secret').digest('hex')
+
+  it('is on only when the variable hashes to the expected value', () => {
+    expect(devLicenseExempt({ [DEV_LICENSE_ENV]: 'test-secret' }, HASH)).toBe(true)
+    expect(devLicenseExempt({ [DEV_LICENSE_ENV]: ' test-secret\n' }, HASH)).toBe(true)
+    for (const value of [undefined, '', '1', 'true', 'test-secret2', 'Test-secret']) {
+      expect(devLicenseExempt({ [DEV_LICENSE_ENV]: value }, HASH)).toBe(false)
     }
-    expect(devLicenseExempt({})).toBe(false)
+    expect(devLicenseExempt({}, HASH)).toBe(false)
+  })
+
+  it('does not accept the old value 1 with the built-in hash', () => {
+    expect(devLicenseExempt({ [DEV_LICENSE_ENV]: '1' })).toBe(false)
   })
 
   it('keeps the author writable after the trial and without a license', () => {
-    const service = build(!devLicenseExempt({ [DEV_LICENSE_ENV]: '1' }))
+    const service = build(!devLicenseExempt({ [DEV_LICENSE_ENV]: 'test-secret' }, HASH))
     now += 400 * DAY
     expect(service.refresh().state).toBe('licensed')
     expect(service.writable()).toBe(true)

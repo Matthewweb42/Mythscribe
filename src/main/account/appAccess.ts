@@ -7,6 +7,7 @@ import {
 } from '@shared/appAccess'
 import type { AppStateStore } from '../appState/appStateStore'
 import { AppError } from '../ipc/errors'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { defaultSchedule, type Schedule } from '../schedule'
 
 /**
@@ -22,16 +23,29 @@ import { defaultSchedule, type Schedule } from '../schedule'
 
 /**
  * The author's own exemption (decided by the author 2026-10-10): with this environment variable
- * set to `1` on their machine, the app answers as licensed, so their copy never turns read-only
+ * set to the author's secret on their machine, the app answers as licensed, so their copy never turns read-only
  * from the trial or from a license check that expired offline. It is read in main only, at
  * launch; no setting, menu, or channel reads or writes it, so nothing in the UI can turn it on.
  * Documented for the author in `docs/PERSONAL-USE.md`.
  */
 export const DEV_LICENSE_ENV = 'MYTHSCRIBE_DEV_LICENSE'
 
-/** Whether the developer exemption is on: exactly `1` (spaces trimmed), nothing looser. */
-export function devLicenseExempt(env: Record<string, string | undefined>): boolean {
-  return env[DEV_LICENSE_ENV]?.trim() === '1'
+/**
+ * SHA-256 of the author's secret. Only the hash ships, so reading the app's code does not give
+ * anyone a value that turns the exemption on; a new secret is a new hash here.
+ */
+const DEV_LICENSE_SHA256 = '64fef2a10927e5b7d4806277c6ad9f46d841985c9ad272ce1d7119c2c0cadf58'
+
+/** Whether the developer exemption is on: the variable hashes to `DEV_LICENSE_SHA256` (trimmed). */
+export function devLicenseExempt(
+  env: Record<string, string | undefined>,
+  expectedSha256: string = DEV_LICENSE_SHA256
+): boolean {
+  const value = env[DEV_LICENSE_ENV]?.trim()
+  if (!value) return false
+  const got = createHash('sha256').update(value).digest()
+  const want = Buffer.from(expectedSha256, 'hex')
+  return got.length === want.length && timingSafeEqual(got, want)
 }
 
 /** How often the state is recomputed while the app runs: a token's `exp` passes without an event. */

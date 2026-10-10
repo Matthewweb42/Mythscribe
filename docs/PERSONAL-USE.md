@@ -41,14 +41,14 @@ app will then refuse it with "saved by a newer version of MythScribe" until you 
    trial ends, not when a license check has been offline too long; F-15.13, decided 2026-10-10).
    In PowerShell:
    ```
-   setx MYTHSCRIBE_DEV_LICENSE 1
+   setx MYTHSCRIBE_DEV_LICENSE <your secret>
    ```
    Then sign out of Windows and back in (programs started from the Start menu only see a new
    variable after that). Check it in the installed app: Settings › Account no longer counts trial
    days, and no trial banner appears. The switch is read only at launch, only from this variable,
-   and only the exact value `1` counts; nothing in the app's menus or settings can turn it on or
+   and only your secret counts (the app holds only its SHA-256 hash, so the secret is not in the code; Claude gave it to you in the session of 2026-10-10 — keep it in your password manager, and ask for a new one if it leaks); nothing in the app's menus or settings can turn it on or
    off. To turn it off: `reg delete HKCU\Environment /v MYTHSCRIBE_DEV_LICENSE /f`, then sign out
-   and in. For the dev app in WSL, `export MYTHSCRIBE_DEV_LICENSE=1` before `npm run dev` (leave
+   and in. For the dev app in WSL, `export MYTHSCRIBE_DEV_LICENSE=<your secret>` before `npm run dev` (leave
    it unset when you want to try the trial yourself). Never set it on a machine you hand to
    someone else, and never in the e2e or a release build script.
 
