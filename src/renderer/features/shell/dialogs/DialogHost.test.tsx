@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DialogHost } from './DialogHost'
 import { dialogs, toast, useDialogStore } from './dialogStore'
 
@@ -90,5 +90,15 @@ describe('DialogHost', () => {
     expect(status).toHaveTextContent('Could not open project')
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }))
     expect(status).not.toHaveTextContent('Could not open project')
+  })
+
+  it("runs a toast's action and dismisses it", async () => {
+    render(<DialogHost />)
+    const run = vi.fn()
+    toast.successWithAction('Organise applied 2 changes', { label: 'Undo', run })
+    const status = await screen.findByRole('status')
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(status).not.toHaveTextContent('Organise applied 2 changes')
   })
 })

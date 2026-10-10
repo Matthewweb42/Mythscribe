@@ -32,6 +32,7 @@ interface HarnessProps {
   onApply?: (accepted: string[]) => void
   onEdit?: (id: string) => void
   applyOnFinish?: boolean
+  onFinish?: () => void
   stepEvery?: boolean
   reject?: boolean
   compact?: boolean
@@ -56,6 +57,7 @@ function Harness(props: HarnessProps): React.JSX.Element {
       onCurrent={props.onCurrent}
       autoFocus
       applyOnFinish={props.applyOnFinish}
+      onFinish={props.onFinish}
       stepEvery={props.stepEvery}
       apply={{
         label: (n) => `Apply ${n} accepted`,
@@ -184,6 +186,20 @@ describe('ReviewDeck', () => {
     press('a')
     expect(finish).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('review-done').textContent).toContain('All 5 reviewed.')
+  })
+
+  it('tells onFinish once every card is decided, skipped ones included, and does not apply itself', () => {
+    const onApply = vi.fn()
+    const onFinish = vi.fn()
+    render(<Harness onApply={onApply} onFinish={onFinish} reject />)
+    press('a')
+    press('s')
+    press('r')
+    press('a')
+    expect(onFinish).not.toHaveBeenCalled()
+    press('a')
+    expect(onFinish).toHaveBeenCalledTimes(1)
+    expect(onApply).not.toHaveBeenCalled()
   })
 
   it('steps through cards that start accepted, one by one, and applies only after the last (stepEvery)', () => {

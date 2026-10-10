@@ -178,6 +178,7 @@ function Plan(): React.JSX.Element {
   const setEditing = useOrganiseStore((s) => s.setEditing)
   const applyAccepted = useOrganiseStore((s) => s.applyAccepted)
   const undoAll = useOrganiseStore((s) => s.undoAll)
+  const finish = useOrganiseStore((s) => s.finish)
   const autoFocus = useTakesFocus()
   const items = useMemo<ReviewDeckItem[]>(
     () =>
@@ -261,7 +262,7 @@ function Plan(): React.JSX.Element {
               ? undefined
               : { label: (n) => `Apply ${n} accepted`, onApply: () => void applyAccepted() }
           }
-          applyOnFinish
+          onFinish={mode === 'plan' ? undefined : () => void finish()}
           busy={busy}
           compact
           autoFocus={autoFocus}

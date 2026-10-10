@@ -17,6 +17,7 @@ import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import type { ReviewDecision } from '@renderer/features/review/reviewDeckModel'
+import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { applyOrganiseAction } from './organiseApply'
@@ -102,6 +103,12 @@ interface OrganiseState {
   undo: (id: string) => Promise<void>
   /** Takes back every applied change that can be undone, newest first. */
   undoAll: () => Promise<void>
+  /**
+   * The end of the deck (author request 2026-10-10): applies what was accepted (a skipped change
+   * counts as not now) and closes, with a toast whose Undo takes the run back. A change that
+   * failed keeps the panel open with its error.
+   */
+  finish: () => Promise<void>
   /** Runs the local pass again. */
   refreshCandidates: () => Promise<void>
   /** Hides the offer until the findings change. */
@@ -119,6 +126,29 @@ let runKey = ''
 let generation = 0
 let counter = 0
 const nextRequestId = (): string => `org-${Date.now().toString(36)}-${++counter}`
+
+/**
+ * Takes back a closed run's changes, newest first (the toast's Undo after `finish`). A newer run
+ * has replaced the undos by then, so it points to the Changes log instead.
+ */
+async function undoClosedRun(ofGeneration: number, ids: readonly string[]): Promise<void> {
+  if (ofGeneration !== generation) {
+    toast.warning('That reorganisation can no longer be undone here: use Tools › Changes.')
+    return
+  }
+  try {
+    for (const id of ids) {
+      const undo = undos.get(id)
+      if (undo === undefined) continue
+      await undo()
+      undos.delete(id)
+    }
+    toast.success('Reorganisation undone')
+    void useOrganiseStore.getState().refreshCandidates()
+  } catch (err) {
+    toast.error(describeError(err))
+  }
+}
 
 const empty = {
   open: false,
@@ -335,6 +365,38 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
       } finally {
         set({ busy: false })
       }
+    },
+
+    async finish() {
+      const { phase, mode, busy } = get()
+      if (phase !== 'ready' || mode === 'plan' || busy) return
+      await get().applyAccepted()
+      const views = Object.values(get().views)
+      if (views.some((view) => view.status === 'failed')) return
+      const applied = views.filter((view) => view.status === 'applied').length
+      const skipped = views.filter(
+        (view) => view.status === 'pending' && view.decision === 'skipped'
+      ).length
+      const undoable = get()
+        .order.filter((id) => undos.has(id))
+        .reverse()
+      get().close()
+      // After close, which moves the generation on: a later run moves it again.
+      const mine = generation
+      const left = skipped === 0 ? '' : ` · ${skipped} skipped`
+      if (applied === 0) {
+        toast.info(`Organise closed: nothing applied${left}`)
+        return
+      }
+      const message = `Organise applied ${applied} change${applied === 1 ? '' : 's'}${left}`
+      if (undoable.length === 0) {
+        toast.success(message)
+        return
+      }
+      toast.successWithAction(message, {
+        label: 'Undo',
+        run: () => void undoClosedRun(mine, undoable)
+      })
     },
 
     async undoAll() {

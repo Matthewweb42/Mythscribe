@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiSettings, type AssistantMode } from '@shared/aiSettings'
 import type { ChangeEntry } from '@shared/changes'
 import type { Channel, Entity, Input, Output, Tag } from '@shared/ipc/contract'
@@ -10,6 +10,7 @@ import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
+import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import { offerShowing, resetOrganiseStore, useOrganiseStore } from './organiseStore'
 
@@ -143,6 +144,7 @@ function setMode(mode: AssistantMode): void {
 }
 
 beforeEach(() => {
+  useDialogStore.setState({ modals: [], toasts: [] })
   install()
   resetChangesStore()
   resetOrganiseStore()
@@ -186,6 +188,48 @@ describe('useOrganiseStore (F-9.10)', () => {
     await useOrganiseStore.getState().undo('c1')
     expect(statuses().c1).toBe('undone')
     expect(calls.at(-1)).toEqual(['tag:update', { id: 'rynna', category: 'custom' }])
+  })
+
+  it('finish applies the accepted, closes, and its toast Undo takes the run back (2026-10-10)', async () => {
+    await useOrganiseStore.getState().start({ instruction: '', scope: [] })
+    useOrganiseStore.getState().decide(['c1', 'c3'], 'accepted')
+    useOrganiseStore.getState().decide(['c2'], 'skipped')
+    await useOrganiseStore.getState().finish()
+    expect(useOrganiseStore.getState().open).toBe(false)
+    expect(useTagStore.getState().byId.rynna?.category).toBe('character')
+    const [shown] = useDialogStore.getState().toasts
+    expect(shown?.message).toBe('Organise applied 2 changes · 1 skipped')
+    expect(shown?.action?.label).toBe('Undo')
+
+    shown?.action?.run()
+    await vi.waitFor(() => expect(useTagStore.getState().byId.rynna?.category).toBe('custom'))
+    // Newest first: the sheet went back before the tag.
+    const undone = calls.filter(([c]) => c === 'entity:update' || c === 'tag:update').slice(-2)
+    expect(undone.map(([c]) => c)).toEqual(['entity:update', 'tag:update'])
+  })
+
+  it('finish with nothing accepted closes with a note and no Undo', async () => {
+    await useOrganiseStore.getState().start({ instruction: '', scope: [] })
+    useOrganiseStore.getState().decide(['c1', 'c2', 'c3'], 'rejected')
+    await useOrganiseStore.getState().finish()
+    expect(useOrganiseStore.getState().open).toBe(false)
+    expect(useDialogStore.getState().toasts.map((t) => [t.message, t.action])).toEqual([
+      ['Organise closed: nothing applied', undefined]
+    ])
+  })
+
+  it('finish keeps the panel open when a change failed', async () => {
+    install({
+      'tag:update': () => {
+        throw new Error('Database is locked')
+      }
+    })
+    await useOrganiseStore.getState().start({ instruction: '', scope: [] })
+    useOrganiseStore.getState().decide(['c1'], 'accepted')
+    await useOrganiseStore.getState().finish()
+    expect(useOrganiseStore.getState().open).toBe(true)
+    expect(statuses().c1).toBe('failed')
+    expect(useDialogStore.getState().toasts).toEqual([])
   })
 
   it('in Auto applies what can be undone at once; a merge still asks; Undo the whole reorganisation', async () => {

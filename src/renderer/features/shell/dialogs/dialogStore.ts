@@ -44,10 +44,17 @@ export interface ChooseOptions<T extends string> {
 
 export type ToastKind = 'success' | 'error' | 'warning' | 'info'
 
+/** A toast's one button (Organise's Undo after it closes); choosing it also dismisses the toast. */
+export interface ToastAction {
+  label: string
+  run: () => void
+}
+
 export interface Toast {
   id: string
   kind: ToastKind
   message: string
+  action?: ToastAction
 }
 
 export type Modal =
@@ -69,7 +76,7 @@ interface DialogState {
   resolveConfirm: (id: string, value: boolean) => void
   resolvePrompt: (id: string, value: string | null) => void
   resolveChoose: (id: string, value: string | null) => void
-  toast: (kind: ToastKind, message: string, durationMs?: number) => string
+  toast: (kind: ToastKind, message: string, durationMs?: number, action?: ToastAction) => string
   dismissToast: (id: string) => void
 }
 
@@ -129,9 +136,11 @@ export const useDialogStore = create<DialogState>((set, get) => ({
     modal.resolve(value)
   },
 
-  toast(kind, message, durationMs = DEFAULT_TOAST_MS[kind]) {
+  toast(kind, message, durationMs = DEFAULT_TOAST_MS[kind], action) {
     const id = nextId()
-    set((s) => ({ toasts: [...s.toasts, { id, kind, message }] }))
+    const toast: Toast =
+      action === undefined ? { id, kind, message } : { id, kind, message, action }
+    set((s) => ({ toasts: [...s.toasts, toast] }))
     if (durationMs > 0) setTimeout(() => get().dismissToast(id), durationMs)
     return id
   },
@@ -156,5 +165,8 @@ export const toast = {
   success: (message: string) => useDialogStore.getState().toast('success', message),
   error: (message: string) => useDialogStore.getState().toast('error', message),
   warning: (message: string) => useDialogStore.getState().toast('warning', message),
-  info: (message: string) => useDialogStore.getState().toast('info', message)
+  info: (message: string) => useDialogStore.getState().toast('info', message),
+  /** A success toast with one button, shown long enough to reach it (8 s). */
+  successWithAction: (message: string, action: ToastAction) =>
+    useDialogStore.getState().toast('success', message, 8000, action)
 }

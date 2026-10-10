@@ -65,6 +65,11 @@ export interface ReviewDeckProps {
   /** Apply by itself once every item is decided and none was skipped. */
   applyOnFinish?: boolean
   /**
+   * Told once every item is decided, skipped ones included (Organise applies and closes,
+   * 2026-10-10); takes the place of `applyOnFinish`.
+   */
+  onFinish?: () => void
+  /**
    * The cards start decided (the upload review: everything starts accepted, 2026-10-10), so the
    * deck steps through every card in order, not only the waiting ones: a decision moves to the
    * next card, the progress is how far along the author is, and the end (with `applyOnFinish`)
@@ -179,6 +184,10 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
     }
     const done = deckCounts(after)
     const finished = stepEvery ? moves && next === null : done.open === 0
+    if (props.onFinish !== undefined) {
+      if (finished) props.onFinish()
+      return
+    }
     if (props.applyOnFinish === true && apply !== undefined && apply.disabled !== true) {
       if (finished && done.skipped === 0 && done.accepted > 0) apply.onApply()
     }

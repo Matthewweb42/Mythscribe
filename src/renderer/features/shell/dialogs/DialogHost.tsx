@@ -194,6 +194,18 @@ function ToastStack({ toasts }: { toasts: Toast[] }): React.JSX.Element {
           className={`pointer-events-auto flex items-start gap-3 rounded-md border border-line border-l-4 bg-surface-raised px-3 py-2 text-sm shadow-panel ${TOAST_BORDER[t.kind]}`}
         >
           <span className="flex-1">{t.message}</span>
+          {t.action !== undefined ? (
+            <button
+              type="button"
+              onClick={() => {
+                dismiss(t.id)
+                t.action?.run()
+              }}
+              className="font-medium text-accent hover:underline"
+            >
+              {t.action.label}
+            </button>
+          ) : null}
           <button
             type="button"
             aria-label="Dismiss notification"

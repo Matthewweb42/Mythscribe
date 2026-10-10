@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings, type AssistantMode } from '@shared/aiSettings'
@@ -10,6 +10,7 @@ import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import { resetEntityStore } from '@renderer/features/entities/entityStore'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
+import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import { OrganisePanel } from './OrganisePanel'
 import { resetOrganiseStore, useOrganiseStore } from './organiseStore'
@@ -39,6 +40,7 @@ const CHANGES: OrganiseChange[] = [
 let calls: Channel[]
 
 beforeEach(() => {
+  useDialogStore.setState({ modals: [], toasts: [] })
   calls = []
   setIpcClient({
     async invoke<C extends Channel>(channel: C, _input: Input<C>): Promise<Output<C>> {
@@ -59,6 +61,7 @@ beforeEach(() => {
         return { duplicates: [], unusedTags: [], emptySheets: [], notNames: [] } as Output<C>
       }
       if (channel === 'proposal:settle') return null as Output<C>
+      if (channel === 'tree:rename') return null as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -106,12 +109,12 @@ describe('OrganisePanel (F-9.10, one decision at a time)', () => {
     expect(within(dialog).getByText('Rename Untitled to “The mill”')).toBeTruthy()
     expect(within(dialog).getByText('says where it is')).toBeTruthy()
     await userEvent.keyboard('a')
-    // Nothing applied by itself: one was skipped. Apply shows the count.
-    expect(within(dialog).getByTestId('review-done').textContent).toContain(
-      '1 accepted · 1 skipped'
-    )
-    expect(within(dialog).getByRole('button', { name: 'Apply 1 accepted' })).toBeTruthy()
-    expect(calls).not.toContain('tree:rename')
+    // The end applies the accepted one and closes (2026-10-10); the skipped one stays out.
+    await waitFor(() => expect(screen.queryByTestId('organise-panel')).toBeNull())
+    expect(calls).toContain('tree:rename')
+    expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([
+      'Organise applied 1 change · 1 skipped'
+    ])
   })
 
   it('edits a merge before accepting it: another keeper', async () => {
@@ -175,6 +178,7 @@ describe('OrganisePanel (F-9.10, one decision at a time)', () => {
           return { duplicates: [], unusedTags: [], emptySheets: [], notNames: [] } as Output<C>
         }
         if (channel === 'proposal:settle') return null as Output<C>
+      if (channel === 'tree:rename') return null as Output<C>
         throw new Error(`unexpected ${channel}`)
       },
       on: () => () => {}
