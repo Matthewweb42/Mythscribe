@@ -5671,7 +5671,11 @@ test('create, close, reopen a project on disk', async () => {
   await expect(clearTurn).toContainText(AGENT_CLEAR_ANSWER)
   const clearCard = clearTurn.getByTestId('agent-change')
   await expect(clearCard).toContainText('Are these the things you want to delete?')
-  await expect(clearCard.getByRole('checkbox', { name: /^Characters \(\d+\)$/ })).toBeChecked()
+  await expect(
+    clearCard
+      .getByRole('group', { name: 'Story-bible sheets' })
+      .getByRole('checkbox', { name: /^Characters \(\d+\)$/ })
+  ).toBeChecked()
   await expect(clearCard.getByTestId('agent-change-apply')).toContainText(
     `Delete ${charactersBefore.length} ${charactersBefore.length === 1 ? 'sheet' : 'sheets'}`
   )
