@@ -480,7 +480,11 @@ function Turn({
       ) : !mine && message.mode === 'agent' ? (
         <p className="m-0 text-xs text-fg-muted italic">{AGENT_NOTICE}</p>
       ) : !mine && message.query !== null ? (
-        <QueryAnswer answer={message.content} query={message.query} />
+        <QueryAnswer
+          answer={message.content}
+          query={message.query}
+          warnUncited={message.mode === 'query'}
+        />
       ) : (
         <p className="m-0 break-words whitespace-pre-wrap">{message.content}</p>
       )}
@@ -566,13 +570,23 @@ function Directions({
 }
 
 /**
- * A Query answer (F-5.7): the "not found" line or the uncited warning when either applies, the
+ * A Query answer (F-5.7): the "not found" line or the uncited warning when either applies (the
+ * warning only on a lookup turn: a Plan chat answer is brainstorming and carries no warning,
+ * changed by the author 2026-10-10), the
  * answer with every live `[n]` marker as a button that opens that scene at the passage it
  * rests on, the Sources list of the citations main verified against the text it sent, the
  * author's sheets it rests on (query.v3; a click opens the entity's page), and the ranked
  * scenes the answer did not cite. Nothing here enters the manuscript.
  */
-function QueryAnswer({ answer, query }: { answer: string; query: QueryTurn }): React.JSX.Element {
+function QueryAnswer({
+  answer,
+  query,
+  warnUncited
+}: {
+  answer: string
+  query: QueryTurn
+  warnUncited: boolean
+}): React.JSX.Element {
   const openScene = useAssistantStore((s) => s.openScene)
   const open = (ref: QuerySceneRef, quote: string | null): void => {
     void openScene(ref, quote)
@@ -584,7 +598,7 @@ function QueryAnswer({ answer, query }: { answer: string; query: QueryTurn }): R
           {QUERY_NOT_FOUND}
         </p>
       ) : null}
-      {query.uncited ? (
+      {warnUncited && query.uncited ? (
         <p data-testid="query-uncited" role="status" className="m-0 text-xs text-warning">
           {QUERY_UNCITED_WARNING}
         </p>

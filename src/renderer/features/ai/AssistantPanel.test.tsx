@@ -570,7 +570,11 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     ...over
   })
 
-  const answered = (answer: string, query: QueryTurn): Conversations => ({
+  const answered = (
+    answer: string,
+    query: QueryTurn,
+    mode: 'query' | 'plan' = 'query'
+  ): Conversations => ({
     active: 'c-1',
     items: [
       conversation({
@@ -578,7 +582,7 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
         messages: [
           message('m-1', 'user', 'Where does she cross?'),
           message('m-2', 'assistant', answer, {
-            mode: 'query',
+            mode,
             model: 'gpt-fake',
             costUsd: 0.0009,
             proposalId: 'p-2',
@@ -702,6 +706,19 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     )
     expect(within(uncited).queryByTestId('query-citation')).not.toBeInTheDocument()
     expect(within(uncited).getByTestId('query-also')).toHaveTextContent('Chapter 2 › Scene 2')
+  })
+
+  it('shows no unverified warning on a Plan chat answer with no citation (brainstorming, 2026-10-10)', async () => {
+    await mountOpen(
+      answered(
+        'She could cross at dawn, or wait for the ferry.',
+        queryTurn({ uncited: true, citations: [] }),
+        'plan'
+      )
+    )
+    const turn = turns()[1]!
+    expect(turn).toHaveTextContent('She could cross at dawn, or wait for the ferry.')
+    expect(within(turn).queryByTestId('query-uncited')).not.toBeInTheDocument()
   })
 
   it("lists the author's sheets an answer rests on, and a click opens the entity's page", async () => {

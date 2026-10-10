@@ -381,7 +381,8 @@ Plan: `plan-knowledge-model.md`. P0 (F-8.7), P1 (F-9.12), and P2 (F-9.13) are bu
 - Question: Plan used to be a streamed brainstorm with no lookups. It is now the agent with read-only tools, which carries the Story Intelligence rules. Is that the Plan you want?
 - Chosen: Plan, Ask, and Auto all go through the router and then the agent. Plan answers are not streamed. Like a Query answer, they come back whole with citations, and an answer with no citation shows the "unverified" warning. The `ai:chat` channel and the chat prompts stay in main, unused by the panel.
 - Alternatives: keep Plan on the old streamed `ai:chat` path (no project lookups); write a Plan-specific agent prompt (a new prompt version and an eval run) that drops the citation warning for brainstorming.
-- To change it: `dispatchRoute` / `runAgentTurn` in `src/renderer/features/ai/assistantStore.ts`; `src/main/ai/prompts/agent.v1.ts`.
+- **Changed by the author 2026-10-10:** no "unverified" warning on a Plan answer with no citation (brainstorming). Built in the panel, no prompt change: `QueryAnswer` shows the warning only on a turn labelled `query` (a lookup the router picked, or a recap), in any mode; a Plan chat turn (`mode: 'plan'`) never shows it, old turns included. The agent still returns `uncited`, so the flag stays in the stored turn.
+- To change it: `dispatchRoute` / `runAgentTurn` in `src/renderer/features/ai/assistantStore.ts`; `src/main/ai/prompts/agent.v1.ts`; the warning: `warnUncited` in `AssistantPanel.tsx`.
 
 ## 2026-10-07 · F-5.21 · Left as they were
 - Question: Some text and data still name the old modes. Should they change?
