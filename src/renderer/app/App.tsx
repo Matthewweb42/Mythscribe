@@ -6,7 +6,7 @@ import { formatLabel, type HierarchyLevel } from '@shared/labels'
 import type { DockPanelId } from '@shared/dock'
 import { DEFAULT_THEME, THEME_TOKENS, THEME_TOKEN_VARS, resolveTheme } from '@shared/themes'
 import { useAccountStore } from '@renderer/features/account/accountStore'
-import { useAppAccessStore } from '@renderer/features/account/appAccessStore'
+import { useAppAccessStore, useExtrasUnlocked } from '@renderer/features/account/appAccessStore'
 import { TrialBanner } from '@renderer/features/account/TrialBanner'
 import { useBackupStore } from '@renderer/features/backups/backupStore'
 import { useCloudSyncStore } from '@renderer/features/project/cloudSyncStore'
@@ -237,9 +237,9 @@ export function App(): React.JSX.Element {
   // or deleted choice resolves to Dark here while main keeps it stored.
   const theme = useViewStore((s) => s.theme)
   const customThemes = useViewStore((s) => s.customThemes)
-  const supporterLicensed = useAccountStore((s) => s.supporter?.licensed === true)
+  const unlocked = useExtrasUnlocked()
   useEffect(() => {
-    const resolved = resolveTheme({ theme, customThemes }, supporterLicensed)
+    const resolved = resolveTheme({ theme, customThemes }, unlocked)
     const root = document.documentElement
     if (resolved.base.id === DEFAULT_THEME) delete root.dataset.theme
     else root.dataset.theme = resolved.base.id
@@ -250,7 +250,7 @@ export function App(): React.JSX.Element {
       if (resolved.overrides) root.style.setProperty(name, resolved.overrides[token])
       else root.style.removeProperty(name)
     }
-  }, [theme, customThemes, supporterLicensed])
+  }, [theme, customThemes, unlocked])
 
   // F-2.1: the document tree follows the open project. App owns when it loads and clears, keyed
   // on the project id so a refreshed `ProjectInfo` for the same project does not reload it.

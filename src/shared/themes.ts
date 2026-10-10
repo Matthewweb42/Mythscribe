@@ -198,7 +198,10 @@ function isBuiltIn(id: string): id is BuiltInThemeId {
   return (BUILT_IN_THEME_IDS as readonly string[]).includes(id)
 }
 
-/** Whether choosing `id` needs the Supporter license: Sepia and every custom theme. */
+/**
+ * Whether `id` is a paid extra: Sepia and every custom theme. They are on during the trial and
+ * with the license (`extrasUnlocked` in `appAccess.ts`; changed by the author 2026-10-10).
+ */
 export function themeNeedsLicense(id: string): boolean {
   return isBuiltIn(id) ? builtInTheme(id).supporter : true
 }

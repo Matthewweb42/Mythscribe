@@ -7,7 +7,7 @@ import {
   type CustomThemeInput
 } from '@shared/themes'
 import { defaultViewSettings, nextZoom, type ViewSettings } from '@shared/zoom'
-import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
+import { resetAppAccessStore, useAppAccessStore } from '@renderer/features/account/appAccessStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetViewStore, useViewStore } from './viewStore'
@@ -88,13 +88,13 @@ beforeEach(() => {
   fake = fakeClient()
   setIpcClient(fake.client)
   resetViewStore()
-  resetAccountStore()
+  resetAppAccessStore()
   useDialogStore.setState({ modals: [], toasts: [] })
 })
 
 afterEach(() => {
   resetViewStore()
-  resetAccountStore()
+  resetAppAccessStore()
 })
 
 describe('viewStore (F-7.10)', () => {
@@ -184,16 +184,10 @@ const MIDNIGHT: CustomThemeInput = {
   colors: { ...builtInTheme('dark').colors, bg: '#000814' }
 }
 
-function license(licensed: boolean): void {
-  useAccountStore.setState({
-    supporter: {
-      licensed,
-      since: licensed ? '2026-09-20T10:00:00.000Z' : null,
-      validUntil: null,
-      offline: false,
-      product: null,
-      accent: 'default'
-    }
+/** The paid themes follow the access (changed by the author 2026-10-10): on in the trial. */
+function access(state: 'trial' | 'licensed' | 'expired'): void {
+  useAppAccessStore.setState({
+    access: { state, trialEndsAt: '2026-11-07T00:00:00.000Z', daysLeft: state === 'trial' ? 12 : 0 }
   })
 }
 
@@ -205,7 +199,8 @@ describe('viewStore themes (F-7.8)', () => {
     expect(toasts()).toEqual([])
   })
 
-  it('switches through the free themes without a license, naming each one', async () => {
+  it('switches through the free themes after the trial ends unpaid, naming each one', async () => {
+    access('expired')
     for (let i = 0; i < 3; i++) await useViewStore.getState().switchTheme()
     expect(fake.calls.map((c) => c.input)).toEqual([
       { theme: 'light' },
@@ -215,8 +210,8 @@ describe('viewStore themes (F-7.8)', () => {
     expect(toasts()).toEqual(['Theme: Light', 'Theme: High contrast', 'Theme: Dark'])
   })
 
-  it('switches through Sepia and the custom themes with a license', async () => {
-    license(true)
+  it('switches through Sepia and the custom themes during the trial', async () => {
+    access('trial')
     await useViewStore.getState().saveCustomTheme(MIDNIGHT)
     await useViewStore.getState().setTheme('high-contrast')
     await useViewStore.getState().switchTheme()
@@ -231,7 +226,7 @@ describe('viewStore themes (F-7.8)', () => {
   })
 
   it('saves a custom theme, selects it, and reports success; a refusal toasts and reports failure', async () => {
-    license(true)
+    access('licensed')
     expect(await useViewStore.getState().saveCustomTheme(MIDNIGHT)).toBe(true)
     expect(useViewStore.getState()).toMatchObject({
       theme: 'custom-a1b2c3d4e5f6',
@@ -243,7 +238,7 @@ describe('viewStore themes (F-7.8)', () => {
   })
 
   it('deletes a custom theme and takes main’s fallback to its base', async () => {
-    license(true)
+    access('licensed')
     await useViewStore.getState().saveCustomTheme({ ...MIDNIGHT, base: 'sepia' })
     await useViewStore.getState().deleteCustomTheme('custom-a1b2c3d4e5f6')
     expect(fake.calls.at(-1)).toEqual({

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TRIAL_ENDED_MESSAGE, trialEndsAt, type AppAccess } from '@shared/appAccess'
 import { AppStateStore } from '../appState/appStateStore'
 import { AppError } from '../ipc/errors'
-import { ACCESS_RECHECK_MS, AppAccessService } from './appAccess'
+import { ACCESS_RECHECK_MS, AppAccessService, DEV_LICENSE_ENV, devLicenseExempt } from './appAccess'
 
 const DAY = 24 * 60 * 60_000
 
@@ -128,5 +128,25 @@ describe('AppAccessService (AI-BILLING-SPEC M1)', () => {
     const service = build()
     service.dispose()
     expect(timers).toHaveLength(0)
+  })
+})
+
+describe('devLicenseExempt (changed by the author 2026-10-10)', () => {
+  it('is on only for MYTHSCRIBE_DEV_LICENSE=1', () => {
+    expect(devLicenseExempt({ [DEV_LICENSE_ENV]: '1' })).toBe(true)
+    expect(devLicenseExempt({ [DEV_LICENSE_ENV]: ' 1\n' })).toBe(true)
+    for (const value of [undefined, '', '0', 'true', 'yes', '11']) {
+      expect(devLicenseExempt({ [DEV_LICENSE_ENV]: value })).toBe(false)
+    }
+    expect(devLicenseExempt({})).toBe(false)
+  })
+
+  it('keeps the author writable after the trial and without a license', () => {
+    const service = build(!devLicenseExempt({ [DEV_LICENSE_ENV]: '1' }))
+    now += 400 * DAY
+    expect(service.refresh().state).toBe('licensed')
+    expect(service.writable()).toBe(true)
+    expect(() => service.assertWritable()).not.toThrow()
+    service.dispose()
   })
 })

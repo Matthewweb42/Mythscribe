@@ -16,6 +16,12 @@ import {
 
 const claims: LicenseClaims = { v: 1, sub: 'user-1', iat: 1_000, exp: 1_000 + LICENSE_GRACE_MS }
 
+describe('LICENSE_GRACE_MS', () => {
+  it('trusts a paid license offline for 90 days (changed by the author 2026-10-10)', () => {
+    expect(LICENSE_GRACE_MS).toBe(90 * 24 * 60 * 60_000)
+  })
+})
+
 describe('base64url', () => {
   it('round-trips bytes without padding or URL-unsafe characters', () => {
     const bytes = new Uint8Array([0, 1, 2, 250, 251, 252, 253, 254, 255])

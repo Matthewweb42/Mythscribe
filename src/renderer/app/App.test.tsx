@@ -24,7 +24,7 @@ import { defaultFloating, defaultLayout } from '@shared/layout'
 import { defaultViewSettings } from '@shared/zoom'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
-import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
+import { resetAccountStore } from '@renderer/features/account/accountStore'
 import { resetAppAccessStore } from '@renderer/features/account/appAccessStore'
 import { resetBackupStore } from '@renderer/features/backups/backupStore'
 import { resetCloudSyncStore } from '@renderer/features/project/cloudSyncStore'
@@ -1051,7 +1051,9 @@ describe('App', () => {
     // The dialog opens on the first app-wide tab, so Account's text is a tab click away.
     await userEvent.click(within(dialog).getByRole('tab', { name: 'Account' }))
     expect(
-      within(dialog).getByText('Optional. You never need an account to write.', { exact: false })
+      within(dialog).getByText(
+        'The account holds your MythScribe license and connects MythScribe Cloud.'
+      )
     ).toBeInTheDocument()
   })
 
@@ -1897,14 +1899,7 @@ describe('App', () => {
         sheet: '#f7eedb'
       }
     } as const
-    const licensed = (on: boolean): unknown => ({
-      licensed: on,
-      since: on ? '2026-09-20T10:00:00.000Z' : null,
-      validUntil: null,
-      offline: false,
-      product: null,
-      accent: 'default'
-    })
+    const ends = new Date(2026, 10, 6).toISOString()
     const html = document.documentElement
     afterEach(() => {
       delete html.dataset.theme
@@ -1923,17 +1918,18 @@ describe('App', () => {
       expect(html.dataset.scheme).toBe('dark')
     })
 
-    it('lays a licensed custom theme over its base as inline variables, and paints Dark without the license', async () => {
+    it('lays a custom theme over its base during the trial, and paints Dark once it ends unpaid', async () => {
       install({
         'view:get': { ...defaultViewSettings(), theme: SEPIA_LIKE.id, customThemes: [SEPIA_LIKE] },
-        'account:getSupporter': licensed(true)
+        'app:getAccess': { state: 'trial', trialEndsAt: ends, daysLeft: 12 }
       })
       render(<App />)
       await waitFor(() => expect(html.dataset.theme).toBe('sepia'))
       expect(html.style.getPropertyValue('--ms-bg')).toBe('#f0e0c0')
       expect(html.style.getPropertyValue('--ms-surface-raised')).toBe('#f7eedb')
-      // The license lapses (a sign-out): the choice stays stored, the window paints Dark.
-      act(() => useAccountStore.setState({ supporter: null }))
+      // The trial ends unpaid (changed by the author 2026-10-10): the choice stays stored, the
+      // window paints Dark.
+      fire('app:accessChanged', { state: 'expired', trialEndsAt: ends, daysLeft: 0 })
       expect(html.dataset.theme).toBeUndefined()
       expect(html.style.getPropertyValue('--ms-bg')).toBe('')
       expect(useViewStore.getState().theme).toBe(SEPIA_LIKE.id)

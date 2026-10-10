@@ -37,6 +37,20 @@ app will then refuse it with "saved by a newer version of MythScribe" until you 
    cd $HOME\coding
    git clone https://github.com/Matthewweb42/Mythscribe.git mythscribe-app
    ```
+3. **Turn on the developer switch**, so your copy never turns read-only (not when the 30-day
+   trial ends, not when a license check has been offline too long; F-15.13, decided 2026-10-10).
+   In PowerShell:
+   ```
+   setx MYTHSCRIBE_DEV_LICENSE 1
+   ```
+   Then sign out of Windows and back in (programs started from the Start menu only see a new
+   variable after that). Check it in the installed app: Settings › Account no longer counts trial
+   days, and no trial banner appears. The switch is read only at launch, only from this variable,
+   and only the exact value `1` counts; nothing in the app's menus or settings can turn it on or
+   off. To turn it off: `reg delete HKCU\Environment /v MYTHSCRIBE_DEV_LICENSE /f`, then sign out
+   and in. For the dev app in WSL, `export MYTHSCRIBE_DEV_LICENSE=1` before `npm run dev` (leave
+   it unset when you want to try the trial yourself). Never set it on a machine you hand to
+   someone else, and never in the e2e or a release build script.
 
 ## Install or update
 

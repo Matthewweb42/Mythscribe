@@ -226,13 +226,11 @@ const showWithCredits = (credits: CreditsResult): void => {
 }
 
 describe('AccountSettingsTab (F-15.2)', () => {
-  it('says an account is optional before it asks for anything', () => {
+  it('says what the account is for before it asks for anything', () => {
     show(SIGNED_OUT)
     render(<AccountSettingsTab />)
     expect(
-      screen.getByText(
-        'Optional. You never need an account to write. It connects MythScribe Cloud, the paid AI source you can pick per project.'
-      )
+      screen.getByText('The account holds your MythScribe license and connects MythScribe Cloud.')
     ).toBeInTheDocument()
   })
 

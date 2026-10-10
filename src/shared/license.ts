@@ -12,8 +12,13 @@ import { CreditPack } from './cloudApi'
  * `LICENSE_SIGNING_KEY` secret.
  */
 
-/** How long a token stays valid without the Worker confirming it again (PLAN.md §4.3). */
-export const LICENSE_GRACE_DAYS = 14
+/**
+ * How long a token stays valid without the Worker confirming it again. 90 days (changed by the
+ * author 2026-10-10, was 14 from PLAN.md §4.3): the token now also keeps projects writable, so a
+ * paid author offline for a season keeps writing. The Worker signs `exp` with this, so a change
+ * reaches installs with the tokens it signs after its deploy.
+ */
+export const LICENSE_GRACE_DAYS = 90
 export const LICENSE_GRACE_MS = LICENSE_GRACE_DAYS * 24 * 60 * 60_000
 /** How often a signed-in app asks the Worker for a fresh token; a failure is silent. */
 export const LICENSE_REFRESH_INTERVAL_MS = 24 * 60 * 60_000
@@ -62,7 +67,7 @@ export function licensePublicKey(env: Record<string, string | undefined>): Licen
 
 /**
  * What the Worker signs. Epoch milliseconds; `exp` is `iat + LICENSE_GRACE_MS`, so a token that
- * was refreshed yesterday is good for thirteen more days without the network.
+ * was refreshed yesterday is good for 89 more days without the network.
  */
 export const LicenseClaims = z.object({
   v: z.literal(1),

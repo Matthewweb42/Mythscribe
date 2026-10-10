@@ -18,12 +18,13 @@ import { effectiveOwnKeyProvider } from '@shared/ai'
 import { hostedModelFor } from '@shared/hostedPricing'
 import { ASSET_SCHEME } from '@shared/focus'
 import { licensePublicKey, licenseVerifiable } from '@shared/license'
+import { extrasUnlocked } from '@shared/appAccess'
 import { projectToReopen, restorableBounds } from '@shared/windowState'
 import { UI_SCALE_FACTORS } from '@shared/zoom'
 import { themeBackground } from '@shared/themes'
 import { AccountService } from './account/accountService'
 import { CloudAccessTokens, withAccessTokens } from './account/accessTokens'
-import { AppAccessService } from './account/appAccess'
+import { AppAccessService, devLicenseExempt } from './account/appAccess'
 import { createCloudAuthClient } from './account/cloudAuthClient'
 import { CloudPricingService } from './account/cloudPricing'
 import { AiKeyStore } from './ai/keyStore'
@@ -364,7 +365,10 @@ if (!primaryInstance) {
         emit(BrowserWindow.getAllWindows(), 'account:supporterChanged', status)
         // M1: the license is what keeps the app writable after the trial.
         access?.refresh()
-      }
+      },
+      // The accent colours follow the trial or the license (changed by the author 2026-10-10).
+      // Read lazily: the access service is built below, and nothing asks before then.
+      extrasUnlocked: () => (access ? extrasUnlocked(access.status()) : false)
     })
     // AI-BILLING-SPEC M1: the 30-day trial clock and the read-only state after it. Built after
     // the account, whose verified license token is the app license.
@@ -372,8 +376,14 @@ if (!primaryInstance) {
     access = new AppAccessService({
       appState,
       licensed: () => licensedAccount.supporter().licensed,
-      enforced: licenseVerifiable(licensePublicKey(process.env)),
-      onChange: (status) => emit(BrowserWindow.getAllWindows(), 'app:accessChanged', status)
+      // The author's machine sets MYTHSCRIBE_DEV_LICENSE=1 (docs/PERSONAL-USE.md): never read-only.
+      enforced: licenseVerifiable(licensePublicKey(process.env)) && !devLicenseExempt(process.env),
+      onChange: (status) => {
+        const windows = BrowserWindow.getAllWindows()
+        emit(windows, 'app:accessChanged', status)
+        // The reported accent follows the access: a trial ending unpaid locks it.
+        emit(windows, 'account:supporterChanged', licensedAccount.supporter())
+      }
     })
     // F-15.4: the Cloud adapter reads the session live through the account service, so it is
     // built once here and never rebuilt; a 401 from the proxy ends the session the same way a

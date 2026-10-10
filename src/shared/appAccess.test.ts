@@ -3,6 +3,7 @@ import {
   APP_TRIAL_DAYS,
   appAccessFor,
   canWrite,
+  extrasUnlocked,
   touchTrial,
   trialDaysText,
   trialEndsAt
@@ -57,5 +58,13 @@ describe('the trial clock (AI-BILLING-SPEC M1)', () => {
     expect(canWrite({ state: 'licensed', trialEndsAt: '', daysLeft: 0 })).toBe(true)
     expect(trialDaysText(1)).toBe('1 day left in your trial')
     expect(trialDaysText(12)).toBe('12 days left in your trial')
+  })
+
+  it('unlocks the extras during the trial and with the license, never after it ends unpaid', () => {
+    expect(extrasUnlocked({ state: 'trial', trialEndsAt: '', daysLeft: 12 })).toBe(true)
+    expect(extrasUnlocked({ state: 'licensed', trialEndsAt: '', daysLeft: 0 })).toBe(true)
+    expect(extrasUnlocked({ state: 'expired', trialEndsAt: '', daysLeft: 0 })).toBe(false)
+    // Unknown counts as locked, unlike `canWrite`.
+    expect(extrasUnlocked(null)).toBe(false)
   })
 })

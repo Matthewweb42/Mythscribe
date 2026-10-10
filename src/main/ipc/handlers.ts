@@ -14,7 +14,7 @@ import {
   type OwnKeyProvider
 } from '@shared/ai'
 import type { AiModelChoice } from '@shared/aiRouting'
-import { TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
+import { extrasUnlocked, TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
 import { aliasKey } from '@shared/aliases'
 import { type AiSource, aiSwitchPatch, isFeatureAllowed } from '@shared/aiSettings'
 import { BOOK_COVER_DIR, bookTitle } from '@shared/bookDetails'
@@ -4030,11 +4030,12 @@ export function registerHandlers({
   })
 
   // F-7.8: the theme is the renderer's to paint; main keeps the choice and the custom themes,
-  // refuses a Supporter theme without the license (the extras are cosmetic, so the check lives
-  // here, beside the accent's), and gives every window the theme's background.
-  const licensed = (): boolean => account.supporter().licensed
+  // refuses a paid theme once the trial has ended unpaid (the extras are cosmetic, so the check
+  // lives here; they are on during the trial and with the license, changed by the author
+  // 2026-10-10), and gives every window the theme's background.
+  const unlocked = (): boolean => extrasUnlocked(access.status())
   const paintWindows = (view: ViewSettings): ViewSettings => {
-    const color = themeBackground(view, licensed())
+    const color = themeBackground(view, unlocked())
     for (const w of windows()) if (!w.isDestroyed()) w.setBackgroundColor(color)
     return view
   }
@@ -4044,14 +4045,14 @@ export function registerHandlers({
       (BUILT_IN_THEME_IDS as readonly string[]).includes(theme) ||
       appState.get().view.customThemes.some((t) => t.id === theme)
     if (!known) throw new AppError('VALIDATION', THEME_NOT_FOUND_MESSAGE)
-    if (themeNeedsLicense(theme) && !licensed()) {
+    if (themeNeedsLicense(theme) && !unlocked()) {
       throw new AppError('VALIDATION', THEME_NEEDS_LICENSE_MESSAGE)
     }
     return paintWindows(appState.update((s) => ({ ...s, view: { ...s.view, theme } })).view)
   })
 
   register('view:saveCustomTheme', ({ theme }) => {
-    if (!licensed()) throw new AppError('VALIDATION', THEME_NEEDS_LICENSE_MESSAGE)
+    if (!unlocked()) throw new AppError('VALIDATION', THEME_NEEDS_LICENSE_MESSAGE)
     const { customThemes } = appState.get().view
     const id = theme.id ?? `custom-${randomUUID().replaceAll('-', '').slice(0, 12)}`
     const saved = { ...theme, id }

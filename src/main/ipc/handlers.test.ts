@@ -61,10 +61,10 @@ import {
   type LicenseClaims
 } from '@shared/license'
 import type { ViewSettings } from '@shared/zoom'
-import { builtInTheme, CUSTOM_THEMES_MAX } from '@shared/themes'
+import { builtInTheme, CUSTOM_THEMES_MAX, THEME_NEEDS_LICENSE_MESSAGE } from '@shared/themes'
 import { AccountService } from '../account/accountService'
 import { AppAccessService } from '../account/appAccess'
-import { TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
+import { extrasUnlocked, TRIAL_ENDED_MESSAGE } from '@shared/appAccess'
 import { AccountError, type CloudAuthClient } from '../account/cloudAuthClient'
 import { registerInflight, resetInflight } from '../ai/inflight'
 import { AiKeyStore } from '../ai/keyStore'
@@ -6269,11 +6269,26 @@ describe('view (F-7.10)', () => {
     expect(fakeWin.setBackgroundColor).toHaveBeenLastCalledWith('#000000')
   })
 
-  it('refuses the Supporter themes without a license, and an id that names nothing (F-7.8)', async () => {
+  it('allows Sepia during the trial and refuses it after the trial ends unpaid (F-7.8)', async () => {
+    // Changed by the author 2026-10-10: the paid extras follow the access, not the license.
+    expect((await invoke('view:setTheme', { theme: 'sepia' })).theme).toBe('sepia')
+    expect(fakeWin.setBackgroundColor).toHaveBeenLastCalledWith(builtInTheme('sepia').colors.bg)
+    accessNow += 31 * 24 * 60 * 60_000
+    access.refresh()
+    const refused = await handlerFor('view:setTheme')(null, { theme: 'sepia' })
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) expect(refused.error.message).toBe(THEME_NEEDS_LICENSE_MESSAGE)
+    // The free themes are still a preference the author may change after the trial.
+    expect((await invoke('view:setTheme', { theme: 'light' })).theme).toBe('light')
+  })
+
+  it('refuses the paid themes after the trial, and an id that names nothing (F-7.8)', async () => {
     const codes = async (channel: Channel, input: unknown): Promise<string | null> => {
       const result = await handlerFor(channel)(null, input)
       return result.ok ? null : result.error.code
     }
+    accessNow += 31 * 24 * 60 * 60_000
+    access.refresh()
     expect(await codes('view:setTheme', { theme: 'sepia' })).toBe('VALIDATION')
     expect(await codes('view:setTheme', { theme: 'custom-gone' })).toBe('VALIDATION')
     expect(await codes('view:setTheme', { theme: 'neon' })).toBe('VALIDATION')
@@ -6555,7 +6570,9 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
       appState,
       licensePublicKey: LICENSE_PUBLIC_JWK,
       onChange: () => {},
-      onSupporterChange: () => {}
+      onSupporterChange: () => {},
+      // As main wires it: the accent follows the trial or the license.
+      extrasUnlocked: () => extrasUnlocked(access.status())
     })
     const neverProvider: Provider = {
       id: 'openai',
@@ -6730,8 +6747,13 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
     expect((await creditsInvoke('view:get', undefined)).customThemes).toHaveLength(8)
   })
 
-  it('refuses an accent without a license (F-15.9)', async () => {
-    const result = await creditsHandlerFor('account:setAccent')(null, { accent: 'ember' })
+  it('stores an accent during the trial and refuses one after it ends unpaid (F-15.9)', async () => {
+    expect((await creditsInvoke('account:setAccent', { accent: 'ember' })).accent).toBe('ember')
+    accessNow += 31 * 24 * 60 * 60_000
+    access.refresh()
+    // Locked, the stored pick is reported as the default until the extras come back.
+    expect((await creditsInvoke('account:getSupporter', undefined)).accent).toBe('default')
+    const result = await creditsHandlerFor('account:setAccent')(null, { accent: 'sky' })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('VALIDATION')
     // The default accent is every install's, so it is not refused.

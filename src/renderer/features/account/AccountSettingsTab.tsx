@@ -12,9 +12,11 @@ const FIELD = 'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-1 text
 const BUTTON =
   'shrink-0 rounded-md border border-line px-2 py-1 text-sm hover:bg-surface disabled:opacity-50 disabled:hover:bg-transparent'
 
-/** The one promise the tab makes, before any field: the account is never needed to write. */
-const INTRO =
-  'Optional. You never need an account to write. It connects MythScribe Cloud, the paid AI source you can pick per project.'
+/**
+ * What the account is for, before any field (changed by the author 2026-10-10: after the trial,
+ * writing needs the license, which belongs to an account, so "never needed" no longer held).
+ */
+const INTRO = 'The account holds your MythScribe license and connects MythScribe Cloud.'
 
 const clockTime = (iso: string): string =>
   new Date(iso).toLocaleTimeString(undefined, { timeStyle: 'short' })

@@ -4,10 +4,11 @@ import { resetBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
-import type { SupporterStatus } from '@shared/license'
 import { builtInTheme, type CustomTheme, type CustomThemeInput } from '@shared/themes'
 import { defaultViewSettings, nextZoom, type ViewSettings } from '@shared/zoom'
-import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
+import { resetAccountStore } from '@renderer/features/account/accountStore'
+import { resetAppAccessStore, useAppAccessStore } from '@renderer/features/account/appAccessStore'
+import type { AppAccess } from '@shared/appAccess'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { AppearanceSettingsTab } from './AppearanceSettingsTab'
@@ -85,6 +86,7 @@ const sizes = (): HTMLElement[] =>
 beforeEach(() => {
   resetViewStore()
   resetAccountStore()
+  resetAppAccessStore()
   // F-1.7: the app below starts a session load; none may finish inside another test file.
   resetSessionStore()
   resetBackgroundStore()
@@ -98,6 +100,7 @@ beforeEach(() => {
 afterEach(() => {
   resetViewStore()
   resetAccountStore()
+  resetAppAccessStore()
   resetSessionStore()
   resetBackgroundStore()
 })
@@ -205,14 +208,8 @@ describe('AppearanceSettingsTab startup (F-7.9)', () => {
   })
 })
 
-const SUPPORTER: SupporterStatus = {
-  licensed: true,
-  since: '2026-09-20T10:00:00.000Z',
-  validUntil: null,
-  offline: false,
-  product: null,
-  accent: 'default'
-}
+/** The paid themes follow the access (changed by the author 2026-10-10): on in the trial. */
+const TRIAL: AppAccess = { state: 'trial', trialEndsAt: '2026-11-07T00:00:00.000Z', daysLeft: 12 }
 const MIDNIGHT: CustomTheme = {
   id: 'custom-0123456789ab',
   name: 'Midnight',
@@ -223,8 +220,9 @@ const MIDNIGHT: CustomTheme = {
 const themeCard = (id: string): HTMLElement => screen.getByTestId(`appearance-theme-${id}`)
 
 describe('AppearanceSettingsTab theme (F-7.8)', () => {
-  it('offers the free themes, shows Sepia locked without a license, and picks one silently', async () => {
+  it('offers the free themes, shows Sepia locked after the trial, and picks one silently', async () => {
     useViewStore.setState({ ...view, loaded: true })
+    useAppAccessStore.setState({ access: { ...TRIAL, state: 'expired', daysLeft: 0 } })
     render(<AppearanceSettingsTab />)
     const group = screen.getByRole('radiogroup', { name: 'Theme' })
     expect(
@@ -269,7 +267,7 @@ describe('AppearanceSettingsTab theme (F-7.8)', () => {
   })
 
   it('creates a custom theme from the painted one and selects it with a license', async () => {
-    useAccountStore.setState({ supporter: SUPPORTER })
+    useAppAccessStore.setState({ access: TRIAL })
     useViewStore.setState({ ...view, theme: 'sepia', loaded: true })
     render(<AppearanceSettingsTab />)
     expect(themeCard('sepia')).toBeEnabled()
@@ -307,7 +305,7 @@ describe('AppearanceSettingsTab theme (F-7.8)', () => {
   })
 
   it('a new theme follows the base until a colour is changed; Cancel sends nothing', async () => {
-    useAccountStore.setState({ supporter: SUPPORTER })
+    useAppAccessStore.setState({ access: TRIAL })
     useViewStore.setState({ ...view, loaded: true })
     render(<AppearanceSettingsTab />)
     await userEvent.click(screen.getByTestId('appearance-theme-new'))
@@ -320,7 +318,7 @@ describe('AppearanceSettingsTab theme (F-7.8)', () => {
   })
 
   it('edits the selected custom theme in place', async () => {
-    useAccountStore.setState({ supporter: SUPPORTER })
+    useAppAccessStore.setState({ access: TRIAL })
     view = { ...view, theme: MIDNIGHT.id, customThemes: [MIDNIGHT] }
     useViewStore.setState({ ...view, loaded: true })
     render(<AppearanceSettingsTab />)
