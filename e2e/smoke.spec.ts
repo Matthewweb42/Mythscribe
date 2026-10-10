@@ -4435,6 +4435,8 @@ test('create, close, reopen a project on disk', async () => {
   await expect(notesWindow).toBeVisible()
   await expect(page.getByTestId('notes-panel')).toHaveCount(0)
   await expect(notesWindow.getByRole('textbox', { name: 'Notes' })).toBeVisible()
+  // The synopsis comes with the notes, as in the docked panel (author, 2026-10-10).
+  await expect(notesWindow.getByRole('textbox', { name: 'Synopsis' })).toBeVisible()
   const notesRectBefore = (await getLayout()).floating.notes
   const windowBox = async (): Promise<{ x: number; y: number; width: number; height: number }> => {
     const box = await notesWindow.boundingBox()

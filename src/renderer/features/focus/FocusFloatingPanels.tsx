@@ -1,5 +1,5 @@
 import { AssistantBody } from '@renderer/features/ai/AssistantPanel'
-import { NotesBody } from '@renderer/features/editor/NotesPanel'
+import { NotesColumn } from '@renderer/features/editor/NotesPanel'
 import {
   AddReferenceImageButton,
   ReferencesBody
@@ -12,8 +12,8 @@ import { useFocusStore } from './focusStore'
  * The floating Notes, References, and AI assistant windows of focus mode (F-6.6; References
  * since 2026-10-07: the pins and the open scene's story bible sheets), mounted by `App` only
  * there and shown on the focus store's session flags (the control bar's buttons toggle them,
- * F-6.5; each window's Close and Escape clear its flag). The notes window hosts `NotesBody`
- * for the selected node, the same editor and store as the docked panel; the assistant window
+ * F-6.5; each window's Close and Escape clear its flag). The notes window hosts `NotesColumn`
+ * for the selected node, the docked panel's synopsis, notes, and scene details (2026-10-10); the assistant window
  * hosts `AssistantBody`, which carries its own New conversation button and Continuity link; the
  * references window hosts `ReferencesBody` with Add image in its title bar. Their geometry is the layout's
  * `floating` rects, persisted app-wide like the docked sizes.
@@ -26,13 +26,9 @@ export function FocusFloatingPanels(): React.JSX.Element {
     <>
       {panels.notes ? (
         <FloatingWindow name="notes" title="Notes" onClose={() => togglePanel('notes')}>
-          {selectedId === null ? (
-            <p className="m-0 px-4 py-3 text-sm text-fg-muted">
-              Select a document to see its notes.
-            </p>
-          ) : (
-            <NotesBody id={selectedId} />
-          )}
+          <div className="flex min-h-0 flex-1 flex-col pt-1">
+            <NotesColumn id={selectedId} />
+          </div>
         </FloatingWindow>
       ) : null}
       {panels.references ? (
