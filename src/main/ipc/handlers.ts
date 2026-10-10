@@ -161,6 +161,7 @@ import { staleSummaryNodeIds, summarizeScene, summarySource } from '../ai/summar
 import { ledgerSummary, recentUsage, usageHistory, type AiDb } from '../ai/usageStore'
 import { createIndexQueue } from '../jobs/indexQueue'
 import { createSheetSyncService } from '../ai/sheetSyncService'
+import { setCategoryFields } from '../entity/categoryFields'
 import {
   confirmPlanLink,
   dismissPlanLink,
@@ -2429,6 +2430,17 @@ export function registerHandlers({
   register('category:update', ({ id, ...patch }) =>
     updateCategory(manager.require().connection.orm, id, patch)
   )
+
+  // F-9.19: a category's fields from Settings › Story bible; moved text reaches the open windows.
+  register('category:setFields', ({ id, fields }) => {
+    const db = manager.require().connection.orm
+    const result = setCategoryFields(db, id, fields)
+    if (result.entities.length > 0) {
+      emit(windows(), 'fact:changed', { entityIds: result.entities.map((sheet) => sheet.id) })
+    }
+    queueTodo(db)
+    return result
+  })
 
   // F-9.8: the context library. Adding a file stores its original and reads its text; nothing is
   // sent anywhere until the author confirms the estimate, and nothing reaches the story bible

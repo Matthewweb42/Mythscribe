@@ -12,6 +12,12 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-10 · F-9.19 · Story bible settings: what each part does
+- Question: You asked for a Settings tab to edit each category's fields, the write-up style (headings vs paragraphs, order, length), and the default view of new sheets.
+- Chosen (decided by Claude, unconfirmed): (1) the page order is the field order you set in the same tab (one order, not two); (2) each field is Heading or Paragraph, one-line fields default to Paragraph and long ones to Heading; the length is per category; (3) fields are saved with a button (renames, reorders, additions and removals together) because a removal moves text into Notes on every sheet of the category, which asks first and names how many sheets; (4) Notes cannot be removed or renamed and stays last (removals need somewhere to go); (5) Threads are not editable here (their fields drive the thread view); (6) the default view applies to the New … dialog and the quick add; sheets the AI or an upload makes keep their own choice.
+- Alternatives: a separate page order; one length for the whole bible; instant saves with an Undo instead of a Save button.
+- To change it: `src/renderer/features/entities/StoryBibleSettingsTab.tsx`, `src/main/entity/categoryFields.ts`, `src/shared/storyBibleSettings.ts`.
+
 ## 2026-10-10 · F-9.18 · Sheet sync follows the chat mode: Auto lands with Undo, Ask and Plan hold it
 - Question: You said the sync "lands on its own (it is the author's own words re-filed), logged in Changes with Undo; it follows the chat's Auto/Ask mode like other story-bible edits if that is the existing pattern".
 - Chosen (decided by Claude, unconfirmed): it is the existing pattern (the background plan links apply at Auto and only suggest at Ask and Plan; Organise and the chat agent follow the mode too), so: at **Auto** a write-up or a filing lands on the sheet at once and is logged in Changes (source "Sheet sync") with an Undo; at **Ask** and **Plan** (the default is Ask) it is computed in the background and held on the sheet with **Apply** and **Dismiss** and a preview of the new page or of each field change. AI rule 1 (CLAUDE.md): both are Proposals except in Auto, as the rule allows; Plan never edits.

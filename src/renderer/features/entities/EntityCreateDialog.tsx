@@ -1,3 +1,4 @@
+import { storyBibleSettingsNow } from './storyBibleSettingsStore'
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import {
   ENTITY_NAME_MAX,
@@ -41,7 +42,10 @@ function CreateForm({ kind }: { kind: EntityKind }): React.JSX.Element {
   const titleId = useId()
   const radioName = useId()
   const [name, setName] = useState('')
-  const [template, setTemplate] = useState<EntityTemplate>('structured')
+  // F-9.19: the view the author chose for new sheets in Settings › Story bible.
+  const [template, setTemplate] = useState<EntityTemplate>(
+    () => storyBibleSettingsNow().defaultTemplate
+  )
   const [busy, setBusy] = useState(false)
   const nameInput = useRef<HTMLInputElement>(null)
   const trimmed = name.trim()

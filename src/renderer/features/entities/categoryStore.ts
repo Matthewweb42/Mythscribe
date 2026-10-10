@@ -5,8 +5,9 @@ import {
   type NewCategoryInput,
   type StoryCategory
 } from '@shared/categories'
-import type { CategoryUpdateInput } from '@shared/ipc/contract'
+import type { CategoryFieldInput, CategoryUpdateInput } from '@shared/ipc/contract'
 import { ipc } from '@renderer/lib/ipc'
+import { useEntityStore } from './entityStore'
 
 /**
  * The story-bible categories in the renderer (F-9.11): the one owner of `category:list` — the
@@ -29,6 +30,11 @@ interface CategoryState {
   create: (input: NewCategoryInput) => Promise<StoryCategory>
   /** Renames a category or changes its singular or icon. */
   update: (id: string, patch: Omit<CategoryUpdateInput, 'id'>) => Promise<StoryCategory>
+  /**
+   * F-9.19: replaces a category's fields (Settings › Story bible); the sheets whose text moved
+   * into Notes are merged into the entity store.
+   */
+  setFields: (id: string, fields: CategoryFieldInput[]) => Promise<StoryCategory>
 }
 
 /** Bumped by every load() and clear() so an answer for a closed project is dropped. */
@@ -67,6 +73,16 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
     const mine = generation
     const category = await ipc().invoke('category:create', input)
     if (mine === generation) set({ categories: [...get().categories, category] })
+    return category
+  },
+
+  async setFields(id, fields) {
+    const mine = generation
+    const { category, entities } = await ipc().invoke('category:setFields', { id, fields })
+    if (mine === generation) {
+      set({ categories: get().categories.map((c) => (c.id === id ? category : c)) })
+      for (const entity of entities) useEntityStore.getState().merge(entity)
+    }
     return category
   },
 

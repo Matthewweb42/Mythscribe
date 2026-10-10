@@ -150,6 +150,7 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'organise:plan': 'ai',
   'category:create': 'write',
   'category:update': 'write',
+  'category:setFields': 'write',
   'library:list': 'read',
   'library:choose': 'read',
   'library:add': 'write',

@@ -11,6 +11,7 @@ import {
   type NewCategoryInput,
   type StoryCategory
 } from '@shared/categories'
+import type { EntityFieldDef } from '@shared/entities'
 import type { CategoryUpdateInput } from '@shared/ipc/contract'
 import { storyCategory, type StoryCategoryRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
@@ -23,6 +24,18 @@ import type { EntityDb } from './entityStore'
  */
 
 const StoredFields = z.array(CategoryFieldDef)
+
+/** A stored template, or null when it does not parse (the library's then stands). */
+function parseStoredFields(raw: string): EntityFieldDef[] | null {
+  let json: unknown
+  try {
+    json = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const fields = StoredFields.safeParse(json)
+  return fields.success ? fields.data : null
+}
 
 /** A project category's row as the contract's category; null for a rename row or a broken one. */
 function rowToCustom(row: StoryCategoryRow): StoryCategory | null {
@@ -52,15 +65,24 @@ function rowToCustom(row: StoryCategoryRow): StoryCategory | null {
 /** Every category of the project, in picker order: the library (renamed where the author did), then the project's own, oldest first. */
 export function listCategories(db: EntityDb): StoryCategory[] {
   const rows = db.select().from(storyCategory).orderBy(asc(storyCategory.created)).all()
-  const renames = new Map<string, { name: string; noun: string; icon: CategoryIcon }>()
+  const renames = new Map<
+    string,
+    { name: string; noun: string; icon: CategoryIcon; fields?: EntityFieldDef[] }
+  >()
   const custom: StoryCategory[] = []
   for (const row of rows) {
-    if (row.fields === null) {
-      if (builtinCategory(row.id) !== undefined) {
-        renames.set(row.id, { name: row.name, noun: row.noun, icon: row.icon })
-      }
+    if (builtinCategory(row.id) !== undefined) {
+      // F-9.19: a library row renames the category and, with `fields`, holds its edited template.
+      const fields = row.fields === null ? null : parseStoredFields(row.fields)
+      renames.set(row.id, {
+        name: row.name,
+        noun: row.noun,
+        icon: row.icon,
+        ...(fields === null ? {} : { fields })
+      })
       continue
     }
+    if (row.fields === null) continue
     const category = rowToCustom(row)
     if (category !== null) custom.push(category)
   }

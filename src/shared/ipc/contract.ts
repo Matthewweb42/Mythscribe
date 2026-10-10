@@ -117,6 +117,7 @@ import {
 import { EditorSettings } from '../editorSettings'
 import {
   CATEGORY_FIELD_LABEL_MAX,
+  CATEGORY_FIELDS_MAX,
   CategoryIcon,
   CATEGORY_NAME_MAX,
   NewCategoryInput,
@@ -353,6 +354,14 @@ export const Entity = z.object({
   sync: SheetSyncView
 })
 export type Entity = z.infer<typeof Entity>
+
+/** F-9.19: one field of a category as Settings › Story bible sends it (no id: a new field). */
+export const CategoryFieldInput = z.object({
+  id: EntityFieldId.optional(),
+  label: z.string().trim().min(1).max(CATEGORY_FIELD_LABEL_MAX),
+  multiline: z.boolean()
+})
+export type CategoryFieldInput = z.infer<typeof CategoryFieldInput>
 
 /**
  * An undo of the Changes log as the windows get it (F-9.13): F-9.15 adds the sheets and tags it
@@ -1773,6 +1782,20 @@ export const contract = {
       icon: CategoryIcon.optional()
     }),
     output: StoryCategory
+  },
+  /**
+   * F-9.19: replaces a category's fields from Settings › Story bible (add, remove, rename,
+   * reorder), for the library's categories and the project's own; Notes stays, last. A field with
+   * an `id` the category has keeps it (a rename keeps every sheet's text); one without is new. A
+   * removed field's text moves into Notes on every sheet of the category; those sheets come back.
+   * VALIDATION for Threads, a blank name, or too many fields; ALREADY_EXISTS for a repeated name.
+   */
+  'category:setFields': {
+    input: z.object({
+      id: z.string(),
+      fields: z.array(CategoryFieldInput).max(CATEGORY_FIELDS_MAX + 1)
+    }),
+    output: z.object({ category: StoryCategory, entities: z.array(Entity) })
   },
   /** The context library (F-9.8): every uploaded file, newest first, with its state. */
   'library:list': { input: z.undefined(), output: z.array(ContextFile) },

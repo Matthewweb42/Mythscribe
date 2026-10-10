@@ -1,3 +1,4 @@
+import { storyBibleSettingsNow } from './storyBibleSettingsStore'
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { ENTITY_NAME_MAX, type EntityKind } from '@shared/entities'
@@ -8,7 +9,7 @@ import { useEntityStore } from './entityStore'
 
 /**
  * The quick-add form at the foot of an entity tab (F-9.2): a name, and Enter or Add creates the
- * entity with the kind's structured template. The new entity is selected so its row is visible in
+ * entity in the view new sheets open in (F-9.19: Settings › Story bible; Structured by default). The new entity is selected so its row is visible in
  * the list; a name that is already taken, or any other refusal, toasts and keeps the name in the
  * field. The button beside Add opens the creation dialog instead (F-9.3), for a template choice.
  */
@@ -25,7 +26,11 @@ export function EntityQuickAdd({ kind }: { kind: EntityKind }): React.JSX.Elemen
     if (trimmed.length === 0 || busy) return
     setBusy(true)
     try {
-      const entity = await create({ kind, name: trimmed, template: 'structured' })
+      const entity = await create({
+        kind,
+        name: trimmed,
+        template: storyBibleSettingsNow().defaultTemplate
+      })
       select(entity.id)
       setName('')
     } catch (err) {
