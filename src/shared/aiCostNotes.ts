@@ -38,11 +38,11 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   summary: {
     trigger: 'background',
-    when: 'Indexing: once per scene after edits settle (content-hash cached), and for every stale scene after open; a new prompt version re-reads the book only after the author confirms the cost (F-9.14 conversion dialog).',
+    when: 'Indexing: once per scene after edits settle (content-hash cached), and for every stale scene after open; a new prompt version re-reads the book only after the author confirms the cost (F-9.14 conversion dialog); summary.v5 (mood and theme, F-5.6) re-reads nothing: a summary.v4 scene gets them with its next reading.',
     callsPerUse: 1,
     typicalOutTokens: 600,
     ideas:
-      'The biggest background spend on a large book: batch API when latency allows; skip tiny edits; cap scene text sent; one pass also yields facts, tags, the scene card, relationships, and thread events (summary.v4 added about 150 output tokens); drop empty lists from the JSON shape if the ledger shows cut-offs.'
+      'The biggest background spend on a large book: batch API when latency allows; skip tiny edits; cap scene text sent; one pass also yields facts, tags, the scene card, relationships, and thread events (summary.v4 added about 150 output tokens, summary.v5 about 20 more for the mood and theme); drop empty lists from the JSON shape if the ledger shows cut-offs.'
   },
   chat: {
     trigger: 'on request',
@@ -85,7 +85,8 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     when: 'Rewrite a selection (bubble, chat, or agent edit).',
     callsPerUse: 1,
     typicalOutTokens: 250,
-    ideas: 'Answer length tracks the selection: set max_tokens from the selection size.'
+    ideas:
+      'Answer length tracks the selection: set max_tokens from the selection size. rewrite.v4 adds the scene mood and theme (about 25 input tokens, from the stored reading, no extra call).'
   },
   brief: {
     trigger: 'on request',
@@ -165,7 +166,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     callsPerUse: 60,
     typicalOutTokens: 1500,
     ideas:
-      'The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs.'
+      'The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading).'
   },
   agent: {
     trigger: 'every chat message',

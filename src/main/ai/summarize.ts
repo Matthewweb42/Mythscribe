@@ -9,7 +9,12 @@ import {
   OBSERVED_FACT_VALUE_MAX
 } from '@shared/observedFacts'
 import { parseRelationType } from '@shared/relations'
-import { SCENE_CARD_CHANGED_MAX, SCENE_CARD_FIELD_MAX, type AiSceneCard } from '@shared/sceneCard'
+import {
+  SCENE_CARD_CHANGED_MAX,
+  SCENE_CARD_FIELD_MAX,
+  SCENE_MOOD_MAX,
+  type AiSceneCard
+} from '@shared/sceneCard'
 import { parseStoredSceneMeta, promptSceneMeta, type PromptSceneMeta } from '@shared/sceneMeta'
 import { toTagName } from '@shared/tags'
 import { ThreadEvent, THREAD_KIND, THREAD_NOTE_MAX } from '@shared/threads'
@@ -45,9 +50,19 @@ import { bankTagNames, type AutoTagsChange } from './autoTags'
 import { headTruncate } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
 import { knownNames, type KnownNames, type ObservedFactsChange } from './observedFacts'
-import { buildSummaryPromptV4, SUMMARY_PROMPT_V4_VERSION } from './prompts/summary.v4'
+import { SUMMARY_PROMPT_V4_VERSION } from './prompts/summary.v4'
+import { buildSummaryPromptV5 } from './prompts/summary.v5'
 import { AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
+
+/**
+ * The oldest stored prompt version that still counts as current. F-5.6 (the author, 2026-10-10):
+ * `summary.v5` only adds the mood and theme, so a `summary.v4` row stays current: no scene is
+ * re-read (and paid for) for them, and F-9.14's conversion never asks again; a scene gets its
+ * mood and theme the next time it is read because its text (or a name in it) changed. Raise this
+ * only for a version whose reading the old rows cannot do without.
+ */
+export const SUMMARY_CURRENT_MIN_VERSION = SUMMARY_PROMPT_V4_VERSION
 
 /**
  * The scene-summary use case (F-5.6). It runs in the background, so it is deliberately quiet
@@ -79,6 +94,10 @@ import { runAiRequest, sha256, type AiRequestDeps } from './request'
  * changed; stored on the summary row), the relationships the scene states between two records,
  * and its plot-thread events, each of those two with a quote `findQuote` must find. They are
  * applied with the facts (`applyDerivedKnowledge`) and logged in the Changes log.
+ *
+ * F-5.6 (`summary.v5`, the author 2026-10-10): and it deduces the scene's mood and theme, kept on
+ * the card (not tags), which the prose-edit prompts carry. A `summary.v4` row stays current
+ * (`SUMMARY_CURRENT_MIN_VERSION`): the mood and theme come with the next reading, never a bulk one.
  */
 
 const BAD_FORMAT = 'The model did not answer in the expected format.'
@@ -191,7 +210,7 @@ export function summaryStaleness(db: TreeDb): SummaryStaleness {
       stale.push(row.id)
       continue
     }
-    if (!promptVersionAtLeast(current.promptVersion, SUMMARY_PROMPT_V4_VERSION)) {
+    if (!promptVersionAtLeast(current.promptVersion, SUMMARY_CURRENT_MIN_VERSION)) {
       outdated.push(row.id)
     }
   }
@@ -213,8 +232,8 @@ export function threadNames(db: TreeDb): string[] {
 export function summaryPrompt(
   db: TreeDb,
   source: SummarySource
-): ReturnType<typeof buildSummaryPromptV4> {
-  return buildSummaryPromptV4({
+): ReturnType<typeof buildSummaryPromptV5> {
+  return buildSummaryPromptV5({
     sceneText: source.sceneText,
     meta: source.meta,
     known: source.known,
@@ -297,7 +316,7 @@ export async function summarizeScene(
   if (
     stored !== null &&
     stored.contentHash === source.contentHash &&
-    promptVersionAtLeast(stored.promptVersion, SUMMARY_PROMPT_V4_VERSION)
+    promptVersionAtLeast(stored.promptVersion, SUMMARY_CURRENT_MIN_VERSION)
   ) {
     return {
       summary: stored,
@@ -386,6 +405,8 @@ const ModelAnswer = z.object({
   facts: z.unknown().optional(),
   tags: z.unknown().optional(),
   card: z.unknown().optional(),
+  mood: z.unknown().optional(),
+  theme: z.unknown().optional(),
   relations: z.unknown().optional(),
   threads: z.unknown().optional()
 })
@@ -479,7 +500,7 @@ export function parseSummaryAnswer(text: string, sceneText: string): ParsedSumma
     facts: facts.facts,
     droppedFacts: facts.droppedFacts + relations.dropped + threads.dropped,
     tags: cleanTags(answer.data.tags),
-    card: cleanCard(answer.data.card),
+    card: cleanCard(answer.data.card, answer.data.mood, answer.data.theme),
     relations: relations.relations,
     threads: threads.threads
   }
@@ -492,18 +513,23 @@ function cardField(value: unknown, max: number): string {
 
 /**
  * The card's AI part (F-9.14), lenient: each field a trimmed string cut to its cap, anything else
- * empty; null when the answer has no card or only empty fields. The card states what the scene
- * does in a few words, so it is not quote-checked; the prompt asks for an empty field rather than
- * a guess.
+ * empty; null when the answer has no card and no mood or theme, or only empty fields. The card
+ * states what the scene does in a few words, so it is not quote-checked; the prompt asks for an
+ * empty field rather than a guess. F-5.6 (`summary.v5`): the answer's top-level `mood` and
+ * `theme`, deduced from the whole scene, are kept on the card the same lenient way.
  */
-function cleanCard(value: unknown): AiSceneCard | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
-  const raw = value as Record<string, unknown>
+function cleanCard(value: unknown, mood: unknown, theme: unknown): AiSceneCard | null {
+  const raw: Record<string, unknown> =
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
   const card: AiSceneCard = {
     where: cardField(raw.where, SCENE_CARD_FIELD_MAX),
     when: cardField(raw.when, SCENE_CARD_FIELD_MAX),
     pov: cardField(raw.pov, SCENE_CARD_FIELD_MAX),
-    changed: cardField(raw.changed, SCENE_CARD_CHANGED_MAX)
+    changed: cardField(raw.changed, SCENE_CARD_CHANGED_MAX),
+    mood: cardField(mood, SCENE_MOOD_MAX),
+    theme: cardField(theme, SCENE_MOOD_MAX)
   }
   return Object.values(card).every((field) => field === '') ? null : card
 }

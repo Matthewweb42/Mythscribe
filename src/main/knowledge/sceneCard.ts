@@ -22,7 +22,8 @@ import type { TreeDb } from '../tree/treeStore'
  * no write: the AI's reading of where, when, POV, and what changed (`scene_summary.card`, written
  * by `summary.v4`), the author's own scene metadata winning over it field by field, the cast from
  * the local mention index (the character tags the scene names, most mentioned first, each by its
- * record's name), else the summary's cast, and the thread events the scene holds. Null when the
+ * record's name), else the summary's cast, the thread events the scene holds, and (F-5.6) the
+ * mood and theme the AI deduced. Null when the
  * node has nothing to show (no summary yet and no metadata) or is not a node at all.
  */
 export function sceneCardFor(db: TreeDb, nodeId: string): SceneCard | null {
@@ -44,7 +45,10 @@ export function sceneCardFor(db: TreeDb, nodeId: string): SceneCard | null {
     pov: pick(meta.pov, ai?.pov),
     changed: ai?.changed ?? '',
     cast: castOf(db, nodeId, summary?.characters ?? []),
-    threads: threadsOf(db, nodeId)
+    threads: threadsOf(db, nodeId),
+    // F-5.6: always the AI's reading ('' until a `summary.v5` reading of the scene).
+    mood: ai?.mood ?? '',
+    theme: ai?.theme ?? ''
   }
   return isEmptyCard(card) ? null : card
 }

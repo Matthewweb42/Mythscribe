@@ -183,6 +183,15 @@ import {
   buildRewriteRegenPromptV3,
   REWRITE_REGEN_PROMPT_V3_VERSION
 } from '../prompts/rewriteRegen.v3'
+import {
+  buildRewritePromptV4,
+  REWRITE_PROMPT_V4_VERSION,
+  type BuildRewritePromptV4Input
+} from '../prompts/rewrite.v4'
+import {
+  buildRewriteRegenPromptV4,
+  REWRITE_REGEN_PROMPT_V4_VERSION
+} from '../prompts/rewriteRegen.v4'
 import { buildSummaryPrompt, SUMMARY_PROMPT_VERSION } from '../prompts/summary.v1'
 import {
   buildSummaryPromptV2,
@@ -199,6 +208,7 @@ import {
   SUMMARY_PROMPT_V4_VERSION,
   SUMMARY_THREAD_NAMES_MAX
 } from '../prompts/summary.v4'
+import { buildSummaryPromptV5, SUMMARY_PROMPT_V5_VERSION } from '../prompts/summary.v5'
 import {
   buildBetaReaderPrompt,
   BETA_READER_PROMPT_VERSION,
@@ -296,6 +306,12 @@ import {
   type BuildEditPassPromptInput
 } from '../prompts/editPass.v1'
 import {
+  buildEditPassPromptV2,
+  EDIT_PASS_MOOD_TYPES,
+  EDIT_PASS_PROMPT_V2_VERSION,
+  type BuildEditPassPromptV2Input
+} from '../prompts/editPass.v2'
+import {
   chunkText,
   EDIT_PASS_INSTRUCTION_MAX,
   EDIT_PASS_TYPES,
@@ -337,6 +353,7 @@ import {
   type SceneBrief
 } from '@shared/sceneMeta'
 import { renderSceneSteer, SCENE_STEER_CATEGORIES, SCENE_STEER_NAMES_MAX } from '@shared/sceneSteer'
+import { renderSceneMood, SCENE_MOOD_MAX } from '@shared/sceneCard'
 import {
   ROUTE_MESSAGE_CHARS,
   ROUTE_SELECTION_PREVIEW_CHARS,
@@ -3218,6 +3235,68 @@ const AGENT_PLAN_LOOKUP_STEP = {
     'Named in 6 scenes (2 up to now): first n3 ¶0, last n15 ¶2'
 }
 
+/** F-5.6: a scene's mood block as the edit prompts carry it, and the block at both phrase caps. */
+const FIXTURE_MOOD = renderSceneMood('quiet dread', 'debts that cannot be paid in coin')
+const MAXED_MOOD = renderSceneMood('m'.repeat(SCENE_MOOD_MAX), 't'.repeat(SCENE_MOOD_MAX))
+
+function summaryV5Case(
+  name: string,
+  note: string,
+  sceneText: string,
+  meta: typeof META | null,
+  known: SummaryKnownNames,
+  bank: SummaryBankTags,
+  threads: readonly string[]
+): EvalCase {
+  const built = buildSummaryPromptV5({ sceneText, meta, known, bank, threads })
+  return {
+    version: SUMMARY_PROMPT_V5_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'summaryFacts', sceneText }
+  }
+}
+
+function rewriteCaseV4(
+  name: string,
+  note: string,
+  input: BuildRewritePromptV4Input,
+  regen: { note: string | null; violation: string | null } | null
+): EvalCase {
+  const built =
+    regen === null ? buildRewritePromptV4(input) : buildRewriteRegenPromptV4({ ...input, ...regen })
+  return {
+    version: regen === null ? REWRITE_PROMPT_V4_VERSION : REWRITE_REGEN_PROMPT_V4_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
+function editPassCaseV2(
+  name: string,
+  note: string,
+  input: Omit<BuildEditPassPromptV2Input, 'title' | 'part'>
+): EvalCase {
+  const built = buildEditPassPromptV2({
+    ...input,
+    title: 'The Crossing',
+    part: { index: 0, count: 1 }
+  })
+  return {
+    version: EDIT_PASS_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'editPass', type: input.type, text: input.text }
+  }
+}
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -5037,5 +5116,120 @@ export const EVAL_CASES: EvalCase[] = [
       retry: true
     },
     { kind: 'agent', expected: 'answer' }
-  )
+  ),
+  summaryV5Case(
+    'fresh',
+    'the v4 fresh case: the shape a new project sends, now asking for the mood and theme',
+    FIXTURE_PASSAGE,
+    null,
+    { character: [], setting: [], world: [] },
+    NO_BANK_TAGS,
+    []
+  ),
+  summaryV5Case(
+    'full',
+    'the v4 full case with the mood and theme asked for',
+    FIXTURE_PASSAGE,
+    META,
+    FIXTURE_KNOWN,
+    FIXTURE_BANK_TAGS,
+    FIXTURE_THREADS
+  ),
+  summaryV5Case(
+    'maxed',
+    'the v4 maxed case with the mood and theme asked for: the most a background reading can cost',
+    `${FIXTURE_PASSAGE.repeat(20).slice(0, SUMMARY_SCENE_CHAR_BUDGET)}…`,
+    {
+      location: 'L'.repeat(200),
+      pov: 'P'.repeat(200),
+      timeline: 'T'.repeat(500),
+      brief: EMPTY_SCENE_BRIEF
+    },
+    MAXED_KNOWN,
+    MAXED_BANK_TAGS,
+    MAXED_THREADS
+  ),
+  rewriteCaseV4(
+    'fresh',
+    'the v3 fresh case: a scene with no reading yet sends no mood block',
+    { ...rewriteFreshV3, mood: null },
+    null
+  ),
+  rewriteCaseV4(
+    'full',
+    "the v3 full case plus the scene's mood and theme",
+    { ...rewriteFullV3, mood: FIXTURE_MOOD },
+    null
+  ),
+  rewriteCaseV4(
+    'maxed',
+    'every cap at its limit, the mood and theme at their caps too',
+    { ...rewriteMaxedV3, mood: MAXED_MOOD },
+    null
+  ),
+  rewriteCaseV4(
+    'maxed both',
+    'the maxed case with its mood, regenerated with an author note and a tense violation',
+    { ...rewriteMaxedV3, mood: MAXED_MOOD },
+    { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: VIOLATION }
+  ),
+  ...EDIT_PASS_MOOD_TYPES.map((type) =>
+    editPassCaseV2(
+      `${type} mood`,
+      `a ${type} pass over the fixture scene with its mood and theme, no voice block, no keep list`,
+      {
+        type,
+        text: EDIT_PASS_PASSAGE,
+        voice: null,
+        keepWords: [],
+        references: [],
+        instruction: type === 'custom' ? 'Tighten: cut filler words and stacked modifiers.' : null,
+        mood: FIXTURE_MOOD
+      }
+    )
+  ),
+  editPassCaseV2('custom maxed', 'the v1 worst custom pass plus the mood and theme at their caps', {
+    type: 'custom',
+    text: EDIT_PASS_MAXED_PIECE,
+    voice: voiceBlock(MAXED_PROFILE, { text: EDIT_PASS_PASSAGE, pov: 'Mara' }),
+    keepWords: [],
+    references: [],
+    instruction: 'i'.repeat(EDIT_PASS_INSTRUCTION_MAX),
+    mood: MAXED_MOOD
+  }),
+  editPassCaseV2(
+    'line full',
+    'the v1 line edit with the voice block plus the mood and theme: what a read project sends',
+    {
+      type: 'line',
+      text: EDIT_PASS_PASSAGE,
+      voice: voiceBlock(FIXTURE_PROFILE, { text: EDIT_PASS_PASSAGE, pov: 'Mara' }),
+      keepWords: [],
+      references: [],
+      instruction: null,
+      mood: FIXTURE_MOOD
+    }
+  ),
+  editPassCaseV2(
+    'copy maxed',
+    'the v1 worst copy edit: a copy edit never carries the mood, so this stays the most a piece costs',
+    {
+      type: 'copy',
+      text: EDIT_PASS_MAXED_PIECE,
+      voice: voiceBlock(MAXED_PROFILE, { text: EDIT_PASS_PASSAGE, pov: 'Mara' }),
+      keepWords: PROOFREAD_MAXED_KEEP_WORDS,
+      references: [],
+      instruction: null,
+      mood: MAXED_MOOD
+    }
+  ),
+  editPassCaseV2('continuity maxed', 'the v1 worst continuity pass, which never carries the mood', {
+    type: 'continuity',
+    text: EDIT_PASS_MAXED_PIECE,
+    voice: null,
+    keepWords: [],
+    references: CONTINUITY_MAXED_REFS.map((ref, at) => continuityRefLine(ref, at + 1)),
+    instruction: null,
+    mood: MAXED_MOOD
+  })
 ]

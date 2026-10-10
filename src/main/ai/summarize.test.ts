@@ -187,14 +187,14 @@ afterEach(() => {
 })
 
 describe('summarizeScene (F-5.6)', () => {
-  it('sends the scene as JSON to the fast tier under summary.v4 and stores the row', async () => {
+  it('sends the scene as JSON to the fast tier under summary.v5 and stores the row', async () => {
     const result = await summarize()
     expect(result).toEqual({
       summary: {
         ...ANSWER,
         nodeId: scene,
         contentHash: summarySource(db, scene)?.contentHash,
-        promptVersion: 'summary.v4',
+        promptVersion: 'summary.v5',
         model: 'gpt-5.4-mini',
         truncated: false,
         createdAt: NOW.toISOString()
@@ -203,7 +203,7 @@ describe('summarizeScene (F-5.6)', () => {
       costUsd: priceFor('gpt-5.4-mini', 600, 90).costUsd,
       cached: false,
       model: 'gpt-5.4-mini',
-      promptVersion: 'summary.v4',
+      promptVersion: 'summary.v5',
       droppedFacts: 0
     })
     expect(getSummary(db, scene)).toEqual(result.summary)
@@ -217,7 +217,7 @@ describe('summarizeScene (F-5.6)', () => {
     expect(ledger[0]).toMatchObject({
       feature: 'summary',
       tier: 'fast',
-      promptVersion: 'summary.v4',
+      promptVersion: 'summary.v5',
       cached: false
     })
   })
@@ -266,7 +266,7 @@ describe('summarizeScene (F-5.6)', () => {
       costUsd: 0,
       cached: true,
       model: 'gpt-5.4-mini',
-      promptVersion: 'summary.v4',
+      promptVersion: 'summary.v5',
       droppedFacts: 0
     })
     expect(complete).toHaveBeenCalledTimes(1)
@@ -434,7 +434,9 @@ describe('parseSummaryAnswer (F-5.6)', () => {
       where: 'The landing',
       when: '',
       pov: '',
-      changed: 'x'.repeat(160)
+      changed: 'x'.repeat(160),
+      mood: '',
+      theme: ''
     })
     expect(parsed.relations).toEqual([
       { from: 'Mara', type: 'member-of', to: 'The Ferrymen', quote: 'She set the lantern down' }
@@ -447,6 +449,30 @@ describe('parseSummaryAnswer (F-5.6)', () => {
     expect(
       parseSummaryAnswer(JSON.stringify({ summary: 'x', card: { where: '' } }), SCENE).card
     ).toBeNull()
+  })
+
+  it("keeps the answer's mood and theme on the card, trimmed and cut, even with no card (F-5.6)", () => {
+    expect(
+      parseSummaryAnswer(
+        JSON.stringify({
+          summary: 'x',
+          card: { where: 'Dock' },
+          mood: ' quiet dread ',
+          theme: 't'.repeat(100)
+        }),
+        SCENE
+      ).card
+    ).toEqual({
+      where: 'Dock',
+      when: '',
+      pov: '',
+      changed: '',
+      mood: 'quiet dread',
+      theme: 't'.repeat(60)
+    })
+    expect(
+      parseSummaryAnswer(JSON.stringify({ summary: 'x', mood: 'calm', theme: 7 }), SCENE).card
+    ).toEqual({ where: '', when: '', pov: '', changed: '', mood: 'calm', theme: '' })
   })
 
   it('reads a missing list as none, and ignores anything the prompt did not ask for', () => {
@@ -656,7 +682,7 @@ describe('summarizeScene logs the story bible (F-5.16)', () => {
     // The rerun rewrites the row under the current version (from the local response cache here:
     // the scene itself has not changed, so the same request is not paid for twice).
     await run()
-    expect(getSummary(db, scene)?.promptVersion).toBe('summary.v4')
+    expect(getSummary(db, scene)?.promptVersion).toBe('summary.v5')
     expect(staleSummaryNodeIds(db)).toEqual([])
   })
 
@@ -786,6 +812,34 @@ describe('staleSummaryNodeIds (F-5.13)', () => {
   })
 })
 
+describe('summary.v5 keeps summary.v4 rows current (F-5.6, the author 2026-10-10)', () => {
+  it('serves an unchanged scene read by summary.v4 without a request, and lists it as neither stale nor outdated', async () => {
+    await summarize()
+    const stored = getSummary(db, scene)
+    if (!stored) throw new Error('no stored summary')
+    upsertSummary(db, { ...stored, promptVersion: 'summary.v4' })
+    expect(summaryStaleness(db)).toEqual({ stale: [], outdated: [] })
+    expect(staleSummaryNodeIds(db)).toEqual([])
+    const again = await summarize()
+    expect(again.cached).toBe(true)
+    expect(again.promptVersion).toBe('summary.v4')
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads the mood and theme with the next reading of an edited scene', async () => {
+    await summarize()
+    saveDocument(db, scene, doc(`${SCENE} The lantern went out.`))
+    answers({ ...ANSWER, mood: 'quiet dread', theme: 'waiting as faith' })
+    const result = await summarize()
+    expect(result.promptVersion).toBe('summary.v5')
+    expect(sent().system).toContain('Then deduce the mood')
+    expect(getSummary(db, scene)?.card).toMatchObject({
+      mood: 'quiet dread',
+      theme: 'waiting as faith'
+    })
+  })
+})
+
 describe('summarizeScene reads cards, relationships, and threads (F-9.14)', () => {
   const CARD = {
     where: 'The ferry landing',
@@ -833,7 +887,7 @@ describe('summarizeScene reads cards, relationships, and threads (F-9.14)', () =
     expect(complete).toHaveBeenCalledTimes(1)
     // The bad type, the bad event, the two unquoted entries, and the unknown record (applied).
     expect(result.droppedFacts).toBe(5)
-    expect(getSummary(db, scene)?.card).toEqual(CARD)
+    expect(getSummary(db, scene)?.card).toEqual({ ...CARD, mood: '', theme: '' })
 
     const relation = listFactsForEntity(db, tomas).find((fact) => fact.objectEntityId === tomas)
     expect(relation).toMatchObject({
@@ -856,7 +910,9 @@ describe('summarizeScene reads cards, relationships, and threads (F-9.14)', () =
       pov: { value: 'Mara', origin: 'ai' },
       changed: 'Mara waits alone.',
       cast: ['Mara', 'Tomas'],
-      threads: [{ entityId: threads[0]?.entityId, name: 'The Silent Bell', event: 'opened' }]
+      threads: [{ entityId: threads[0]?.entityId, name: 'The Silent Bell', event: 'opened' }],
+      mood: '',
+      theme: ''
     })
 
     const labels = listChanges(db, { limit: 50 }).entries.map((entry) => entry.label)

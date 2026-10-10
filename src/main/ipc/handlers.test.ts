@@ -1957,7 +1957,7 @@ describe('ai:rewrite (F-14.10)', () => {
     expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
       feature: 'rewrite',
       nodeId: scene,
-      promptVersion: 'rewrite.v3',
+      promptVersion: 'rewrite.v4',
       content: 'The storm broke at dusk. Mara counted the gaps.',
       flagged: false,
       violation: null,
@@ -1984,7 +1984,7 @@ describe('ai:rewrite (F-14.10)', () => {
     expect(again.text).toBe('Dusk, and the storm over the forest.')
     expect(getProposal(manager.require().connection.orm, again.proposalId)).toMatchObject({
       feature: 'rewrite',
-      promptVersion: 'rewriteRegen.v3',
+      promptVersion: 'rewriteRegen.v4',
       regeneratedFrom: first.proposalId
     })
   })
@@ -3578,7 +3578,7 @@ describe('scene summaries (F-5.6)', () => {
     expect(result.state.summary).toMatchObject({
       ...ANSWER,
       nodeId: scene,
-      promptVersion: 'summary.v4',
+      promptVersion: 'summary.v5',
       model: 'gpt-fake',
       truncated: false
     })
@@ -4706,7 +4706,7 @@ describe('relationships, threads, and the conversion pass (F-9.14)', () => {
     expect(done.state).toBe('done')
     // The author safety rule: a full backup before the pass starts.
     expect((await invoke('backups:get', undefined)).backups).toHaveLength(1)
-    await vi.waitFor(() => expect(getSummary(db, id)?.promptVersion).toBe('summary.v4'))
+    await vi.waitFor(() => expect(getSummary(db, id)?.promptVersion).toBe('summary.v5'))
   })
 
   it('starts nothing when the backup before the conversion fails', async () => {

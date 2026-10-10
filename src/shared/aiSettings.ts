@@ -360,7 +360,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'notes, and up to 3 exemplar passages) with your author rules and banned phrases; for ' +
       'copy edits and proofreads up to 200 words to leave alone (the names of your story-bible ' +
       'entries and tags and the project dictionary); for a continuity pass the sheets of the ' +
-      'story-bible entries the scene names and what other scenes state about them.',
+      'story-bible entries the scene names and what other scenes state about them; for ' +
+      "developmental, line, and custom passes the scene's mood and theme as the AI read them.",
     minDial: 1
   },
   betaReader: {
@@ -420,7 +421,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'The selected passage (up to 4,000 characters), up to 300 characters of manuscript text ' +
       'before and after it, the scene metadata (location, POV, timeline), the voice profile ' +
       '(stylometric rules, learned style notes, and up to 3 exemplar passages), your author rules and banned ' +
-      `phrases, and ${STORY_BIBLE_SENDS}. An off-voice rewrite is sent back once with the rule ` +
+      `phrases, ${STORY_BIBLE_SENDS}, and the scene's mood and theme as the AI read them. An ` +
+      'off-voice rewrite is sent back once with the rule ' +
       'it broke; a regenerate carries your note.',
     minDial: 1
   },

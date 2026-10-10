@@ -32,10 +32,17 @@ function CardLine({
   )
 }
 
+/** A line only the AI writes (what changed; F-5.6's mood and theme), always with its mark. */
+function AiLine({ label, value }: { label: string; value: string }): React.JSX.Element | null {
+  if (value === '') return null
+  return <CardLine label={label} value={{ value, origin: 'ai' }} />
+}
+
 /**
- * A scene card (F-9.14): who, where, when, POV, what changed, and the threads it moved. Main puts
- * it together (`summary:get`'s `card`): the author's own scene metadata wins, a value the AI read
- * carries its mark. `compact` is the Outline row's one-line version.
+ * A scene card (F-9.14): who, where, when, POV, what changed, the scene's mood and theme (F-5.6,
+ * the AI's reading, not tags), and the threads it moved. Main puts it together (`summary:get`'s
+ * `card`): the author's own scene metadata wins, a value the AI read carries its mark. `compact`
+ * is the Outline row's one-line version.
  */
 export function SceneCardView({
   card,
@@ -81,15 +88,9 @@ export function SceneCardView({
         <CardLine label="Where" value={card.where} />
         <CardLine label="When" value={card.when} />
         <CardLine label="POV" value={card.pov} />
-        {card.changed !== '' ? (
-          <div className="flex items-baseline gap-1.5 text-xs">
-            <dt className="shrink-0 text-fg-muted">Changed</dt>
-            <dd className="m-0 flex min-w-0 items-baseline gap-1 wrap-anywhere">
-              {card.changed}
-              <AiMark />
-            </dd>
-          </div>
-        ) : null}
+        <AiLine label="Changed" value={card.changed} />
+        <AiLine label="Mood" value={card.mood} />
+        <AiLine label="Theme" value={card.theme} />
       </dl>
       {card.threads.length > 0 ? (
         <ul

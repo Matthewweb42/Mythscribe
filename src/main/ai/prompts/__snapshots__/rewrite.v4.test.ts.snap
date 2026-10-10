@@ -1,0 +1,35 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`rewrite.v4 prompt (F-14.10, F-5.6 mood and theme) > puts the mood block after the steer in the user turn, leaving the system turn alone 1`] = `
+[
+  {
+    "content": "You are the rewrite feature inside a novel-writing app. Rewrite the passage the author selected so it reads as the author's own voice, as described below. Keep its meaning, its events, the names and facts it states, its point of view, its tense, and roughly its length. Remove generic or machine-sounding phrasing. Reply with the rewritten passage only, with the same paragraph breaks: no preamble, no notes, and no quotation marks around the answer. Match the author's voice:
+- Narration is in past tense.
+
+Scene: location Ferry landing, POV Mara, timeline —.",
+    "role": "system",
+  },
+  {
+    "content": "Scene tags (let them steer the writing):
+Tone: tense
+Write in this tone.
+
+Scene mood: quiet dread
+Scene theme: debts come due
+Keep the edit in line with them.
+
+Text before:
+"""
+She set the lantern down on the post.
+"""
+
+Passage to rewrite:
+"""
+The storm broke at dusk over the dark forest. Mara counted the lightning gaps, each one shorter than the last.
+"""
+
+Rewrite the passage.",
+    "role": "user",
+  },
+]
+`;

@@ -33,13 +33,16 @@ import { QUERY_PROMPT_V3_VERSION } from './query.v3'
 import { REWRITE_PROMPT_VERSION } from './rewrite.v1'
 import { REWRITE_PROMPT_V2_VERSION } from './rewrite.v2'
 import { REWRITE_PROMPT_V3_VERSION } from './rewrite.v3'
+import { REWRITE_PROMPT_V4_VERSION } from './rewrite.v4'
 import { REWRITE_REGEN_PROMPT_VERSION } from './rewriteRegen.v1'
 import { REWRITE_REGEN_PROMPT_V2_VERSION } from './rewriteRegen.v2'
 import { REWRITE_REGEN_PROMPT_V3_VERSION } from './rewriteRegen.v3'
+import { REWRITE_REGEN_PROMPT_V4_VERSION } from './rewriteRegen.v4'
 import { SUMMARY_PROMPT_VERSION } from './summary.v1'
 import { SUMMARY_PROMPT_V2_VERSION } from './summary.v2'
 import { SUMMARY_PROMPT_V3_VERSION } from './summary.v3'
 import { SUMMARY_PROMPT_V4_VERSION } from './summary.v4'
+import { SUMMARY_PROMPT_V5_VERSION } from './summary.v5'
 import { TAGS_PROMPT_VERSION } from './tags.v1'
 import { VOICE_NOTES_PROMPT_VERSION } from './voiceNotes.v1'
 import { TAGS_REGEN_PROMPT_VERSION } from './tagsRegen.v1'
@@ -54,6 +57,7 @@ import { NOTES_SUGGEST_PROMPT_VERSION } from './notesSuggest.v1'
 import { AGENT_PROMPT_VERSION } from './agent.v1'
 import { AGENT_PROMPT_V2_VERSION } from './agent.v2'
 import { EDIT_PASS_PROMPT_VERSION } from './editPass.v1'
+import { EDIT_PASS_PROMPT_V2_VERSION } from './editPass.v2'
 import { CONTEXT_IMPORT_PROMPT_VERSION } from './contextImport.v1'
 import { REVIEW_CHAT_PROMPT_VERSION } from './reviewChat.v1'
 import { AGENT_PROMPT_V3_VERSION } from './agent.v3'
@@ -157,7 +161,12 @@ export const PROMPT_VERSIONS = [
   TODO_PROMPT_VERSION,
   AGENT_PROMPT_V5_VERSION,
   AGENT_PROMPT_V6_VERSION,
-  AGENT_PROMPT_V7_VERSION
+  AGENT_PROMPT_V7_VERSION,
+  // F-5.6: the scene's mood and theme (the reading, then the prose edits that carry them).
+  SUMMARY_PROMPT_V5_VERSION,
+  REWRITE_PROMPT_V4_VERSION,
+  REWRITE_REGEN_PROMPT_V4_VERSION,
+  EDIT_PASS_PROMPT_V2_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -484,7 +493,21 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   [AGENT_PROMPT_V5_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-9.16' },
   [TODO_SUGGEST_PROMPT_VERSION]: { feature: 'todo', tier: 'fast', output: 'json', since: 'F-9.16' },
   [AGENT_PROMPT_V6_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-5.24' },
-  [AGENT_PROMPT_V7_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-5.25' }
+  [AGENT_PROMPT_V7_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-5.25' },
+  [SUMMARY_PROMPT_V5_VERSION]: { feature: 'summary', tier: 'fast', output: 'json', since: 'F-5.6' },
+  [REWRITE_PROMPT_V4_VERSION]: { feature: 'rewrite', tier: 'fast', output: 'text', since: 'F-5.6' },
+  [REWRITE_REGEN_PROMPT_V4_VERSION]: {
+    feature: 'rewrite',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-5.6'
+  },
+  [EDIT_PASS_PROMPT_V2_VERSION]: {
+    feature: 'editPass',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-5.6'
+  }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

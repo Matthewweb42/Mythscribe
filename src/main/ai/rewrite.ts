@@ -12,10 +12,11 @@ import { voiceBlock } from '../voice/voiceBlock'
 import { checkChatFidelity, postProcessChatText, type ChatResult } from './chat'
 import { assertFeatureAllowed } from './dial'
 import { regenRequestId } from './inflight'
+import { buildSceneMood } from './context/sceneMood'
 import { buildSceneSteer } from './context/sceneSteer'
 import { buildStoryBible } from './context/storyBible'
-import { buildRewritePromptV3, type BuildRewritePromptV3Input } from './prompts/rewrite.v3'
-import { buildRewriteRegenPromptV3 } from './prompts/rewriteRegen.v3'
+import { buildRewritePromptV4, type BuildRewritePromptV4Input } from './prompts/rewrite.v4'
+import { buildRewriteRegenPromptV4 } from './prompts/rewriteRegen.v4'
 import { AiCancelledError } from './providers/types'
 import {
   runAiRequest,
@@ -62,17 +63,17 @@ export type RewriteResult = ChatResult
  * (author-control rule 2), the draft is post-processed (`postProcessChatText`: trim, strip
  * wrapping quotes) and scored with `checkChatFidelity` (F-14.7), the author's banned phrases
  * (F-14.2) first — skipped only when there is no voice block at all, the same gate
- * `voiceBlock` uses, so a fresh project warns about a banned phrase and nothing else. An off-voice draft is regenerated once through `rewriteRegen.v3` with the violation
+ * `voiceBlock` uses, so a fresh project warns about a banned phrase and nothing else. An off-voice draft is regenerated once through `rewriteRegen.v4` with the violation
  * named, not streamed (the panel is already past its drafting state), re-scored, and shown
  * flagged when it still fails; a regenerate that fails for any reason falls back to the first
  * draft, flagged, except a cancel, which propagates as CANCELLED from either call.
  *
  * An author regenerate (F-14.5: a note, a predecessor proposal, or both) sends
- * `rewriteRegen.v3` from the start, with the note clause and, if the fidelity check fires on
+ * `rewriteRegen.v4` from the start, with the note clause and, if the fidelity check fires on
  * that attempt, the violation clause too. The note and the predecessor join the context hash,
  * so asking again never answers from the cache with the rewrite the author just turned down.
  * The hash otherwise covers everything that shaped the messages: the passage, both context
- * windows, the metadata, the story bible, the scene steer (F-14.13), and the voice profile's version (it moves on every save and exemplar
+ * windows, the metadata, the story bible, the scene steer (F-14.13), the scene mood (F-5.6), and the voice profile's version (it moves on every save and exemplar
  * write, so a changed profile misses the cache while an unchanged one keeps hitting it).
  */
 export async function runRewrite(
@@ -104,22 +105,25 @@ export async function runRewrite(
   const voice = voiceBlock(profile, { text: input.text, pov: pov || null })
   const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
   const steer = buildSceneSteer(db, input.nodeId)
+  // F-5.6: the scene's mood and theme from its last reading, so the rewrite stays in line with them.
+  const mood = buildSceneMood(db, input.nodeId)
 
-  const base: BuildRewritePromptV3Input = {
+  const base: BuildRewritePromptV4Input = {
     text: input.text,
     before: input.before,
     after: input.after,
     meta,
     voice,
     bible,
-    steer
+    steer,
+    mood
   }
   const note = normalizeProposalNote(input.note)
   const regeneratedFrom = input.regeneratedFrom ?? null
   const authorRegenerate = note !== null || regeneratedFrom !== null
   const prompt = authorRegenerate
-    ? buildRewriteRegenPromptV3({ ...base, note, violation: null })
-    : buildRewritePromptV3(base)
+    ? buildRewriteRegenPromptV4({ ...base, note, violation: null })
+    : buildRewritePromptV4(base)
   const hashed = {
     text: input.text,
     before: input.before,
@@ -127,6 +131,7 @@ export async function runRewrite(
     meta,
     bible,
     steer,
+    mood,
     note,
     regeneratedFrom: authorRegenerate ? regeneratedFrom : null,
     voiceVersion: voiceProfileVersion()
@@ -159,7 +164,7 @@ export async function runRewrite(
   const violation = checkChatFidelity(profile.stats, firstText, banned)[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
-  const regen = buildRewriteRegenPromptV3({ ...base, note, violation: violation.message })
+  const regen = buildRewriteRegenPromptV4({ ...base, note, violation: violation.message })
   const flaggedFirst: RewriteResult = {
     ...shown(first, firstText, prompt.version),
     flagged: true,

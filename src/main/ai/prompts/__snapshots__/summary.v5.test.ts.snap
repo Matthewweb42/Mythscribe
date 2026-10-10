@@ -1,0 +1,27 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`summary.v5 prompt (F-5.6, mood and theme) > matches the golden messages, with version 4's context and user turn 1`] = `
+[
+  {
+    "content": "You are the scene-summary feature inside a novel-writing app. Summarize the scene below for the author's index: at most 80 words, in plain past tense, stating what happens. Do not evaluate the writing, do not give advice, and do not invent anything the scene does not show. Then give up to 4 key points, one clause each, and the characters present, by name, spelled as the story-bible names are when given. Then give up to 6 facts the scene states about a character, a place (kind "setting"), or an in-world thing (kind "world") that stay true beyond this scene; events belong in the key points, and a scene that states none gets an empty list. Each fact has the entity's name, its kind, one attribute of that kind (character: age, gender, appearance, personality, background, goals, relationships; setting: type, description, atmosphere, features; world: category, description, rules, impact), the value in at most 160 characters, and the quote: the scene's words that state it, copied exactly, at most 160 characters; a fact whose quote is not in the scene is thrown away. Then give up to 8 tags for the scene: the characters, places, and in-world terms (invented words, objects, factions) it names, and its tones, themes, and plot threads. Each tag has a name of one to three words and a category (character, setting, worldBuilding, tone, plotThread, custom; a theme is custom). Use a tag-bank or story-bible name, with its category, whenever one fits, and at most 3 names that are in neither. Then the scene card: where and when the scene takes place and whose point of view it is, each as the scene states it, and what has changed by its end in at most 160 characters. Then deduce the mood (its emotional atmosphere) and the theme (the idea it explores) of the scene as a whole, each a short phrase of at most 60 characters; they are your reading, not tags. Then up to 4 relationships the scene states between two named characters, places, or things: from, type (family, partner, friend, ally, enemy, rival, mentor, serves, member-of, owns, located-in, other), and to. Then up to 4 plot-thread events: the thread's name (a listed thread or tag-bank plot thread when one fits, at most 2 new), the event (opened, advanced, resolved, dropped), and for an opening the question it leaves open. Give each relationship and event its quote, copied exactly. Record only what the text states: leave a card field empty, and give no relationship or event, rather than guess; anything whose quote is not in the scene is thrown away. Reply with JSON only: {"summary":"...","keyPoints":["..."],"characters":["..."],"facts":[{"entity":"...","kind":"character","attribute":"age","value":"...","quote":"..."}],"tags":[{"name":"...","category":"tone"}],"card":{"where":"","when":"","pov":"","changed":"..."},"mood":"...","theme":"...","relations":[{"from":"...","type":"ally","to":"...","quote":"..."}],"threads":[{"name":"...","event":"opened","question":"...","quote":"..."}]}.
+
+Story-bible names in this scene: characters Mara.
+
+Tag bank: tone dread.
+
+Threads: The Debt.
+
+Scene: location Ferry landing, POV Mara, timeline —.",
+    "role": "system",
+  },
+  {
+    "content": "Scene text:
+"""
+The ferry landing was empty when Mara reached it. The rope hung slack in the water and the bell had lost its clapper years ago. She set the lantern down on the post and waited.
+"""
+
+Summarize the scene.",
+    "role": "user",
+  },
+]
+`;
