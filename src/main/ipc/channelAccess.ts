@@ -66,6 +66,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'session:set': 'read',
   'authorRules:get': 'read',
   'authorRules:set': 'write',
+  'storyBible:get': 'read',
+  'storyBible:set': 'read',
   'background:list': 'read',
   'background:add': 'read',
   'background:remove': 'read',

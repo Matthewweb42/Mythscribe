@@ -10,15 +10,14 @@ import type { Entity, EntityCreateInput, EntityUpdateInput } from '@shared/ipc/c
 import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { ipc } from '@renderer/lib/ipc'
-import type { EntityView } from './entityView'
 
 /**
  * The one owner of the story bible in the renderer (F-9.2), the tag store's pattern: `load`
  * rebuilds it from `entity:list`; every mutation awaits main and merges the returned row, never
  * re-listing. Errors propagate so the caller can show them, and a failed request leaves the
- * store as it was. It also carries the session-only view state the three entity tabs share
- * (the list/cards choice per kind and the selected entity), so switching sidebar tabs keeps them,
- * and which kind the creation dialog is open for (F-9.3). The open entity's unsaved edits are not
+ * store as it was. It also carries the selected entity, so switching sidebar tabs keeps it, and
+ * which kind the creation dialog is open for (F-9.3); the List/Cards choice every tab shares is a
+ * story-bible setting since F-9.17 (`storyBibleSettingsStore`). The open entity's unsaved edits are not
  * here: they live in `entityDraftStore`, which writes them back through `update`.
  */
 interface EntityState {
@@ -26,8 +25,6 @@ interface EntityState {
   /** Every entity id in the order `entity:list` returns: kind, then name key, then id. */
   ids: string[]
   loaded: boolean
-  /** List or cards, per category; cards until the author toggles. Session state, not persisted. */
-  view: Readonly<Record<EntityKind, EntityView>>
   /** The entity the author picked in a tab, if any; F-9.3 opens it in the editor. */
   selectedId: string | null
   /** The kind the creation dialog is open for (F-9.3), or null while it is closed. */
@@ -81,7 +78,6 @@ interface EntityState {
    * story-bible job met a name with no entity), so the tabs show it without a reload.
    */
   subscribe: () => void
-  setView: (kind: EntityKind, view: EntityView) => void
   select: (id: string | null) => void
   /** Opens the creation dialog for `kind` (F-9.3: the quick-add button and the Insert menu). */
   startCreate: (kind: EntityKind) => void
@@ -128,17 +124,6 @@ export function orderedIds(byId: Record<string, Entity>): string[] {
     .map((entity) => entity.id)
 }
 
-/** No category has a view of its own yet: each reads as cards (`viewOf`). */
-const DEFAULT_VIEW: Readonly<Record<EntityKind, EntityView>> = {}
-
-/** A category's list/cards choice; cards until the author toggles. */
-export function viewOf(
-  view: Readonly<Record<EntityKind, EntityView>>,
-  kind: EntityKind
-): EntityView {
-  return view[kind] ?? 'cards'
-}
-
 /** Bumped by every load() and clear() so a response from a superseded load is dropped. */
 let generation = 0
 /** The subscription to main's entity writes; one for the renderer, opened by `subscribe`. */
@@ -148,7 +133,6 @@ export const useEntityStore = create<EntityState>((set, get) => ({
   byId: {},
   ids: [],
   loaded: false,
-  view: DEFAULT_VIEW,
   selectedId: null,
   creating: null,
   importPlan: null,
@@ -169,7 +153,6 @@ export const useEntityStore = create<EntityState>((set, get) => ({
       byId: {},
       ids: [],
       loaded: false,
-      view: DEFAULT_VIEW,
       selectedId: null,
       creating: null,
       importPlan: null,
@@ -291,10 +274,6 @@ export const useEntityStore = create<EntityState>((set, get) => ({
     unsubscribe ??= ipc().on('entity:changed', (entity) => {
       get().merge(entity)
     })
-  },
-
-  setView(kind, view) {
-    if (get().view[kind] !== view) set({ view: { ...get().view, [kind]: view } })
   },
 
   select(id) {

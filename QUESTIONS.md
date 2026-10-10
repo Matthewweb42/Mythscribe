@@ -12,6 +12,12 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-10 · F-9.17 · The List/Cards choice is kept with the project
+- Question: You asked for one List/Cards choice for every category tab, "until they click the other". Should it survive closing the project?
+- Chosen (decided by Claude, unconfirmed): yes. It is stored in the project's story-bible settings (`storyBible` settings row, the same row as the F-9.19 Settings tab), so it holds across tabs, restarts, and Settings changes, per project.
+- Alternatives: keep it for the session only (as before, but shared); make it app-wide for every project.
+- To change it: `src/shared/storyBibleSettings.ts` (`listView`), `src/renderer/features/entities/storyBibleSettingsStore.ts`, `EntityTab.tsx`.
+
 ## 2026-10-10 · F-5.25 · Chat tool audit: what was built and what waits
 - Question: The audit of the chat's tools listed eight fixes. Which ship with F-5.25?
 - Chosen (decided by Claude, unconfirmed): built 1 (clear the story bible), 2 (routing: a bulk delete is a clear, never Organise; scenes and chapters never in bulk; unclear nouns are asked about), 3 (one tag on many documents; many items moved at once), 4 (rename a tag; rename a sheet; move sheets to another category; merge sheets; new empty sheet; all through Organise's own apply and the Changes log), 6 (the sheet list reads one field across the sheets). Not built: 5 (clear one document's notes; settle To do items from the chat), 7 (set a fact's status from the chat), 8 (answer actions: undo the last turn, re-run summaries, open the upload or Library dialog). They each need a new tool result format (fact and To do ids the model can name) or new renderer actions, and every extra edit line costs about 20 tokens on every write request.

@@ -43,6 +43,7 @@ import { AccountStatus } from '../account'
 import { AliasList } from '../aliases'
 import { AppAccess } from '../appAccess'
 import { AuthorRules } from '../authorRules'
+import { StoryBibleSettings } from '../storyBibleSettings'
 import { BackupSettingsPatch, BackupState } from '../backups'
 import {
   CheckoutBody,
@@ -1144,6 +1145,14 @@ export const contract = {
   'authorRules:get': { input: z.undefined(), output: AuthorRules },
   /** Replaces the author's rules (F-14.2); phrases are normalised and deduplicated, a value outside the schema is refused with VALIDATION. */
   'authorRules:set': { input: AuthorRules, output: AuthorRules },
+  /**
+   * The story-bible settings (F-9.17, F-9.19): the List/Cards choice every category tab shares,
+   * the view a new sheet opens in, and the write-up style per category. A missing or unreadable
+   * row answers the defaults.
+   */
+  'storyBible:get': { input: z.undefined(), output: StoryBibleSettings },
+  /** Replaces the story-bible settings; a value outside the schema is refused with VALIDATION. */
+  'storyBible:set': { input: StoryBibleSettings, output: StoryBibleSettings },
   /** Every focus-mode background of the open project (F-6.2): the files in `assets/backgrounds/`, by name. */
   'background:list': { input: z.undefined(), output: z.array(Background) },
   /**

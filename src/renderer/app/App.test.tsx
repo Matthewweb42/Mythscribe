@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { defaultAuthorRules } from '@shared/authorRules'
+import { defaultStoryBibleSettings } from '@shared/storyBibleSettings'
 import type { Conversations } from '@shared/chat'
 import type { DraftList } from '@shared/drafts'
 import { defaultEditorSettings } from '@shared/editorSettings'
@@ -31,6 +32,7 @@ import { resetCloudSyncStore } from '@renderer/features/project/cloudSyncStore'
 import { draftFixture } from '@renderer/features/import/draftFixture'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetAuthorRulesStore, useAuthorRulesStore } from '@renderer/features/ai/authorRulesStore'
+import { resetStoryBibleSettingsStore } from '@renderer/features/entities/storyBibleSettingsStore'
 import { resetAssistantStore, useAssistantStore } from '@renderer/features/ai/assistantStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
@@ -125,6 +127,7 @@ beforeEach(() => {
   resetEditorSettingsStore()
   resetAiSettingsStore()
   resetAuthorRulesStore()
+  resetStoryBibleSettingsStore()
   resetAssistantStore()
   resetTagStore()
   // F-9.3: the entity page is part of the main pane, so its stores belong to the fixture too.
@@ -179,6 +182,7 @@ afterEach(() => {
   resetGoalsStore()
   resetAiSettingsStore()
   resetAuthorRulesStore()
+  resetStoryBibleSettingsStore()
   resetAssistantStore()
   resetBackgroundStore()
   resetIndexingStore()
@@ -227,6 +231,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'editorSettings:get') return defaultEditorSettings('novel')
     if (channel === 'aiSettings:get') return defaultAiSettings()
     if (channel === 'authorRules:get') return defaultAuthorRules()
+    if (channel === 'storyBible:get') return defaultStoryBibleSettings()
     if (channel === 'layout:get') return defaultLayout()
     if (channel === 'layout:set') return input
     if (channel === 'session:get') return defaultProjectSession()

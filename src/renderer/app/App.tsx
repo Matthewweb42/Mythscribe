@@ -1,3 +1,4 @@
+import { useStoryBibleSettingsStore } from '@renderer/features/entities/storyBibleSettingsStore'
 import { useEffect } from 'react'
 import { FileInput, FolderOpen, FilePlus2, PanelLeft, Settings2 } from 'lucide-react'
 import type { AiSource, AiSwitch } from '@shared/aiSettings'
@@ -282,6 +283,8 @@ export function App(): React.JSX.Element {
       useEditorSettingsStore.getState().clear()
       useAiSettingsStore.getState().clear()
       useAuthorRulesStore.getState().clear()
+      // F-9.17: the story-bible settings belong to the project that closed.
+      useStoryBibleSettingsStore.getState().clear()
       usePresetsStore.getState().clear()
       // F-11.1b: and the structure template.
       useStructureStore.getState().clear()
@@ -395,6 +398,11 @@ export function App(): React.JSX.Element {
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
     useAuthorRulesStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    // F-9.17, F-9.19: the List/Cards choice, the default view, the write-up style.
+    useStoryBibleSettingsStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))

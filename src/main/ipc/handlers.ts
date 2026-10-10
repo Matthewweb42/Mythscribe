@@ -307,6 +307,8 @@ import { statsDashboard } from '../stats/dashboardStore'
 import {
   getAiSettings,
   getAuthorRules,
+  getStoryBibleSettings,
+  setStoryBibleSettings,
   getConversations,
   getDismissedNames,
   getKeptSpellings,
@@ -1241,6 +1243,13 @@ export function registerHandlers({
 
   // F-14.2: the author's rules are part of the voice profile, so a write invalidates its cache.
   register('authorRules:get', () => getAuthorRules(manager.require().connection.orm))
+
+  // F-9.17, F-9.19: the story bible's view choice, default view, and write-up style.
+  register('storyBible:get', () => getStoryBibleSettings(manager.require().connection.orm))
+
+  register('storyBible:set', (value) =>
+    setStoryBibleSettings(manager.require().connection.orm, value)
+  )
 
   register('authorRules:set', (value) => {
     const stored = setAuthorRules(manager.require().connection.orm, value)
