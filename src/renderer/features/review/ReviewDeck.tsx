@@ -64,6 +64,13 @@ export interface ReviewDeckProps {
   apply?: ReviewDeckApply
   /** Apply by itself once every item is decided and none was skipped. */
   applyOnFinish?: boolean
+  /**
+   * The cards start decided (the upload review: everything starts accepted, 2026-10-10), so the
+   * deck steps through every card in order, not only the waiting ones: a decision moves to the
+   * next card, the progress is how far along the author is, and the end (with `applyOnFinish`)
+   * comes after the last card.
+   */
+  stepEvery?: boolean
   /** Told whenever the item on show changes (edit passes jump the editor to it). */
   onCurrent?: (id: string | null) => void
   /** While true, nothing can be decided (a write is under way). */
@@ -107,6 +114,7 @@ function typing(event: KeyboardEvent): boolean {
  */
 export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
   const { items, groups, onDecide, busy = false, apply, onCurrent } = props
+  const stepEvery = props.stepEvery === true
   const root = useRef<HTMLDivElement>(null)
   const ordered = useMemo(() => deckOrder(items, groups), [items, groups])
   const [filter, setFilter] = useState<ReviewFilter>('all')
@@ -156,8 +164,13 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
     const after = deckOrder(withDecision(items, ids, decision), groups)
     onDecide(ids, decision)
     const from = shown?.id ?? null
-    if (from !== null && ids.includes(from)) {
-      let next = nextOpen(after, from, filter)
+    const moves = from !== null && ids.includes(from)
+    let next: string | null = null
+    if (moves) {
+      next =
+        stepEvery && filter === 'all'
+          ? neighbour(after, from, 1, 'all')
+          : nextOpen(after, from, filter)
       if (next === null && filter === 'skipped') {
         setFilter('all')
         next = nextOpen(after, from, 'all')
@@ -165,8 +178,9 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
       go(next)
     }
     const done = deckCounts(after)
+    const finished = stepEvery ? moves && next === null : done.open === 0
     if (props.applyOnFinish === true && apply !== undefined && apply.disabled !== true) {
-      if (done.open === 0 && done.skipped === 0 && done.accepted > 0) apply.onApply()
+      if (finished && done.skipped === 0 && done.accepted > 0) apply.onApply()
     }
   }
 
@@ -213,15 +227,21 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
     }
   }
 
-  const progress = counts.total === 0 ? 0 : Math.round((counts.reviewed / counts.total) * 100)
+  // Stepping through every card, the progress is the cards passed; otherwise the ones decided.
+  const reviewed = !stepEvery
+    ? counts.reviewed
+    : shown === null
+      ? counts.total
+      : ordered.findIndex((item) => item.id === shown.id)
+  const progress = counts.total === 0 ? 0 : Math.round((reviewed / counts.total) * 100)
   const progressBar = (
     <div
       role="progressbar"
       aria-label="Reviewed"
       aria-valuemin={0}
       aria-valuemax={counts.total}
-      aria-valuenow={counts.reviewed}
-      aria-valuetext={`${counts.reviewed} of ${counts.total} reviewed`}
+      aria-valuenow={reviewed}
+      aria-valuetext={`${reviewed} of ${counts.total} reviewed`}
       data-testid="review-progress"
       className="flex items-center gap-2 text-xs text-fg-muted tabular-nums"
     >

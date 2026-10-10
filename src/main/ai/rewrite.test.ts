@@ -183,7 +183,7 @@ afterEach(() => {
 })
 
 describe('runRewrite (F-14.10)', () => {
-  it('streams the draft through onDelta, resolves the post-processed passage, and logs one fast-tier rewrite.v4 row with no temperature', async () => {
+  it('streams the draft through onDelta, resolves the post-processed passage, and logs one strong-tier rewrite.v4 row with no temperature', async () => {
     chunks = [
       { delta: '"She turned back to the ridge ' },
       { delta: 'and he followed."', usage: { inputTokens: 90, outputTokens: 8 } }
@@ -194,9 +194,9 @@ describe('runRewrite (F-14.10)', () => {
     expect(result).toEqual({
       text: 'She turned back to the ridge and he followed.',
       usage: { inputTokens: 90, outputTokens: 8 },
-      costUsd: priceFor('gpt-5.4-mini', 90, 8).costUsd,
+      costUsd: priceFor('gpt-5.4', 90, 8).costUsd,
       cached: false,
-      model: 'gpt-5.4-mini',
+      model: 'gpt-5.4',
       promptVersion: 'rewrite.v4',
       flagged: false,
       violation: null
@@ -204,7 +204,7 @@ describe('runRewrite (F-14.10)', () => {
     expect(complete).not.toHaveBeenCalled()
     const request = stream.mock.calls[0]![0]
     expect(request).toMatchObject({
-      tier: 'fast',
+      tier: 'strong',
       maxTokens: Math.ceil((PASSAGE.length / 4) * 1.5) + 40
     })
     expect('temperature' in request).toBe(false)
@@ -212,7 +212,7 @@ describe('runRewrite (F-14.10)', () => {
     expect(ledger).toHaveLength(1)
     expect(ledger[0]).toMatchObject({
       feature: 'rewrite',
-      tier: 'fast',
+      tier: 'strong',
       promptVersion: 'rewrite.v4',
       cached: false
     })
@@ -381,9 +381,9 @@ describe('runRewrite fidelity check (F-14.7)', () => {
     expect(result).toEqual({
       text: CLEAN,
       usage: { inputTokens: 210, outputTokens: 20 },
-      costUsd: priceFor('gpt-5.4-mini', 90, 8).costUsd + priceFor('gpt-5.4-mini', 120, 12).costUsd,
+      costUsd: priceFor('gpt-5.4', 90, 8).costUsd + priceFor('gpt-5.4', 120, 12).costUsd,
       cached: false,
-      model: 'gpt-5.4-mini',
+      model: 'gpt-5.4',
       promptVersion: 'rewriteRegen.v4',
       flagged: false,
       violation: null

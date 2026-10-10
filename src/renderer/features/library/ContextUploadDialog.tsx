@@ -321,6 +321,7 @@ function Review({
           disabled: asking || !writes
         }}
         applyOnFinish
+        stepEvery
         busy={busy}
         compact
         autoFocus={autoFocus}

@@ -24,7 +24,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `query` | Story Intelligence | on request | query.v4 | strong | 1587 / 11711 | 300 / 600 | $0.000459 · $0.00271 | $0.000574 | $0.00847 | 1 | $0.000459 |
 | `critique` | Editor's notes | on request | critique.v3 | strong | 1264 / 7025 | 900 / 1500 | $0.000643 · $0.00211 | $0.000804 | $0.0167 | 1 | $0.000643 |
 | `embeddings` | Search indexing | background | — | — | 0 / 8000 | 0 / 150 | $0 · $0.000432 | $0 | $0 | 0 | $0 |
-| `rewrite` | Rewrite in my voice | on request | rewrite.v4 | fast | 936 / 2802 | 250 / 1500 | $0.000348 · $0.00200 | $0.000435 | $0.00183 | 1 | $0.000348 |
+| `rewrite` | Rewrite in my voice | on request | rewrite.v4 | strong | 936 / 2802 | 250 / 1500 | $0.000302 · $0.00122 | $0.000377 | $0.00609 | 1 | $0.000302 |
 | `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000242 · $0.000418 | $0.000303 | $0.00276 | 1 | $0.000242 |
 | `betaReader` | Beta reader | on request | betaReader.v1 | strong | 673 / 11599 | 700 / 1200 | $0.000435 · $0.00294 | $0.000544 | $0.0122 | 1 | $0.000435 |
 | `importStructure` | Import structure detection | on request | importStructure.v1 | fast | 2428 / 4178 | 150 / 400 | $0.000265 · $0.000637 | $0.000331 | $0.00250 | 40 | $0.0106 |
@@ -88,7 +88,7 @@ git history of this file is the log of each feature's cost over time (author req
 ### `rewrite` — Rewrite in my voice
 
 - **When:** Rewrite a selection (bubble, chat, or agent edit).
-- **Ideas:** Answer length tracks the selection: set max_tokens from the selection size. rewrite.v4 adds the scene mood and theme (about 25 input tokens, from the stored reading, no extra call).
+- **Ideas:** Strong tier since 2026-10-10 (author: voice matters more than cost here); on an OpenAI key that is about 3x the fast tier, on the OpenRouter defaults about the same. Answer length tracks the selection: set max_tokens from the selection size. rewrite.v4 adds the scene mood and theme (about 25 input tokens, from the stored reading, no extra call).
 
 ### `brief` — Scene brief drafts
 

@@ -32,6 +32,7 @@ interface HarnessProps {
   onApply?: (accepted: string[]) => void
   onEdit?: (id: string) => void
   applyOnFinish?: boolean
+  stepEvery?: boolean
   reject?: boolean
   compact?: boolean
   onCurrent?: (id: string | null) => void
@@ -55,6 +56,7 @@ function Harness(props: HarnessProps): React.JSX.Element {
       onCurrent={props.onCurrent}
       autoFocus
       applyOnFinish={props.applyOnFinish}
+      stepEvery={props.stepEvery}
       apply={{
         label: (n) => `Apply ${n} accepted`,
         onApply: () =>
@@ -182,6 +184,34 @@ describe('ReviewDeck', () => {
     press('a')
     expect(finish).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('review-done').textContent).toContain('All 5 reviewed.')
+  })
+
+  it('steps through cards that start accepted, one by one, and applies only after the last (stepEvery)', () => {
+    const onApply = vi.fn()
+    const accepted = ITEMS.map((item) => ({ ...item, decision: 'accepted' as const }))
+    render(<Harness items={accepted} onApply={onApply} applyOnFinish stepEvery />)
+    expect(card()).toHaveAttribute('data-item-id', 'm1')
+    expect(screen.getAllByTestId('review-progress')[0]).toHaveTextContent('0%')
+    press('a')
+    expect(card()).toHaveAttribute('data-item-id', 'm2')
+    press('s')
+    expect(card()).toHaveAttribute('data-item-id', 'n1')
+    expect(screen.getAllByTestId('review-progress')[0]).toHaveTextContent('40%')
+    press('a')
+    press('a')
+    press('a')
+    expect(onApply).not.toHaveBeenCalled()
+    expect(screen.getByTestId('review-done')).toHaveTextContent('4 accepted · 1 skipped')
+  })
+
+  it('with stepEvery and nothing skipped, applies on passing the last card', () => {
+    const onApply = vi.fn()
+    const accepted = ITEMS.map((item) => ({ ...item, decision: 'accepted' as const }))
+    render(<Harness items={accepted} onApply={onApply} applyOnFinish stepEvery />)
+    for (let i = 0; i < 4; i++) press('a')
+    expect(onApply).not.toHaveBeenCalled()
+    press('a')
+    expect(onApply).toHaveBeenCalledOnce()
   })
 
   it('stops at the end with the skipped ones still to see, and offers Reject where it applies', async () => {

@@ -21,32 +21,35 @@ function withShips(): ContextReview {
 }
 
 describe('the upload review on the deck (2026-10-08)', () => {
-  it('makes one card per proposed category, sheet, and the notes, grouped by what they do', () => {
-    const items = uploadReviewItems(withShips(), { e1: 'accepted' })
+  it('makes one card per proposed category, sheet, and the notes, every one accepted until the author skips it (2026-10-10)', () => {
+    const items = uploadReviewItems(withShips(), { e1: 'skipped' })
     expect(items).toEqual([
-      { id: categoryCardId('c-ships'), group: 'categories', decision: 'pending' },
-      { id: 'e1', group: 'conflicts', decision: 'accepted' },
-      { id: 'e2', group: 'new', decision: 'pending' },
-      { id: 'notes', group: 'notes', decision: 'pending' }
+      { id: categoryCardId('c-ships'), group: 'categories', decision: 'accepted' },
+      { id: 'e1', group: 'conflicts', decision: 'skipped' },
+      { id: 'e2', group: 'new', decision: 'accepted' },
+      { id: 'notes', group: 'notes', decision: 'accepted' }
     ])
   })
 
-  it('writes only what was accepted, and files an unaccepted category’s sheets under World', () => {
-    const decided = decidedReview(withShips(), { e2: 'accepted', notes: 'skipped' }, [])
+  it('writes everything not skipped, and files a skipped category’s sheets under World', () => {
+    const kept = decidedReview(withShips(), {}, [])
+    expect(kept.categories.map((category) => category.id)).toEqual(['c-ships'])
+    expect(kept.entities.map((item) => [item.id, item.include, item.kind])).toEqual([
+      ['e1', true, 'character'],
+      ['e2', true, 'c-ships']
+    ])
+    expect(kept.notes.include).toBe(true)
+
+    const decided = decidedReview(
+      withShips(),
+      { [categoryCardId('c-ships')]: 'skipped', e1: 'skipped', notes: 'skipped' },
+      []
+    )
     expect(decided.entities.map((item) => [item.id, item.include, item.kind])).toEqual([
       ['e1', false, 'character'],
       ['e2', true, 'world']
     ])
     expect(decided.categories).toEqual([])
     expect(decided.notes.include).toBe(false)
-
-    const kept = decidedReview(
-      withShips(),
-      { [categoryCardId('c-ships')]: 'accepted', e2: 'accepted', notes: 'accepted' },
-      []
-    )
-    expect(kept.categories.map((category) => category.id)).toEqual(['c-ships'])
-    expect(kept.entities.find((item) => item.id === 'e2')?.kind).toBe('c-ships')
-    expect(kept.notes.include).toBe(true)
   })
 })

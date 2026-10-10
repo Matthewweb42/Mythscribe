@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ChangeEntry } from '@shared/changes'
 import type { Channel, Input, Output, Tag, TreeNode } from '@shared/ipc/contract'
 import { resetChangesStore } from '@renderer/features/changes/changesStore'
+import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import { resetEntityStore } from '@renderer/features/entities/entityStore'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetDocumentTagStore } from '@renderer/features/tags/documentTagStore'
@@ -127,6 +128,7 @@ const sent = (channel: Channel): unknown[] =>
 describe('bulk agent edits (F-5.25)', () => {
   beforeEach(() => {
     resetChangesStore()
+    resetCategoryStore()
     resetEntityStore()
     resetTagStore()
     resetDocumentTagStore()

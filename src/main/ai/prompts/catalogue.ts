@@ -257,34 +257,39 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     output: 'text',
     since: 'F-14.13'
   },
-  [REWRITE_PROMPT_VERSION]: { feature: 'rewrite', tier: 'fast', output: 'text', since: 'F-14.10' },
+  [REWRITE_PROMPT_VERSION]: {
+    feature: 'rewrite',
+    tier: 'strong',
+    output: 'text',
+    since: 'F-14.10'
+  },
   [REWRITE_REGEN_PROMPT_VERSION]: {
     feature: 'rewrite',
-    tier: 'fast',
+    tier: 'strong',
     output: 'text',
     since: 'F-14.10'
   },
   [REWRITE_PROMPT_V2_VERSION]: {
     feature: 'rewrite',
-    tier: 'fast',
+    tier: 'strong',
     output: 'text',
     since: 'F-14.9'
   },
   [REWRITE_REGEN_PROMPT_V2_VERSION]: {
     feature: 'rewrite',
-    tier: 'fast',
+    tier: 'strong',
     output: 'text',
     since: 'F-14.9'
   },
   [REWRITE_PROMPT_V3_VERSION]: {
     feature: 'rewrite',
-    tier: 'fast',
+    tier: 'strong',
     output: 'text',
     since: 'F-14.13'
   },
   [REWRITE_REGEN_PROMPT_V3_VERSION]: {
     feature: 'rewrite',
-    tier: 'fast',
+    tier: 'strong',
     output: 'text',
     since: 'F-14.13'
   },
@@ -497,10 +502,15 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   [AGENT_PROMPT_V6_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-5.24' },
   [AGENT_PROMPT_V7_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-5.25' },
   [SUMMARY_PROMPT_V5_VERSION]: { feature: 'summary', tier: 'fast', output: 'json', since: 'F-5.6' },
-  [REWRITE_PROMPT_V4_VERSION]: { feature: 'rewrite', tier: 'fast', output: 'text', since: 'F-5.6' },
+  [REWRITE_PROMPT_V4_VERSION]: {
+    feature: 'rewrite',
+    tier: 'strong',
+    output: 'text',
+    since: 'F-5.6'
+  },
   [REWRITE_REGEN_PROMPT_V4_VERSION]: {
     feature: 'rewrite',
-    tier: 'fast',
+    tier: 'strong',
     output: 'text',
     since: 'F-5.6'
   },
