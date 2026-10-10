@@ -18,7 +18,7 @@ import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
-import { DockPanelControls } from '@renderer/features/shell/Dock'
+import { DockPanelControls, PANEL_TITLE } from '@renderer/features/shell/Dock'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useMentionStore } from '@renderer/features/tags/mentionStore'
@@ -106,15 +106,15 @@ export function TagsColumn({ id }: { id: string | null }): React.JSX.Element | n
     <aside
       data-testid="tags-panel"
       aria-label="Tags column"
-      className="flex min-h-0 flex-1 flex-col bg-surface"
+      className="flex min-h-0 flex-1 flex-col bg-panel"
     >
       {id === null ? (
         <>
-          <div className="flex shrink-0 items-center gap-2 pt-3 pr-4 pb-2 pl-2">
+          <div className={PANEL_TITLE}>
             <DockPanelControls id="tags" />
             <h2 className="m-0 text-sm font-medium text-fg-muted">Tags</h2>
           </div>
-          <p className="m-0 px-4 text-sm text-fg-muted">Select a document to see its tags.</p>
+          <p className="m-0 px-4 pt-2 text-sm text-fg-muted">Select a document to see its tags.</p>
         </>
       ) : (
         <TagsPanel id={id} />
@@ -435,14 +435,14 @@ export function TagsPanel({ id }: { id: string }): React.JSX.Element {
 
   return (
     <div role="region" aria-label="Tags" className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 flex-col gap-1 pt-3 pr-4 pb-2 pl-2">
-        <div className="flex items-center gap-2">
-          <DockPanelControls id="tags" />
-          <h2 className="m-0 flex items-center gap-2 text-sm font-medium text-fg-muted">
-            Tags
-            <span className="text-xs font-normal text-fg-subtle tabular-nums">{linked.length}</span>
-          </h2>
-        </div>
+      <div className={PANEL_TITLE}>
+        <DockPanelControls id="tags" />
+        <h2 className="m-0 flex items-center gap-2 text-sm font-medium text-fg-muted">
+          Tags
+          <span className="text-xs font-normal text-fg-subtle tabular-nums">{linked.length}</span>
+        </h2>
+      </div>
+      <div className="flex shrink-0 flex-col gap-1 pt-2 pr-4 pb-2 pl-2">
         {/* The labels never break inside a button, so a narrow column wraps the row instead. */}
         <div className="flex flex-wrap items-center gap-1">
           <button

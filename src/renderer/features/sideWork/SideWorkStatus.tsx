@@ -5,6 +5,7 @@ import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
 import { uploadInPanel, useLibraryStore } from '@renderer/features/library/libraryStore'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { showSideWork, useShownSideWork, type SideWork } from './sideWork'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
 
 const ITEM =
   'rounded px-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:text-fg'
@@ -67,12 +68,13 @@ function Item({
   shown: boolean
   children: ReactNode
 }): React.JSX.Element {
+  const assistantName = useAssistantName()
   return (
     <button
       type="button"
       data-testid={`side-work-${work}`}
       aria-pressed={shown}
-      title={shown ? 'Back to the conversation' : 'Show it in the assistant column'}
+      title={shown ? 'Back to the conversation' : `Show it in the ${assistantName} column`}
       onClick={() => {
         if (shown) {
           if (work === 'organise') useOrganiseStore.getState().hide()

@@ -298,6 +298,7 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'view:setTheme': 'read',
   'view:saveCustomTheme': 'read',
   'view:deleteCustomTheme': 'read',
+  'view:setAssistantName': 'read',
   'startup:get': 'read',
   'startup:setReopenLastProject': 'read',
   'menu:edit': 'read',

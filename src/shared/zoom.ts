@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { CustomTheme, CUSTOM_THEMES_MAX, DEFAULT_THEME } from './themes'
+import { DEFAULT_ASSISTANT_NAME, StoredAssistantName } from './assistantName'
 
 /**
  * Document zoom (F-7.10): Ctrl+= / Ctrl+- / Ctrl+0 and the View › Zoom items scale the writing
@@ -95,13 +96,18 @@ export const ViewSettings = z.object({
    */
   theme: z.string().default(DEFAULT_THEME).catch(DEFAULT_THEME),
   /** Custom themes (F-7.8), at most `CUSTOM_THEMES_MAX`; an unreadable list is dropped. */
-  customThemes: z.array(CustomTheme).max(CUSTOM_THEMES_MAX).default([]).catch([])
+  customThemes: z.array(CustomTheme).max(CUSTOM_THEMES_MAX).default([]).catch([]),
+  /**
+   * The assistant's name (F-7.12): what the panel, the menus, and the settings call it. A file
+   * from before the setting, or a blank or unreadable value, opens as "Ms Scribe".
+   */
+  assistantName: StoredAssistantName
 })
 export type ViewSettings = z.infer<typeof ViewSettings>
 
 /**
  * A fresh install: the document at 100 %, the interface at its normal size, page edges shown,
- * the Dark theme.
+ * the Dark theme, the assistant called Ms Scribe.
  */
 export function defaultViewSettings(): ViewSettings {
   return {
@@ -109,6 +115,7 @@ export function defaultViewSettings(): ViewSettings {
     uiScale: 'medium',
     pageEdges: true,
     theme: DEFAULT_THEME,
-    customThemes: []
+    customThemes: [],
+    assistantName: DEFAULT_ASSISTANT_NAME
   }
 }

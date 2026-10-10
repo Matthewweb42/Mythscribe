@@ -28,7 +28,7 @@ describe('ShortcutsDialog (F-7.7)', () => {
     expect(row('Insert scene')).toHaveTextContent('Ctrl+Shift+S')
     expect(row('Insert chapter')).toHaveTextContent('Ctrl+Shift+C')
     expect(row('Settings')).toHaveTextContent('Ctrl+,')
-    expect(row('AI assistant')).toHaveTextContent('Ctrl+K')
+    expect(row('Ms Scribe')).toHaveTextContent('Ctrl+K')
     expect(row('Focus mode')).toHaveTextContent('F11')
     expect(row('Save')).toHaveTextContent('Ctrl+S')
     // F-7.10: the zoom chords are app shortcuts, so the reference lists them from the registry.

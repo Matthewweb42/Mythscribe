@@ -90,7 +90,7 @@ export function StackedEditor({
       )}
       <div
         ref={scroller}
-        className={`min-h-0 flex-1 overflow-y-auto pb-12 ${sheet ? 'bg-desk px-4' : ''}`}
+        className={`min-h-0 flex-1 overflow-y-auto pb-12 ${sheet ? 'bg-page px-4' : ''}`}
       >
         {docIds.map((id, index) => (
           <Fragment key={id}>

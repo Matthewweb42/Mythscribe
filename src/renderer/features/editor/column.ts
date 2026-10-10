@@ -27,7 +27,7 @@ export function columnClass(sheet: boolean): string {
  * the smaller: it comes out of the pane's width, which a narrow window has little of.
  */
 export function deskClass(sheet: boolean): string {
-  return sheet ? 'bg-desk px-4 py-6' : ''
+  return sheet ? 'bg-page px-4 py-6' : ''
 }
 
 /**

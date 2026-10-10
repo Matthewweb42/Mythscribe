@@ -105,7 +105,8 @@ describe('ViewSettings (F-7.10)', () => {
       uiScale: 'medium',
       pageEdges: true,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
   })
 
@@ -116,14 +117,16 @@ describe('ViewSettings (F-7.10)', () => {
       uiScale: 'medium',
       pageEdges: true,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
     expect(ViewSettings.parse({ uiScale: 'small' })).toEqual({
       editorZoom: 1,
       uiScale: 'small',
       pageEdges: true,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
     // F-7.11: a file written before the sheet existed shows it, the installed default.
     expect(ViewSettings.parse({ editorZoom: 1, uiScale: 'medium' }).pageEdges).toBe(true)
@@ -132,7 +135,8 @@ describe('ViewSettings (F-7.10)', () => {
       uiScale: 'medium',
       pageEdges: false,
       theme: 'dark',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Ms Scribe'
     })
   })
 

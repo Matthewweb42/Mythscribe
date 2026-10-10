@@ -8,6 +8,7 @@ import {
   type AiStatus
 } from '@shared/ai'
 import { AI_DATA_SHARING, AiSettings, defaultAiSettings } from '@shared/aiSettings'
+import { DEFAULT_ASSISTANT_NAME, nameAssistant } from '@shared/assistantName'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, IpcRequestError, type IpcClient } from '@renderer/lib/ipc'
@@ -121,12 +122,16 @@ describe('AiDialSection (F-14.4, F-5.21)', () => {
   it('disables every toggle while AI is off and enables them all once it is on', async () => {
     await open()
     for (const id of AI_FEATURE_IDS) {
-      expect(checkbox(AI_DATA_SHARING[id].label)).toBeDisabled()
+      expect(
+        checkbox(nameAssistant(AI_DATA_SHARING[id].label, DEFAULT_ASSISTANT_NAME))
+      ).toBeDisabled()
     }
     expect(checkbox('Ghost text')).toBeChecked()
     await userEvent.click(useAi())
     for (const id of AI_FEATURE_IDS) {
-      expect(checkbox(AI_DATA_SHARING[id].label)).toBeEnabled()
+      expect(
+        checkbox(nameAssistant(AI_DATA_SHARING[id].label, DEFAULT_ASSISTANT_NAME))
+      ).toBeEnabled()
     }
   })
 
@@ -194,7 +199,8 @@ describe('AiDialSection (F-14.4, F-5.21)', () => {
     const rows = within(table).getAllByRole('row').slice(1)
     expect(rows).toHaveLength(AI_FEATURE_IDS.length)
     for (const id of AI_FEATURE_IDS) {
-      const { label, sends } = AI_DATA_SHARING[id]
+      const label = nameAssistant(AI_DATA_SHARING[id].label, DEFAULT_ASSISTANT_NAME)
+      const sends = nameAssistant(AI_DATA_SHARING[id].sends, DEFAULT_ASSISTANT_NAME)
       const row = within(table).getByRole('row', { name: new RegExp(`^${label} `) })
       expect(row).toHaveTextContent(sends)
       expect(row).toHaveTextContent('OpenAI')

@@ -491,18 +491,18 @@ describe('DocumentEditor page edges (F-7.11)', () => {
     const column = (): HTMLElement | null => box().parentElement
     const desk = (): HTMLElement | null | undefined => column()?.parentElement
     expect(column()).toHaveClass('ms-sheet', 'px-6')
-    expect(desk()).toHaveClass('bg-desk')
+    expect(desk()).toHaveClass('bg-page')
     // Focus mode keeps its own surface (F-6.4): no sheet, no desk.
     act(() => useFocusStore.setState({ active: true }))
     expect(column()).not.toHaveClass('ms-sheet')
-    expect(desk()).not.toHaveClass('bg-desk')
+    expect(desk()).not.toHaveClass('bg-page')
     act(() => useFocusStore.setState({ active: false }))
     expect(column()).toHaveClass('ms-sheet')
     // Off is the borderless column, the text in the same place (same padding).
     act(() => useViewStore.setState({ pageEdges: false }))
     expect(column()).not.toHaveClass('ms-sheet')
     expect(column()).toHaveClass('px-6')
-    expect(desk()).not.toHaveClass('bg-desk')
+    expect(desk()).not.toHaveClass('bg-page')
   })
 })
 

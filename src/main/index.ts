@@ -279,9 +279,12 @@ if (!primaryInstance) {
   void app.whenReady().then(() => {
     // F-7.1: the native menu from the shared definition, for its accelerators and macOS; on
     // Windows and Linux every window hides its bar, the in-app bar being the visible one.
+    // Read before the menu, whose View item carries the assistant's name (F-7.12).
+    const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
     const menu = installApplicationMenu({
       manager,
       devTools: () => devtools?.enabled() ?? false,
+      assistantName: () => appState.get().view.assistantName,
       platform: process.platform,
       target: () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
     })
@@ -302,7 +305,6 @@ if (!primaryInstance) {
       if (file === null || !existsSync(file)) return new Response(null, { status: 404 })
       return net.fetch(pathToFileURL(file).toString())
     })
-    const appState = new AppStateStore(join(app.getPath('userData'), 'app-state.json'))
     // Developer tools (2026-10-07): the switch in Settings › Advanced. Built first so the rest of
     // startup's warnings reach the log; it records nothing while off. Main's console is wrapped
     // once (the original still prints); the menu is rebuilt so Help › Developer follows the switch.
@@ -472,6 +474,7 @@ if (!primaryInstance) {
       ),
       windows: () => BrowserWindow.getAllWindows(),
       focusedWindow: () => BrowserWindow.getFocusedWindow(),
+      onAssistantNameChanged: () => menu.rebuild(),
       spellDictionary,
       openExternal: (url) => shell.openExternal(url),
       openPath: (folder) => shell.openPath(folder),

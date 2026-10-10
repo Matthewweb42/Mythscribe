@@ -56,7 +56,11 @@ describe('buildMenuTemplate (F-7.1)', () => {
   const onAction = vi.fn<(id: MenuItemId) => void>()
 
   it('renders the six sections in order on Windows and Linux, with every item present', () => {
-    const template = buildMenuTemplate(MENU, { format: null, platform: 'linux' }, onAction)
+    const template = buildMenuTemplate(
+      MENU,
+      { format: null, platform: 'linux', assistantName: 'Ms Scribe' },
+      onAction
+    )
     expect(template.map((s) => s.label)).toEqual([
       'File',
       'Edit',
@@ -81,7 +85,11 @@ describe('buildMenuTemplate (F-7.1)', () => {
   })
 
   it('puts the app menu first on macOS, and nowhere else', () => {
-    const mac = buildMenuTemplate(MENU, { format: null, platform: 'darwin' }, onAction)
+    const mac = buildMenuTemplate(
+      MENU,
+      { format: null, platform: 'darwin', assistantName: 'Ms Scribe' },
+      onAction
+    )
     expect(mac[0]).toEqual({ role: 'appMenu' })
     expect(mac.slice(1).map((s) => s.label)).toEqual([
       'File',
@@ -91,12 +99,20 @@ describe('buildMenuTemplate (F-7.1)', () => {
       'Tools',
       'Help'
     ])
-    const win = buildMenuTemplate(MENU, { format: null, platform: 'win32' }, onAction)
+    const win = buildMenuTemplate(
+      MENU,
+      { format: null, platform: 'win32', assistantName: 'Ms Scribe' },
+      onAction
+    )
     expect(win.some((s) => s.role === 'appMenu')).toBe(false)
   })
 
   it('binds the F-2.7 chords as accelerators', () => {
-    const template = buildMenuTemplate(MENU, { format: 'novel', platform: 'linux' }, onAction)
+    const template = buildMenuTemplate(
+      MENU,
+      { format: 'novel', platform: 'linux', assistantName: 'Ms Scribe' },
+      onAction
+    )
     expect(item(template, 'insertScene').accelerator).toBe('CmdOrCtrl+Shift+S')
     expect(item(template, 'insertChapter').accelerator).toBe('CmdOrCtrl+Shift+C')
     expect(item(template, 'insertPart').accelerator).toBe('CmdOrCtrl+Shift+P')
@@ -112,7 +128,11 @@ describe('buildMenuTemplate (F-7.1)', () => {
   })
 
   it('disables the project items without a project and enables them with one', () => {
-    const closed = buildMenuTemplate(MENU, { format: null, platform: 'linux' }, onAction)
+    const closed = buildMenuTemplate(
+      MENU,
+      { format: null, platform: 'linux', assistantName: 'Ms Scribe' },
+      onAction
+    )
     expect(item(closed, 'saveDocument').enabled).toBe(false)
     expect(item(closed, 'insertScene').enabled).toBe(false)
     expect(item(closed, 'openSettings').enabled).toBe(true)
@@ -123,13 +143,21 @@ describe('buildMenuTemplate (F-7.1)', () => {
     expect(item(closed, 'openAbout').enabled).toBe(true)
     // F-15.7: Help › Check for updates… works on the welcome screen too.
     expect(item(closed, 'checkForUpdates').enabled).toBe(true)
-    const open = buildMenuTemplate(MENU, { format: 'novel', platform: 'linux' }, onAction)
+    const open = buildMenuTemplate(
+      MENU,
+      { format: 'novel', platform: 'linux', assistantName: 'Ms Scribe' },
+      onAction
+    )
     expect(item(open, 'saveDocument').enabled).toBe(true)
     expect(item(open, 'insertScene').enabled).toBe(true)
   })
 
   it('labels the Insert items by the format', () => {
-    const template = buildMenuTemplate(MENU, { format: 'webnovel', platform: 'linux' }, onAction)
+    const template = buildMenuTemplate(
+      MENU,
+      { format: 'webnovel', platform: 'linux', assistantName: 'Ms Scribe' },
+      onAction
+    )
     expect(submenu(template, 'Insert').map((e) => e.label)).toEqual([
       'Scene',
       'Chapter',
@@ -144,7 +172,11 @@ describe('buildMenuTemplate (F-7.1)', () => {
   })
 
   it('gives the Edit items their Electron role and no click; every other item clicks through', () => {
-    const template = buildMenuTemplate(MENU, { format: 'novel', platform: 'linux' }, onAction)
+    const template = buildMenuTemplate(
+      MENU,
+      { format: 'novel', platform: 'linux', assistantName: 'Ms Scribe' },
+      onAction
+    )
     for (const role of ['undo', 'redo', 'cut', 'copy', 'paste'] as const) {
       const entry = item(template, role)
       expect(entry.role).toBe(role)
@@ -172,9 +204,11 @@ describe('installApplicationMenu (F-7.1)', () => {
       }
     }
     let devTools = false
+    let assistantName = 'Ms Scribe'
     const { dispose: off, rebuild } = installApplicationMenu({
       manager: fakeManager,
       devTools: () => devTools,
+      assistantName: () => assistantName,
       platform: 'linux',
       target: () => win
     })
@@ -200,6 +234,12 @@ describe('installApplicationMenu (F-7.1)', () => {
     item(third, 'openDeveloperTools').click?.(undefined as never, undefined, undefined as never)
     expect(send).toHaveBeenCalledWith('menu:action', { id: 'openDeveloperTools' })
     expect(item(third, 'openChromiumDevTools').enabled).toBe(true)
+
+    // F-7.12: View's assistant item carries the name; a rename rebuilds it.
+    expect(item(third, 'toggleAssistant').label).toBe('Ms Scribe')
+    assistantName = 'Quill'
+    rebuild()
+    expect(item(built(3), 'toggleAssistant').label).toBe('Quill')
     off()
     expect(listeners).toEqual([])
   })
@@ -209,6 +249,7 @@ describe('installApplicationMenu (F-7.1)', () => {
     installApplicationMenu({
       manager,
       devTools: () => false,
+      assistantName: () => 'Ms Scribe',
       platform: 'win32',
       target: () => null
     })

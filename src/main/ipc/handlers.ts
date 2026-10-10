@@ -75,6 +75,7 @@ import {
   type SceneSummaryState
 } from '@shared/summary'
 import { UI_SCALE_FACTORS, nextZoom, type ViewSettings } from '@shared/zoom'
+import { normalizeAssistantName } from '@shared/assistantName'
 import {
   BUILT_IN_THEME_IDS,
   CUSTOM_THEMES_MAX,
@@ -489,6 +490,11 @@ export interface HandlerDeps {
   openPath: (folder: string) => Promise<string>
   /** The renderer abandoned a window close (its flush failed); forget any quit that asked for it. */
   onCloseCancelled: () => void
+  /**
+   * F-7.12: the assistant's name changed; `index.ts` rebuilds the native menu so View shows it.
+   * Absent in the unit tests, which have no menu.
+   */
+  onAssistantNameChanged?: () => void
 }
 
 export function registerHandlers({
@@ -510,7 +516,8 @@ export function registerHandlers({
   spellDictionary,
   openExternal,
   openPath,
-  onCloseCancelled
+  onCloseCancelled,
+  onAssistantNameChanged
 }: HandlerDeps): void {
   /**
    * AI-BILLING-SPEC M1: every channel is registered through the read-only gate. A `write` channel
@@ -4027,6 +4034,15 @@ export function registerHandlers({
   // F-7.11: the sheet is the renderer's to draw; main only keeps the choice for the next launch.
   register('view:setPageEdges', ({ on }) => {
     return appState.update((s) => ({ ...s, view: { ...s.view, pageEdges: on } })).view
+  })
+
+  // F-7.12: the assistant's name is app-wide; main keeps it (blank is the default) and rebuilds
+  // the native menu, whose View item carries it.
+  register('view:setAssistantName', ({ name }) => {
+    const assistantName = normalizeAssistantName(name)
+    const view = appState.update((s) => ({ ...s, view: { ...s.view, assistantName } })).view
+    onAssistantNameChanged?.()
+    return view
   })
 
   // F-7.8: the theme is the renderer's to paint; main keeps the choice and the custom themes,

@@ -462,7 +462,12 @@ describe('AppStateStore', () => {
   it('opens a file from before themes, or with an unreadable theme list, in Dark (F-7.8)', () => {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [], view: VIEW }), 'utf8')
-    expect(new AppStateStore(file).get().view).toEqual({ ...VIEW, theme: 'dark', customThemes: [] })
+    expect(new AppStateStore(file).get().view).toEqual({
+      ...VIEW,
+      theme: 'dark',
+      customThemes: [],
+      assistantName: 'Ms Scribe'
+    })
     fs.writeFileSync(
       file,
       JSON.stringify({
@@ -472,7 +477,24 @@ describe('AppStateStore', () => {
       }),
       'utf8'
     )
-    expect(new AppStateStore(file).get().view).toEqual({ ...VIEW, theme: 'dark', customThemes: [] })
+    expect(new AppStateStore(file).get().view).toEqual({
+      ...VIEW,
+      theme: 'dark',
+      customThemes: [],
+      assistantName: 'Ms Scribe'
+    })
+  })
+
+  it('opens a file from before the assistant name, or with a blank or overlong one, as Ms Scribe (F-7.12)', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    for (const assistantName of [undefined, '   ', 'x'.repeat(40), 7]) {
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ version: 1, recents: [], view: { ...VIEW, assistantName } }),
+        'utf8'
+      )
+      expect(new AppStateStore(file).get().view.assistantName).toBe('Ms Scribe')
+    }
   })
 
   it('round-trips the view settings and refuses a zoom outside 67–200 %', () => {
@@ -480,20 +502,22 @@ describe('AppStateStore', () => {
     expect(
       store.update((s) => ({
         ...s,
-        view: { ...VIEW, theme: 'light', customThemes: [] }
+        view: { ...VIEW, theme: 'light', customThemes: [], assistantName: 'Quill' }
       })).view
-    ).toEqual({ ...VIEW, theme: 'light', customThemes: [] })
+    ).toEqual({ ...VIEW, theme: 'light', customThemes: [], assistantName: 'Quill' })
     expect(new AppStateStore(file).get().view).toEqual({
       ...VIEW,
       theme: 'light',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Quill'
     })
     expect(() => store.update((s) => ({ ...s, view: { ...s.view, editorZoom: 2.5 } }))).toThrow()
     expect(() => store.update((s) => ({ ...s, view: { ...s.view, editorZoom: 0.5 } }))).toThrow()
     expect(new AppStateStore(file).get().view).toEqual({
       ...VIEW,
       theme: 'light',
-      customThemes: []
+      customThemes: [],
+      assistantName: 'Quill'
     })
   })
 
