@@ -33,6 +33,21 @@ do. Review, then confirm, change, or delete the entry.
 - Status: P0 (F-16.1–16.3) built, reviewed and ticked 2026-10-11; plan `docs/research/story-memory-2026-10-11/plans/P0.md`. Your one step in P0: run `npm run ai:probe -- -u` once with your OpenRouter key (a few cents); see the P0 entry below. P1 is next.
 - To change it: decision 3 lives in F-16.26 (`agent.v9`, P3); the others are in the F-16 lines named above and `design.md` › "Decisions (2026-10-11)".
 
+## 2026-10-11 · F-16.4–16.15 · P1 plan: the calls the design left open
+- Question: Planning P1 (`docs/research/story-memory-2026-10-11/plans/P1.md`, six slices, nothing built yet) needed calls the design did not make. Details are in the plan's §7.
+- Chosen (decided by Claude, unconfirmed):
+  1. **Data copies:** the copy from tags, sheets and uploads into the new tables happens at the switch-over you start, not in the migrations. The installed app keeps running the old memory after the migrations, so an early copy would go stale. The migrations only add empty tables.
+  2. **The switch-over in P1 runs only on a duplicate**, from Help › Developer in a development build. Your installed app cannot start it until F-16.31.
+  3. **Your custom tags become custom labels,** which stay local and no longer steer prose (they steered as "Themes" before). The dry run tells you, and you can change a label's kind to Theme.
+  4. **A character or place tag you linked to a scene that never names them** becomes "+ also here" for that scene.
+  5. **"Names that are also dictionary words"** are read from your manuscript (the name also appears in lower case, like "will"), since no word list ships. A record you create yourself is warned about by the twin check ("Looks like Rynna Falsire"), never silently blocked.
+  6. **Rename in book** rewrites the manuscript in every draft, the name itself and the Dismissed entries. It leaves notes, Research and sheets to Replace in project.
+  7. **Range tags** are left in your documents, hidden and inert, until the old tables go (P9). The only change to your prose is the inline-tag rewrite you approve on the consent screen.
+  8. **Sections:** in the new memory, Timeline, Threads, To do, Changes, Index and Library are hidden from P1 on. Their content returns inside the This scene | Book panel in P2b–P4, and timeline years become typed story years at the switch-over.
+  9. **Scene suggestions** get `notesSuggest.v3` in P1, so P2a's version is `notesSuggest.v4`.
+- Alternatives: copy in the migrations and refresh at the switch-over; custom tags as Theme labels; keep the old sections visible until P2b.
+- To change it: `plans/P1.md` §7 (P1-D1 to P1-D13), before the slice that builds it.
+
 ## 2026-10-11 · F-16.1–16.3 · P0 ground truth: the details the plan left open
 - Question: Building P0 (`docs/research/story-memory-2026-10-11/plans/P0.md`) needed a few calls the plan did not make.
 - Chosen (decided by Claude, unconfirmed):
