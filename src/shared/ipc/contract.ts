@@ -216,6 +216,24 @@ import { UiScale, ViewSettings, ZoomStep } from '../zoom'
 import { CustomThemeId, CustomThemeInput, ThemeId } from '../themes'
 import { AssistantNameInput } from '../assistantName'
 import { StoryMemoryVersion } from '../storyMemory'
+import { AuthorTodo, AuthorTodoCreate, AuthorTodoPatch } from '../memory/authorTodo'
+import { Dismissed, DismissedList } from '../memory/dismissed'
+import { NameAnswer, NameAnswerResult, NameQuestion } from '../memory/nameQuestions'
+import { NameMentionView } from '../memory/nameScan'
+import { MemoryPassageHit, MemoryPassageQuery } from '../memory/passages'
+import {
+  RECORD_ALIASES_MAX,
+  RECORD_NAME_MAX,
+  RecordAliasInput,
+  RecordMainNameInput,
+  RecordName,
+  RecordPage,
+  StoryRecord,
+  StoryRecordSummary
+} from '../memory/records'
+import { SceneDetails, SceneDetailsView } from '../memory/sceneDetails'
+import { TwinGateBlocked, TwinGateVerdict } from '../memory/twinGate'
+import { Label, LabelColour, LabelKind, LabelName } from '../storyLabels'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -3053,7 +3071,147 @@ export const contract = {
    * Help › Documentation (F-7.1): opens the page in the default browser. Only `https` URLs on
    * mythscribe.app are accepted (`isAllowedExternalUrl`); anything else is VALIDATION.
    */
-  'menu:openExternal': { input: z.object({ url: z.string() }), output: z.null() }
+  'menu:openExternal': { input: z.object({ url: z.string() }), output: z.null() },
+
+  // Story memory v2 (F-16.4, F-16.5, F-16.7, F-16.10, F-16.11; plan P1 §1.4). Every channel below
+  // answers only in a project on story memory v2: the registry refuses it in a v1 project with
+  // VALIDATION before the handler runs (`CHANNEL_MEMORY`).
+
+  /** Every record with its names, by name. */
+  'record:list': { input: z.undefined(), output: z.array(StoryRecordSummary) },
+  /** One record with its Pinned and Ideas pages (NOT_FOUND once it is gone). */
+  'record:get': { input: z.object({ id: z.string() }), output: StoryRecord },
+  /**
+   * Creates a record after the twin gate (design §2.2 rule 5): a blocked name answers `{ gate }`
+   * and writes nothing unless `force` (the author's own record is warned about, never blocked,
+   * decision P1-D4). A name another record holds unshared is refused (VALIDATION) either way.
+   */
+  'record:create': {
+    input: z.object({
+      name: RecordName,
+      categoryId: z.string().min(1),
+      aliases: z.array(RecordAliasInput).max(RECORD_ALIASES_MAX).default([]),
+      force: z.boolean().default(false)
+    }),
+    output: z.union([z.object({ record: StoryRecord }), z.object({ gate: TwinGateBlocked })])
+  },
+  /**
+   * Moves a record to another category (its kind follows), or changes its image: `choose` opens
+   * the image dialog (the record is answered unchanged when it is cancelled), `remove` clears it.
+   */
+  'record:update': {
+    input: z.object({
+      id: z.string(),
+      categoryId: z.string().min(1).optional(),
+      image: z.enum(['choose', 'remove']).optional()
+    }),
+    output: StoryRecord
+  },
+  /**
+   * Replaces a record's names: its own (`name`) and the others, each with its case rule and
+   * shared flag. A name another record holds unshared is refused with that record's name; a
+   * removed nickname goes to Dismissed.
+   */
+  'record:setAliases': {
+    input: z.object({
+      id: z.string(),
+      name: RecordMainNameInput,
+      aliases: z.array(RecordAliasInput).max(RECORD_ALIASES_MAX)
+    }),
+    output: StoryRecord
+  },
+  /** Saves the record's Pinned or Ideas page; null (or a page with no text) clears it. */
+  'record:savePage': {
+    input: z.object({ id: z.string(), page: RecordPage, doc: TiptapNode.nullable() }),
+    output: StoryRecord
+  },
+  /** Deletes a record with its names, mentions, dismissals and image. */
+  'record:delete': { input: z.object({ id: z.string() }), output: z.null() },
+  /** *Same as…*: merges `mergeId` into `keepId` (names, pages, every row that pointed at it). */
+  'record:sameAs': {
+    input: z.object({ keepId: z.string(), mergeId: z.string() }),
+    output: StoryRecord
+  },
+  /** *Split*: moves nicknames to a new record (`intoId` null) or another one, and remembers the split. */
+  'record:split': {
+    input: z.object({
+      id: z.string(),
+      aliasIds: z.array(z.string()).min(1).max(RECORD_ALIASES_MAX),
+      intoId: z.string().nullable()
+    }),
+    output: z.object({ from: StoryRecord, into: StoryRecord })
+  },
+  /** The twin gate for a name being typed (`exceptId`: the record being renamed). */
+  'record:gate': {
+    input: z.object({ name: z.string().max(RECORD_NAME_MAX), exceptId: z.string().optional() }),
+    output: TwinGateVerdict
+  },
+  /** The author's labels, in her order. */
+  'label:list': { input: z.undefined(), output: z.array(Label) },
+  /** Creates a label (names unique case-insensitively: ALREADY_EXISTS); colour defaults by kind. */
+  'label:create': {
+    input: z.object({ name: LabelName, kind: LabelKind, colour: LabelColour.optional() }),
+    output: Label
+  },
+  'label:update': {
+    input: z.object({
+      id: z.string(),
+      name: LabelName.optional(),
+      kind: LabelKind.optional(),
+      colour: LabelColour.optional()
+    }),
+    output: Label
+  },
+  /** Deletes a label and its links; answers the list. */
+  'label:delete': { input: z.object({ id: z.string() }), output: z.array(Label) },
+  /** Puts the labels in this order (every label once); answers the list. */
+  'label:reorder': { input: z.object({ ids: z.array(z.string()) }), output: z.array(Label) },
+  /** Puts a label on a scene or document; answers the node's labels. */
+  'label:assign': {
+    input: z.object({ labelId: z.string(), nodeId: z.string() }),
+    output: z.array(Label)
+  },
+  /** Takes a label off a node; answers the node's labels. */
+  'label:unassign': {
+    input: z.object({ labelId: z.string(), nodeId: z.string() }),
+    output: z.array(Label)
+  },
+  /** A node's labels, in label order. */
+  'label:forNode': { input: z.object({ nodeId: z.string() }), output: z.array(Label) },
+  /** The one Dismissed list (F-16.10), newest first, with its count. */
+  'dismissed:list': { input: z.undefined(), output: DismissedList },
+  /** Undo on a Dismissed row: the tombstone goes, so the thing may come back. */
+  'dismissed:undo': { input: z.object({ id: z.string() }), output: Dismissed },
+  /** My to-dos (F-16.10), in the author's order. */
+  'authorTodo:list': { input: z.undefined(), output: z.array(AuthorTodo) },
+  'authorTodo:create': { input: AuthorTodoCreate, output: AuthorTodo },
+  /** Edits a to-do, or ticks and unticks it. */
+  'authorTodo:update': {
+    input: z.object({ id: z.string(), patch: AuthorTodoPatch }),
+    output: AuthorTodo
+  },
+  'authorTodo:delete': { input: z.object({ id: z.string() }), output: z.array(AuthorTodo) },
+  'authorTodo:reorder': {
+    input: z.object({ ids: z.array(z.string()) }),
+    output: z.array(AuthorTodo)
+  },
+  /** A scene's typed details (F-16.11), with the "+ also here" ids whose record is gone. */
+  'sceneDetail:get': { input: z.object({ nodeId: z.string() }), output: SceneDetailsView },
+  /** Saves a scene's typed details; every record they name must exist (VALIDATION). */
+  'sceneDetail:set': {
+    input: z.object({ nodeId: z.string(), details: SceneDetails }),
+    output: SceneDetailsView
+  },
+  /** Where a scene names its records (F-16.5), as last scanned, in document order. */
+  'names:forNode': { input: z.object({ nodeId: z.string() }), output: z.array(NameMentionView) },
+  /** *Not a mention*: the phrase is never a mention of that record again; answers the tombstone. */
+  'names:notAMention': { input: z.object({ mentionId: z.string() }), output: Dismissed },
+  /** New names and nicknames to ask about, most named first. */
+  'names:questions': { input: z.undefined(), output: z.array(NameQuestion) },
+  /** Answers a question: *Add as* · *Not a name*, or *Yes* · *No*. */
+  'names:answer': { input: z.object({ answer: NameAnswer }), output: NameAnswerResult },
+  /** Word search over the local passage index, each hit labelled with its source and canon status. */
+  'passages:search': { input: MemoryPassageQuery, output: z.array(MemoryPassageHit) }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract
@@ -3167,7 +3325,13 @@ export const events = {
   /** The backup state changed without a renderer call (F-8.4): a scheduled or on-close backup ran or failed, or a project opened or closed. */
   'backups:changed': BackupState,
   /** The app's access changed (M1): the trial ended, or a license was verified or dropped. */
-  'app:accessChanged': AppAccess
+  'app:accessChanged': AppAccess,
+  /** F-16.4 (v2): these records changed (made, renamed, merged, split, deleted, a page saved); the store refetches them. */
+  'record:changed': z.object({ recordIds: z.array(z.string()) }),
+  /** F-16.5 (v2): the recorded mentions of these scenes changed (a scan wrote rows). */
+  'names:changed': z.object({ nodeIds: z.array(z.string()) }),
+  /** F-16.4 (v2): the name questions changed (a scan, a record, an answer); the whole list. Only a real change is pushed. */
+  'questions:changed': z.array(NameQuestion)
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

@@ -524,7 +524,6 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       scene: 's01',
       records: [
         'harrow-mr',
-        'harrow-mrs',
         'thornmere',
         'tull',
         'ashby',
@@ -598,7 +597,8 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
         'harrow-mrs',
         'pell-lady',
         'pell-sir',
-        'callow-cross'
+        'callow-cross',
+        'wexley'
       ]
     },
     {
@@ -624,6 +624,7 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
         'callow-cross',
         'liesel',
         'pocock',
+        'gullhaven',
         'captain',
         'dunmore',
         'elsdale',
@@ -711,7 +712,7 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       reason: "One edit from 'Johanna' (7 letters)."
     },
     {
-      name: 'Dunmoor',
+      name: 'Dunmoore',
       outcome: 'blocked',
       blockedBy: 'dunmore',
       rule: 'edit',

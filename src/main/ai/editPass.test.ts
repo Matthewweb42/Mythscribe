@@ -116,6 +116,7 @@ beforeEach(() => {
   runner = createEditPassRunner({
     db: () => db,
     requestDeps: () => deps,
+    memory: () => 'v1',
     onChange: (summary) => void events.push(summary),
     now: () => NOW.toISOString()
   })

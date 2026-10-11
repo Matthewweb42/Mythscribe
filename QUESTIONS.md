@@ -12,6 +12,21 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-11 · F-16.4, F-16.5, F-16.7, F-16.10, F-16.11 · P1 slice 1 (records, names, the local index): calls made while building
+- Question: Slice 1 of P1 (the data layer: tables, the name and passage index, the v1/v2 gate; no screens yet) needed calls the plan did not spell out. Nothing here changes your installed app: it runs story memory v1, and every new channel refuses to answer there.
+- Chosen (decided by Claude, unconfirmed):
+  1. **Names compare without full stops:** "Mr. Harrow" and "Mr Harrow" are one name (the plan's normal form plus this). Titles still count in the prose: "Mr. Harrow" and "Mrs. Harrow" stay two people.
+  2. **The twin check, in detail:** a new name matches an existing one with titles kept first (spelled one way: "Capt" is "Captain"), then with titles taken out; a one-word name is also compared, for spelling slips, with each word of a longer name ("Liesl" against "Liesel Harrow"). The word-subset rule works both ways, so a shared surname makes every new family member look like a twin. For a name you type yourself that is only a warning; for a name the app would suggest it becomes a nickname question instead.
+  3. **Sentence starts:** "Then Mr. Pruett came" is read as Mr. Pruett, but "Jem Falsire came in" stays an unknown name (not Falsire). The first word of a sentence is dropped only when it is a common sentence opener (a built-in list of about 100 words such as Then, Old, Dearest), a title or month, or a word your scene also writes in lower case.
+  4. **Other matching details:** "Mr. Varrow of Elsdale" is tried whole and then in its parts (both are named); "the Captain" is matched with its "the"; a plural of a person's name ("the Ashbys") is shown as uncertain rather than as that person.
+  5. **Removing a nickname** puts it on Dismissed for that record, so it is not asked about again; adding it back takes it off.
+  6. **Name questions:** a word must be capitalised mid-sentence at least twice; a word you also write in lower case needs four (the rule the old proposed tags used). Words that are already part of a record's names are never asked about.
+  7. **Idea and left-out scenes in the word index:** a scene inside a chapter or part marked Idea, or left out of compile, is labelled that way too.
+  8. **Changes to the test book's labels (P0 test data):** Mrs. Harrow was listed in chapter 1 only because "Harrow" is inside "Mr. Harrow" (removed); Wexley in the Thornmere ball and Gullhaven in "The Captain" are named in the text and were missing (added); the twin case "Dunmoor" is two letters from "Dunmore", over the one-letter limit for a seven-letter name, so it is now "Dunmoore".
+  9. **While a project runs the new memory,** scenes the old summary prompt read are still held back from re-reading (no spend you did not ask for), but the old conversion dialog never appears, and the background consistency check does not run (P4 replaces it).
+- Alternatives: keep full stops significant; compare one-word names only with whole names; fold titles when matching mentions (rejected by the design); ask about every capitalised word twice, ordinary words included.
+- To change it: `normName` in `src/shared/memory/names.ts`; `twinGate` in `src/shared/memory/twinGate.ts`; `SENTENCE_OPENERS` and `scanNames` in `src/shared/memory/nameScan.ts`; `setAliases` in `src/main/memory/recordStore.ts`; `nameQuestions` in `src/shared/memory/nameQuestions.ts`; `sceneStatuses` in `src/main/memory/passageIndexer.ts`; `src/main/memory/testBook/labels.ts`.
+
 ## 2026-10-11 · F-16 (story memory redesign) · Approved: the eight decisions, and what it supersedes
 - Question: The from-zero story memory redesign (`docs/research/story-memory-2026-10-11/design.md`, the plan doc linked from that folder's `README.md`) ended with eight open decisions, each with a recommended default.
 - **Decided by the author 2026-10-11: approved, build it.** The author took the recommended default on 1, 2 and 4–8, and changed 3:
@@ -30,7 +45,7 @@ do. Review, then confirm, change, or delete the entry.
   - F-5.25 (two 2026-10-10 entries) and F-4.14 (three 2026-10-08 entries): replaced by Dismissed, *Rebuild memory* (F-16.10, F-16.19) and records with aliases (F-16.4).
   
   Each of these entries carries a one-line Superseded note below. During the build (Part 4 rules), edit requests about tags, entities, the knowledge model, Organise and To do are parked and logged here as superseded. The installed app keeps today's memory (`storyMemory: v1`) until you start the switch-over (F-16.31).
-- Status: P0 (F-16.1–16.3) built, reviewed and ticked 2026-10-11; plan `docs/research/story-memory-2026-10-11/plans/P0.md`. Your one step in P0: run `npm run ai:probe -- -u` once with your OpenRouter key (a few cents); see the P0 entry below. P1 is next.
+- Status: P0 (F-16.1–16.3) built, reviewed and ticked 2026-10-11; plan `docs/research/story-memory-2026-10-11/plans/P0.md`. Your one step in P0: run `npm run ai:probe -- -u` once with your OpenRouter key (a few cents); see the P0 entry below. P1 slice 1 (records, names and the local index; data layer) built 2026-10-11, see its entry above; slices 2–6 are next.
 - To change it: decision 3 lives in F-16.26 (`agent.v9`, P3); the others are in the F-16 lines named above and `design.md` › "Decisions (2026-10-11)".
 
 ## 2026-10-11 · F-16.4–16.15 · P1 plan: the calls the design left open

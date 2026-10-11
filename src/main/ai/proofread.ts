@@ -21,6 +21,7 @@ import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import { projectNameWords, projectSpellingWords } from '../spellcheck/projectWords'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
 import { voiceBlock } from '../voice/voiceBlock'
@@ -34,6 +35,8 @@ import { runAiRequest, sha256, type AiRequestDeps } from './request'
 export interface ProofreadInput {
   /** The scene to proofread, or the scene the selection is in. */
   nodeId: string
+  /** F-16.4: which story memory the project runs; v2 reads its story names from records. */
+  memory: StoryMemoryVersion
   /** The selection as plain text, to proofread only that; null, absent, or blank is the scene. */
   selection?: string | null
   /** The caller's id for `ai:cancel` (F-5.10); optional so tests and the eval can run without one. */
@@ -121,8 +124,8 @@ export async function runProofread(
 
   // Every accepted word guards the drop rule; the prompt carries the names first (the misspelled
   // names are what the list is for), then the dictionary, up to the cap.
-  const allKeepWords = projectSpellingWords(db)
-  const keepWords = keepList([...projectNameWords(db), ...allKeepWords])
+  const allKeepWords = projectSpellingWords(db, input.memory)
+  const keepWords = keepList([...projectNameWords(db, input.memory), ...allKeepWords])
   const build = (text: string): ReturnType<typeof buildProofreadPrompt> =>
     buildProofreadPrompt({ text, voice, brief, keepWords })
 

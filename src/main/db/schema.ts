@@ -35,6 +35,10 @@ import { SNAPSHOT_KINDS, SNAPSHOT_SCOPES } from '../../shared/snapshots'
 import { TAG_CATEGORIES } from '../../shared/tags'
 import { TODO_KINDS, TODO_RULES, TODO_SOURCES, TODO_STATUSES } from '../../shared/todo'
 import { EXEMPLAR_KINDS, VOICE_EXEMPLAR_SOURCES } from '../../shared/voice'
+import { ALIAS_ORIGINS, CASE_RULES, RECORD_ORIGINS } from '../../shared/memory/records'
+import { DISMISSED_KINDS } from '../../shared/memory/dismissed'
+import { MEMORY_OWNER_KINDS } from '../../shared/memory/passages'
+import { LABEL_KINDS } from '../../shared/storyLabels'
 
 /**
  * Drizzle schema. Migrations are generated from this file with `npm run db:generate`
@@ -883,3 +887,212 @@ export const todoItem = sqliteTable(
 )
 export type TodoItemRow = typeof todoItem.$inferSelect
 export type TodoItemInsert = typeof todoItem.$inferInsert
+
+/**
+ * Story memory v2 (F-16.4, phase P1, migration 0029): a record, what names and nicknames point
+ * at. It replaces the v1 tag and sheet in a v2 project; a v1 project never writes here. The
+ * category is by value with no foreign key (`entity.kind` does the same), the kind follows it
+ * (`recordKindOf`), `image` is an asset file name under `assets/entities/` (the folder sheets
+ * use), `pinned` and `ideas` are Tiptap JSON (null while empty). `legacy_entity_id` and
+ * `legacy_tag_id` let the switch-over (P1 slice 6) run once per source row and show its mapping;
+ * they have no foreign key, since the v1 rows may go at P9. The table starts empty: nothing is
+ * copied in a migration (decision P1-D1).
+ */
+export const record = sqliteTable(
+  'record',
+  {
+    id: text('id').primaryKey(),
+    categoryId: text('category_id').notNull(),
+    image: text('image'),
+    origin: text('origin', { enum: RECORD_ORIGINS }).notNull().default('author'),
+    pinned: text('pinned'),
+    ideas: text('ideas'),
+    legacyEntityId: text('legacy_entity_id'),
+    legacyTagId: text('legacy_tag_id'),
+    created: text('created').notNull(),
+    modified: text('modified').notNull()
+  },
+  (t) => [
+    index('record_category_idx').on(t.categoryId),
+    uniqueIndex('record_legacy_entity_uq').on(t.legacyEntityId),
+    uniqueIndex('record_legacy_tag_uq').on(t.legacyTagId)
+  ]
+)
+export type RecordRow = typeof record.$inferSelect
+export type RecordInsert = typeof record.$inferInsert
+
+/**
+ * A record's names (F-16.4): exactly one `is_main` per record (its name, one owner), the rest
+ * nicknames, titles and other spellings. `norm` is `normName(text)`, unique per record; a norm
+ * may belong to several records only when every one of them marks it `shared` (identity rule 4),
+ * which the store checks and the partial unique index backs for unshared rows.
+ */
+export const alias = sqliteTable(
+  'alias',
+  {
+    id: text('id').primaryKey(),
+    recordId: text('record_id')
+      .notNull()
+      .references(() => record.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    norm: text('norm').notNull(),
+    isMain: integer('is_main', { mode: 'boolean' }).notNull().default(false),
+    caseRule: text('case_rule', { enum: CASE_RULES }).notNull().default('auto'),
+    origin: text('origin', { enum: ALIAS_ORIGINS }).notNull().default('author'),
+    shared: integer('shared', { mode: 'boolean' }).notNull().default(false),
+    created: text('created').notNull()
+  },
+  (t) => [
+    uniqueIndex('alias_record_norm_uq').on(t.recordId, t.norm),
+    uniqueIndex('alias_norm_unshared_uq')
+      .on(t.norm)
+      .where(sql`${t.shared} = 0`),
+    uniqueIndex('alias_main_uq')
+      .on(t.recordId)
+      .where(sql`${t.isMain} = 1`),
+    index('alias_norm_idx').on(t.norm)
+  ]
+)
+export type AliasRow = typeof alias.$inferSelect
+export type AliasInsert = typeof alias.$inferInsert
+
+/**
+ * The author's labels (F-16.7): name, colour, kind, order. Names are unique case-insensitively,
+ * enforced in the store (`labelNameKey`). `legacy_tag_id` is the switch-over's mapping.
+ */
+export const label = sqliteTable('label', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  colour: text('colour').notNull(),
+  kind: text('kind', { enum: LABEL_KINDS }).notNull(),
+  position: integer('position').notNull(),
+  legacyTagId: text('legacy_tag_id'),
+  created: text('created').notNull(),
+  modified: text('modified').notNull()
+})
+export type LabelRow = typeof label.$inferSelect
+export type LabelInsert = typeof label.$inferInsert
+
+/** Which scenes and Research documents carry a label (F-16.7). Both ends cascade. */
+export const labelLink = sqliteTable(
+  'label_link',
+  {
+    labelId: text('label_id')
+      .notNull()
+      .references(() => label.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' })
+  },
+  (t) => [primaryKey({ columns: [t.labelId, t.nodeId] }), index('label_link_node_idx').on(t.nodeId)]
+)
+export type LabelLinkRow = typeof labelLink.$inferSelect
+
+/**
+ * One Dismissed list (F-16.10): every "never bring this back" of v2, one row per tombstone,
+ * unique per kind and key (`dismissedKey`). The record's rows go with it; a node that goes leaves
+ * the row with the link cleared.
+ */
+export const dismissed = sqliteTable(
+  'dismissed',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind', { enum: DISMISSED_KINDS }).notNull(),
+    key: text('key').notNull(),
+    recordId: text('record_id').references(() => record.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id').references(() => node.id, { onDelete: 'set null' }),
+    label: text('label').notNull(),
+    quote: text('quote'),
+    created: text('created').notNull()
+  },
+  (t) => [uniqueIndex('dismissed_kind_key_uq').on(t.kind, t.key)]
+)
+export type DismissedRow = typeof dismissed.$inferSelect
+export type DismissedInsert = typeof dismissed.$inferInsert
+
+/** The author's own to-dos (F-16.10). A scene or record it points at may go; the to-do stays. */
+export const authorTodo = sqliteTable('author_todo', {
+  id: text('id').primaryKey(),
+  text: text('text').notNull(),
+  nodeId: text('node_id').references(() => node.id, { onDelete: 'set null' }),
+  recordId: text('record_id').references(() => record.id, { onDelete: 'set null' }),
+  done: integer('done', { mode: 'boolean' }).notNull().default(false),
+  position: integer('position').notNull(),
+  created: text('created').notNull(),
+  doneAt: text('done_at')
+})
+export type AuthorTodoRow = typeof authorTodo.$inferSelect
+export type AuthorTodoInsert = typeof authorTodo.$inferInsert
+
+/**
+ * A scene's typed details (F-16.11): POV and place point at records (cleared when the record
+ * goes), place and time keep free text, `story_year` is an integer, `also_here` a JSON array of
+ * record ids (an id with no record reads as gone). Its own table rather than `scene_meta` keys,
+ * so an older build that saves scene meta cannot drop them.
+ */
+export const sceneDetail = sqliteTable('scene_detail', {
+  nodeId: text('node_id')
+    .primaryKey()
+    .references(() => node.id, { onDelete: 'cascade' }),
+  povRecordId: text('pov_record_id').references(() => record.id, { onDelete: 'set null' }),
+  placeRecordId: text('place_record_id').references(() => record.id, { onDelete: 'set null' }),
+  placeText: text('place_text').notNull().default(''),
+  timeText: text('time_text').notNull().default(''),
+  storyYear: integer('story_year'),
+  alsoHere: text('also_here').notNull().default('[]'),
+  modified: text('modified').notNull()
+})
+export type SceneDetailRow = typeof sceneDetail.$inferSelect
+export type SceneDetailInsert = typeof sceneDetail.$inferInsert
+
+/**
+ * Where a scene names a record (F-16.5, migration 0030): one row per mention, written by the
+ * local name scan (`nameIndexer.ts`) after every save, never by the author. `from`/`to` are
+ * ProseMirror positions of the saved document (as `tag_mention` stores them), `para` the
+ * paragraph index. An ambiguous span (a shared alias nothing settled) has one row per possible
+ * owner, grouped by `span_key` (`para:from`). Cascaded from both ends.
+ */
+export const nameMention = sqliteTable(
+  'name_mention',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    recordId: text('record_id')
+      .notNull()
+      .references(() => record.id, { onDelete: 'cascade' }),
+    para: integer('para').notNull(),
+    from: integer('from').notNull(),
+    to: integer('to').notNull(),
+    text: text('text').notNull(),
+    ambiguous: integer('ambiguous', { mode: 'boolean' }).notNull().default(false),
+    spanKey: text('span_key').notNull()
+  },
+  (t) => [
+    index('name_mention_node_idx').on(t.nodeId),
+    index('name_mention_record_idx').on(t.recordId)
+  ]
+)
+export type NameMentionRow = typeof nameMention.$inferSelect
+export type NameMentionInsert = typeof nameMention.$inferInsert
+
+/**
+ * What the last name scan and the last passage index of an owner saw (F-16.5): a scene, a scene's
+ * notes, a record's pages or (from slice 2) a Research page. A hash that still matches skips the
+ * work. No foreign key, since owners are nodes or records: rows whose owner went are pruned on
+ * open (`pruneMemoryIndex`).
+ */
+export const memoryScan = sqliteTable(
+  'memory_scan',
+  {
+    ownerKind: text('owner_kind', { enum: MEMORY_OWNER_KINDS }).notNull(),
+    ownerId: text('owner_id').notNull(),
+    namesHash: text('names_hash'),
+    passagesHash: text('passages_hash'),
+    scannedAt: text('scanned_at').notNull()
+  },
+  (t) => [primaryKey({ columns: [t.ownerKind, t.ownerId] })]
+)
+export type MemoryScanRow = typeof memoryScan.$inferSelect
+export type MemoryScanInsert = typeof memoryScan.$inferInsert

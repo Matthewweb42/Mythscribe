@@ -79,7 +79,7 @@ function answers(...sets: unknown[][]): void {
 }
 
 const proofread = (over: Partial<ProofreadInput> = {}): ReturnType<typeof runProofread> =>
-  runProofread(db, deps, { nodeId: scene, ...over })
+  runProofread(db, deps, { nodeId: scene, memory: 'v1', ...over })
 
 async function failure(
   over: Partial<ProofreadInput> = {}

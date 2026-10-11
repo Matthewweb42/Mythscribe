@@ -1,0 +1,195 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { LABEL_DEFAULT_COLOUR } from '@shared/storyLabels'
+import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { createNode, deleteNode, listNodes, type TreeDb } from '../tree/treeStore'
+import { manuscriptDocuments } from '../voice/profile'
+import {
+  createAuthorTodo,
+  deleteAuthorTodo,
+  listAuthorTodos,
+  reorderAuthorTodos,
+  updateAuthorTodo
+} from './authorTodoStore'
+import { dismiss, dismissedKeys, isDismissed, listDismissed, undoDismissed } from './dismissedStore'
+import {
+  assignLabel,
+  createLabel,
+  deleteLabel,
+  labelsForNode,
+  listLabels,
+  nodesOfLabel,
+  reorderLabels,
+  unassignLabel,
+  updateLabel
+} from './labelStore'
+import { createRecord, deleteRecord } from './recordStore'
+import { getSceneDetails, setSceneDetails } from './sceneDetailStore'
+
+let tmp: string
+let session: ProjectSession
+let db: TreeDb
+let scene: string
+
+const at = (minute: number): Date => new Date(Date.UTC(2026, 9, 11, 12, minute, 0))
+
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-memory-stores-'))
+  session = createProject(projectFolderFor(tmp, 'Stores'), 'Stores', 'novel')
+  db = session.connection.orm
+  scene = manuscriptDocuments(db)[0]?.id ?? ''
+})
+afterEach(() => {
+  session.close()
+  fs.rmSync(tmp, { recursive: true, force: true })
+})
+
+const record = (name: string): string => {
+  const made = createRecord(db, { name, categoryId: 'character', force: true }, at(0))
+  if (!('record' in made)) throw new Error('blocked')
+  return made.record.id
+}
+
+describe('labelStore (F-16.7)', () => {
+  it('creates labels with their kind’s colour, unique by name whatever the case', () => {
+    const tone = createLabel(db, { name: 'Wry', kind: 'tone' }, at(0))
+    expect(tone).toMatchObject({ name: 'Wry', colour: LABEL_DEFAULT_COLOUR.tone, position: 0 })
+    expect(() => createLabel(db, { name: ' wry ', kind: 'custom' }, at(1))).toThrow(
+      /already a label/
+    )
+    const custom = createLabel(
+      db,
+      { name: 'Needs research', kind: 'custom', colour: '#123456' },
+      at(1)
+    )
+    expect(custom).toMatchObject({ colour: '#123456', position: 1 })
+    expect(updateLabel(db, custom.id, { name: 'Check facts', kind: 'theme' }, at(2))).toMatchObject(
+      {
+        name: 'Check facts',
+        kind: 'theme'
+      }
+    )
+    expect(() => updateLabel(db, custom.id, { name: 'WRY' }, at(3))).toThrow(/already a label/)
+  })
+
+  it('reorders, deletes and closes up', () => {
+    const a = createLabel(db, { name: 'A', kind: 'tone' }, at(0))
+    const b = createLabel(db, { name: 'B', kind: 'tone' }, at(0))
+    const c = createLabel(db, { name: 'C', kind: 'tone' }, at(0))
+    expect(reorderLabels(db, [c.id, a.id, b.id]).map((row) => row.name)).toEqual(['C', 'A', 'B'])
+    expect(() => reorderLabels(db, [c.id, a.id])).toThrow(/every label once/)
+    expect(deleteLabel(db, a.id).map((row) => [row.name, row.position])).toEqual([
+      ['C', 0],
+      ['B', 1]
+    ])
+  })
+
+  it('assigns a label to a node once, lists both ways, and refuses a section root', () => {
+    const tone = createLabel(db, { name: 'Wry', kind: 'tone' }, at(0))
+    expect(assignLabel(db, tone.id, scene).map((row) => row.id)).toEqual([tone.id])
+    expect(assignLabel(db, tone.id, scene)).toHaveLength(1)
+    expect(nodesOfLabel(db, tone.id)).toEqual([scene])
+    const root = listNodes(db).find((row) => row.parentId === null)
+    expect(() => assignLabel(db, tone.id, root?.id ?? '')).toThrow(/section/)
+    expect(unassignLabel(db, tone.id, scene)).toEqual([])
+    expect(labelsForNode(db, scene)).toEqual([])
+    assignLabel(db, tone.id, scene)
+    deleteNode(db, scene)
+    expect(nodesOfLabel(db, tone.id)).toEqual([])
+    expect(listLabels(db)).toHaveLength(1)
+  })
+})
+
+describe('dismissedStore (F-16.10)', () => {
+  it('writes one tombstone per kind and key, lists newest first, and undoes', () => {
+    const first = dismiss(db, { kind: 'name', key: 'hesk', label: 'Hesk: not a name' }, at(0))
+    expect(dismiss(db, { kind: 'name', key: 'hesk', label: 'again' }, at(1)).id).toBe(first.id)
+    dismiss(db, { kind: 'alias', key: 'r|ry', label: 'Ry is not R' }, at(2))
+    expect(listDismissed(db).items.map((row) => row.key)).toEqual(['r|ry', 'hesk'])
+    expect(listDismissed(db).count).toBe(2)
+    expect(dismissedKeys(db, 'name')).toEqual(new Set(['hesk']))
+    expect(undoDismissed(db, first.id).key).toBe('hesk')
+    expect(isDismissed(db, 'name', 'hesk')).toBe(false)
+    expect(() => undoDismissed(db, first.id)).toThrow(/no longer dismissed/)
+  })
+})
+
+describe('authorTodoStore (F-16.10)', () => {
+  it('adds, ticks with a date, unticks, reorders and deletes; a link clears when its target goes', () => {
+    const mara = record('Mara')
+    const a = createAuthorTodo(
+      db,
+      { text: ' Fix the timeline ', nodeId: scene, recordId: mara },
+      at(0)
+    )
+    const b = createAuthorTodo(db, { text: 'Name the ship', nodeId: null, recordId: null }, at(1))
+    expect(a).toMatchObject({ text: 'Fix the timeline', position: 0, done: false, doneAt: null })
+    expect(updateAuthorTodo(db, a.id, { done: true }, at(2)).doneAt).toBe(at(2).toISOString())
+    expect(updateAuthorTodo(db, a.id, { done: false }, at(3)).doneAt).toBeNull()
+    expect(reorderAuthorTodos(db, [b.id, a.id]).map((row) => row.id)).toEqual([b.id, a.id])
+    expect(() =>
+      createAuthorTodo(db, { text: 'x', nodeId: 'missing', recordId: null }, at(4))
+    ).toThrow(/no longer exists/)
+    deleteRecord(db, mara)
+    deleteNode(db, scene)
+    expect(listAuthorTodos(db).find((row) => row.id === a.id)).toMatchObject({
+      nodeId: null,
+      recordId: null
+    })
+    expect(deleteAuthorTodo(db, b.id).map((row) => [row.id, row.position])).toEqual([[a.id, 0]])
+  })
+})
+
+describe('sceneDetailStore (F-16.11)', () => {
+  it('reads empty details, saves typed ones that point at records, and reports gone ones', () => {
+    const mara = record('Mara')
+    const tomas = record('Tomas')
+    expect(getSceneDetails(db, scene)).toEqual({
+      povRecordId: null,
+      place: { recordId: null, text: '' },
+      time: { text: '' },
+      storyYear: null,
+      alsoHere: [],
+      gone: []
+    })
+    const saved = setSceneDetails(
+      db,
+      scene,
+      {
+        povRecordId: mara,
+        place: { recordId: null, text: ' the harbour ' },
+        time: { text: 'December, evening' },
+        storyYear: 1811,
+        alsoHere: [tomas, tomas]
+      },
+      at(0)
+    )
+    expect(saved).toMatchObject({
+      povRecordId: mara,
+      place: { text: 'the harbour' },
+      alsoHere: [tomas]
+    })
+    expect(() => setSceneDetails(db, scene, { ...saved, povRecordId: 'missing' }, at(1))).toThrow(
+      /no longer exists/
+    )
+  })
+
+  it('refuses a node outside the manuscript, and a section root', () => {
+    const root = listNodes(db).find(
+      (row) => row.parentId === null && row.sectionType === 'manuscript'
+    )
+    expect(() => getSceneDetails(db, root?.id ?? '')).toThrow(/manuscript/)
+    const notes = listNodes(db).find(
+      (row) => row.parentId === null && row.sectionType !== 'manuscript'
+    )
+    const page = createNode(db, 'novel', {
+      parentId: notes?.id ?? '',
+      kind: 'document',
+      hierarchyLevel: null,
+      title: 'Page'
+    })
+    expect(() => getSceneDetails(db, page.id)).toThrow(/manuscript/)
+  })
+})

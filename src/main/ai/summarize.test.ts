@@ -99,7 +99,7 @@ function answers(...replies: unknown[]): void {
 }
 
 const summarize = (over: Partial<SummarizeSceneInput> = {}): ReturnType<typeof summarizeScene> =>
-  summarizeScene(db, deps, { nodeId: scene, ...over })
+  summarizeScene(db, deps, { nodeId: scene, memory: 'v1', ...over })
 
 async function failure(
   over: Partial<SummarizeSceneInput> = {}
@@ -624,6 +624,24 @@ describe('summarizeScene logs the story bible (F-5.16)', () => {
     // Nothing of it is in the stored summary row or the manuscript: facts live in their own table.
     expect(getSummary(db, scene)).toEqual(result.summary)
     expect(result.summary).not.toHaveProperty('facts')
+  })
+
+  it('derives nothing in a story-memory v2 project: the summary is stored, no fact, record, tag or change (F-16.4)', async () => {
+    answers({ ...ANSWER, facts: [FACT, TOMAS], tags: [{ name: 'Tomas', category: 'character' }] })
+    const logged: number[] = []
+    const result = await summarize({
+      memory: 'v2',
+      onFactsChanged: (change) => void changes.push(change),
+      onChangesLogged: () => void logged.push(1)
+    })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(getSummary(db, scene)).toEqual(result.summary)
+    expect(listEntities(db)).toEqual([])
+    expect(listTags(db)).toEqual([])
+    expect(listChanges(db, { limit: 50 }).entries).toEqual([])
+    expect(changes).toEqual([])
+    expect(logged).toEqual([])
+    expect(result.summary.contentHash).toBe(summarySource(db, scene)?.contentHash)
   })
 
   it('never changes scene text: a run that logs facts, a sheet, and tags leaves every document byte-identical (F-9.13)', async () => {

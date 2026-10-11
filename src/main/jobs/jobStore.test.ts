@@ -180,6 +180,21 @@ describe('jobStore (F-5.13)', () => {
     expect(listJobs(db).map((job) => job.id)).toEqual([jobId('summary', scene(0).id)])
   })
 
+  it('narrows to several kinds at once, for the mention queue’s names and passages (F-16.5)', () => {
+    enqueueJob(db, 'summary', scene(0).id, at(0))
+    enqueueJob(db, 'names', scene(0).id, at(1))
+    enqueueJob(db, 'passages', scene(0).id, at(2))
+    markFailed(db, jobId('passages', scene(0).id), 3, FAILURE, at(3))
+    markFailed(db, jobId('summary', scene(0).id), 3, FAILURE, at(3))
+    const mine = ['mentions', 'names', 'passages'] as const
+
+    expect(listJobs(db, mine).map((job) => job.kind)).toEqual(['names', 'passages'])
+    expect(requeueFailed(db, at(4), mine)).toBe(1)
+    expect(getJob(db, jobId('summary', scene(0).id))).toMatchObject({ status: 'failed' })
+    deleteAllJobs(db, mine)
+    expect(listJobs(db).map((job) => job.kind)).toEqual(['summary'])
+  })
+
   it('skips a job whose kind this build does not know', () => {
     enqueueJob(db, 'summary', scene(0).id, at(0))
     enqueueJob(db, 'summary', scene(1).id, at(1))

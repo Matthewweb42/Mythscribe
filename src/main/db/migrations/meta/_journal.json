@@ -204,6 +204,27 @@
       "when": 1791744276055,
       "tag": "0028_usage_reported_cost",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1791752435673,
+      "tag": "0029_story_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1791752448967,
+      "tag": "0030_name_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1791752452868,
+      "tag": "0031_memory_passage_fts",
+      "breakpoints": true
     }
   ]
 }

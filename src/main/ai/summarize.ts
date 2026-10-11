@@ -45,7 +45,8 @@ import type { TreeDb } from '../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../voice/profile'
 import type { NodeRow } from '../db/schema'
 import { listEntities } from '../entity/entityStore'
-import { applyDerivedKnowledge } from '../knowledge/derive'
+import { applyDerivedKnowledge, type DerivedKnowledge } from '../knowledge/derive'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { bankTagNames, type AutoTagsChange } from './autoTags'
 import { headTruncate } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
@@ -101,6 +102,14 @@ export const SUMMARY_CURRENT_MIN_VERSION = SUMMARY_PROMPT_V4_VERSION
  */
 
 const BAD_FORMAT = 'The model did not answer in the expected format.'
+
+/** F-16.4: what a reading derives in a v2 project: nothing (P2a's reader takes its place). */
+const NOTHING_DERIVED: DerivedKnowledge = {
+  facts: { entityIds: [], added: [], created: [], skipped: 0 },
+  tags: { created: [], moved: [], records: [], linked: [] },
+  runId: '',
+  logged: 0
+}
 
 /** What the request was built from; the handler reuses it to tell a stale row from a current one. */
 export interface SummarySource {
@@ -245,6 +254,12 @@ export function summaryPrompt(
 export interface SummarizeSceneInput {
   nodeId: string
   /**
+   * F-16.4: which story memory the project runs. In v2 the summary row is still written (the
+   * beta reader, plan links, the story map and the summary pane read it until P2a), but nothing
+   * is derived from it: no observed or dated facts, no AI records or tags, no Changes rows.
+   */
+  memory: StoryMemoryVersion
+  /**
    * The caller's id for `ai:cancel` (F-5.10). A background job carries the queue's own
    * `job-<n>` (F-5.13), so Cancel can stop it too; `ai:summarize` passes the renderer's.
    */
@@ -295,6 +310,8 @@ export async function summarizeScene(
     const cleared = db.transaction((tx) => {
       deleteSummary(tx, input.nodeId)
       // F-9.13: with no text read, every AI fact of the scene has lost its quote; nothing is added.
+      // F-16.4: a v2 project derives nothing, so there is nothing to clear either.
+      if (input.memory === 'v2') return null
       return applyDerivedKnowledge(tx, {
         nodeId: input.nodeId,
         facts: [],
@@ -303,8 +320,9 @@ export async function summarizeScene(
         now: deps.now().toISOString()
       })
     })
-    if (cleared.facts.entityIds.length > 0) input.onFactsChanged?.(cleared.facts)
-    if (cleared.tags.moved.length > 0) input.onTagsChanged?.(cleared.tags)
+    if (cleared !== null && cleared.facts.entityIds.length > 0)
+      input.onFactsChanged?.(cleared.facts)
+    if (cleared !== null && cleared.tags.moved.length > 0) input.onTagsChanged?.(cleared.tags)
     throw new AppError(
       'VALIDATION',
       `Write at least ${SUMMARY_TEXT_MIN} characters in this scene before summarising it`,
@@ -354,16 +372,19 @@ export async function summarizeScene(
     const unchanged =
       sourceHash(source.sceneText, source.meta, knownNames(tx, source.sceneText)) ===
       source.contentHash
-    // F-9.13: facts, sheets, tags, and the Changes log, together.
-    const derived = applyDerivedKnowledge(tx, {
-      nodeId: input.nodeId,
-      facts: parsed.facts,
-      tags: parsed.tags,
-      relations: parsed.relations,
-      threads: parsed.threads,
-      sceneText: source.sceneText,
-      now: deps.now().toISOString()
-    })
+    // F-9.13: facts, sheets, tags, and the Changes log, together. F-16.4: none of it in v2.
+    const derived =
+      input.memory === 'v2'
+        ? NOTHING_DERIVED
+        : applyDerivedKnowledge(tx, {
+            nodeId: input.nodeId,
+            facts: parsed.facts,
+            tags: parsed.tags,
+            relations: parsed.relations,
+            threads: parsed.threads,
+            sceneText: source.sceneText,
+            now: deps.now().toISOString()
+          })
     const applied = derived.facts
     const tags = derived.tags
     const row: StoredSceneSummary = {

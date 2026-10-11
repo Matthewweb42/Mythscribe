@@ -10,6 +10,8 @@ import {
   type ParsedInput,
   type Output
 } from '@shared/ipc/contract'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
+import { assertChannelMemory } from './channelAccess'
 import { IPC_LOG_PREFIX, toIpcError } from './errors'
 
 export type Handler<C extends Channel> = (input: ParsedInput<C>) => Promise<Output<C>> | Output<C>
@@ -21,13 +23,22 @@ export type Handler<C extends Channel> = (input: ParsedInput<C>) => Promise<Outp
 export type FailureObserver = (channel: Channel, error: IpcError, cause?: unknown) => void
 
 /**
- * Wraps a handler with input validation and error envelope. Pure, so it is unit-testable
- * without Electron; `register` binds it to ipcMain.
+ * The story memory the open project runs, or null when none is open (F-16.4): what the registry
+ * checks a channel's `CHANNEL_MEMORY` against before its handler runs.
+ */
+export type MemoryOf = () => StoryMemoryVersion | null
+
+/**
+ * Wraps a handler with input validation, the story-memory gate (F-16.4: a `v2` channel in a v1
+ * project, or a `v1` channel in a v2 project, is refused with VALIDATION before the handler
+ * runs, when `memoryOf` is given) and error envelope. Pure, so it is unit-testable without
+ * Electron; `register` binds it to ipcMain.
  */
 export function createHandler<C extends Channel>(
   channel: C,
   fn: Handler<C>,
-  onFailure?: FailureObserver
+  onFailure?: FailureObserver,
+  memoryOf?: MemoryOf
 ): (raw: unknown) => Promise<IpcResult<Output<C>>> {
   const schema = contract[channel].input
   return async (raw) => {
@@ -42,6 +53,7 @@ export function createHandler<C extends Channel>(
       return { ok: false, error }
     }
     try {
+      if (memoryOf !== undefined) assertChannelMemory(channel, memoryOf())
       const data = await fn(parsed.data as ParsedInput<C>)
       return { ok: true, data }
     } catch (err) {
@@ -57,9 +69,10 @@ export function createHandler<C extends Channel>(
 export function register<C extends Channel>(
   channel: C,
   fn: Handler<C>,
-  onFailure?: FailureObserver
+  onFailure?: FailureObserver,
+  memoryOf?: MemoryOf
 ): void {
-  const handler = createHandler(channel, fn, onFailure)
+  const handler = createHandler(channel, fn, onFailure, memoryOf)
   ipcMain.handle(channel, (_event, raw: unknown) => handler(raw))
 }
 

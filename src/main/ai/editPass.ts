@@ -36,6 +36,7 @@ import {
 import { AppError } from '../ipc/errors'
 import { getAiSettings } from '../project/settingsStore'
 import { projectNameWords, projectSpellingWords } from '../spellcheck/projectWords'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { getNode, type TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
 import { voiceBlock } from '../voice/voiceBlock'
@@ -217,6 +218,8 @@ export function parseEditNotes(
 
 export interface EditSceneInput {
   passId: string
+  /** F-16.4: which story memory the project runs; v2 reads its story names from records. */
+  memory: StoryMemoryVersion
   type: EditPassType
   instruction: string | null
   nodeId: string
@@ -384,8 +387,10 @@ export async function editScene(
     profile === null
       ? null
       : voiceBlock(profile, { text: headTruncate(sceneText, 20_000), pov: pov || null })
-  const allKeep = SENDS_KEEP[input.type] ? projectSpellingWords(db) : []
-  const keepWords = SENDS_KEEP[input.type] ? keepList([...projectNameWords(db), ...allKeep]) : []
+  const allKeep = SENDS_KEEP[input.type] ? projectSpellingWords(db, input.memory) : []
+  const keepWords = SENDS_KEEP[input.type]
+    ? keepList([...projectNameWords(db, input.memory), ...allKeep])
+    : []
   const keep = new Set(allKeep.map((word) => word.toLocaleLowerCase()))
   const references =
     input.type === 'continuity'
@@ -526,6 +531,8 @@ export interface EditPassRunnerDeps {
   db: () => TreeDb | null
   /** The request path for that database. */
   requestDeps: (db: TreeDb) => AiRequestDeps
+  /** F-16.4: which story memory the open project runs. */
+  memory: () => StoryMemoryVersion
   /** Every change of a pass's state: started, a scene finished, stopped, failed, done. */
   onChange: (summary: EditPassSummary) => void
   now?: () => string
@@ -618,6 +625,7 @@ export function createEditPassRunner(deps: EditPassRunnerDeps): EditPassRunner {
             deps.requestDeps(db),
             {
               passId,
+              memory: deps.memory(),
               type: row.type,
               instruction: row.instruction,
               nodeId,

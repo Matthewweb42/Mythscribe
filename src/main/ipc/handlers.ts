@@ -409,6 +409,54 @@ import {
 } from '../tag/customTemplates'
 import { isWriteChannel } from './channelAccess'
 import { emit, register as registerChannel, type EmitTarget, type Handler } from './registry'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
+import type { NameQuestion } from '@shared/memory/nameQuestions'
+import {
+  createAuthorTodo,
+  deleteAuthorTodo,
+  listAuthorTodos,
+  reorderAuthorTodos,
+  updateAuthorTodo
+} from '../memory/authorTodoStore'
+import { listDismissed, undoDismissed } from '../memory/dismissedStore'
+import {
+  assignLabel,
+  createLabel,
+  deleteLabel,
+  labelsForNode,
+  listLabels,
+  reorderLabels,
+  unassignLabel,
+  updateLabel
+} from '../memory/labelStore'
+import {
+  listNameMentions,
+  markNotAMention,
+  scanNamesFor,
+  staleNameScans
+} from '../memory/nameIndexer'
+import {
+  dropOwner,
+  indexScene,
+  indexStaleRecords,
+  pruneMemoryIndex,
+  searchMemoryPassages,
+  stalePassageOwners
+} from '../memory/passageIndexer'
+import { answerQuestion, listNameQuestions, resetNameQuestionCache } from '../memory/questions'
+import {
+  createRecord,
+  deleteRecord,
+  gateName,
+  listRecords,
+  requireRecord,
+  sameAs,
+  savePage,
+  setAliases,
+  splitRecord,
+  updateRecord
+} from '../memory/recordStore'
+import { getSceneDetails, setSceneDetails } from '../memory/sceneDetailStore'
 
 /** The parts of a BrowserWindow the handlers need; structural so tests can pass a fake. */
 export interface ClosableWindow extends EmitTarget {
@@ -534,8 +582,10 @@ export function registerHandlers({
     // Developer tools: every error envelope reaches the live log (a no-op while it is off).
     const onFailure = (failed: Channel, error: IpcError, cause?: unknown): void =>
       devtools.ipcFailure(failed, error, cause)
+    // F-16.4: a channel of the other story memory is refused before its handler runs.
+    const memoryOf = (): StoryMemoryVersion | null => manager.current()?.storyMemory ?? null
     if (!isWriteChannel(channel)) {
-      registerChannel(channel, fn, onFailure)
+      registerChannel(channel, fn, onFailure, memoryOf)
       return
     }
     registerChannel(
@@ -544,9 +594,15 @@ export function registerHandlers({
         access.assertWritable()
         return fn(input)
       },
-      onFailure
+      onFailure,
+      memoryOf
     )
   }
+  /**
+   * F-16.4: the story memory the open project runs (the stored version, or the dev-only override),
+   * which every branching feature takes as its `memory` input.
+   */
+  const memory = (): StoryMemoryVersion => manager.require().storyMemory
   /**
    * The failure envelope every AI channel answers with. Developer tools: the request path traces
    * and logs its own failures, but a feature the AI switch or its toggle forbids is refused
@@ -620,8 +676,10 @@ export function registerHandlers({
     run: async (job, requestId) => {
       const db = manager.require().connection.orm
       const deps = requestDeps(db)
+      const memoryNow = manager.require().storyMemory
       const result = await summarizeScene(db, deps, {
         nodeId: job.nodeId,
+        memory: memoryNow,
         requestId,
         onFactsChanged: (change) => publishObservedFacts(db, change),
         onTagsChanged: (change) => publishAutoTags(db, job.nodeId, change),
@@ -633,20 +691,23 @@ export function registerHandlers({
       // paid for by now, so any error of the check (provider, parse, budget) is dropped here.
       // The memo is not set on a throw, so the scene's next summary run checks again. Only a
       // cancel is passed on, so Stop still stops the job. Nothing is shown but the panel's count.
-      let checked: Awaited<ReturnType<typeof runBackgroundContinuity>>
-      try {
-        checked = await runBackgroundContinuity(db, deps, {
-          nodeId: job.nodeId,
-          requestId,
-          memo: continuityChecked
-        })
-        if (checked !== null) {
-          const stored = storeContinuityRun(db, job.nodeId, 'background', checked, deps.now())
-          if (stored.changed) emit(windows(), 'continuity:changed', { nodeIds: [job.nodeId] })
+      let checked: Awaited<ReturnType<typeof runBackgroundContinuity>> = null
+      // F-16.4: the consistency check is v1's (its findings are v1 rows); P4 replaces it.
+      if (memoryNow === 'v1') {
+        try {
+          checked = await runBackgroundContinuity(db, deps, {
+            nodeId: job.nodeId,
+            requestId,
+            memo: continuityChecked
+          })
+          if (checked !== null) {
+            const stored = storeContinuityRun(db, job.nodeId, 'background', checked, deps.now())
+            if (stored.changed) emit(windows(), 'continuity:changed', { nodeIds: [job.nodeId] })
+          }
+        } catch (err) {
+          if (err instanceof AiCancelledError) throw err
+          checked = null
         }
-      } catch (err) {
-        if (err instanceof AiCancelledError) throw err
-        checked = null
       }
       // F-11.1d: a scene with a fresh summary may fulfil a plan; one debounced plan-link job per
       // burst, gated here so a project with the feature off never queues one.
@@ -714,6 +775,8 @@ export function registerHandlers({
   }
   /** F-9.16: the knowledge moved (facts, records, tags, threads, findings, notes, metadata). */
   const queueTodo = (db: TreeDb): void => {
+    // F-16.4: the To do list is v1's; a v2 project has the author's own to-dos instead.
+    if (manager.current()?.storyMemory === 'v2') return
     todoBookMoved()
     const root = manuscriptRootId(db)
     if (root !== null) todoQueue.touch('todo', root)
@@ -737,7 +800,8 @@ export function registerHandlers({
    */
   let lastProposed: string | null = null
   const publishProposed = (): void => {
-    if (manager.current() === null) return
+    // F-16.4: tag proposals are v1's; a v2 project asks name questions instead.
+    if (manager.current()?.storyMemory !== 'v1') return
     const proposals = listProposedTags(manager.require().connection.orm)
     const json = JSON.stringify(proposals)
     if (json === lastProposed) return
@@ -755,18 +819,58 @@ export function registerHandlers({
    */
   const syncSpelling = (): Promise<void> => {
     if (manager.current() === null) return spellDictionary.sync([])
-    return spellDictionary.sync(projectSpellingWords(manager.require().connection.orm))
+    return spellDictionary.sync(projectSpellingWords(manager.require().connection.orm, memory()))
   }
 
+  /**
+   * F-16.4: the name questions as they stand now, pushed when they differ from what was last
+   * pushed (v2 only; the list is computed, as the proposed tags are in v1). Null for "nothing
+   * pushed yet", which a project change restores.
+   */
+  let lastQuestions: string | null = null
+  const publishQuestions = (): void => {
+    if (manager.current()?.storyMemory !== 'v2') return
+    const questions: NameQuestion[] = listNameQuestions(manager.require().connection.orm)
+    const json = JSON.stringify(questions)
+    if (json === lastQuestions) return
+    lastQuestions = json
+    emit(windows(), 'questions:changed', questions)
+  }
+
+  /** The value the mention queue's runs answer: whether rows moved, and whether the text was read. */
+  const NO_SCAN = { changed: false, scanned: false }
   const mentionQueue = createIndexQueue<{ changed: boolean; scanned: boolean }>({
-    kind: 'mentions',
+    // F-16.5: the v2 name scan and passage index ride the same local queue; each run below
+    // keeps to its own story memory, so a job left by the other one is dropped quietly.
+    kind: ['mentions', 'names', 'passages'],
     db: () => (manager.current() === null ? null : manager.require().connection.orm),
     run: (job) => {
-      const value = scanMentions(manager.require().connection.orm, job.nodeId, new Date())
+      const db = manager.require().connection.orm
+      const now = new Date()
+      const v2 = memory() === 'v2'
+      if (job.kind === 'names') {
+        if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
+        const value = scanNamesFor(db, job.nodeId, now)
+        if (value.changed) emit(windows(), 'names:changed', { nodeIds: [job.nodeId] })
+        if (value.scanned) publishQuestions()
+        return Promise.resolve({ requested: false, value })
+      }
+      if (job.kind === 'passages') {
+        if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
+        // Keyed to the manuscript root, the job is every record page that changed.
+        const changed =
+          job.nodeId === manuscriptRootId(db)
+            ? indexStaleRecords(db, now) > 0
+            : indexScene(db, job.nodeId, now)
+        return Promise.resolve({ requested: false, value: { changed, scanned: changed } })
+      }
+      // F-4.12: the tag mention scan is v1's.
+      if (v2) return Promise.resolve({ requested: false, value: NO_SCAN })
+      const value = scanMentions(db, job.nodeId, now)
       if (value.changed) {
         emit(windows(), 'mention:changed', { nodeIds: [job.nodeId] })
         // F-9.16: which scenes name which records is what most local To do rules count.
-        queueTodo(manager.require().connection.orm)
+        queueTodo(db)
       }
       // F-4.12b: a scan that read the document again may have changed which names are proposed,
       // whether or not any tag's mentions moved; one that short-circuited on the hash cannot.
@@ -779,6 +883,22 @@ export function registerHandlers({
     debounceMs: MENTION_DEBOUNCE_MS,
     minIntervalMs: 0
   })
+
+  /**
+   * F-16.5: the v2 backfill: every scene whose name scan or passages are out of date (a roster
+   * change makes every scene's scan stale), and one root job for the record pages.
+   */
+  const queueMemoryIndex = (db: TreeDb): void => {
+    if (memory() !== 'v2') return
+    mentionQueue.indexAll('names', staleNameScans(db))
+    const stale = stalePassageOwners(db)
+    const scenes = [...new Set(stale.filter((o) => o.kind !== 'record').map((o) => o.id))]
+    mentionQueue.indexAll('passages', scenes)
+    const root = manuscriptRootId(db)
+    if (root !== null && stale.some((owner) => owner.kind === 'record')) {
+      mentionQueue.indexAll('passages', [root])
+    }
+  }
 
   /**
    * F-14.14: automatic voice learning's own queue, one `voice` job per project keyed to the
@@ -1028,8 +1148,15 @@ export function registerHandlers({
     // "Updating…" for a run that will never happen, nor leave a run queued for the moment the
     // toggle comes on (one settings row per save; the run gates again anyway).
     const summaries = isFeatureAllowed(getAiSettings(db), 'summary')
+    const v2 = memory() === 'v2'
     for (const id of ids) {
       if (summaries) queue.touch('summary', id)
+      if (v2) {
+        // F-16.5: the local name scan and passage index, with no gate either.
+        mentionQueue.touch('names', id)
+        mentionQueue.touch('passages', id)
+        continue
+      }
       // F-4.12: the mention scan is local, so it has no gate to read — every save queues one, and
       // the scan itself answers "nothing changed" for a node that is not a manuscript document.
       // F-4.12b: a scan that read the document again republishes the proposed tags itself.
@@ -1066,7 +1193,11 @@ export function registerHandlers({
       // F-9.14: while the conversion waits for the author, the scenes an older prompt read are
       // held back, and the windows hear what it would cost (the dialog shows on `pending`).
       const hold = conversionPending(db)
-      if (hold) emit(windows(), 'knowledge:conversionChanged', conversionOf(db))
+      // F-16.4: the conversion pass is v1's; a v2 project still holds those scenes back (no
+      // unasked spend) but never hears about the dialog.
+      if (hold && memory() === 'v1') {
+        emit(windows(), 'knowledge:conversionChanged', conversionOf(db))
+      }
       if (!access.writable()) return
       if (!isFeatureAllowed(getAiSettings(db), 'summary') || !ai.get(sourceOf(db))) return
       if (lift && queue.status().paused !== null) queue.resume()
@@ -1134,6 +1265,8 @@ export function registerHandlers({
     const saved = saveNotes(db, id, notes)
     // F-9.16: a name the notes explain is no longer undefined.
     queueTodo(db)
+    // F-16.5: a scene's notes are passages of their own (a node that is no scene is skipped).
+    if (memory() === 'v2') mentionQueue.touch('passages', id)
     return saved
   })
 
@@ -1209,6 +1342,8 @@ export function registerHandlers({
     const stored = setSceneMeta(db, id, meta)
     // F-9.16: a scene's point of view and its idea status feed the To do rules.
     queueTodo(db)
+    // F-16.5: the Idea status relabels the scene's passages.
+    if (memory() === 'v2') queueMemoryIndex(db)
     return stored
   })
 
@@ -1414,7 +1549,13 @@ export function registerHandlers({
 
   register('compileState:get', () => getCompileState(manager.require().connection.orm))
 
-  register('compileState:set', (value) => setCompileState(manager.require().connection.orm, value))
+  register('compileState:set', (value) => {
+    const db = manager.require().connection.orm
+    const stored = setCompileState(db, value)
+    // F-16.5: a scene left out of compile is relabelled in the passage index.
+    queueMemoryIndex(db)
+    return stored
+  })
 
   register('bookDetails:get', () => getBookDetails(manager.require().connection.orm))
 
@@ -3166,7 +3307,12 @@ export function registerHandlers({
     try {
       const db = manager.require().connection.orm
       const deps = requestDeps(db)
-      const result = await runProofread(db, deps, { nodeId, selection, requestId })
+      const result = await runProofread(db, deps, {
+        nodeId,
+        memory: memory(),
+        selection,
+        requestId
+      })
       const { fixes, usage, costUsd, cached, model } = result
       const flaggedFix = fixes.find((entry) => entry.flagged)
       const proposal = createProposal(db, {
@@ -3210,6 +3356,7 @@ export function registerHandlers({
   const editPasses = createEditPassRunner({
     db: () => (manager.current() === null ? null : manager.require().connection.orm),
     requestDeps: (db) => requestDeps(db),
+    memory,
     onChange: (summary) => emit(windows(), 'editPass:changed', summary)
   })
   const passSummary = (db: AiDb, id: string): ReturnType<typeof toSummary> => {
@@ -4252,6 +4399,216 @@ export function registerHandlers({
     return null
   })
 
+  // Story memory v2 (F-16.4, F-16.5, F-16.7, F-16.10, F-16.11; plan P1 §1). The registry has
+  // already refused each of these in a v1 project (`CHANNEL_MEMORY`). All of it is local: no AI,
+  // no key, nothing sent anywhere; it works with Use AI off.
+
+  /**
+   * The roster moved (a record made, renamed, merged, split or deleted, a nickname confirmed):
+   * the windows hear which records, every scene's name scan is due again (the roster is part of
+   * its hash), the questions and the spellchecker's names follow.
+   */
+  const rosterChanged = (db: TreeDb, recordIds: readonly string[]): void => {
+    emit(windows(), 'record:changed', { recordIds: [...recordIds] })
+    queueMemoryIndex(db)
+    publishQuestions()
+    void syncSpelling()
+  }
+
+  register('record:list', () => listRecords(manager.require().connection.orm))
+
+  register('record:get', ({ id }) => requireRecord(manager.require().connection.orm, id))
+
+  register('record:create', ({ name, categoryId, aliases, force }) => {
+    const db = manager.require().connection.orm
+    const made = createRecord(db, { name, categoryId, aliases, force }, new Date())
+    if ('record' in made) rosterChanged(db, [made.record.id])
+    return made
+  })
+
+  register('record:update', async ({ id, categoryId, image }) => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const previous = requireRecord(db, id).image
+    let fileName: string | null | undefined
+    if (image === 'choose') {
+      const source = await dialogs.chooseEntityImage()
+      if (source !== null)
+        fileName = addImageAsset(session.folder, ENTITY_IMAGES_DIR, source, 'image')
+    } else if (image === 'remove') {
+      fileName = null
+    }
+    let updated: ReturnType<typeof updateRecord>
+    try {
+      updated = updateRecord(
+        db,
+        id,
+        {
+          ...(categoryId === undefined ? {} : { categoryId }),
+          ...(fileName === undefined ? {} : { image: fileName })
+        },
+        new Date()
+      )
+    } catch (err) {
+      if (typeof fileName === 'string')
+        removeImageAsset(session.folder, ENTITY_IMAGES_DIR, fileName)
+      throw err
+    }
+    // The record's image is its own file, so the one it replaced goes.
+    if (fileName !== undefined && previous !== null && previous !== fileName) {
+      removeImageAsset(session.folder, ENTITY_IMAGES_DIR, previous)
+    }
+    // A category is a kind, which the name scan reads (a group answers plurals).
+    if (categoryId !== undefined) rosterChanged(db, [id])
+    else emit(windows(), 'record:changed', { recordIds: [id] })
+    return updated
+  })
+
+  register('record:setAliases', ({ id, name, aliases }) => {
+    const db = manager.require().connection.orm
+    const updated = setAliases(db, id, { name, aliases }, new Date())
+    rosterChanged(db, [id])
+    return updated
+  })
+
+  register('record:savePage', ({ id, page, doc }) => {
+    const db = manager.require().connection.orm
+    const saved = savePage(db, id, page, doc, new Date())
+    emit(windows(), 'record:changed', { recordIds: [id] })
+    // F-16.5: Pinned and Ideas are passages; one root job indexes every page that changed.
+    const root = manuscriptRootId(db)
+    if (root !== null) mentionQueue.touch('passages', root)
+    return saved
+  })
+
+  register('record:delete', ({ id }) => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const gone = deleteRecord(db, id)
+    dropOwner(db, 'record', id)
+    if (gone.image !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, gone.image)
+    rosterChanged(db, [id])
+    return null
+  })
+
+  register('record:sameAs', ({ keepId, mergeId }) => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const { record: kept, droppedImage } = sameAs(db, keepId, mergeId, new Date())
+    dropOwner(db, 'record', mergeId)
+    if (droppedImage !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, droppedImage)
+    rosterChanged(db, [keepId, mergeId])
+    return kept
+  })
+
+  register('record:split', ({ id, aliasIds, intoId }) => {
+    const db = manager.require().connection.orm
+    const result = splitRecord(db, id, aliasIds, intoId, new Date())
+    rosterChanged(db, [result.from.id, result.into.id])
+    return result
+  })
+
+  register('record:gate', ({ name, exceptId }) =>
+    gateName(manager.require().connection.orm, name, exceptId)
+  )
+
+  register('label:list', () => listLabels(manager.require().connection.orm))
+  register('label:create', ({ name, kind, colour }) =>
+    createLabel(
+      manager.require().connection.orm,
+      { name, kind, ...(colour === undefined ? {} : { colour }) },
+      new Date()
+    )
+  )
+  register('label:update', ({ id, name, kind, colour }) =>
+    updateLabel(
+      manager.require().connection.orm,
+      id,
+      {
+        ...(name === undefined ? {} : { name }),
+        ...(kind === undefined ? {} : { kind }),
+        ...(colour === undefined ? {} : { colour })
+      },
+      new Date()
+    )
+  )
+  register('label:delete', ({ id }) => deleteLabel(manager.require().connection.orm, id))
+  register('label:reorder', ({ ids }) => reorderLabels(manager.require().connection.orm, ids))
+  register('label:assign', ({ labelId, nodeId }) =>
+    assignLabel(manager.require().connection.orm, labelId, nodeId)
+  )
+  register('label:unassign', ({ labelId, nodeId }) =>
+    unassignLabel(manager.require().connection.orm, labelId, nodeId)
+  )
+  register('label:forNode', ({ nodeId }) => labelsForNode(manager.require().connection.orm, nodeId))
+
+  register('dismissed:list', () => listDismissed(manager.require().connection.orm))
+
+  register('dismissed:undo', ({ id }) => {
+    const db = manager.require().connection.orm
+    const undone = undoDismissed(db, id)
+    // What it kept quiet may come back: a mention (every scan's hash holds the list), a question.
+    if (undone.kind === 'notMention') queueMemoryIndex(db)
+    publishQuestions()
+    return undone
+  })
+
+  register('authorTodo:list', () => listAuthorTodos(manager.require().connection.orm))
+  register('authorTodo:create', (input) =>
+    createAuthorTodo(manager.require().connection.orm, input, new Date())
+  )
+  register('authorTodo:update', ({ id, patch }) =>
+    updateAuthorTodo(manager.require().connection.orm, id, patch, new Date())
+  )
+  register('authorTodo:delete', ({ id }) => deleteAuthorTodo(manager.require().connection.orm, id))
+  register('authorTodo:reorder', ({ ids }) =>
+    reorderAuthorTodos(manager.require().connection.orm, ids)
+  )
+
+  register('sceneDetail:get', ({ nodeId }) =>
+    getSceneDetails(manager.require().connection.orm, nodeId)
+  )
+
+  register('sceneDetail:set', ({ nodeId, details }) => {
+    const db = manager.require().connection.orm
+    const stored = setSceneDetails(db, nodeId, details, new Date())
+    // The typed POV settles shared aliases, so the scene's names are read again.
+    if (manuscriptDocuments(db).some((row) => row.id === nodeId)) {
+      mentionQueue.touch('names', nodeId)
+    }
+    return stored
+  })
+
+  register('names:forNode', ({ nodeId }) =>
+    listNameMentions(manager.require().connection.orm, nodeId)
+  )
+
+  register('names:notAMention', ({ mentionId }) => {
+    const db = manager.require().connection.orm
+    const tombstone = markNotAMention(db, mentionId, new Date())
+    if (tombstone.nodeId !== null) emit(windows(), 'names:changed', { nodeIds: [tombstone.nodeId] })
+    // The list is part of every scan's hash: the same phrase elsewhere is read again too.
+    queueMemoryIndex(db)
+    return tombstone
+  })
+
+  register('names:questions', () => listNameQuestions(manager.require().connection.orm))
+
+  register('names:answer', ({ answer }) => {
+    const db = manager.require().connection.orm
+    const result = answerQuestion(db, answer, new Date())
+    if (result.kind === 'record') rosterChanged(db, [result.record.id])
+    else publishQuestions()
+    return result
+  })
+
+  register('passages:search', ({ query, sources, limit }) =>
+    searchMemoryPassages(manager.require().connection.orm, query, {
+      limit,
+      ...(sources === undefined ? {} : { sources })
+    })
+  )
+
   manager.onChange((info) => {
     // Open, create, and close all land here: a profile built for one project never answers for another.
     resetVoiceProfileCache()
@@ -4281,6 +4638,9 @@ export function registerHandlers({
     // because the list happens to read the same as the last one's.
     resetProposedTagCache()
     lastProposed = null
+    // F-16.4: the same for the name questions.
+    resetNameQuestionCache()
+    lastQuestions = null
     // F-10.1: the cached searchable texts are keyed by node id, which means nothing in
     // another project.
     clearSearchCache()
@@ -4293,7 +4653,9 @@ export function registerHandlers({
     // F-9.12: the local knowledge index, before anything reads the bank or the scenes: the
     // one-time conversion (every name tag a record, every record a tag) and the passages of
     // documents that left the manuscript. Local and free; a failure never stops the open.
-    if (info) {
+    // F-16.4: a v2 project skips all of it (v1's conversions write v1 tables) and prunes its own
+    // passage index instead.
+    if (info?.storyMemory === 'v1') {
       try {
         const db = manager.require().connection.orm
         convertKnowledgeIndex(db)
@@ -4305,6 +4667,12 @@ export function registerHandlers({
       } catch (err) {
         console.warn('Could not update the knowledge index', err)
       }
+    } else if (info?.storyMemory === 'v2') {
+      try {
+        pruneMemoryIndex(manager.require().connection.orm)
+      } catch (err) {
+        console.warn('Could not update the story memory index', err)
+      }
     }
     // F-3.11, F-3.14: the spellchecker accepts the open project's words and story names and no
     // other project's.
@@ -4313,15 +4681,23 @@ export function registerHandlers({
     if (info) {
       queue.load()
       mentionQueue.load()
-      mentionQueue.indexAll('mentions', staleMentionNodeIds(manager.require().connection.orm))
-      voiceQueue.load()
-      // F-9.16: the To do list is brought up to date on every open (local, free).
-      todoQueue.load()
-      // F-9.18: the sheets left due when the project closed are synced (no new pauses start).
-      sheetSync.load()
       const opened = manager.require().connection.orm
-      const todoRoot = manuscriptRootId(opened)
-      if (todoRoot !== null) todoQueue.indexAll('todo', [todoRoot])
+      if (info.storyMemory === 'v2') {
+        // F-16.4: v2's open: the stale name scans and passages are queued; the tag mentions, the
+        // To do sync, the sheet sync and the tag proposals are v1's and do not run.
+        queueMemoryIndex(opened)
+        voiceQueue.load()
+        publishQuestions()
+      } else {
+        mentionQueue.indexAll('mentions', staleMentionNodeIds(opened))
+        voiceQueue.load()
+        // F-9.16: the To do list is brought up to date on every open (local, free).
+        todoQueue.load()
+        // F-9.18: the sheets left due when the project closed are synced (no new pauses start).
+        sheetSync.load()
+        const todoRoot = manuscriptRootId(opened)
+        if (todoRoot !== null) todoQueue.indexAll('todo', [todoRoot])
+      }
       backfillSummaries(false)
       publishProposed()
       try {

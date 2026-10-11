@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(29)
+    expect(result.version).toBe(32)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -134,6 +134,20 @@ describe('migrate', () => {
     expect(tables()).toContain('snapshot_text')
     expect(tables()).toContain('context_file')
     expect(tables()).toContain('passage_fts')
+    for (const table of [
+      'record',
+      'alias',
+      'label',
+      'label_link',
+      'dismissed',
+      'author_todo',
+      'scene_detail',
+      'name_mention',
+      'memory_scan',
+      'memory_passage_fts'
+    ]) {
+      expect(tables()).toContain(table)
+    }
   })
 })
 
@@ -1154,5 +1168,156 @@ describe('ai_usage.reported_cost_usd and reasoning_tokens (0028, F-16.1)', () =>
     expect(
       db.prepare("SELECT reported_cost_usd, reasoning_tokens FROM ai_usage WHERE id = 'u2'").get()
     ).toEqual({ reported_cost_usd: 0.0101, reasoning_tokens: 250 })
+  })
+})
+
+/**
+ * Story memory v2 (F-16.4, F-16.5; plan P1 §0): migrations 0029–0031 are additive only. A
+ * database as the build before them left it, holding a row in every table, comes out with every
+ * one of those tables, their rows and every schema object byte for byte as they were; only new
+ * objects are added, and they start empty (decision P1-D1: nothing is copied in a migration).
+ */
+describe('story memory tables (0029–0031) leave every older table untouched', () => {
+  let db: Database.Database
+  const BEFORE = 29
+
+  /** Every schema object's definition, by type and name. */
+  const schema = (): { type: string; name: string; sql: string | null }[] =>
+    db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all() as {
+      type: string
+      name: string
+      sql: string | null
+    }[]
+
+  /** Every table's rows, in rowid order (virtual tables and their shadow tables included). */
+  const dump = (names: readonly string[]): Record<string, unknown[]> =>
+    Object.fromEntries(names.map((name) => [name, db.prepare(`SELECT * FROM "${name}"`).all()]))
+
+  const tableNames = (): string[] =>
+    (
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+        .all() as { name: string }[]
+    ).map((row) => row.name)
+
+  /** A value for a column nobody constrained: text, a number, or a real. */
+  const valueFor = (type: string, column: string): string | number => {
+    if (/INT/i.test(type)) return 1
+    if (/REAL/i.test(type)) return 0.5
+    return `${column}-1`
+  }
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, loadMigrations().slice(0, BEFORE))
+    // One row in every table, foreign keys off so each can be filled on its own. The node table
+    // carries a check (a root has a section type), so its row is written by hand.
+    db.pragma('foreign_keys = OFF')
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
+       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, NULL, '2026-01-01', '2026-01-01')`
+    ).run()
+    const virtual = new Set(
+      (
+        db
+          .prepare("SELECT name FROM sqlite_master WHERE sql LIKE 'CREATE VIRTUAL TABLE%'")
+          .all() as {
+          name: string
+        }[]
+      ).map((row) => row.name)
+    )
+    const shadow = (name: string): boolean =>
+      [...virtual].some((table) => name.startsWith(`${table}_`))
+    for (const table of tableNames()) {
+      if (table === 'node' || table === 'schema_migrations' || shadow(table)) continue
+      const columns = db.prepare(`PRAGMA table_info("${table}")`).all() as {
+        name: string
+        type: string
+      }[]
+      const names = columns.map((column) => `"${column.name}"`).join(', ')
+      const marks = columns.map(() => '?').join(', ')
+      db.prepare(`INSERT INTO "${table}" (${names}) VALUES (${marks})`).run(
+        ...columns.map((column) => valueFor(column.type, column.name))
+      )
+    }
+    db.pragma('foreign_keys = ON')
+  })
+  afterEach(() => db.close())
+
+  it('keeps sqlite_master and every pre-0029 table byte-identical, and adds only empty tables', () => {
+    const tablesBefore = tableNames()
+    for (const table of tablesBefore) {
+      if (table !== 'schema_migrations') {
+        expect(
+          (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n,
+          table
+        ).toBeGreaterThan(0)
+      }
+    }
+    const objectsBefore = schema()
+    const rowsBefore = dump(tablesBefore.filter((table) => table !== 'schema_migrations'))
+
+    const result = migrate(db)
+    expect(result.applied).toEqual([
+      '0029_story_records',
+      '0030_name_index',
+      '0031_memory_passage_fts'
+    ])
+
+    const objectsAfter = schema()
+    const kept = objectsAfter.filter((object) =>
+      objectsBefore.some((before) => before.type === object.type && before.name === object.name)
+    )
+    expect(JSON.stringify(kept)).toBe(JSON.stringify(objectsBefore))
+    expect(JSON.stringify(dump(Object.keys(rowsBefore)))).toBe(JSON.stringify(rowsBefore))
+
+    // FTS5 keeps its own bookkeeping in shadow tables (`memory_passage_fts_config`, …).
+    const added = tableNames().filter(
+      (table) => !tablesBefore.includes(table) && !table.startsWith('memory_passage_fts_')
+    )
+    expect(added.sort()).toEqual([
+      'alias',
+      'author_todo',
+      'dismissed',
+      'label',
+      'label_link',
+      'memory_passage_fts',
+      'memory_scan',
+      'name_mention',
+      'record',
+      'scene_detail'
+    ])
+    for (const table of added) {
+      expect(
+        (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n,
+        table
+      ).toBe(0)
+    }
+  })
+
+  it('opens at 0031 with a passage table that stems, folds diacritics and filters by its labels', () => {
+    migrate(db)
+    const insert = db.prepare(
+      'INSERT INTO memory_passage_fts (source, owner_id, para, canon, text) VALUES (?, ?, ?, ?, ?)'
+    )
+    insert.run('scene', 's1', 0, 'canon', 'Mara was running past the café.')
+    insert.run('pinned', 'r1', 0, 'notCanon', 'Mara runs a bakery.')
+    const hits = (query: string, source?: string): number =>
+      (
+        db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM memory_passage_fts WHERE memory_passage_fts MATCH ?${
+              source === undefined ? '' : ' AND source = ?'
+            }`
+          )
+          .get(...(source === undefined ? [query] : [query, source])) as { n: number }
+      ).n
+    expect(hits('"runs"')).toBe(2)
+    expect(hits('"cafe"')).toBe(1)
+    expect(hits('"mara"', 'pinned')).toBe(1)
+    // The labels are not searchable words.
+    expect(hits('"notCanon"')).toBe(0)
   })
 })

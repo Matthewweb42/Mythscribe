@@ -43,7 +43,12 @@ export const JobKind = z.enum([
   'todo',
   // F-9.18: the sheet sync job, one per project (keyed to the manuscript root): the sheets left
   // alone for 30 seconds since an edit (the due list, a settings row) are made true to each other.
-  'sheetSync'
+  'sheetSync',
+  // F-16.5 (story memory v2 only): the local name scan of one scene, on the mention queue.
+  'names',
+  // F-16.5 (story memory v2 only): the local passage index of one scene and its notes, or, keyed
+  // to the manuscript root, of every record page that changed. On the mention queue.
+  'passages'
 ])
 export type JobKind = z.infer<typeof JobKind>
 

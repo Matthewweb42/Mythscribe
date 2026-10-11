@@ -73,12 +73,13 @@ export interface IndexQueueOptions<T> {
   /** The open project's database, or null when none is open; read at run time, never captured. */
   db: () => TreeDb | null
   /**
-   * The only kind of job this instance may see in `index_job`. Two instances share the table
+   * The only kinds of job this instance may see in `index_job`. Two instances share the table
    * (F-4.12's local mention scan runs beside the provider-backed summaries), so an instance
    * that filtered nothing would count, run, cancel, and retry the other one's rows. Left out,
-   * the instance owns the whole table.
+   * the instance owns the whole table. The mention queue owns several (F-16.5: `names` and
+   * `passages` beside `mentions`).
    */
-  kind?: JobKind
+  kind?: JobKind | readonly JobKind[]
   /** Runs one job. `requestId` is registered in flight, so the run can be aborted. */
   run: (job: QueuedJob, requestId: string) => Promise<JobRun<T>>
   /** Aborts the request in flight under that id (the inflight registry, F-5.10). */

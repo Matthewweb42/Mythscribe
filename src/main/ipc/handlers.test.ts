@@ -94,9 +94,12 @@ import {
   getObservedDismissed,
   getVoiceAutoState,
   setObservedDismissed,
+  setStoryMemory,
   setVoiceNotes
 } from '../project/settingsStore'
 import { createTag } from '../tag/tagStore'
+import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
+import type { TiptapNodeT } from '@shared/tiptap'
 import { withObservedDismissed } from '@shared/observedFacts'
 import { aiProposal } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
@@ -8719,5 +8722,145 @@ describe('context library', () => {
     expect(
       await invoke('organise:plan', { instruction: '', scope: [], requestId: 'o-2' })
     ).toMatchObject({ ok: false, code: 'DISABLED', requestId: 'o-2' })
+  })
+})
+
+// F-16.4, F-16.5, F-16.7, F-16.10, F-16.11 (story memory v2, plan P1 slice 1): the v1/v2 gate,
+// the v2 open path, and the local name and passage index through the mention queue. The stores
+// have their own tests under `src/main/memory/`.
+describe('story memory v2 (F-16.4, F-16.5)', () => {
+  const sentOf = (channel: string): unknown[] =>
+    vi
+      .mocked(fakeWin.webContents.send)
+      .mock.calls.filter(([sent]) => sent === channel)
+      .map(([, payload]) => payload)
+
+  const paragraphs = (...texts: string[]): TiptapNodeT => ({
+    type: 'doc',
+    content: texts.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] }))
+  })
+
+  /** A project switched to v2 and opened again; the manuscript's first scene. */
+  async function openV2(): Promise<string> {
+    const created = await invoke('project:create', {
+      name: 'Memory',
+      format: 'novel',
+      directory: tmp
+    })
+    setStoryMemory(manager.require().connection.orm, 'v2', new Date())
+    await invoke('project:close', undefined)
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    const info = await invoke('project:open', { path: created?.path ?? '' })
+    expect(info?.storyMemory).toBe('v2')
+    const scene = manuscriptReadingOrder(await invoke('tree:list', undefined))[0]
+    if (scene === undefined) throw new Error('skeleton not seeded')
+    return scene
+  }
+
+  it('refuses a v2 channel in a v1 project, and a v1 write in a v2 project, before the handler runs', async () => {
+    await invoke('project:create', { name: 'Plain', format: 'novel', directory: tmp })
+    await expect(invoke('record:list', undefined)).rejects.toThrow(
+      'VALIDATION: This project uses the other story memory'
+    )
+    await invoke('project:close', undefined)
+    await openV2()
+    expect(await invoke('record:list', undefined)).toEqual([])
+    await expect(invoke('tag:create', { name: 'mara', category: 'character' })).rejects.toThrow(
+      'VALIDATION: This project uses the other story memory'
+    )
+    await expect(invoke('entity:create', { kind: 'character', name: 'Mara' })).rejects.toThrow(
+      'VALIDATION: This project uses the other story memory'
+    )
+    // Reads of v1's memory and the shared channels still answer.
+    expect(await invoke('tag:list', undefined)).toEqual([])
+    expect((await invoke('tree:list', undefined)).length).toBeGreaterThan(0)
+  })
+
+  it('opens without v1’s steps: no tag proposals, and the name questions are published instead', async () => {
+    await openV2()
+    expect(sentOf('tag:proposedChanged')).toEqual([])
+    expect(sentOf('questions:changed')).toEqual([[]])
+  })
+
+  it('scans names and indexes passages after a save, locally, and asks about a new name', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await openV2()
+      const made = await invoke('record:create', {
+        name: 'Mara Vell',
+        categoryId: 'character',
+        aliases: [{ text: 'Mara' }]
+      })
+      if (!('record' in made)) throw new Error('blocked')
+      expect(sentOf('record:changed')).toContainEqual({ recordIds: [made.record.id] })
+      // The spellchecker accepts the record's names.
+      expect(spellSync.mock.calls.at(-1)?.[0]).toEqual(expect.arrayContaining(['Mara', 'Vell']))
+
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs('Mara walked to the harbour.', 'They met Hesk there, and Hesk laughed.')
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect(
+        (await invoke('names:forNode', { nodeId: scene })).map((m) => [m.recordId, m.text])
+      ).toEqual([[made.record.id, 'Mara']])
+      expect(sentOf('names:changed')).toContainEqual({ nodeIds: [scene] })
+      expect(
+        (await invoke('passages:search', { query: 'harbour' })).map((hit) => [
+          hit.source,
+          hit.ownerId
+        ])
+      ).toEqual([['scene', scene]])
+      const questions = await invoke('names:questions', undefined)
+      expect(questions.map((q) => [q.kind, q.name])).toEqual([['newName', 'Hesk']])
+      // No tag mention was scanned and nothing was sent to a model.
+      expect(await invoke('mention:listForNode', { nodeId: scene })).toEqual([])
+      expect(complete).not.toHaveBeenCalled()
+
+      // Not a name: the question goes, onto Dismissed, and Undo brings it back.
+      const answered = await invoke('names:answer', { answer: { kind: 'notAName', name: 'Hesk' } })
+      expect(answered.kind).toBe('dismissed')
+      expect(await invoke('names:questions', undefined)).toEqual([])
+      const dismissed = await invoke('dismissed:list', undefined)
+      expect(dismissed.count).toBe(1)
+      await invoke('dismissed:undo', { id: dismissed.items[0]?.id ?? '' })
+      expect((await invoke('names:questions', undefined)).map((q) => q.name)).toEqual(['Hesk'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps labels, to-dos, scene details and record pages through their channels', async () => {
+    const scene = await openV2()
+    const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+    if (!('record' in made)) throw new Error('blocked')
+    const label = await invoke('label:create', { name: 'Wry', kind: 'tone' })
+    expect(await invoke('label:assign', { labelId: label.id, nodeId: scene })).toEqual([label])
+    const todo = await invoke('authorTodo:create', { text: 'Fix the ending' })
+    expect(todo).toMatchObject({ text: 'Fix the ending', nodeId: null, recordId: null })
+    const details = await invoke('sceneDetail:set', {
+      nodeId: scene,
+      details: {
+        povRecordId: made.record.id,
+        place: { recordId: null, text: 'the harbour' },
+        time: { text: 'dusk' },
+        storyYear: 1811,
+        alsoHere: []
+      }
+    })
+    expect(details).toMatchObject({ povRecordId: made.record.id, storyYear: 1811, gone: [] })
+    const saved = await invoke('record:savePage', {
+      id: made.record.id,
+      page: 'pinned',
+      doc: paragraphs('Eyes: grey')
+    })
+    expect(saved.pinned).toEqual(paragraphs('Eyes: grey'))
+    expect(await invoke('record:gate', { name: 'Mar' })).toMatchObject({
+      outcome: 'blocked',
+      rule: 'prefix',
+      recordId: made.record.id
+    })
+    const blocked = await invoke('record:create', { name: 'Mar', categoryId: 'character' })
+    expect('gate' in blocked).toBe(true)
   })
 })
