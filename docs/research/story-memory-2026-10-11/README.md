@@ -1,10 +1,15 @@
-# Story memory redesign (2026-10-11), awaiting the author's approval
+# Story memory redesign (2026-10-11), approved by the author 2026-10-11
 
 The author asked for a from-zero redesign of story memory (tags, lookups, sheets, auto-updates) optimised
-for accuracy, ease of use, and token efficiency. Not approved yet: nothing here is built, and FEATURES.md
-is unchanged until the author signs off.
+for accuracy, ease of use, and token efficiency. **Approved by the author on 2026-10-11**, with the
+recommended defaults except decision 3, which the author changed (see `design.md` › "Decisions
+(2026-10-11)"). Building has started: P0 is in progress.
 
-- The plan the author reviews (Claude Docs, two tabs: Plan, Technical design, with an 8-row decisions
+- The spec: `FEATURES.md` §2.16 (F-16.1–16.38); milestones M8 (P0–P4 and the switch-over, before
+  launch) and M9 (P5–P9, after launch) in `FEATURES.md` §6. The approval entry is in `QUESTIONS.md`
+  (2026-10-11 · F-16).
+- Phase plans: `plans/` (`plans/P0.md` first).
+- The plan the author reviewed (Claude Docs, two tabs: Plan, Technical design, with an 8-row decisions
   table): https://claude.ai/artifact/UZ3sYxeoTL1cs3sLNb2Lic
 - `author-answers.md`: the author's 24 binding answers from the Q&A.
 - `design.md`: the final design (judge panel of three designs, merged, then revised after a four-lens

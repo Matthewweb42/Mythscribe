@@ -12,6 +12,27 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-11 · F-16 (story memory redesign) · Approved: the eight decisions, and what it supersedes
+- Question: The from-zero story memory redesign (`docs/research/story-memory-2026-10-11/design.md`, the plan doc linked from that folder's `README.md`) ended with eight open decisions, each with a recommended default.
+- **Decided by the author 2026-10-11: approved, build it.** The author took the recommended default on 1, 2 and 4–8, and changed 3:
+  1. Build before launch (about 10 weeks). The launch line moves below the new milestone M8 Story memory (`FEATURES.md` §6).
+  2. Plan links are applied automatically, marked AI-made, with *Unlink* (F-16.21).
+  3. **Changed by the author.** The recommended default was "goes into Ideas unless you say pin it". Instead, when the author explicitly asks Ms Scribe to put something on a sheet ("add this to Mara's sheet"), it goes there (Pinned) with a quick confirmation and an Undo. When Ms Scribe cannot tell from context whether it is canon or an idea, it asks "Is this an idea or canon?" as a two-choice quick question (F-16.26).
+  4. When the text disagrees with a typed POV, place or time, the text's value shows with the typed one dimmed, and the author is asked once (F-16.18, F-16.29).
+  5. One typed story year per time jump carries forward for ages (F-16.23).
+  6. Uploads are filed on the strong model with reasoning off, about 15¢ per 20,000 words (F-16.9).
+  7. The Cloud monthly background cap defaults to $1 (F-16.19).
+  8. Sheet text the AI wrote earlier is kept in a "Filed by AI earlier: please check" block marked Not canon (F-16.15).
+- **Decided by Claude, unconfirmed (decision 3 against the chat modes):** in Auto, an explicit sheet write lands at once with the confirmation and Undo; in Ask, Ask's one click is the quick confirmation; Plan never writes. An explicit "save this idea" or "brainstorm" goes to Ideas without the question.
+- **Superseded by the redesign (open entries closed without action):**
+  - M7: `2026-10-08 · M7 (F-8.7, F-9.12–F-9.15, F-5.24) · Knowledge model: the plan's decisions`. Everything there except F-8.7 is replaced by F-16 and never ticked; F-8.7's backup stays and starts the switch-over.
+  - F-9.17–9.19: the five 2026-10-10 entries on the List/Cards choice, sheet sync and Story bible settings. The redesign has one sheet view with no sync, so there is nothing for you to test there.
+  - F-5.25 (two 2026-10-10 entries) and F-4.14 (three 2026-10-08 entries): replaced by Dismissed, *Rebuild memory* (F-16.10, F-16.19) and records with aliases (F-16.4).
+  
+  Each of these entries carries a one-line Superseded note below. During the build (Part 4 rules), edit requests about tags, entities, the knowledge model, Organise and To do are parked and logged here as superseded. The installed app keeps today's memory (`storyMemory: v1`) until you start the switch-over (F-16.31).
+- Status: P0 (F-16.1–16.3) in progress; plan `docs/research/story-memory-2026-10-11/plans/P0.md`. Your one step in P0: run `npm run ai:probe` once with your OpenRouter key (a few cents) when it is built.
+- To change it: decision 3 lives in F-16.26 (`agent.v9`, P3); the others are in the F-16 lines named above and `design.md` › "Decisions (2026-10-11)".
+
 ## 2026-10-11 · F-9.8 · Upload review: what counts as a conflict, and a name the story bible already has
 - Question: You reported conflicts that were not conflicts, and Apply failing with 'A world-building item named "Fathoms" already exists'. Where is the line, and what happens to a sheet Apply cannot write?
 - Chosen (decided by Claude, unconfirmed): (1) A conflict is decided locally, word by word, not by the AI: case, accents, punctuation, apostrophes, spacing, and a plural's final s are ignored. Same words, or the sheet already saying everything the upload says: nothing to review. An empty sheet field, a placeholder (Unknown, TBD, TBC, n/a, todo), or an upload that keeps every word of the sheet's value and adds more ("Captain of the guard" → "Captain of the city guard since 1201"): a fill, listed under Updates, and the upload's longer value replaces the sheet's. Each side saying something the other does not ("34" against "35", "Stubborn" against "Gentle"), or a negation gained or lost ("married" against "not married"): a conflict, the sheet's value kept unless you pick the upload's. Two files saying the same thing, or one saying more of it, give one value instead of "A / A+". (2) The Fathoms error: the model filed one name under two categories (a place in one chunk, a world item in the next); the first claimed your World sheet and the second became a new "Fathoms". Now a group named after a sheet another group already fills joins it (its fields not of that category go to its details), and before Apply any new sheet whose name its category already has fills that sheet instead; two new sheets of one name in one category become one. (3) Apply writes each sheet on its own: if a create still collides, it fills the existing sheet (empty fields only; its own values stay, since you never saw that conflict); a sheet that cannot be written (deleted since the review, or a page over its length cap) is left out with a warning naming it and why, and everything else applies.
@@ -60,35 +81,41 @@ do. Review, then confirm, change, or delete the entry.
 - Chosen (decided by Claude, unconfirmed): (1) the page order is the field order you set in the same tab (one order, not two); (2) each field is Heading or Paragraph, one-line fields default to Paragraph and long ones to Heading; the length is per category; (3) fields are saved with a button (renames, reorders, additions and removals together) because a removal moves text into Notes on every sheet of the category, which asks first and names how many sheets; (4) Notes cannot be removed or renamed and stays last (removals need somewhere to go); (5) Threads are not editable here (their fields drive the thread view); (6) the default view applies to the New … dialog and the quick add; sheets the AI or an upload makes keep their own choice.
 - Alternatives: a separate page order; one length for the whole bible; instant saves with an Undo instead of a Save button.
 - To change it: `src/renderer/features/entities/StoryBibleSettingsTab.tsx`, `src/main/entity/categoryFields.ts`, `src/shared/storyBibleSettings.ts`.
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-10 · F-9.18 · Sheet sync lands on its own in every chat mode
 - Question: Should the sync follow the chat's Auto/Ask/Plan mode (held for Apply at Ask and Plan), or land on its own?
 - Decided by the author 2026-10-10: lands on its own in every mode, with Undo. Both directions (the page written up from the fields, and page edits filed into the fields) are applied at once in Auto, Ask, and Plan, each logged in Changes (source "Sheet sync") with an Undo. There is no Apply/Dismiss step; the out-of-date bar (Write up now / File now / Try again, and the AI-off message) stays.
 - To change it: `src/main/ai/sheetSync.ts` (`runSheetSync`).
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-10 · F-9.18 · How AI-written page text is marked, and why it fits AI rule 1
 - Question: The Blank page now holds prose the AI wrote. How is it marked, and is it allowed?
 - Chosen (decided by Claude, unconfirmed): the page is derived from the author's own sheet text (the fields), never from the manuscript, and never enters the manuscript — the same footing as the derived index data rule 1 already allows (summaries, facts), but stored in the sheet because it is the sheet's other view. Each paragraph the AI writes is remembered by hash (`entity.sync.aiParagraphs`); the page shows "Written up by AI from your fields" or "N of M paragraphs written up by AI…". A paragraph the author edits stops matching and counts as theirs. Every write-up is costed in the ledger and has an Undo in Changes. Rule 2 (voice profile, brief, exemplars, fidelity check) is not applied: this is story-bible reference text, not manuscript prose, and the voice block would multiply its cost.
 - Alternatives: mark AI paragraphs inline (the page would need a rich-text editor instead of the plain textarea); apply the voice block and fidelity check to write-ups.
 - To change it: `src/main/entity/sheetSyncState.ts` (`aiParagraphs`), `SheetSyncBar.tsx`, a new prompt version for rule 2.
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-10 · F-9.18 · Existing sheets: what the first sync does
 - Question: Sheets written before F-9.18 have fields, a page, or both, and no sync history. What happens to them?
 - Chosen (decided by Claude, unconfirmed): nothing runs on open (no bulk spend). A sheet syncs only after the author edits it (30 s pause) or clicks Write up now / File now. A **Blank page sheet** keeps its page exactly as written: the first sync only fills its fields from it. A sheet with **both** a page and fields keeps its page too (its fields are filled from the page; the page is written up only after a later field edit). A **Structured sheet** with no page gets its page written up. The migration adds two columns and touches no text; F-8.7's backup is taken before it, and every applied sync has an Undo.
 - Alternatives: a one-time "sync every sheet" pass after the update (with a cost estimate, like the F-9.14 conversion); write the page of a both-texts sheet up from its fields at once.
 - To change it: `src/main/ai/sheetSync.ts` (`pageStaleAfter`), `src/main/entity/sheetSyncState.ts` (`sheetSyncStateOf`).
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-10 · F-9.18 · Safety rules and smaller calls in the sync
 - Question: several details the request left open.
 - Chosen (decided by Claude, unconfirmed): (1) an emptied page never empties the fields, and fields with no text never empty the page (both just mark the views as agreeing); (2) an answer that comes back after the author edited the sheet again is dropped, and once a sync has landed the open page sends only what the author edited, so their typing wins in that view and nothing the sync wrote elsewhere is written back; (3) the pause is per sheet (editing another sheet does not hold this one back), and the due list is a settings row so a quit resumes it; (4) the page is plain text: headings are the field labels on a line of their own, laid out by the app (the model writes only prose), shown in the prose font; (5) the write-up length is a ceiling (short ≈ 120, medium ≈ 250, long ≈ 500 words) and never adds facts; (6) the page is marked out of date when the fields' labels, order, the sheet's own fields, or the category's write-up style change, but nothing re-runs until the sheet is edited or Write up now is clicked; (7) a filing sends only the paragraphs removed and added since the views last agreed and gets back compact edits (never whole field values); added text over 3,000 characters is filed in several requests; (8) a write-up over the input budget cuts the longest field values to fit; a filing over it is refused with the budget message (rare); (9) a page addition with no fitting field becomes a field of the sheet's own (at most 12; past that it goes into Notes as "Label: text"); (10) "Write up now" / "File now" / "Try again" skip the 30 s pause.
 - Alternatives: per-section incremental write-ups (cheaper on long sheets; listed in the cost registry ideas); a rich-text page with real headings.
 - To change it: `src/shared/sheetSync.ts`, `src/main/ai/sheetSync.ts`, `src/main/ai/sheetSyncService.ts`.
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-10 · F-9.17 · The List/Cards choice is kept with the project
 - Question: You asked for one List/Cards choice for every category tab, "until they click the other". Should it survive closing the project?
 - Chosen (decided by Claude, unconfirmed): yes. It is stored in the project's story-bible settings (`storyBible` settings row, the same row as the F-9.19 Settings tab), so it holds across tabs, restarts, and Settings changes, per project.
 - Alternatives: keep it for the session only (as before, but shared); make it app-wide for every project.
 - To change it: `src/shared/storyBibleSettings.ts` (`listView`), `src/renderer/features/entities/storyBibleSettingsStore.ts`, `EntityTab.tsx`.
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-10 · F-5.25 · Chat tool audit: what was built and what waits
 - Question: The audit of the chat's tools listed eight fixes. Which ship with F-5.25?
@@ -96,6 +123,7 @@ do. Review, then confirm, change, or delete the entry.
 - Alternatives: build 5, 7, 8 as a later prompt version (agent.v8) once the ledger shows the v7 cost.
 - **Changed by the author 2026-10-10: built 5, 7, 8 as agent.v8.** Only the write edit list grows (about 110 input tokens on a write request, none on a Plan request). The `todo` tool now prints a ref per item (`t1`, `t2`, …) that the settle edit names; record and statement statuses are logged in Changes with a new Undo (`restoreStatus`). Decided by Claude, unconfirmed: (1) "undo the last turn" always asks, like a deletion, and takes back only what the latest earlier turn applied and can still undo this session (after a restart: use Changes or Ctrl+Z); (2) opening the Library or the upload picker runs at once in Ask too (it changes nothing); in Plan the chat has no edits and names the place instead; (3) "re-run summaries" queues only missing or stale summaries, as the Summarize all button does (a forced re-read of unchanged scenes would hit the cache); (4) settling a contradiction from the chat cannot be reopened by its Undo (it is settled in the consistency checker, as in the To do tab).
 - To change it: `src/main/ai/prompts/agent.v8.ts` (`AGENT_EDITS_V8`), `src/main/ai/agentTools.ts` (`resolveAgentEdit`, `resolveStatus`, `resolveTodoSettle`), `src/renderer/features/ai/agentApply.ts`, `src/renderer/features/ai/assistantStore.ts` (`undoLastTurn`, the open action in `runAgentTurn`).
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-10 · F-5.25 · Clear the story bible: what a fresh start forgets and keeps
 - Question: You asked for one confirm card with checkboxes, a backup first, one Changes entry, and one Undo. Three details were open: does a clear remember the deleted names (so the background reading and tagging do not make them again, as a one-by-one delete does)? What happens to pictures and uploaded originals? What does "the story bible" tick?
@@ -103,6 +131,7 @@ do. Review, then confirm, change, or delete the entry.
 - Alternatives: (1) remember the names as a one-by-one delete does; (2) delete the files at once (Undo then brings sheets back without pictures); (3) leave tags or uploads unticked by default; (4) let Undo double up, or merge into what was made since.
 - To change it: `src/main/knowledge/bibleClear.ts` (`clearStoryBible`), `src/main/knowledge/clearSnapshot.ts` (`assertRestorable`), `src/main/ai/prompts/agent.v7.ts` (`AGENT_BULK_RULES`, a new prompt version).
 - **Confirmed by the author 2026-10-10:** (1) a clear allows the AI to make the same names again.
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-08 · F-4.13, F-4.12b, F-9.10 · How the tag rule reads "ordinary word"
 - Question: You said tags should be capitalised words or abnormal terms ("memorial fragments"), and that an ordinary word used often in an abnormal way can be a potential tag. How does the app tell a name from an ordinary word?
@@ -164,6 +193,7 @@ Plan: `plan-knowledge-model.md`. P0 (F-8.7), P1 (F-9.12), and P2 (F-9.13) are bu
 - **F-9.16, open for you:** the plan says to list To do items in `CLAUDE.md`'s AI rule 1 among the derived-data exceptions (next to continuity findings: AI-made, stored apart from your text, removable, costed, never in the manuscript). The subagent that built F-9.16 does not edit `CLAUDE.md`; the main session or you should add it.
 - **F-5.24 (P4, lookup ladder) details (decided by Claude, unconfirmed):** (1) The prompt is `agent.v6` (v5 went to the To do tool); its rules repeat v1's opening sentence and list the v6 tools, with `todo` folded into the list; the ladder rule and the status rule are new paragraphs; `search` and `read_summary` are gone from v6 only. (2) Status labels: author sheets are `[canon]` (D7), so a canon sheet that says "dies in the war" still does not make the death happen: the status rule keeps v3's "an event found only in a sheet or notes has not happened yet" (eval case `agent.v6 plan`). (3) Node notes default to **Plan** (`SceneMeta.notesStatus`, no migration), with a Plan / Canon / Idea picker beside the Notes heading; the synopsis is read under the same status as the notes. (4) `lookup` resolves a name by sheet name, alias, or a unique partial name, then by tag name or alias; its threads line lists, for a non-thread record, the open threads (as of now) with an event in a scene up to now that names the record, most shared scenes first, at most 3. Alternative: only threads that name the record in their own text. (5) `cards {name}` lists the scenes that name the record in reading order from the start of the book (not only up to now), first 8, then "…and N more". (6) `read_scene {para}` returns whole paragraphs up to 6,000 characters (a single longer paragraph is cut there). (7) Measured on the eval fixtures, not yet on the ledger: a typical fact question's answer step −44 % input (3,188 → 1,773 tokens), the whole three-request run −25 % (6,231 → 4,703); the plan expected 30–50 %. The v6 rules add ~140 tokens to each request (a cacheable prefix). Please check it against Settings › AI usage after a week of use. To change: `src/main/ai/prompts/agent.v6.ts`, `src/main/ai/agentTools.ts` (`lookup`, `cards`, `findPassages`, `readParagraphs`, `statusMark`), `src/shared/agent.ts` (`AGENT_TOOLS_V6`, `AGENT_LOOKUP_CHARS`, `AGENT_CARDS_MAX`, `AGENT_PASSAGE_RESULTS`), `NotesStatusSelect` in `src/renderer/features/editor/MetadataPane.tsx`.
 - **Closed 2026-10-10:** CLAUDE.md AI rule 1 already lists To do items among the derived-data exceptions.
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action; F-8.7 stays.
 
 ## 2026-10-08 · F-8.7 · Migration safety: what happens when the pre-migration backup fails
 - Question: Before a schema upgrade the database is copied to the project's backups folder. What if that copy cannot be written (the chosen backup folder is on a drive that is not there, or is read-only)?
@@ -208,6 +238,7 @@ Plan: `plan-knowledge-model.md`. P0 (F-8.7), P1 (F-9.12), and P2 (F-9.13) are bu
 - Alternatives: phonetic matching (Soundex/Metaphone) as well; an AI pass that confirms each finding (costed); lower-case words too.
 - To change it: `isCloseSpelling`, `allowedEdits`, `formsOf` in `src/shared/misspellings.ts`.
 - **Confirmed by the author 2026-10-10** (review of QUESTIONS.md): the choices above stay as built. Any operator step listed above is still open.
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-08 · F-4.14 · Where misspellings are offered, and what Fix does
 - Question: Over the whole manuscript, or where the author is?
@@ -215,6 +246,7 @@ Plan: `plan-knowledge-model.md`. P0 (F-8.7), P1 (F-9.12), and P2 (F-9.13) are bu
 - Alternatives: a manuscript-wide list (for example in the Tags tab, or in OR3's Organise plan); fix one occurrence at a time.
 - To change it: `src/renderer/features/editor/MisspellingList.tsx`; `listProposedTags` in `src/main/tag/proposedTags.ts`.
 - **Confirmed by the author 2026-10-10** (review of QUESTIONS.md): the choices above stay as built. Any operator step listed above is still open.
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-08 · F-4.14 · Alias rules
 - Question: Clashes, limits, and where aliases travel.
@@ -222,6 +254,7 @@ Plan: `plan-knowledge-model.md`. P0 (F-8.7), P1 (F-9.12), and P2 (F-9.13) are bu
 - Alternatives: allow shared aliases between tags; carry aliases in the `mythscribe-tags` file as v2; send aliases to the tagging prompts.
 - To change it: `assertAliasesFree`/`addTagAliases` in `src/main/tag/tagStore.ts`, `src/shared/aliases.ts`, `src/shared/tagExchange.ts`.
 - **Confirmed by the author 2026-10-10** (review of QUESTIONS.md): the choices above stay as built. Any operator step listed above is still open.
+- **Superseded 2026-10-11** by the story memory redesign (F-16; see the 2026-10-11 F-16 entry at the top): closed without action.
 
 ## 2026-10-07 · F-5.22 · How a chat insertion sits in the editor
 - Question: The author decided chat insertions land as ghost text (Tab accepts, Esc dismisses). The author is usually typing in the chat box when one lands; must the editor take the focus?

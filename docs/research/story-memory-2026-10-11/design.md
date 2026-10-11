@@ -1,6 +1,14 @@
 # Story memory: the final design plan
 
-*For the author's approval, 2026-10-11. This is the merged Evidence-first design, revised for all 4 blockers and 45 major issues from the red-team review. Part 6 lists the fixes that were changed rather than taken as written. Prices are list prices: V4 Flash $0.14 in / $0.28 out and V4 Pro $1.74 / $3.48 per million tokens. The prices in `src/shared/ai.ts` are wrong, and phase P0 checks the real ones.*
+## Decisions (2026-10-11)
+
+**Approved by the author on 2026-10-11: build it.** The author took the recommended default on decisions 1, 2 and 4–8 (Part 6) and changed decision 3:
+
+- **Decision 3, as changed by the author.** When the author explicitly asks Ms Scribe to put something on a sheet ("add this to Mara's sheet"), it goes there (Pinned) with a quick confirmation and an Undo. When Ms Scribe cannot tell from context whether it is canon or an idea, it asks "Is this an idea or canon?" as a two-choice quick question. The recommended default it replaces was "into Ideas unless she says pin it". §2.2 and §2.6 below are amended to match.
+- Decision 8 (from the plan doc's decisions table): sheet text the AI wrote before the switch-over is kept in a "Filed by AI earlier: please check" block marked Not canon (Part 3).
+- The spec is `FEATURES.md` §2.16 (F-16.1–16.38) with milestones M8 (before launch) and M9 (after launch) in §6. Phase plans are in `plans/`; P0 is in progress (`plans/P0.md`).
+
+*Written for the author's approval, 2026-10-11. This is the merged Evidence-first design, revised for all 4 blockers and 45 major issues from the red-team review. Part 6 lists the fixes that were changed rather than taken as written. Prices are list prices: V4 Flash $0.14 in / $0.28 out and V4 Pro $1.74 / $3.48 per million tokens. The prices in `src/shared/ai.ts` are wrong, and phase P0 checks the real ones.*
 
 ## What changes for you
 
@@ -81,7 +89,7 @@ Chat is about 80 % of a month's cost. Whole-book actions show their price before
 ## 2.2 Data model
 
 **Author-owned.** The AI writes these only through four exceptions:
-- Ideas and Pinned lines she asks for in the chat;
+- sheet lines she asks for in the chat: Pinned when she says where ("add this to Mara's sheet"), Ideas when she says it is an idea, and when context cannot tell, Ms Scribe asks "Is this an idea or canon?" first (decision 3 as changed by the author, 2026-10-11);
 - *Update my note* proposals she accepts;
 - *Update my detail* proposals she accepts;
 - upload filing through the review deck.
@@ -291,7 +299,12 @@ Reasoning is off for answer, lookup, idea and to-do turns. It is low for edit an
 - An unsupported main claim retries once, then says "Not found in the manuscript (I looked in …)".
 - **Self-Route** allows one `{"need":"chapter 9"}` request (≤8k tokens). Evidence it finds that the first search missed is logged as a **search miss**, which is the trigger for adding embeddings later.
 
-**Writes.** The chat never writes claims. Manuscript edits keep the Auto, Ask and Plan rules. Sheet writes go to **Ideas** unless she asks to pin them, and Pinned writes carry `aiWritten`.
+**Writes.** The chat never writes claims. Manuscript edits keep the Auto, Ask and Plan rules. Sheet writes follow decision 3 as the author changed it on 2026-10-11:
+- An explicit request to put something on a sheet ("add this to Mara's sheet", "pin that on the Bell") goes there, into **Pinned**, with a quick confirmation in the chat and an Undo. Pinned writes carry `aiWritten` until she edits them.
+- When she asks to save something and Ms Scribe cannot tell from context whether it is canon or an idea, it asks "Is this an idea or canon?" as a two-choice quick question: *Idea* goes to the sheet's **Ideas**, *Canon* to **Pinned**. "Save this idea" or "brainstorm" goes to Ideas without asking.
+- Chat modes (decided by Claude, unconfirmed): in Auto the line lands at once; in Ask, Ask's one click is the confirmation; Plan never writes.
+
+(The recommended default was: sheet writes go to Ideas unless she asks to pin them.)
 
 **Prose story block** (ghost text, Rewrite, Author mode, critique, edit passes, What next, scene suggestions).
 - New heading: "Story notes (the manuscript wins: where the passage and these notes disagree, follow the passage)".
@@ -473,14 +486,17 @@ These keep working: names, nicknames and mentions; word search; the panel (POV, 
 - **The leaner Pro prompt** does not wait for the cache result, because AI rule 2 needs the voice profile only for prose.
 - **Content and theme labels keep steering prose**, as F-14.13 does today.
 
-## Decisions still open for you
+## Decisions (were open; settled by the author 2026-10-11)
+
+All eight were settled on 2026-10-11: the recommended default stands for 1, 2 and 4–8, and decision 3 was changed by the author (see "Decisions (2026-10-11)" at the top). Decision 8 is in the plan doc and Part 3.
 
 | # | Question | Recommended default |
 |---|---|---|
 | 1 | Build this before launch (about 10 weeks), or launch on today's memory and ship this as the first update? | **Before launch.** Today's memory is not signed off, and converting paying customers' projects later is riskier. |
 | 2 | Apply plan links automatically, marked AI-made with *Unlink*, instead of waiting for you to confirm each one? | **Yes.** |
-| 3 | When you ask Ms Scribe to add something to a sheet, should it go into **Ideas** unless you say "pin it"? | **Yes.** Chat brainstorms stay out of canon. |
+| 3 | When you ask Ms Scribe to add something to a sheet, should it go into **Ideas** unless you say "pin it"? | ~~**Yes.** Chat brainstorms stay out of canon.~~ **Changed by the author 2026-10-11:** an explicit request goes where asked (Pinned) with a quick confirmation and Undo; when context cannot tell, Ms Scribe asks "Is this an idea or canon?" |
 | 4 | When the text disagrees with your typed POV, place or time, show the text's value with yours dimmed and ask once? | **Yes.** The alternative: your typed value always wins, silently. |
 | 5 | Type one story year per time jump and let it carry forward? | **Yes.** |
 | 6 | File uploads with the strong model (≈15¢ per 20,000 words) or the fast one (≈1.2¢)? | **Strong, with thinking off.** It is a one-time write into canon. |
 | 7 | What monthly Cloud cap for background reading? | **$1.** A heavy month uses about 30¢. |
+| 8 | Sheet text the AI wrote earlier (uploads, Organise, the chat): keep it in a "Filed by AI earlier: please check" block marked Not canon, or drop it? | **Keep, marked Not canon.** |

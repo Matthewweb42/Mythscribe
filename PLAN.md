@@ -345,6 +345,8 @@ Deliberately small; a solo side business cannot run a big service:
 | **M5 Safety and output** | Backups, drafts, snapshots, export, import | Removes the last "why not Scrivener" objections |
 | **M6 Polish** | Themes, outline, timeline | Steady state; ship monthly |
 
+**2026-10-11:** the launch line moved: the story memory redesign (`FEATURES.md` §2.16, M8; design in `docs/research/story-memory-2026-10-11/`) is built before launch, about 10 weeks (decision 1, approved by the author). The paragraph below is the original line.
+
 **Launch line (decided: launch as soon as possible).** v1 ships after M3 with exactly: M0, M1,
 M2 minus local models, M2.5, and the Story Intelligence core (F-5.6, F-5.7, F-5.8) from M3. Beta
 reader, continuity, granular tagging, and everything in M4+ are post-launch. Cloud (M-Cloud)
