@@ -39,6 +39,7 @@ function pass(over: Partial<EditPassSummary> = {}): EditPassSummary {
     id: 'p1',
     type: 'line',
     instruction: null,
+    excerpt: false,
     status: 'running',
     nodeIds: ['a', 'b'],
     doneNodeIds: [],

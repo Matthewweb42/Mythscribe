@@ -17,7 +17,8 @@ import {
 import {
   ROUTE_HISTORY_TURNS,
   ROUTE_SELECTION_PREVIEW_CHARS,
-  type RouteAction
+  type RouteAction,
+  type RouteEdit
 } from '@shared/assistantRoute'
 import type { ClearGroup } from '@shared/bibleClear'
 import { DEFAULT_ASSISTANT_MODE, type AssistantMode } from '@shared/aiSettings'
@@ -37,6 +38,13 @@ import {
   type ChatMode,
   type Conversation
 } from '@shared/chat'
+import {
+  choiceForPass,
+  EDIT_ASK_CHOICES,
+  EDIT_ASK_QUESTION,
+  type EditChoice,
+  type EditTurn
+} from '@shared/editRequest'
 import type { AiAgentResult, AiRouteResult, AiWhatNextResult, Input } from '@shared/ipc/contract'
 import type { QuerySceneRef } from '@shared/query'
 import { WHAT_NEXT_QUESTION, directionMessage, recapQuestion } from '@shared/quickActions'
@@ -79,6 +87,14 @@ import {
   type OpenScene
 } from './aiActions'
 import { useAiActivityStore } from './aiActivityStore'
+import {
+  EDIT_NO_SCENE_MESSAGE,
+  editChoiceReason,
+  quoteChoice,
+  resolveEditTarget,
+  runEditChoice
+} from './editRequest'
+import { confirmLine } from '@renderer/features/editPass/passQuote'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { proposalStore } from './proposalStore'
 
@@ -232,6 +248,12 @@ interface AssistantState {
    * edit it calls the Changes log's undo, F-9.15).
    */
   undoChange: (messageId: string, changeId: string) => Promise<void>
+  /**
+   * F-5.26: runs one choice of an edit request's turn on the turn's target (an edit pass whose
+   * changes come back as tracked changes, or Editor's notes) and records the pick and the pass.
+   * Not in Plan; a choice that cannot run now toasts why.
+   */
+  pickEdit: (messageId: string, choice: EditChoice) => Promise<void>
 }
 
 /**
@@ -352,7 +374,8 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   query: null,
   directions: null,
   action: null,
-  agent: null
+  agent: null,
+  edit: null
 })
 
 /** Records one lookup of an agent turn on its way, under the request it belongs to. */
@@ -823,8 +846,58 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       return
     }
     await openPassage(ref.nodeId, (doc) => locateText(doc, quote))
+  },
+
+  async pickEdit(messageId, choice) {
+    const edit = findMessage(messageId)?.edit ?? null
+    if (edit?.picked !== null || !edit.choices.includes(choice)) return
+    if (picking.has(messageId)) return
+    if (agentAccessFor(chatModeNow()) === 'read') {
+      toast.error(PLAN_NO_EDITS_MESSAGE)
+      return
+    }
+    const open = openSceneNow()
+    const settings = useAiSettingsStore.getState().settings
+    const reason = editChoiceReason(choice, edit.instruction, edit.target, settings, open)
+    if (reason !== null) {
+      toast.error(reason)
+      return
+    }
+    picking.add(messageId)
+    try {
+      const started = await runEditChoice(choice, edit.instruction, edit.target, open)
+      if (started === null) return
+      patchMessage(messageId, {
+        content: started.content,
+        edit: { ...edit, picked: choice, passId: started.passId }
+      })
+    } finally {
+      picking.delete(messageId)
+    }
   }
 }))
+
+/** Edit-request turns whose pick is starting (F-5.26), so a double click starts one pass. */
+const picking = new Set<string>()
+
+/** Applies `patch` to message `messageId`, wherever it is. */
+function patchMessage(messageId: string, patch: Partial<ChatMessage>): void {
+  const value = useAssistantStore.getState().conversations
+  if (value === null) return
+  commit({
+    ...value,
+    items: value.items.map((conversation) =>
+      conversation.messages.some((m) => m.id === messageId)
+        ? {
+            ...conversation,
+            messages: conversation.messages.map((m) =>
+              m.id === messageId ? { ...m, ...patch } : m
+            )
+          }
+        : conversation
+    )
+  })
+}
 
 /** The recent turns that ride along with a request as history. */
 function historyOf(conversation: Conversation): Input<'ai:chat'>['history'] {
@@ -955,10 +1028,12 @@ async function routeTurn(
   if (useAssistantStore.getState().pending[id] !== requestId) return // stopped or closed meanwhile
   let action: RouteAction = 'chat'
   let instruction: string | null = null
+  let edit: RouteEdit | null = null
   let cost: Partial<ChatMessage> = {}
   if (route.ok) {
     action = route.action
     instruction = route.instruction
+    edit = route.edit
     if (route.model !== null) {
       cost = { model: route.model, costUsd: route.costUsd, usage: route.usage }
     }
@@ -973,6 +1048,7 @@ async function routeTurn(
   await dispatchRoute(id, {
     action: routeActionFor(mode, action),
     instruction,
+    edit,
     cost,
     text,
     history,
@@ -985,6 +1061,8 @@ async function routeTurn(
 interface RoutedTurn {
   action: RouteAction
   instruction: string | null
+  /** An edit pass's pass and target (F-5.26); null for every other action. */
+  edit: RouteEdit | null
   /** The router's own cost, shown on a turn whose feature answers outside the chat. */
   cost: Partial<ChatMessage>
   text: string
@@ -996,7 +1074,7 @@ interface RoutedTurn {
 
 /** Runs the feature the router picked on conversation `id`'s turn pair, labelled with the action. */
 async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
-  const { action, instruction, cost, text, history, open, mode } = routed
+  const { action, instruction, edit, cost, text, history, open, mode } = routed
   const { editor, nodeId } = open
   const autoApply = appliesEditsItself(mode)
   switch (action) {
@@ -1029,6 +1107,11 @@ async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
       await runWhatNext(id, nextRequest(id), active)
       return
     }
+    case 'editPass': {
+      patchLastTurn(id, { action })
+      await runEditRequest(id, edit, instruction, cost, open)
+      return
+    }
     case 'rewrite': {
       patchLastTurn(id, { action })
       const settings = useAiSettingsStore.getState().settings
@@ -1051,6 +1134,67 @@ async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
       finishTurn(id, { content, ...cost }, false)
     }
   }
+}
+
+/**
+ * An edit request (F-5.26) on conversation `id`'s turn: the target it covers (or why there is
+ * none), then for a vague request the question with its quick picks, and for a specific one its
+ * pass started at once, unless it cannot run now (the turn says why and keeps the choice) or the
+ * hosted quote is over the confirm threshold (the turn shows the quote and the choice to confirm,
+ * as the Edits workspace asks once more).
+ */
+async function runEditRequest(
+  id: string,
+  edit: RouteEdit | null,
+  instruction: string | null,
+  cost: Partial<ChatMessage>,
+  open: OpenScene
+): Promise<void> {
+  const target = edit === null ? EDIT_NO_SCENE_MESSAGE : resolveEditTarget(edit, open)
+  if (edit === null || typeof target === 'string') {
+    finishTurn(
+      id,
+      { content: typeof target === 'string' ? target : EDIT_NO_SCENE_MESSAGE, ...cost },
+      false
+    )
+    return
+  }
+  const choice = choiceForPass(edit.pass)
+  // Editor's notes read one scene, so a chapter is not offered them.
+  const choices =
+    choice === null
+      ? EDIT_ASK_CHOICES.filter((c) => c !== 'critique' || target.kind !== 'chapter')
+      : [choice]
+  const turnEdit: EditTurn = { target, choices, instruction, picked: null, passId: null }
+  if (choice === null) {
+    finishTurn(id, { content: EDIT_ASK_QUESTION, edit: turnEdit, ...cost }, false)
+    return
+  }
+  const settings = useAiSettingsStore.getState().settings
+  const reason = editChoiceReason(choice, instruction, target, settings, open)
+  if (reason !== null) {
+    finishTurn(id, { content: reason, edit: turnEdit, ...cost }, false)
+    return
+  }
+  const quote = quoteChoice(choice, instruction, target)?.quote ?? null
+  if (quote?.needsConfirm === true) {
+    finishTurn(id, { content: confirmLine(quote), edit: turnEdit, ...cost }, false)
+    return
+  }
+  const pendingId = useAssistantStore.getState().pending[id]
+  const started = await runEditChoice(choice, instruction, target, open)
+  if (useAssistantStore.getState().pending[id] !== pendingId) return // stopped or closed meanwhile
+  finishTurn(
+    id,
+    started === null
+      ? { content: 'The edit pass did not start.', edit: turnEdit, ...cost }
+      : {
+          content: started.content,
+          edit: { ...turnEdit, picked: choice, passId: started.passId },
+          ...cost
+        },
+    false
+  )
 }
 
 /** The open document's caret window and selection, as an agent turn carries them (F-5.22). */

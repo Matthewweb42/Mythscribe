@@ -2486,6 +2486,7 @@ describe('ai:route (F-5.19)', () => {
       ok: true,
       action: 'rewrite',
       instruction: 'Colder, fewer adjectives.',
+      edit: null,
       routedBy: 'model',
       usage: { inputTokens: 300, outputTokens: 12 },
       costUsd: 0,
@@ -2496,6 +2497,8 @@ describe('ai:route (F-5.19)', () => {
     const request = complete.mock.calls.at(-1)?.[0]
     expect(request?.tier).toBe('fast')
     expect(request?.json).toBe(true)
+    // F-5.26: route.v2 is the version sent.
+    expect(request?.messages[0]?.content).toContain('- editPass: ')
     const user = request?.messages[1]?.content ?? ''
     expect(user).toContain('Open document: scene "Scene 1"')
     expect(user).toContain('Selected passage (opening):\n"""\nHe looked at the lantern.\n"""')
@@ -2504,11 +2507,33 @@ describe('ai:route (F-5.19)', () => {
     expect(summary.byFeature.map((f) => f.feature)).toEqual(['route'])
   })
 
-  it('falls back to chat for a rewrite with no selection and for an unreadable answer', async () => {
+  it('makes a rewrite with no selection an edit pass on the scene, and an unreadable answer chat', async () => {
     const { scene } = await ready()
     answersWith({ action: 'rewrite', instruction: 'Colder.' })
     const noSelection = await invoke('ai:route', ask({ nodeId: scene, requestId: 'rt-2' }))
-    expect(noSelection).toMatchObject({ ok: true, action: 'chat', instruction: null })
+    expect(noSelection).toMatchObject({
+      ok: true,
+      action: 'editPass',
+      instruction: 'Colder.',
+      edit: { pass: 'custom', target: 'scene', chapter: null }
+    })
+    answersWith({
+      action: 'editPass',
+      instruction: '',
+      pass: 'line',
+      target: 'selection',
+      chapter: ''
+    })
+    const tighten = await invoke(
+      'ai:route',
+      ask({ nodeId: scene, message: 'Tighten the prose.', requestId: 'rt-4' })
+    )
+    // No selection rides along, so the line pass covers the scene.
+    expect(tighten).toMatchObject({
+      ok: true,
+      action: 'editPass',
+      edit: { pass: 'line', target: 'scene', chapter: null }
+    })
     answersWith('not json at all')
     const garbled = await invoke(
       'ai:route',
@@ -2524,6 +2549,7 @@ describe('ai:route (F-5.19)', () => {
       ok: true,
       action: 'proofread',
       instruction: null,
+      edit: null,
       routedBy: 'local',
       usage: { inputTokens: 0, outputTokens: 0 },
       costUsd: 0,

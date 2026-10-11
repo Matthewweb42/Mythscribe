@@ -242,12 +242,31 @@ const SUMMARY_ANSWER = JSON.stringify({
 })
 const BRIEF_SENTINEL = 'You are the scene-brief feature inside a novel-writing app.'
 /**
- * F-5.19: the opening of the router's system turn (`route.v1`). The fake router sends a request
- * whose last turn carries `ROUTE_CRITIQUE_MESSAGE` to editor's notes and everything else to chat.
+ * F-5.19: the opening of the router's system turn (`route.v1`, the same in `route.v2`). The fake
+ * router sends a request whose last turn carries `ROUTE_CRITIQUE_MESSAGE` to editor's notes, one
+ * carrying `ROUTE_IMPROVE_MESSAGE` to an edit pass that asks which kind first (F-5.26), and
+ * everything else to chat.
  */
 const ROUTE_SENTINEL = "You are the router inside a novel-writing app's assistant."
 const ROUTE_CRITIQUE_MESSAGE = "Give me editor's notes on this scene."
+const ROUTE_IMPROVE_MESSAGE = 'Make this scene better.'
 /** F-5.20: the openings of the synopsis and notes-suggestion system turns, and their answers. */
+/** What the fake router answers for a message (F-5.19; F-5.26's edit pass). */
+function routeAnswer(message: string): string {
+  if (message.includes(ROUTE_CRITIQUE_MESSAGE)) {
+    return JSON.stringify({ action: 'critique', instruction: null })
+  }
+  if (message.includes(ROUTE_IMPROVE_MESSAGE)) {
+    return JSON.stringify({
+      action: 'editPass',
+      instruction: '',
+      pass: 'ask',
+      target: 'scene',
+      chapter: ''
+    })
+  }
+  return JSON.stringify({ action: 'chat', instruction: null })
+}
 const SYNOPSIS_SENTINEL = 'You are the synopsis feature inside a novel-writing app.'
 const NOTES_SUGGEST_SENTINEL = 'You are the scene-notes feature inside a novel-writing app.'
 const SUGGESTED_SYNOPSIS = 'Mara climbs the ridge to watch the storm before the others wake.'
@@ -937,14 +956,7 @@ function startFakeOpenAi(): Promise<string> {
                                   : chatAgent
                                     ? chatAgentReply(request.messages)
                                     : route
-                                      ? JSON.stringify({
-                                          action: (request.messages.at(-1)?.content ?? '').includes(
-                                            ROUTE_CRITIQUE_MESSAGE
-                                          )
-                                            ? 'critique'
-                                            : 'chat',
-                                          instruction: null
-                                        })
+                                      ? routeAnswer(request.messages.at(-1)?.content ?? '')
                                       : synopsis
                                         ? JSON.stringify({ synopsis: SUGGESTED_SYNOPSIS })
                                         : notesSuggest
@@ -5174,6 +5186,59 @@ test('create, close, reopen a project on disk', async () => {
   expect(afterEditPasses.byFeature.find((f) => f.feature === 'editPass')).toMatchObject({
     requests: 2
   })
+
+  // F-5.26: "make this scene better" in the chat. The sentence with the doubled word is typed
+  // again. In Ask the router (route.v2) reads the vague request as an edit pass that asks first:
+  // the turn asks what to focus on, with the five quick picks, each pass with its estimate.
+  // Tighten prose runs a line pass on Scene 1 (one request, the scene's text); its change comes
+  // back as a tracked change in the editor, and the turn's Review the changes opens the review
+  // deck, where Accept applies it.
+  await caretToEnd(editor)
+  await page.keyboard.type(EDIT_PASS_TYPED)
+  await expect
+    .poll(async () => ((await documentText(scene1Row.id)) ?? '').includes(EDIT_PASS_TYPED.trim()), {
+      timeout: 3000
+    })
+    .toBe(true)
+  if (!(await assistant.isVisible())) {
+    await page.getByRole('button', { name: 'Ms Scribe', exact: true }).click()
+  }
+  await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
+  const turnsBeforeImprove = await turns.count()
+  await messageBox.fill(ROUTE_IMPROVE_MESSAGE)
+  await messageBox.press('Enter')
+  const improveTurn = turns.nth(turnsBeforeImprove + 1)
+  await expect(improveTurn.getByTestId('chat-turn-action')).toHaveText('Edit pass')
+  await expect(improveTurn).toContainText('What should I focus on?')
+  const editChoices = improveTurn.getByTestId('edit-choice')
+  await expect(editChoices).toHaveCount(5)
+  await expect(editChoices.first()).toContainText('Tighten prose')
+  await expect(editChoices.first()).toContainText('about')
+  const improveRequestsBefore = editPassBodies().length
+  await editChoices.first().click()
+  const improveStatus = improveTurn.getByTestId('edit-request-status')
+  await expect(improveStatus).toHaveAttribute('data-status', 'done')
+  await expect(improveStatus).toContainText('Line edit finished: 1 change to review.')
+  expect(editPassBodies().length).toBe(improveRequestsBefore + 1)
+  expect(editPassBodies().at(-1)?.messages[1]?.content).toContain(EDIT_PASS_TYPED.trim())
+  await expect(editor.locator('.tracked-del')).toHaveText(EDIT_PASS_QUOTE)
+  await improveTurn.getByTestId('edit-request-review').click()
+  await expect(editReview.getByTestId('edit-review-diff')).toContainText(EDIT_PASS_QUOTE)
+  await editReview.getByTestId('review-accept').click()
+  await expect(editor.locator('.tracked-del')).toHaveCount(0)
+  await expect
+    .poll(async () => ((await documentText(scene1Row.id)) ?? '').includes(EDIT_PASS_TYPED.trim()), {
+      timeout: 3000
+    })
+    .toBe(false)
+  await editReview.getByTestId('edit-review-close').click()
+  await expect(editReview).toHaveCount(0)
+  // The pass's drop notification (F-7.12) goes, so it covers nothing the next steps click.
+  await expect(
+    page.getByTestId('activity-drop').filter({ hasText: 'Edit pass finished' })
+  ).toBeVisible()
+  await dismissToasts()
+  await expect(page.getByTestId('activity-drop')).toHaveCount(0)
 
   // F-5.6: scene summaries. With the toggle back on, the metadata pane's Summary disclosure
   // shows Scene 1 has none yet (out of date: the text is long past the floor). Summarize now

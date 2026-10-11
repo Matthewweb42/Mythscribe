@@ -3225,7 +3225,7 @@ export function registerHandlers({
     }
   }
 
-  register('editPass:start', ({ type, instruction, nodeIds }) => {
+  register('editPass:start', ({ type, instruction, nodeIds, excerpt }) => {
     const db = manager.require().connection.orm
     const text = instruction?.trim() ? instruction.trim() : null
     if (type === 'custom' && text === null) {
@@ -3238,8 +3238,18 @@ export function registerHandlers({
     )
     const ids = [...new Set(nodeIds)].filter((id) => documents.has(id))
     if (ids.length === 0) throw new AppError('VALIDATION', 'Pick at least one scene for the pass')
+    // F-5.26: a selected passage belongs to one scene; a blank one means the whole scene.
+    const passage = excerpt?.trim() ? excerpt : null
+    if (passage !== null && ids.length !== 1) {
+      throw new AppError('VALIDATION', 'A pass on a selection covers one scene')
+    }
     return startResult(() =>
-      editPasses.start({ type, instruction: type === 'custom' ? text : null, nodeIds: ids })
+      editPasses.start({
+        type,
+        instruction: type === 'custom' ? text : null,
+        nodeIds: ids,
+        excerpt: passage
+      })
     )
   })
 
@@ -3354,11 +3364,12 @@ export function registerHandlers({
           selection,
           requestId
         })
-        const { action, instruction, routedBy, usage, costUsd, cached, model } = result
+        const { action, instruction, edit, routedBy, usage, costUsd, cached, model } = result
         return {
           ok: true,
           action,
           instruction,
+          edit,
           routedBy,
           usage,
           costUsd,

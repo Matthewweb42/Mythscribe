@@ -3,6 +3,7 @@ import { AgentTurn, type AgentAccess } from './agent'
 import { AiUsage } from './ai'
 import type { AssistantMode } from './aiSettings'
 import { RouteAction } from './assistantRoute'
+import { EditTurn } from './editRequest'
 import { QueryTurn } from './query'
 import { toTagName } from './tags'
 import { WhatNextDirection } from './whatNext'
@@ -58,7 +59,8 @@ export function appliesEditsItself(mode: AssistantMode): boolean {
  * The router's picks (F-5.19) a Plan turn may run as they are: the answer in the chat, a cited
  * lookup, three directions, and a beta read, none of which proposes an edit. Every other pick
  * (a rewrite, proofread, editor's notes with fixes, a consistency check with fixes, a suggested
- * synopsis or notes) is answered by the read-only chat instead. Decided by Claude, unconfirmed.
+ * synopsis or notes, an edit pass, F-5.26) is answered by the read-only chat instead, which may
+ * describe what it would do. Decided by Claude, unconfirmed.
  */
 export const PLAN_ROUTE_ACTIONS: readonly RouteAction[] = [
   'chat',
@@ -123,7 +125,12 @@ export const ChatMessage = z.object({
    * A chat agent turn's lookups and edits (F-5.22) and where each edit stands; null for every
    * other turn and for rows written before it.
    */
-  agent: AgentTurn.nullable().default(null)
+  agent: AgentTurn.nullable().default(null),
+  /**
+   * F-5.26: an edit request's target, its choices, and what was picked and started; null for
+   * every other turn and for rows written before it.
+   */
+  edit: EditTurn.nullable().default(null)
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
 

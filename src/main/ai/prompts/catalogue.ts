@@ -78,6 +78,7 @@ import { TODO_PROMPT_VERSION } from './todo.v1'
 import { TODO_SUGGEST_PROMPT_VERSION } from './todoSuggest.v1'
 import { SHEET_REFILE_PROMPT_VERSION } from './sheetRefile.v1'
 import { SHEET_WRITE_UP_PROMPT_VERSION } from './sheetWriteUp.v1'
+import { ROUTE_PROMPT_V2_VERSION } from './route.v2'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -173,7 +174,8 @@ export const PROMPT_VERSIONS = [
   AGENT_PROMPT_V8_VERSION,
   // The filing first, so the cost registry's row for `sheetSync` shows the write-up (its last version).
   SHEET_REFILE_PROMPT_VERSION,
-  SHEET_WRITE_UP_PROMPT_VERSION
+  SHEET_WRITE_UP_PROMPT_VERSION,
+  ROUTE_PROMPT_V2_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -537,7 +539,8 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-9.18'
-  }
+  },
+  [ROUTE_PROMPT_V2_VERSION]: { feature: 'route', tier: 'fast', output: 'json', since: 'F-5.26' }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

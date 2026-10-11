@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { AiFeatureId } from './ai'
+import { EDIT_PASS_TYPES } from './editPass'
 import { PROPOSAL_NOTE_MAX } from './proposal'
 import { QUICK_ACTION_IDS, type QuickActionId } from './quickActions'
 
@@ -17,6 +18,9 @@ import { QUICK_ACTION_IDS, type QuickActionId } from './quickActions'
  * What the router can answer. `query` is a question about the facts of the book (ai:query,
  * cited); `chat` is everything else, discussion and brainstorming (ai:chat). The rest name the
  * existing scene features; `synopsis` and `notes` are the side-panel suggestions (F-5.20).
+ * `editPass` (F-5.26, route.v2, requested by the author 2026-10-11) is a request to improve,
+ * polish, tighten, or fix a passage, a scene, or a chapter: it runs an edit pass (F-14.15) whose
+ * changes come back as tracked changes, or first asks which kind of edit (`RouteEdit`).
  */
 export const ROUTE_ACTIONS = [
   'chat',
@@ -28,7 +32,8 @@ export const ROUTE_ACTIONS = [
   'continuity',
   'whatNext',
   'synopsis',
-  'notes'
+  'notes',
+  'editPass'
 ] as const
 export const RouteAction = z.enum(ROUTE_ACTIONS)
 export type RouteAction = z.infer<typeof RouteAction>
@@ -44,7 +49,8 @@ export const ROUTE_ACTION_LABEL: Record<RouteAction, string> = {
   continuity: 'Check consistency',
   whatNext: 'What should come next?',
   synopsis: 'Suggested synopsis',
-  notes: 'Suggested notes'
+  notes: 'Suggested notes',
+  editPass: 'Edit pass'
 }
 
 /** The feature whose dial level and toggle gate each action (the router's own gate is `route`). */
@@ -58,7 +64,8 @@ export const ROUTE_ACTION_FEATURE: Record<RouteAction, AiFeatureId> = {
   continuity: 'continuity',
   whatNext: 'whatNext',
   synopsis: 'synopsis',
-  notes: 'notesSuggest'
+  notes: 'notesSuggest',
+  editPass: 'editPass'
 }
 
 /** The actions that act on the open document; without one they fall back to `chat`. */
@@ -89,11 +96,38 @@ export const ROUTE_TITLE_CHARS = 100
  */
 export const ROUTE_INSTRUCTION_MAX = PROPOSAL_NOTE_MAX
 
+/**
+ * The pass an `editPass` decision names (F-5.26): `ask` when the request is vague ("make this
+ * better"), so the chat asks which kind of edit first; an edit pass type; or `dialogue`, a custom
+ * pass with the built-in dialogue instruction.
+ */
+export const ROUTE_EDIT_PASSES = ['ask', ...EDIT_PASS_TYPES, 'dialogue'] as const
+export const RouteEditPass = z.enum(ROUTE_EDIT_PASSES)
+export type RouteEditPass = z.infer<typeof RouteEditPass>
+
+/** What an `editPass` decision covers: the selected passage, the open scene, or a chapter. */
+export const ROUTE_EDIT_TARGETS = ['selection', 'scene', 'chapter'] as const
+export const RouteEditTarget = z.enum(ROUTE_EDIT_TARGETS)
+export type RouteEditTarget = z.infer<typeof RouteEditTarget>
+
+/** The chapter the author named ("chapter 3", "The Crossing"), as the router restates it. */
+export const ROUTE_CHAPTER_MAX = 100
+
+export const RouteEdit = z.object({
+  pass: RouteEditPass,
+  target: RouteEditTarget,
+  /** The chapter the author named, or null for the open scene's chapter (and other targets). */
+  chapter: z.string().max(ROUTE_CHAPTER_MAX).nullable()
+})
+export type RouteEdit = z.infer<typeof RouteEdit>
+
 /** What the router decided, after the fallbacks. */
 export interface RouteDecision {
   action: RouteAction
   /** The author's specific request restated for the action, or null when there is none. */
   instruction: string | null
+  /** An `editPass` decision's pass and target (F-5.26); null for every other action. */
+  edit: RouteEdit | null
 }
 
 /** What the open editor offers the chosen action: a document, and a selection in it. */
@@ -102,18 +136,42 @@ export interface RouteSituation {
   hasSelection: boolean
 }
 
+const CHAT: RouteDecision = { action: 'chat', instruction: null, edit: null }
+
 /**
  * The fallbacks every decision passes through, whether it came from the model or from the
- * short-circuit: `rewrite` needs a selection, and every scene action needs an open document;
- * otherwise the message goes to `chat`, which can always answer.
+ * short-circuit: every scene action needs an open document; otherwise the message goes to
+ * `chat`, which can always answer. F-5.26 (route.v2): a `rewrite` without a selection is an
+ * edit pass on the open scene (a custom pass carrying the request, or the question which edit
+ * when there is none) instead of chat. An `editPass` decision is completed and checked: missing
+ * fields ask on the selection (or the scene); a selection target without a selection is the
+ * scene; a custom pass with no instruction asks; it needs an open document unless it names a
+ * chapter. Every other decision carries no `edit`.
  */
 export function settleRoute(decision: RouteDecision, situation: RouteSituation): RouteDecision {
-  const { action } = decision
-  if (action === 'rewrite' && !situation.hasSelection) return { action: 'chat', instruction: null }
-  if (ROUTE_NODE_ACTIONS.includes(action) && !situation.hasNode) {
-    return { action: 'chat', instruction: null }
+  const { action, instruction } = decision
+  if (action === 'rewrite' && !situation.hasSelection) {
+    if (!situation.hasNode) return CHAT
+    return {
+      action: 'editPass',
+      instruction,
+      edit: { pass: instruction === null ? 'ask' : 'custom', target: 'scene', chapter: null }
+    }
   }
-  return decision
+  if (action === 'editPass') {
+    const edit = decision.edit ?? {
+      pass: 'ask',
+      target: situation.hasSelection ? 'selection' : 'scene',
+      chapter: null
+    }
+    const target = edit.target === 'selection' && !situation.hasSelection ? 'scene' : edit.target
+    const chapter = target === 'chapter' ? edit.chapter : null
+    if (!situation.hasNode && chapter === null) return CHAT
+    const pass = edit.pass === 'custom' && instruction === null ? 'ask' : edit.pass
+    return { action, instruction, edit: { pass, target, chapter } }
+  }
+  if (ROUTE_NODE_ACTIONS.includes(action) && !situation.hasNode) return CHAT
+  return decision.edit === null ? decision : { ...decision, edit: null }
 }
 
 /** The quick-action ids (F-5.17) as router actions; the recap is a Story Intelligence question. */
@@ -132,7 +190,7 @@ const QUICK_ACTION_ROUTES: Record<QuickActionId, RouteAction> = {
  */
 export function localRoute(message: string, situation: RouteSituation): RouteDecision | null {
   const trimmed = message.trim()
-  if (!/[\p{L}\p{N}]/u.test(trimmed)) return { action: 'chat', instruction: null }
+  if (!/[\p{L}\p{N}]/u.test(trimmed)) return CHAT
   const key = trimmed
     .replace(/[\s.!?]+$/u, '')
     .replace(/\s+/g, '')
@@ -140,5 +198,7 @@ export function localRoute(message: string, situation: RouteSituation): RouteDec
   const action =
     ROUTE_ACTIONS.find((id) => id.toLowerCase() === key) ??
     QUICK_ACTION_IDS.flatMap((id) => (id.toLowerCase() === key ? [QUICK_ACTION_ROUTES[id]] : []))[0]
-  return action === undefined ? null : settleRoute({ action, instruction: null }, situation)
+  return action === undefined
+    ? null
+    : settleRoute({ action, instruction: null, edit: null }, situation)
 }

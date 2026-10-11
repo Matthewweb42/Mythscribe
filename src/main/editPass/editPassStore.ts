@@ -39,6 +39,8 @@ export interface CreatePassInput {
   type: EditPassType
   instruction: string | null
   nodeIds: readonly string[]
+  /** The selected passage a one-scene pass reads (F-5.26); null or absent for whole scenes. */
+  excerpt?: string | null
   /** ISO timestamp; defaults to now. */
   now?: string
 }
@@ -51,6 +53,7 @@ export function createPass(db: TreeDb, input: CreatePassInput): EditPassRow {
       id,
       type: input.type,
       instruction: input.instruction,
+      excerpt: input.excerpt ?? null,
       status: 'running',
       nodeIds: JSON.stringify(input.nodeIds),
       createdAt: input.now ?? new Date().toISOString()
@@ -258,6 +261,7 @@ export function toSummary(
     id: row.id,
     type: row.type,
     instruction: row.instruction,
+    excerpt: row.excerpt !== null,
     status: row.status,
     nodeIds: passNodeIds(row),
     doneNodeIds: doneNodeIds(row),

@@ -62,6 +62,11 @@ export function passChangesText(type: EditPassType): boolean {
 export const EDIT_PASS_CHUNK_CHARS = 12_000
 /** A scene needs this many characters of text to be sent; shorter scenes are skipped. */
 export const EDIT_PASS_TEXT_MIN = 20
+/**
+ * The selected passage a one-scene pass reads instead of the whole scene (F-5.26, the chat's
+ * "improve this" on a selection): one request's worth. A longer selection runs on the scene.
+ */
+export const EDIT_PASS_EXCERPT_MAX = EDIT_PASS_CHUNK_CHARS
 /** The author's instruction for a custom pass (and a saved preset's). */
 export const EDIT_PASS_INSTRUCTION_MAX = 1_000
 /** Changes (or notes) kept per request, in document order. */
@@ -301,6 +306,8 @@ export const EditPassSummary = z.object({
   type: EditPassType,
   /** The custom instruction; null for the built-in passes. */
   instruction: z.string().nullable(),
+  /** The pass reads a selected passage of its one scene, not the whole scene (F-5.26). */
+  excerpt: z.boolean(),
   status: EditPassStatus,
   /** The scenes in the pass, in reading order. */
   nodeIds: z.array(z.string()),

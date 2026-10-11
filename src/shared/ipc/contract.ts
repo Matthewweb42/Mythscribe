@@ -133,6 +133,7 @@ import {
   EntityTemplate
 } from '../entities'
 import {
+  EDIT_PASS_EXCERPT_MAX,
   EDIT_PASS_INSTRUCTION_MAX,
   EDIT_PASS_SCENES_MAX,
   EditChange,
@@ -195,7 +196,7 @@ import { CustomTagTemplate, CustomTagTemplateName, TagTemplateId } from '../tagT
 import { TiptapNode } from '../tiptap'
 import { UpdateChannel, UpdateState } from '../updates'
 import { WHAT_NEXT_CHAR_BUDGET, WhatNextDirections } from '../whatNext'
-import { ROUTE_SELECTION_PREVIEW_CHARS, RouteAction } from '../assistantRoute'
+import { ROUTE_SELECTION_PREVIEW_CHARS, RouteAction, RouteEdit } from '../assistantRoute'
 import {
   NOTES_SUGGEST_INSTRUCTION_MAX,
   SuggestedNotePoints,
@@ -698,15 +699,17 @@ const AiFailureWithRequest = z.object({
 
 /**
  * What `ai:route` answers (F-5.19): the action that answers the message, the instruction the
- * router restated for it (null when there is none), whether the decision was `local` (no
- * request; zero usage, null model) or the `model`'s, and what it cost; or an expected AI failure
- * as data. No proposal: a routing decision is never shown as content.
+ * router restated for it (null when there is none), an edit pass's pass and target (F-5.26; null
+ * for every other action), whether the decision was `local` (no request; zero usage, null model)
+ * or the `model`'s, and what it cost; or an expected AI failure as data. No proposal: a routing
+ * decision is never shown as content.
  */
 export const AiRouteResult = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true),
     action: RouteAction,
     instruction: z.string().nullable(),
+    edit: RouteEdit.nullable(),
     routedBy: z.enum(['local', 'model']),
     usage: AiUsage,
     costUsd: z.number(),
@@ -2605,14 +2608,18 @@ export const contract = {
    * Edit passes (F-14.15). The renderer flushes pending saves first (main reads saved rows) and
    * sends the pass type, the custom instruction (required for a custom pass), and the scenes in
    * reading order; main keeps the ids that are documents (VALIDATION when none is) and starts
-   * the one background run of the session (VALIDATION while another runs). The answer comes
+   * the one background run of the session (VALIDATION while another runs). `excerpt` (F-5.26,
+   * the chat's "improve this" on a selection) is the selected passage of a one-scene pass, read
+   * instead of the whole scene (VALIDATION with more than one scene); null or absent for whole
+   * scenes. The answer comes
    * back at once; `editPass:changed` follows every scene. Expected AI failures are data.
    */
   'editPass:start': {
     input: z.object({
       type: EditPassType,
       instruction: z.string().trim().max(EDIT_PASS_INSTRUCTION_MAX).nullable(),
-      nodeIds: z.array(z.string()).min(1).max(EDIT_PASS_SCENES_MAX)
+      nodeIds: z.array(z.string()).min(1).max(EDIT_PASS_SCENES_MAX),
+      excerpt: z.string().max(EDIT_PASS_EXCERPT_MAX).nullable().optional()
     }),
     output: EditPassStartResult
   },
@@ -2657,8 +2664,9 @@ export const contract = {
    * the open document (null with none), the message, the recent turns (main reads the last two),
    * and the selection as its first `ROUTE_SELECTION_PREVIEW_CHARS` characters (null with none).
    * Main short-circuits a blank-ish message or an exact action / quick-action id without a
-   * request, otherwise asks the fast tier for JSON; an unreadable answer is `chat`, a `rewrite`
-   * without a selection or a scene action without an open document falls back to `chat`. The
+   * request, otherwise asks the fast tier for JSON (route.v2); an unreadable answer is `chat`, a
+   * scene action without an open document falls back to `chat`, and a `rewrite` without a
+   * selection is an `editPass` on the open scene (F-5.26). The
    * renderer then calls the chosen feature's own channel. AI failures come back as data with
    * the echoed `requestId` (DISABLED when the router is off: fall back to `ai:chat`).
    */

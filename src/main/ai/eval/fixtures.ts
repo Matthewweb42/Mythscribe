@@ -386,6 +386,7 @@ import {
   ROUTE_PROMPT_VERSION,
   type BuildRoutePromptInput
 } from '../prompts/route.v1'
+import { buildRoutePromptV2, ROUTE_PROMPT_V2_VERSION } from '../prompts/route.v2'
 import {
   buildSynopsisPrompt,
   SYNOPSIS_PROMPT_VERSION,
@@ -725,9 +726,10 @@ export interface EvalCase {
     | { kind: 'voiceNotes' }
     /**
      * The assistant router (F-5.19): the answer, read by the feature's own parser, must name
-     * `expected`, the action a well-behaved router picks for the case.
+     * `expected`, the action a well-behaved router picks for the case; for an edit pass (route.v2,
+     * F-5.26) also `edit`, the pass and the target it should name.
      */
-    | { kind: 'route'; expected: string }
+    | { kind: 'route'; expected: string; edit?: { pass: string; target: string } }
     /** A suggested synopsis (F-5.20): the answer must survive the feature's own parser. */
     | { kind: 'synopsis' }
     /** Suggested notes (F-5.20): the answer must survive the feature's own parser, nothing dropped. */
@@ -2357,6 +2359,25 @@ function routeCase(
   }
 }
 
+/** A route.v2 case (F-5.26): the same input as v1's, and the edit pass it should name, if any. */
+function routeV2Case(
+  name: string,
+  note: string,
+  input: BuildRoutePromptInput,
+  expected: string,
+  edit?: { pass: string; target: string }
+): EvalCase {
+  const built = buildRoutePromptV2(input)
+  return {
+    version: ROUTE_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: edit === undefined ? { kind: 'route', expected } : { kind: 'route', expected, edit }
+  }
+}
+
 function agentCase(
   name: string,
   note: string,
@@ -3433,6 +3454,9 @@ function sheetRefileCase(name: string, note: string, input: BuildSheetRefileProm
     scoring: { kind: 'sheetRefile', fields: input.fields.map((field) => field.id) }
   }
 }
+
+/** The open scene the route.v2 cases (F-5.26) run in. */
+const ROUTE_V2_SCENE = 'scene "The ferry landing"'
 
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
@@ -5476,5 +5500,86 @@ export const EVAL_CASES: EvalCase[] = [
     noun: 'character',
     length: 'long',
     fields: MAXED_SHEET_FIELDS
-  })
+  }),
+  routeV2Case(
+    'vague-scene',
+    '"make this scene better" with the scene open and nothing selected: ask which edit',
+    { message: 'Make this scene better.', history: [], active: ROUTE_V2_SCENE, selection: null },
+    'editPass',
+    { pass: 'ask', target: 'scene' }
+  ),
+  routeV2Case(
+    'vague-selection',
+    '"polish this" over a selection: ask which edit, on the selection',
+    {
+      message: 'Polish this.',
+      history: [],
+      active: ROUTE_V2_SCENE,
+      selection: REWRITE_PASSAGE.slice(0, ROUTE_SELECTION_PREVIEW_CHARS)
+    },
+    'editPass',
+    { pass: 'ask', target: 'selection' }
+  ),
+  routeV2Case(
+    'tighten',
+    '"tighten the prose" with the scene open: a line pass on the scene',
+    { message: 'Tighten the prose.', history: [], active: ROUTE_V2_SCENE, selection: null },
+    'editPass',
+    { pass: 'line', target: 'scene' }
+  ),
+  routeV2Case(
+    'pacing',
+    '"the pacing drags" with the scene open: a developmental pass on the scene',
+    {
+      message: 'The pacing drags in this scene.',
+      history: [],
+      active: ROUTE_V2_SCENE,
+      selection: null
+    },
+    'editPass',
+    { pass: 'developmental', target: 'scene' }
+  ),
+  routeV2Case(
+    'proofread-chapter',
+    '"proofread chapter 3": a proofread pass on the chapter it names',
+    { message: 'Proofread chapter 3.', history: [], active: ROUTE_V2_SCENE, selection: null },
+    'editPass',
+    { pass: 'proofread', target: 'chapter' }
+  ),
+  routeV2Case(
+    'rewrite-voice',
+    '"rewrite this in my voice" over a selection: still Rewrite in my voice, unchanged',
+    {
+      message: 'Rewrite this in my voice.',
+      history: CHAT_HISTORY,
+      active: ROUTE_V2_SCENE,
+      selection: REWRITE_PASSAGE.slice(0, ROUTE_SELECTION_PREVIEW_CHARS)
+    },
+    'rewrite'
+  ),
+  routeV2Case(
+    'question',
+    'a plain question about craft with the scene open: chat',
+    {
+      message: 'Should Mara trust Tomas yet, or is it too early?',
+      history: [],
+      active: ROUTE_V2_SCENE,
+      selection: null
+    },
+    'chat'
+  ),
+  routeV2Case(
+    'maxed',
+    'every cap at its limit: the message, two turns, the title, and the selection opening',
+    {
+      message: FIXTURE_PASSAGE.repeat(3).slice(0, ROUTE_MESSAGE_CHARS),
+      history: [
+        { role: 'user', content: FIXTURE_PASSAGE.slice(0, ROUTE_TURN_CHARS) },
+        { role: 'assistant', content: FIXTURE_PASSAGE.slice(0, ROUTE_TURN_CHARS) }
+      ],
+      active: `scene "${'T'.repeat(ROUTE_TITLE_CHARS)}"`,
+      selection: FIXTURE_PASSAGE.slice(0, ROUTE_SELECTION_PREVIEW_CHARS)
+    },
+    'chat'
+  )
 ]

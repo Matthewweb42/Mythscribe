@@ -409,18 +409,33 @@ function scoreWhatNext(answer: string): LiveResult['verdict'] {
 /**
  * The assistant router (F-5.19) scores through the feature's own parser: the answer must be JSON
  * naming a known action (anything else silently becomes `chat`, which is a miss unless `chat`
- * was expected), and the action must be the one the case expects.
+ * was expected), and the action must be the one the case expects; for an edit pass (route.v2,
+ * F-5.26) also the pass and the target.
  */
-function scoreRoute(expected: string, answer: string): LiveResult['verdict'] {
+function scoreRoute(
+  expected: string,
+  edit: { pass: string; target: string } | undefined,
+  answer: string
+): LiveResult['verdict'] {
   try {
     JSON.parse(answer)
   } catch {
     return { kind: 'json', ok: false, problem: 'not JSON' }
   }
-  const { action } = parseRouteAnswer(answer)
-  return action === expected
-    ? { kind: 'json', ok: true, problem: null }
-    : { kind: 'json', ok: false, problem: `routed to ${action}, expected ${expected}` }
+  const decision = parseRouteAnswer(answer)
+  if (decision.action !== expected) {
+    return {
+      kind: 'json',
+      ok: false,
+      problem: `routed to ${decision.action}, expected ${expected}`
+    }
+  }
+  if (edit !== undefined) {
+    const got = `${decision.edit?.pass ?? '-'}/${decision.edit?.target ?? '-'}`
+    const want = `${edit.pass}/${edit.target}`
+    if (got !== want) return { kind: 'json', ok: false, problem: `edit ${got}, expected ${want}` }
+  }
+  return { kind: 'json', ok: true, problem: null }
 }
 
 /** One chat agent step (F-5.22): JSON that the feature's parser reads as the expected kind. */
@@ -803,7 +818,7 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
         results.push({
           ...base,
           answer: reply.text,
-          verdict: scoreRoute(c.scoring.expected, reply.text)
+          verdict: scoreRoute(c.scoring.expected, c.scoring.edit, reply.text)
         })
         continue
       }

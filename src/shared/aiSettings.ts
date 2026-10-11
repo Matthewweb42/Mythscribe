@@ -354,8 +354,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   editPass: {
     label: 'Edit passes',
     sends:
-      'Only when you start a pass, the text of each scene you picked, in pieces of up to ' +
-      '12,000 characters, with its title and your instruction for a custom pass; for line, ' +
+      'Only when you start a pass, the text of each scene you picked (or, from the chat, only ' +
+      'the passage you selected), in pieces of up to 12,000 characters, with its title and ' +
+      'your instruction for a custom pass; for line, ' +
       'copy, proofread, and custom passes the voice profile (stylometric rules, learned style ' +
       'notes, and up to 3 exemplar passages) with your author rules and banned phrases; for ' +
       'copy edits and proofreads up to 200 words to leave alone (the names of your story-bible ' +

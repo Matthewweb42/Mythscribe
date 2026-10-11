@@ -1,7 +1,10 @@
 import { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
+import type { RouteEdit } from '@shared/assistantRoute'
 import type { Conversations } from '@shared/chat'
+import type { EditPassSummary } from '@shared/editPass'
+import { EDIT_ASK_QUESTION } from '@shared/editRequest'
 import type {
   AiChatResult,
   AiAgentResult,
@@ -18,6 +21,7 @@ import { resetCritiqueStore, useCritiqueStore } from '@renderer/features/editor/
 import { resetDocumentStore } from '@renderer/features/editor/documentStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { resetRewriteStore, useRewriteStore } from '@renderer/features/editor/rewriteStore'
+import { resetEditPassStore, useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import {
   resetSceneSuggestStore,
   useSceneSuggestStore
@@ -33,6 +37,7 @@ import { resetAiActivityStore } from './aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
 import {
   ATTACHMENT_MAX,
+  PLAN_NO_EDITS_MESSAGE,
   REWRITE_STARTED_MESSAGE,
   resetAssistantStore,
   useAssistantStore,
@@ -62,11 +67,13 @@ const usage = { inputTokens: 90, outputTokens: 8 }
 
 const routed = (
   action: Extract<AiRouteResult, { ok: true }>['action'],
-  instruction: string | null = null
+  instruction: string | null = null,
+  edit: RouteEdit | null = null
 ): AiRouteResult => ({
   ok: true,
   action,
   instruction,
+  edit,
   routedBy: 'model',
   usage,
   costUsd: 0.00002,
@@ -132,6 +139,10 @@ function client(): IpcClient {
         case 'ai:rewrite':
         case 'ai:suggestSynopsis':
           return new Promise<Output<C>>(() => {})
+        case 'editPass:start': {
+          const start = input as Input<'editPass:start'>
+          return { ok: true, pass: passSummary(start) } as Output<C>
+        }
         case 'ai:cancel':
           return { cancelled: true } as Output<C>
         case 'proposal:settle':
@@ -141,6 +152,29 @@ function client(): IpcClient {
       }
     },
     on: () => () => {}
+  }
+}
+
+/** What main answers an edit pass start with: the pass, running. */
+function passSummary(start: Input<'editPass:start'>): EditPassSummary {
+  return {
+    id: `pass-${calls.length}`,
+    type: start.type,
+    instruction: start.instruction,
+    excerpt: start.excerpt != null,
+    status: 'running',
+    nodeIds: start.nodeIds,
+    doneNodeIds: [],
+    currentNodeId: null,
+    model: 'gpt-strong',
+    tokensIn: 0,
+    tokensOut: 0,
+    costUsd: 0,
+    counts: { pending: 0, accepted: 0, rejected: 0, stale: 0 },
+    dropped: 0,
+    error: null,
+    createdAt: '2026-10-11T10:00:00.000Z',
+    finishedAt: null
   }
 }
 
@@ -166,6 +200,7 @@ beforeEach(async () => {
   resetAiSettingsStore()
   resetCritiqueStore()
   resetRewriteStore()
+  resetEditPassStore()
   resetSceneSuggestStore()
   resetContinuityStore()
   resetLayoutStore()
@@ -190,6 +225,7 @@ afterEach(() => {
   resetAssistantStore()
   resetCritiqueStore()
   resetRewriteStore()
+  resetEditPassStore()
   resetSceneSuggestStore()
   resetContinuityStore()
   resetLayoutStore()
@@ -320,6 +356,140 @@ describe('Auto conversations (F-5.19 router, 2026-10-06)', () => {
     expect(turns()[1]).toMatchObject({
       action: 'critique',
       content: "Editor's notes is turned off for this project (Settings, AI tab)"
+    })
+  })
+})
+
+describe('edit requests (F-5.26)', () => {
+  const editRoute = (edit: RouteEdit, instruction: string | null = null): AiRouteResult =>
+    routed('editPass', instruction, edit)
+
+  it('a vague request asks which kind of edit, with the quick picks, and starts nothing', async () => {
+    route = editRoute({ pass: 'ask', target: 'scene', chapter: null })
+    await useAssistantStore.getState().send('Make this scene better')
+    expect(sent('editPass:start')).toHaveLength(0)
+    expect(turns()[1]).toMatchObject({
+      action: 'editPass',
+      content: EDIT_ASK_QUESTION,
+      model: 'gpt-fast',
+      edit: {
+        target: { kind: 'scene', nodeIds: ['sc-1'], title: 'Scene 1', excerpt: null },
+        choices: ['line', 'developmental', 'dialogue', 'proofread', 'critique'],
+        picked: null,
+        passId: null
+      }
+    })
+  })
+
+  it('a pick runs its pass on the target and records it on the turn', async () => {
+    route = editRoute({ pass: 'ask', target: 'scene', chapter: null })
+    await useAssistantStore.getState().send('Improve this')
+    const id = turns()[1]?.id ?? ''
+    await useAssistantStore.getState().pickEdit(id, 'line')
+    expect(sent('editPass:start')).toEqual([
+      { type: 'line', instruction: null, nodeIds: ['sc-1'], excerpt: null }
+    ])
+    expect(turns()[1]?.edit?.picked).toBe('line')
+    expect(turns()[1]?.edit?.passId).toBe(useEditPassStore.getState().startedHere)
+    expect(turns()[1]?.content).toContain('Line edit started on “Scene 1”')
+    // A second pick on the same turn starts nothing more.
+    await useAssistantStore.getState().pickEdit(id, 'proofread')
+    expect(sent('editPass:start')).toHaveLength(1)
+  })
+
+  it('Dialogue runs a custom pass carrying the dialogue instruction', async () => {
+    route = editRoute({ pass: 'ask', target: 'scene', chapter: null })
+    await useAssistantStore.getState().send('Improve this')
+    await useAssistantStore.getState().pickEdit(turns()[1]?.id ?? '', 'dialogue')
+    expect(sent('editPass:start')[0]?.type).toBe('custom')
+    expect(sent('editPass:start')[0]?.instruction?.startsWith('Dialogue pass: ')).toBe(true)
+  })
+
+  it('with a selection, the pass reads only the selected passage', async () => {
+    route = editRoute({ pass: 'proofread', target: 'selection', chapter: null })
+    editor.commands.setTextSelection({ from: 1, to: 40 })
+    await useAssistantStore.getState().send('Proofread this')
+    expect(sent('editPass:start')).toEqual([
+      {
+        type: 'proofread',
+        instruction: null,
+        nodeIds: ['sc-1'],
+        excerpt: SCENE.slice(0, 39)
+      }
+    ])
+    expect(turns()[1]?.content).toContain('Proofread started on the selection in “Scene 1”')
+  })
+
+  it('a specific request on a named chapter runs at once over its scenes', async () => {
+    route = editRoute({ pass: 'proofread', target: 'chapter', chapter: 'chapter 3' })
+    await useAssistantStore.getState().send('Proofread chapter 3')
+    expect(sent('editPass:start')).toEqual([
+      { type: 'proofread', instruction: null, nodeIds: ['sc-3'], excerpt: null }
+    ])
+    expect(turns()[1]?.edit).toMatchObject({
+      target: { kind: 'chapter', title: 'Chapter 3' },
+      picked: 'proofread'
+    })
+  })
+
+  it("this chapter is the open scene's; a chapter that is not there says so", async () => {
+    route = editRoute({ pass: 'developmental', target: 'chapter', chapter: null })
+    await useAssistantStore.getState().send('Fix the pacing of this chapter')
+    expect(sent('editPass:start')[0]).toMatchObject({ type: 'developmental', nodeIds: ['sc-1'] })
+
+    route = editRoute({ pass: 'line', target: 'chapter', chapter: 'Chapter 40' })
+    await useAssistantStore.getState().send('Tighten chapter 40')
+    expect(sent('editPass:start')).toHaveLength(1)
+    expect(turns()[3]?.content).toBe('No chapter called “Chapter 40” in the manuscript.')
+  })
+
+  it('a custom request carries the instruction; a chapter is not offered Editor’s notes', async () => {
+    route = editRoute({ pass: 'custom', target: 'scene', chapter: null }, 'Cut the adverbs.')
+    await useAssistantStore.getState().send('Cut the adverbs')
+    expect(sent('editPass:start')[0]).toMatchObject({
+      type: 'custom',
+      instruction: 'Cut the adverbs.'
+    })
+    useEditPassStore.setState({ byId: {}, ids: [] })
+    route = editRoute({ pass: 'ask', target: 'chapter', chapter: null })
+    await useAssistantStore.getState().send('Polish this chapter')
+    expect(turns()[3]?.edit?.choices).not.toContain('critique')
+  })
+
+  it('a pass already running answers with the reason and keeps the choice to try later', async () => {
+    route = editRoute({ pass: 'line', target: 'scene', chapter: null })
+    await useAssistantStore.getState().send('Tighten the prose')
+    await useAssistantStore.getState().send('Tighten the prose again')
+    expect(sent('editPass:start')).toHaveLength(1)
+    expect(turns()[3]).toMatchObject({
+      content: 'An edit pass is already running. Stop it or wait for it to finish.',
+      edit: { choices: ['line'], picked: null }
+    })
+  })
+
+  it('in Plan an edit request is answered by the read-only chat, and a pick is refused', async () => {
+    useAiSettingsStore.setState({ settings: settings({ chatMode: 'plan' }) })
+    route = editRoute({ pass: 'ask', target: 'scene', chapter: null })
+    await useAssistantStore.getState().send('Make this scene better')
+    expect(sent('ai:agent')).toEqual([expect.objectContaining({ access: 'read' })])
+    expect(turns()[1]?.edit).toBeNull()
+
+    useAiSettingsStore.setState({ settings: settings() })
+    await useAssistantStore.getState().send('Make this scene better')
+    useAiSettingsStore.setState({ settings: settings({ chatMode: 'plan' }) })
+    await useAssistantStore.getState().pickEdit(turns()[3]?.id ?? '', 'line')
+    expect(sent('editPass:start')).toHaveLength(0)
+    expect(useDialogStore.getState().toasts.map((t) => t.message)).toContain(PLAN_NO_EDITS_MESSAGE)
+  })
+
+  it('Editor’s notes from the quick picks opens the critique on the scene', async () => {
+    route = editRoute({ pass: 'ask', target: 'scene', chapter: null })
+    await useAssistantStore.getState().send('Make this better')
+    await useAssistantStore.getState().pickEdit(turns()[1]?.id ?? '', 'critique')
+    await expect.poll(() => useCritiqueStore.getState().session?.nodeId).toBe('sc-1')
+    expect(turns()[1]).toMatchObject({
+      content: "Editor's notes are above the chat.",
+      edit: { picked: 'critique', passId: null }
     })
   })
 })

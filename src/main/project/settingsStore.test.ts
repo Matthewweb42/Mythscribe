@@ -281,7 +281,8 @@ describe('getConversations / setConversations (F-5.4)', () => {
         query: null,
         directions: null,
         action: null,
-        agent: null
+        agent: null,
+        edit: null
       }
     ],
     created: '2026-09-15T10:00:00.000Z',
