@@ -113,8 +113,8 @@ function Status(): React.JSX.Element {
       <div
         className={
           phase === 'running'
-            ? 'flex min-h-32 items-center justify-center px-3 py-6 text-center text-sm'
-            : 'px-3 py-3 text-sm'
+            ? 'flex min-h-32 flex-1 items-center justify-center px-3 py-6 text-center text-sm'
+            : 'flex-1 px-3 py-3 text-sm'
         }
       >
         {phase === 'running' ? (
@@ -206,7 +206,7 @@ function Plan(): React.JSX.Element {
       type="button"
       onClick={close}
       disabled={busy}
-      className="rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-60"
+      className="min-w-20 shrink-0 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-60"
     >
       {pending === 0 || mode === 'plan' ? 'Done' : 'Close'}
     </button>
@@ -238,7 +238,7 @@ function Plan(): React.JSX.Element {
       ) : null}
       {items.length === 0 ? (
         <>
-          <p className="m-0 px-3 py-3 text-sm text-fg-muted" data-testid="organise-nothing">
+          <p className="m-0 flex-1 px-3 py-3 text-sm text-fg-muted" data-testid="organise-nothing">
             Nothing to change: everything already looks organised.
           </p>
           <div className="flex shrink-0 justify-end border-t border-line px-3 py-2">

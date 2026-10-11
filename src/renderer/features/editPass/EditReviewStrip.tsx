@@ -73,7 +73,7 @@ export function EditReviewStrip(): React.JSX.Element | null {
 
   return (
     <div
-      className="flex max-h-[55vh] shrink-0 flex-col border-b border-line bg-surface-raised"
+      className="flex h-[max(14rem,min(50vh,24rem))] shrink-0 flex-col border-b border-line bg-surface-raised"
       data-testid="edit-review"
     >
       <ReviewDeck

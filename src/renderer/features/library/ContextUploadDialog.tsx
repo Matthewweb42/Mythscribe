@@ -193,7 +193,7 @@ function Status({ flow }: { flow: Exclude<LibraryFlow, { stage: 'review' }> }): 
   const pad = flow.stage === 'estimating' || flow.stage === 'confirm' ? 'px-5' : 'px-3'
   return (
     <>
-      <div className={`${pad} py-4 text-sm`}>
+      <div className={`flex-1 ${pad} py-4 text-sm`}>
         {flow.stage === 'estimating' ? (
           <p className={`m-0 ${AI_WAIT_CLASS}`} role="status">
             Working out what sorting would cost…
