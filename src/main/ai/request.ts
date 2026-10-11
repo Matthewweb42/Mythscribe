@@ -210,14 +210,19 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
     ? resolveTier({ feature: input.feature, requested: input.tier, ...routed })
     : input.tier
   const model = provider.resolveModel(tier)
-  // 2026-10-07: the own-key reasoning mode (Settings, else the bundled table); MythScribe Cloud
-  // decides its own on the server, so nothing is asked of it here.
+  // 2026-10-07: the own-key reasoning mode (Settings, else the bundled table). MythScribe Cloud
+  // decides its own on the server; F-16.2: a feature that never thinks asks it for `off` (the
+  // Worker honours only a request that lowers its table's mode), and every other one asks nothing.
   const reasoning: ReasoningMode =
-    routed === null || provider.id === 'cloud'
-      ? 'default'
-      : NO_REASONING_FEATURES.has(input.feature)
+    provider.id === 'cloud'
+      ? NO_REASONING_FEATURES.has(input.feature)
         ? 'off'
-        : resolveReasoning(routed.routing, tier, model)
+        : 'default'
+      : routed === null
+        ? 'default'
+        : NO_REASONING_FEATURES.has(input.feature)
+          ? 'off'
+          : resolveReasoning(routed.routing, tier, model)
   // Called through a closure rather than passed as a method reference: the provider owns it.
   const providerPrice = provider.price
   const price: typeof priceFor = providerPrice

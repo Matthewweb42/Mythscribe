@@ -1,5 +1,12 @@
 import { z } from 'zod'
-import { AI_FEATURE_IDS, AiFeatureId, ReasoningMode, Tier, bundledReasoning } from './ai'
+import {
+  AI_FEATURE_IDS,
+  type AiFeatureId,
+  ReasoningMode,
+  Tier,
+  bundledReasoning,
+  lenientFeatureRecord
+} from './ai'
 import { PricingResult } from './cloudApi'
 
 /**
@@ -40,16 +47,7 @@ export const DEFAULT_ROUTING_TABLE: Partial<Record<AiFeatureId, Tier>> = {
 }
 
 /** A stored table read leniently: a feature id or a tier this build does not know is dropped. */
-const LenientTierTable = z
-  .record(z.string(), z.unknown())
-  .transform((stored) =>
-    Object.fromEntries(
-      Object.entries(stored).filter(
-        ([feature, tier]) => AiFeatureId.safeParse(feature).success && Tier.safeParse(tier).success
-      )
-    )
-  )
-  .pipe(z.partialRecord(AiFeatureId, Tier))
+const LenientTierTable = lenientFeatureRecord(Tier)
 
 /** The author's overrides, app-wide (like the models): one tier for every task, and per task. */
 export const AiRouting = z.object({

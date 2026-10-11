@@ -3,6 +3,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import type { NovelFormat, ProjectInfo } from '@shared/ipc/contract'
+import { effectiveStoryMemory, type StoryMemoryVersion } from '@shared/storyMemory'
 import { openDatabase, type Connection } from '../db/connection'
 import { writePreMigrationBackup } from '../db/preMigrationBackup'
 import { project as projectTable, settings } from '../db/schema'
@@ -11,6 +12,7 @@ import { insertNodes } from '../tree/treeStore'
 import { isLegacyDatabase } from './legacy'
 import { OPEN_LOCK_FILE, OpenLock } from './openLock'
 import { seedSettings, seedSkeleton } from './seed'
+import { getStoryMemory } from './settingsStore'
 import type { WorkingCopy } from './workingCopy'
 
 /**
@@ -56,6 +58,14 @@ export class ProjectSession {
   }
 
   /**
+   * The story-memory system this open runs (F-16.2): main-side feature code branches on it, so a
+   * v2 path never runs on a v1 project. Fixed for the open; the switch-over (F-16.31) reopens.
+   */
+  get storyMemory(): StoryMemoryVersion {
+    return this.info.storyMemory
+  }
+
+  /**
    * Closes the database and releases the open marker. A project in a cloud-synced folder is
    * copied back first, while the marker still says this computer has it; a failed copy is
    * logged and the working copy stays marked as ahead, so the next open copies it back.
@@ -84,7 +94,12 @@ export class ProjectSession {
 
 type ProjectRow = typeof projectTable.$inferSelect
 
-function toInfo(row: ProjectRow, folder: string, schemaVersion: number): ProjectInfo {
+function toInfo(
+  row: ProjectRow,
+  folder: string,
+  connection: Connection,
+  storyMemoryOverride: StoryMemoryVersion | null
+): ProjectInfo {
   return {
     id: row.id,
     name: row.name,
@@ -93,7 +108,8 @@ function toInfo(row: ProjectRow, folder: string, schemaVersion: number): Project
     created: row.created,
     modified: row.modified,
     lastOpened: row.lastOpened,
-    schemaVersion
+    schemaVersion: connection.schemaVersion,
+    storyMemory: effectiveStoryMemory(getStoryMemory(connection.orm), storyMemoryOverride)
   }
 }
 
@@ -116,13 +132,23 @@ export interface CreateProjectOptions {
    * folder before the create answers; a copy that fails undoes the create.
    */
   workingCopy?: (folder: string) => WorkingCopy | null
+  /**
+   * F-16.2: the dev-only story-memory override for this open (`parseStoryMemoryOverride`); it
+   * sets `ProjectInfo.storyMemory` and is never written to the project.
+   */
+  storyMemoryOverride?: StoryMemoryVersion | null
 }
 
 export function createProject(
   folder: string,
   name: string,
   format: NovelFormat,
-  { skeleton = true, fill, workingCopy: prepare }: CreateProjectOptions = {}
+  {
+    skeleton = true,
+    fill,
+    workingCopy: prepare,
+    storyMemoryOverride = null
+  }: CreateProjectOptions = {}
 ): ProjectSession {
   if (fs.existsSync(folder)) {
     if (isProjectFolder(folder)) {
@@ -162,7 +188,7 @@ export function createProject(
     return new ProjectSession(
       folder,
       connection,
-      toInfo(row, folder, connection.schemaVersion),
+      toInfo(row, folder, connection, storyMemoryOverride),
       lock,
       copy
     )
@@ -251,12 +277,14 @@ function projectIdentity(
  * cloud-synced location once the open marker is held; SQLite then opens that copy instead of the
  * database in the folder. Null (or absent) opens the folder's database in place.
  * `backupDirFor` (F-8.7) names the folder a pre-migration backup goes to before a schema
- * upgrade; absent (the unit tests), no backup is written.
+ * upgrade; absent (the unit tests), no backup is written. `storyMemoryOverride` (F-16.2) is the
+ * dev-only story-memory override for this open; it is never written to the project.
  */
 export function openProject(
   input: string,
   workingCopy?: (folder: string) => WorkingCopy | null,
-  backupDirFor?: BackupDirFor
+  backupDirFor?: BackupDirFor,
+  storyMemoryOverride: StoryMemoryVersion | null = null
 ): ProjectSession {
   const location = locateProject(input)
   if (location.kind === 'legacy') {
@@ -295,7 +323,7 @@ export function openProject(
     return new ProjectSession(
       folder,
       connection,
-      toInfo({ ...row, lastOpened }, folder, connection.schemaVersion),
+      toInfo({ ...row, lastOpened }, folder, connection, storyMemoryOverride),
       lock,
       copy
     )

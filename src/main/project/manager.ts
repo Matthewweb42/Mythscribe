@@ -1,6 +1,7 @@
 import path from 'node:path'
 import type { CloudProvider, CloudSide } from '@shared/cloudSync'
 import type { NovelFormat, ProjectInfo } from '@shared/ipc/contract'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { AppError } from '../ipc/errors'
 import { cloudProviderFor } from './cloudFolder'
 import {
@@ -26,6 +27,11 @@ export interface ProjectManagerOptions {
   detectCloud?: (folder: string) => CloudProvider | null
   /** Where a project's backups go (F-8.7: the pre-migration backup); absent, none is written. */
   backupDirFor?: BackupDirFor
+  /**
+   * F-16.2: the story-memory version every open runs instead of the stored one; null (and absent)
+   * in a packaged build. Read from `MYTHSCRIBE_STORY_MEMORY` once; never written to a project.
+   */
+  storyMemoryOverride?: StoryMemoryVersion | null
 }
 
 /** Owns the single open project and notifies listeners when it changes. */
@@ -36,10 +42,12 @@ export class ProjectManager {
   private readonly workingRoot: (() => string) | null
   private readonly detectCloud: (folder: string) => CloudProvider | null
   private readonly backupDirFor: BackupDirFor | undefined
+  private readonly storyMemoryOverride: StoryMemoryVersion | null
 
   constructor(options: ProjectManagerOptions = {}) {
     this.workingRoot = options.workingRoot ?? null
     this.backupDirFor = options.backupDirFor
+    this.storyMemoryOverride = options.storyMemoryOverride ?? null
     this.detectCloud = options.detectCloud ?? ((folder) => cloudProviderFor(folder))
   }
 
@@ -61,7 +69,8 @@ export class ProjectManager {
   ): ProjectInfo {
     const next = createProject(folder, name, format, {
       ...options,
-      workingCopy: (target) => this.workingCopyFor(target, 'create')
+      workingCopy: (target) => this.workingCopyFor(target, 'create'),
+      storyMemoryOverride: this.storyMemoryOverride
     })
     this.replace(next)
     return next.info
@@ -76,7 +85,8 @@ export class ProjectManager {
     const next = openProject(
       folder,
       (target) => this.workingCopyFor(target, 'open', keep),
-      this.backupDirFor
+      this.backupDirFor,
+      this.storyMemoryOverride
     )
     this.replace(next)
     return next.info

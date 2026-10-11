@@ -112,25 +112,30 @@ export const ChatMessage = z.object({
   usage: AiUsage.nullable().default(null),
   /** The mode the turn was made in; an Author turn's text went to the editor, not the chat. */
   mode: ChatMode.nullable(),
-  /** A Query turn's citations and flags (F-5.7); null for every other turn and for rows written before it. */
-  query: QueryTurn.nullable().default(null),
+  /**
+   * A Query turn's citations and flags (F-5.7); null for every other turn and for rows written
+   * before it. Every structured part of a turn reads leniently (F-16.2): a part that no longer
+   * parses (a shape retired at the story-memory switch-over) is null, and the turn keeps its text.
+   */
+  query: QueryTurn.nullable().catch(null).default(null),
   /** A What should come next? turn's directions (F-5.17); null for every other turn and for rows written before it. */
-  directions: z.array(WhatNextDirection).nullable().default(null),
+  directions: z.array(WhatNextDirection).nullable().catch(null).default(null),
   /**
    * The feature the router (F-5.19) picked for this turn in an Auto conversation, shown as a
-   * label on the turn; null for a turn sent in a fixed mode and for rows written before it.
+   * label on the turn; null for a turn sent in a fixed mode and for rows written before it, and
+   * for an action this build no longer has (F-16.2: retired at the switch-over).
    */
-  action: RouteAction.nullable().default(null),
+  action: RouteAction.nullable().catch(null).default(null),
   /**
    * A chat agent turn's lookups and edits (F-5.22) and where each edit stands; null for every
    * other turn and for rows written before it.
    */
-  agent: AgentTurn.nullable().default(null),
+  agent: AgentTurn.nullable().catch(null).default(null),
   /**
    * F-5.26: an edit request's target, its choices, and what was picked and started; null for
    * every other turn and for rows written before it.
    */
-  edit: EditTurn.nullable().default(null)
+  edit: EditTurn.nullable().catch(null).default(null)
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
 

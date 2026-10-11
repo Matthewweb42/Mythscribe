@@ -89,6 +89,72 @@ describe('chat model (F-5.4)', () => {
     expect(parsed.items[0]?.messages[0]?.query).toBeNull()
   })
 
+  it('keeps every conversation and a turn’s text when its action or its agent part no longer parses (F-16.2)', () => {
+    const turn = (id: string, content: string): Record<string, unknown> => ({
+      id,
+      role: 'assistant',
+      content,
+      created: '2026-10-11T10:00:00.000Z',
+      proposalId: null,
+      model: 'deepseek/deepseek-v4-pro',
+      costUsd: 0.002,
+      usage: null,
+      mode: 'plan',
+      query: null,
+      directions: null,
+      action: null,
+      agent: null,
+      edit: null
+    })
+    const conversation = (id: string, messages: Record<string, unknown>[]): unknown => ({
+      id,
+      title: id,
+      paragraphs: 1,
+      messages,
+      created: '2026-10-11T10:00:00.000Z',
+      modified: '2026-10-11T10:00:00.000Z'
+    })
+    const stored = {
+      active: 'c2',
+      items: [
+        conversation('c1', [turn('m1', 'Mara is on the ridge.')]),
+        conversation('c2', [
+          {
+            ...turn('m2', 'Her eyes are grey in 2.1 and brown in 9.4.'),
+            // An action retired at the story-memory switch-over (F-16.31).
+            action: 'continuityRetired',
+            // An agent part whose edit kind this build no longer has.
+            agent: {
+              access: 'write',
+              steps: [],
+              changes: [
+                {
+                  id: 'e1',
+                  edit: { kind: 'retiredEdit', nodeId: 'n1', title: 'Scene' },
+                  status: 'applied',
+                  violation: null,
+                  error: null
+                }
+              ]
+            }
+          },
+          turn('m3', 'Anything else?')
+        ])
+      ]
+    }
+    const parsed = parseStoredConversations(stored)
+    expect(parsed.active).toBe('c2')
+    expect(parsed.items.map((item) => item.id)).toEqual(['c1', 'c2'])
+    const kept = parsed.items[1]?.messages
+    expect(kept?.map((message) => message.content)).toEqual([
+      'Her eyes are grey in 2.1 and brown in 9.4.',
+      'Anything else?'
+    ])
+    expect(kept?.[0]?.action).toBeNull()
+    expect(kept?.[0]?.agent).toBeNull()
+    expect(kept?.[0]?.model).toBe('deepseek/deepseek-v4-pro')
+  })
+
   it('reads a turn stored before F-5.9, with no usage field, as usage: null', () => {
     const stored = {
       active: 'c1',

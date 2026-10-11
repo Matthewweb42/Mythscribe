@@ -122,7 +122,8 @@ const project: ProjectInfo = {
   created: 'c',
   modified: 'm',
   lastOpened: 'l',
-  schemaVersion: 1
+  schemaVersion: 1,
+  storyMemory: 'v1'
 }
 
 // The project store is app-wide: other files expect it to start with no project open.

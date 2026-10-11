@@ -159,6 +159,19 @@ describe('buildCloudProvider.complete', () => {
     })
   })
 
+  it('sends the reasoning field only when it asks for less thinking (F-16.2)', async () => {
+    const { fetch, calls } = answering(() => answer())
+    const provider = build({ fetch })
+    await provider.complete({ ...REQUEST, reasoning: 'off' })
+    await provider.complete({ ...REQUEST, reasoning: 'low' })
+    await provider.complete({ ...REQUEST, reasoning: 'default' })
+    await provider.complete(REQUEST)
+    expect(bodyOf(calls[0])).toMatchObject({ reasoning: 'off' })
+    expect(bodyOf(calls[1])).toMatchObject({ reasoning: 'low' })
+    expect(bodyOf(calls[2])).not.toHaveProperty('reasoning')
+    expect(bodyOf(calls[3])).not.toHaveProperty('reasoning')
+  })
+
   it('sends a fresh Idempotency-Key with every request (L8)', async () => {
     const { fetch, calls } = answering(() => answer())
     const keys = ['key-00000001', 'key-00000002']

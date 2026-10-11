@@ -22,6 +22,7 @@ import { extrasUnlocked } from '@shared/appAccess'
 import { projectToReopen, restorableBounds } from '@shared/windowState'
 import { UI_SCALE_FACTORS } from '@shared/zoom'
 import { themeBackground } from '@shared/themes'
+import { STORY_MEMORY_ENV, parseStoryMemoryOverride } from '@shared/storyMemory'
 import { AccountService } from './account/accountService'
 import { CloudAccessTokens, withAccessTokens } from './account/accessTokens'
 import { AppAccessService, devLicenseExempt } from './account/appAccess'
@@ -62,7 +63,12 @@ const manager = new ProjectManager({
   workingRoot: () => join(app.getPath('userData'), 'working'),
   backupDirFor: (project) =>
     backups?.dirForProject(project) ??
-    projectBackupDir(defaultBackupFolder(), sanitizeName(project.name), project.id)
+    projectBackupDir(defaultBackupFolder(), sanitizeName(project.name), project.id),
+  // F-16.2: dev builds and the e2e may run a project on the other story-memory system for one
+  // open; a packaged build never reads the variable, and nothing writes it to the project.
+  storyMemoryOverride: app.isPackaged
+    ? null
+    : parseStoryMemoryOverride(process.env[STORY_MEMORY_ENV])
 })
 /** F-15.2: built once the app is ready (it reads userData); its poll timer is dropped on quit. */
 let account: AccountService | null = null

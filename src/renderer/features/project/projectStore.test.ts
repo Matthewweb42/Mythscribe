@@ -1,3 +1,4 @@
+import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   Channel,
@@ -13,6 +14,7 @@ import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { registerPendingSave, resetPendingSaves } from './pendingSaves'
 import { useProjectStore } from './projectStore'
+import { currentStoryMemory, useStoryMemory } from './storyMemory'
 
 const info: ProjectInfo = {
   id: '1',
@@ -22,7 +24,8 @@ const info: ProjectInfo = {
   created: 'c',
   modified: 'm',
   lastOpened: 'l',
-  schemaVersion: 1
+  schemaVersion: 1,
+  storyMemory: 'v1'
 }
 
 const recent: RecentProject = {
@@ -352,5 +355,20 @@ describe('projectStore', () => {
     expect(invoke).toHaveBeenCalledWith('recents:remove', { path: recent.path })
     expect(useProjectStore.getState().recents).toEqual([])
     expect(busyStates.every((b) => !b)).toBe(true)
+  })
+})
+
+describe('the story-memory selector (F-16.2)', () => {
+  it('reads v1 with no project open, then follows the open project', () => {
+    const { result } = renderHook(() => useStoryMemory())
+    expect(result.current).toBe('v1')
+    expect(currentStoryMemory()).toBe('v1')
+    act(() => useProjectStore.setState({ current: { ...info, storyMemory: 'v2' } }))
+    expect(result.current).toBe('v2')
+    expect(currentStoryMemory()).toBe('v2')
+    act(() => useProjectStore.setState({ current: info }))
+    expect(result.current).toBe('v1')
+    act(() => useProjectStore.setState({ current: null }))
+    expect(result.current).toBe('v1')
   })
 })

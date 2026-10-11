@@ -11,6 +11,7 @@ import {
   CreditsResult,
   SESSION_TTL_MS
 } from '../../src/shared/cloudApi'
+import { DEFAULT_HOSTED_MODELS } from '../../src/shared/cloudBilling'
 import { sha256Hex } from './crypto'
 import type { Mailer } from './email'
 import { handleRequest, runScheduledSweep, type WorkerDeps } from './index'
@@ -440,6 +441,74 @@ describe('POST /ai/complete, not streamed', () => {
         temperature: 0.7
       }
     ])
+  })
+
+  it('meters a feature id this Worker does not know, and refuses a malformed one (F-16.2)', async () => {
+    // A newer app's feature (the story-memory reader) is charged under its own name.
+    const response = await handleRequest(
+      completeRequest({ body: validBody({ feature: 'reader' }) }),
+      deps
+    )
+    expect(response.status).toBe(200)
+    expect(await charges()).toEqual([expect.objectContaining({ feature: 'reader' })])
+    expect(logs[0]).toContain('feature=reader ')
+    for (const feature of ['../x', '', 'Reader', 'a'.repeat(41), 'x y']) {
+      seen = []
+      const refused = await handleRequest(completeRequest({ body: validBody({ feature }) }), deps)
+      expect((await errorOf(refused)).code).toBe('BAD_REQUEST')
+      expect(seen).toHaveLength(0)
+    }
+  })
+
+  // F-16.2: the request's `reasoning` is honoured only when it lowers the price table's entry.
+  it.each([
+    ['default', 'off', 'off'],
+    ['off', 'low', 'off'],
+    ['low', undefined, 'low'],
+    ['default', undefined, undefined],
+    [undefined, undefined, undefined]
+  ] as const)(
+    'with the table at %s and the request asking %s, the gateway is asked for %s',
+    async (table, requested, expected) => {
+      // The whole default table, so routing stays priced; only the requested model changes.
+      store.setConfig(
+        'models',
+        DEFAULT_HOSTED_MODELS.map(({ reasoning: _reasoning, ...model }) =>
+          model.id === MODEL && table !== undefined ? { ...model, reasoning: table } : model
+        )
+      )
+      const response = await handleRequest(
+        completeRequest({
+          body: validBody(requested === undefined ? {} : { reasoning: requested })
+        }),
+        deps
+      )
+      expect(response.status).toBe(200)
+      expect(seen[0]?.reasoning).toBe(expected)
+      if (expected === undefined) expect(seen[0]).not.toHaveProperty('reasoning')
+    }
+  )
+
+  it('sends OpenRouter `{ enabled: false }` when the table thinks by default and the app asks for off', async () => {
+    const bodies: unknown[] = []
+    const fetchImpl: FetchLike = (_url, init) => {
+      bodies.push(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'))
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            model: MODEL,
+            choices: [{ message: { content: 'ok' } }],
+            usage: { prompt_tokens: 10, completion_tokens: 2 }
+          }),
+          { status: 200 }
+        )
+      )
+    }
+    deps = { ...deps, upstream: openRouterUpstream('or-key', fetchImpl) }
+    await handleRequest(completeRequest({ body: validBody({ reasoning: 'off' }) }), deps)
+    await handleRequest(completeRequest({ body: validBody() }), deps)
+    expect(bodies[0]).toMatchObject({ reasoning: { enabled: false } })
+    expect(bodies[1]).not.toHaveProperty('reasoning')
   })
 
   it('bills the requested model when the gateway answers with a snapshot id', async () => {

@@ -49,7 +49,8 @@ const info: ProjectInfo = {
   created: 'c',
   modified: 'm',
   lastOpened: 'l',
-  schemaVersion: 1
+  schemaVersion: 1,
+  storyMemory: 'v1'
 }
 
 /** F-15.7: what main answers `updates:check` with in these tests. */

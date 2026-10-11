@@ -9,6 +9,7 @@ import { AppError } from '../ipc/errors'
 import Database from 'better-sqlite3'
 import { listNodes } from '../tree/treeStore'
 import * as seed from './seed'
+import { getStoryMemory, setStoryMemory } from './settingsStore'
 import {
   createProject,
   isProjectFolder,
@@ -143,6 +144,37 @@ function editorSettings(session: ProjectSession): EditorSettings {
     .get()
   return EditorSettings.parse(JSON.parse(row?.value ?? ''))
 }
+
+describe('the story-memory switch on open (F-16.2)', () => {
+  it('carries the stored version in the project info, v1 for a new project', () => {
+    const folder = projectFolderFor(tmp, 'Memory')
+    const created = createProject(folder, 'Memory', 'novel')
+    expect(created.info.storyMemory).toBe('v1')
+    expect(created.storyMemory).toBe('v1')
+    setStoryMemory(created.connection.orm, 'v2', new Date('2026-10-11T09:00:00.000Z'))
+    created.close()
+    const reopened = openProject(folder)
+    open.push(reopened)
+    expect(reopened.info.storyMemory).toBe('v2')
+    expect(reopened.storyMemory).toBe('v2')
+  })
+
+  it('lets an override win for that open only, and never writes it to the project', () => {
+    const folder = projectFolderFor(tmp, 'Override')
+    const created = createProject(folder, 'Override', 'novel', { storyMemoryOverride: 'v2' })
+    expect(created.info.storyMemory).toBe('v2')
+    expect(getStoryMemory(created.connection.orm)).toEqual({ version: 'v1', switchedAt: null })
+    created.close()
+    const overridden = openProject(folder, undefined, undefined, 'v2')
+    expect(overridden.info.storyMemory).toBe('v2')
+    expect(getStoryMemory(overridden.connection.orm).version).toBe('v1')
+    overridden.close()
+    // Reopened without the override, the stored value is back: the override was never persisted.
+    const plain = openProject(folder)
+    open.push(plain)
+    expect(plain.info.storyMemory).toBe('v1')
+  })
+})
 
 describe('openProject', () => {
   it('reopens a created project and bumps lastOpened', async () => {

@@ -77,6 +77,15 @@ describe('bundledPricing (P5: the Worker defaults until GET /pricing answers)', 
   })
 })
 
+describe('the hosted defaults’ reasoning (F-16.2)', () => {
+  it('runs the fast default, V4 Flash, with reasoning off and leaves the strong one to its default', () => {
+    const fast = DEFAULT_HOSTED_MODELS.find((model) => model.id === HOSTED_DEFAULT_MODELS.fast)
+    const strong = DEFAULT_HOSTED_MODELS.find((model) => model.id === HOSTED_DEFAULT_MODELS.strong)
+    expect(fast?.reasoning).toBe('off')
+    expect(strong?.reasoning).toBeUndefined()
+  })
+})
+
 describe('hostedPriceFor (P2, P3, R6)', () => {
   it('charges exactly what the Worker charges: cost plus markup, cached at its own rate', () => {
     const usage = { inputTokens: 1_000_000, outputTokens: 100_000, cachedInputTokens: 250_000 }

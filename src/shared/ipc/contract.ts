@@ -215,6 +215,7 @@ import { StartupSettings } from '../windowState'
 import { UiScale, ViewSettings, ZoomStep } from '../zoom'
 import { CustomThemeId, CustomThemeInput, ThemeId } from '../themes'
 import { AssistantNameInput } from '../assistantName'
+import { StoryMemoryVersion } from '../storyMemory'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -233,7 +234,12 @@ export const ProjectInfo = z.object({
   created: z.string(),
   modified: z.string(),
   lastOpened: z.string(),
-  schemaVersion: z.number().int().nonnegative()
+  schemaVersion: z.number().int().nonnegative(),
+  /**
+   * F-16.2: the story-memory system this open runs (`effectiveStoryMemory`): the stored version,
+   * or the dev-only `MYTHSCRIBE_STORY_MEMORY` override, which is never written to the project.
+   */
+  storyMemory: StoryMemoryVersion
 })
 export type ProjectInfo = z.infer<typeof ProjectInfo>
 

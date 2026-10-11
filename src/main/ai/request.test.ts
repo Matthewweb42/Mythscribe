@@ -845,4 +845,37 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     await runAiRequest(f.deps, { ...input, feature: 'tags', contextHash: 't' })
     expect(seen.at(-1)).not.toHaveProperty('reasoning')
   })
+
+  // F-16.2: `summary` stands in for the story-memory reader until P2a adds `reader`, `verify` and
+  // `judge` to this table.
+  it.each([
+    ['summary', 'off'],
+    ['ghostText', 'off'],
+    ['tags', undefined],
+    ['agent', undefined]
+  ] as const)(
+    'a Cloud request for %s goes out with reasoning %s (a feature that never thinks asks for off; the rest ask nothing)',
+    async (feature, expected) => {
+      const f = fakes()
+      const seen: CompletionRequest[] = []
+      f.complete.mockImplementation((request) => {
+        seen.push(request)
+        return Promise.resolve({
+          text: 'x',
+          model: 'm',
+          usage: { inputTokens: 1, outputTokens: 1 }
+        })
+      })
+      if (f.provider === null) throw new Error('no provider')
+      f.provider = { ...f.provider, id: 'cloud' }
+      // The author's own-key Thinking setting never reaches Cloud, with or without routing.
+      const routing = { ...defaultAiRouting(), reasoning: { fast: 'low' as const } }
+      f.deps.routing = () => ({ routing, table: autoTable(null) })
+      await runAiRequest(f.deps, { ...input, feature, contextHash: `cloud-${feature}` })
+      expect(seen.at(-1)?.reasoning).toBe(expected)
+      f.deps.routing = undefined
+      await runAiRequest(f.deps, { ...input, feature, contextHash: `bare-${feature}` })
+      expect(seen.at(-1)?.reasoning).toBe(expected)
+    }
+  )
 })

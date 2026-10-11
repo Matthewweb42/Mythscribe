@@ -21,7 +21,8 @@ const info: ProjectInfo = {
   created: 'c',
   modified: 'm',
   lastOpened: 'l',
-  schemaVersion: 1
+  schemaVersion: 1,
+  storyMemory: 'v1'
 }
 
 /** The submenu of the top-level entry with this label. */

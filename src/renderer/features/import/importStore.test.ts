@@ -152,7 +152,8 @@ const project: ProjectInfo = {
   created: 'c',
   modified: 'm',
   lastOpened: 'l',
-  schemaVersion: 1
+  schemaVersion: 1,
+  storyMemory: 'v1'
 }
 
 const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.message)

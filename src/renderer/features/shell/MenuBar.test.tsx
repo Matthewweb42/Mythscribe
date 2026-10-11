@@ -20,7 +20,8 @@ const info: ProjectInfo = {
   created: 'c',
   modified: 'm',
   lastOpened: 'l',
-  schemaVersion: 1
+  schemaVersion: 1,
+  storyMemory: 'v1'
 }
 
 let invoke: ReturnType<typeof vi.fn<(channel: string, input: unknown) => Promise<unknown>>>

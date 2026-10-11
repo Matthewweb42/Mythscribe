@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { AI_FEATURE_IDS, AiFeatureId, type AiProviderId, type OwnKeyProvider } from './ai'
+import {
+  AI_FEATURE_IDS,
+  type AiFeatureId,
+  type AiProviderId,
+  type OwnKeyProvider,
+  lenientFeatureRecord
+} from './ai'
 import { DEFAULT_HONESTY, Honesty } from './critique'
 
 /** Settings-table key under which the AI dial and toggles (F-14.4) are stored as JSON. */
@@ -186,11 +192,13 @@ export const AiSettings = z
     /**
      * One toggle per feature. A stored row from before a feature existed lacks its key, so the
      * missing toggles are filled from the defaults (on) instead of the whole row falling back
-     * and resetting the dial (F-14.10 added `rewrite` after projects had settings rows).
+     * and resetting the dial (F-14.10 added `rewrite` after projects had settings rows). Read
+     * leniently (F-16.2): a key this build does not know (an id retired at the story-memory
+     * switch-over) and a value that is not a boolean are dropped, never failing the row.
      */
-    features: z
-      .partialRecord(AiFeatureId, z.boolean())
-      .transform((stored) => ({ ...defaultFeatureToggles(), ...stored })),
+    features: lenientFeatureRecord(z.boolean()).transform(
+      (stored): Record<AiFeatureId, boolean> => ({ ...defaultFeatureToggles(), ...stored })
+    ),
     /** Defaulted, so a row stored before F-5.3 (no `ghostText` key) still parses instead of falling back wholesale. */
     ghostText: GhostTextSettings.default(defaultGhostTextSettings),
     /** Defaulted likewise for a row stored before F-14.8. */

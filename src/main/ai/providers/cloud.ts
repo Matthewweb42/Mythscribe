@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Tier } from '@shared/ai'
+import type { AiFeatureId, Tier } from '@shared/ai'
 import {
   type AiCompleteBody,
   AiCompleteResult,
@@ -176,8 +176,17 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
     return failureOf(parsed.data.code, parsed.data.offer)
   }
 
-  const bodyFor = (request: CompletionRequest, stream: boolean): AiCompleteBody => {
+  /**
+   * The wire body. The wire takes any well-formed feature id (F-16.2), but the app sends only its
+   * own `AiFeatureId`s. `reasoning` goes only when it asks for less than the default (`off` or
+   * `low`); the Worker honours it only when that lowers its price table's mode.
+   */
+  const bodyFor = (
+    request: CompletionRequest,
+    stream: boolean
+  ): AiCompleteBody & { feature: AiFeatureId } => {
     if (request.feature === undefined) throw new AiFallbackError(NO_FEATURE)
+    const reasoning = request.reasoning
     return {
       feature: request.feature,
       model: options.resolveModel(request.tier),
@@ -185,6 +194,7 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
       maxTokens: request.maxTokens,
       ...(request.json === undefined ? {} : { json: request.json }),
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+      ...(reasoning === 'off' || reasoning === 'low' ? { reasoning } : {}),
       stream
     }
   }

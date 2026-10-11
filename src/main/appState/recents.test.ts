@@ -57,7 +57,8 @@ describe('toRecentEntry', () => {
       created: 'c',
       modified: 'm',
       lastOpened: 'o',
-      schemaVersion: 1
+      schemaVersion: 1,
+      storyMemory: 'v1'
     }
     expect(toRecentEntry(info)).toEqual({
       path: '/p/A.mythscribe',

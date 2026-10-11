@@ -31,18 +31,31 @@ describe('defaultAiSettings (F-14.4)', () => {
     expect(Object.keys(defaults.features).sort()).toEqual([...AI_FEATURE_IDS].sort())
   })
 
-  it('parses its own defaults and refuses a dial outside 0–3, an unknown toggle key, or a non-boolean toggle', () => {
+  it('parses its own defaults and refuses a dial outside 0–3', () => {
     expect(AiSettings.safeParse(defaultAiSettings()).success).toBe(true)
     expect(AiSettings.safeParse({ ...defaultAiSettings(), dial: 4 }).success).toBe(false)
     expect(AiSettings.safeParse({ ...defaultAiSettings(), dial: -1 }).success).toBe(false)
     expect(AiSettings.safeParse({ ...defaultAiSettings(), dial: 1.5 }).success).toBe(false)
-    const features = defaultAiSettings().features
-    expect(AiSettings.safeParse({ dial: 0, features: { ...features, bogus: true } }).success).toBe(
-      false
-    )
-    expect(
-      AiSettings.safeParse({ dial: 0, features: { ...features, ghostText: 'yes' } }).success
-    ).toBe(false)
+    expect(AiSettings.safeParse({ dial: 0, features: 'all on' }).success).toBe(false)
+  })
+
+  it('still parses stored settings with retired ids: an unknown key and a bad value are dropped, the rest kept (F-16.2)', () => {
+    const parsed = AiSettings.safeParse({
+      dial: 1,
+      features: { tags: false, retiredThing: true, ghostText: false, rewrite: 'yes' }
+    })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      // The dial survives: a retired id never turns Use AI off.
+      expect(parsed.data.dial).toBe(1)
+      expect(parsed.data.features.ghostText).toBe(false)
+      expect(parsed.data.features.tags).toBe(false)
+      // The bad value is dropped, so the toggle falls back to its default (on), like a missing id.
+      expect(parsed.data.features.rewrite).toBe(true)
+      expect(parsed.data.features.chat).toBe(true)
+      expect(Object.keys(parsed.data.features).sort()).toEqual([...AI_FEATURE_IDS].sort())
+      expect(parsed.data.features).not.toHaveProperty('retiredThing')
+    }
   })
 
   it('fills a toggle missing from a stored row (a feature added later, F-14.10) with on, keeping the rest', () => {

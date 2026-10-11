@@ -345,6 +345,29 @@ export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
 
 /**
+ * A stored per-feature record read leniently (F-16.2, story memory P0): a key that is not an
+ * `AiFeatureId` of this build (an id retired at the switch-over, F-16.31, or one a newer build
+ * wrote) and a value that does not parse are dropped, and the rest is kept. Every stored row that
+ * is keyed by feature reads through this one helper, so retiring an id can never fail a whole row
+ * (which would reset Use AI to off, or drop the routing overrides).
+ */
+export function lenientFeatureRecord<V extends z.ZodType>(
+  value: V
+): z.ZodType<Partial<Record<AiFeatureId, z.output<V>>>, Record<string, unknown>> {
+  return z
+    .record(z.string(), z.unknown())
+    .transform((stored) =>
+      Object.fromEntries(
+        Object.entries(stored).filter(
+          ([feature, entry]) =>
+            AiFeatureId.safeParse(feature).success && value.safeParse(entry).success
+        )
+      )
+    )
+    .pipe(z.partialRecord(AiFeatureId, value))
+}
+
+/**
  * The output cap for a feature with no `FEATURE_BUDGETS` line yet: short, so a feature that
  * reaches the request path before its budget is set cannot run long. Not a licence to skip the
  * line (CLAUDE.md, token efficiency rule 6).

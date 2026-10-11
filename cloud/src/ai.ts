@@ -32,6 +32,7 @@ import {
   holdMicros,
   inputTokenUpperBound,
   lockPrices,
+  lowerReasoning,
   providerCostMicros
 } from '../../src/shared/cloudBilling'
 import { authenticate, jsonError, jsonResponse, readJson, UNAUTHORIZED_MESSAGE } from './auth'
@@ -280,14 +281,16 @@ export async function handleAiComplete(request: Request, deps: AiDeps): Promise<
     inputChars,
     startedAt
   }
+  const reasoning = lowerReasoning(price.reasoning, body.reasoning)
   const params: UpstreamParams = {
     model: price.id,
     messages: body.messages,
     maxTokens: body.maxTokens,
     ...(body.json === undefined ? {} : { json: body.json }),
     ...(body.temperature === undefined ? {} : { temperature: body.temperature }),
-    // 2026-10-07: the model's reasoning mode is server config (the price table's entry).
-    ...(price.reasoning === undefined ? {} : { reasoning: price.reasoning })
+    // 2026-10-07: the model's reasoning mode is server config (the price table's entry); F-16.2:
+    // the app may ask for less (`body.reasoning`), never more. `default` sends nothing.
+    ...(reasoning === 'default' ? {} : { reasoning })
   }
 
   if (body.stream) return streamAnswer(metered, upstream, params)

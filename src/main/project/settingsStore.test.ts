@@ -23,6 +23,7 @@ import { REFERENCE_PINS_KEY, REFERENCE_PINS_MAX, defaultReferencePins } from '@s
 import { SESSION_KEY, defaultProjectSession } from '@shared/session'
 import { STRUCTURE_KEY, defaultProjectStructure } from '@shared/structure'
 import { STORY_BIBLE_SETTINGS_KEY, defaultStoryBibleSettings } from '@shared/storyBibleSettings'
+import { STORY_MEMORY_KEY } from '@shared/storyMemory'
 import { settings } from '../db/schema'
 import type { TreeDb } from '../tree/treeStore'
 import { createProject, projectFolderFor, type ProjectSession } from './projectStore'
@@ -43,6 +44,7 @@ import {
   getProjectSession,
   getProjectStructure,
   getReferencePins,
+  getStoryMemory,
   getWritingPresets,
   setAiSettings,
   setAuthorRules,
@@ -54,6 +56,7 @@ import {
   setProjectSession,
   setProjectStructure,
   setReferencePins,
+  setStoryMemory,
   setWritingPresets
 } from './settingsStore'
 
@@ -180,8 +183,24 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     open('novel')
     setRaw(JSON.stringify({ dial: 9, features: defaultAiSettings().features }), AI_SETTINGS_KEY)
     expect(getAiSettings(db)).toEqual(defaultAiSettings())
-    setRaw(JSON.stringify({ dial: 3, features: { ghostText: 'on' } }), AI_SETTINGS_KEY)
+    setRaw(JSON.stringify({ dial: 'on', features: { ghostText: true } }), AI_SETTINGS_KEY)
     expect(getAiSettings(db)).toEqual(defaultAiSettings())
+  })
+
+  it('keeps the stored level when only a toggle no longer parses: a retired id or a bad value is dropped (F-16.2)', () => {
+    open('novel')
+    setRaw(
+      JSON.stringify({
+        dial: 1,
+        features: { ghostText: 'on', summary: false, tags: false, gone: false }
+      }),
+      AI_SETTINGS_KEY
+    )
+    expect(getAiSettings(db)).toEqual({
+      ...defaultAiSettings(),
+      dial: 1,
+      features: { ...defaultAiSettings().features, summary: false, tags: false }
+    })
   })
 
   it('fills toggles missing from an older row with on instead of resetting the dial (F-14.10)', () => {
@@ -641,5 +660,34 @@ describe('getStoryBibleSettings / setStoryBibleSettings (F-9.17, F-9.19)', () =>
       STORY_BIBLE_SETTINGS_KEY
     )
     expect(getStoryBibleSettings(db)).toEqual(defaultStoryBibleSettings())
+  })
+})
+
+describe('getStoryMemory / setStoryMemory (F-16.2)', () => {
+  it('reads v1, never switched, with no row', () => {
+    open('novel')
+    expect(rows(STORY_MEMORY_KEY)).toHaveLength(0)
+    expect(getStoryMemory(db)).toEqual({ version: 'v1', switchedAt: null })
+  })
+
+  it('stores v2 with the date it switched, and reads it back', () => {
+    open('novel')
+    const at = new Date('2026-10-11T09:30:00.000Z')
+    expect(setStoryMemory(db, 'v2', at)).toEqual({
+      version: 'v2',
+      switchedAt: '2026-10-11T09:30:00.000Z'
+    })
+    expect(getStoryMemory(db)).toEqual({ version: 'v2', switchedAt: '2026-10-11T09:30:00.000Z' })
+    expect(rows(STORY_MEMORY_KEY)).toHaveLength(1)
+  })
+
+  it('reads a broken row as v1', () => {
+    open('novel')
+    setRaw('{not json', STORY_MEMORY_KEY)
+    expect(getStoryMemory(db)).toEqual({ version: 'v1', switchedAt: null })
+    setRaw(JSON.stringify({ version: 'v9' }), STORY_MEMORY_KEY)
+    expect(getStoryMemory(db).version).toBe('v1')
+    setRaw(JSON.stringify(['v2']), STORY_MEMORY_KEY)
+    expect(getStoryMemory(db).version).toBe('v1')
   })
 })

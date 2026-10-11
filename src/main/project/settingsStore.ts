@@ -49,6 +49,12 @@ import {
 import { WRITING_PRESETS_KEY, WritingPresets, defaultWritingPresets } from '@shared/presets'
 import { DISMISSED_NAMES_KEY, DismissedNames, defaultDismissedNames } from '@shared/proposedTags'
 import { KNOWLEDGE_MODEL_KEY, KnowledgeModelState } from '@shared/knowledge'
+import {
+  STORY_MEMORY_KEY,
+  StoryMemoryState,
+  type StoryMemoryVersion,
+  defaultStoryMemoryState
+} from '@shared/storyMemory'
 import { TODO_STATE_KEY, TodoPassState } from '@shared/todo'
 import { KEPT_SPELLINGS_KEY, KEPT_SPELLINGS_MAX, KeptSpellings } from '@shared/misspellings'
 import { REFERENCE_PINS_KEY, ReferencePins, defaultReferencePins } from '@shared/references'
@@ -511,6 +517,42 @@ export function setKnowledgeModel(
   const serialized = JSON.stringify(stored)
   db.insert(settings)
     .values({ key: KNOWLEDGE_MODEL_KEY, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+  return stored
+}
+
+/**
+ * Which story-memory system the project runs (F-16.2), from the `settings` row under
+ * `STORY_MEMORY_KEY`. A missing or unreadable row reads as v1: a broken row can only keep the
+ * project on the system it already runs.
+ */
+export function getStoryMemory(db: TreeDb): StoryMemoryState {
+  const row = db.select().from(settings).where(eq(settings.key, STORY_MEMORY_KEY)).get()
+  if (!row) return defaultStoryMemoryState()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return defaultStoryMemoryState()
+  }
+  const parsed = StoryMemoryState.safeParse(json)
+  return parsed.success ? parsed.data : defaultStoryMemoryState()
+}
+
+/**
+ * Stores the project's story-memory version and when it switched (upsert on the settings key).
+ * Its only callers are tests and, from F-16.31, the switch-over; no IPC channel flips it.
+ */
+export function setStoryMemory(
+  db: TreeDb,
+  version: StoryMemoryVersion,
+  now: Date
+): StoryMemoryState {
+  const stored = StoryMemoryState.parse({ version, switchedAt: now.toISOString() })
+  const serialized = JSON.stringify(stored)
+  db.insert(settings)
+    .values({ key: STORY_MEMORY_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
   return stored

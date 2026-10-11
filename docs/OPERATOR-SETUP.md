@@ -98,6 +98,34 @@ server (spec P5).
   revenue should be about 1.2× the operator key's spend, minus payment fees.
 - Set a low-credit email alert on the operator account if OpenRouter offers one.
 
+### 1.8 Reasoning and routing (story memory, 2026-10-11)
+How much each model may think is server config: the `reasoning` field of its entry in the `models` row (4.3), sent upstream
+as OpenRouter's `reasoning` parameter. `off` turns thinking off, `low` asks for a little, and leaving it out is the model's
+default. The default table sets V4 Flash to `off`: the fast tier runs the app's background JSON (summaries now, the
+story-memory reader later) under small output caps, where thinking would eat the whole cap. As JSON in the `models` row:
+```json
+{ "id": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash", "inputUsdPerM": 0.14, "outputUsdPerM": 0.28,
+  "cachedInputUsdPerM": null, "displayMultiplier": 1, "aliases": [], "reasoning": "off" }
+```
+- **The app may ask for less thinking, never more.** A request can carry `reasoning: "off"` or `"low"`. The Worker sends the
+  lower of that and the table's entry (`lowerReasoning`, in the order off < low < default). The app sends `off` only for
+  features that never think (`NO_REASONING_FEATURES`); every other request sends nothing, so the table decides.
+- **Caveat.** The rule assumes `default` thinks the most. That holds for V4 Pro and the OpenAI reasoning models; the price
+  probe (`npm run ai:probe`) checks it for Pro. Give a model that does not think by default `"reasoning": "off"` in its
+  entry, so a `low` from the app can never add thinking.
+- **No `routing.features` overrides are needed.** The app's own feature → tier choices hold: the story-memory reader,
+  verifier, judge, navigator and citation requests run on the fast tier; the chat agent runs on strong; filing an upload into
+  sheets runs on strong with reasoning off (the author's decision 6, 2026-10-11).
+- **Providers.** Leave OpenRouter's `provider.order` unset, but every provider DeepSeek routes to must meet 1.2's privacy
+  settings.
+- **Deploy order.** Deploy the Worker (lenient feature ids, the `reasoning` field, the corrected default prices) before any
+  app build that sends a new feature id. An older Worker refuses an unknown feature id; the `reasoning` field is simply
+  dropped by an older Worker, because the body parser strips unknown keys. The Worker now accepts any well-formed feature id
+  (a lowercase letter, then 1–39 letters or digits) and meters it under its own name.
+- **Prices first.** The Worker is not deployed yet, so its first deploy already carries the corrected default prices
+  (F-16.1). If it ever goes live before that change, set the `models` row (4.3) first, or V4 Pro is charged at about an
+  eighth of its cost.
+
 ---
 
 ## Part 2 — Lemon Squeezy (checkout, tax, payouts)
@@ -256,7 +284,7 @@ The keys you can set:
 | `max_input_chars` | Largest request accepted |
 | `refund_window_days` | Refund window for unused balance, every pack and the starter (default 30; 0 turns self-serve refunds off) |
 | `webhook_max_age_hours` | Oldest webhook event accepted (default 72) |
-| `models` | Price table: input, output and cached-input price, and display multiplier |
+| `models` | Price table: input, output and cached-input price, display multiplier, and `reasoning` (`off`, `low`, or absent for the model's default; 1.8) |
 | `routing` | Which model serves the fast and strong tiers |
 | `word_costs` | Measured per-word costs. Null hides the "words left" line and the pack examples |
 

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AI_MODEL_MAX, HOSTED_DEFAULT_MODELS, ReasoningMode, Tier } from './ai'
+import { AI_MODEL_MAX, HOSTED_DEFAULT_MODELS, REASONING_MODES, ReasoningMode, Tier } from './ai'
 
 /** Micro-USD (1e-6 USD) is the unit of every balance and charge (L2); a $10 pack is 10_000_000. */
 export const MICROS_PER_USD = 1_000_000
@@ -80,7 +80,10 @@ export const DEFAULT_HOSTED_MODELS: readonly HostedModelPrice[] = [
     outputUsdPerM: 1.28,
     cachedInputUsdPerM: 0.03,
     displayMultiplier: 1,
-    aliases: []
+    aliases: [],
+    // F-16.2: the fast model's background JSON (summaries, the story-memory reader) runs under
+    // small output caps, so it never thinks on Cloud; billing_config can still override it.
+    reasoning: 'off'
   },
   {
     id: HOSTED_DEFAULT_MODELS.strong,
@@ -145,6 +148,23 @@ export const DEFAULT_BILLING_TERMS = {
 } as const
 
 export const DEFAULT_WORD_COSTS: WordCostConstants = { lineEdit: null, consistencyCheck: null }
+
+/**
+ * The reasoning mode a Cloud request runs with (F-16.2): the lower of the price table's entry and
+ * what the app asked for, in `REASONING_MODES` order (`off < low < default`), with either one
+ * absent read as `default`. So the app may ask for less thinking than the operator set, never
+ * more. Pure, so the Worker and the app's tests share it. It assumes `default` thinks the most,
+ * which holds for V4 Pro and the OpenAI reasoning models (the probe, F-16.1, checks Pro); a model
+ * that does not think by default gets `off` in its table entry, so `low` can never add thinking.
+ */
+export function lowerReasoning(
+  table: ReasoningMode | undefined,
+  requested: ReasoningMode | undefined
+): ReasoningMode {
+  const a = REASONING_MODES.indexOf(table ?? 'default')
+  const b = REASONING_MODES.indexOf(requested ?? 'default')
+  return REASONING_MODES[Math.min(a, b)] ?? 'default'
+}
 
 /** The price table entry for `model`, by id or by alias; undefined for a model not on sale. */
 export function findHostedModel(

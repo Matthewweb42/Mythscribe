@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AiFeatureId, ModelName } from './ai'
+import { ModelName } from './ai'
 import { HostedModelId, HostedRouting, WordCostConstants } from './cloudBilling'
 import { USAGE_PERIOD_DAYS } from './cloudUsage'
 import {
@@ -362,16 +362,38 @@ export type AiCompleteMessage = z.infer<typeof AiCompleteMessage>
 export const IDEMPOTENCY_KEY_HEADER = 'Idempotency-Key'
 export const IdempotencyKey = z.string().regex(/^[A-Za-z0-9._:-]{8,128}$/)
 
+/**
+ * A feature id on the wire (F-16.2): any well-formed id, not only this build's `AiFeatureId`, so
+ * a Worker deployed before an app release still meters a feature that release added (the
+ * story-memory requests) instead of refusing it. The app sends only `AiFeatureId` values (typed
+ * in the Cloud adapter's `bodyFor`); the Worker stores the id as text and shows an unknown one raw.
+ */
+export const CloudFeatureId = z.string().regex(/^[a-z][A-Za-z0-9]{1,39}$/)
+
+/**
+ * The reasoning a request may ask the Worker for (F-16.2): only less than its price table's
+ * entry, never more (`lowerReasoning`). `default` is never sent: absent means the table decides.
+ */
+export const CLOUD_REASONING_REQUESTS = ['off', 'low'] as const
+export const CloudReasoningRequest = z.enum(CLOUD_REASONING_REQUESTS)
+export type CloudReasoningRequest = z.infer<typeof CloudReasoningRequest>
+
 /** The body's fields without the size cap, so the Worker can answer an oversize body by name. */
 export const AiCompleteFields = z.object({
-  /** The `AiFeatureId` that is spending, so the ledger and the Account tab break spend down by feature. */
-  feature: AiFeatureId,
+  /** The feature that is spending, so the ledger and the Account tab break spend down by feature. */
+  feature: CloudFeatureId,
   /** Resolved by the app (F-5.11); the Worker refuses a model outside the published rate table. */
   model: ModelName,
   messages: z.array(AiCompleteMessage).min(1).max(AI_COMPLETE_MAX_MESSAGES),
   maxTokens: z.number().int().min(1).max(AI_COMPLETE_MAX_TOKENS),
   json: z.boolean().optional(),
   temperature: z.number().min(0).max(2).optional(),
+  /**
+   * F-16.2: less thinking than the model's table entry allows, for a feature whose small JSON
+   * output cap leaves no room to think; honoured only when it lowers the table's mode. An older
+   * Worker strips it (`z.object` drops unknown keys), so sending it is always safe.
+   */
+  reasoning: CloudReasoningRequest.optional(),
   stream: z.boolean()
 })
 

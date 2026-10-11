@@ -8,6 +8,7 @@ import {
   holdMicros,
   inputTokenUpperBound,
   lockPrices,
+  lowerReasoning,
   markupToBps,
   microsPerM,
   providerCostMicros
@@ -103,5 +104,27 @@ describe('the price table', () => {
   it('refuses a cached price above the input price, which would break charge ≤ hold', () => {
     expect(HostedModelPrice.safeParse({ ...MINI, cachedInputUsdPerM: 1 }).success).toBe(false)
     expect(HostedModelPrice.safeParse(MINI).success).toBe(true)
+  })
+})
+
+describe('lowerReasoning (F-16.2: the app may ask for less thinking, never more)', () => {
+  it.each([
+    [undefined, undefined, 'default'],
+    [undefined, 'off', 'off'],
+    [undefined, 'low', 'low'],
+    ['default', undefined, 'default'],
+    ['default', 'off', 'off'],
+    ['default', 'low', 'low'],
+    ['default', 'default', 'default'],
+    ['low', undefined, 'low'],
+    ['low', 'off', 'off'],
+    ['low', 'low', 'low'],
+    ['low', 'default', 'low'],
+    ['off', undefined, 'off'],
+    ['off', 'off', 'off'],
+    ['off', 'low', 'off'],
+    ['off', 'default', 'off']
+  ] as const)('table %s, request %s → %s', (table, requested, expected) => {
+    expect(lowerReasoning(table, requested)).toBe(expected)
   })
 })
