@@ -412,7 +412,12 @@ export const AiCompleteResult = z.object({
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
     /** Input tokens the provider served from its prompt cache, billed at the cached price (R6). */
-    cachedInputTokens: z.number().int().nonnegative().optional()
+    cachedInputTokens: z.number().int().nonnegative().optional(),
+    /**
+     * F-16.1: output tokens the model spent thinking, when the gateway said. Optional both ways:
+     * an older app ignores it, and a newer app reads it as absent from an older Worker.
+     */
+    reasoningTokens: z.number().int().nonnegative().optional()
   }),
   /** Micro-USD taken off the balance for this request; at least 1, never more than its hold. */
   chargeMicros: z.number().int().min(1),

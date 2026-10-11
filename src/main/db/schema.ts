@@ -197,7 +197,15 @@ export const aiUsage = sqliteTable(
     cached: integer('cached', { mode: 'boolean' }).notNull(),
     /** null until F-5.12 versions the prompts. */
     promptVersion: text('prompt_version'),
-    contextHash: text('context_hash').notNull()
+    contextHash: text('context_hash').notNull(),
+    /**
+     * F-16.1 (migration 0028): the cost the provider reported (OpenRouter's `usage.cost`, or the
+     * MythScribe Cloud charge); null when it did not report one, on a cache hit, and on rows
+     * written before. When set, `cost_usd` equals it.
+     */
+    reportedCostUsd: real('reported_cost_usd'),
+    /** F-16.1: the completion tokens the model spent thinking, when the provider said. */
+    reasoningTokens: integer('reasoning_tokens')
   },
   (t) => [index('ai_usage_at_idx').on(t.at), index('ai_usage_feature_idx').on(t.feature)]
 )

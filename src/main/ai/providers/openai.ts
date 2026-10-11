@@ -48,9 +48,13 @@ export interface OpenAiProviderOptions {
   openRouter?: boolean
 }
 
-/** The request body: Chat Completions plus OpenRouter's `reasoning` parameter when one is sent. */
+/**
+ * The request body: Chat Completions plus OpenRouter's `reasoning` parameter when one is sent,
+ * and (F-16.1) OpenRouter's usage accounting switch, so every answer reports its own cost.
+ */
 type CreateParams = OpenAI.ChatCompletionCreateParamsNonStreaming & {
   reasoning?: ReturnType<typeof reasoningParam>
+  usage?: { include: true }
 }
 
 /** OpenRouter's optional attribution headers: the app's site and name on its dashboard. */
@@ -62,20 +66,31 @@ interface UsageBlock {
   completion_tokens: number
   prompt_tokens_details?: { cached_tokens?: number } | null
   completion_tokens_details?: { reasoning_tokens?: number } | null
+  /** F-16.1: OpenRouter's usage accounting (`usage: { include: true }`): the request's cost in USD. */
+  cost?: number
 }
 
 /**
  * The SDK's usage in the provider-neutral shape; `cachedInputTokens` only when the provider
  * reported prompt-cache hits (OpenAI and OpenRouter both use `prompt_tokens_details`).
+ * `reportsCost` (OpenRouter only, F-16.1) maps a finite, non-negative `cost` to
+ * `reportedCostUsd`; OpenAI and local servers are never asked for it, so never read for it.
  */
-export function usageOf(usage: UsageBlock | undefined | null): CompletionUsage {
+export function usageOf(
+  usage: UsageBlock | undefined | null,
+  reportsCost = false
+): CompletionUsage {
   const cached = usage?.prompt_tokens_details?.cached_tokens
   const reasoning = usage?.completion_tokens_details?.reasoning_tokens
+  const cost = reportsCost ? usage?.cost : undefined
   return {
     inputTokens: usage?.prompt_tokens ?? 0,
     outputTokens: usage?.completion_tokens ?? 0,
     ...(typeof cached === 'number' && cached >= 0 ? { cachedInputTokens: cached } : {}),
-    ...(typeof reasoning === 'number' && reasoning > 0 ? { reasoningTokens: reasoning } : {})
+    ...(typeof reasoning === 'number' && reasoning > 0 ? { reasoningTokens: reasoning } : {}),
+    ...(typeof cost === 'number' && Number.isFinite(cost) && cost >= 0
+      ? { reportedCostUsd: cost }
+      : {})
   }
 }
 
@@ -114,8 +129,14 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
       options.openRouter && request.reasoning !== undefined
         ? reasoningParam(request.reasoning)
         : undefined
-    return reasoning === undefined ? base : { ...base, reasoning }
+    return {
+      ...base,
+      ...(reasoning === undefined ? {} : { reasoning }),
+      // F-16.1: OpenRouter's usage accounting, so the ledger records the cost it charged.
+      ...(options.openRouter ? { usage: { include: true as const } } : {})
+    }
   }
+  const reportsCost = options.openRouter === true
 
   return {
     id: options.id ?? 'openai',
@@ -130,7 +151,7 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
         return {
           text: completion.choices[0]?.message.content ?? '',
           model: completion.model,
-          usage: usageOf(completion.usage),
+          usage: usageOf(completion.usage, reportsCost),
           ...(finishReason ? { finishReason } : {})
         }
       } catch (err) {
@@ -151,7 +172,7 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
           const finishReason = chunk.choices[0]?.finish_reason
           const usage = chunk.usage
           if (usage) {
-            yield { delta, usage: usageOf(usage) }
+            yield { delta, usage: usageOf(usage, reportsCost) }
           } else if (finishReason) {
             yield { delta, finishReason }
           } else if (delta) {

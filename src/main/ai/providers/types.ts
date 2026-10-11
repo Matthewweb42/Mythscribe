@@ -22,9 +22,15 @@ export interface CompletionUsage {
   /**
    * How many of `outputTokens` a reasoning model spent thinking (OpenAI's and OpenRouter's
    * `completion_tokens_details.reasoning_tokens`); absent when the provider does not say. Shown
-   * by the developer tools' AI inspector only.
+   * by the developer tools' AI inspector and (F-16.1) stored in the ledger.
    */
   reasoningTokens?: number
+  /**
+   * F-16.1: what the request cost in USD as the provider reported it (OpenRouter's
+   * `usage.cost`, or the MythScribe Cloud charge); absent when it did not say. When present the
+   * ledger records it, and the daily cap counts it, instead of the price-table estimate.
+   */
+  reportedCostUsd?: number
 }
 
 export interface CompletionRequest {

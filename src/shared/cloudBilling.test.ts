@@ -3,6 +3,7 @@ import {
   chargeMicros,
   DEFAULT_HOSTED_MODELS,
   DEFAULT_HOSTED_ROUTING,
+  displayMultiplierOf,
   findHostedModel,
   HostedModelPrice,
   holdMicros,
@@ -13,6 +14,7 @@ import {
   microsPerM,
   providerCostMicros
 } from './cloudBilling'
+import { OPENROUTER_PROBED_PRICES } from './modelPrices'
 
 // The arithmetic below is worked on GPT-5.4 mini, still on sale beside the approved defaults.
 const MINI = findHostedModel(DEFAULT_HOSTED_MODELS, 'openai/gpt-5.4-mini')!
@@ -99,6 +101,40 @@ describe('the price table', () => {
     for (const model of Object.values(DEFAULT_HOSTED_ROUTING.tiers)) {
       expect(findHostedModel(DEFAULT_HOSTED_MODELS, model)).toBeDefined()
     }
+  })
+
+  it('computes every multiplier from the prices, against the fast default (F-16.1)', () => {
+    const base = DEFAULT_HOSTED_MODELS[0]
+    if (base === undefined) throw new Error('no default model')
+    expect(base.id).toBe(DEFAULT_HOSTED_ROUTING.tiers.fast)
+    for (const model of DEFAULT_HOSTED_MODELS) {
+      expect(model.displayMultiplier).toBe(displayMultiplierOf(model, base))
+    }
+    const multiplier = (id: string): number | undefined =>
+      findHostedModel(DEFAULT_HOSTED_MODELS, id)?.displayMultiplier
+    expect(multiplier('deepseek/deepseek-v4-flash')).toBe(1)
+    expect(multiplier('deepseek/deepseek-v4-pro')).toBe(12.4)
+    expect(multiplier('openai/gpt-5.4-mini')).toBe(7.1)
+    expect(multiplier('openai/gpt-5.4')).toBe(23.8)
+    expect(multiplier('openai/gpt-5.4-nano')).toBe(1.9)
+    // (10 × 3 + 15) / (10 × 1 + 2) = 3.75 → 3.8.
+    expect(
+      displayMultiplierOf(
+        { inputUsdPerM: 3, outputUsdPerM: 15 },
+        { inputUsdPerM: 1, outputUsdPerM: 2 }
+      )
+    ).toBe(3.8)
+  })
+
+  it('prices the DeepSeek defaults from the one price module (F-16.1)', () => {
+    for (const [id, probed] of Object.entries(OPENROUTER_PROBED_PRICES)) {
+      expect(findHostedModel(DEFAULT_HOSTED_MODELS, id)).toMatchObject({
+        inputUsdPerM: probed.inUsdPerM,
+        outputUsdPerM: probed.outUsdPerM,
+        cachedInputUsdPerM: probed.cachedInUsdPerM
+      })
+    }
+    for (const model of DEFAULT_HOSTED_MODELS) expect(HostedModelPrice.parse(model)).toEqual(model)
   })
 
   it('refuses a cached price above the input price, which would break charge ≤ hold', () => {

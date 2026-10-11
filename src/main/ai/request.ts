@@ -193,7 +193,14 @@ interface PreparedRequest {
   /** The ledger and cache columns both paths write. */
   base: Omit<
     UsageEntry,
-    'at' | 'promptTokens' | 'completionTokens' | 'cachedTokens' | 'costUsd' | 'cached'
+    | 'at'
+    | 'promptTokens'
+    | 'completionTokens'
+    | 'cachedTokens'
+    | 'costUsd'
+    | 'cached'
+    | 'reportedCostUsd'
+    | 'reasoningTokens'
   >
 }
 
@@ -278,7 +285,9 @@ function serveCached(
     completionTokens: 0,
     cachedTokens: null,
     costUsd: 0,
-    cached: true
+    cached: true,
+    reportedCostUsd: null,
+    reasoningTokens: null
   })
   deps.dailyCap.spend({ costUsd: 0, tokens: 0 })
   deps.session.spend({ costUsd: 0, tokens: 0 })
@@ -318,12 +327,18 @@ function record(
 ): AiRequestResult {
   const { model, key } = prepared
   const cachedTokens = answer.usage.cachedInputTokens ?? null
-  const { costUsd, priced } = prepared.price(
-    model,
-    answer.usage.inputTokens,
-    answer.usage.outputTokens,
-    cachedTokens ?? 0
-  )
+  // F-16.1: the cost the provider reported (OpenRouter's `usage.cost`, the Cloud charge) wins
+  // over the price-table estimate, in the ledger row, the daily cap, and the session tally.
+  const reported = answer.usage.reportedCostUsd
+  const { costUsd, priced } =
+    reported === undefined
+      ? prepared.price(
+          model,
+          answer.usage.inputTokens,
+          answer.usage.outputTokens,
+          cachedTokens ?? 0
+        )
+      : { costUsd: reported, priced: true }
   const at = deps.now().toISOString()
   const tokens = answer.usage.inputTokens + answer.usage.outputTokens
   deps.ledger.insert({
@@ -333,7 +348,9 @@ function record(
     completionTokens: answer.usage.outputTokens,
     cachedTokens,
     costUsd,
-    cached: false
+    cached: false,
+    reportedCostUsd: reported ?? null,
+    reasoningTokens: answer.usage.reasoningTokens ?? null
   })
   if (cacheable(input, answer)) {
     deps.cache.put({

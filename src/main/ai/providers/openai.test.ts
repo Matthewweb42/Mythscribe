@@ -488,6 +488,60 @@ describe('OpenRouter (AI-BILLING-SPEC A2)', () => {
     expect(bodyOf(direct.calls[0])).not.toHaveProperty('reasoning')
   })
 
+  it('asks OpenRouter for its usage accounting and reads the cost it reports (F-16.1)', async () => {
+    const priced = { ...completion, usage: { ...completion.usage, cost: 0.000123 } }
+    const { fetch, calls } = answering(() => json(200, priced))
+    const result = await openRouter(fetch).complete(request)
+    expect(bodyOf(calls[0]).usage).toEqual({ include: true })
+    expect(result.usage).toEqual({ inputTokens: 7, outputTokens: 2, reportedCostUsd: 0.000123 })
+    // Streamed too: the request carries the switch, and the final chunk carries the cost.
+    const streamed = answering(() =>
+      sse([
+        {
+          ...completion,
+          object: 'chat.completion.chunk',
+          choices: [{ index: 0, delta: { content: 'hi' } }]
+        },
+        {
+          ...completion,
+          object: 'chat.completion.chunk',
+          choices: [],
+          usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9, cost: 0.0002 }
+        }
+      ])
+    )
+    const chunks: StreamChunk[] = []
+    for await (const chunk of openRouter(streamed.fetch).stream(request)) chunks.push(chunk)
+    expect(bodyOf(streamed.calls[0]).usage).toEqual({ include: true })
+    expect(chunks.at(-1)?.usage?.reportedCostUsd).toBe(0.0002)
+    // A cost that is not a finite, non-negative number is no cost.
+    for (const cost of [-1, Number.NaN, '0.1']) {
+      const bad = answering(() =>
+        json(200, { ...completion, usage: { ...completion.usage, cost } })
+      )
+      expect((await openRouter(bad.fetch).complete(request)).usage).not.toHaveProperty(
+        'reportedCostUsd'
+      )
+    }
+  })
+
+  it('never asks OpenAI or a local server for usage accounting, nor reads a cost from them (F-16.1)', async () => {
+    const priced = { ...completion, usage: { ...completion.usage, cost: 0.5 } }
+    const direct = answering(() => json(200, priced))
+    const result = await buildOpenAiProvider(KEY, { fetch: direct.fetch }).complete(request)
+    expect(bodyOf(direct.calls[0])).not.toHaveProperty('usage')
+    expect(result.usage).not.toHaveProperty('reportedCostUsd')
+    const local = answering(() => json(200, priced))
+    const localResult = await buildOpenAiProvider('local', {
+      fetch: local.fetch,
+      baseURL: 'http://localhost:11434/v1',
+      id: 'local',
+      label: 'Local model'
+    }).complete(request)
+    expect(bodyOf(local.calls[0])).not.toHaveProperty('usage')
+    expect(localResult.usage).not.toHaveProperty('reportedCostUsd')
+  })
+
   it('tests the key on GET /key and answers with the fast model', async () => {
     const { fetch, calls } = answering(() => json(200, { data: { label: 'k' } }))
     await expect(openRouter(fetch).testConnection()).resolves.toEqual({

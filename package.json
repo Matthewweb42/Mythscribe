@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "test:e2e": "electron-vite build && node e2e/run.mjs",
     "eval:ai": "vitest run --project eval",
+    "ai:probe": "vitest run --project probe",
     "db:generate": "drizzle-kit generate",
     "postinstall": "electron-builder install-app-deps",
     "build:win": "npm run build && electron-builder --win",

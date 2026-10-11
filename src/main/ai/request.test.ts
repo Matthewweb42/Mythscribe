@@ -173,7 +173,9 @@ describe('runAiRequest (F-5.14)', () => {
         completionTokens: 10,
         cachedTokens: null,
         costUsd: expected.costUsd,
-        cached: false
+        cached: false,
+        reportedCostUsd: null,
+        reasoningTokens: null
       }
     ])
     expect([...f.cache.values()]).toEqual([
@@ -769,6 +771,53 @@ describe('the developer tools observer (2026-10-07)', () => {
     f.provider = null
     await expect(runAiRequest({ ...f.deps, observe }, input)).rejects.toThrow(NoKeyError)
     expect(calls.map(([step]) => step)).toEqual(['start', 'failed'])
+  })
+})
+
+describe('the cost the provider reports (F-16.1)', () => {
+  it('records a reported cost over the estimate, in the row, the cap and the session, with the thinking tokens', async () => {
+    const f = fakes()
+    f.complete.mockResolvedValueOnce({
+      text: '{"tags":["dark-forest"]}',
+      model: 'gpt-5.4-mini',
+      usage: { inputTokens: 40, outputTokens: 10, reasoningTokens: 6, reportedCostUsd: 0.25 }
+    })
+    const result = await runAiRequest(f.deps, input)
+    expect(result).toMatchObject({ costUsd: 0.25, priced: true })
+    expect(f.ledger[0]).toMatchObject({
+      costUsd: 0.25,
+      reportedCostUsd: 0.25,
+      reasoningTokens: 6
+    })
+    expect(f.spends).toEqual([{ costUsd: 0.25, tokens: 50 }])
+    expect(f.day.spentTodayUsd).toBeCloseTo(0.25)
+    expect(f.session.totals().costUsd).toBeCloseTo(0.25)
+    // The cache hit afterwards writes nulls and costs nothing.
+    await runAiRequest(f.deps, input)
+    expect(f.ledger[1]).toMatchObject({
+      cached: true,
+      reportedCostUsd: null,
+      reasoningTokens: null
+    })
+  })
+
+  it('prices from the table and writes nulls when nothing was reported, and a reported cost prices an unknown model', async () => {
+    const f = fakes()
+    await runAiRequest(f.deps, input)
+    expect(f.ledger[0]).toMatchObject({
+      costUsd: priceFor('gpt-5.4-mini', 40, 10).costUsd,
+      reportedCostUsd: null,
+      reasoningTokens: null
+    })
+    f.complete.mockResolvedValueOnce({
+      text: '{"tags":[]}',
+      model: 'mystery',
+      usage: { inputTokens: 10, outputTokens: 2, reportedCostUsd: 0.0001 }
+    })
+    if (f.provider === null) throw new Error('no provider')
+    f.provider = { ...f.provider, resolveModel: () => 'mystery/model' }
+    const unknown = await runAiRequest(f.deps, { ...input, contextHash: 'other' })
+    expect(unknown).toMatchObject({ costUsd: 0.0001, priced: true })
   })
 })
 

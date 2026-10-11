@@ -14,7 +14,9 @@ import {
   FEATURE_INPUT_BUDGETS,
   MODEL_PRICING,
   OPENROUTER_DEFAULT_MODELS,
+  OPENROUTER_PRICING,
   effectiveOwnKeyProvider,
+  modelPriceOf,
   TAGS_MIN_CHARS,
   aiFailure,
   defaultAiModels,
@@ -30,6 +32,7 @@ import {
   defaultModelsFor,
   isLoopbackUrl
 } from './ai'
+import { OPENROUTER_PROBED_PRICES } from './modelPrices'
 
 describe('cached input and OpenRouter (AI-BILLING-SPEC A4, R6, A2)', () => {
   it('prices cached prompt tokens at the cached rate, never above the input count', () => {
@@ -53,9 +56,30 @@ describe('cached input and OpenRouter (AI-BILLING-SPEC A4, R6, A2)', () => {
         priceFor(DEFAULT_MODELS[tier], 1_000, 1_000)
       )
     }
-    // 1M in, 1M out on V4 Flash: $0.03 + $1.28.
-    expect(priceFor('deepseek/deepseek-v4-flash', 1_000_000, 1_000_000).costUsd).toBeCloseTo(1.31)
+    // F-16.1: the researched list prices until the probe runs. 1M in, 1M out on V4 Flash:
+    // $0.14 + $0.28; on V4 Pro: $1.74 + $3.48.
+    expect(priceFor('deepseek/deepseek-v4-flash', 1_000_000, 1_000_000).costUsd).toBeCloseTo(0.42)
+    expect(priceFor('deepseek/deepseek-v4-pro', 1_000_000, 1_000_000).costUsd).toBeCloseTo(5.22)
     expect(defaultModelsFor('openrouter')).toEqual(OPENROUTER_DEFAULT_MODELS)
+  })
+
+  it('bills cached DeepSeek input at the full input rate while no cached price is known (F-16.1)', () => {
+    for (const model of ['deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro']) {
+      expect(OPENROUTER_PRICING[model]).not.toHaveProperty('cachedInUsdPerM')
+      expect(priceFor(model, 10_000, 100, 8_000).costUsd).toBeCloseTo(
+        priceFor(model, 10_000, 100, 0).costUsd,
+        12
+      )
+    }
+  })
+
+  it('reads the DeepSeek prices from the one price module, a null cached price left out', () => {
+    for (const [model, probed] of Object.entries(OPENROUTER_PROBED_PRICES)) {
+      expect(OPENROUTER_PRICING[model]).toEqual(modelPriceOf(probed))
+    }
+    expect(
+      modelPriceOf({ inUsdPerM: 1, outUsdPerM: 2, cachedInUsdPerM: 0.1, source: 'probe' })
+    ).toEqual({ inUsdPerM: 1, outUsdPerM: 2, cachedInUsdPerM: 0.1, priced: true })
   })
 
   it('keeps an install with an OpenAI key on OpenAI until the author picks, else OpenRouter', () => {

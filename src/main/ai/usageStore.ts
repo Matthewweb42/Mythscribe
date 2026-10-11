@@ -19,7 +19,13 @@ export type LedgerSummary = Pick<AiUsageSummary, 'total' | 'byFeature'>
 export function insertUsage(db: AiDb, entry: UsageEntry): AiUsageRow {
   const row: AiUsageInsert = { id: randomUUID(), ...entry }
   db.insert(aiUsage).values(row).run()
-  return { cachedTokens: null, promptVersion: null, ...row }
+  return {
+    cachedTokens: null,
+    promptVersion: null,
+    reportedCostUsd: null,
+    reasoningTokens: null,
+    ...row
+  }
 }
 
 /** Every row, oldest first (insertion order on a tie); for tests and later export. */
@@ -40,7 +46,11 @@ export function recentUsage(db: AiDb, limit: number): AiUsageRecent[] {
   return usagePage(db, 0, limit)
 }
 
-/** Rows `offset` to `offset + limit` of the ledger, newest first, as the history lists them. */
+/**
+ * Rows `offset` to `offset + limit` of the ledger, newest first, as the history lists them.
+ * F-16.1: each row says how many tokens went to thinking (null when the provider did not say)
+ * and whether its cost was reported by the provider or estimated from the price table.
+ */
 function usagePage(db: AiDb, offset: number, limit: number): AiUsageRecent[] {
   return db
     .select({
@@ -52,13 +62,16 @@ function usagePage(db: AiDb, offset: number, limit: number): AiUsageRecent[] {
       completionTokens: aiUsage.completionTokens,
       cachedTokens: aiUsage.cachedTokens,
       costUsd: aiUsage.costUsd,
-      cached: aiUsage.cached
+      cached: aiUsage.cached,
+      reasoningTokens: aiUsage.reasoningTokens,
+      reportedCostUsd: aiUsage.reportedCostUsd
     })
     .from(aiUsage)
     .orderBy(desc(aiUsage.at), desc(sql`rowid`))
     .limit(limit)
     .offset(offset)
     .all()
+    .map(({ reportedCostUsd, ...row }) => ({ ...row, costReported: reportedCostUsd !== null }))
 }
 
 /**

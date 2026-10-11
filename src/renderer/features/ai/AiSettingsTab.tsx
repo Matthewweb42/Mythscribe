@@ -1006,9 +1006,18 @@ const dateTime = (iso: string): string => {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${clockTime(iso)}`
 }
 
-/** In / out tokens of one row, with the prompt-cache hits when the provider reported any. */
+/**
+ * In / out tokens of one row, with the prompt-cache hits when the provider reported any, and
+ * (F-16.1) the output tokens the model spent thinking when it said: "+N thinking".
+ */
 const rowTokens = (row: AiUsageRecent): string =>
-  `${formatCount(row.promptTokens)} / ${formatCount(row.completionTokens)}${row.cachedTokens ? ` (${formatCount(row.cachedTokens)} cached)` : ''}`
+  `${formatCount(row.promptTokens)} / ${formatCount(row.completionTokens)}${row.cachedTokens ? ` (${formatCount(row.cachedTokens)} cached)` : ''}${row.reasoningTokens ? ` +${formatCount(row.reasoningTokens)} thinking` : ''}`
+
+/** F-16.1: where a row's cost came from, as the cost cell's title says it. */
+const COST_SOURCE_TITLE = {
+  reported: 'Reported by the provider',
+  estimated: 'Estimated from the price table'
+} as const
 
 /**
  * The usage history (AI-BILLING-SPEC E7): every request this project made, whatever the source,
@@ -1076,7 +1085,14 @@ function UsageHistory(): React.JSX.Element {
                   <td className="text-left">{featureLabel(row.feature)}</td>
                   <td className="text-left">{row.model}</td>
                   <td className="text-right tabular-nums">{rowTokens(row)}</td>
-                  <td className="text-right tabular-nums">
+                  <td
+                    className="text-right tabular-nums"
+                    title={
+                      row.costReported === true
+                        ? COST_SOURCE_TITLE.reported
+                        : COST_SOURCE_TITLE.estimated
+                    }
+                  >
                     {`${formatRequestCost(row.costUsd)}${row.cached ? ' · cached' : ''}`}
                   </td>
                 </tr>

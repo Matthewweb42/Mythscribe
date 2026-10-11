@@ -8,7 +8,14 @@ import {
   type AiFeatureId,
   type Tier
 } from '@shared/ai'
-import { AI_COST_NOTES } from '@shared/aiCostNotes'
+import {
+  AI_COST_NOTES,
+  PLANNED_COST_NOTES,
+  PLANNED_RETRY_FACTOR,
+  PLANNED_TASK_COSTS,
+  type PlannedCostNote,
+  type PlannedTask
+} from '@shared/aiCostNotes'
 import { AI_DATA_SHARING } from '@shared/aiSettings'
 import { DEFAULT_BILLING_TERMS } from '@shared/cloudBilling'
 import { PROMPT_CATALOGUE, PROMPT_VERSIONS, type PromptVersion } from '../prompts/catalogue'
@@ -121,5 +128,62 @@ export function renderCostRegistry(rows: TokenRow[]): string {
     lines.push(`- **When:** ${note.when}`)
     lines.push(`- **Ideas:** ${note.ideas}`, '')
   }
+  lines.push(...renderPlannedSection(markup))
   return `${lines.join('\n').trimEnd()}\n`
+}
+
+/** Where a planned request is priced: the own-key OpenRouter defaults, or an OpenAI key. */
+export type PlannedSource = 'ownKey' | 'openai'
+
+/** One call of a planned row on a source's default model for its tier. */
+export function plannedRowCost(row: PlannedCostNote, source: PlannedSource): number {
+  const model = (source === 'ownKey' ? OPENROUTER_DEFAULT_MODELS : DEFAULT_MODELS)[row.tier]
+  return perCall(model, row.typicalInTokens, row.typicalOutTokens)
+}
+
+/** A planned task on a source, retries included; throws for a call naming no planned row. */
+export function plannedTaskCost(task: PlannedTask, source: PlannedSource): number {
+  const sum = task.calls.reduce((total, { row, calls }) => {
+    const note = PLANNED_COST_NOTES.find((candidate) => candidate.id === row)
+    if (note === undefined) throw new Error(`No planned cost row ${row}`)
+    return total + plannedRowCost(note, source) * calls
+  }, 0)
+  return sum * PLANNED_RETRY_FACTOR
+}
+
+/** The planned story-memory section (F-16.1): every planned request, then every task. */
+function renderPlannedSection(markup: number): string[] {
+  const lines: string[] = [
+    '## Planned: story memory (F-16)',
+    '',
+    'The story-memory redesign (`FEATURES.md` §2.16, design Part 5) priced before it is built, from',
+    '`PLANNED_COST_NOTES` and `PLANNED_TASK_COSTS` in `src/shared/aiCostNotes.ts`. A row moves into the',
+    'table above when its feature ships. Cached input is not discounted; task totals add 5 % for retries.',
+    '',
+    '### Per call',
+    '',
+    '| Request | Feature | Phase | Tier | Trigger | In / out | Own key (OpenRouter) | Hosted | OpenAI key | When |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |'
+  ]
+  for (const row of PLANNED_COST_NOTES) {
+    const own = plannedRowCost(row, 'ownKey')
+    lines.push(
+      `| \`${row.id}\` | \`${row.feature}\`${row.existing ? ' (existing)' : ''} | ${row.phase} | ${row.tier} | ${row.trigger} | ${row.typicalInTokens} / ${row.typicalOutTokens} | ${formatUsd(own)} | ${formatUsd(own * (1 + markup))} | ${formatUsd(plannedRowCost(row, 'openai'))} | ${cell(row.when)} |`
+    )
+  }
+  lines.push(
+    '',
+    '### Per task',
+    '',
+    '| Task | Requests | Own key (OpenRouter) | Hosted | OpenAI key |',
+    '| --- | --- | --- | --- | --- |'
+  )
+  for (const task of PLANNED_TASK_COSTS) {
+    const own = plannedTaskCost(task, 'ownKey')
+    const requests = task.calls.reduce((sum, { calls }) => sum + calls, 0)
+    lines.push(
+      `| ${cell(task.label)} | ${requests} | ${formatUsd(own)} | ${formatUsd(own * (1 + markup))} | ${formatUsd(plannedTaskCost(task, 'openai'))} |`
+    )
+  }
+  return lines
 }

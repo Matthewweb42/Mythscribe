@@ -111,7 +111,9 @@ describe('usageStore (F-5.14)', () => {
         completionTokens: 20,
         cachedTokens: null,
         costUsd: 0.001,
-        cached: false
+        cached: false,
+        reasoningTokens: null,
+        costReported: false
       }
     ])
   })
@@ -132,5 +134,26 @@ describe('usageStore (F-5.14)', () => {
     ])
     expect(first.rows[0]?.cachedTokens).toBe(64)
     expect(usageHistory(db, 4, 2).rows.map((r) => r.at)).toEqual(['2026-10-07T10:00:00.000Z'])
+  })
+
+  it('keeps the reported cost and the thinking tokens, and says which costs were reported (F-16.1)', () => {
+    const reported = insertUsage(
+      db,
+      entry({
+        at: '2026-10-11T10:01:00.000Z',
+        costUsd: 0.0101,
+        reportedCostUsd: 0.0101,
+        reasoningTokens: 250
+      })
+    )
+    expect(reported).toMatchObject({ reportedCostUsd: 0.0101, reasoningTokens: 250 })
+    const estimated = insertUsage(db, entry({ at: '2026-10-11T10:00:00.000Z' }))
+    expect(estimated).toMatchObject({ reportedCostUsd: null, reasoningTokens: null })
+    expect(
+      usageHistory(db, 0, 10).rows.map((r) => [r.costReported, r.reasoningTokens, r.costUsd])
+    ).toEqual([
+      [true, 250, 0.0101],
+      [false, null, 0.001]
+    ])
   })
 })

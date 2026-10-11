@@ -12,6 +12,7 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   type PricingResult
 } from '@shared/cloudApi'
+import { MICROS_PER_USD } from '@shared/cloudBilling'
 import {
   bundledPricing,
   hostedPriceFor,
@@ -33,6 +34,7 @@ import {
   AiTooLargeError,
   type CompletionRequest,
   type CompletionResult,
+  type CompletionUsage,
   type Provider,
   type StreamChunk
 } from './types'
@@ -268,9 +270,9 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
       const response = await send(request, false)
       const parsed = AiCompleteResult.safeParse(parseJson(await response.text().catch(() => '')))
       if (!parsed.success) throw new AiFallbackError(UNREADABLE)
-      const { text, model, usage } = parsed.data
+      const { text, model, usage, chargeMicros } = parsed.data
       options.onBalance?.(parsed.data.balanceMicros)
-      return { text, model, usage }
+      return { text, model, usage: chargedUsage(usage, chargeMicros) }
     },
 
     async *stream(request): AsyncGenerator<StreamChunk> {
@@ -288,7 +290,7 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
         if (event.data.type === 'error') throw failureOf(event.data.code)
         // `done` carries the whole request's usage, like the OpenAI adapter's final chunk.
         options.onBalance?.(event.data.balanceMicros)
-        yield { delta: '', usage: event.data.usage }
+        yield { delta: '', usage: chargedUsage(event.data.usage, event.data.chargeMicros) }
         return
       }
       // The stream ended without a terminal event: the proxy or the connection gave up.
@@ -317,6 +319,17 @@ export function buildCloudProvider(options: CloudProviderOptions): Provider {
       return { model: options.resolveModel('fast') }
     }
   }
+}
+
+/**
+ * The wire usage with what the Balance was charged as the reported cost (F-16.1): the ledger
+ * then records exactly what the author paid, and the daily cap counts it.
+ */
+export function chargedUsage(
+  usage: AiCompleteResult['usage'],
+  chargeMicros: number
+): CompletionUsage {
+  return { ...usage, reportedCostUsd: chargeMicros / MICROS_PER_USD }
 }
 
 /** A `CloudAuthClient` failure in the provider taxonomy; its own two codes have no Cloud twin. */

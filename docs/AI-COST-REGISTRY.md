@@ -16,33 +16,33 @@ git history of this file is the log of each feature's cost over time (author req
 
 | Feature | What | Trigger | Prompt | Tier | In typical / worst | Out typical / cap | Own key (OpenRouter) typical · worst | Hosted typical | OpenAI typical | Calls per use | Typical per use (own key) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ghostText` | Ghost text | while typing | ghostText.v4 | fast | 1024 / 2085 | 40 / 60 | $0.0000819 · $0.000139 | $0.000102 | $0.000948 | 1 | $0.0000819 |
-| `tags` | Tag suggestions | on request | tags.v1 | fast | 1204 / 1913 | 80 / 200 | $0.000139 · $0.000313 | $0.000173 | $0.00126 | 1 | $0.000139 |
-| `summary` | Scene summaries, story bible, and tags | background | summary.v5 | fast | 1150 / 6512 | 600 / 1000 | $0.000803 · $0.00148 | $0.00100 | $0.00356 | 1 | $0.000803 |
-| `chat` | Assistant chat | on request | chat.v5 | fast | 1050 / 7782 | 400 / 1200 | $0.000544 · $0.00177 | $0.000679 | $0.00259 | 1 | $0.000544 |
-| `authorMode` | Author mode | on request | — | — | 0 / 8000 | 0 / 150 | $0 · $0.000432 | $0 | $0 | 0 | $0 |
-| `query` | Story Intelligence | on request | query.v4 | strong | 1587 / 11711 | 300 / 600 | $0.000459 · $0.00271 | $0.000574 | $0.00847 | 1 | $0.000459 |
-| `critique` | Editor's notes | on request | critique.v3 | strong | 1264 / 7025 | 900 / 1500 | $0.000643 · $0.00211 | $0.000804 | $0.0167 | 1 | $0.000643 |
-| `embeddings` | Search indexing | background | — | — | 0 / 8000 | 0 / 150 | $0 · $0.000432 | $0 | $0 | 0 | $0 |
-| `rewrite` | Rewrite in my voice | on request | rewrite.v4 | strong | 936 / 2802 | 250 / 1500 | $0.000302 · $0.00122 | $0.000377 | $0.00609 | 1 | $0.000302 |
-| `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000242 · $0.000418 | $0.000303 | $0.00276 | 1 | $0.000242 |
-| `betaReader` | Beta reader | on request | betaReader.v1 | strong | 673 / 11599 | 700 / 1200 | $0.000435 · $0.00294 | $0.000544 | $0.0122 | 1 | $0.000435 |
-| `importStructure` | Import structure detection | on request | importStructure.v1 | fast | 2428 / 4178 | 150 / 400 | $0.000265 · $0.000637 | $0.000331 | $0.00250 | 40 | $0.0106 |
-| `continuity` | Consistency check | background | continuity.v2 | strong | 1334 / 5702 | 300 / 800 | $0.000406 · $0.00153 | $0.000508 | $0.00783 | 1 | $0.000406 |
-| `proofread` | Proofread | on request | proofread.v1 | fast | 1055 / 7578 | 600 / 2000 | $0.000800 · $0.00279 | $0.00100 | $0.00349 | 1 | $0.000800 |
-| `whatNext` | What comes next | on request | whatNext.v3 | fast | 1079 / 3027 | 200 / 300 | $0.000288 · $0.000475 | $0.000360 | $0.00171 | 1 | $0.000288 |
-| `route` | Assistant routing | every chat message | route.v2 | fast | 508 / 981 | 40 / 120 | $0.0000664 · $0.000183 | $0.0000830 | $0.000561 | 1 | $0.0000664 |
-| `synopsis` | Synopsis suggestions | on request | synopsis.v1 | fast | 495 / 3400 | 120 / 350 | $0.000168 · $0.000550 | $0.000211 | $0.000911 | 1 | $0.000168 |
-| `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000413 · $0.000912 | $0.000516 | $0.00207 | 1 | $0.000413 |
-| `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000356 · $0.000568 | $0.000445 | $0.00202 | 1 | $0.000356 |
-| `editPass` | Edit passes | on request | editPass.v2 | strong | 912 / 5161 | 1500 / 4000 | $0.000822 · $0.00276 | $0.00103 | $0.0248 | 60 | $0.0493 |
-| `agent` | Assistant lookups and edits | every chat message | agent.v8 | strong | 2487 / 10684 | 300 / 3000 | $0.000648 · $0.00350 | $0.000810 | $0.0107 | 3 | $0.00194 |
-| `contextImport` | Context library sorting | on request | contextImport.v2 | strong | 884 / 3490 | 1500 / 6000 | $0.000816 · $0.00325 | $0.00102 | $0.0247 | 10 | $0.00816 |
-| `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.000268 · $0.00244 | $0.000335 | $0.00619 | 1 | $0.000268 |
-| `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000285 · $0.000690 | $0.000356 | $0.00299 | 1 | $0.000285 |
-| `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00104 · $0.00385 | $0.00130 | $0.0244 | 4 | $0.00418 |
-| `todo` | To do list: gaps and suggestions | on request | todo.v1 | fast | 415 / 9965 | 600 / 1200 | $0.000780 · $0.00183 | $0.000976 | $0.00301 | 1 | $0.000780 |
-| `sheetSync` | Sheet write-ups: Structured and Blank page kept in step | background | sheetWriteUp.v1 | fast | 308 / 4743 | 350 / 1200 | $0.000457 · $0.00168 | $0.000572 | $0.00181 | 1 | $0.000457 |
+| `ghostText` | Ghost text | while typing | ghostText.v4 | fast | 1024 / 2085 | 40 / 60 | $0.000155 · $0.000309 | $0.000193 | $0.000948 | 1 | $0.000155 |
+| `tags` | Tag suggestions | on request | tags.v1 | fast | 1204 / 1913 | 80 / 200 | $0.000191 · $0.000324 | $0.000239 | $0.00126 | 1 | $0.000191 |
+| `summary` | Scene summaries, story bible, and tags | background | summary.v5 | fast | 1150 / 6512 | 600 / 1000 | $0.000329 · $0.00119 | $0.000411 | $0.00356 | 1 | $0.000329 |
+| `chat` | Assistant chat | on request | chat.v5 | fast | 1050 / 7782 | 400 / 1200 | $0.000259 · $0.00143 | $0.000324 | $0.00259 | 1 | $0.000259 |
+| `authorMode` | Author mode | on request | — | — | 0 / 8000 | 0 / 150 | $0 · $0.00116 | $0 | $0 | 0 | $0 |
+| `query` | Story Intelligence | on request | query.v4 | strong | 1587 / 11711 | 300 / 600 | $0.00381 · $0.0225 | $0.00476 | $0.00847 | 1 | $0.00381 |
+| `critique` | Editor's notes | on request | critique.v3 | strong | 1264 / 7025 | 900 / 1500 | $0.00533 · $0.0174 | $0.00666 | $0.0167 | 1 | $0.00533 |
+| `embeddings` | Search indexing | background | — | — | 0 / 8000 | 0 / 150 | $0 · $0.00116 | $0 | $0 | 0 | $0 |
+| `rewrite` | Rewrite in my voice | on request | rewrite.v4 | strong | 936 / 2802 | 250 / 1500 | $0.00250 · $0.0101 | $0.00312 | $0.00609 | 1 | $0.00250 |
+| `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000448 · $0.000813 | $0.000560 | $0.00276 | 1 | $0.000448 |
+| `betaReader` | Beta reader | on request | betaReader.v1 | strong | 673 / 11599 | 700 / 1200 | $0.00361 · $0.0244 | $0.00451 | $0.0122 | 1 | $0.00361 |
+| `importStructure` | Import structure detection | on request | importStructure.v1 | fast | 2428 / 4178 | 150 / 400 | $0.000382 · $0.000697 | $0.000477 | $0.00250 | 40 | $0.0153 |
+| `continuity` | Consistency check | background | continuity.v2 | strong | 1334 / 5702 | 300 / 800 | $0.00337 · $0.0127 | $0.00421 | $0.00783 | 1 | $0.00337 |
+| `proofread` | Proofread | on request | proofread.v1 | fast | 1055 / 7578 | 600 / 2000 | $0.000316 · $0.00162 | $0.000395 | $0.00349 | 1 | $0.000316 |
+| `whatNext` | What comes next | on request | whatNext.v3 | fast | 1079 / 3027 | 200 / 300 | $0.000207 · $0.000508 | $0.000259 | $0.00171 | 1 | $0.000207 |
+| `route` | Assistant routing | every chat message | route.v2 | fast | 508 / 981 | 40 / 120 | $0.0000823 · $0.000171 | $0.000103 | $0.000561 | 1 | $0.0000823 |
+| `synopsis` | Synopsis suggestions | on request | synopsis.v1 | fast | 495 / 3400 | 120 / 350 | $0.000103 · $0.000574 | $0.000129 | $0.000911 | 1 | $0.000103 |
+| `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000219 · $0.000840 | $0.000273 | $0.00207 | 1 | $0.000219 |
+| `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000237 · $0.000373 | $0.000296 | $0.00202 | 1 | $0.000237 |
+| `editPass` | Edit passes | on request | editPass.v2 | strong | 912 / 5161 | 1500 / 4000 | $0.00681 · $0.0229 | $0.00851 | $0.0248 | 60 | $0.408 |
+| `agent` | Assistant lookups and edits | every chat message | agent.v8 | strong | 2487 / 10684 | 300 / 3000 | $0.00537 · $0.0290 | $0.00671 | $0.0107 | 3 | $0.0161 |
+| `contextImport` | Context library sorting | on request | contextImport.v2 | strong | 884 / 3490 | 1500 / 6000 | $0.00676 · $0.0270 | $0.00845 | $0.0247 | 10 | $0.0676 |
+| `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.00222 · $0.0202 | $0.00278 | $0.00619 | 1 | $0.00222 |
+| `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000474 · $0.000942 | $0.000593 | $0.00299 | 1 | $0.000474 |
+| `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00865 · $0.0319 | $0.0108 | $0.0244 | 4 | $0.0346 |
+| `todo` | To do list: gaps and suggestions | on request | todo.v1 | fast | 415 / 9965 | 600 / 1200 | $0.000226 · $0.00173 | $0.000283 | $0.00301 | 1 | $0.000226 |
+| `sheetSync` | Sheet write-ups: Structured and Blank page kept in step | background | sheetWriteUp.v1 | fast | 308 / 4743 | 350 / 1200 | $0.000141 · $0.00100 | $0.000176 | $0.00181 | 1 | $0.000141 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -180,3 +180,38 @@ git history of this file is the log of each feature's cost over time (author req
 
 - **When:** Thirty seconds after the author stops editing a sheet whose fields or page changed (or on Write up now / File now): one write-up when the fields moved, one filing per 3,000 characters of added page text when the page moved; nothing while the hashes say both views agree; identical requests answer from the local cache.
 - **Ideas:** Write up only the sections whose fields changed (keep the rest of the page); skip a filing when the page edit is whitespace or punctuation only; batch several sheets edited in one sitting into one request.
+
+## Planned: story memory (F-16)
+
+The story-memory redesign (`FEATURES.md` §2.16, design Part 5) priced before it is built, from
+`PLANNED_COST_NOTES` and `PLANNED_TASK_COSTS` in `src/shared/aiCostNotes.ts`. A row moves into the
+table above when its feature ships. Cached input is not discounted; task totals add 5 % for retries.
+
+### Per call
+
+| Request | Feature | Phase | Tier | Trigger | In / out | Own key (OpenRouter) | Hosted | OpenAI key | When |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `reader.v1:first` | `reader` | P2a | fast | background | 3800 / 520 | $0.000678 | $0.000847 | $0.00519 | A scene read whole: its first read, after >50 % of it changed, or after five partial reads; pages of 2,500 prose tokens. |
+| `reader.v1:window` | `reader` | P2a | fast | background | 4000 / 300 | $0.000644 | $0.000805 | $0.00435 | A window read: the changed paragraphs ±2 when the author leaves a scene or pauses. |
+| `verify.v1` | `verify` | P2a | fast | background | 1300 / 110 | $0.000213 | $0.000266 | $0.00147 | One batch per reading: the claims code could not prove, with their sentences ±1. |
+| `verify.v1:pro` | `verify` | P2a | strong | background | 700 / 40 | $0.00136 | $0.00170 | $0.00235 | Spot checks: 20 verified claims per rebuild on the strong model, with more surrounding text. |
+| `planLinks.v2` | `planLinks` (existing) | P2a | fast | background | 1500 / 100 | $0.000238 | $0.000298 | $0.00158 | Plan links applied automatically after a scene settles (decision 2). |
+| `contextImport.v3` | `contextImport` (existing) | P1 | strong | on request | 3200 / 1500 | $0.0108 | $0.0135 | $0.0305 | Filing an upload into Pinned, once, one request per chunk, reasoning off (decision 6). |
+| `navigator.v1` | `navigator` | P3 | fast | every chat message | 6000 / 150 | $0.000882 | $0.00110 | $0.00517 | An open question: up to two steps choosing which passages Ms Scribe reads. |
+| `agent.v9:open` | `agent` (existing) | P3 | strong | every chat message | 6500 / 350 | $0.0125 | $0.0157 | $0.0215 | Ms Scribe answers an open question from the passages the navigator found. |
+| `agent.v9:lookup` | `agent` (existing) | P3 | strong | every chat message | 4500 / 120 | $0.00825 | $0.0103 | $0.0131 | Ms Scribe answers a lookup that the instant answers (F-16.24) could not. |
+| `cite.v1` | `cite` | P3 | fast | every chat message | 1000 / 60 | $0.000157 | $0.000196 | $0.00102 | After each answer: checks every citation against its passage. |
+| `judge.v1` | `judge` | P4 | fast | background | 1500 / 300 | $0.000294 | $0.000368 | $0.00248 | Up to 10 contradiction pairs per call, each judged twice with the quotes swapped. |
+| `judge.v1:pro` | `judge` | P4 | strong | on request | 600 / 90 | $0.00136 | $0.00170 | $0.00285 | Check the book: the strong model confirms up to 20 pairs called a contradiction both ways. |
+
+### Per task
+
+| Task | Requests | Own key (OpenRouter) | Hosted | OpenAI key |
+| --- | --- | --- | --- | --- |
+| Index the book once (= Rebuild memory; 90 scenes) | 212 | $0.116 | $0.145 | $0.710 |
+| A 2-hour writing session | 30 | $0.0125 | $0.0157 | $0.0870 |
+| A lookup through Ms Scribe | 2 | $0.00882 | $0.0110 | $0.0148 |
+| An open question | 4 | $0.0152 | $0.0190 | $0.0345 |
+| Check the book | 40 | $0.0347 | $0.0433 | $0.112 |
+| File a 20,000-word upload, once | 14 | $0.159 | $0.198 | $0.448 |
+| A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions, 2 checks) | 926 | $1.26 | $1.57 | $4.01 |

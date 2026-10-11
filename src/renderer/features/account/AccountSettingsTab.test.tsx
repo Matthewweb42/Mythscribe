@@ -479,7 +479,7 @@ describe('AccountSettingsTab balance (F-15.3, AI-BILLING-SPEC E1-E7, C2-C4)', ()
       'Standard'
     )
     expect(screen.getByTestId('account-model-price-deepseek/deepseek-v4-pro')).toHaveTextContent(
-      'about 1.6x the standard price'
+      'about 12x the standard price'
     )
     expect(models.textContent).not.toMatch(/per 1M|token/i)
   })

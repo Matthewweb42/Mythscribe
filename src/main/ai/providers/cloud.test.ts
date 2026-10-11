@@ -143,7 +143,8 @@ describe('buildCloudProvider.complete', () => {
     expect(result).toEqual({
       text: 'Because the pass is watched.',
       model: 'gpt-5.4-mini',
-      usage: { inputTokens: 100, outputTokens: 20 }
+      // F-16.1: the Balance's own charge is the reported cost.
+      usage: { inputTokens: 100, outputTokens: 20, reportedCostUsd: 0.00013 }
     })
     expect(calls).toHaveLength(1)
     expect(calls[0]?.url).toBe(`${BASE}/ai/complete`)
@@ -374,9 +375,21 @@ describe('buildCloudProvider.stream', () => {
     expect(await collect(build({ fetch }).stream(REQUEST))).toEqual([
       { delta: 'The storm ' },
       { delta: 'broke at dusk.' },
-      { delta: '', usage: { inputTokens: 100, outputTokens: 20 } }
+      { delta: '', usage: { inputTokens: 100, outputTokens: 20, reportedCostUsd: 0.00013 } }
     ])
     expect(bodyOf(calls[0])).toMatchObject({ stream: true })
+  })
+
+  it('passes the reasoning tokens a newer Worker reports, and reads an older one without them (F-16.1)', async () => {
+    const { fetch } = answering(() =>
+      answer({ usage: { inputTokens: 100, outputTokens: 60, reasoningTokens: 40 } })
+    )
+    expect((await build({ fetch }).complete(REQUEST)).usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 60,
+      reasoningTokens: 40,
+      reportedCostUsd: 0.00013
+    })
   })
 
   it('reassembles a line split across two reads', async () => {
@@ -393,7 +406,7 @@ describe('buildCloudProvider.stream', () => {
     const { fetch } = answering(() => ndjson([whole.slice(0, split), whole.slice(split)]))
     expect(await collect(build({ fetch }).stream(REQUEST))).toEqual([
       { delta: 'The storm broke.' },
-      { delta: '', usage: { inputTokens: 10, outputTokens: 4 } }
+      { delta: '', usage: { inputTokens: 10, outputTokens: 4, reportedCostUsd: 0.000006 } }
     ])
   })
 

@@ -511,6 +511,24 @@ describe('POST /ai/complete, not streamed', () => {
     expect(bodies[1]).not.toHaveProperty('reasoning')
   })
 
+  it('returns the reasoning tokens the gateway reported, billed as output (F-16.1)', async () => {
+    deps = {
+      ...deps,
+      upstream: fakeUpstream({
+        answer: {
+          ...ANSWER,
+          usage: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 0, reasoningTokens: 15 }
+        }
+      })
+    }
+    const result = AiCompleteResult.parse(
+      await (await handleRequest(completeRequest(), deps)).json()
+    )
+    expect(result.usage.reasoningTokens).toBe(15)
+    // Thinking tokens are output tokens: the charge is the same as without them.
+    expect(result.chargeMicros).toBe(CHARGE)
+  })
+
   it('bills the requested model when the gateway answers with a snapshot id', async () => {
     deps = {
       ...deps,

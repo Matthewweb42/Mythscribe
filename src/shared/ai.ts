@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { OPENROUTER_PROBED_PRICES, type ProbedPrice } from './modelPrices'
 
 /**
  * The AI provider surface shared by main and the renderer (F-5.1): provider ids, the model tiers
@@ -605,23 +606,30 @@ export const MODEL_PRICING: Record<string, ModelPrice> = {
 }
 
 /**
- * The models by their OpenRouter ids (2026-10-07). OpenRouter passes the provider's price
- * through, so the OpenAI ones carry the same rates; the DeepSeek defaults are OpenRouter's live
- * prices of 2026-10-07 (re-check whenever a default changes).
+ * A probed price (`src/shared/modelPrices.ts`) as a `ModelPrice`: a null cached price leaves
+ * `cachedInUsdPerM` absent, so cached tokens bill at the full input rate (over-counted, never
+ * under-counted).
+ */
+export function modelPriceOf(price: ProbedPrice): ModelPrice {
+  return {
+    inUsdPerM: price.inUsdPerM,
+    outUsdPerM: price.outUsdPerM,
+    ...(price.cachedInUsdPerM === null ? {} : { cachedInUsdPerM: price.cachedInUsdPerM }),
+    priced: true
+  }
+}
+
+/**
+ * The models by their OpenRouter ids. OpenRouter passes the provider's price through, so the
+ * OpenAI ones carry the same rates. F-16.1: the DeepSeek defaults read the one price module the
+ * probe (`npm run ai:probe`) regenerates; until it runs they are the researched list prices
+ * (the 2026-10-07 figures were wrong: Flash output 4.6× too high, Pro about 8× too low).
  */
 export const OPENROUTER_PRICING: Record<string, ModelPrice> = {
-  'deepseek/deepseek-v4-flash': {
-    inUsdPerM: 0.03,
-    outUsdPerM: 1.28,
-    cachedInUsdPerM: 0.03,
-    priced: true
-  },
-  'deepseek/deepseek-v4-pro': {
-    inUsdPerM: 0.21,
-    outUsdPerM: 0.42,
-    cachedInUsdPerM: 0.017,
-    priced: true
-  },
+  'deepseek/deepseek-v4-flash': modelPriceOf(
+    OPENROUTER_PROBED_PRICES['deepseek/deepseek-v4-flash']
+  ),
+  'deepseek/deepseek-v4-pro': modelPriceOf(OPENROUTER_PROBED_PRICES['deepseek/deepseek-v4-pro']),
   'openai/gpt-5.4': GPT_5_4,
   'openai/gpt-5.4-mini': GPT_5_4_MINI,
   'openai/gpt-5.4-nano': GPT_5_4_NANO
@@ -696,7 +704,11 @@ export const AiUsageRecent = z.object({
   /** Prompt tokens the provider served from its cache; null when it did not say (AI-BILLING-SPEC A4). */
   cachedTokens: z.number().int().nonnegative().nullable().optional(),
   costUsd: z.number(),
-  cached: z.boolean()
+  cached: z.boolean(),
+  /** F-16.1: completion tokens spent thinking; null when the provider did not say. */
+  reasoningTokens: z.number().int().nonnegative().nullable().optional(),
+  /** F-16.1: true when `costUsd` is what the provider reported, false when the table estimated it. */
+  costReported: z.boolean().optional()
 })
 export type AiUsageRecent = z.infer<typeof AiUsageRecent>
 

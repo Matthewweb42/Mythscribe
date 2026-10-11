@@ -82,9 +82,18 @@ The key is stored only in Windows' secure store; MythScribe refuses to save it a
 
 ### 1.6 The models and their prices
 The defaults (approved 2026-10-07) are `deepseek/deepseek-v4-flash` (fast tier) and `deepseek/deepseek-v4-pro` (strong tier).
-Prices on 2026-10-07, per million tokens:
-- flash: $0.03 in / $1.28 out
-- pro: $0.21 in / $0.42 out
+List prices (F-16.1, corrected 2026-10-11), per million tokens, with no cached-input discount assumed:
+- flash: $0.14 in / $0.28 out
+- pro: $1.74 in / $3.48 out
+
+The 2026-10-07 figures ($0.03 / $1.28 and $0.21 / $0.42) were wrong: Flash's $0.03 input most likely came from a
+`-latest` listing, and Pro's was an expired promotion (about an eighth of list). Both the app's own-key table and the
+Worker's default `models` read one generated module, `src/shared/modelPrices.ts`.
+
+**Check them with the probe.** `OPENROUTER_API_KEY=sk-or-… npm run ai:probe` (about 5¢) reads OpenRouter's listing and
+per-provider prices, measures prompt-cache hits and thinking tokens, and writes a dated report to
+`docs/research/story-memory-2026-10-11/probe/`. If its proposed prices differ, `npm run ai:probe -- -u` regenerates the
+module; then run `npm run eval:ai -- -u` and update the `models` row (4.3) from the report.
 
 Prices move. To check today's prices without logging in:
 ```bash
@@ -95,7 +104,8 @@ server (spec P5).
 
 ### 1.7 Monitoring
 - OpenRouter's **Activity** page shows spend per key and per model. Compare it now and then with the ledger (4.4): hosted
-  revenue should be about 1.2× the operator key's spend, minus payment fees.
+  revenue should be about 1.25× the operator key's spend, minus payment fees. (The Worker's ledger keeps its own price-table
+  cost per request, not OpenRouter's reported cost; the app's ledger records the charge.)
 - Set a low-credit email alert on the operator account if OpenRouter offers one.
 
 ### 1.8 Reasoning and routing (story memory, 2026-10-11)

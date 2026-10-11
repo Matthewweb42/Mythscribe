@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
+import { AI_FEATURE_IDS, estimateTokens, inputBudget, outputBudget } from '@shared/ai'
+import { PLANNED_COST_NOTES, PLANNED_TASK_COSTS, type PlannedTask } from '@shared/aiCostNotes'
+import { plannedTaskCost, renderCostRegistry } from './costRegistry'
 import type { EvalCase } from './fixtures'
 import {
   markdownTable,
@@ -135,5 +137,53 @@ describe('eval report (F-5.12)', () => {
       '| xx | y    |',
       '| z  |      |'
     ])
+  })
+})
+
+describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
+  const task = (id: string): PlannedTask => {
+    const found = PLANNED_TASK_COSTS.find((candidate) => candidate.id === id)
+    if (found === undefined) throw new Error(`no task ${id}`)
+    return found
+  }
+
+  it.each([
+    ['index', 0.12],
+    ['openQuestion', 0.02],
+    ['session', 0.013],
+    ['checkBook', 0.035]
+  ] as const)(
+    'keeps %s within ±30 %% of the design’s figure at the corrected prices',
+    (id, design) => {
+      const cost = plannedTaskCost(task(id), 'ownKey')
+      expect(cost).toBeGreaterThan(design * 0.7)
+      expect(cost).toBeLessThan(design * 1.3)
+    }
+  )
+
+  it('marks a planned feature existing exactly when it is already an AiFeatureId', () => {
+    const known: readonly string[] = AI_FEATURE_IDS
+    for (const row of PLANNED_COST_NOTES) {
+      expect(row.existing, row.id).toBe(known.includes(row.feature))
+    }
+    // The planned new ids are new: none collides with a feature id this build has.
+    const fresh = [...new Set(PLANNED_COST_NOTES.filter((r) => !r.existing).map((r) => r.feature))]
+    expect(fresh.sort()).toEqual(['cite', 'judge', 'navigator', 'reader', 'verify'])
+    expect(fresh.some((feature) => known.includes(feature))).toBe(false)
+  })
+
+  it('names only planned rows in the tasks, and every row once', () => {
+    const ids = PLANNED_COST_NOTES.map((row) => row.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const planned of PLANNED_TASK_COSTS) {
+      for (const { row } of planned.calls) expect(ids).toContain(row)
+    }
+  })
+
+  it('renders both planned tables into the registry', () => {
+    const registry = renderCostRegistry([])
+    expect(registry).toContain('## Planned: story memory (F-16)')
+    for (const row of PLANNED_COST_NOTES) expect(registry).toContain(`| \`${row.id}\` |`)
+    for (const planned of PLANNED_TASK_COSTS) expect(registry).toContain(`| ${planned.label} |`)
   })
 })

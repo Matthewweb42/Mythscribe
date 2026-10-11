@@ -22,6 +22,11 @@ export interface UpstreamUsage {
   outputTokens: number
   /** Input tokens served from the provider's prompt cache (part of `inputTokens`); 0 if none. */
   cachedInputTokens: number
+  /**
+   * F-16.1: output tokens the model spent thinking (`completion_tokens_details.reasoning_tokens`),
+   * when the gateway said; returned to the app, never billed apart (they are output tokens).
+   */
+  reasoningTokens?: number
 }
 
 export interface UpstreamParams {
@@ -120,6 +125,7 @@ interface ChatUsage {
   prompt_tokens?: number
   completion_tokens?: number
   prompt_tokens_details?: { cached_tokens?: number | null } | null
+  completion_tokens_details?: { reasoning_tokens?: number | null } | null
 }
 
 /** The shape of a Chat Completions answer this module reads; everything else is ignored. */
@@ -144,12 +150,17 @@ function parseJson(text: string): unknown {
   }
 }
 
-function usageOf(usage: ChatUsage): UpstreamUsage {
+export function usageOf(usage: ChatUsage): UpstreamUsage {
   const inputTokens = usage.prompt_tokens ?? 0
+  const outputTokens = usage.completion_tokens ?? 0
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens
   return {
     inputTokens,
-    outputTokens: usage.completion_tokens ?? 0,
-    cachedInputTokens: Math.min(usage.prompt_tokens_details?.cached_tokens ?? 0, inputTokens)
+    outputTokens,
+    cachedInputTokens: Math.min(usage.prompt_tokens_details?.cached_tokens ?? 0, inputTokens),
+    ...(typeof reasoning === 'number' && reasoning >= 0
+      ? { reasoningTokens: Math.min(reasoning, outputTokens) }
+      : {})
   }
 }
 

@@ -1,0 +1,17 @@
+{
+  "data": {
+    "id": "deepseek/deepseek-v4-pro",
+    "endpoints": [
+      {
+        "name": "DeepSeek | deepseek/deepseek-v4-pro",
+        "provider_name": "DeepSeek",
+        "pricing": {
+          "prompt": "0.00000174",
+          "completion": "0.00000348",
+          "input_cache_read": "0.000000145"
+        },
+        "quantization": null
+      }
+    ]
+  }
+}

@@ -72,7 +72,8 @@ describe('bundledPricing (P5: the Worker defaults until GET /pricing answers)', 
       const hosted = DEFAULT_HOSTED_MODELS.find((model) => model.id === id)
       expect(hosted?.inputUsdPerM).toBe(OPENROUTER_PRICING[id]?.inUsdPerM)
       expect(hosted?.outputUsdPerM).toBe(OPENROUTER_PRICING[id]?.outUsdPerM)
-      expect(hosted?.cachedInputUsdPerM).toBe(OPENROUTER_PRICING[id]?.cachedInUsdPerM)
+      // A null hosted cached price is an absent own-key one: both bill cached input at the input rate.
+      expect(hosted?.cachedInputUsdPerM ?? undefined).toBe(OPENROUTER_PRICING[id]?.cachedInUsdPerM)
     }
   })
 })

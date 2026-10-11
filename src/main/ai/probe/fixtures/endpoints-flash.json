@@ -1,0 +1,28 @@
+{
+  "data": {
+    "id": "deepseek/deepseek-v4-flash",
+    "name": "DeepSeek: DeepSeek V4 Flash",
+    "endpoints": [
+      {
+        "name": "DeepSeek | deepseek/deepseek-v4-flash",
+        "provider_name": "DeepSeek",
+        "context_length": 1048576,
+        "pricing": {
+          "prompt": "0.00000014",
+          "completion": "0.00000028",
+          "input_cache_read": "0.000000028"
+        },
+        "quantization": "fp8",
+        "max_completion_tokens": 8192,
+        "status": 0
+      },
+      {
+        "name": "Chutes | deepseek/deepseek-v4-flash",
+        "provider_name": "Chutes",
+        "pricing": { "prompt": "0.00000015", "completion": "0.0000003" },
+        "quantization": "fp8"
+      },
+      { "provider_name": "Broken", "pricing": { "prompt": "x" } }
+    ]
+  }
+}

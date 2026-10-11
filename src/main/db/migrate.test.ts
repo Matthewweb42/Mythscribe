@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(28)
+    expect(result.version).toBe(29)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1118,5 +1118,41 @@ describe('edit_pass.excerpt (0027)', () => {
     expect(db.prepare("SELECT excerpt FROM edit_pass WHERE id = 'p2'").get()).toEqual({
       excerpt: 'The bell rang.'
     })
+  })
+})
+
+describe('ai_usage.reported_cost_usd and reasoning_tokens (0028, F-16.1)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    // A database as the build before F-16.1 left it: migrations up to 0027, with one ledger row.
+    migrate(db, loadMigrations().slice(0, 28))
+    db.prepare(
+      `INSERT INTO ai_usage (id, at, feature, tier, model, provider, prompt_tokens,
+         completion_tokens, cached_tokens, cost_usd, cached, prompt_version, context_hash)
+       VALUES ('u1', '2026-10-01T10:00:00.000Z', 'summary', 'fast', 'deepseek/deepseek-v4-flash',
+         'openrouter', 1200, 300, NULL, 0.0004, 0, 'summary.v5', 'ctx')`
+    ).run()
+    migrate(db)
+  })
+  afterEach(() => db.close())
+
+  it('keeps every ledger row, with no reported cost and no reasoning tokens', () => {
+    expect(
+      db.prepare('SELECT id, cost_usd, reported_cost_usd, reasoning_tokens FROM ai_usage').all()
+    ).toEqual([{ id: 'u1', cost_usd: 0.0004, reported_cost_usd: null, reasoning_tokens: null }])
+  })
+
+  it('stores a reported cost and the thinking tokens on a new row', () => {
+    db.prepare(
+      `INSERT INTO ai_usage (id, at, feature, tier, model, provider, prompt_tokens,
+         completion_tokens, cost_usd, cached, context_hash, reported_cost_usd, reasoning_tokens)
+       VALUES ('u2', '2026-10-11T10:00:00.000Z', 'agent', 'strong', 'deepseek/deepseek-v4-pro',
+         'openrouter', 5000, 400, 0.0101, 0, 'ctx2', 0.0101, 250)`
+    ).run()
+    expect(
+      db.prepare("SELECT reported_cost_usd, reasoning_tokens FROM ai_usage WHERE id = 'u2'").get()
+    ).toEqual({ reported_cost_usd: 0.0101, reasoning_tokens: 250 })
   })
 })

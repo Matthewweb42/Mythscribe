@@ -34,6 +34,16 @@ export default defineConfig({
       {
         resolve: { alias },
         test: {
+          name: 'probe',
+          environment: 'node',
+          // F-16.1: the live price probe, `npm run ai:probe` only (it needs OPENROUTER_API_KEY and
+          // spends about 5¢); under `npm run test` its suites are skipped.
+          include: ['src/main/ai/probe/**/*.probe.ts']
+        }
+      },
+      {
+        resolve: { alias },
+        test: {
           name: 'cloud',
           environment: 'node',
           // The MythScribe Cloud Worker (F-15.2): plain fetch handlers over injected

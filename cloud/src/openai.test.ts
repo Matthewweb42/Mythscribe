@@ -276,6 +276,38 @@ describe('openRouterUpstream (A9) and cached tokens (A4, R6)', () => {
     ])
   })
 
+  it('reads the reasoning tokens the gateway reports, capped at the output (F-16.1)', async () => {
+    const reply = (usage: unknown) => (): Response =>
+      jsonResponse({ choices: [{ message: { content: 'x' } }], usage })
+    const thinking = fakeFetch(
+      reply({
+        prompt_tokens: 600,
+        completion_tokens: 380,
+        completion_tokens_details: { reasoning_tokens: 300 }
+      })
+    )
+    expect((await openRouterUpstream('k', thinking.fetch).complete(PARAMS)).usage).toEqual({
+      inputTokens: 600,
+      outputTokens: 380,
+      cachedInputTokens: 0,
+      reasoningTokens: 300
+    })
+    const none = fakeFetch(reply({ prompt_tokens: 600, completion_tokens: 80 }))
+    expect((await openRouterUpstream('k', none.fetch).complete(PARAMS)).usage).not.toHaveProperty(
+      'reasoningTokens'
+    )
+    const odd = fakeFetch(
+      reply({
+        prompt_tokens: 10,
+        completion_tokens: 5,
+        completion_tokens_details: { reasoning_tokens: 50 }
+      })
+    )
+    expect((await openRouterUpstream('k', odd.fetch).complete(PARAMS)).usage.reasoningTokens).toBe(
+      5
+    )
+  })
+
   it('maps a price table id to OpenAI direct by dropping the gateway prefix', async () => {
     expect(openAiModelId('openai/gpt-5.4')).toBe('gpt-5.4')
     expect(openAiModelId('gpt-5.4')).toBe('gpt-5.4')

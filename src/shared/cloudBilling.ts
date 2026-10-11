@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { AI_MODEL_MAX, HOSTED_DEFAULT_MODELS, REASONING_MODES, ReasoningMode, Tier } from './ai'
+import { OPENROUTER_PROBED_PRICES, type ProbedModelId } from './modelPrices'
 
 /** Micro-USD (1e-6 USD) is the unit of every balance and charge (L2); a $10 pack is 10_000_000. */
 export const MICROS_PER_USD = 1_000_000
@@ -64,43 +65,50 @@ export const WordCostConstants = z.record(z.string(), z.number().positive().null
 export type WordCostConstants = z.infer<typeof WordCostConstants>
 
 /**
- * The defaults the Worker serves until the operator overrides a key in `billing_config`
- * (author decisions 2026-10-07: cost + 20 %, a $2.00 trial grant, $10 minimum pack). The default
- * models were approved by the author on 2026-10-07: DeepSeek V4 Flash (fast) and V4 Pro (strong)
- * through OpenRouter, at OpenRouter's live prices that day. The OpenAI models stay on sale as
- * choices (and for the bare ids older apps send). `displayMultiplier` compares a model with the
- * default (fast) model on a blend of ten input tokens per output token, the shape of most of the
- * app's requests (decided by Claude, unconfirmed: QUESTIONS.md 2026-10-07).
+ * The "about 2x" label of a model on the price table (E5): its price on a blend of ten input
+ * tokens per output token (the shape of most of the app's requests; decided by Claude,
+ * unconfirmed: QUESTIONS.md 2026-10-07), relative to `base`, the default (fast) model, rounded
+ * to one decimal. F-16.1: every default entry's `displayMultiplier` is computed with it, so the
+ * labels cannot drift from the prices.
  */
-export const DEFAULT_HOSTED_MODELS: readonly HostedModelPrice[] = [
+export function displayMultiplierOf(
+  price: Pick<HostedModelPrice, 'inputUsdPerM' | 'outputUsdPerM'>,
+  base: Pick<HostedModelPrice, 'inputUsdPerM' | 'outputUsdPerM'>
+): number {
+  const blend = (entry: typeof price): number => 10 * entry.inputUsdPerM + entry.outputUsdPerM
+  return Math.round((blend(price) / blend(base)) * 10) / 10
+}
+
+/** One entry before its multiplier is computed. */
+type HostedEntry = Omit<HostedModelPrice, 'displayMultiplier'>
+
+/** A probed DeepSeek price (`src/shared/modelPrices.ts`) as a hosted entry. */
+function probedEntry(id: ProbedModelId, label: string): HostedEntry {
+  const price = OPENROUTER_PROBED_PRICES[id]
+  return {
+    id,
+    label,
+    inputUsdPerM: price.inUsdPerM,
+    outputUsdPerM: price.outUsdPerM,
+    cachedInputUsdPerM: price.cachedInUsdPerM,
+    aliases: []
+  }
+}
+
+const HOSTED_ENTRIES: readonly HostedEntry[] = [
   {
-    id: HOSTED_DEFAULT_MODELS.fast,
-    label: 'DeepSeek V4 Flash',
-    inputUsdPerM: 0.03,
-    outputUsdPerM: 1.28,
-    cachedInputUsdPerM: 0.03,
-    displayMultiplier: 1,
-    aliases: [],
+    ...probedEntry('deepseek/deepseek-v4-flash', 'DeepSeek V4 Flash'),
     // F-16.2: the fast model's background JSON (summaries, the story-memory reader) runs under
     // small output caps, so it never thinks on Cloud; billing_config can still override it.
     reasoning: 'off'
   },
-  {
-    id: HOSTED_DEFAULT_MODELS.strong,
-    label: 'DeepSeek V4 Pro',
-    inputUsdPerM: 0.21,
-    outputUsdPerM: 0.42,
-    cachedInputUsdPerM: 0.017,
-    displayMultiplier: 1.6,
-    aliases: []
-  },
+  probedEntry('deepseek/deepseek-v4-pro', 'DeepSeek V4 Pro'),
   {
     id: 'openai/gpt-5.4-mini',
     label: 'GPT-5.4 mini',
     inputUsdPerM: 0.75,
     outputUsdPerM: 4.5,
     cachedInputUsdPerM: 0.075,
-    displayMultiplier: 7.6,
     aliases: ['gpt-5.4-mini']
   },
   {
@@ -109,7 +117,6 @@ export const DEFAULT_HOSTED_MODELS: readonly HostedModelPrice[] = [
     inputUsdPerM: 2.5,
     outputUsdPerM: 15,
     cachedInputUsdPerM: 0.25,
-    displayMultiplier: 25,
     aliases: ['gpt-5.4']
   },
   {
@@ -118,10 +125,23 @@ export const DEFAULT_HOSTED_MODELS: readonly HostedModelPrice[] = [
     inputUsdPerM: 0.2,
     outputUsdPerM: 1.25,
     cachedInputUsdPerM: 0.02,
-    displayMultiplier: 2.1,
     aliases: ['gpt-5.4-nano']
   }
 ]
+
+/**
+ * The defaults the Worker serves until the operator overrides a key in `billing_config`
+ * (author decisions 2026-10-07: cost + 20 %, a $2.00 trial grant, $10 minimum pack). The default
+ * models were approved by the author on 2026-10-07: DeepSeek V4 Flash (fast) and V4 Pro (strong)
+ * through OpenRouter. F-16.1: their prices come from the one price module the probe regenerates
+ * (`src/shared/modelPrices.ts`; the researched list prices until it runs), and every
+ * `displayMultiplier` is `displayMultiplierOf` the fast default. The OpenAI models stay on sale as
+ * choices (and for the bare ids older apps send).
+ */
+export const DEFAULT_HOSTED_MODELS: readonly HostedModelPrice[] = HOSTED_ENTRIES.map((entry) => ({
+  ...entry,
+  displayMultiplier: displayMultiplierOf(entry, HOSTED_ENTRIES[0] ?? entry)
+}))
 
 export const DEFAULT_HOSTED_ROUTING: HostedRouting = {
   tiers: { ...HOSTED_DEFAULT_MODELS },

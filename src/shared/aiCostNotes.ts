@@ -1,4 +1,4 @@
-import type { AiFeatureId } from './ai'
+import type { AiFeatureId, Tier } from './ai'
 
 /**
  * The AI cost registry's hand-written half (author request 2026-10-08: "keep track of every single
@@ -224,3 +224,270 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     ideas: 'Send a compact review summary instead of every record.'
   }
 }
+
+/**
+ * The story-memory redesign's planned AI requests (F-16.1, `FEATURES.md` §2.16, design Part 5),
+ * priced at the corrected prices before any of them is built, so the registry shows what the
+ * redesign will cost and a drift from the design's budget fails a test. One row per request
+ * shape; a prompt with two shapes (a first read and a window read) has a row each. When a row's
+ * feature ships (P1–P4) it moves into `AI_COST_NOTES`, where the compile check takes over.
+ */
+export interface PlannedCostNote {
+  /** The row's own key: the prompt version, with a suffix for a second shape of it. */
+  id: string
+  /** The prompt version the row will run. */
+  prompt: string
+  /** The planned feature id, or an existing one for a new version of its prompt. */
+  feature: string
+  /** True when `feature` is already an `AiFeatureId` (a new version of an existing prompt). */
+  existing: boolean
+  phase: 'P1' | 'P2a' | 'P2b' | 'P3' | 'P4'
+  tier: Tier
+  trigger: AiCostNote['trigger']
+  when: string
+  typicalInTokens: number
+  typicalOutTokens: number
+  /** Provider requests one use makes. */
+  callsPerUse: number
+}
+
+export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
+  {
+    id: 'reader.v1:first',
+    prompt: 'reader.v1',
+    feature: 'reader',
+    existing: false,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'A scene read whole: its first read, after >50 % of it changed, or after five partial reads; pages of 2,500 prose tokens.',
+    typicalInTokens: 3_800,
+    typicalOutTokens: 520,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v1:window',
+    prompt: 'reader.v1',
+    feature: 'reader',
+    existing: false,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'A window read: the changed paragraphs ±2 when the author leaves a scene or pauses.',
+    typicalInTokens: 4_000,
+    typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
+    id: 'verify.v1',
+    prompt: 'verify.v1',
+    feature: 'verify',
+    existing: false,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'One batch per reading: the claims code could not prove, with their sentences ±1.',
+    typicalInTokens: 1_300,
+    typicalOutTokens: 110,
+    callsPerUse: 1
+  },
+  {
+    id: 'verify.v1:pro',
+    prompt: 'verify.v1',
+    feature: 'verify',
+    existing: false,
+    phase: 'P2a',
+    tier: 'strong',
+    trigger: 'background',
+    when: 'Spot checks: 20 verified claims per rebuild on the strong model, with more surrounding text.',
+    typicalInTokens: 700,
+    typicalOutTokens: 40,
+    callsPerUse: 1
+  },
+  {
+    id: 'planLinks.v2',
+    prompt: 'planLinks.v2',
+    feature: 'planLinks',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'Plan links applied automatically after a scene settles (decision 2).',
+    typicalInTokens: 1_500,
+    typicalOutTokens: 100,
+    callsPerUse: 1
+  },
+  {
+    id: 'contextImport.v3',
+    prompt: 'contextImport.v3',
+    feature: 'contextImport',
+    existing: true,
+    phase: 'P1',
+    tier: 'strong',
+    trigger: 'on request',
+    when: 'Filing an upload into Pinned, once, one request per chunk, reasoning off (decision 6).',
+    typicalInTokens: 3_200,
+    typicalOutTokens: 1_500,
+    callsPerUse: 1
+  },
+  {
+    id: 'navigator.v1',
+    prompt: 'navigator.v1',
+    feature: 'navigator',
+    existing: false,
+    phase: 'P3',
+    tier: 'fast',
+    trigger: 'every chat message',
+    when: 'An open question: up to two steps choosing which passages Ms Scribe reads.',
+    typicalInTokens: 6_000,
+    typicalOutTokens: 150,
+    callsPerUse: 1
+  },
+  {
+    id: 'agent.v9:open',
+    prompt: 'agent.v9',
+    feature: 'agent',
+    existing: true,
+    phase: 'P3',
+    tier: 'strong',
+    trigger: 'every chat message',
+    when: 'Ms Scribe answers an open question from the passages the navigator found.',
+    typicalInTokens: 6_500,
+    typicalOutTokens: 350,
+    callsPerUse: 1
+  },
+  {
+    id: 'agent.v9:lookup',
+    prompt: 'agent.v9',
+    feature: 'agent',
+    existing: true,
+    phase: 'P3',
+    tier: 'strong',
+    trigger: 'every chat message',
+    when: 'Ms Scribe answers a lookup that the instant answers (F-16.24) could not.',
+    typicalInTokens: 4_500,
+    typicalOutTokens: 120,
+    callsPerUse: 1
+  },
+  {
+    id: 'cite.v1',
+    prompt: 'cite.v1',
+    feature: 'cite',
+    existing: false,
+    phase: 'P3',
+    tier: 'fast',
+    trigger: 'every chat message',
+    when: 'After each answer: checks every citation against its passage.',
+    typicalInTokens: 1_000,
+    typicalOutTokens: 60,
+    callsPerUse: 1
+  },
+  {
+    id: 'judge.v1',
+    prompt: 'judge.v1',
+    feature: 'judge',
+    existing: false,
+    phase: 'P4',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'Up to 10 contradiction pairs per call, each judged twice with the quotes swapped.',
+    typicalInTokens: 1_500,
+    typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
+    id: 'judge.v1:pro',
+    prompt: 'judge.v1',
+    feature: 'judge',
+    existing: false,
+    phase: 'P4',
+    tier: 'strong',
+    trigger: 'on request',
+    when: 'Check the book: the strong model confirms up to 20 pairs called a contradiction both ways.',
+    typicalInTokens: 600,
+    typicalOutTokens: 90,
+    callsPerUse: 1
+  }
+]
+
+/** A whole task the author pays for, as the planned rows it runs (design Part 5). */
+export interface PlannedTask {
+  id: string
+  label: string
+  calls: readonly { row: string; calls: number }[]
+}
+
+/**
+ * The design's tasks (Part 5), built from the planned rows. Totals add the design's 5 % for
+ * retries (`PLANNED_RETRY_FACTOR`); cached input is not discounted.
+ */
+export const PLANNED_TASK_COSTS: readonly PlannedTask[] = [
+  {
+    id: 'index',
+    label: 'Index the book once (= Rebuild memory; 90 scenes)',
+    calls: [
+      { row: 'reader.v1:first', calls: 90 },
+      { row: 'verify.v1', calls: 90 },
+      { row: 'judge.v1', calls: 12 },
+      { row: 'verify.v1:pro', calls: 20 }
+    ]
+  },
+  {
+    id: 'session',
+    label: 'A 2-hour writing session',
+    calls: [
+      { row: 'reader.v1:window', calls: 12 },
+      { row: 'verify.v1', calls: 12 },
+      { row: 'judge.v1', calls: 4 },
+      { row: 'planLinks.v2', calls: 2 }
+    ]
+  },
+  {
+    id: 'lookup',
+    label: 'A lookup through Ms Scribe',
+    calls: [
+      { row: 'agent.v9:lookup', calls: 1 },
+      { row: 'cite.v1', calls: 1 }
+    ]
+  },
+  {
+    id: 'openQuestion',
+    label: 'An open question',
+    calls: [
+      { row: 'navigator.v1', calls: 2 },
+      { row: 'agent.v9:open', calls: 1 },
+      { row: 'cite.v1', calls: 1 }
+    ]
+  },
+  {
+    id: 'checkBook',
+    label: 'Check the book',
+    calls: [
+      { row: 'judge.v1', calls: 20 },
+      { row: 'judge.v1:pro', calls: 20 }
+    ]
+  },
+  {
+    id: 'upload',
+    label: 'File a 20,000-word upload, once',
+    calls: [{ row: 'contextImport.v3', calls: 14 }]
+  },
+  {
+    id: 'heavyMonth',
+    label: 'A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions, 2 checks)',
+    calls: [
+      { row: 'reader.v1:window', calls: 12 * 20 + 6 },
+      { row: 'verify.v1', calls: 12 * 20 },
+      { row: 'judge.v1', calls: 4 * 20 + 20 * 2 },
+      { row: 'planLinks.v2', calls: 2 * 20 },
+      { row: 'agent.v9:lookup', calls: 20 },
+      { row: 'navigator.v1', calls: 2 * 50 },
+      { row: 'agent.v9:open', calls: 50 },
+      { row: 'cite.v1', calls: 20 + 50 },
+      { row: 'judge.v1:pro', calls: 20 * 2 }
+    ]
+  }
+]
+
+/** The design's allowance for retries on every planned task (Part 5 assumptions). */
+export const PLANNED_RETRY_FACTOR = 1.05

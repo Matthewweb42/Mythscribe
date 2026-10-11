@@ -882,6 +882,34 @@ describe('AiSettingsTab usage history (AI-BILLING-SPEC E7, C4)', () => {
     })
   })
 
+  it('shows the thinking tokens and says where each cost came from (F-16.1)', async () => {
+    await open()
+    fake.historyRows = [
+      {
+        ...row(1),
+        promptTokens: 4_000,
+        completionTokens: 400,
+        reasoningTokens: 250,
+        costUsd: 0.0101,
+        costReported: true
+      },
+      { ...row(2), promptTokens: 2_000, completionTokens: 90, reasoningTokens: null },
+      { ...row(3), promptTokens: 3_000, completionTokens: 50 }
+    ]
+    await userEvent.click(screen.getByTestId('ai-usage-history-toggle'))
+    const table = await screen.findByTestId('ai-usage-history')
+    expect(within(table).getByText('4,000 / 400 +250 thinking')).toBeInTheDocument()
+    expect(within(table).getByText('2,000 / 90')).toBeInTheDocument()
+    const [reported, estimated, older] = within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((tr) => tr.lastElementChild)
+    expect(reported).toHaveAttribute('title', 'Reported by the provider')
+    expect(estimated).toHaveAttribute('title', 'Estimated from the price table')
+    // A row written before F-16.1 carries neither field and reads as estimated.
+    expect(older).toHaveAttribute('title', 'Estimated from the price table')
+  })
+
   it('keeps tokens out of the usage block on MythScribe Cloud', async () => {
     await open(WITH_KEY, SOME_USAGE, { cloudAvailable: true })
     expect(screen.getByTestId('ai-usage-total')).toHaveTextContent(/tokens/)
