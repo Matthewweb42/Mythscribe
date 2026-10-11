@@ -746,10 +746,15 @@ function ReviewChat({ busy }: { busy: boolean }): React.JSX.Element {
 
   return (
     <div className="shrink-0 border-t border-line px-3 pt-2 pb-3" data-testid="review-chat">
-      {chat.entries.length > 0 ? (
+      {/* One fixed height from the start (2026-10-11), so a first message never moves the deck. */}
+      {chat.entries.length === 0 ? (
+        <p className="m-0 mb-2 flex h-24 items-center justify-center text-xs text-fg-subtle">
+          No messages yet.
+        </p>
+      ) : (
         <ol
           ref={log}
-          className="m-0 mb-2 max-h-40 list-none overflow-y-auto p-0 text-sm"
+          className="m-0 mb-2 h-24 list-none overflow-y-auto p-0 text-sm"
           aria-live="polite"
           data-testid="review-chat-log"
         >
@@ -794,7 +799,7 @@ function ReviewChat({ busy }: { busy: boolean }): React.JSX.Element {
             </li>
           ))}
         </ol>
-      ) : null}
+      )}
       <label htmlFor={inputId} className="mb-1 block text-xs text-fg-muted">
         Tell the AI what to change. You see every change before you apply.
       </label>
