@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ALIAS_MAX, ALIASES_MAX } from '../aliases'
+import { ALIASES_MAX } from '../aliases'
 import { ENTITY_NAME_MAX } from '../entities'
 import { TiptapNode } from '../tiptap'
 
@@ -70,8 +70,11 @@ export type CaseRule = z.infer<typeof CaseRule>
 
 /** The longest record name (its main alias), as long as a v1 sheet name. */
 export const RECORD_NAME_MAX = ENTITY_NAME_MAX
-/** The longest other name, as long as a v1 alias. */
-export const RECORD_ALIAS_MAX = ALIAS_MAX
+/**
+ * The longest other name: as long as a record name, since *Same as…* makes the merged record's
+ * name a nickname and the full-list editor must be able to send it back (`record:setAliases`).
+ */
+export const RECORD_ALIAS_MAX = RECORD_NAME_MAX
 /** Most names one record keeps besides its main name. */
 export const RECORD_ALIASES_MAX = ALIASES_MAX
 

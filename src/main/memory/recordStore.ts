@@ -3,9 +3,10 @@ import { and, asc, eq, inArray, like, ne, or, sql } from 'drizzle-orm'
 import { docToText } from '@shared/docText'
 import { dismissedKey } from '@shared/memory/dismissed'
 import type { InvariantAlias } from '@shared/memory/invariants'
-import { normName } from '@shared/memory/names'
+import { gateWords, normName } from '@shared/memory/names'
 import {
   defaultCaseRule,
+  RECORD_ALIASES_MAX,
   recordKindOf,
   type AliasOrigin,
   type CaseRule,
@@ -240,6 +241,33 @@ export interface NewAlias {
   origin?: AliasOrigin
 }
 
+/**
+ * A name that becomes a record's leaves the `name` list of Dismissed ("Hesk: not a name" is
+ * false once Hesk is a record), compared as the twin gate compares dismissed names.
+ */
+function forgetNotAName(db: TreeDb, text: string): void {
+  const words = gateWords(text).join(' ')
+  for (const key of dismissedKeys(db, 'name')) {
+    if (gateWords(key).join(' ') === words) forgetDismissed(db, 'name', key)
+  }
+}
+
+/**
+ * Refuses a change that would leave `name` with more other names than a record keeps
+ * (`RECORD_ALIASES_MAX`), so the full-list editor (`record:setAliases`) can always send them back.
+ */
+function requireAliasRoom(name: string, others: number): void {
+  if (others <= RECORD_ALIASES_MAX) return
+  throw new AppError(
+    'VALIDATION',
+    `${name} would have ${others} other names; a record keeps at most ${RECORD_ALIASES_MAX}. Remove some first.`,
+    { others }
+  )
+}
+
+const otherNames = (entries: readonly RecordAlias[]): number =>
+  entries.filter((entry) => !entry.isMain).length
+
 function insertAlias(
   db: TreeDb,
   recordId: string,
@@ -247,6 +275,7 @@ function insertAlias(
   now: Date
 ): void {
   const text = entry.text.normalize('NFC').trim().replace(/\s+/g, ' ')
+  forgetNotAName(db, text)
   db.insert(alias)
     .values({
       id: randomUUID(),
@@ -276,7 +305,8 @@ export type CreateRecordResult = { record: StoryRecord } | { gate: BlockedGate }
 /**
  * Creates a record with its name (and any other names), after the twin gate. A blocked name
  * answers `{ gate }` and writes nothing, unless `force`; a name that is already another record's
- * unshared name is refused whatever `force` says (identity rule 4).
+ * unshared name is refused whatever `force` says (identity rule 4). A name made a record leaves
+ * Dismissed's `name` list.
  */
 export function createRecord(db: TreeDb, input: CreateRecordInput, now: Date): CreateRecordResult {
   requireCategoryId(db, input.categoryId)
@@ -345,7 +375,8 @@ export interface AliasesInput {
  * shared flag. Unchanged names keep their rows (and so their origin and date). A name another
  * record holds is refused with that record's name unless both mark it shared. A nickname the
  * author removes goes to Dismissed (`alias`), so it is never asked about again for this record;
- * one she adds back leaves Dismissed.
+ * one she adds back leaves Dismissed. A changed name is a rename, not a removal: the old name
+ * leaves no Dismissed row.
  */
 export function setAliases(db: TreeDb, id: string, input: AliasesInput, now: Date): StoryRecord {
   const current = requireRecord(db, id)
@@ -395,7 +426,7 @@ export function setAliases(db: TreeDb, id: string, input: AliasesInput, now: Dat
         )
         .run()
     }
-    for (const entry of removed) {
+    for (const entry of removed.filter((gone) => !gone.isMain)) {
       dismiss(
         tx,
         {
@@ -415,7 +446,8 @@ export function setAliases(db: TreeDb, id: string, input: AliasesInput, now: Dat
 
 /**
  * Adds one nickname (a Yes to a nickname question: origin `confirmed`). Refused when another
- * record holds it unshared; a name the record already has changes nothing.
+ * record holds it unshared, or when the record already keeps `RECORD_ALIASES_MAX` other names; a
+ * name the record already has changes nothing.
  */
 export function addAlias(db: TreeDb, id: string, entry: NewAlias, now: Date): StoryRecord {
   const current = requireRecord(db, id)
@@ -423,6 +455,7 @@ export function addAlias(db: TreeDb, id: string, entry: NewAlias, now: Date): St
   if (norm.length === 0)
     throw new AppError('VALIDATION', 'A name needs at least one letter or digit')
   if (current.aliases.some((existing) => existing.norm === norm)) return current
+  requireAliasRoom(current.name, otherNames(current.aliases) + 1)
   db.transaction((tx) => {
     refuseClash(tx, id, entry.text, entry.shared ?? false)
     insertAlias(tx, id, { ...entry, isMain: false }, now)
@@ -527,15 +560,20 @@ export interface SameAsResult {
  * become nicknames of the kept one (a name it already has is dropped), its Pinned and Ideas are
  * appended, and every row that pointed at it now points at the kept record: mentions, scene
  * details ("+ also here" too), to-dos and dismissals (their keys rewritten; a split or not-same
- * between the two goes). The merged record is then deleted.
+ * between the two goes). The merged record is then deleted. Refused when the kept record would
+ * end with more than `RECORD_ALIASES_MAX` other names.
  */
 export function sameAs(db: TreeDb, keepId: string, mergeId: string, now: Date): SameAsResult {
   if (keepId === mergeId) throw new AppError('VALIDATION', 'A record cannot be merged into itself')
   const keep = requireRecord(db, keepId)
   const merge = requireRecord(db, mergeId)
+  const have = new Set(keep.aliases.map((entry) => entry.norm))
+  requireAliasRoom(
+    keep.name,
+    otherNames(keep.aliases) + merge.aliases.filter((entry) => !have.has(entry.norm)).length
+  )
   let droppedImage: string | null = null
   db.transaction((tx) => {
-    const have = new Set(keep.aliases.map((entry) => entry.norm))
     for (const entry of merge.aliases) {
       if (have.has(entry.norm)) continue
       tx.update(alias).set({ recordId: keepId, isMain: false }).where(eq(alias.id, entry.id)).run()
@@ -629,6 +667,13 @@ export function splitRecord(
   }
   if (intoId === id) throw new AppError('VALIDATION', 'Pick another record to move the names to')
   const into = intoId === null ? null : requireRecord(db, intoId)
+  if (into !== null) {
+    const have = new Set(into.aliases.map((entry) => entry.norm))
+    requireAliasRoom(
+      into.name,
+      otherNames(into.aliases) + moving.filter((entry) => !have.has(entry.norm)).length
+    )
+  }
   let target = intoId ?? ''
   db.transaction((tx) => {
     if (into === null) {

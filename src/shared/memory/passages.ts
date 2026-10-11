@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { MEMORY_SOURCES, type MemorySource } from './sources'
+import { MEMORY_SOURCES, meaningOf, type MemorySource } from './sources'
 
 /**
  * The local passage index of story memory v2 (F-16.5): one FTS5 table (`memory_passage_fts`,
@@ -22,14 +22,30 @@ export const PASSAGE_SOURCES = [
 export const PassageSource = z.enum(PASSAGE_SOURCES)
 export type PassageSource = z.infer<typeof PassageSource>
 
-/** A paragraph's canon status: canon unless the author marked it, or its page, Not canon. */
+/**
+ * A paragraph's canon status: `notCanon` when it is never real (design §2.2 "Meaning by place"),
+ * because the author marked it, or its page, Not canon, or because of where it is (Ideas, an Idea
+ * scene, a scene left out of compile); `canon` otherwise.
+ */
 export const PASSAGE_CANON = ['canon', 'notCanon'] as const
 export const PassageCanon = z.enum(PASSAGE_CANON)
 export type PassageCanon = z.infer<typeof PassageCanon>
 
-/** The source a hit reads as: `notCanon` when marked so, otherwise where it is. */
+/** Whether text from `source` is never real wherever the author is (Ideas, Idea and left-out scenes). */
+const neverReal = (source: PassageSource): boolean =>
+  meaningOf(source, { order: 0, openOrder: 0 }) === 'never'
+
+/** A paragraph's canon status from its source and its Not canon mark. */
+export function passageCanon(source: PassageSource, marked: boolean): PassageCanon {
+  return marked || neverReal(source) ? 'notCanon' : 'canon'
+}
+
+/**
+ * The source a hit reads as: where it is when that is never real already (`idea`, `ideaScene`,
+ * `excludedScene`), else `notCanon` when marked so, else where it is.
+ */
 export function passageLabel(source: PassageSource, canon: PassageCanon): MemorySource {
-  return canon === 'notCanon' ? 'notCanon' : source
+  return canon === 'notCanon' && !neverReal(source) ? 'notCanon' : source
 }
 
 /** Who owns a group of passage rows (and a `memory_scan` row): a scene, its notes, a record, a Research page. */
@@ -53,6 +69,7 @@ export const MemoryPassageHit = z.object({
   ownerId: z.string(),
   /** The paragraph's index in its document or page. */
   para: z.number().int(),
+  /** `notCanon` whenever the hit is never real: marked so, or Ideas, an Idea or left-out scene. */
   canon: PassageCanon,
   /** What the hit reads as (`passageLabel`), for `meaningOf`. */
   label: z.enum(MEMORY_SOURCES),

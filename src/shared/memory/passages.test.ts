@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { passageParagraphs } from '../mentions'
 import type { TiptapNodeT } from '../tiptap'
 import { markedParagraphs } from './pageMarks'
-import { passageLabel } from './passages'
+import { PASSAGE_SOURCES, passageCanon, passageLabel } from './passages'
 import { meaningOf } from './sources'
 
 const para = (text: string, notCanon = false): TiptapNodeT => ({
@@ -20,6 +20,19 @@ describe('passage labels (F-16.5)', () => {
     )
     expect(meaningOf(passageLabel('idea', 'canon'), { order: 0, openOrder: 0 })).toBe('never')
     expect(meaningOf(passageLabel('sceneNote', 'canon'), { order: 0, openOrder: 0 })).toBe('plan')
+  })
+
+  it('never reads Ideas, Idea scenes or left-out scenes as canon, and keeps their own label', () => {
+    for (const source of ['idea', 'ideaScene', 'excludedScene'] as const) {
+      expect(passageCanon(source, false)).toBe('notCanon')
+      expect(passageLabel(source, passageCanon(source, false))).toBe(source)
+    }
+    // Every source whose text means anything but never is canon until marked.
+    for (const source of PASSAGE_SOURCES) {
+      const never = meaningOf(source, { order: 0, openOrder: 0 }) === 'never'
+      expect(passageCanon(source, false)).toBe(never ? 'notCanon' : 'canon')
+      expect(passageCanon(source, true)).toBe('notCanon')
+    }
   })
 })
 

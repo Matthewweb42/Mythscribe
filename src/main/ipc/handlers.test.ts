@@ -8830,6 +8830,76 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     }
   })
 
+  it('never opens the v1 conversion dialog from Summarize all scenes, and keeps the held scene held', async () => {
+    const scene = await openV2()
+    await invoke('document:save', {
+      id: scene,
+      content: paragraphs(
+        'The storm broke at dusk over the dark forest. Mara counted the gaps. '.repeat(4)
+      )
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
+    complete.mockResolvedValue({
+      text: JSON.stringify({ summary: 'Mara waits.', keyPoints: [], characters: [] }),
+      model: 'gpt-fake',
+      usage: { inputTokens: 400, outputTokens: 60 }
+    })
+    await invoke('ai:summarize', { nodeId: scene, requestId: 'v2-1' })
+    const db = manager.require().connection.orm
+    const stored = getSummary(db, scene)
+    if (!stored) throw new Error('no summary')
+    upsertSummary(db, { ...stored, promptVersion: 'summary.v3' })
+    expect((await invoke('knowledge:conversion', undefined)).state).toBe('pending')
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    expect(await invoke('jobs:indexAll', undefined)).toMatchObject({ ok: true, queued: 0 })
+    expect(sentOf('knowledge:conversionChanged')).toEqual([])
+  })
+
+  it('scans and indexes a duplicated scene, and relabels a scene moved under an Idea chapter', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await openV2()
+      const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+      if (!('record' in made)) throw new Error('blocked')
+      await invoke('document:save', { id: scene, content: paragraphs('Mara lit the lantern.') })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      const [copy] = (await invoke('tree:duplicate', { id: scene })).filter(
+        (node) => node.id !== scene
+      )
+      if (copy === undefined) throw new Error('no copy')
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect((await invoke('names:forNode', { nodeId: copy.id })).map((m) => m.recordId)).toEqual([
+        made.record.id
+      ])
+      expect(
+        (await invoke('passages:search', { query: 'lantern' })).map((hit) => hit.ownerId).sort()
+      ).toEqual([scene, copy.id].sort())
+
+      // An Idea chapter: the moved scene's rows read as an Idea scene, never canon.
+      const nodes = await invoke('tree:list', undefined)
+      const parentId = nodes.find((node) => node.id === scene)?.parentId ?? null
+      const chapter = await invoke('tree:create', {
+        parentId: nodes.find((node) => node.id === parentId)?.parentId ?? parentId ?? '',
+        kind: 'folder',
+        hierarchyLevel: 'chapter',
+        title: 'Maybe'
+      })
+      await invoke('sceneMeta:set', {
+        id: chapter.id,
+        meta: { ...emptySceneMeta(), status: 'idea' }
+      })
+      await invoke('tree:move', { id: copy.id, parentId: chapter.id, afterId: null })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      const hit = (await invoke('passages:search', { query: 'lantern' })).find(
+        (each) => each.ownerId === copy.id
+      )
+      expect(hit).toMatchObject({ source: 'ideaScene', canon: 'notCanon', label: 'ideaScene' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps labels, to-dos, scene details and record pages through their channels', async () => {
     const scene = await openV2()
     const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })

@@ -2,7 +2,15 @@ import { z } from 'zod'
 import type { Paragraph } from '../mentions'
 import { STOPLIST } from '../proposedTags'
 import { dismissedKey } from './dismissed'
-import { capitalisedSpans, caseForm, normName, SENTENCE_OPENERS, type SpanWord } from './names'
+import {
+  capitalisedSpans,
+  caseForm,
+  isTitle,
+  NAME_PART_JOINERS,
+  normName,
+  SENTENCE_OPENERS,
+  type SpanWord
+} from './names'
 import type { CaseRule, RecordKind } from './records'
 
 /**
@@ -12,10 +20,14 @@ import type { CaseRule, RecordKind } from './records'
  *
  * 1. A mention is a whole capitalised span (`capitalisedSpans`) equal to a known name or alias,
  *    so "Jem Falsire" is an unknown name, not Rynna Falsire's "Falsire". Possessives count. A
- *    span joined by a link word ("Mr. Varrow of Elsdale") that is no name as a whole is tried in
- *    its parts; a span that opens a sentence is also tried without its first word ("Then Mr.
- *    Pruett", "Dearest Jo"); a span after a lower-case "the" is tried with it ("the Captain").
- *    A plural ("the Harrows") points to a group, or stays ambiguous.
+ *    span joined by "of" or "the" ("Mr. Varrow of Elsdale") that is no name as a whole is tried
+ *    in its parts; one joined by a surname particle ("Anne de Vere") is not, so it is never the
+ *    "Vere" of another record. A span that opens a sentence with a common opener is also tried
+ *    without it ("Then Mr. Pruett", "Dearest Jo"); one that opens with a word the scene also
+ *    writes in lower case ("Rose Harrow") is tried without it only as an `ambiguous` row, and a
+ *    title is never dropped ("Mrs. Harrow" is not "Harrow"). A span after a lower-case "the" is
+ *    tried with it ("the Captain"). A plural ("the Harrows") points to a group, or stays
+ *    ambiguous.
  * 2. Titles are never folded here: "Mr. Harrow" and "Mrs. Harrow" are different names.
  * 3. `exact` names, and `auto` names the scene also writes in lower case ("Will" beside "will",
  *    read from the scene itself: no word list ships, decision P1-D3), match only in their exact
@@ -127,6 +139,8 @@ interface RawHit {
   needsMid: boolean
   /** The span opened a sentence (so it says nothing about "mid-sentence"). */
   sentenceStart: boolean
+  /** Found only by dropping a sentence's first word the scene also writes in lower case: never certain. */
+  uncertain: boolean
 }
 
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u
@@ -187,11 +201,18 @@ export function scanNames(
   }
   const isExact = (alias: IndexedAlias): boolean =>
     alias.rule === 'exact' || (alias.rule === 'auto' && writtenLower(alias))
-  /** The words the scene writes in lower case, so a sentence opener it also uses as a plain word is no name. */
+  /** The words the scene writes in lower case, so a sentence opener it also uses as a plain word may be no name. */
   const lowerWords = new Set(sceneText.match(/(?<![\p{L}\p{M}])\p{Ll}[\p{L}\p{M}]*/gu) ?? [])
-  const isOpener = (word: string): boolean => {
+  /**
+   * Whether a sentence's first word may be dropped to find a name in the rest: `drop` for a common
+   * opener ("Then", "Dearest"), `uncertain` for a word the scene also writes in lower case ("Rose"
+   * beside "rose"), never for a title, day or month ("Mrs. Harrow" is not "Harrow").
+   */
+  const openerOf = (word: string): 'drop' | 'uncertain' | null => {
     const lower = word.toLowerCase()
-    return SENTENCE_OPENERS.has(lower) || STOPLIST.has(lower) || lowerWords.has(lower)
+    if (SENTENCE_OPENERS.has(lower)) return 'drop'
+    if (isTitle(lower) || STOPLIST.has(lower)) return null
+    return lowerWords.has(lower) ? 'uncertain' : null
   }
 
   /** The owners `text` may name, after the case rules; `needsMid` when one is an exact match at a sentence start. */
@@ -236,10 +257,11 @@ export function scanNames(
         recordIds: found.recordIds,
         plural,
         needsMid: found.needsMid,
-        sentenceStart
+        sentenceStart,
+        uncertain: false
       }
     }
-    /** Rule 1 for one run of span words: whole first, then its parts, then without its opener, then as a plural. */
+    /** Rule 1 for one run of span words: whole first, then its parts ("of", "the"), then without its opener, then as a plural. */
     const matchWords = (
       words: readonly SpanWord[],
       sentenceStart: boolean,
@@ -262,18 +284,24 @@ export function scanNames(
       }
       const found = lookup(whole, sentenceStart)
       if (found !== null) return [hit(words, sentenceStart, found, false, first.start)]
-      if (words.some((word) => word.link)) {
+      const splitsAt = (word: SpanWord): boolean => word.link && NAME_PART_JOINERS.has(word.text)
+      if (words.some(splitsAt)) {
         const parts: SpanWord[][] = [[]]
         for (const word of words) {
-          if (word.link) parts.push([])
+          if (splitsAt(word)) parts.push([])
           else parts[parts.length - 1]?.push(word)
         }
         return parts.flatMap((part, i) =>
           matchWords(part, sentenceStart && i === 0, allowThe && i === 0)
         )
       }
-      if (sentenceStart && words.length >= 2 && isOpener(first.text)) {
-        return matchWords(words.slice(1), false, false)
+      const opener = sentenceStart && words.length >= 2 ? openerOf(first.text) : null
+      if (opener === 'drop') return matchWords(words.slice(1), false, false)
+      if (opener === 'uncertain') {
+        return matchWords(words.slice(1), false, false).map((found) => ({
+          ...found,
+          uncertain: true
+        }))
       }
       // A plural: "Harrows" → "Harrow", "Ashbys" → "Ashby", "Marches" → "March".
       for (const cut of [/es$/u, /s$/u]) {
@@ -305,7 +333,8 @@ export function scanNames(
           recordIds: [...new Set(owners)],
           plural: false,
           needsMid: false,
-          sentenceStart: false
+          sentenceStart: false,
+          uncertain: false
         })
       }
     }
@@ -322,7 +351,7 @@ export function scanNames(
   // Rule 4: who each paragraph names for certain, for the shared aliases around it.
   const certain = new Map<number, Set<string>>()
   for (const found of raw) {
-    if (found.plural || found.recordIds.length !== 1) continue
+    if (found.plural || found.uncertain || found.recordIds.length !== 1) continue
     const id = found.recordIds[0]
     if (id === undefined) continue
     const set = certain.get(found.para) ?? new Set<string>()
@@ -335,6 +364,7 @@ export function scanNames(
     ambiguous: boolean
   }
   const resolved: Resolved[] = raw.map((found) => {
+    if (found.uncertain) return { ...found, owners: found.recordIds, ambiguous: true }
     if (found.plural) {
       const groups = found.recordIds.filter((id) => index.kinds.get(id) === 'group')
       if (groups.length === 1) return { ...found, owners: groups, ambiguous: false }

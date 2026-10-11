@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { dismissedKey } from '@shared/memory/dismissed'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
+import { RECORD_ALIASES_MAX } from '@shared/memory/records'
 import { alias, nameMention } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
@@ -198,6 +199,48 @@ describe('setAliases and addAlias', () => {
         NOW
       )
     ).toThrow(/listed twice/)
+  })
+
+  it('leaves no Dismissed row for a renamed record’s old name', () => {
+    const id = make('Mara Vel')
+    setAliases(db, id, { name: { text: 'Mara Vell' }, aliases: [] }, NOW)
+    expect(listDismissed(db).items).toEqual([])
+    expect(requireRecord(db, id).name).toBe('Mara Vell')
+  })
+
+  it('takes a name off Dismissed’s Not a name list when the author makes it a record or a nickname', () => {
+    const notAName = (name: string): void => {
+      dismiss(
+        db,
+        {
+          kind: 'name',
+          key: dismissedKey({ kind: 'name', name }),
+          label: `${name}: not a name`
+        },
+        NOW
+      )
+    }
+    notAName('Hesk')
+    expect(createRecord(db, { name: 'Hesk', categoryId: 'character' }, NOW)).toMatchObject({
+      gate: { rule: 'dismissed' }
+    })
+    make('Hesk')
+    notAName('Ry')
+    const rynna = make('Rynna Falsire')
+    addAlias(db, rynna, { text: 'Ry', origin: 'confirmed' }, NOW)
+    expect(listDismissed(db).items).toEqual([])
+  })
+
+  it('caps the other names a nickname, a merge or a split can leave a record', () => {
+    const others = Array.from({ length: RECORD_ALIASES_MAX }, (_, i) => `Name${String(i)}x`)
+    const full = make('Full Record', others)
+    expect(() => addAlias(db, full, { text: 'One More' }, NOW)).toThrow(/at most/)
+    const merged = make('Merged Away')
+    expect(() => sameAs(db, full, merged, NOW)).toThrow(/at most/)
+    const donor = make('Donor', ['Spare'])
+    const spare = requireRecord(db, donor).aliases.find((entry) => entry.text === 'Spare')
+    expect(() => splitRecord(db, donor, [spare?.id ?? ''], full, NOW)).toThrow(/at most/)
+    expect(requireRecord(db, full).aliases).toHaveLength(RECORD_ALIASES_MAX + 1)
   })
 
   it('adds a confirmed nickname once, and refuses one another record holds', () => {

@@ -31,7 +31,7 @@ import { povOf } from './sceneDetailStore'
  */
 
 /** Bumped when what a scan writes changes, so every scene is scanned once more. */
-export const NAME_INDEX_VERSION = 1
+export const NAME_INDEX_VERSION = 2
 
 /** What every scan of one pass shares: the roster's index and the hashes that stand for it. */
 export interface NameScanShared {
@@ -121,9 +121,19 @@ export function listNameMentions(db: TreeDb, nodeId: string): (NameMention & { i
     .map(toMention)
 }
 
+/** Every stored field but the row id, so a shifted paragraph or a new spelling rewrites the rows. */
+const mentionKey = (m: NameMention): unknown[] => [
+  m.recordId,
+  m.para,
+  m.from,
+  m.to,
+  m.text,
+  m.ambiguous,
+  m.spanKey
+]
+
 const sameMentions = (a: readonly NameMention[], b: readonly NameMention[]): boolean =>
-  JSON.stringify(a.map((m) => [m.recordId, m.from, m.to, m.ambiguous])) ===
-  JSON.stringify(b.map((m) => [m.recordId, m.from, m.to, m.ambiguous]))
+  JSON.stringify(a.map(mentionKey)) === JSON.stringify(b.map(mentionKey))
 
 /**
  * Scans one manuscript document and replaces its rows. A hash that still matches writes nothing;
@@ -173,7 +183,9 @@ export function staleNameScans(db: TreeDb): string[] {
 /**
  * *Not a mention*: the phrase around a recorded mention (the span with a word either side) is
  * never a mention of that record again (a `notMention` dismissal), and the scene is scanned
- * again at once. Answers the tombstone.
+ * again at once. Answers the tombstone. A row the saved text has moved past (the scene was saved
+ * after its last scan, so the words at its range are no longer its words) is refused with
+ * NOT_FOUND: that save queued a scan, which rewrites the rows and tells the windows.
  */
 export function markNotAMention(db: TreeDb, mentionId: string, now: Date): Dismissed {
   const row = db.select().from(nameMention).where(eq(nameMention.id, mentionId)).get()
@@ -183,8 +195,13 @@ export function markNotAMention(db: TreeDb, mentionId: string, now: Date): Dismi
   const doc = scene === undefined ? EMPTY_DOC : (documentJson(scene) ?? EMPTY_DOC)
   const paragraph = passageParagraphs(doc)[row.para]
   if (paragraph === undefined)
-    throw new AppError('NOT_FOUND', 'That mention is no longer there', { mentionId })
-  const phrase = mentionPhrase(paragraph.text, row.from - paragraph.from, row.to - paragraph.from)
+    throw new AppError('NOT_FOUND', 'That mention moved. Try again.', { mentionId })
+  const start = row.from - paragraph.from
+  const end = row.to - paragraph.from
+  if (paragraph.text.slice(start, end) !== row.text) {
+    throw new AppError('NOT_FOUND', 'That mention moved. Try again.', { mentionId })
+  }
+  const phrase = mentionPhrase(paragraph.text, start, end)
   const name = getRecord(db, row.recordId)?.name ?? row.text
   const tombstone = dismiss(
     db,

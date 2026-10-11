@@ -1108,9 +1108,13 @@ export function registerHandlers({
     return renamed
   })
 
-  register('tree:duplicate', ({ id }) =>
-    duplicateNode(manager.require().connection.orm, id).map(toTreeNode)
-  )
+  register('tree:duplicate', ({ id }) => {
+    const db = manager.require().connection.orm
+    const copies = duplicateNode(db, id).map(toTreeNode)
+    // F-16.5: the copies are new manuscript scenes for the name scan and the passage index.
+    queueMemoryIndex(db)
+    return copies
+  })
 
   register('tree:delete', ({ id }) => {
     const entityIds = deleteNode(manager.require().connection.orm, id)
@@ -1128,6 +1132,9 @@ export function registerHandlers({
     const moved = toTreeNode(moveNode(db, id, parentId, afterId))
     // F-9.16: reading order decides loose ends and an age that goes down.
     queueTodo(db)
+    // F-16.5: a scene moved under an Idea or left-out folder is relabelled, one moved into the
+    // manuscript is scanned and indexed (by hash: nothing else is read again).
+    queueMemoryIndex(db)
     return moved
   })
 
@@ -1339,11 +1346,14 @@ export function registerHandlers({
 
   register('sceneMeta:set', ({ id, meta }) => {
     const db = manager.require().connection.orm
+    const v2 = memory() === 'v2'
+    const wasIdea = v2 && getSceneMeta(db, id).meta.status === 'idea'
     const stored = setSceneMeta(db, id, meta)
     // F-9.16: a scene's point of view and its idea status feed the To do rules.
     queueTodo(db)
-    // F-16.5: the Idea status relabels the scene's passages.
-    if (memory() === 'v2') queueMemoryIndex(db)
+    // F-16.5: the Idea status relabels the passages of the node and everything under it; the
+    // synopsis, brief and beats autosave here too, and they change no label.
+    if (v2 && wasIdea !== (getSceneMeta(db, id).meta.status === 'idea')) queueMemoryIndex(db)
     return stored
   })
 
@@ -3994,7 +4004,9 @@ export function registerHandlers({
     // it holds stay held, and the dialog opens again (Later is lifted) so the author can decide.
     const hold = conversionPending(db)
     const queued = queue.indexAll('summary', staleSummaryNodeIds(db, { holdOutdated: hold }))
-    if (hold) {
+    // F-16.4: as in the backfill, a v2 project keeps the held scenes held but never hears about
+    // the v1 dialog, whose Update now it could not run.
+    if (hold && memory() === 'v1') {
       conversionDeferred = false
       emit(windows(), 'knowledge:conversionChanged', conversionOf(db))
     }
@@ -4180,6 +4192,8 @@ export function registerHandlers({
     if (result.factEntityIds.length > 0)
       emit(windows(), 'fact:changed', { entityIds: result.factEntityIds })
     mentionQueue.indexAll('mentions', staleMentionNodeIds(db))
+    // F-16.5: in v2 the imported scenes are scanned for names and indexed (by hash).
+    queueMemoryIndex(db)
     backfillSummaries(false)
     // A project in a cloud-synced folder gets the import copied back now, not in three minutes.
     cloudSync?.changed()

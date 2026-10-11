@@ -1,10 +1,7 @@
-import {
-  countCapitalisedWords,
-  type DocumentWordCounts,
-  type WordCount
-} from '@shared/proposedTags'
+import type { DocumentWordCounts, WordCount } from '@shared/proposedTags'
 import { dismissedKey } from '@shared/memory/dismissed'
 import {
+  countNameSpans,
   nameQuestions,
   type NameAnswer,
   type NameAnswerResult,
@@ -17,8 +14,8 @@ import { addAlias, createRecord, requireRecord, rosterOf } from './recordStore'
 
 /**
  * Name questions in Needs a look (F-16.4): computed, never stored, from the manuscript's
- * capitalised words, the roster and the Dismissed list. Each document's word counts are memoised
- * by its text (the F-4.12b pattern), so only a document that changed is read again.
+ * capitalised spans (`countNameSpans`), the roster and the Dismissed list. Each document's counts
+ * are memoised by its text (the F-4.12b pattern), so only a document that changed is read again.
  */
 
 interface CountedDocument {
@@ -36,7 +33,7 @@ export function listNameQuestions(db: TreeDb): NameQuestion[] {
   for (const row of manuscriptDocuments(db)) {
     const text = documentText(row)
     const hit = memo.get(row.id)
-    const counted = hit?.text === text ? hit : { text, counts: countCapitalisedWords(text) }
+    const counted = hit?.text === text ? hit : { text, counts: countNameSpans(text) }
     next.set(row.id, counted)
     perDocument.push({ nodeId: row.id, counts: counted.counts })
   }

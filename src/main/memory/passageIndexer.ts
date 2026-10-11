@@ -3,6 +3,7 @@ import { passageParagraphs } from '@shared/mentions'
 import { markedParagraphs } from '@shared/memory/pageMarks'
 import {
   MEMORY_PASSAGE_SEARCH_MAX,
+  passageCanon,
   passageLabel,
   type MemoryOwnerKind,
   type MemoryPassageHit,
@@ -23,7 +24,8 @@ import { deleteScanRow, getScanHashes, scanHashesOf, setScanHash } from './scanS
 /**
  * The passage index of story memory v2 (F-16.5): the one writer of `memory_passage_fts`
  * (migration 0031, a virtual table drizzle does not model, so it is read and written with plain
- * SQL). One row per paragraph with text, labelled by source and canon status:
+ * SQL). One row per paragraph with text, labelled by source and canon status (`passageCanon`:
+ * `notCanon` for everything never real, marked or by place):
  * - a scene's paragraphs are `scene`, or `ideaScene` when it (or a folder above it) has the Idea
  *   status, or `excludedScene` when it is left out of compile;
  * - a scene's notes are `sceneNote`;
@@ -34,7 +36,7 @@ import { deleteScanRow, getScanHashes, scanHashesOf, setScanHash } from './scanS
  */
 
 /** Bumped when what goes into the index changes, so every owner is written again. */
-export const MEMORY_PASSAGE_INDEX_VERSION = 1
+export const MEMORY_PASSAGE_INDEX_VERSION = 2
 
 /** Tokens of context `snippet()` keeps around the match. */
 const SNIPPET_TOKENS = 16
@@ -68,7 +70,7 @@ function pageRows(doc: TiptapNodeT | null, source: PassageSource): PassageRow[] 
   return markedParagraphs(doc).map((paragraph) => ({
     source,
     para: paragraph.index,
-    canon: paragraph.notCanon ? 'notCanon' : 'canon',
+    canon: passageCanon(source, paragraph.notCanon),
     text: paragraph.text
   }))
 }
@@ -112,7 +114,7 @@ function sceneRows(row: NodeRow, statuses: SceneStatuses): PassageRow[] {
   return passageParagraphs(doc).map((paragraph) => ({
     source,
     para: paragraph.index,
-    canon: 'canon',
+    canon: passageCanon(source, false),
     text: paragraph.text
   }))
 }
@@ -206,13 +208,24 @@ export interface StaleOwner {
   id: string
 }
 
+/** The records whose pages would index differently now, oldest first. */
+function staleRecordOwners(db: TreeDb): StaleOwner[] {
+  const records = scanHashesOf(db, 'record')
+  return db
+    .select({ id: record.id })
+    .from(record)
+    .orderBy(asc(record.created))
+    .all()
+    .filter(({ id }) => records.get(id)?.passagesHash !== rowsHash(recordRows(db, id) ?? []))
+    .map(({ id }) => ({ kind: 'record', id }))
+}
+
 /** Every owner whose rows would read differently now: scenes (and notes) in reading order, then records. */
 export function stalePassageOwners(db: TreeDb): StaleOwner[] {
   const nodes = listNodes(db)
   const statuses = sceneStatuses(db, nodes)
   const scenes = scanHashesOf(db, 'scene')
   const notes = scanHashesOf(db, 'sceneNote')
-  const records = scanHashesOf(db, 'record')
   const stale: StaleOwner[] = []
   for (const row of manuscriptDocuments(db, nodes)) {
     if (scenes.get(row.id)?.passagesHash !== rowsHash(sceneRows(row, statuses))) {
@@ -222,23 +235,14 @@ export function stalePassageOwners(db: TreeDb): StaleOwner[] {
       stale.push({ kind: 'sceneNote', id: row.id })
     }
   }
-  for (const { id } of db
-    .select({ id: record.id })
-    .from(record)
-    .orderBy(asc(record.created))
-    .all()) {
-    if (records.get(id)?.passagesHash !== rowsHash(recordRows(db, id) ?? [])) {
-      stale.push({ kind: 'record', id })
-    }
-  }
-  return stale
+  return [...stale, ...staleRecordOwners(db)]
 }
 
-/** Indexes every stale record page (the `passages` job keyed to the manuscript root). */
+/** Indexes every stale record page (the `passages` job keyed to the manuscript root); scenes are not read. */
 export function indexStaleRecords(db: TreeDb, now: Date): number {
   let written = 0
-  for (const owner of stalePassageOwners(db)) {
-    if (owner.kind === 'record' && indexOwner(db, 'record', owner.id, now)) written += 1
+  for (const owner of staleRecordOwners(db)) {
+    if (indexOwner(db, 'record', owner.id, now)) written += 1
   }
   return written
 }

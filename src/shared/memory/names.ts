@@ -162,8 +162,8 @@ export function foldTitles(words: readonly string[]): string[] {
 
 /**
  * The small words a name may carry inside it ("Isle of Skye", "Anne de Vere", "Jan van Eyck").
- * A span joined by one of them is tried whole first and in its parts after (`nameScan.ts`), so
- * "Mr. Varrow of Elsdale" still names both.
+ * A span joined by one of them is tried whole first (`nameScan.ts`); only a span joined by a
+ * descriptive word (`NAME_PART_JOINERS`) is tried in its parts after.
  */
 export const NAME_LINK_WORDS: ReadonlySet<string> = new Set([
   'of',
@@ -185,10 +185,20 @@ export const NAME_LINK_WORDS: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * The link words that join two names rather than make one ("Mr. Varrow of Elsdale", "Wat the
+ * Elder"), so a span they join that is no name as a whole is tried in its parts. A surname
+ * particle (de, van, von…) is part of the name: "Anne de Vere" is an unknown name, never the
+ * "Vere" of another record (identity rule 1, as "Jem Falsire" is not Falsire).
+ */
+export const NAME_PART_JOINERS: ReadonlySet<string> = new Set(['of', 'the'])
+
+/**
  * Words that open sentences in prose without being anybody's name ("Then Mr. Pruett came",
- * "Dearest Jo", "Old Hobb"). A span that opens a sentence with one of them, or with a word the
- * scene also writes in lower case, is tried without it (`nameScan.ts`); any other opener is kept,
- * so "Jem Falsire" at a sentence start stays an unknown name (identity rule 1).
+ * "Dearest Jo", "Old Hobb"). A span that opens a sentence with one of them is tried without it
+ * (`nameScan.ts`); a title is never dropped (identity rule 2), and a word the scene also writes
+ * in lower case is dropped only to leave the rest uncertain ("Rose Harrow" may be anyone's
+ * Rose). Any other opener is kept, so "Jem Falsire" at a sentence start stays an unknown name
+ * (identity rule 1).
  */
 export const SENTENCE_OPENERS: ReadonlySet<string> = new Set([
   'a',

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { countCapitalisedWords } from '../proposedTags'
 import { dismissedKey } from './dismissed'
-import { NAME_QUESTIONS_MAX, nameQuestions, type NameQuestionDismissals } from './nameQuestions'
+import {
+  countNameSpans,
+  NAME_QUESTIONS_MAX,
+  NameAnswer,
+  nameQuestions,
+  type NameQuestionDismissals
+} from './nameQuestions'
 
 const ROSTER = [
   { id: 'rynna', names: ['Rynna Falsire', 'Rynna'] },
@@ -10,7 +15,7 @@ const ROSTER = [
 const NONE: NameQuestionDismissals = { names: [], aliasKeys: new Set() }
 
 const docs = (...texts: string[]) =>
-  texts.map((text, i) => ({ nodeId: `s${i + 1}`, counts: countCapitalisedWords(text) }))
+  texts.map((text, i) => ({ nodeId: `s${i + 1}`, counts: countNameSpans(text) }))
 
 describe('nameQuestions (F-16.4)', () => {
   it('asks about a recurring new name the gate clears, and a nickname the gate ties to a record', () => {
@@ -44,7 +49,7 @@ describe('nameQuestions (F-16.4)', () => {
     ])
   })
 
-  it('skips known name words, titles, stoplist words, sentence openers and names said once', () => {
+  it('skips known names, titles, stoplist words, sentence openers and names said once', () => {
     expect(
       nameQuestions(
         docs(
@@ -73,6 +78,85 @@ describe('nameQuestions (F-16.4)', () => {
         (question) => question.name
       )
     ).toEqual(['Trial'])
+  })
+
+  it('asks about a two-word name as one name, never as its words', () => {
+    const questions = nameQuestions(
+      docs('Hesk Varn came in. Later we saw Hesk Varn leave, and we watched Hesk Varn go.'),
+      ROSTER,
+      NONE
+    )
+    expect(questions.map((q) => [q.kind, q.name, q.count])).toEqual([['newName', 'Hesk Varn', 3]])
+  })
+
+  it('asks whether a record name used alone is that record, not about a stranger with its surname', () => {
+    const roster = [{ id: 'r1', names: ['Rynna Falsire'] }]
+    expect(
+      nameQuestions(
+        docs(
+          'The rain fell. Later Rynna smiled at him. He said Rynna was tired. They saw Rynna again by the gate.'
+        ),
+        roster,
+        NONE
+      ).map((q) => [q.kind, q.name, q.recordId, q.count])
+    ).toEqual([['nickname', 'Rynna', 'r1', 3]])
+    expect(
+      nameQuestions(docs('He met Falsire at noon and saw Falsire again.'), roster, NONE).map(
+        (q) => [q.kind, q.name, q.recordId]
+      )
+    ).toEqual([['nickname', 'Falsire', 'r1']])
+    // "Jem Falsire" is a new name (identity rule 1), never a question about "Falsire".
+    expect(
+      nameQuestions(docs('He met Jem Falsire, and Jem Falsire left.'), roster, NONE).map((q) => [
+        q.kind,
+        q.name
+      ])
+    ).toEqual([['newName', 'Jem Falsire']])
+  })
+
+  it('never offers a title with a name as a nickname (identity rule 2), and asks nothing the scan already finds', () => {
+    expect(
+      nameQuestions(docs('He bowed to Mr. Vell, and Mr. Vell bowed back.'), ROSTER, NONE)
+    ).toEqual([])
+    expect(
+      nameQuestions(docs('He bowed to Mr. Pruett, and Mr. Pruett bowed back.'), ROSTER, NONE).map(
+        (q) => [q.kind, q.name]
+      )
+    ).toEqual([['newName', 'Mr. Pruett']])
+    const roster = [
+      { id: 'w', names: ['the Wanderer'] },
+      { id: 'h', names: ['Harrow'] }
+    ]
+    expect(
+      nameQuestions(
+        docs('He met the Wanderer and the Harrows; the Wanderer and the Harrows left.'),
+        roster,
+        NONE
+      )
+    ).toEqual([])
+  })
+
+  it('keeps a name dismissed as Not a name silent once a record near it exists', () => {
+    const text = 'He met Hesk at noon. Then he saw Hesk again and Hesk left.'
+    const dismissedHesk = {
+      names: [dismissedKey({ kind: 'name', name: 'Hesk' })],
+      aliasKeys: new Set<string>()
+    }
+    expect(nameQuestions(docs(text), [], dismissedHesk)).toEqual([])
+    expect(nameQuestions(docs(text), [{ id: 'r2', names: ['Hesker'] }], dismissedHesk)).toEqual([])
+    expect(
+      nameQuestions(docs(text), [{ id: 'r2', names: ['Hesker'] }], NONE).map((q) => q.kind)
+    ).toEqual(['nickname'])
+  })
+
+  it('caps the names an answer carries at the record name and alias limits', () => {
+    const long = 'x'.repeat(201)
+    expect(
+      NameAnswer.safeParse({ kind: 'addAs', name: long, categoryId: 'character' }).success
+    ).toBe(false)
+    expect(NameAnswer.safeParse({ kind: 'notAName', name: long }).success).toBe(false)
+    expect(NameAnswer.safeParse({ kind: 'yes', name: long, recordId: 'r' }).success).toBe(false)
+    expect(NameAnswer.safeParse({ kind: 'no', name: 'Ry', recordId: 'r' }).success).toBe(true)
   })
 
   it('caps the list, most named first', () => {

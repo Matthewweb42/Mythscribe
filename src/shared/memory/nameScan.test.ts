@@ -198,4 +198,39 @@ describe('scanNames (F-16.5, identity rules 1–4)', () => {
       named(scan(['Mr. Varrow of Elsdale bowed. "Dearest Jo, sail to the Isle of Skye."'], people))
     ).toEqual(['varrow:Mr. Varrow', 'elsdale:Elsdale', 'jo:Jo', 'skye:Isle of Skye'])
   })
+
+  it('keeps a span joined by a surname particle whole: "Anne de Vere" is not Vere', () => {
+    const people: RosterEntry[] = [
+      { id: 'vere', names: ['Rynna Vere', 'Vere'] },
+      { id: 'eyck', names: ['Pieter Eyck', 'Eyck'] }
+    ]
+    expect(
+      scan(['Anne de Vere came in.', 'Later, Anne de Vere left. Jan van Eyck painted.'], people)
+    ).toEqual([])
+    // The bare surname still names its record.
+    expect(named(scan(['Vere bowed to Eyck.'], people))).toEqual(['vere:Vere', 'eyck:Eyck'])
+  })
+
+  const TOMAS: RosterEntry[] = [{ id: 'tomas', names: ['Tomas Harrow', 'Harrow'] }]
+
+  it('never drops a title at a sentence start: "Mrs. Harrow" is not Harrow there either', () => {
+    for (const text of [
+      'Mrs. Harrow bowed to him.',
+      'Lady Harrow bowed to him.',
+      'He bowed to Mrs. Harrow.',
+      'He bowed to Lady Harrow.'
+    ]) {
+      expect(scan([text], TOMAS)).toEqual([])
+    }
+  })
+
+  it('leaves a name found by dropping a lower-case word at a sentence start ambiguous', () => {
+    const found = scan(['The sun rose over the hill.', 'Rose Harrow came down the stairs.'], TOMAS)
+    expect(found.map((mention) => [mention.recordId, mention.text, mention.ambiguous])).toEqual([
+      ['tomas', 'Harrow', true]
+    ])
+    expect(scan(['He waited for Rose Harrow by the stairs.'], TOMAS)).toEqual([])
+    // A common opener is still dropped for certain.
+    expect(named(scan(['Then Harrow came down.'], TOMAS))).toEqual(['tomas:Harrow'])
+  })
 })

@@ -8,6 +8,7 @@ import { createProject, projectFolderFor, type ProjectSession } from '../project
 import { createNode, getNode, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { listDismissed } from './dismissedStore'
+import { listNameMentions, scanNamesFor } from './nameIndexer'
 import { answerQuestion, listNameQuestions, resetNameQuestionCache } from './questions'
 import { createRecord, listRecords, requireRecord } from './recordStore'
 
@@ -64,6 +65,42 @@ describe('name questions (F-16.4)', () => {
     ])
     const added = answerQuestion(db, { kind: 'addAs', name: 'Hesk', categoryId: 'setting' }, NOW)
     expect(added).toMatchObject({ kind: 'record', record: { name: 'Hesk', kind: 'place' } })
+    expect(listNameQuestions(db)).toEqual([])
+  })
+
+  it('answers a two-word name with a record the scan finds where the question came from', () => {
+    saveDocument(
+      db,
+      scenes[0] ?? '',
+      doc('Hesk Varn came in. Later we saw Hesk Varn leave, and we watched Hesk Varn go.')
+    )
+    expect(listNameQuestions(db).map((q) => [q.kind, q.name])).toEqual([['newName', 'Hesk Varn']])
+    const added = answerQuestion(
+      db,
+      { kind: 'addAs', name: 'Hesk Varn', categoryId: 'character' },
+      NOW
+    )
+    if (added.kind !== 'record') throw new Error('not made')
+    scanNamesFor(db, scenes[0] ?? '', NOW)
+    expect(
+      listNameMentions(db, scenes[0] ?? '').map((m) => [m.recordId, m.text, m.ambiguous])
+    ).toEqual([
+      [added.record.id, 'Hesk Varn', false],
+      [added.record.id, 'Hesk Varn', false],
+      [added.record.id, 'Hesk Varn', false]
+    ])
+    expect(listNameQuestions(db)).toEqual([])
+  })
+
+  it('keeps Not a name silent after a near-twin record is made', () => {
+    saveDocument(
+      db,
+      scenes[0] ?? '',
+      doc('He met Brook at noon. Then he saw Brook and Brook left.')
+    )
+    expect(listNameQuestions(db).map((q) => q.name)).toEqual(['Brook'])
+    answerQuestion(db, { kind: 'notAName', name: 'Brook' }, NOW)
+    createRecord(db, { name: 'Brooke Harlan', categoryId: 'character' }, NOW)
     expect(listNameQuestions(db)).toEqual([])
   })
 

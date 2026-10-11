@@ -141,6 +141,30 @@ describe('nameIndexer (F-16.5)', () => {
     expect(listDismissed(db).count).toBe(1)
   })
 
+  it('refuses Not a mention on a row the saved text has moved past, and leaves Dismissed alone', () => {
+    record('Rynna')
+    saveDocument(db, scene(), doc('Then Rynna went home.'))
+    scanNamesFor(db, scene(), at(1))
+    const [row] = listNameMentions(db, scene())
+    saveDocument(db, scene(), doc('Then the old woman named Rynna went home.'))
+    expect(() => markNotAMention(db, row?.id ?? '', at(2))).toThrow(/moved/)
+    expect(listDismissed(db).count).toBe(0)
+    // The scan the save queued rewrites the row; Not a mention then keys the right phrase.
+    scanNamesFor(db, scene(), at(3))
+    const [moved] = listNameMentions(db, scene())
+    expect(markNotAMention(db, moved?.id ?? '', at(4))).toMatchObject({ quote: 'named Rynna went' })
+  })
+
+  it('rewrites rows whose paragraph index moved though their positions did not', () => {
+    record('Rynna')
+    saveDocument(db, scene(), doc('Hello', 'Rynna came.'))
+    scanNamesFor(db, scene(), at(1))
+    expect(listNameMentions(db, scene()).map((m) => m.para)).toEqual([1])
+    saveDocument(db, scene(), doc('     ', 'Rynna came.'))
+    expect(scanNamesFor(db, scene(), at(2))).toEqual({ changed: true, scanned: true })
+    expect(listNameMentions(db, scene()).map((m) => m.para)).toEqual([0])
+  })
+
   it('refuses a node that is not a manuscript document', () => {
     expect(() => scanNamesFor(db, 'missing', at(0))).toThrow(/Not a manuscript document/)
   })
@@ -164,12 +188,17 @@ describe('passageIndexer (F-16.5)', () => {
     setSceneMeta(db, scene(0), { ...emptySceneMeta(), status: 'idea' })
     expect(stalePassageOwners(db)).toContainEqual({ kind: 'scene', id: scene(0) })
     indexOwner(db, 'scene', scene(0), at(3))
-    expect(searchMemoryPassages(db, 'harbour')[0]?.source).toBe('ideaScene')
+    expect(searchMemoryPassages(db, 'harbour')[0]).toMatchObject({
+      source: 'ideaScene',
+      canon: 'notCanon',
+      label: 'ideaScene'
+    })
     setSceneMeta(db, scene(0), { ...emptySceneMeta(), status: 'draft' })
     setCompileState(db, { ...getCompileState(db), excluded: [scene(0)] })
     indexOwner(db, 'scene', scene(0), at(4))
     expect(searchMemoryPassages(db, 'harbour')[0]).toMatchObject({
       source: 'excludedScene',
+      canon: 'notCanon',
       label: 'excludedScene'
     })
   })
@@ -190,7 +219,7 @@ describe('passageIndexer (F-16.5)', () => {
     const hits = searchMemoryPassages(db, 'harbour', { limit: 10 })
     expect(hits.map((hit) => [hit.source, hit.para, hit.canon, hit.label]).sort()).toEqual(
       [
-        ['idea', 0, 'canon', 'idea'],
+        ['idea', 0, 'notCanon', 'idea'],
         ['pinned', 0, 'canon', 'pinned'],
         ['pinned', 1, 'notCanon', 'notCanon']
       ].sort()
