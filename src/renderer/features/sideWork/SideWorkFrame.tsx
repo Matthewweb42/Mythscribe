@@ -84,7 +84,7 @@ export function SideWorkFrame({
       aria-modal={dialog ? true : undefined}
       className={
         dialog
-          ? 'flex max-h-[85vh] w-[860px] max-w-[95vw] flex-col overflow-y-auto rounded-lg border border-line bg-surface-raised pb-2 shadow-panel outline-none'
+          ? 'flex h-[min(85vh,48rem)] w-[min(860px,95vw)] flex-col overflow-y-auto rounded-lg border border-line bg-surface-raised pb-2 shadow-panel outline-none'
           : 'flex min-h-0 flex-1 flex-col overflow-y-auto border-t border-line outline-none'
       }
     >

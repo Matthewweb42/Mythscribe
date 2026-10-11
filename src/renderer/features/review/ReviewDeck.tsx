@@ -116,6 +116,8 @@ function typing(event: KeyboardEvent): boolean {
  * deck itself: decisions go to the screen's store, and Apply (or reaching the end with nothing
  * skipped, when `applyOnFinish`) applies the accepted ones. In a narrow window, or `compact`,
  * the rail becomes a dropdown. One component for Organise, the upload review, and edit passes.
+ * It keeps one size whatever the card (the author, 2026-10-11): it fills its parent, only the
+ * card's body scrolls, and the buttons hold their place on every card and at the end.
  */
 export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
   const { items, groups, onDecide, busy = false, apply, onCurrent } = props
@@ -261,31 +263,41 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
     </div>
   )
 
+  // Both links keep their place when they do not apply (an empty slot of the same size), so the
+  // card below never moves between cards (the author's report, 2026-10-11).
   const skippedToggle =
     counts.skipped > 0 || filter === 'skipped' ? (
       <button
         type="button"
-        className={LINK}
+        className={`${LINK} tabular-nums`}
         aria-pressed={filter === 'skipped'}
         data-testid="review-skipped-filter"
         onClick={showSkipped}
       >
         {filter === 'skipped' ? 'Show all' : `Skipped (${counts.skipped})`}
       </button>
-    ) : null
+    ) : (
+      <span aria-hidden="true" className={`${LINK} invisible`}>
+        Skipped (0)
+      </span>
+    )
 
   const acceptGroup =
-    shown !== null && group !== null && props.groupAccept !== false ? (
+    props.groupAccept === false ? null : shown !== null && group !== null ? (
       <button
         type="button"
-        className={LINK}
+        className={`${LINK} tabular-nums`}
         disabled={busy || groupOpen.length === 0}
         data-testid="review-accept-group"
         onClick={() => decide(groupOpen, 'accepted')}
       >
         {`Accept group (${groupOpen.length}) ▸`}
       </button>
-    ) : null
+    ) : (
+      <span aria-hidden="true" className={`${LINK} invisible`}>
+        Accept group (0) ▸
+      </span>
+    )
 
   const compactClass = props.compact === true ? 'hidden' : 'hidden @2xl:flex'
   const dropdownClass = props.compact === true ? 'flex' : 'flex @2xl:hidden'
@@ -298,13 +310,13 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
       tabIndex={-1}
       onKeyDown={onKeyDown}
       data-testid={props.testId ?? 'review-deck'}
-      className={`@container flex flex-1 flex-col outline-none ${props.compact === true ? 'min-h-0' : 'min-h-72'}`}
+      className={`@container flex flex-1 flex-col outline-none ${props.compact === true ? 'min-h-56' : 'min-h-72'}`}
     >
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label="Groups"
           data-testid="review-rail"
-          className={`${compactClass} w-56 shrink-0 flex-col gap-1 border-r border-line p-3`}
+          className={`${compactClass} w-56 shrink-0 flex-col gap-1 overflow-y-auto border-r border-line p-3`}
         >
           <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
             {stats.map(({ group: g, total, reviewed }) => (
@@ -333,8 +345,8 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
           </div>
           <div className="mt-auto pt-3">{progressBar}</div>
         </nav>
-        <section className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-          <div className={`${dropdownClass} flex-wrap items-center gap-x-3 gap-y-1.5`}>
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 p-4">
+          <div className={`${dropdownClass} shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5`}>
             <select
               aria-label="Group"
               data-testid="review-group-select"
@@ -351,113 +363,121 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
             {skippedToggle}
             <div className="min-w-32 flex-1">{progressBar}</div>
           </div>
-          {shown === null ? (
-            <Done
-              accepted={counts.acceptedTotal}
-              skipped={counts.skipped}
-              total={counts.total}
-              onReviewSkipped={showSkipped}
-            />
-          ) : (
-            <article
-              data-testid="review-card"
-              data-item-id={shown.id}
-              data-decision={shown.settled === true ? 'settled' : shown.decision}
-              className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4"
+          <article
+            data-testid={shown === null ? undefined : 'review-card'}
+            data-item-id={shown?.id}
+            data-decision={
+              shown === null ? undefined : shown.settled === true ? 'settled' : shown.decision
+            }
+            className="flex min-h-0 flex-1 flex-col rounded-lg border border-line bg-surface"
+          >
+            <header className="flex min-h-11 shrink-0 items-center gap-2 px-4 pt-3 pb-1">
+              {shown === null ? null : (
+                <>
+                  <h3
+                    className="m-0 min-w-0 truncate text-sm font-semibold"
+                    data-testid="review-position"
+                  >
+                    {`${group?.noun ?? group?.label ?? ''} ${position} of ${inGroup.length}`}
+                  </h3>
+                  {shown.settled !== true && shown.decision !== 'pending' ? (
+                    <span
+                      className="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs text-fg-muted"
+                      data-testid="review-decision"
+                    >
+                      {DECISION_LABEL[shown.decision]}
+                    </span>
+                  ) : null}
+                  {filter === 'skipped' ? (
+                    <span className="shrink-0 text-xs text-fg-subtle">Skipped items</span>
+                  ) : null}
+                </>
+              )}
+            </header>
+            <div
+              key={shown?.id ?? 'end'}
+              data-testid="review-card-body"
+              className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pb-3"
             >
-              <header className="flex flex-wrap items-center gap-2">
-                <h3 className="m-0 text-sm font-semibold" data-testid="review-position">
-                  {`${group?.noun ?? group?.label ?? ''} ${position} of ${inGroup.length}`}
-                </h3>
-                {shown.settled !== true && shown.decision !== 'pending' ? (
-                  <span
-                    className="rounded-full border border-line px-2 py-0.5 text-xs text-fg-muted"
-                    data-testid="review-decision"
-                  >
-                    {DECISION_LABEL[shown.decision]}
-                  </span>
-                ) : null}
-                {filter === 'skipped' ? (
-                  <span className="text-xs text-fg-subtle">Skipped items</span>
-                ) : null}
-              </header>
-              <div key={shown.id} className="min-w-0">
-                {props.renderCard(shown.id)}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {decidable ? (
-                  <>
-                    <button
-                      type="button"
-                      className={PRIMARY}
-                      disabled={busy}
-                      data-testid="review-accept"
-                      onClick={() => decide([shown.id], 'accepted')}
-                    >
-                      <kbd className={KBD}>A</kbd>
-                      {props.acceptLabel ?? 'Accept'}
-                    </button>
-                    <button
-                      type="button"
-                      className={BUTTON}
-                      disabled={busy}
-                      data-testid="review-skip"
-                      onClick={() => decide([shown.id], 'skipped')}
-                    >
-                      <kbd className={KBD}>S</kbd>
-                      {props.skipLabel ?? 'Skip'}
-                    </button>
-                    {editable ? (
-                      <button
-                        type="button"
-                        className={BUTTON}
-                        disabled={busy}
-                        data-testid="review-edit"
-                        onClick={() => props.onEdit?.(shown.id)}
-                      >
-                        <kbd className={KBD}>E</kbd>
-                        {props.editLabel ?? 'Edit'}
-                      </button>
-                    ) : null}
-                    {props.reject === true ? (
-                      <button
-                        type="button"
-                        className={BUTTON}
-                        disabled={busy}
-                        data-testid="review-reject"
-                        onClick={() => decide([shown.id], 'rejected')}
-                      >
-                        <kbd className={KBD}>R</kbd>
-                        {props.rejectLabel ?? 'Reject'}
-                      </button>
-                    ) : null}
-                  </>
-                ) : null}
-                <span className="ml-auto flex gap-1">
-                  <button
-                    type="button"
-                    className="rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40"
-                    aria-label="Previous"
-                    data-testid="review-prev"
-                    disabled={neighbour(ordered, shown.id, -1, filter) === null}
-                    onClick={() => step(-1)}
-                  >
-                    <ChevronLeft size={16} aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40"
-                    aria-label="Next"
-                    data-testid="review-next"
-                    disabled={neighbour(ordered, shown.id, 1, filter) === null}
-                    onClick={() => step(1)}
-                  >
-                    <ChevronRight size={16} aria-hidden="true" />
-                  </button>
-                </span>
-              </div>
-            </article>
-          )}
+              {shown === null ? (
+                <Done
+                  accepted={counts.acceptedTotal}
+                  skipped={counts.skipped}
+                  total={counts.total}
+                  onReviewSkipped={showSkipped}
+                />
+              ) : (
+                props.renderCard(shown.id)
+              )}
+            </div>
+            <div
+              data-testid="review-actions"
+              className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line px-4 py-2.5"
+            >
+              <DecisionButton
+                live={decidable}
+                className={PRIMARY}
+                busy={busy}
+                testId="review-accept"
+                keyName="A"
+                label={props.acceptLabel ?? 'Accept'}
+                onClick={() => shown !== null && decide([shown.id], 'accepted')}
+              />
+              <DecisionButton
+                live={decidable}
+                className={BUTTON}
+                busy={busy}
+                testId="review-skip"
+                keyName="S"
+                label={props.skipLabel ?? 'Skip'}
+                onClick={() => shown !== null && decide([shown.id], 'skipped')}
+              />
+              {props.onEdit !== undefined ? (
+                <DecisionButton
+                  live={editable}
+                  className={BUTTON}
+                  busy={busy}
+                  testId="review-edit"
+                  keyName="E"
+                  label={props.editLabel ?? 'Edit'}
+                  onClick={() => shown !== null && props.onEdit?.(shown.id)}
+                />
+              ) : null}
+              {props.reject === true ? (
+                <DecisionButton
+                  live={decidable}
+                  className={BUTTON}
+                  busy={busy}
+                  testId="review-reject"
+                  keyName="R"
+                  label={props.rejectLabel ?? 'Reject'}
+                  onClick={() => shown !== null && decide([shown.id], 'rejected')}
+                />
+              ) : null}
+              <span className="ml-auto flex gap-1">
+                <button
+                  type="button"
+                  className="rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40"
+                  aria-label="Previous"
+                  data-testid="review-prev"
+                  disabled={neighbour(ordered, shownId, -1, filter) === null}
+                  onClick={() => step(-1)}
+                >
+                  <ChevronLeft size={16} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40"
+                  aria-label="Next"
+                  data-testid="review-next"
+                  disabled={shown === null || neighbour(ordered, shown.id, 1, filter) === null}
+                  onClick={() => step(1)}
+                >
+                  <ChevronRight size={16} aria-hidden="true" />
+                </button>
+              </span>
+            </div>
+          </article>
         </section>
       </div>
       {apply !== undefined || props.footer !== undefined || props.actions !== undefined ? (
@@ -467,7 +487,7 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
           {apply !== undefined ? (
             <button
               type="button"
-              className={PRIMARY}
+              className={`${PRIMARY} min-w-36 shrink-0 justify-center tabular-nums`}
               disabled={busy || counts.accepted === 0 || apply.disabled === true}
               data-testid="review-apply"
               onClick={apply.onApply}
@@ -478,6 +498,50 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
         </div>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * One of the card's decision buttons. Where it does not apply (a settled card, the end, a card
+ * with nothing to edit) it keeps its place as an invisible, unreachable twin, so the buttons sit
+ * in the same spot on every card.
+ */
+function DecisionButton({
+  live,
+  className,
+  busy,
+  testId,
+  keyName,
+  label,
+  onClick
+}: {
+  live: boolean
+  className: string
+  busy: boolean
+  testId: string
+  keyName: string
+  label: string
+  onClick: () => void
+}): React.JSX.Element {
+  if (!live) {
+    return (
+      <span aria-hidden="true" className={`${className} invisible`}>
+        <kbd className={KBD}>{keyName}</kbd>
+        {label}
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      className={className}
+      disabled={busy}
+      data-testid={testId}
+      onClick={onClick}
+    >
+      <kbd className={KBD}>{keyName}</kbd>
+      {label}
+    </button>
   )
 }
 
@@ -496,7 +560,7 @@ function Done({
     <div
       data-testid="review-done"
       role="status"
-      className="flex flex-col items-start gap-2 rounded-lg border border-line bg-surface p-4 text-sm"
+      className="flex flex-col items-start gap-2 text-sm"
     >
       <p className="m-0 font-medium">
         {total === 0 ? 'Nothing to review.' : `All ${total} reviewed.`}

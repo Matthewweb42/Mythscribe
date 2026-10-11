@@ -286,3 +286,39 @@ describe('ReviewDeck labels (F-9.16)', () => {
     expect(screen.getAllByTestId('review-accept-group').length).toBeGreaterThan(0)
   })
 })
+
+describe('ReviewDeck layout (the author, 2026-10-11: the deck keeps its size)', () => {
+  /** The action row's slots: every button or its invisible twin, in order. */
+  const slots = (): string[] =>
+    Array.from(screen.getByTestId('review-actions').children).map((el) => el.textContent ?? '')
+
+  it('keeps every button slot on settled cards and at the end, and the card body scrolls', () => {
+    const items: ReviewDeckItem[] = [
+      { id: 'm1', group: 'merges', decision: 'pending' },
+      { id: 'm2', group: 'merges', decision: 'accepted', settled: true }
+    ]
+    render(<Harness items={items} reject compact onEdit={() => undefined} />)
+    const first = slots()
+    expect(first).toEqual(['AAccept', 'SSkip', 'EEdit', 'RReject', ''])
+    expect(screen.getByTestId('review-card-body').className).toContain('overflow-y-auto')
+    press('ArrowRight')
+    expect(card()).toHaveAttribute('data-decision', 'settled')
+    expect(slots()).toEqual(first)
+    // The settled card's buttons are placeholders: hidden, unreachable, without test ids.
+    expect(screen.queryByTestId('review-accept')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Accept$/ })).toBeNull()
+    press('ArrowLeft')
+    press('a')
+    expect(screen.getByTestId('review-done')).toBeInTheDocument()
+    expect(slots()).toEqual(first)
+  })
+
+  it('steps back from the end to the last card with Previous', async () => {
+    render(<Harness items={[{ id: 'm1', group: 'merges', decision: 'pending' }]} compact />)
+    press('a')
+    expect(screen.getByTestId('review-done')).toBeInTheDocument()
+    expect(screen.getByTestId('review-next')).toBeDisabled()
+    await userEvent.click(screen.getByTestId('review-prev'))
+    expect(card()).toHaveAttribute('data-item-id', 'm1')
+  })
+})
