@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_CATEGORIES } from '@shared/categories'
-import type { ContextReview } from '@shared/contextLibrary'
+import type { ContextReview, ExistingSheet } from '@shared/contextLibrary'
 import { contextReviewFixture } from './libraryFixture'
 import { categoryCardId, decidedReview, uploadReviewItems } from './uploadReview'
 
@@ -51,5 +51,30 @@ describe('the upload review on the deck (2026-10-08)', () => {
     ])
     expect(decided.categories).toEqual([])
     expect(decided.notes.include).toBe(false)
+  })
+
+  it('never sends Apply a new sheet under a name the story bible has: it fills that sheet (2026-10-11)', () => {
+    const sheet = (id: string, name: string, tagId: string | null): ExistingSheet => ({
+      id,
+      kind: 'character',
+      name,
+      template: 'structured',
+      fields: {},
+      body: null,
+      image: null,
+      tagId
+    })
+    // "tomas" was made since the review was planned (in another window, or by the review chat).
+    const existing = [sheet('mara', 'Mara Vell', 't1'), sheet('tomas', ' tomas', null)]
+    const decided = decidedReview(contextReviewFixture(), {}, existing)
+    expect(decided.entities.map((item) => [item.id, item.existingId, item.name])).toEqual([
+      ['e1', 'mara', 'Mara Vell'],
+      ['e2', 'tomas', ' tomas']
+    ])
+    // Nothing to add but the tag the untagged sheet lacks: the item says so instead of creating.
+    expect(decided.entities[1]).toMatchObject({ tag: true, include: true })
+    // A skipped card is left as it was: Apply leaves it out anyway.
+    const skipped = decidedReview(contextReviewFixture(), { e2: 'skipped' }, existing)
+    expect(skipped.entities[1]).toMatchObject({ id: 'e2', existingId: null, include: false })
   })
 })

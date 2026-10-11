@@ -1,5 +1,6 @@
 import {
   declineReviewCategory,
+  settleNameClashes,
   type ContextReview,
   type ContextReviewEntity,
   type ExistingSheet
@@ -79,7 +80,10 @@ export function uploadReviewItems(
 /**
  * The review as Apply writes it: a proposed category not accepted is declined (its sheets go to
  * World, as Decline does), and a sheet or the notes are included only when accepted (the
- * default; skipped leaves it out).
+ * default; skipped leaves it out). Since every card starts accepted, a new sheet and an update
+ * that name one sheet can both be included (a declined category's item landing on a World
+ * sheet, the review chat's edits): they are settled into one update here (2026-10-11), so Apply
+ * never creates a sheet whose name is taken.
  */
 export function decidedReview(
   review: ContextReview,
@@ -92,12 +96,15 @@ export function decidedReview(
       decided = declineReviewCategory(decided, category.id, existing)
     }
   }
-  return {
-    ...decided,
-    entities: decided.entities.map((item) => ({
-      ...item,
-      include: decisionOf(decisions, item.id) === 'accepted'
-    })),
-    notes: { ...decided.notes, include: decisionOf(decisions, REVIEW_NOTES_ID) === 'accepted' }
-  }
+  return settleNameClashes(
+    {
+      ...decided,
+      entities: decided.entities.map((item) => ({
+        ...item,
+        include: decisionOf(decisions, item.id) === 'accepted'
+      })),
+      notes: { ...decided.notes, include: decisionOf(decisions, REVIEW_NOTES_ID) === 'accepted' }
+    },
+    existing
+  )
 }

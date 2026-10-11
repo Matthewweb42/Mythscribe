@@ -2575,7 +2575,8 @@ export function registerHandlers({
       categories: result.categories,
       created: result.created,
       updated: result.updated,
-      notes: result.notes
+      notes: result.notes,
+      skipped: result.skipped
     }
   })
 

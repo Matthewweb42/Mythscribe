@@ -9,6 +9,7 @@ import {
 } from './categories'
 import {
   buildReviewEntity,
+  keepPicks,
   canSplit,
   isEmptyUpdate,
   recordAsKind,
@@ -16,7 +17,6 @@ import {
   type ContextRecord,
   type ContextReview,
   type ContextReviewEntity,
-  type ContextReviewField,
   type ExistingSheet
 } from './contextLibrary'
 import { ENTITY_NAME_MAX, toEntityNameKey, type EntityFieldId, type EntityKind } from './entities'
@@ -171,24 +171,6 @@ export function resolveKind(review: ContextReview, text: string): EntityKind | n
     (category) => category.name.toLowerCase() === key || category.noun.toLowerCase() === key
   )
   return hit?.id ?? null
-}
-
-/** A field's pick carries over only where the same values meet again (a fill never becomes a conflict's pick). */
-const pickKey = (field: ContextReviewField): string =>
-  `${field.field}\0${field.upload}\0${field.existing ?? ''}`
-
-/** The rebuilt item keeps the author's earlier picks where the same field still has the same values. */
-function keepPicks(next: ContextReviewEntity, before: readonly ContextReviewEntity[]): void {
-  const picks = new Map<string, { include: boolean; choice: 'upload' | 'existing' }>()
-  for (const item of before) {
-    for (const field of item.fields) picks.set(pickKey(field), field)
-  }
-  next.fields = next.fields.map((field) => {
-    const pick = picks.get(pickKey(field))
-    return pick ? { ...field, include: pick.include, choice: pick.choice } : field
-  })
-  const first = before[0]
-  if (first !== undefined) next.includeDetails = first.includeDetails
 }
 
 /** The paragraphs an item would leave in Project notes: its fields and details, under its name. */

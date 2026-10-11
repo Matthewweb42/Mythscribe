@@ -10,7 +10,7 @@ import {
 } from '@shared/contextLibrary'
 import { categoryFromInput } from '@shared/categories'
 import { ENTITY_IMAGES_DIR } from '@shared/entities'
-import { createEntity, getEntity, listEntities } from '../entity/entityStore'
+import { createEntity, deleteEntity, getEntity, listEntities } from '../entity/entityStore'
 import { assetDir } from '../project/imageAssets'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { listTags } from '../tag/tagStore'
@@ -179,16 +179,70 @@ describe('applyContextReview (F-9.8)', () => {
     expect(listContextFiles(db)).toHaveLength(2)
   })
 
-  it('rolls everything back, copied pictures included, when a name was taken since', async () => {
-    const review = reviewOf([record({ name: 'Mara' }), record({ name: 'Tomas' })], ['Theme.'], true)
-    createEntity(db, { kind: 'character', name: 'Tomas' })
-    await expect(applyContextReview(db, session.folder, review)).rejects.toMatchObject({
-      code: 'ALREADY_EXISTS'
+  it('fills a sheet whose name was taken since instead of failing (2026-10-11)', async () => {
+    const review = reviewOf(
+      [record({ name: 'Mara' }), record({ name: 'Tomas', fields: { age: '29', gender: 'Male' } })],
+      ['Theme.']
+    )
+    createEntity(db, { kind: 'character', name: 'tomas ', fields: { gender: 'Female' } })
+    const result = await applyContextReview(db, session.folder, review)
+    expect(result).toMatchObject({ created: 1, updated: 1, notes: true, skipped: [] })
+    const tomas = listEntities(db).filter((e) => e.name.trim().toLowerCase() === 'tomas')
+    expect(tomas).toHaveLength(1)
+    // The empty field is filled; the author's own value, never reviewed as a conflict, stays.
+    expect(tomas[0]?.fields).toEqual({ age: '29', gender: 'Female' })
+    expect(listEntities(db).map((e) => e.name)).toContain('Mara')
+  })
+
+  it('applies a review that names one World sheet twice, the author’s "Fathoms" (2026-10-11)', async () => {
+    const fathoms = createEntity(db, {
+      kind: 'world',
+      name: 'Fathoms',
+      fields: { description: 'The drowned quarter.' }
+    }).entity
+    // The model filed Fathoms as a place in one chunk and a world item in the next.
+    const review = reviewOf([
+      record({ kind: 'setting', name: 'Fathoms', fields: { atmosphere: 'Cold, wet' } }),
+      record({ kind: 'world', name: 'Fathoms', fields: { rules: 'No fire below the tideline' } })
+    ])
+    expect(review.entities).toHaveLength(1)
+    // An item that would still create it (a stale or hand-edited review) fills it instead.
+    review.entities.push({ ...review.entities[0]!, id: 'dup', existingId: null, name: 'fathoms' })
+    const result = await applyContextReview(db, session.folder, review)
+    expect(result).toMatchObject({ created: 0, updated: 2, skipped: [] })
+    const sheets = listEntities(db).filter((e) => e.kind === 'world')
+    expect(sheets).toHaveLength(1)
+    expect(getEntity(db, fathoms.id)?.fields).toMatchObject({
+      description: 'The drowned quarter.',
+      rules: 'No fire below the tideline'
     })
-    expect(listEntities(db).map((e) => e.name)).toEqual(['Tomas'])
+  })
+
+  it('leaves out a sheet deleted since, its picture too, and applies the rest', async () => {
+    const mara = createEntity(db, { kind: 'character', name: 'Mara' }).entity
+    const review = reviewOf(
+      [record({ name: 'Mara', fields: { age: '35' } }), record({ name: 'Tomas' })],
+      ['Theme.'],
+      true
+    )
+    expect(review.entities[0]).toMatchObject({ existingId: mara.id })
+    expect(review.entities[0]?.images).toHaveLength(1)
+    deleteEntity(db, mara.id)
+    const result = await applyContextReview(db, session.folder, review)
+    expect(result).toMatchObject({
+      created: 1,
+      updated: 0,
+      notes: true,
+      skipped: [{ name: 'Mara', reason: '"Mara" is no longer in the story bible' }]
+    })
+    expect(
+      listEntities(db)
+        .map((e) => e.name)
+        .sort()
+    ).toEqual([PROJECT_NOTES_NAME, 'Tomas'])
     const images = assetDir(session.folder, ENTITY_IMAGES_DIR)
     expect(fs.existsSync(images) ? fs.readdirSync(images) : []).toEqual([])
-    expect(listContextFiles(db).find((f) => f.id === fileId)?.state).toBe('new')
+    expect(listContextFiles(db).find((f) => f.id === fileId)?.state).toBe('processed')
   })
 
   it('creates an accepted proposed category and files its sheets there (F-9.11)', async () => {

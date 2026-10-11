@@ -481,7 +481,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
       set({ flow: { ...flow, busy: true } })
       try {
         const result = await ipc().invoke('library:apply', { review })
-        settle(review, appliedWhole(review) ? 'accepted' : 'acceptedPart')
+        settle(
+          review,
+          appliedWhole(review) && result.skipped.length === 0 ? 'accepted' : 'acceptedPart'
+        )
         if (mine !== generation) return
         const entityStore = useEntityStore.getState()
         for (const entity of result.entities) entityStore.merge(entity)
@@ -494,6 +497,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
         ]
         if (result.notes) parts.push('Project notes updated')
         toast.success(`Story bible: ${parts.join(', ')}.`)
+        // 2026-10-11: a sheet Apply could not write is named with why; the rest was written.
+        for (const skipped of result.skipped) {
+          toast.warning(`${skipped.name} was left out: ${skipped.reason}`)
+        }
         // F-9.10: an upload is when duplicates arrive; the local pass looks, the offer may show.
         void useOrganiseStore.getState().refreshCandidates()
       } catch (err) {

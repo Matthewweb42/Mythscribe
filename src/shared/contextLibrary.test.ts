@@ -16,7 +16,9 @@ import {
   planContextReview,
   PROJECT_NOTES_NAME,
   recordFields,
+  relateValues,
   reviewHasChanges,
+  settleNameClashes,
   splitParagraphs,
   splitReviewEntity,
   writesField,
@@ -415,5 +417,174 @@ describe('categories in the review (F-9.11)', () => {
 
   it('takes a proposed category’s field by its label as well as its id', () => {
     expect(recordFields(ships, { Crew: 'twelve', other: 'x' })).toEqual({ crew: 'twelve' })
+  })
+})
+
+describe('only a real disagreement is a conflict (2026-10-11)', () => {
+  it('reads how an uploaded value relates to the sheet’s', () => {
+    // Not conflicts: the same words, an empty or placeholder field, more of the same, less of it.
+    expect(relateValues('Grey eyes.', 'grey  eyes')).toBe('same')
+    expect(relateValues('Captain of the Guard', 'captain of the guard!')).toBe('same')
+    expect(relateValues('Café owner', 'cafe owner')).toBe('same')
+    expect(relateValues("Mara's brother", 'Maras brother')).toBe('same')
+    expect(relateValues('Blue eye', 'blue eyes')).toBe('same')
+    expect(relateValues('', 'Tall')).toBe('empty')
+    expect(relateValues('Unknown', '34')).toBe('empty')
+    expect(relateValues(' - ', '34')).toBe('empty')
+    expect(relateValues('Captain of the guard', 'Captain of the city guard since 1201')).toBe(
+      'extends'
+    )
+    expect(relateValues('Grey eyes, a burn scar', 'a burn scar')).toBe('covered')
+    // Conflicts: a different fact, or one turned around.
+    expect(relateValues('34', '35')).toBe('differs')
+    expect(relateValues('Born in Varn', 'Born in Sallow')).toBe('differs')
+    expect(relateValues('Married to Tomas', 'Not married to Tomas')).toBe('differs')
+    expect(relateValues('Loyal to the Crown', "Isn't loyal to the Crown")).toBe('differs')
+  })
+
+  it('offers no conflict where the upload agrees, adds detail, or fills an empty field', () => {
+    const existing = [
+      sheet({
+        id: 'mara',
+        name: 'Mara Vell',
+        fields: {
+          age: 'Unknown',
+          gender: 'Female.',
+          appearance: 'Grey eyes, a burn scar',
+          background: 'Ran the ferry',
+          personality: 'Stubborn'
+        }
+      })
+    ]
+    const { entities } = plan(
+      [
+        record({
+          name: 'Mara Vell',
+          fields: {
+            age: '34',
+            gender: 'female',
+            appearance: 'Grey eyes, a burn scar on her left hand',
+            background: 'ran the ferry.',
+            goals: 'Pay the mill',
+            personality: 'Gentle'
+          }
+        })
+      ],
+      existing
+    )
+    expect(entities[0]?.fields).toEqual([
+      { field: 'age', upload: '34', existing: null, include: true, choice: 'upload' },
+      {
+        field: 'appearance',
+        upload: 'Grey eyes, a burn scar on her left hand',
+        existing: null,
+        include: true,
+        choice: 'upload'
+      },
+      // The one real disagreement.
+      {
+        field: 'personality',
+        upload: 'Gentle',
+        existing: 'Stubborn',
+        include: true,
+        choice: 'existing'
+      },
+      { field: 'goals', upload: 'Pay the mill', existing: null, include: true, choice: 'upload' }
+    ])
+  })
+
+  it('merges two files saying the same thing, or one saying more of it, into one value', () => {
+    const { entities } = plan([
+      record({ name: 'Mara', fields: { gender: 'Female', appearance: 'Grey eyes' } }),
+      record({ name: 'Mara', fields: { gender: 'female.', appearance: 'Grey eyes, a scar' } })
+    ])
+    expect(entities[0]?.fields.map((f) => [f.field, f.upload])).toEqual([
+      ['gender', 'Female'],
+      ['appearance', 'Grey eyes, a scar']
+    ])
+  })
+})
+
+describe('no new sheet under a name the story bible has (2026-10-11)', () => {
+  const fathoms = sheet({
+    id: 's-fathoms',
+    kind: 'world',
+    name: 'Fathoms',
+    fields: { description: 'The drowned quarter.' }
+  })
+
+  it('joins a group to the item already filling the sheet of its name (the author’s "Fathoms")', () => {
+    const { entities } = plan(
+      [
+        record({ kind: 'setting', name: 'Fathoms', fields: { atmosphere: 'Cold' } }),
+        record({ kind: 'world', name: 'Fathoms', fields: { rules: 'No fire below' } })
+      ],
+      [fathoms]
+    )
+    expect(entities).toHaveLength(1)
+    expect(entities[0]).toMatchObject({ kind: 'world', existingId: 's-fathoms' })
+    expect(entities[0]?.fields.map((f) => f.field)).toEqual(['rules'])
+    expect(entities[0]?.details).toEqual(['Atmosphere: Cold'])
+  })
+
+  it('turns a new sheet whose name is taken into an update, and joins two new ones of one name', () => {
+    const review = reviewOf(plan([record({ kind: 'world', name: 'The Gull', fields: {} })]))
+    const gull = review.entities[0]!
+    const twisted: ContextReview = {
+      ...review,
+      entities: [
+        {
+          ...gull,
+          id: 'a',
+          name: '  fathoms ',
+          records: [record({ kind: 'world', name: 'Fathoms', fields: { rules: 'No fire' } })]
+        },
+        {
+          ...gull,
+          id: 'b',
+          name: 'The Gull',
+          records: [record({ kind: 'world', name: 'The Gull', fields: { rules: 'Sails at dawn' } })]
+        },
+        {
+          ...gull,
+          id: 'c',
+          name: 'the gull',
+          records: [record({ kind: 'world', name: 'the gull', details: ['Crew: 12'] })]
+        },
+        { ...gull, id: 'd', name: 'Fathoms', include: false }
+      ]
+    }
+    const settled = settleNameClashes(twisted, [fathoms])
+    expect(
+      settled.entities.map((item) => [item.id, item.existingId, item.name, item.include])
+    ).toEqual([
+      ['a', 's-fathoms', 'Fathoms', true],
+      ['b', null, 'The Gull', true],
+      ['d', null, 'Fathoms', false]
+    ])
+    expect(settled.entities[1]?.details).toEqual(['Crew: 12'])
+    expect(settleNameClashes(review, [fathoms])).toBe(review)
+  })
+
+  it('declines a proposal whose item has the name of a new World sheet: one sheet, not two', () => {
+    const ships = {
+      ...categoryFromInput('c-ships', { name: 'Ships', fields: ['Crew'] }, 'ai'),
+      proposed: true
+    }
+    // Neither exists yet, and they are of two categories, so the plan keeps them apart.
+    const planned = plan(
+      [
+        record({ kind: 'world', name: 'Fathoms', fields: { rules: 'No fire below' } }),
+        record({ kind: 'c-ships', name: 'Fathoms', fields: { crew: '12' } })
+      ],
+      [],
+      { categories: [ships] }
+    )
+    expect(planned.entities).toHaveLength(2)
+    const review = { ...reviewOf(planned), categories: planned.categories }
+    const declined = declineReviewCategory(review, 'c-ships', [])
+    expect(declined.entities).toHaveLength(1)
+    expect(declined.entities[0]).toMatchObject({ kind: 'world', existingId: null, name: 'Fathoms' })
+    expect(declined.entities[0]?.details).toEqual(['Crew: 12'])
   })
 })

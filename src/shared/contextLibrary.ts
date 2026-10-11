@@ -291,8 +291,10 @@ export interface ContextImageHint {
 }
 
 /**
- * One field of one sheet in the review. `existing` is null when the sheet has no value there (a
- * plain fill, `include` decides); otherwise the values conflict and `choice` is the author's pick
+ * One field of one sheet in the review. `existing` is null when the upload only adds to the
+ * sheet (a plain fill, `include` decides): the sheet has no value there (or only a placeholder
+ * such as "Unknown"), or the upload's value already holds every word of the sheet's and says
+ * more. Otherwise the two disagree on a fact (`relateValues`), and `choice` is the author's pick
  * (`existing` by default, so accepting everything never overwrites what they wrote).
  */
 export const ContextReviewField = z.object({
@@ -367,11 +369,12 @@ export const ContextProcessResult = z.discriminatedUnion('ok', [
 ])
 export type ContextProcessResult = z.infer<typeof ContextProcessResult>
 
-/** What Apply wrote. */
+/** What Apply wrote, and the sheets it had to leave out with why (2026-10-11). */
 export const ContextApplyCounts = z.object({
   created: z.number().int().nonnegative(),
   updated: z.number().int().nonnegative(),
-  notes: z.boolean()
+  notes: z.boolean(),
+  skipped: z.array(ContextSkipped)
 })
 export type ContextApplyCounts = z.infer<typeof ContextApplyCounts>
 
@@ -395,6 +398,82 @@ function sheetKeys(sheet: ExistingSheet): string[] {
 }
 
 const norm = (text: string): string => text.replace(/\s+/g, ' ').trim().toLowerCase()
+
+/** What a sheet field holds when the author has not really filled it yet. */
+const PLACEHOLDER_VALUES = new Set(['unknown', 'tbd', 'tbc', 'na', 'n a', 'todo', 'to do'])
+
+/**
+ * Words that turn a fact around: a value that gains or loses one of them says something else
+ * ("married" against "not married"), however many words the two share.
+ */
+const NEGATION_WORDS = new Set([
+  'not',
+  'no',
+  'never',
+  'nor',
+  'neither',
+  'without',
+  'non',
+  'former',
+  'formerly',
+  'ex',
+  'cannot',
+  'isnt',
+  'arent',
+  'wasnt',
+  'werent',
+  'dont',
+  'doesnt',
+  'didnt',
+  'cant',
+  'wont',
+  'hasnt',
+  'havent',
+  'hadnt',
+  'couldnt',
+  'wouldnt',
+  'shouldnt'
+])
+
+/**
+ * The words of a value as facts are compared: case, accents, punctuation, apostrophes, and
+ * spacing set aside, and a plural's final s folded ("Grey eyes." and "grey eye" are one fact).
+ */
+function factWords(text: string): string[] {
+  return text
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase()
+    .replace(/['\u2019`]/gu, '')
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word !== '')
+    .map((word) => (word.length > 3 && /[^s]s$/u.test(word) ? word.slice(0, -1) : word))
+}
+
+/**
+ * How an uploaded value relates to what a sheet field already holds (F-9.8, 2026-10-11: only a
+ * real disagreement is a conflict). `empty`: the sheet holds nothing or a placeholder. `same`:
+ * the same words, whatever the case, punctuation, or spacing. `covered`: the sheet already says
+ * everything the upload says. `extends`: the upload says everything the sheet says, and more.
+ * `differs`: each says something the other does not, or a negation is gained or lost. Pure.
+ */
+export type ValueRelation = 'empty' | 'same' | 'covered' | 'extends' | 'differs'
+
+export function relateValues(existing: string, upload: string): ValueRelation {
+  const had = factWords(existing)
+  if (had.length === 0 || PLACEHOLDER_VALUES.has(had.join(' '))) return 'empty'
+  const given = factWords(upload)
+  if (given.length === 0) return 'covered'
+  if (had.join(' ') === given.join(' ')) return 'same'
+  const hadSet = new Set(had)
+  const givenSet = new Set(given)
+  const onlyHad = [...hadSet].filter((word) => !givenSet.has(word))
+  const onlyGiven = [...givenSet].filter((word) => !hadSet.has(word))
+  if ([...onlyHad, ...onlyGiven].some((word) => NEGATION_WORDS.has(word))) return 'differs'
+  if (onlyGiven.length === 0) return 'covered'
+  if (onlyHad.length === 0) return 'extends'
+  return 'differs'
+}
 
 /** Where a sheet's details go: the page of a blank sheet, the Notes field of a structured one. */
 export function detailsTarget(
@@ -432,8 +511,13 @@ function mergedValue(
   const values: string[] = []
   for (const record of records) {
     const value = record.fields[field]?.trim() ?? ''
-    if (value === '' || values.some((seen) => norm(seen) === norm(value))) continue
-    values.push(value)
+    if (value === '') continue
+    // Two files saying the same thing, or one saying more of it, give one value, not "A / A+".
+    const relations = values.map((seen) => relateValues(seen, value))
+    if (relations.some((r) => r === 'same' || r === 'covered')) continue
+    const grown = relations.indexOf('extends')
+    if (grown === -1) values.push(value)
+    else values[grown] = value
   }
   const multiline = category.fields.find((def) => def.id === field)?.multiline ?? true
   return values.join(multiline ? '\n\n' : ' / ').slice(0, ENTITY_FIELD_MAX)
@@ -450,12 +534,15 @@ function reviewFields(
     const upload = mergedValue(category, field, records)
     if (upload === '') continue
     const existing = sheet?.fields[field]?.trim() ?? ''
-    if (existing === '') {
+    const relation = relateValues(existing, upload)
+    // The sheet already says it (or says more): nothing new to review.
+    if (relation === 'same' || relation === 'covered') continue
+    // An empty sheet field, or an upload that keeps every word of the sheet's and adds more, is
+    // a fill: writing it loses nothing the author wrote.
+    if (relation === 'empty' || relation === 'extends') {
       fields.push({ field, upload, existing: null, include: true, choice: 'upload' })
       continue
     }
-    // The sheet already says it (or says more): nothing new to review.
-    if (norm(existing) === norm(upload) || norm(existing).includes(norm(upload))) continue
     fields.push({ field, upload, existing, include: true, choice: 'existing' })
   }
   return fields
@@ -600,6 +687,116 @@ export function buildReviewEntity(
   }
 }
 
+/** A field's pick carries over only where the same values meet again (a fill never becomes a conflict's pick). */
+const pickKey = (field: ContextReviewField): string =>
+  `${field.field}\0${field.upload}\0${field.existing ?? ''}`
+
+/** A rebuilt item keeps the author's earlier picks where the same field still has the same values. */
+export function keepPicks(next: ContextReviewEntity, before: readonly ContextReviewEntity[]): void {
+  const picks = new Map<string, { include: boolean; choice: 'upload' | 'existing' }>()
+  for (const item of before) {
+    for (const field of item.fields) picks.set(pickKey(field), field)
+  }
+  next.fields = next.fields.map((field) => {
+    const pick = picks.get(pickKey(field))
+    return pick ? { ...field, include: pick.include, choice: pick.choice } : field
+  })
+  const first = before[0]
+  if (first !== undefined) next.includeDetails = first.includeDetails
+}
+
+/**
+ * `parts` as one item for `sheet` (null: one new sheet under the first part's name): their
+ * descriptions merged and compared with the sheet again, the first part's picks, tag, and
+ * picture kept where they still apply.
+ */
+function mergeItems(
+  parts: readonly ContextReviewEntity[],
+  sheet: ExistingSheet | null,
+  categories: Categories
+): ContextReviewEntity {
+  const head = parts[0]
+  if (head === undefined) throw new Error('a merge needs an item')
+  const records = parts.flatMap((part) => part.records)
+  const images = parts.find((part) => part.images.length > 0)?.images ?? []
+  if (records.length === 0) {
+    // Only pictures to add to an existing sheet: nothing to compare again.
+    return { ...head, images }
+  }
+  const next = buildReviewEntity(head.id, records, sheet, categories)
+  if (sheet === null) {
+    next.name = head.name
+    next.tag = head.tag ?? true
+  }
+  next.include = true
+  next.images = categoryOf(next.kind, categories).hasImage ? images : []
+  keepPicks(next, parts)
+  return next
+}
+
+/**
+ * Settles every name clash in a review before it is shown or applied (F-9.8, 2026-10-11): an
+ * included item that would create a sheet whose name (as `toEntityNameKey` reads it, the key the
+ * story bible's uniqueness check uses) a sheet of its category already has fills that sheet
+ * instead, and two included items for one sheet, or for one new name in one category, become
+ * one. A skipped item is left as it is, since Apply leaves it out. Pure; answers `review` itself
+ * when nothing clashes.
+ */
+export function settleNameClashes(
+  review: ContextReview,
+  existing: readonly ExistingSheet[]
+): ContextReview {
+  const entities = settleItems(review.entities, existing, review.categories)
+  return entities === review.entities ? review : { ...review, entities }
+}
+
+/** `settleNameClashes` over a list of items; answers `items` itself when nothing clashes. */
+function settleItems(
+  items: ContextReviewEntity[],
+  existing: readonly ExistingSheet[],
+  categories: Categories
+): ContextReviewEntity[] {
+  const settled: ContextReviewEntity[] = []
+  let changed = false
+  for (const item of items) {
+    // A skipped item is left out by Apply anyway; one for a sheet no longer in the story bible
+    // is Apply's to report, not to be turned into a new sheet here.
+    if (
+      !item.include ||
+      (item.existingId !== null && !existing.some((s) => s.id === item.existingId))
+    ) {
+      settled.push(item)
+      continue
+    }
+    const key = toEntityNameKey(item.name)
+    const sheet =
+      item.existingId === null
+        ? (existing.find((s) => s.kind === item.kind && toEntityNameKey(s.name) === key) ?? null)
+        : (existing.find((s) => s.id === item.existingId) ?? null)
+    const targetId = sheet?.id ?? item.existingId
+    const at = settled.findIndex(
+      (other) =>
+        other.include &&
+        (targetId !== null
+          ? other.existingId === targetId
+          : other.existingId === null &&
+            other.kind === item.kind &&
+            toEntityNameKey(other.name) === key)
+    )
+    const holder = settled[at]
+    if (holder === undefined && (item.existingId !== null || sheet === null)) {
+      settled.push(item)
+      continue
+    }
+    changed = true
+    const parts = holder === undefined ? [item] : [holder, item]
+    const next = mergeItems(parts, sheet, categories)
+    if (holder === undefined) settled.push(next)
+    else settled[at] = next
+  }
+  return changed ? settled.filter((item) => !isEmptyUpdate(item)) : items
+}
+
 /** True when an item for an existing sheet would change nothing. */
 export function isEmptyUpdate(item: ContextReviewEntity): boolean {
   return (
@@ -716,11 +913,35 @@ export function planContextReview(input: PlanInput): {
   for (const group of groupRecords(input.records)) {
     const sheet = matchSheet(group, input.existing, taken)
     if (sheet !== null) taken.add(sheet.id)
+    // 2026-10-11: a group named after a sheet another group already fills (the files call
+    // "Fathoms" a place in one chunk and a world item in the next) joins that item; left apart
+    // it became a second "Fathoms", which Apply cannot create.
+    const held =
+      sheet === null
+        ? items.find((item) => {
+            const owner = input.existing.find((s) => s.id === item.existingId)
+            if (owner === undefined) return false
+            const keys = sheetKeys(owner)
+            return group.some((record) => keys.includes(toEntityNameKey(record.name)))
+          })
+        : undefined
+    if (held !== undefined) {
+      const owner = input.existing.find((s) => s.id === held.existingId) ?? null
+      items[items.indexOf(held)] = buildReviewEntity(
+        held.id,
+        [...held.records, ...group],
+        owner,
+        input.categories
+      )
+      continue
+    }
     items.push(buildReviewEntity(nextId(), group, sheet, input.categories))
   }
   attachImages(items, input.existing, input.images, input.hints, nextId, input.categories)
   const notesSheet = projectNotesSheet(input.existing)
-  const entities = items.filter((item) => !isEmptyUpdate(item))
+  const entities = settleItems(items, input.existing, input.categories).filter(
+    (item) => !isEmptyUpdate(item)
+  )
   return {
     entities,
     // A proposed category none of the items ended up in (they all matched sheets elsewhere) is
@@ -850,11 +1071,15 @@ export function declineReviewCategory(
     next.includeDetails = item.includeDetails
     return next
   })
-  return {
-    ...review,
-    entities: entities.filter((item) => !isEmptyUpdate(item)),
-    categories: review.categories.filter((c) => c.id !== categoryId)
-  }
+  // A declined item whose World sheet another item already fills joins that item (2026-10-11).
+  return settleNameClashes(
+    {
+      ...review,
+      entities: entities.filter((item) => !isEmptyUpdate(item)),
+      categories: review.categories.filter((c) => c.id !== categoryId)
+    },
+    existing
+  )
 }
 
 /** Renames a proposed category before it is created (F-9.11); its singular follows unless set apart. Pure. */
