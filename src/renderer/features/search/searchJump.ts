@@ -12,7 +12,7 @@ import { useLayoutStore } from '@renderer/features/shell/layoutStore'
  * has no passage, so the document is only selected); notes by selecting the node and showing the
  * notes panel (the floating one in focus mode, the docked one otherwise); an entity through the
  * entity store, leaving focus mode first like every other opener of the story bible, because the
- * entity page has no focus view.
+ * entity page has no focus view. A Research document (F-16.8) is selected, which opens its page.
  */
 export async function jumpToResult(result: SearchResult, query: string): Promise<void> {
   switch (result.type) {
@@ -34,6 +34,10 @@ export async function jumpToResult(result: SearchResult, query: string): Promise
       if (!layout.layout.notes.open) layout.toggle('notes')
       return
     }
+    case 'research':
+      // F-16.8: a Research page opens in the page editor, which takes no passage jump yet.
+      useTreeStore.getState().select(result.id)
+      return
     case 'character':
     case 'setting':
     case 'world': {

@@ -100,6 +100,12 @@ interface TreeState extends TreeIndex {
    * the selection is untouched. Errors propagate so the caller can show them.
    */
   move: (id: string, parentId: string, afterId?: string | null) => Promise<void>
+  /**
+   * Merges nodes main created through another owner's channel (F-16.8: Research uploads and
+   * notes) without a reload: each at its position with its words, its ancestors opened; the first
+   * is selected, and `rename` opens inline rename on it.
+   */
+  mergeCreated: (nodes: readonly TreeNode[], options?: { rename?: boolean }) => void
   /** Records a document's saved word count (F-3.2) and adjusts its ancestors' rollups by the delta. */
   setWordCount: (id: string, wordCount: number) => void
   /**
@@ -513,6 +519,31 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     } finally {
       if (mine === generation) set({ busy: false })
     }
+  },
+
+  mergeCreated(nodes, options) {
+    const first = nodes[0]
+    if (first === undefined) return
+    set((s) => {
+      let index: TreeIndex = s
+      let collapsed = s.collapsed
+      for (const node of nodes) {
+        const merged = insertIntoIndex(index, node)
+        index = {
+          ...merged,
+          wordCountRollup: addToAncestorRollups(merged, node.parentId, node.wordCount)
+        }
+        collapsed = expandAncestors({ byId: index.byId, collapsed }, node.parentId)
+      }
+      return {
+        ...index,
+        collapsed,
+        selectedId: first.id,
+        renamingId: options?.rename === true ? first.id : s.renamingId
+      }
+    })
+    // Picking a document closes a sheet or the Edits workspace, as every selection does.
+    get().select(first.id)
   },
 
   setWordCount(id, wordCount) {

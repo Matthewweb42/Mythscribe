@@ -13,9 +13,10 @@ import {
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import { TiptapNode, type TiptapNodeT } from '@shared/tiptap'
 import { sha256 } from '../ai/request'
-import { memoryScan, record, type NodeRow } from '../db/schema'
+import { memoryScan, record, researchDoc, type NodeRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { getCompileState } from '../project/settingsStore'
+import { researchDocumentIds } from '../research/researchStore'
 import { ftsQuery } from '../search/passageIndex'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -30,7 +31,9 @@ import { deleteScanRow, getScanHashes, scanHashesOf, setScanHash } from './scanS
  *   status, or `excludedScene` when it is left out of compile;
  * - a scene's notes are `sceneNote`;
  * - a record's Pinned paragraphs are `pinned` and its Ideas `idea`, each `notCanon` where marked;
- * - Research pages arrive with P1 slice 2.
+ * - a Research page's paragraphs (F-16.8) are `note` when the author wrote it in MythScribe and
+ *   `research` when it was made from an upload, every one `notCanon` when the page is switched
+ *   Not canon, else where marked.
  * An owner is skipped while its rows hash as they did (`memory_scan.passages_hash`). Local and
  * free; nothing leaves the machine.
  */
@@ -48,10 +51,11 @@ interface PassageRow {
   text: string
 }
 
-const SOURCES_OF: Record<Exclude<MemoryOwnerKind, 'research'>, readonly PassageSource[]> = {
+const SOURCES_OF: Record<MemoryOwnerKind, readonly PassageSource[]> = {
   scene: ['scene', 'ideaScene', 'excludedScene'],
   sceneNote: ['sceneNote'],
-  record: ['pinned', 'idea']
+  record: ['pinned', 'idea'],
+  research: ['note', 'research']
 }
 
 function parseDoc(raw: string | null): TiptapNodeT | null {
@@ -64,13 +68,17 @@ function parseDoc(raw: string | null): TiptapNodeT | null {
   }
 }
 
-/** The page's rows under one source, Not canon where marked. */
-function pageRows(doc: TiptapNodeT | null, source: PassageSource): PassageRow[] {
+/** The page's rows under one source, Not canon where marked (or everywhere, for a page switched Not canon). */
+function pageRows(
+  doc: TiptapNodeT | null,
+  source: PassageSource,
+  pageNotCanon = false
+): PassageRow[] {
   if (doc === null) return []
   return markedParagraphs(doc).map((paragraph) => ({
     source,
     para: paragraph.index,
-    canon: passageCanon(source, paragraph.notCanon),
+    canon: passageCanon(source, pageNotCanon || paragraph.notCanon),
     text: paragraph.text
   }))
 }
@@ -131,6 +139,17 @@ function recordRows(db: TreeDb, id: string): PassageRow[] | null {
   return [...pageRows(parseDoc(row.pinned), 'pinned'), ...pageRows(parseDoc(row.ideas), 'idea')]
 }
 
+/** A Research page's rows (F-16.8): `note` for a written page, `research` for an upload. */
+function researchRows(db: TreeDb, row: NodeRow): PassageRow[] {
+  const meta = db
+    .select({ origin: researchDoc.origin, notCanon: researchDoc.notCanon })
+    .from(researchDoc)
+    .where(eq(researchDoc.nodeId, row.id))
+    .get()
+  const source: PassageSource = meta?.origin === 'upload' ? 'research' : 'note'
+  return pageRows(parseDoc(row.content), source, meta?.notCanon === true)
+}
+
 const rowsHash = (rows: readonly PassageRow[]): string =>
   sha256(
     JSON.stringify({
@@ -142,7 +161,7 @@ const rowsHash = (rows: readonly PassageRow[]): string =>
 /** Replaces one owner's rows (the caller holds the transaction). */
 function replaceRows(
   db: TreeDb,
-  kind: Exclude<MemoryOwnerKind, 'research'>,
+  kind: MemoryOwnerKind,
   id: string,
   rows: readonly PassageRow[]
 ): void {
@@ -160,7 +179,7 @@ function replaceRows(
 /** Writes an owner's rows unless they hash as they did; answers whether anything was written. */
 function writeOwner(
   db: TreeDb,
-  kind: Exclude<MemoryOwnerKind, 'research'>,
+  kind: MemoryOwnerKind,
   id: string,
   rows: readonly PassageRow[],
   now: Date
@@ -175,9 +194,10 @@ function writeOwner(
 }
 
 /**
- * Indexes one owner: a scene's text (`scene`), a scene's notes (`sceneNote`), or a record's
- * pages (`record`). A scene that is not a manuscript document, or a record that is gone, throws
- * NOT_FOUND (quiet for the queue). Research pages have no owner before P1 slice 2.
+ * Indexes one owner: a scene's text (`scene`), a scene's notes (`sceneNote`), a record's pages
+ * (`record`), or a Research page (`research`). A scene that is not a manuscript document, a
+ * Research id that is not a Research document, or a record that is gone, throws NOT_FOUND (quiet
+ * for the queue).
  */
 export function indexOwner(db: TreeDb, kind: MemoryOwnerKind, id: string, now: Date): boolean {
   if (kind === 'record') {
@@ -185,10 +205,14 @@ export function indexOwner(db: TreeDb, kind: MemoryOwnerKind, id: string, now: D
     if (rows === null) throw new AppError('NOT_FOUND', 'That record no longer exists', { id })
     return writeOwner(db, 'record', id, rows, now)
   }
-  if (kind === 'research') {
-    throw new AppError('NOT_FOUND', 'This project has no Research section yet', { id })
-  }
   const nodes = listNodes(db)
+  if (kind === 'research') {
+    const row = researchDocumentIds(db, nodes).includes(id)
+      ? nodes.find((each) => each.id === id)
+      : undefined
+    if (row === undefined) throw new AppError('NOT_FOUND', 'Not a Research document', { id })
+    return writeOwner(db, 'research', id, researchRows(db, row), now)
+  }
   const row = manuscriptDocuments(db, nodes).find((document) => document.id === id)
   if (row === undefined) throw new AppError('NOT_FOUND', 'Not a manuscript document', { id })
   if (kind === 'sceneNote') return writeOwner(db, 'sceneNote', id, noteRows(row), now)
@@ -202,9 +226,18 @@ export function indexScene(db: TreeDb, nodeId: string, now: Date): boolean {
   return text || notes
 }
 
+/**
+ * What one `passages` job keyed to a node indexes: a Research page (F-16.8) when the node is a
+ * Research document, else the scene and its notes (NOT_FOUND for anything else).
+ */
+export function indexNodePassages(db: TreeDb, nodeId: string, now: Date): boolean {
+  if (researchDocumentIds(db).includes(nodeId)) return indexOwner(db, 'research', nodeId, now)
+  return indexScene(db, nodeId, now)
+}
+
 /** One owner the index is behind on. */
 export interface StaleOwner {
-  kind: Exclude<MemoryOwnerKind, 'research'>
+  kind: MemoryOwnerKind
   id: string
 }
 
@@ -220,7 +253,10 @@ function staleRecordOwners(db: TreeDb): StaleOwner[] {
     .map(({ id }) => ({ kind: 'record', id }))
 }
 
-/** Every owner whose rows would read differently now: scenes (and notes) in reading order, then records. */
+/**
+ * Every owner whose rows would read differently now: scenes (and notes) in reading order, then
+ * Research pages in tree order, then records.
+ */
 export function stalePassageOwners(db: TreeDb): StaleOwner[] {
   const nodes = listNodes(db)
   const statuses = sceneStatuses(db, nodes)
@@ -233,6 +269,14 @@ export function stalePassageOwners(db: TreeDb): StaleOwner[] {
     }
     if (notes.get(row.id)?.passagesHash !== rowsHash(noteRows(row))) {
       stale.push({ kind: 'sceneNote', id: row.id })
+    }
+  }
+  const research = scanHashesOf(db, 'research')
+  const byId = new Map(nodes.map((row) => [row.id, row]))
+  for (const id of researchDocumentIds(db, nodes)) {
+    const row = byId.get(id)
+    if (row !== undefined && research.get(id)?.passagesHash !== rowsHash(researchRows(db, row))) {
+      stale.push({ kind: 'research', id })
     }
   }
   return [...stale, ...staleRecordOwners(db)]
@@ -248,33 +292,57 @@ export function indexStaleRecords(db: TreeDb, now: Date): number {
 }
 
 /** Drops an owner's rows and its hashes (a record deleted). */
-export function dropOwner(
-  db: TreeDb,
-  kind: Exclude<MemoryOwnerKind, 'research'>,
-  id: string
-): void {
+export function dropOwner(db: TreeDb, kind: MemoryOwnerKind, id: string): void {
   db.transaction((tx) => {
     replaceRows(tx, kind, id, [])
     deleteScanRow(tx, kind, id)
   })
 }
 
+/** The live owners of each kind: manuscript documents, Research documents, records. */
+interface LiveOwners {
+  scenes: ReadonlySet<string>
+  research: ReadonlySet<string>
+  records: ReadonlySet<string>
+}
+
+function liveOwners(db: TreeDb): LiveOwners {
+  const nodes = listNodes(db)
+  return {
+    scenes: new Set(manuscriptDocuments(db, nodes).map((row) => row.id)),
+    research: new Set(researchDocumentIds(db, nodes)),
+    records: new Set(
+      db
+        .select({ id: record.id })
+        .from(record)
+        .all()
+        .map((row) => row.id)
+    )
+  }
+}
+
+/** The owner kind a passage row's source belongs to. */
+function ownerKindOf(source: PassageSource): MemoryOwnerKind {
+  if (source === 'pinned' || source === 'idea') return 'record'
+  if (source === 'sceneNote') return 'sceneNote'
+  if (source === 'note' || source === 'research') return 'research'
+  return 'scene'
+}
+
+function isAlive(live: LiveOwners, kind: MemoryOwnerKind, id: string): boolean {
+  if (kind === 'record') return live.records.has(id)
+  if (kind === 'research') return live.research.has(id)
+  return live.scenes.has(id)
+}
+
 /**
  * Drops the rows and scan hashes of every owner that is gone (a scene deleted or moved out of
- * the manuscript, a record deleted), so one that comes back is indexed afresh. Runs on open.
- * Answers how many owners went.
+ * the manuscript, a Research document deleted, a record deleted), so one that comes back is
+ * indexed afresh. Runs on open. Answers how many owners went.
  */
 export function pruneMemoryIndex(db: TreeDb): number {
-  const scenes = new Set(manuscriptDocuments(db).map((row) => row.id))
-  const records = new Set(
-    db
-      .select({ id: record.id })
-      .from(record)
-      .all()
-      .map((row) => row.id)
-  )
-  const alive = (kind: MemoryOwnerKind, id: string): boolean =>
-    kind === 'record' ? records.has(id) : kind === 'research' ? false : scenes.has(id)
+  const live = liveOwners(db)
+  const alive = (kind: MemoryOwnerKind, id: string): boolean => isAlive(live, kind, id)
   const owners = db
     .select({ kind: memoryScan.ownerKind, id: memoryScan.ownerId })
     .from(memoryScan)
@@ -282,15 +350,7 @@ export function pruneMemoryIndex(db: TreeDb): number {
   const indexed = db.all<{ source: PassageSource; owner_id: string }>(
     sql`SELECT DISTINCT source, owner_id FROM memory_passage_fts`
   )
-  const ownerKind = (source: PassageSource): MemoryOwnerKind =>
-    source === 'pinned' || source === 'idea'
-      ? 'record'
-      : source === 'sceneNote'
-        ? 'sceneNote'
-        : source === 'note' || source === 'research'
-          ? 'research'
-          : 'scene'
-  const goneRows = indexed.filter((row) => !alive(ownerKind(row.source), row.owner_id))
+  const goneRows = indexed.filter((row) => !alive(ownerKindOf(row.source), row.owner_id))
   const goneScans = owners.filter((row) => !alive(row.kind, row.id))
   if (goneRows.length === 0 && goneScans.length === 0) return 0
   db.transaction((tx) => {
@@ -317,14 +377,7 @@ export function searchMemoryPassages(
   const match = ftsQuery(query)
   const max = Math.min(Math.max(0, Math.floor(options.limit ?? 10)), MEMORY_PASSAGE_SEARCH_MAX)
   if (match === null || max === 0) return []
-  const scenes = new Set(manuscriptDocuments(db).map((row) => row.id))
-  const records = new Set(
-    db
-      .select({ id: record.id })
-      .from(record)
-      .all()
-      .map((row) => row.id)
-  )
+  const live = liveOwners(db)
   const sources = options.sources ?? null
   const filter =
     sources === null || sources.length === 0
@@ -348,11 +401,7 @@ export function searchMemoryPassages(
         ORDER BY rank LIMIT ${max * 3}`
   )
   return rows
-    .filter((row) =>
-      row.source === 'pinned' || row.source === 'idea'
-        ? records.has(row.owner_id)
-        : scenes.has(row.owner_id)
-    )
+    .filter((row) => isAlive(live, ownerKindOf(row.source), row.owner_id))
     .slice(0, max)
     .map((row) => ({
       source: row.source,

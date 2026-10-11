@@ -4,7 +4,7 @@ import type { SectionType } from '@shared/labels'
 import { LEVEL_GLYPH } from './levelGlyph'
 
 function levelColor(node: TreeNode, section: SectionType): string {
-  if (node.kind === 'document' && section !== 'manuscript') return 'text-matter'
+  if (node.kind === 'document' && (section === 'front' || section === 'end')) return 'text-matter'
   return node.hierarchyLevel === null
     ? 'text-level-generic'
     : LEVEL_GLYPH[node.hierarchyLevel].color
@@ -12,7 +12,8 @@ function levelColor(node: TreeNode, section: SectionType): string {
 
 /**
  * Per-level icon in its level colour: sections and generic folders show a folder, levels their
- * own glyph, generic documents a plain file, front and end matter documents the matter colour.
+ * own glyph, generic documents a plain file, front and end matter documents the matter colour
+ * (Research documents, F-16.8, the generic one).
  * Shared by the Manuscript tree (F-2.1) and the cork board's cards (F-11.1).
  */
 export function LevelIcon({

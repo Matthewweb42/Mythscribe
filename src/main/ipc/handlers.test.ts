@@ -8933,4 +8933,82 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     const blocked = await invoke('record:create', { name: 'Mar', categoryId: 'character' })
     expect('gate' in blocked).toBe(true)
   })
+
+  // F-16.8 (plan P1 slice 2): the Research section is made on the v2 open only.
+  it('adds the Research root on a v2 open only, and makes, indexes and opens Research pages', async () => {
+    vi.useFakeTimers()
+    try {
+      await invoke('project:create', { name: 'Plain', format: 'novel', directory: tmp })
+      const v1Roots = (await invoke('tree:list', undefined)).filter((n) => n.parentId === null)
+      expect(v1Roots.map((n) => n.sectionType)).toEqual(['front', 'manuscript', 'end'])
+      await expect(invoke('research:list', undefined)).rejects.toThrow(
+        'VALIDATION: This project uses the other story memory'
+      )
+      await invoke('project:close', undefined)
+
+      await openV2()
+      const roots = (await invoke('tree:list', undefined)).filter((n) => n.parentId === null)
+      expect(roots.map((n) => n.sectionType)).toEqual(['front', 'manuscript', 'end', 'research'])
+      const note = await invoke('research:create', { title: 'Tides' })
+      expect(note.node.parentId).toBe(roots[3]?.id)
+      expect(note.doc).toMatchObject({ origin: 'written', notCanon: false })
+      await invoke('document:save', { id: note.node.id, content: paragraphs('Spring tides run.') })
+
+      contextFiles = [path.join(tmp, 'coast.md')]
+      fs.writeFileSync(contextFiles[0] ?? '', 'The coast is chalk.')
+      const added = await invoke('research:add', {})
+      expect(added?.nodes.map((n) => n.title)).toEqual(['coast'])
+      expect(added?.docs[0]).toMatchObject({ origin: 'upload', fileType: 'md' })
+      const upload = added?.nodes[0]?.id ?? ''
+      expect(await invoke('research:add', {})).toMatchObject({
+        nodes: [],
+        skipped: [{ name: 'coast.md', reason: 'Already in Research as "coast".' }]
+      })
+      contextFiles = null
+      expect(await invoke('research:add', {})).toBeNull()
+
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect(
+        (await invoke('passages:search', { query: 'tides coast' })).map((hit) => [
+          hit.ownerId,
+          hit.label
+        ])
+      ).toEqual(
+        expect.arrayContaining([
+          [note.node.id, 'note'],
+          [upload, 'research']
+        ])
+      )
+      expect(
+        await invoke('research:setNotCanon', { nodeId: upload, notCanon: true })
+      ).toMatchObject({ notCanon: true })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect((await invoke('passages:search', { query: 'coast' })).map((hit) => hit.label)).toEqual(
+        ['notCanon']
+      )
+      expect((await invoke('research:list', undefined)).map((doc) => doc.nodeId)).toEqual([
+        note.node.id,
+        upload
+      ])
+
+      await invoke('research:openOriginal', { nodeId: upload })
+      expect(openPath.mock.calls.at(-1)?.[0]).toContain(path.join('assets', 'library'))
+      await expect(invoke('research:openOriginal', { nodeId: note.node.id })).rejects.toThrow(
+        'VALIDATION: This document has no original file'
+      )
+      // A duplicate keeps the upload's meta.
+      const [copy] = (await invoke('tree:duplicate', { id: upload })).filter((n) => n.id !== upload)
+      expect(
+        (await invoke('research:list', undefined)).find((d) => d.nodeId === copy?.id)
+      ).toMatchObject({ origin: 'upload', notCanon: true })
+      // Opening again does not add a second root.
+      await invoke('project:close', undefined)
+      await invoke('project:open', { path: path.join(tmp, 'Memory.mythscribe') })
+      expect(
+        (await invoke('tree:list', undefined)).filter((n) => n.sectionType === 'research')
+      ).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

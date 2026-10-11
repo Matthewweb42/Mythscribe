@@ -39,6 +39,7 @@ import { ALIAS_ORIGINS, CASE_RULES, RECORD_ORIGINS } from '../../shared/memory/r
 import { DISMISSED_KINDS } from '../../shared/memory/dismissed'
 import { MEMORY_OWNER_KINDS } from '../../shared/memory/passages'
 import { LABEL_KINDS } from '../../shared/storyLabels'
+import { RESEARCH_ORIGINS } from '../../shared/research'
 
 /**
  * Drizzle schema. Migrations are generated from this file with `npm run db:generate`
@@ -1096,3 +1097,27 @@ export const memoryScan = sqliteTable(
 )
 export type MemoryScanRow = typeof memoryScan.$inferSelect
 export type MemoryScanInsert = typeof memoryScan.$inferInsert
+
+/**
+ * A Research document's meta (F-16.8, migration `0032_research_doc`): where it came from
+ * (`written` in MythScribe or made from an `upload`), the original it was made from (kept in the
+ * library folder; cleared, not cascaded, if that row ever goes), the original's type, whether its
+ * text was read out of a PDF (`converted`), and whether the whole page is Not canon. The text
+ * itself is the node's `content`, edited like any document. A Research node with no row reads as
+ * written and canon (`writtenResearchDoc`). Story memory v2 only; v1 never writes it.
+ */
+export const researchDoc = sqliteTable('research_doc', {
+  nodeId: text('node_id')
+    .primaryKey()
+    .references(() => node.id, { onDelete: 'cascade' }),
+  origin: text('origin', { enum: RESEARCH_ORIGINS }).notNull(),
+  contextFileId: text('context_file_id').references(() => contextFile.id, {
+    onDelete: 'set null'
+  }),
+  fileType: text('file_type', { enum: CONTEXT_FILE_TYPES }),
+  converted: integer('converted', { mode: 'boolean' }).notNull().default(false),
+  notCanon: integer('not_canon', { mode: 'boolean' }).notNull().default(false),
+  created: text('created').notNull()
+})
+export type ResearchDocRow = typeof researchDoc.$inferSelect
+export type ResearchDocInsert = typeof researchDoc.$inferInsert

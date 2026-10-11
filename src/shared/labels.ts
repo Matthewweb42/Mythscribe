@@ -7,9 +7,26 @@ import type { NovelFormat } from './ipc/contract'
  * manuscript "Volume 1" and its parts "Arcs"; an epic calls its manuscript "Series".
  */
 
-export const SECTION_TYPES = ['front', 'manuscript', 'end'] as const
+export const SECTION_TYPES = ['front', 'manuscript', 'end', 'research'] as const
 export const SectionType = z.enum(SECTION_TYPES)
 export type SectionType = z.infer<typeof SectionType>
+
+/**
+ * The three sections of the book: what the starter seeds, compile and its Contents list, and
+ * the v0 converter know. `research` (F-16.8, story memory v2 only) is a fourth root that is never
+ * part of the book: compile, statistics, goals, drafts, snapshots and the reader leave it out.
+ */
+export const BOOK_SECTION_TYPES = [
+  'front',
+  'manuscript',
+  'end'
+] as const satisfies readonly SectionType[]
+export type BookSectionType = (typeof BOOK_SECTION_TYPES)[number]
+
+/** Whether a section root belongs to the book (front matter, manuscript, end matter), not Research. */
+export function isBookSection(sectionType: SectionType): sectionType is BookSectionType {
+  return sectionType !== 'research'
+}
 
 export const HIERARCHY_LEVELS = ['part', 'chapter', 'scene'] as const
 export const HierarchyLevel = z.enum(HIERARCHY_LEVELS)
@@ -42,7 +59,7 @@ export function formatLabel(format: NovelFormat): string {
   return FORMAT_LABEL[format]
 }
 
-/** Display name of one of the three root sections for the given format. */
+/** Display name of a root section for the given format. */
 export function sectionLabel(format: NovelFormat, sectionType: SectionType): string {
   switch (sectionType) {
     case 'front':
@@ -51,6 +68,8 @@ export function sectionLabel(format: NovelFormat, sectionType: SectionType): str
       return MANUSCRIPT_LABEL[format]
     case 'end':
       return 'End Matter'
+    case 'research':
+      return 'Research'
   }
 }
 

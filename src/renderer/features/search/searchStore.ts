@@ -3,9 +3,11 @@ import {
   SEARCH_TYPES,
   isSearchable,
   normalizeQuery,
+  searchTypesFor,
   type SearchResponse,
   type SearchType
 } from '@shared/search'
+import { currentStoryMemory } from '@renderer/features/project/storyMemory'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 
@@ -56,6 +58,14 @@ const initial = {
 let generation = 0
 let timer: ReturnType<typeof setTimeout> | null = null
 
+/**
+ * The chosen types the open project offers, in `SEARCH_TYPES` order: F-16.8's Research only in
+ * story memory v2, so a v1 project asks exactly as it did.
+ */
+export function offeredSearchTypes(chosen: readonly SearchType[]): SearchType[] {
+  return searchTypesFor(currentStoryMemory()).filter((type) => chosen.includes(type))
+}
+
 function cancelTimer(): void {
   if (timer !== null) clearTimeout(timer)
   timer = null
@@ -65,7 +75,8 @@ export const useSearchStore = create<SearchState>((set, get) => {
   const run = async (): Promise<void> => {
     cancelTimer()
     const mine = ++generation
-    const { query, types, tagId } = get()
+    const { query, tagId } = get()
+    const types = offeredSearchTypes(get().types)
     const normalized = normalizeQuery(query)
     if (!isSearchable(normalized) || types.length === 0) {
       set({ response: null, answeredQuery: '', status: 'idle', error: null })

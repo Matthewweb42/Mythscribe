@@ -19,11 +19,12 @@ import { requireDocument, writeDocumentText, type StoredText } from '../document
 import { activeDraftName, diffDocument } from '../draft/draftStore'
 import { AppError } from '../ipc/errors'
 import { listNodes, type TreeDb } from '../tree/treeStore'
-import { projectDocuments } from '../voice/profile'
+import { projectDocuments, researchSubtree } from '../voice/profile'
 
 /**
  * Snapshots (F-8.6): frozen copies of document text, of one document or of every document in
- * the project (`projectDocuments`: front matter, the manuscript, end matter, in tree order). The
+ * the project (`projectDocuments`: front matter, the manuscript, end matter, in tree order; never
+ * the Research section of story memory v2, F-16.8, which is no part of the book). The
  * text taken is the live `node.content`, i.e. the active draft's; the active draft's name is
  * recorded for context. A snapshot holds a `snapshot_text` row per document it took; a document
  * deleted since drops out (cascade), and a document snapshot goes with its document.
@@ -144,7 +145,8 @@ export function listSnapshots(db: TreeDb): SnapshotList {
 
 /**
  * Takes a snapshot of one document's live text (NOT_FOUND for an unknown id, VALIDATION for a
- * folder) or of every document in the project. `milestone` makes it a milestone, else manual.
+ * folder or a Research document) or of every document in the project. `milestone` makes it a
+ * milestone, else manual.
  */
 export function takeSnapshot(db: TreeDb, input: TakeSnapshot): SnapshotList {
   return db.transaction((tx) => {
@@ -153,6 +155,11 @@ export function takeSnapshot(db: TreeDb, input: TakeSnapshot): SnapshotList {
     const kind = input.milestone ? 'milestone' : 'manual'
     if (input.scope === 'document') {
       const doc = requireDocument(tx, input.nodeId)
+      if (researchSubtree(listNodes(tx)).has(doc.id)) {
+        throw new AppError('VALIDATION', 'Research documents are not part of snapshots', {
+          nodeId: doc.id
+        })
+      }
       insertSnapshot(tx, { name, note, kind, scope: 'document', nodeId: doc.id }, [doc])
     } else {
       insertSnapshot(tx, { name, note, kind, scope: 'project', nodeId: null }, projectDocuments(tx))

@@ -53,3 +53,15 @@ export const treeFixture: TreeNode[] = [
   node('sc-5', 'ch-5', 0, 'Scene 5', 'document', 'scene', 0),
   node('sc-6', 'ch-6', 0, 'Scene 6', 'document', 'scene', 300)
 ]
+
+/**
+ * F-16.8: the same tree in a story memory v2 project, with its Research root (after end matter)
+ * holding a folder with an uploaded page and a written note at the root.
+ */
+export const researchTreeFixture: TreeNode[] = [
+  ...treeFixture,
+  node('research', null, 3, 'research', 'folder', null, 0, 'research'),
+  node('r-folder', 'research', 0, 'Maps', 'folder', null),
+  node('r-upload', 'r-folder', 0, 'Coast survey', 'document', null, 40),
+  node('r-note', 'research', 1, 'Open questions', 'document', null, 12)
+]

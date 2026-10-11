@@ -20,6 +20,7 @@ import { parseStoredTiptap } from '../document/documentStore'
 import { listCategories } from '../entity/categoryStore'
 import { listEntities } from '../entity/entityStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
+import { researchSubtree } from '../voice/profile'
 
 /**
  * Global search (F-10.1): one scan of the stored text per query, no index table. A novel is a
@@ -146,7 +147,7 @@ function entityTexts(entity: Entity, category: StoryCategory): EntityText[] {
 }
 
 function nodeHit(
-  type: 'document' | 'notes',
+  type: 'document' | 'notes' | 'research',
   row: NodeRow,
   location: string,
   query: string,
@@ -204,7 +205,8 @@ function entityHit(entity: Entity, category: StoryCategory, query: string): Hit 
 
 /**
  * Searches the open project (F-10.1): documents (title and text) in tree order, then notes in
- * tree order, then entities (name, template fields, page) in story-bible order; one result per
+ * tree order, then entities (name, template fields, page) in story-bible order, then (F-16.8,
+ * story memory v2) the Research section's documents as source documents; one result per
  * matching source, the first `SEARCH_MAX_RESULTS` of them. A query shorter than the minimum, and
  * a request with no type, answer nothing rather than failing.
  */
@@ -217,15 +219,18 @@ export function searchProject(db: TreeDb, request: SearchRequest): SearchRespons
     if (hit !== null) hits.push(hit)
   }
 
+  const rows =
+    types.has('document') || types.has('notes') || types.has('research') ? listNodes(db) : []
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  // F-16.8: Research is no part of the book: its documents are source documents, not documents.
+  const research = researchSubtree(rows)
+  const locationOf = (row: NodeRow): string => nodeLocation(byId, row)
   if (types.has('document') || types.has('notes')) {
-    const rows = listNodes(db)
-    const byId = new Map(rows.map((row) => [row.id, row]))
     const tagged = request.tagId === null ? null : nodeIdsWithTag(db, request.tagId)
     const nodes = nodesInTreeOrder(rows).filter((row) => tagged === null || tagged.has(row.id))
-    const locationOf = (row: NodeRow): string => nodeLocation(byId, row)
     if (types.has('document')) {
       for (const row of nodes) {
-        if (row.kind !== 'document') continue
+        if (row.kind !== 'document' || research.has(row.id)) continue
         const text = storedText('content', row.id, row.content)
         add(nodeHit('document', row, locationOf(row), query, text, true))
       }
@@ -245,6 +250,18 @@ export function searchProject(db: TreeDb, request: SearchRequest): SearchRespons
       if (!types.has(entityType(entity.kind))) continue
       if (request.tagId !== null && entity.tagId !== request.tagId) continue
       add(entityHit(entity, categoryOf(entity.kind, categories), query))
+    }
+  }
+
+  // Research documents carry no tags, so a tag filter finds none of them.
+  if (types.has('research') && request.tagId === null && research.size > 0) {
+    for (const row of nodesInTreeOrder(rows)) {
+      if (row.kind !== 'document' || !research.has(row.id)) continue
+      const text = storedText('content', row.id, row.content)
+      // A page right under the Research root has no folder to name.
+      const parent = row.parentId === null ? undefined : byId.get(row.parentId)
+      const location = parent?.parentId === null ? '' : locationOf(row)
+      add(nodeHit('research', row, location, query, text, true))
     }
   }
 

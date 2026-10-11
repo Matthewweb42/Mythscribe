@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(32)
+    expect(result.version).toBe(33)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1172,12 +1172,12 @@ describe('ai_usage.reported_cost_usd and reasoning_tokens (0028, F-16.1)', () =>
 })
 
 /**
- * Story memory v2 (F-16.4, F-16.5; plan P1 §0): migrations 0029–0031 are additive only. A
+ * Story memory v2 (F-16.4, F-16.5, F-16.8; plan P1 §0): migrations 0029–0032 are additive only. A
  * database as the build before them left it, holding a row in every table, comes out with every
  * one of those tables, their rows and every schema object byte for byte as they were; only new
  * objects are added, and they start empty (decision P1-D1: nothing is copied in a migration).
  */
-describe('story memory tables (0029–0031) leave every older table untouched', () => {
+describe('story memory tables (0029–0032) leave every older table untouched', () => {
   let db: Database.Database
   const BEFORE = 29
 
@@ -1263,7 +1263,8 @@ describe('story memory tables (0029–0031) leave every older table untouched', 
     expect(result.applied).toEqual([
       '0029_story_records',
       '0030_name_index',
-      '0031_memory_passage_fts'
+      '0031_memory_passage_fts',
+      '0032_research_doc'
     ])
 
     const objectsAfter = schema()
@@ -1287,6 +1288,7 @@ describe('story memory tables (0029–0031) leave every older table untouched', 
       'memory_scan',
       'name_mention',
       'record',
+      'research_doc',
       'scene_detail'
     ])
     for (const table of added) {

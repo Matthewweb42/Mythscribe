@@ -350,7 +350,12 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'names:notAMention': 'write',
   'names:questions': 'read',
   'names:answer': 'write',
-  'passages:search': 'read'
+  'passages:search': 'read',
+  'research:list': 'read',
+  'research:add': 'write',
+  'research:create': 'write',
+  'research:setNotCanon': 'write',
+  'research:openOriginal': 'read'
 }
 
 /** Whether a channel is refused while the app is read-only. */
@@ -699,7 +704,12 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'names:notAMention': 'v2',
   'names:questions': 'v2',
   'names:answer': 'v2',
-  'passages:search': 'v2'
+  'passages:search': 'v2',
+  'research:list': 'v2',
+  'research:add': 'v2',
+  'research:create': 'v2',
+  'research:setNotCanon': 'v2',
+  'research:openOriginal': 'v2'
 }
 
 /** The message a channel of the other memory is refused with. */

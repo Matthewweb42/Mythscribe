@@ -99,6 +99,10 @@ import { SideWorkBar } from '@renderer/features/sideWork/SideWorkStatus'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { DropOverlay } from '@renderer/features/library/DropOverlay'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
+import { currentStoryMemory } from '@renderer/features/project/storyMemory'
+import { usePageStore } from '@renderer/features/research/pageStore'
+import { ResearchPage } from '@renderer/features/research/ResearchPage'
+import { useResearchStore } from '@renderer/features/research/researchStore'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { EditPassReport } from '@renderer/features/editPass/EditPassReport'
 import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
@@ -316,6 +320,9 @@ export function App(): React.JSX.Element {
       useCategoryStore.getState().clear()
       // F-9.8: the Library and any upload under review belong to the project that closed.
       useLibraryStore.getState().clear()
+      // F-16.8: and so do the Research meta and the open pages.
+      useResearchStore.getState().clear()
+      usePageStore.getState().clear()
       useFactStore.getState().clear()
       // F-9.13: the Changes log belongs to the project that closed.
       useChangesStore.getState().clear()
@@ -396,6 +403,13 @@ export function App(): React.JSX.Element {
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
+    // F-16.8: story memory v2's Research section (its channels answer only in v2).
+    if (currentStoryMemory() === 'v2') {
+      useResearchStore
+        .getState()
+        .load()
+        .catch((err: unknown) => toast.error(describeError(err)))
+    }
     useEditorSettingsStore
       .getState()
       .load()
@@ -1183,6 +1197,7 @@ function PaneContent({
 }): React.JSX.Element {
   const focus = useFocusStore((s) => s.active)
   const folderView = useOutlineViewStore((s) => s.folderView)
+  const section = useTreeStore((s) => (node === undefined ? undefined : s.sectionOf[node.id]))
   if (entityId !== null) {
     return (
       <WithSideWorkBar>
@@ -1197,6 +1212,21 @@ function PaneContent({
         <div className="flex flex-1 items-center justify-center p-6" data-testid="empty-state">
           <p className="m-0 text-sm text-fg-muted">Select a document to start writing.</p>
         </div>
+      </WithSideWorkBar>
+    )
+  }
+  // F-16.8: a Research document opens as a page (the page schema, its source and Not canon
+  // switch); a Research folder has no stack or cork board, since its documents are not scenes.
+  if (section === 'research') {
+    return (
+      <WithSideWorkBar>
+        {node.kind === 'document' ? (
+          <ResearchPage key={node.id} nodeId={node.id} />
+        ) : (
+          <div className="flex flex-1 items-center justify-center p-6">
+            <p className="m-0 text-sm text-fg-muted">Select a Research document to open it.</p>
+          </div>
+        )}
       </WithSideWorkBar>
     )
   }

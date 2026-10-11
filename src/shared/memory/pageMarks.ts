@@ -1,14 +1,51 @@
+import { z } from 'zod'
 import type { TiptapNodeT } from '../tiptap'
 
 /**
- * The marks a page paragraph may carry in stored JSON (F-16.5, F-16.6), read by main without the
- * editor: the passage index labels a paragraph `notCanon` from them, and the Story notes block
- * (P1 slice 5) leaves such paragraphs out. Slice 2's page schema writes them (`PageParagraph`),
- * and adds `aiFiled` and `aiWritten` here; manuscript documents never carry any of them.
+ * The marks a page paragraph may carry in stored JSON (F-16.5, F-16.6, F-16.8), read by main
+ * without the editor: the passage index labels a paragraph `notCanon` from them, and the Story
+ * notes block (P1 slice 5) leaves such paragraphs out. The page schema writes them
+ * (`PageParagraph` in the renderer, used by Research pages and, from slice 3, Pinned and Ideas);
+ * manuscript documents and scene notes never carry any of them.
  */
 
 /** The paragraph attribute the Not canon mark is stored under (`data-not-canon` when rendered). */
 export const NOT_CANON_ATTR = 'notCanon'
+
+/**
+ * A paragraph filed from an upload (F-16.9, written from slice 5): the source document, the
+ * paragraph there, and the words it was filed from. Cleared when the author edits the paragraph.
+ */
+export const AI_FILED_ATTR = 'aiFiled'
+export const AiFiled = z.object({
+  doc: z.string().min(1),
+  para: z.number().int().nonnegative(),
+  quote: z.string()
+})
+export type AiFiled = z.infer<typeof AiFiled>
+
+/**
+ * A paragraph Ms Scribe wrote from the chat (F-16.26, written from P3): the chat turn and the
+ * day. Cleared when the author edits the paragraph.
+ */
+export const AI_WRITTEN_ATTR = 'aiWritten'
+export const AiWritten = z.object({ turn: z.string().min(1), date: z.string().min(1) })
+export type AiWritten = z.infer<typeof AiWritten>
+
+/** Every attribute the page paragraph adds to the manuscript paragraph, by stored name. */
+export const PAGE_ATTRS = [NOT_CANON_ATTR, AI_FILED_ATTR, AI_WRITTEN_ATTR] as const
+
+/** The `aiFiled` mark of a stored block, or null when it has none (or an unreadable one). */
+export function aiFiledOf(node: TiptapNodeT): AiFiled | null {
+  const parsed = AiFiled.safeParse(node.attrs?.[AI_FILED_ATTR])
+  return parsed.success ? parsed.data : null
+}
+
+/** The `aiWritten` mark of a stored block, or null when it has none (or an unreadable one). */
+export function aiWrittenOf(node: TiptapNodeT): AiWritten | null {
+  const parsed = AiWritten.safeParse(node.attrs?.[AI_WRITTEN_ATTR])
+  return parsed.success ? parsed.data : null
+}
 
 /** Whether a stored block carries the Not canon mark. */
 export function isNotCanon(node: TiptapNodeT): boolean {

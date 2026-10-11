@@ -8,6 +8,7 @@ import {
 } from '@shared/replace'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { reloadResearchPages } from '@renderer/features/research/pageStore'
 import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -114,11 +115,15 @@ export function describeReplaceCounts(total: number, documents: number): string 
   return `${plural(total, 'occurrence')} in ${plural(documents, 'document')}`
 }
 
-/** The loaded documents among `written` are read again and the tree's word counts follow. */
+/**
+ * The loaded documents among `written` are read again and the tree's word counts follow; an open
+ * Research page (F-16.8, P1-D9: Replace in project includes Research) is read again too.
+ */
 async function refresh(written: readonly { id: string; wordCount: number }[]): Promise<void> {
   const tree = useTreeStore.getState()
   for (const { id, wordCount } of written) tree.setWordCount(id, wordCount)
-  await useDocumentStore.getState().reload(written.map((each) => each.id))
+  const ids = written.map((each) => each.id)
+  await Promise.all([useDocumentStore.getState().reload(ids), reloadResearchPages(ids)])
 }
 
 export const useReplaceStore = create<ReplaceState>((set, get) => {

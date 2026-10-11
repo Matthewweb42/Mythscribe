@@ -65,7 +65,8 @@ import type {
   Channel,
   Entity,
   IpcError,
-  JobsIndexAllResult
+  JobsIndexAllResult,
+  TreeNode
 } from '@shared/ipc/contract'
 import {
   SUMMARY_BACKFILL_DELAY_MS,
@@ -298,6 +299,16 @@ import {
   sanitizeName
 } from '../project/projectStore'
 import { convertLegacyProject, legacyBackupPath } from '../project/legacyImport'
+import { ensureResearchRoot } from '../project/seed'
+import {
+  addResearchFiles,
+  copyResearchMeta,
+  createResearchNote,
+  listResearchDocs,
+  researchDocOf,
+  researchOriginalPath,
+  setResearchNotCanon
+} from '../research/researchStore'
 import { writeTextAtomic } from '../fs'
 import { renderDisclosure } from '../provenance/disclosure'
 import {
@@ -437,7 +448,7 @@ import {
 } from '../memory/nameIndexer'
 import {
   dropOwner,
-  indexScene,
+  indexNodePassages,
   indexStaleRecords,
   pruneMemoryIndex,
   searchMemoryPassages,
@@ -857,11 +868,12 @@ export function registerHandlers({
       }
       if (job.kind === 'passages') {
         if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
-        // Keyed to the manuscript root, the job is every record page that changed.
+        // Keyed to the manuscript root, the job is every record page that changed; keyed to a
+        // node, its scene and notes, or its Research page (F-16.8).
         const changed =
           job.nodeId === manuscriptRootId(db)
             ? indexStaleRecords(db, now) > 0
-            : indexScene(db, job.nodeId, now)
+            : indexNodePassages(db, job.nodeId, now)
         return Promise.resolve({ requested: false, value: { changed, scanned: changed } })
       }
       // F-4.12: the tag mention scan is v1's.
@@ -1110,7 +1122,10 @@ export function registerHandlers({
 
   register('tree:duplicate', ({ id }) => {
     const db = manager.require().connection.orm
-    const copies = duplicateNode(db, id).map(toTreeNode)
+    const rows = duplicateNode(db, id)
+    // F-16.8: a copied Research page keeps its original and its Not canon switch.
+    if (memory() === 'v2') copyResearchMeta(db, id, rows)
+    const copies = rows.map(toTreeNode)
     // F-16.5: the copies are new manuscript scenes for the name scan and the passage index.
     queueMemoryIndex(db)
     return copies
@@ -4623,6 +4638,66 @@ export function registerHandlers({
     })
   )
 
+  // F-16.8: the Research section. Its documents are saved through `document:save` like any
+  // other; these channels make them, switch a page Not canon, and open an upload's original.
+  register('research:list', () => listResearchDocs(manager.require().connection.orm))
+
+  register('research:add', async ({ paths, parentId }) => {
+    const session = manager.require()
+    const chosen = paths ?? (await dialogs.chooseContextFiles())
+    if (chosen === null) return null
+    const db = session.connection.orm
+    const sources = chosen.map((file) => ({
+      name: path.basename(file),
+      read: () => fs.readFileSync(file)
+    }))
+    const result = await addResearchFiles(
+      db,
+      session.folder,
+      session.info.format,
+      sources,
+      parentId
+    )
+    const nodes: TreeNode[] = []
+    for (const id of result.created) {
+      const row = getNode(db, id)
+      if (row !== undefined) nodes.push(toTreeNode(row))
+      mentionQueue.touch('passages', id)
+    }
+    return {
+      nodes,
+      docs: result.created.map((id) => researchDocOf(db, id)),
+      skipped: result.skipped
+    }
+  })
+
+  register('research:create', ({ parentId, afterId, title }) => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const row = createResearchNote(db, session.info.format, {
+      ...(parentId === undefined ? {} : { parentId }),
+      ...(afterId === undefined ? {} : { afterId }),
+      ...(title === undefined ? {} : { title })
+    })
+    return { node: toTreeNode(row), doc: researchDocOf(db, row.id) }
+  })
+
+  register('research:setNotCanon', ({ nodeId, notCanon }) => {
+    const db = manager.require().connection.orm
+    const doc = setResearchNotCanon(db, nodeId, notCanon)
+    // Every paragraph of the page reads as the switch says now.
+    mentionQueue.touch('passages', nodeId)
+    return doc
+  })
+
+  register('research:openOriginal', async ({ nodeId }) => {
+    const session = manager.require()
+    const target = researchOriginalPath(session.connection.orm, session.folder, nodeId)
+    const failure = await openPath(target)
+    if (failure !== '') throw new AppError('IO', failure)
+    return null
+  })
+
   manager.onChange((info) => {
     // Open, create, and close all land here: a profile built for one project never answers for another.
     resetVoiceProfileCache()
@@ -4683,6 +4758,8 @@ export function registerHandlers({
       }
     } else if (info?.storyMemory === 'v2') {
       try {
+        // F-16.8: the Research section, made once, before the window reads the tree.
+        ensureResearchRoot(manager.require().connection.orm)
         pruneMemoryIndex(manager.require().connection.orm)
       } catch (err) {
         console.warn('Could not update the story memory index', err)

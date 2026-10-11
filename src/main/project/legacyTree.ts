@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { HierarchyLevel, type SectionType } from '@shared/labels'
+import { HierarchyLevel, type BookSectionType } from '@shared/labels'
 import { SCENE_META_FIELD_MAX, SCENE_META_TIMELINE_MAX, emptySceneMeta } from '@shared/sceneMeta'
 import { countWords } from '@shared/wordCount'
 import type { NodeInsert } from '../db/schema'
@@ -40,7 +40,7 @@ export interface LegacyDocument {
   modified: string
 }
 
-export type SectionIds = Record<SectionType, string>
+export type SectionIds = Record<BookSectionType, string>
 
 export interface LegacyTreePlan {
   rows: NodeInsert[]
@@ -48,7 +48,7 @@ export interface LegacyTreePlan {
   ids: Map<string, string>
 }
 
-const SECTION_OF: Record<string, SectionType> = {
+const SECTION_OF: Record<string, BookSectionType> = {
   'front-matter': 'front',
   manuscript: 'manuscript',
   'end-matter': 'end'
@@ -94,7 +94,7 @@ export function planLegacyTree(
   // Top-level rows grouped by where they land.
   const topLevel = ordered(childrenOf.get(null) ?? [])
   const notes = topLevel.filter((doc) => doc.doc_type === 'note')
-  const placed: Record<SectionType, LegacyDocument[]> = { front: [], manuscript: [], end: [] }
+  const placed: Record<BookSectionType, LegacyDocument[]> = { front: [], manuscript: [], end: [] }
   for (const doc of topLevel) {
     if (doc.doc_type === 'note') continue
     placed[SECTION_OF[doc.section ?? ''] ?? 'manuscript'].push(doc)

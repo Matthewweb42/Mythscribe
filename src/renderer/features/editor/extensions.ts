@@ -6,17 +6,17 @@ import {
   type Editor,
   type Extensions
 } from '@tiptap/core'
-import Paragraph from '@tiptap/extension-paragraph'
 import TextAlign from '@tiptap/extension-text-align'
 import { DOMSerializer, type Schema } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
-import { IMPORTED_ORIGIN, PARAGRAPH_ORIGIN_ATTR } from '@shared/provenance'
 import { AiOrigin } from './aiOrigin'
 import { FindReplace } from './findReplace'
 import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
 import { NameCheck } from './nameCheck'
+import { OriginParagraph } from './originParagraph'
+import { PageParagraph } from './pageParagraph'
 import { RewriteTarget } from './rewriteTarget'
 import { SmartTypography } from './smartTypography'
 import { TagRange } from './TagRange'
@@ -177,31 +177,7 @@ export const SceneBreak = Node.create<SceneBreakOptions>({
   }
 })
 
-/**
- * The paragraph with its import provenance (F-12.2): a paragraph the manuscript importer wrote
- * carries `attrs.origin = 'imported'` and renders it as `data-origin="imported"`, so imported
- * prose stays distinguishable from what the author typed afterwards (and from the AI-origin
- * mark, F-14.6, which lives on text instead). Nothing in the editor sets the attribute; it rides
- * on the document the importer stored, survives a round-trip through `getJSON`, and parses back
- * from the HTML flavour of the clipboard. StarterKit's own paragraph is off in `buildExtensions`
- * so this one is the schema's.
- */
-export const OriginParagraph = Paragraph.extend({
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      [PARAGRAPH_ORIGIN_ATTR]: {
-        default: null,
-        parseHTML: (element: HTMLElement) =>
-          element.getAttribute('data-origin') === IMPORTED_ORIGIN ? IMPORTED_ORIGIN : null,
-        renderHTML: (attributes: Record<string, unknown>) =>
-          attributes[PARAGRAPH_ORIGIN_ATTR] === IMPORTED_ORIGIN
-            ? { 'data-origin': IMPORTED_ORIGIN }
-            : {}
-      }
-    }
-  }
-})
+export { OriginParagraph } from './originParagraph'
 
 /**
  * The one owner of the editor schema (F-3.1): StarterKit trimmed to what the spec lists (marks,
@@ -262,14 +238,13 @@ export const EDITOR_CORE_OPTIONS = {
   clipboardTextSerializer: { blockSeparator: '\n' }
 } as const
 
-export function buildExtensions({
-  sceneBreak,
-  onSave,
-  onEscape,
-  inlineTagNodeId,
-  onTagSelection
-}: EditorSchemaOptions): Extensions {
-  const extensions: Extensions = [
+/** The schema's shared core (F-3.1): StarterKit trimmed, `paragraph` in place of its own, alignment, breaks, save. */
+function coreExtensions(
+  paragraph: typeof OriginParagraph,
+  sceneBreak: string,
+  onSave: () => void
+): Extensions {
+  return [
     StarterKit.configure({
       heading: { levels: [...HEADING_LEVELS] },
       link: false,
@@ -286,13 +261,23 @@ export function buildExtensions({
       // inactive. The scene-break command opens its own paragraph at the end of the document.
       trailingNode: false
     }),
-    OriginParagraph,
+    paragraph,
     TextAlign.configure({ types: ['heading', 'paragraph'], alignments: [...ALIGNMENTS] }),
     SceneBreak.configure({ text: sceneBreak }),
     SaveShortcut.configure({ onSave }),
     ClipboardParagraphs,
     SmartTypography
   ]
+}
+
+export function buildExtensions({
+  sceneBreak,
+  onSave,
+  onEscape,
+  inlineTagNodeId,
+  onTagSelection
+}: EditorSchemaOptions): Extensions {
+  const extensions: Extensions = coreExtensions(OriginParagraph, sceneBreak, onSave)
   if (inlineTagNodeId !== undefined) {
     extensions.push(
       InlineTag.configure({ nodeId: inlineTagNodeId }),
@@ -310,6 +295,26 @@ export function buildExtensions({
   return extensions
 }
 
+/** What a page editor (`PageEditor`) passes for its schema. */
+export interface PageSchemaOptions {
+  /** What a scene break on the page shows; pages are not the manuscript, so it is fixed. */
+  sceneBreak: string
+  /** Runs on Ctrl/Cmd+S. */
+  onSave: () => void
+}
+
+/**
+ * The page schema (F-16.6, F-16.8; plan P1 §2.3): the schema of the pages story memory v2 keeps
+ * beside the manuscript (Research documents; a record's Pinned and Ideas from slice 3). The
+ * manuscript's core with `PageParagraph` (Not canon, `aiFiled`, `aiWritten`, and the
+ * `clearAiMarks` plugin) in place of `OriginParagraph`, and none of the manuscript's own tools
+ * (tags, ghost text, rewrite, find, tracked changes). A separate builder, so no manuscript
+ * document ever gains the page's attributes.
+ */
+export function buildPageExtensions({ sceneBreak, onSave }: PageSchemaOptions): Extensions {
+  return coreExtensions(PageParagraph, sceneBreak, onSave)
+}
+
 /**
  * The manuscript editor's schema without an editor (F-3.12), for rendering stored documents
  * read-only (the compiled preview). Built from the same `buildExtensions` a manuscript document
@@ -319,4 +324,9 @@ export function buildExtensions({
  */
 export function manuscriptSchema(sceneBreak: string): Schema {
   return getSchema(buildExtensions({ sceneBreak, onSave: () => undefined, inlineTagNodeId: '' }))
+}
+
+/** The page schema without an editor (F-16.8), for checking stored pages (`storedContent.test.ts`). */
+export function pageSchema(sceneBreak: string): Schema {
+  return getSchema(buildPageExtensions({ sceneBreak, onSave: () => undefined }))
 }

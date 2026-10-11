@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
-import { SEARCH_TYPES, type SearchRequest, type SearchResponse } from '@shared/search'
+import {
+  SEARCH_TYPES,
+  searchTypesFor,
+  type SearchRequest,
+  type SearchResponse
+} from '@shared/search'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { SEARCH_DEBOUNCE_MS, resetSearchStore, useSearchStore } from './searchStore'
 
@@ -88,7 +93,10 @@ describe('searchStore (F-10.1)', () => {
     await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS - 1)
     expect(requests).toEqual([])
     await vi.advanceTimersByTimeAsync(1)
-    expect(requests).toEqual([{ query: 'The Lantern', types: [...SEARCH_TYPES], tagId: null }])
+    // No project is open, so story memory v1's types are asked for (F-16.8: never Research).
+    expect(requests).toEqual([
+      { query: 'The Lantern', types: [...searchTypesFor('v1')], tagId: null }
+    ])
     pending[0]?.(answerFor('one'))
     await rest()
     expect(state()).toMatchObject({
@@ -141,7 +149,7 @@ describe('searchStore (F-10.1)', () => {
     state().toggleType('document')
     state().toggleType('world')
     state().toggleType('document')
-    expect(state().types).toEqual(['document', 'notes', 'character', 'setting'])
+    expect(state().types).toEqual(['document', 'notes', 'character', 'setting', 'research'])
     state().setTagId('t-1')
     expect(requests.slice(1).map((r) => [r.types.length, r.tagId])).toEqual([
       [4, null],
@@ -160,7 +168,8 @@ describe('searchStore (F-10.1)', () => {
     await rest()
     for (const type of SEARCH_TYPES) state().toggleType(type)
     expect(state()).toMatchObject({ types: [], status: 'idle', response: null })
-    expect(requests).toHaveLength(SEARCH_TYPES.length)
+    // The last v1 type off asks nothing more, and Research is never offered in v1.
+    expect(requests).toHaveLength(searchTypesFor('v1').length)
   })
 
   it('reports a failed request with its cause', async () => {

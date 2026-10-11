@@ -21,7 +21,9 @@ export const SIDEBAR_TOOL_IDS = [
   // F-9.16: what the book leaves unexplained, contradicted, unfinished, or unstated.
   'todo',
   // F-9.13: what the AI added to the story bible on its own, with Undo.
-  'changes'
+  'changes',
+  // F-16.8 (story memory v2 only): the author's uploaded and written research.
+  'research'
 ] as const
 export type SidebarToolId = (typeof SIDEBAR_TOOL_IDS)[number]
 

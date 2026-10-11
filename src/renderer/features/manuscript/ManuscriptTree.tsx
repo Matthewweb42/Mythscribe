@@ -2,11 +2,12 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import type { NovelFormat, TreeNode } from '@shared/ipc/contract'
 import { goalTargetError, parseGoalTarget } from '@shared/goals'
-import { HierarchyLevel, sectionLabel } from '@shared/labels'
+import { HierarchyLevel, isBookSection, sectionLabel } from '@shared/labels'
 import { useCompileWindowStore } from '@renderer/features/compile/compileWindowStore'
 import { formatCompactWords } from '@renderer/features/editor/wordFormat'
 import { GoalBar } from '@renderer/features/goals/GoalBar'
 import { useGoalsStore } from '@renderer/features/goals/goalsStore'
+import { useResearchStore } from '@renderer/features/research/researchStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useDocumentTagStore } from '@renderer/features/tags/documentTagStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
@@ -15,7 +16,7 @@ import { describeError } from '@renderer/lib/errors'
 import { ContextMenu } from './ContextMenu'
 import { LevelIcon } from './LevelIcon'
 import { INCLUDE_ITEM_ID, templateIdOf, treeContextMenuItems } from './contextMenuItems'
-import { resolveDropTarget, type DropZone } from './placement'
+import { resolveDropTarget, resolveGenericTarget, type DropZone } from './placement'
 import { tagFilterView } from './tagFilter'
 import { useTreeStore, type TreeIndex } from './treeStore'
 
@@ -151,7 +152,7 @@ function TreeItem({
   // Under a filter every visible folder is open, so a match is never hidden behind a chevron.
   const expanded = isFolder && (filter !== null || !collapsed)
   const label = node.sectionType ? sectionLabel(format, node.sectionType) : node.title
-  const isMatter = node.kind === 'document' && section !== 'manuscript'
+  const isMatter = node.kind === 'document' && (section === 'front' || section === 'end')
   const zone = over?.id === id ? over.zone : null
   const matched = filter?.matches.has(id) === true
   const visibleChildIds = filter
@@ -381,7 +382,16 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
     await useGoalsStore.getState().set({ nodeTargets: [{ nodeId, target: null }] })
     return
   }
-  if (itemId === 'new-generic-document') return createGeneric('document', nodeId)
+  if (itemId === 'new-generic-document') {
+    // F-16.8: a document made in Research is a written Research note.
+    const index = useTreeStore.getState()
+    if (index.sectionOf[nodeId] === 'research') {
+      const target = resolveGenericTarget(index, nodeId)
+      if (target !== null) await useResearchStore.getState().create(target)
+      return
+    }
+    return createGeneric('document', nodeId)
+  }
   if (itemId === 'new-generic-folder') return createGeneric('folder', nodeId)
   const template = templateIdOf(itemId)
   if (template) return createFromTemplate(template, nodeId)
@@ -398,11 +408,31 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
  * (F-2.6). Rows drag within their section (F-2.4): onto a folder to
  * nest, onto a row's top or bottom edge to become its sibling; sections only accept nesting.
  * Manuscript rows with a word target (F-10.3) show their count against it; the menu sets and
- * clears it.
+ * clears it. F-16.8: `roots` picks the sections shown: the book's three by default (the
+ * Manuscript tab), the Research root alone in the Research tab, which takes no tag filter and no
+ * compile ticks.
  */
-export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.Element | null {
+export function ManuscriptTree({
+  format,
+  roots
+}: {
+  format: NovelFormat
+  roots?: readonly string[]
+}): React.JSX.Element | null {
   const loaded = useTreeStore((s) => s.loaded)
-  const rootIds = useTreeStore((s) => s.rootIds)
+  const allRootIds = useTreeStore((s) => s.rootIds)
+  const byIdForRoots = useTreeStore((s) => s.byId)
+  const rootIds = useMemo(
+    () =>
+      roots === undefined
+        ? allRootIds.filter((id) => {
+            const type = byIdForRoots[id]?.sectionType
+            return type === null || type === undefined || isBookSection(type)
+          })
+        : allRootIds.filter((id) => roots.includes(id)),
+    [allRootIds, byIdForRoots, roots]
+  )
+  const research = rootIds.some((id) => byIdForRoots[id]?.sectionType === 'research')
   const childrenOf = useTreeStore((s) => s.childrenOf)
   const collapsed = useTreeStore((s) => s.collapsed)
   const selectedId = useTreeStore((s) => s.selectedId)
@@ -428,10 +458,10 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
     [byId, childrenOf, rootIds, sectionOf, wordCountRollup]
   )
   const filter = useMemo<TreeFilter | null>(() => {
-    if (!filterTag) return null
+    if (!filterTag || research) return null
     const view = tagFilterView(index, tagIdsByNode, filterTag.id)
     return { visible: view.visible, matches: new Set(view.matches), color: filterTag.color }
-  }, [index, tagIdsByNode, filterTag])
+  }, [index, tagIdsByNode, filterTag, research])
   const rows = useMemo(
     () => listVisibleRows(rootIds, childrenOf, collapsed, filter?.visible),
     [rootIds, childrenOf, collapsed, filter]
@@ -469,7 +499,10 @@ export function ManuscriptTree({ format }: { format: NovelFormat }): React.JSX.E
             menu.id,
             format,
             nodeTargets?.[menu.id] !== undefined,
-            compileStateLoaded ? !excluded.includes(menu.id) : undefined
+            // F-16.8: Research is never compiled, so its rows offer no tick.
+            compileStateLoaded && index.sectionOf[menu.id] !== 'research'
+              ? !excluded.includes(menu.id)
+              : undefined
           )
         : [],
     [index, menu, format, nodeTargets, compileStateLoaded, excluded]

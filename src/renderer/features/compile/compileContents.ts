@@ -6,7 +6,7 @@ import {
 } from '@shared/compileFormat'
 import type { BookItem, CompiledBook, ContentBlock, Inline } from '@shared/compileModel'
 import { pageRuns } from '@shared/compilePages'
-import type { SectionType } from '@shared/labels'
+import { isBookSection, type SectionType } from '@shared/labels'
 import type { TreeIndex } from '@renderer/features/manuscript/treeStore'
 
 /**
@@ -102,8 +102,9 @@ export interface IncludeRow {
 }
 
 /**
- * Every node of the three sections in tree order with its include state; a section root is
- * titled as the binder titles it (`sectionTitle`, e.g. "Front Matter").
+ * Every node of the book's three sections in tree order with its include state (never the
+ * Research section, F-16.8); a section root is titled as the binder titles it (`sectionTitle`,
+ * e.g. "Front Matter").
  */
 export function includeRows(
   index: Pick<TreeIndex, 'byId' | 'childrenOf' | 'rootIds'>,
@@ -125,7 +126,11 @@ export function includeRows(
     })
     for (const child of index.childrenOf[id] ?? []) walk(child, depth + 1, above || own)
   }
-  for (const root of index.rootIds) walk(root, 0, false)
+  for (const root of index.rootIds) {
+    // F-16.8: the Research section (story memory v2) is never compiled, so it is not listed.
+    const type = index.byId[root]?.sectionType
+    if (type === null || type === undefined || isBookSection(type)) walk(root, 0, false)
+  }
   return rows
 }
 

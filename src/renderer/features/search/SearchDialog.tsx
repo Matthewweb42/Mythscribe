@@ -4,13 +4,15 @@ import {
   SEARCH_MAX_RESULTS,
   SEARCH_QUERY_MAX,
   SEARCH_QUERY_MIN,
-  SEARCH_TYPES,
+  SEARCH_RESULT_KIND,
   SEARCH_TYPE_LABEL,
   isSearchable,
+  searchTypesFor,
   normalizeQuery,
   type SearchRange,
   type SearchResult
 } from '@shared/search'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { APP_SHORTCUTS, formatShortcut } from '@renderer/features/shell/shortcuts'
 import { useTagStore } from '@renderer/features/tags/tagStore'
@@ -18,7 +20,7 @@ import { describeError } from '@renderer/lib/errors'
 import { useReplaceStore } from './replaceStore'
 import { SEARCH_INPUT_CLASS, SearchFrame } from './SearchFrame'
 import { jumpToResult } from './searchJump'
-import { useSearchStore } from './searchStore'
+import { offeredSearchTypes, useSearchStore } from './searchStore'
 
 /** Header action (F-10.1): opens the project search; Ctrl+Shift+F and Edit › Search project… do too. */
 export function SearchButton(): React.JSX.Element {
@@ -61,10 +63,14 @@ function Highlighted({
   return <>{parts}</>
 }
 
-/** Where the row's text lives: the parent or kind, and the entity field when the hit is in one. */
+/**
+ * Where the row's text lives: what it is when that needs saying (notes, a Research source
+ * document), the parent or kind, and the entity field when the hit is in one.
+ */
 function locationLine(result: SearchResult): string {
-  const type = result.type === 'notes' ? 'Notes' : null
-  return [type, result.location, result.field].filter((part) => part).join(' · ')
+  return [SEARCH_RESULT_KIND[result.type], result.location, result.field]
+    .filter((part) => part)
+    .join(' · ')
 }
 
 /** The project search dialog (F-10.1), shown while the search store says it is open. */
@@ -97,6 +103,8 @@ function SearchDialogBody(): React.JSX.Element {
   const toggleType = useSearchStore((s) => s.toggleType)
   const setTagId = useSearchStore((s) => s.setTagId)
   const tagIds = useTagStore((s) => s.ids)
+  // F-16.8: a v2 project's search offers its Research documents too.
+  const offered = searchTypesFor(useStoryMemory())
   const tagsById = useTagStore((s) => s.byId)
   // The active row belongs to the answer it was chosen in: a new answer starts at its first row.
   const [active, setActiveRow] = useState({ response, index: 0 })
@@ -147,7 +155,7 @@ function SearchDialogBody(): React.JSX.Element {
   const normalized = normalizeQuery(query)
   const message = !isSearchable(normalized)
     ? `Type at least ${SEARCH_QUERY_MIN} characters.`
-    : types.length === 0
+    : offeredSearchTypes(types).length === 0
       ? 'Choose at least one type to search.'
       : status === 'error'
         ? (error ?? 'The search failed.')
@@ -192,7 +200,7 @@ function SearchDialogBody(): React.JSX.Element {
         />
         <div className="flex flex-wrap items-center gap-1.5">
           <div role="group" aria-label="Search in" className="flex flex-wrap gap-1.5">
-            {SEARCH_TYPES.map((type) => (
+            {offered.map((type) => (
               <button
                 key={type}
                 type="button"

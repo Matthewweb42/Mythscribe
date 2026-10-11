@@ -96,11 +96,34 @@ export function manuscriptDocuments(db: TreeDb, rows: NodeRow[] = listNodes(db))
 }
 
 /**
- * Every document row of the project (front matter, the manuscript, end matter) in the order the
- * tree shows them, sections in their own order. Snapshots (F-8.6) walk these.
+ * Every document row of the book (front matter, the manuscript, end matter) in the order the
+ * tree shows them, sections in their own order. Snapshots (F-8.6) walk these. F-16.8: the
+ * Research section (story memory v2) is not part of the book, so its documents are left out.
  */
 export function projectDocuments(db: TreeDb, rows: NodeRow[] = listNodes(db)): NodeRow[] {
-  return documentsInTreeOrder(rows, () => true)
+  const research = researchSubtree(rows)
+  return documentsInTreeOrder(rows, (row) => !research.has(row.id))
+}
+
+/** The ids of the Research root (F-16.8) and every node under it; empty when there is none. */
+export function researchSubtree(rows: readonly NodeRow[]): Set<string> {
+  const root = rows.find((row) => row.parentId === null && row.sectionType === 'research')
+  const ids = new Set<string>()
+  if (!root) return ids
+  ids.add(root.id)
+  const children = new Map<string, NodeRow[]>()
+  for (const row of rows) {
+    if (row.parentId === null) continue
+    const list = children.get(row.parentId)
+    if (list) list.push(row)
+    else children.set(row.parentId, [row])
+  }
+  const stack = [...(children.get(root.id) ?? [])]
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    ids.add(next.id)
+    stack.push(...(children.get(next.id) ?? []))
+  }
+  return ids
 }
 
 /** The document rows `keep` accepts, sorted by each row's chain of positions from its root. */

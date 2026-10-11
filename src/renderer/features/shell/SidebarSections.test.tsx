@@ -11,6 +11,7 @@ import { ThreadsTab } from '@renderer/features/threads/ThreadsTab'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetLayoutStore, useLayoutStore } from './layoutStore'
 import { SidebarSections } from './SidebarSections'
+import { ResearchTab } from '@renderer/features/research/ResearchTab'
 import { buildSections, type SidebarSection } from './sectionList'
 
 const section = (
@@ -191,7 +192,8 @@ describe('buildSections (F-9.11)', () => {
     library: 0,
     changes: 0,
     todo: 0,
-    sheets: {}
+    sheets: {},
+    research: 0
   }
   const used = (built: SidebarSection[]): string[] => built.filter((s) => s.used).map((s) => s.id)
 
@@ -211,7 +213,8 @@ describe('buildSections (F-9.11)', () => {
       library: 3,
       changes: 2,
       todo: 3,
-      sheets: { magic: 2, world: 1 }
+      sheets: { magic: 2, world: 1 },
+      research: 0
     })
     expect(used(busy)).toEqual([
       'manuscript',
@@ -277,5 +280,23 @@ describe('buildSections (F-9.11)', () => {
           ['manuscript', 'bible', 'tools'].indexOf(a) - ['manuscript', 'bible', 'tools'].indexOf(b)
       )
     )
+  })
+
+  it('lists Research only in story memory v2, first of the tools and always shown (F-16.8)', () => {
+    const v1 = buildSections(ALL_BUILTIN_CATEGORIES, { ...counts, research: 3 })
+    expect(v1.map((s) => s.id)).not.toContain('research')
+    expect(v1.map((s) => [s.id, s.group, s.used])).toEqual(
+      buildSections(ALL_BUILTIN_CATEGORIES, counts).map((s) => [s.id, s.group, s.used])
+    )
+    const v2 = buildSections(ALL_BUILTIN_CATEGORIES, { ...counts, research: 3 }, { research: true })
+    const tools = v2.filter((s) => s.group === 'tools').map((s) => s.id)
+    expect(tools[0]).toBe('research')
+    expect(v2.find((s) => s.id === 'research')).toMatchObject({
+      label: 'Research',
+      used: true,
+      count: 3
+    })
+    const panel = v2.find((s) => s.id === 'research')?.render('novel')
+    expect(isValidElement(panel) ? panel.type : null).toBe(ResearchTab)
   })
 })

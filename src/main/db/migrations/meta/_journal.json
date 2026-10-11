@@ -225,6 +225,13 @@
       "when": 1791752452868,
       "tag": "0031_memory_passage_fts",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1791757821145,
+      "tag": "0032_research_doc",
+      "breakpoints": true
     }
   ]
 }

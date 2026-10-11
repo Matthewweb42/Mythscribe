@@ -6,6 +6,7 @@ import type { Channel, Input, Output } from '@shared/ipc/contract'
 import {
   SEARCH_MAX_RESULTS,
   SEARCH_TYPES,
+  searchTypesFor,
   type SearchRequest,
   type SearchResponse,
   type SearchResult
@@ -25,6 +26,7 @@ import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layou
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { useProjectStore } from '@renderer/features/project/projectStore'
 import { resetReplaceStore, useReplaceStore } from './replaceStore'
 import { SearchButton, SearchDialog } from './SearchDialog'
 import { resetSearchStore, useSearchStore } from './searchStore'
@@ -203,7 +205,9 @@ describe('SearchDialog (F-10.1)', () => {
     render(<SearchDialog />)
     await userEvent.type(box(), 'waited')
     await waitFor(() => expect(options()).toHaveLength(4))
-    expect(requests).toEqual([{ query: 'waited', types: [...SEARCH_TYPES], tagId: null }])
+    // No project is open, so story memory v1's types are asked for (F-16.8: never Research).
+    expect(requests).toEqual([{ query: 'waited', types: [...searchTypesFor('v1')], tagId: null }])
+    expect(screen.queryByRole('button', { name: 'Source documents' })).toBeNull()
 
     const documents = screen.getByRole('button', { name: 'Documents' })
     await userEvent.click(documents)
@@ -219,6 +223,58 @@ describe('SearchDialog (F-10.1)', () => {
     expect(requests[2]?.tagId).toBe(tagFixture[0]!.id)
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Filter by tag' }), '')
     await waitFor(() => expect(requests[3]?.tagId).toBeNull())
+  })
+
+  it('offers Research in a story memory v2 project and labels its hits source documents (F-16.8)', async () => {
+    useProjectStore.setState({
+      current: {
+        id: 'p-2',
+        name: 'Memory',
+        format: 'novel',
+        path: '/books/Memory.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 33,
+        storyMemory: 'v2'
+      }
+    })
+    try {
+      useSearchStore.getState().openSearch()
+      render(<SearchDialog />)
+      expect(screen.getByRole('button', { name: 'Source documents' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      )
+      await userEvent.type(box(), 'waited')
+      await waitFor(() => expect(requests).toHaveLength(1))
+      expect(requests[0]?.types).toEqual([...SEARCH_TYPES])
+      act(() =>
+        useSearchStore.setState({
+          status: 'done',
+          answeredQuery: 'waited',
+          response: {
+            results: [
+              {
+                type: 'research',
+                id: 'r-1',
+                title: 'Tides',
+                location: 'Maps',
+                field: null,
+                snippet: { text: 'She waited for the tide.', highlights: [[4, 10]] },
+                titleHighlights: [],
+                count: 1
+              }
+            ],
+            total: 1,
+            truncated: false
+          }
+        })
+      )
+      expect(options()[0]).toHaveTextContent('Source document · Maps')
+    } finally {
+      useProjectStore.setState({ current: null })
+    }
   })
 
   it('renders a row per result: title, location, count, and the snippet with its marks', () => {

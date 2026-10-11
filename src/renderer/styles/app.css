@@ -26,6 +26,7 @@
   --color-level-generic: var(--ms-level-generic);
   --color-matter: var(--ms-matter);
   --color-status-idea: var(--ms-status-idea);
+  --color-not-canon: var(--ms-not-canon);
   --color-status-draft: var(--ms-status-draft);
   --color-status-revised: var(--ms-status-revised);
   --color-status-final: var(--ms-status-final);
@@ -114,6 +115,52 @@ select {
 .ms-editor.ms-notes p {
   margin-bottom: 0.5em;
   text-indent: 0;
+}
+
+/*
+ * Pages of story memory v2 (F-16.6, F-16.8: Research now; Pinned and Ideas from P1 slice 3) are
+ * working text like notes: a fixed size, no first-line indent. A paragraph marked Not canon is
+ * muted and hatched, with "Not canon" in the gutter the page column leaves on its left.
+ */
+.ms-editor.ms-page {
+  min-height: 12rem;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.ms-editor.ms-page p {
+  margin-bottom: 0.6em;
+  text-indent: 0;
+}
+
+.ms-editor.ms-page p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--color-fg-muted);
+  pointer-events: none;
+}
+
+.ms-editor.ms-page p[data-not-canon] {
+  position: relative;
+  color: var(--color-fg-muted);
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ms-not-canon) 14%, transparent) 0 2px,
+    transparent 2px 9px
+  );
+}
+
+.ms-editor.ms-page p[data-not-canon]::after {
+  content: 'Not canon';
+  position: absolute;
+  top: 0.25em;
+  right: calc(100% + 0.75rem);
+  white-space: nowrap;
+  font-family: var(--ms-font-ui);
+  font-size: 0.7rem;
+  color: var(--ms-not-canon);
+  pointer-events: none;
 }
 
 /* The Settings preview (F-7.5) is a short static sample: it shows the formatting, not a page. */

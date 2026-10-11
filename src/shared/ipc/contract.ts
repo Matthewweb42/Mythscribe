@@ -75,8 +75,10 @@ import {
   ContextFile,
   ContextProcessResult,
   ContextProgress,
-  ContextReview
+  ContextReview,
+  ContextSkipped
 } from '../contextLibrary'
+import { RESEARCH_TITLE_MAX, ResearchDoc } from '../research'
 import { ContinuityFinding } from '../continuity'
 import { REVIEW_CHAT_MESSAGE_MAX, ReviewChatResult, ReviewChatTurn } from '../reviewChat'
 import {
@@ -3211,7 +3213,51 @@ export const contract = {
   /** Answers a question: *Add as* · *Not a name*, or *Yes* · *No*. */
   'names:answer': { input: z.object({ answer: NameAnswer }), output: NameAnswerResult },
   /** Word search over the local passage index, each hit labelled with its source and canon status. */
-  'passages:search': { input: MemoryPassageQuery, output: z.array(MemoryPassageHit) }
+  'passages:search': { input: MemoryPassageQuery, output: z.array(MemoryPassageHit) },
+  /** F-16.8: every Research document's meta (origin, original, Not canon), in tree order. */
+  'research:list': { input: z.undefined(), output: z.array(ResearchDoc) },
+  /**
+   * F-16.8: uploads files into Research under `parentId` (default the Research root): `paths` as
+   * given, or the ones the author picks in the library's open dialog when omitted (null when it
+   * is cancelled). Each original is kept in the library folder and becomes an editable document
+   * (a PDF converted, an image a caption page with Open original). A file already in Research,
+   * and one of another type, is skipped with the reason. Answers the new nodes and their meta.
+   */
+  'research:add': {
+    input: z.object({
+      paths: z.array(z.string()).min(1).optional(),
+      parentId: z.string().optional()
+    }),
+    output: z
+      .object({
+        nodes: z.array(TreeNode),
+        docs: z.array(ResearchDoc),
+        skipped: z.array(ContextSkipped)
+      })
+      .nullable()
+  },
+  /**
+   * F-16.8: a written Research note, an empty document under `parentId` (default the root),
+   * right after `afterId` when given, else last.
+   */
+  'research:create': {
+    input: z.object({
+      parentId: z.string().optional(),
+      afterId: z.string().optional(),
+      title: z.string().max(RESEARCH_TITLE_MAX).optional()
+    }),
+    output: z.object({ node: TreeNode, doc: ResearchDoc })
+  },
+  /** F-16.8: switches a whole Research page Not canon, or back to canon. */
+  'research:setNotCanon': {
+    input: z.object({ nodeId: z.string(), notCanon: z.boolean() }),
+    output: ResearchDoc
+  },
+  /**
+   * F-16.8: opens an uploaded Research document's original in the OS's own app (the library's
+   * path check applies). VALIDATION for a written document, NOT_FOUND when the original is gone.
+   */
+  'research:openOriginal': { input: z.object({ nodeId: z.string() }), output: z.null() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract

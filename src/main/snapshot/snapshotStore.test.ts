@@ -9,6 +9,7 @@ import { node, snapshot, snapshotText, writingLog, type NodeRow } from '../db/sc
 import { getDocumentContent, saveDocument } from '../document/documentStore'
 import { listDrafts } from '../draft/draftStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { ensureResearchRoot } from '../project/seed'
 import { createSeededProject } from '../project/testProject'
 import { createNode, deleteNode, getNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments, projectDocuments } from '../voice/profile'
@@ -86,6 +87,16 @@ afterEach(() => {
 
 describe('projectDocuments (F-8.6)', () => {
   it('lists every document of all three sections in tree order', () => {
+    expect(projectDocuments(db).map((row) => row.id)).toEqual([
+      preface.id,
+      ...scenes.map((row) => row.id),
+      afterword.id
+    ])
+  })
+
+  it('leaves out the Research section (F-16.8), which is no part of the book', () => {
+    const research = ensureResearchRoot(db)
+    createNode(db, 'novel', { parentId: research, kind: 'document', hierarchyLevel: null })
     expect(projectDocuments(db).map((row) => row.id)).toEqual([
       preface.id,
       ...scenes.map((row) => row.id),

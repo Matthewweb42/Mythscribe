@@ -4,7 +4,7 @@ import { BUILTIN_COMPILE_FORMATS, type CompileFormat } from '@shared/compileForm
 import { compileBook, type CompiledBook, type CompileNode } from '@shared/compileModel'
 import type { TreeNode } from '@shared/ipc/contract'
 import type { TiptapNodeT } from '@shared/tiptap'
-import { treeFixture } from '@renderer/features/manuscript/treeFixture'
+import { researchTreeFixture, treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex } from '@renderer/features/manuscript/treeStore'
 import {
   chapterGroups,
@@ -123,6 +123,14 @@ describe('includeRows', () => {
     expect(byTitle('Arc 2')).toMatchObject({ excluded: true, excludedAbove: false })
     expect(byTitle('Chapter 4')).toMatchObject({ excluded: false, excludedAbove: true })
     expect(byTitle('Scene 4')).toMatchObject({ kind: 'document', excludedAbove: true })
+  })
+
+  it('never lists the Research section (F-16.8), which is no part of the book', () => {
+    const rows = includeRows(buildIndex(researchTreeFixture), new Set())
+    expect(rows.map((r) => r.id)).toEqual(
+      includeRows(buildIndex(treeFixture), new Set()).map((r) => r.id)
+    )
+    expect(rows.map((r) => r.id)).not.toContain('r-note')
   })
 })
 

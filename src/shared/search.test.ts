@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   SEARCH_QUERY_MAX,
+  SEARCH_RESULT_KIND,
   SEARCH_TYPES,
   SEARCH_TYPE_LABEL,
   SearchRequest,
@@ -9,19 +10,27 @@ import {
   foldCase,
   isSearchable,
   normalizeQuery,
-  searchableText
+  searchableText,
+  searchTypesFor
 } from './search'
 
 describe('search vocabulary (F-10.1)', () => {
-  it('lists the five types with a chip label each', () => {
-    expect(SEARCH_TYPES).toEqual(['document', 'notes', 'character', 'setting', 'world'])
+  it('lists the types with a chip label each; Research is offered only in story memory v2', () => {
+    expect(SEARCH_TYPES).toEqual(['document', 'notes', 'character', 'setting', 'world', 'research'])
     expect(SEARCH_TYPES.map((type) => SEARCH_TYPE_LABEL[type])).toEqual([
       'Documents',
       'Notes',
       'Characters',
       'Settings',
-      'World'
+      'World',
+      'Source documents'
     ])
+    expect(searchTypesFor('v1')).toEqual(['document', 'notes', 'character', 'setting', 'world'])
+    expect(searchTypesFor('v2')).toEqual(SEARCH_TYPES)
+    // F-16.8: a Research hit says it is a source document.
+    expect(SEARCH_RESULT_KIND.research).toBe('Source document')
+    expect(SEARCH_RESULT_KIND.notes).toBe('Notes')
+    expect(SEARCH_RESULT_KIND.document).toBeNull()
   })
 
   it('accepts a short query (main answers empty) and refuses one over the maximum', () => {

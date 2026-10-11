@@ -7,6 +7,7 @@ import {
   Library,
   ListTodo,
   ListTree,
+  NotebookText,
   Tag,
   type LucideIcon
 } from 'lucide-react'
@@ -28,6 +29,8 @@ import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { ManuscriptTab } from '@renderer/features/manuscript/ManuscriptTab'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { OutlineTab } from '@renderer/features/outline/OutlineTab'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
+import { ResearchTab } from '@renderer/features/research/ResearchTab'
 import { TagsTab } from '@renderer/features/tags/TagsTab'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { ThreadsTab } from '@renderer/features/threads/ThreadsTab'
@@ -77,6 +80,14 @@ export interface SectionCounts {
   todo: number
   /** Sheets per category id. */
   sheets: Readonly<Record<string, number>>
+  /** F-16.8: the documents of the Research section (story memory v2; 0 in v1, which has none). */
+  research: number
+}
+
+/** What the open project's story memory adds to the list. */
+export interface SectionOptions {
+  /** F-16.8: story memory v2 lists Research after the categories; v1's list is as it was. */
+  research: boolean
 }
 
 interface ToolDef {
@@ -162,6 +173,16 @@ const TOOLS: readonly ToolDef[] = [
   }
 ]
 
+/** F-16.8 (story memory v2 only): always listed, after the categories. */
+const RESEARCH: ToolDef = {
+  id: 'research',
+  label: 'Research',
+  icon: NotebookText,
+  render: (format) => createElement(ResearchTab, { format }),
+  count: (c) => c.research,
+  used: () => true
+}
+
 function toolSection(tool: ToolDef, counts: SectionCounts, group: SectionGroup): SidebarSection {
   return {
     id: tool.id,
@@ -198,11 +219,13 @@ function categorySection(
  * Every section in picker order, used or not. A category a sheet names that the list does not
  * carry (never expected) still gets its section, so no sheet is ever out of reach. F-9.15: the
  * thread category is Threads, the first of the tools, and the tags close the story bible as its
- * Index. Pure.
+ * Index. F-16.8: in story memory v2 Research leads the tools, right after the story bible
+ * (slice 3 finishes the v2 list). Pure.
  */
 export function buildSections(
   categories: readonly StoryCategory[],
-  counts: SectionCounts
+  counts: SectionCounts,
+  options: SectionOptions = { research: false }
 ): SidebarSection[] {
   const listed = new Set(categories.map((category) => category.id))
   const strays = Object.keys(counts.sheets)
@@ -216,6 +239,7 @@ export function buildSections(
       .filter((category) => category !== threads)
       .map((category) => categorySection(category, counts.sheets[category.id] ?? 0, 'bible')),
     toolSection(INDEX, counts, 'bible'),
+    ...(options.research ? [toolSection(RESEARCH, counts, 'tools')] : []),
     ...(threads === undefined
       ? []
       : [categorySection(threads, counts.sheets[threads.id] ?? 0, 'tools')]),
@@ -225,9 +249,21 @@ export function buildSections(
 
 /** The documents of the manuscript section (front and end matter are not counted). */
 function manuscriptDocuments(state: ReturnType<typeof useTreeStore.getState>): number {
+  return documentsIn(state, 'manuscript')
+}
+
+/** F-16.8: the documents of the Research section. */
+function researchDocuments(state: ReturnType<typeof useTreeStore.getState>): number {
+  return documentsIn(state, 'research')
+}
+
+function documentsIn(
+  state: ReturnType<typeof useTreeStore.getState>,
+  section: 'manuscript' | 'research'
+): number {
   let count = 0
   for (const node of Object.values(state.byId)) {
-    if (node.kind === 'document' && state.sectionOf[node.id] === 'manuscript') count += 1
+    if (node.kind === 'document' && state.sectionOf[node.id] === section) count += 1
   }
   return count
 }
@@ -236,6 +272,8 @@ function manuscriptDocuments(state: ReturnType<typeof useTreeStore.getState>): n
 export function useSidebarSections(): SidebarSection[] {
   const categories = useCategoryStore((s) => s.categories)
   const documents = useTreeStore(manuscriptDocuments)
+  const research = useTreeStore(researchDocuments)
+  const memory = useStoryMemory()
   const tags = useTagStore((s) => s.ids.length)
   const timeline = useTimelineStore((s) => s.events.length)
   const edits = useEditPassStore((s) => s.ids.length)
@@ -252,14 +290,9 @@ export function useSidebarSections(): SidebarSection[] {
       return counts
     })
   )
-  return buildSections(categories, {
-    documents,
-    tags,
-    timeline,
-    edits,
-    library,
-    changes,
-    todo,
-    sheets
-  })
+  return buildSections(
+    categories,
+    { documents, tags, timeline, edits, library, changes, todo, sheets, research },
+    { research: memory === 'v2' }
+  )
 }

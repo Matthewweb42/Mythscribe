@@ -7,7 +7,14 @@ import { z } from 'zod'
  * stored text per query (no index table); the renderer only renders what comes back, so the
  * offsets in a result always refer to the strings in that same result.
  */
-export const SEARCH_TYPES = ['document', 'notes', 'character', 'setting', 'world'] as const
+export const SEARCH_TYPES = [
+  'document',
+  'notes',
+  'character',
+  'setting',
+  'world',
+  'research'
+] as const
 export const SearchType = z.enum(SEARCH_TYPES)
 export type SearchType = z.infer<typeof SearchType>
 
@@ -17,7 +24,29 @@ export const SEARCH_TYPE_LABEL: Record<SearchType, string> = {
   notes: 'Notes',
   character: 'Characters',
   setting: 'Settings',
-  world: 'World'
+  world: 'World',
+  research: 'Source documents'
+}
+
+/**
+ * What a result row says it is, beside where it is: notes and Research documents (F-16.8, "source
+ * document") say so; a document of the book and a sheet need no word.
+ */
+export const SEARCH_RESULT_KIND: Record<SearchType, string | null> = {
+  document: null,
+  notes: 'Notes',
+  character: null,
+  setting: null,
+  world: null,
+  research: 'Source document'
+}
+
+/**
+ * The types a project's search offers: story memory v2 adds Research's documents (F-16.8); a v1
+ * project has no Research section, so its chips are as they were.
+ */
+export function searchTypesFor(memory: 'v1' | 'v2'): readonly SearchType[] {
+  return memory === 'v2' ? SEARCH_TYPES : SEARCH_TYPES.filter((type) => type !== 'research')
 }
 
 /** The shortest query that is searched; anything shorter answers nothing. */

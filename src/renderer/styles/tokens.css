@@ -42,6 +42,8 @@
 
   /* Writing status (F-11.1): the colour of an index card and an outline row; `none` draws none. */
   --ms-status-idea: #c084fc;
+  /* F-16.6, F-16.8: the Not canon mark of a page paragraph; it follows each theme's Idea colour. */
+  --ms-not-canon: var(--ms-status-idea);
   --ms-status-draft: #f5a524;
   --ms-status-revised: #60a5fa;
   --ms-status-final: #4ade80;
