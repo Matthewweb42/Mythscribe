@@ -288,6 +288,32 @@ describe('the edit pass runner (F-14.15)', () => {
     )
   })
 
+  it('reads only the selected passage of a pass on a selection, kept for Resume (F-5.26)', async () => {
+    complete.mockResolvedValue(
+      reply({
+        changes: [
+          { quote: 'The the rope', replacement: 'The rope', why: 'Doubled word.' },
+          { quote: 'She walked very slowly', replacement: 'She trudged', why: 'Not selected.' }
+        ]
+      })
+    )
+    const pass = runner.start({
+      type: 'proofread',
+      instruction: null,
+      nodeIds: [one],
+      excerpt: '  The the rope hung slack in the water.\n'
+    })
+    expect(pass.excerpt).toBe(true)
+    await runner.idle()
+    const sent = complete.mock.calls[0]![0].messages[1]?.content ?? ''
+    expect(sent).toContain('The the rope hung slack in the water.')
+    expect(sent).not.toContain('The ferry landing was empty')
+    // A change quoting text outside the selection is dropped: it was not in the piece sent.
+    expect(listChanges(db, { passId: pass.id }).map((c) => c.original)).toEqual(['The the rope'])
+    expect(requirePass(db, pass.id).excerpt).toBe('  The the rope hung slack in the water.\n')
+    expect(toSummary(db, requirePass(db, pass.id)).excerpt).toBe(true)
+  })
+
   it("sends the scene's mood and theme to a line pass but not to a proofread (F-5.6)", async () => {
     upsertSummary(db, {
       nodeId: one,

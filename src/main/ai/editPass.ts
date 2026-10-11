@@ -220,6 +220,11 @@ export interface EditSceneInput {
   type: EditPassType
   instruction: string | null
   nodeId: string
+  /**
+   * The selected passage to read instead of the whole scene (F-5.26), or null. Its changes must
+   * still quote a passage that occurs once in the whole scene, so the editor finds it.
+   */
+  excerpt?: string | null
   /** Prefix for the requests' ids (`ai:cancel` reaches each through the in-flight registry). */
   requestPrefix: string
   signal: AbortSignal
@@ -327,7 +332,12 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 /** A document's text with a blank line between its paragraphs (empty ones left out). */
 export function sceneTextOf(content: TiptapNodeT | null): string {
   if (content === null) return ''
-  return docToText(content)
+  return paragraphsOf(docToText(content))
+}
+
+/** Text with a blank line between its non-empty lines, each trimmed: the shape pieces are cut in. */
+function paragraphsOf(text: string): string {
+  return text
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line !== '')
@@ -362,6 +372,9 @@ export async function editScene(
   // One paragraph per block, a blank line between them: the pieces are cut at those lines.
   const sceneText = sceneTextOf(content)
   if (sceneText.length < EDIT_PASS_TEXT_MIN) return empty
+  // F-5.26: a pass on a selection sends only the selected passage, in the same paragraph shape.
+  const sentText = input.excerpt == null ? sceneText : paragraphsOf(input.excerpt)
+  if (sentText.length < EDIT_PASS_TEXT_MIN) return empty
   const scene = normalizeForMatch(sceneText)
   const title = getNode(db, input.nodeId)?.title ?? 'Untitled'
 
@@ -396,7 +409,7 @@ export async function editScene(
       instruction: input.instruction,
       mood
     }).messages
-  const pieces = fitPieces(sceneText, (piece) => build(piece, { index: 0, count: 2 }))
+  const pieces = fitPieces(sentText, (piece) => build(piece, { index: 0, count: 2 }))
 
   const result: EditSceneResult = { ...empty, usage: { inputTokens: 0, outputTokens: 0 } }
   const taken: { at: number; end: number }[] = []
@@ -504,6 +517,8 @@ export interface StartEditPassInput {
   type: EditPassType
   instruction: string | null
   nodeIds: readonly string[]
+  /** The selected passage of a one-scene pass (F-5.26), or null for whole scenes. */
+  excerpt?: string | null
 }
 
 export interface EditPassRunnerDeps {
@@ -606,6 +621,7 @@ export function createEditPassRunner(deps: EditPassRunnerDeps): EditPassRunner {
               type: row.type,
               instruction: row.instruction,
               nodeId,
+              excerpt: row.excerpt,
               requestPrefix: `edit-${passId}:${index}`,
               signal: controller.signal
             },

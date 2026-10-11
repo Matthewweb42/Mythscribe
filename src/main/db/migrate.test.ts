@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(27)
+    expect(result.version).toBe(28)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1086,5 +1086,37 @@ describe('entity.extra_fields and entity.sync (0026)', () => {
     expect(() =>
       db.prepare("UPDATE entity SET extra_fields = NULL WHERE id = 'mara'").run()
     ).toThrow(/NOT NULL/)
+  })
+})
+
+describe('edit_pass.excerpt (0027)', () => {
+  let db: Database.Database
+  beforeEach(() => {
+    db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    // A database as the build before F-5.26 left it: migrations up to 0026, with one pass.
+    migrate(db, loadMigrations().slice(0, 27))
+    db.prepare(
+      `INSERT INTO edit_pass (id, type, instruction, status, node_ids, created_at)
+       VALUES ('p1', 'line', NULL, 'done', '["s1"]', '2026-01-01')`
+    ).run()
+    migrate(db)
+  })
+  afterEach(() => db.close())
+
+  it('keeps every pass as written, over whole scenes', () => {
+    expect(db.prepare('SELECT id, type, node_ids, excerpt FROM edit_pass').all()).toEqual([
+      { id: 'p1', type: 'line', node_ids: '["s1"]', excerpt: null }
+    ])
+  })
+
+  it('stores the selected passage a one-scene pass reads', () => {
+    db.prepare(
+      `INSERT INTO edit_pass (id, type, instruction, status, node_ids, excerpt, created_at)
+       VALUES ('p2', 'proofread', NULL, 'running', '["s1"]', 'The bell rang.', '2026-01-02')`
+    ).run()
+    expect(db.prepare("SELECT excerpt FROM edit_pass WHERE id = 'p2'").get()).toEqual({
+      excerpt: 'The bell rang.'
+    })
   })
 })

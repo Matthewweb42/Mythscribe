@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   localRoute,
+  ROUTE_CHAPTER_MAX,
   ROUTE_HISTORY_TURNS,
   ROUTE_INSTRUCTION_MAX,
   ROUTE_MESSAGE_CHARS,
@@ -8,8 +9,11 @@ import {
   ROUTE_TITLE_CHARS,
   ROUTE_TURN_CHARS,
   RouteAction,
+  RouteEditPass,
+  RouteEditTarget,
   settleRoute,
   type RouteDecision,
+  type RouteEdit,
   type RouteSituation
 } from '@shared/assistantRoute'
 import { getAiSettings } from '../project/settingsStore'
@@ -17,7 +21,7 @@ import { getNode, type TreeDb } from '../tree/treeStore'
 import { headTruncate } from './context/chatContext'
 import { assertFeatureAllowed } from './dial'
 import type { ChatTurn } from './prompts/chat.v1'
-import { buildRoutePrompt, ROUTE_PROMPT_VERSION } from './prompts/route.v1'
+import { buildRoutePromptV2, ROUTE_PROMPT_V2_VERSION } from './prompts/route.v2'
 import type { CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -46,7 +50,13 @@ export interface RouteResult extends RouteDecision {
   promptVersion: string | null
 }
 
-const ModelAnswer = z.object({ action: z.unknown(), instruction: z.unknown().optional() })
+const ModelAnswer = z.object({
+  action: z.unknown(),
+  instruction: z.unknown().optional(),
+  pass: z.unknown().optional(),
+  target: z.unknown().optional(),
+  chapter: z.unknown().optional()
+})
 
 /**
  * The assistant router (F-5.19). The gate first (`route` must be allowed: nothing is read or
@@ -56,8 +66,9 @@ const ModelAnswer = z.object({ action: z.unknown(), instruction: z.unknown().opt
  * needs no request). Otherwise one fast-tier JSON request carrying exactly what the data-sharing
  * panel lists: the opening of the message, the last two turns cut short, the open document's
  * kind and title, and the opening of the selection. The answer never fails the turn: anything
- * unreadable is `chat` (`parseRouteAnswer`), and every decision passes `settleRoute` (a rewrite
- * needs a selection, a scene action an open document). Provider failures still come back as
+ * unreadable is `chat` (`parseRouteAnswer`), and every decision passes `settleRoute` (a scene
+ * action needs an open document; F-5.26: a rewrite without a selection is an edit pass on the
+ * scene, and an edit pass is completed and checked). Provider failures still come back as
  * errors, so the caller can fall back to the chat itself.
  *
  * The context hash covers everything that shaped the messages.
@@ -99,7 +110,7 @@ export async function runRoute(
   const selection = selectionText
     ? headTruncate(selectionText, ROUTE_SELECTION_PREVIEW_CHARS)
     : null
-  const prompt = buildRoutePrompt({ message, history, active, selection })
+  const prompt = buildRoutePromptV2({ message, history, active, selection })
 
   const result = await runAiRequest(deps, {
     feature: 'route',
@@ -119,7 +130,7 @@ export async function runRoute(
     costUsd: result.costUsd,
     cached: result.cached,
     model: result.model,
-    promptVersion: ROUTE_PROMPT_VERSION
+    promptVersion: ROUTE_PROMPT_V2_VERSION
   }
 }
 
@@ -127,24 +138,42 @@ export async function runRoute(
  * The model's `{ action, instruction }`, leniently: an answer that is not JSON, not an object,
  * or names no known action is `chat` (the router must never cost the author their turn); the
  * instruction is trimmed and cut to `ROUTE_INSTRUCTION_MAX`, and blank or not a string is null.
- * The action is matched case-insensitively, since models capitalise ids now and then.
+ * The action is matched case-insensitively, since models capitalise ids now and then. An
+ * `editPass` answer (route.v2, F-5.26) also carries its pass (unknown reads as `ask`), its
+ * target (unknown reads as `scene`), and the chapter it names (blank is null); `settleRoute`
+ * then completes and checks it.
  */
 export function parseRouteAnswer(text: string): RouteDecision {
+  const chat: RouteDecision = { action: 'chat', instruction: null, edit: null }
   let json: unknown
   try {
     json = JSON.parse(text)
   } catch {
-    return { action: 'chat', instruction: null }
+    return chat
   }
   const answer = ModelAnswer.safeParse(json)
-  if (!answer.success || typeof answer.data.action !== 'string') {
-    return { action: 'chat', instruction: null }
+  if (!answer.success || typeof answer.data.action !== 'string') return chat
+  const action = matchId(RouteAction.options, answer.data.action)
+  if (action === undefined) return chat
+  const instruction = cleanText(answer.data.instruction, ROUTE_INSTRUCTION_MAX)
+  if (action !== 'editPass') return { action, instruction, edit: null }
+  const edit: RouteEdit = {
+    pass: matchId(RouteEditPass.options, answer.data.pass) ?? 'ask',
+    target: matchId(RouteEditTarget.options, answer.data.target) ?? 'scene',
+    chapter: cleanText(answer.data.chapter, ROUTE_CHAPTER_MAX)
   }
-  const wanted = answer.data.action.trim().toLowerCase()
-  const action = RouteAction.options.find((id) => id.toLowerCase() === wanted)
-  if (action === undefined) return { action: 'chat', instruction: null }
-  const raw = answer.data.instruction
-  const instruction =
-    typeof raw === 'string' ? raw.trim().slice(0, ROUTE_INSTRUCTION_MAX).trim() : ''
-  return { action, instruction: instruction || null }
+  return { action, instruction, edit }
+}
+
+/** The id in `ids` that `value` names, ignoring case and surrounding space; undefined for none. */
+function matchId<T extends string>(ids: readonly T[], value: unknown): T | undefined {
+  if (typeof value !== 'string') return undefined
+  const wanted = value.trim().toLowerCase()
+  return ids.find((id) => id.toLowerCase() === wanted)
+}
+
+/** A string trimmed and cut to `max`; blank or not a string is null. */
+function cleanText(value: unknown, max: number): string | null {
+  const text = typeof value === 'string' ? value.trim().slice(0, max).trim() : ''
+  return text || null
 }

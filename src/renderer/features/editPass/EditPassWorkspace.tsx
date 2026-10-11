@@ -1,7 +1,5 @@
 import { useId, useMemo, useState } from 'react'
 import { Loader2, Check, X } from 'lucide-react'
-import { DEFAULT_MODELS, outputBudget, type Tier } from '@shared/ai'
-import { type AiSource } from '@shared/aiSettings'
 import { isFeatureAllowed } from '@shared/aiSettings'
 import {
   BUILTIN_PRESET_IDS,
@@ -13,16 +11,14 @@ import {
   EDIT_PASS_PRESETS_MAX,
   EDIT_PASS_TIER,
   EDIT_PASS_TYPES,
-  estimateEditPass,
   presetInstruction,
   type BuiltinPresetId,
   type EditPassSummary,
   type EditPassType
 } from '@shared/editPass'
-import { hostedModelFor, hostedQuote } from '@shared/hostedPricing'
 import { useHostedPricing } from '@renderer/features/account/hostedPricing'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
-import { providerOf, routedTier, useAiStore } from '@renderer/features/ai/aiStore'
+import { routedTier, useAiStore } from '@renderer/features/ai/aiStore'
 import { AiWaitText } from '@renderer/features/ai/AiWaitText'
 import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
@@ -32,28 +28,13 @@ import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { runningPass, useEditPassStore } from './editPassStore'
 import { useEditPassViewStore } from './editPassViewStore'
 import { passTitle } from './passFormat'
+import { confirmLine, estimateLine, quotePass, usePassModel } from './passQuote'
 
 const SECTION = 'flex flex-col gap-2 border-b border-line px-6 py-4'
 const HEADING = 'm-0 text-sm font-semibold text-fg'
 const SMALL_BUTTON =
   'rounded-md border border-line px-2 py-0.5 text-xs hover:bg-surface-raised disabled:opacity-40 disabled:hover:bg-transparent'
 const INDENT = ['pl-0', 'pl-4', 'pl-8', 'pl-12', 'pl-16'] as const
-
-/**
- * The tier and model a pass of this kind goes out on for this project's source (F-5.11, F-15.4),
- * after the author's model choice (AI-BILLING-SPEC M8, R4), as the estimate prices it. On
- * MythScribe Cloud a tier left at its default follows the server's routing table, as main does.
- */
-function usePassModel(type: EditPassType): { tier: Tier; model: string; source: AiSource } {
-  const source = useAiSettingsStore((s) => s.settings?.source ?? 'ownKey')
-  const status = useAiStore((s) => s.status)
-  const choice = useAiStore((s) => s.choice)
-  const pricing = useHostedPricing()
-  const tier = routedTier(choice, source, 'editPass', EDIT_PASS_TIER[type])
-  const chosen = status?.models[providerOf(status, source)][tier] ?? DEFAULT_MODELS[tier]
-  const model = source === 'cloud' ? hostedModelFor(tier, chosen, pricing) : chosen
-  return { tier, model, source }
-}
 
 /**
  * The Edits workspace (F-14.15), the main pane's own screen for a pass: choose the kind of edit
@@ -150,19 +131,18 @@ function PassSetup(): React.JSX.Element {
   const pricing = useHostedPricing()
   const [confirming, setConfirming] = useState(false)
   const ordered = scope.ordered
-  const estimate = useMemo(
+  const priced = useMemo(
     () =>
-      estimateEditPass(
+      quotePass(
         type,
         ordered.map((id) => wordCounts[id] ?? 0),
         model,
-        outputBudget('editPass')
+        hosted,
+        pricing
       ),
-    [type, ordered, wordCounts, model]
+    [type, ordered, wordCounts, model, hosted, pricing]
   )
-  // Hosted flow 2, R3, E4: a pass is quoted at the server's price for the sum of its chunks,
-  // padded by the safety factor; above the threshold Start asks for a confirm first.
-  const quote = hosted ? hostedQuote(pricing, model, estimate.tokensIn, estimate.tokensOut) : null
+  const { estimate, quote } = priced
   const quoteKey = `${type}|${ordered.join(',')}|${model}|${quote?.costUsd ?? ''}`
   const [quotedFor, setQuotedFor] = useState(quoteKey)
   if (quotedFor !== quoteKey) {
@@ -206,13 +186,7 @@ function PassSetup(): React.JSX.Element {
           {`${formatCount(estimate.scenes, 'scene')} · ${formatCount(estimate.words, 'word')} · ${formatCount(estimate.chunks, 'request')}`}
         </p>
         <p className="m-0 text-sm" data-testid="edit-pass-estimate-ai">
-          {quote !== null
-            ? quote.priced
-              ? `With MythScribe: up to about ${formatUsd(quote.costUsd)} from your MythScribe Cloud balance on ${model}.`
-              : `With MythScribe: MythScribe Cloud does not offer ${model}, so the pass cannot run on it.`
-            : estimate.priced
-              ? `With MythScribe: about ${formatUsd(estimate.costUsd)} on ${model} (about ${formatCount(estimate.tokensIn)} tokens in, ${formatCount(estimate.tokensOut)} out at most).`
-              : `With MythScribe: ${model} has no published price here, so the cost is not estimated (about ${formatCount(estimate.tokensIn)} tokens in).`}
+          {estimateLine(priced)}
         </p>
       </section>
       <div className="flex items-center gap-3 px-6 py-4">
@@ -228,7 +202,7 @@ function PassSetup(): React.JSX.Element {
         {confirming && quote !== null ? (
           <>
             <span role="status" data-testid="edit-pass-quote" className="text-xs text-fg">
-              {`This pass takes up to about ${formatUsd(quote.costUsd)} from your MythScribe Cloud balance. You pay only for what it uses.`}
+              {confirmLine(quote)}
             </span>
             <button
               type="button"

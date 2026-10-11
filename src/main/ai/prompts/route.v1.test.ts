@@ -6,7 +6,10 @@ import { buildRoutePrompt, ROUTE_PROMPT_VERSION, ROUTE_RULES } from './route.v1'
 describe('route.v1 prompt (F-5.19)', () => {
   it('lists every action in the stable system turn and asks for JSON only', () => {
     expect(ROUTE_PROMPT_VERSION).toBe('route.v1')
-    for (const action of ROUTE_ACTIONS) expect(ROUTE_RULES).toContain(`- ${action}: `)
+    // v1 predates the edit pass action (route.v2, F-5.26).
+    for (const action of ROUTE_ACTIONS) {
+      if (action !== 'editPass') expect(ROUTE_RULES).toContain(`- ${action}: `)
+    }
     expect(ROUTE_RULES).toContain('Reply with JSON only: {"action":"chat","instruction":""}.')
     expect(
       ROUTE_RULES.startsWith("You are the router inside a novel-writing app's assistant.")

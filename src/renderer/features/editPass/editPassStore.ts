@@ -50,6 +50,8 @@ export interface StartPassInput {
   type: EditPassType
   instruction: string | null
   nodeIds: string[]
+  /** The selected passage of a one-scene pass (F-5.26, from the chat); absent for whole scenes. */
+  excerpt?: string | null
 }
 
 interface EditPassState {
@@ -93,6 +95,8 @@ interface EditPassState {
   jump: (change: EditChange, options?: { quiet?: boolean }) => void
   /** Starts the one-at-a-time review over these changes (only pending tracked changes count). */
   startReview: (changes: readonly EditChange[], titles: Record<string, string>) => void
+  /** The same over one pass's changes, read from main (F-5.26: the chat's Review the changes). */
+  reviewPass: (passId: string) => Promise<void>
   /** The deck moved to another change (or to the end): the editor follows. */
   reviewAt: (id: string | null) => void
   /** Keeps changes for later in the review. */
@@ -487,6 +491,15 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
       review: { changes: pending, titles, skipped: [], currentId: first.id, nodeId: first.nodeId }
     })
     get().jump(first, { quiet: true })
+  },
+
+  async reviewPass(passId) {
+    try {
+      const detail = await ipc().invoke('editPass:get', { id: passId })
+      get().startReview(detail.changes, detail.titles)
+    } catch (err) {
+      toast.error(describeError(err))
+    }
   },
 
   reviewAt(id) {

@@ -134,10 +134,11 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   route: {
     trigger: 'every chat message',
-    when: 'Classifies an Auto/Ask message to pick the feature (skipped for exact action names).',
+    when: 'Classifies an Auto/Ask message to pick the feature (skipped for exact action names). Since route.v2 (F-5.26) it also picks an edit pass (its type or "ask", and the selection, scene, or chapter): ~200 more input tokens in the cached system turn, ~15 more output tokens on an edit request.',
     callsPerUse: 1,
     typicalOutTokens: 40,
-    ideas: 'Local keyword match first; merge into the agent step to save a round trip.'
+    ideas:
+      'Local keyword match first; merge into the agent step to save a round trip. A quick pick on an edit request (F-5.26) costs no routing: it starts the pass directly.'
   },
   synopsis: {
     trigger: 'on request',
@@ -162,7 +163,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   editPass: {
     trigger: 'on request',
-    when: 'An Editor-tab pass: one request per scene piece across the chosen scenes.',
+    when: 'An Editor-tab pass: one request per scene piece across the chosen scenes. Since F-5.26 also from the chat ("make this scene better", a quick pick, or a specific request), on the selection (one request), the open scene, or a chapter; the chat shows each choice’s estimate first.',
     callsPerUse: 60,
     typicalOutTokens: 1500,
     ideas:

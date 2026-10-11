@@ -58,6 +58,7 @@ import {
   useAssistantStore
 } from './assistantStore'
 import { ContinuityLink, ContinuityView } from './ContinuityPanel'
+import { EditRequestCard } from './EditRequestCard'
 import { useContinuityStore } from './continuityStore'
 import { RequestCost } from './RequestCost'
 
@@ -433,7 +434,8 @@ function MessageLog(): React.JSX.Element {
  * Query turn (F-5.7) shows its citations through `QueryAnswer`; a What should come next? turn
  * (F-5.17) shows its directions as cards through `Directions`. An agent turn (F-5.22) shows
  * its lookups live while it waits (`liveSteps`), then its answer, the lookups folded away, and
- * its edits (`AgentChanges`). `busy` is whether the conversation has a request in flight.
+ * its edits (`AgentChanges`). An edit request (F-5.26) shows its choices or its pass
+ * (`EditRequestCard`). `busy` is whether the conversation has a request in flight.
  */
 function Turn({
   message,
@@ -505,6 +507,9 @@ function Turn({
           <AgentSteps steps={message.agent.steps} live={false} />
           <AgentChanges messageId={message.id} changes={message.agent.changes} />
         </>
+      ) : null}
+      {!mine && message.edit !== null ? (
+        <EditRequestCard messageId={message.id} edit={message.edit} busy={busy} />
       ) : null}
       {message.model !== null ? (
         <p data-testid="chat-turn-cost" className="m-0 text-[11px] text-fg-subtle">

@@ -5,7 +5,9 @@ export default defineConfig({
   // One monolithic smoke test that gains a step per feature; F-4.12b's scan waits took it past
   // 90 s on the author's machine, and the step it then timed out in was nowhere near its own.
   // By F-8.6 a passing run took ~140 s, so a slow one timed out at 150 s in the F-8.5 step.
-  timeout: 240_000,
+  // By F-5.26 (2026-10-11) a passing run took ~4 min in a cloud container and timed out at 240 s
+  // in the F-1.7 relaunch at the very end.
+  timeout: 360_000,
   workers: 1,
   retries: 0,
   reporter: 'list',

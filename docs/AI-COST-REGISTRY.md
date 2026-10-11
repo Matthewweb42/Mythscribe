@@ -31,7 +31,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `continuity` | Consistency check | background | continuity.v2 | strong | 1334 / 5702 | 300 / 800 | $0.000406 · $0.00153 | $0.000508 | $0.00783 | 1 | $0.000406 |
 | `proofread` | Proofread | on request | proofread.v1 | fast | 1055 / 7578 | 600 / 2000 | $0.000800 · $0.00279 | $0.00100 | $0.00349 | 1 | $0.000800 |
 | `whatNext` | What comes next | on request | whatNext.v3 | fast | 1079 / 3027 | 200 / 300 | $0.000288 · $0.000475 | $0.000360 | $0.00171 | 1 | $0.000288 |
-| `route` | Assistant routing | every chat message | route.v1 | fast | 407 / 780 | 40 / 120 | $0.0000634 · $0.000177 | $0.0000793 | $0.000485 | 1 | $0.0000634 |
+| `route` | Assistant routing | every chat message | route.v2 | fast | 508 / 981 | 40 / 120 | $0.0000664 · $0.000183 | $0.0000830 | $0.000561 | 1 | $0.0000664 |
 | `synopsis` | Synopsis suggestions | on request | synopsis.v1 | fast | 495 / 3400 | 120 / 350 | $0.000168 · $0.000550 | $0.000211 | $0.000911 | 1 | $0.000168 |
 | `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000413 · $0.000912 | $0.000516 | $0.00207 | 1 | $0.000413 |
 | `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000356 · $0.000568 | $0.000445 | $0.00202 | 1 | $0.000356 |
@@ -123,8 +123,8 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `route` — Assistant routing
 
-- **When:** Classifies an Auto/Ask message to pick the feature (skipped for exact action names).
-- **Ideas:** Local keyword match first; merge into the agent step to save a round trip.
+- **When:** Classifies an Auto/Ask message to pick the feature (skipped for exact action names). Since route.v2 (F-5.26) it also picks an edit pass (its type or "ask", and the selection, scene, or chapter): ~200 more input tokens in the cached system turn, ~15 more output tokens on an edit request.
+- **Ideas:** Local keyword match first; merge into the agent step to save a round trip. A quick pick on an edit request (F-5.26) costs no routing: it starts the pass directly.
 
 ### `synopsis` — Synopsis suggestions
 
@@ -143,7 +143,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `editPass` — Edit passes
 
-- **When:** An Editor-tab pass: one request per scene piece across the chosen scenes.
+- **When:** An Editor-tab pass: one request per scene piece across the chosen scenes. Since F-5.26 also from the chat ("make this scene better", a quick pick, or a specific request), on the selection (one request), the open scene, or a chapter; the chat shows each choice’s estimate first.
 - **Ideas:** The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading).
 
 ### `agent` — Assistant lookups and edits

@@ -745,8 +745,10 @@ export type SnapshotTextRow = typeof snapshotText.$inferSelect
 /**
  * One edit pass (F-14.15): its type, the custom instruction, the scenes it covers in reading
  * order (`node_ids`, JSON) and the ones it has finished (`done_node_ids`, JSON, so a pass stopped
- * by a crash or a cancel can resume where it was), what it cost, and how it ended. Derived data:
- * nothing here is the author's text until a change is accepted in the editor.
+ * by a crash or a cancel can resume where it was), what it cost, and how it ended. `excerpt` is
+ * the selected passage a one-scene pass reads instead of the whole scene (F-5.26, 2026-10-11; null
+ * for a pass over whole scenes). Derived data: nothing here is the author's text until a change
+ * is accepted in the editor.
  */
 export const editPass = sqliteTable(
   'edit_pass',
@@ -754,6 +756,7 @@ export const editPass = sqliteTable(
     id: text('id').primaryKey(),
     type: text('type', { enum: EDIT_PASS_TYPES }).notNull(),
     instruction: text('instruction'),
+    excerpt: text('excerpt'),
     status: text('status', { enum: EDIT_PASS_STATUSES }).notNull(),
     nodeIds: text('node_ids').notNull(),
     doneNodeIds: text('done_node_ids').notNull().default('[]'),

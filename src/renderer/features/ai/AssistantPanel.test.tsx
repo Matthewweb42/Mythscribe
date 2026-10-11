@@ -9,6 +9,12 @@ import type { AgentChange } from '@shared/agent'
 import type { ClearOption } from '@shared/bibleClear'
 import type { RouteAction } from '@shared/assistantRoute'
 import type { AiAgentResult, Channel, Input, Output } from '@shared/ipc/contract'
+import type { EditChange, EditPassSummary } from '@shared/editPass'
+import { EDIT_ASK_QUESTION, type EditTurn } from '@shared/editRequest'
+import { bundledPricing } from '@shared/hostedPricing'
+import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
+import { resetEditPassStore, useEditPassStore } from '@renderer/features/editPass/editPassStore'
+import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { QUERY_NOT_FOUND, type QueryTurn } from '@shared/query'
 import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
 import {
@@ -61,6 +67,48 @@ let sets: Input<'conversations:set'>[]
 let cancels: string[]
 /** F-5.25: what the clear card's Delete sent. */
 let clears: Input<'bible:clear'>[]
+/** F-5.26: the edit passes the chat's edit choices started. */
+let passStarts: Input<'editPass:start'>[]
+
+/** An edit pass as main reports it (F-5.26). */
+function editPassSummary(over: Partial<EditPassSummary> = {}): EditPassSummary {
+  return {
+    id: 'pass-1',
+    type: 'line',
+    instruction: null,
+    excerpt: false,
+    status: 'running',
+    nodeIds: ['sc-1'],
+    doneNodeIds: [],
+    currentNodeId: null,
+    model: 'gpt-strong',
+    tokensIn: 0,
+    tokensOut: 0,
+    costUsd: 0,
+    counts: { pending: 0, accepted: 0, rejected: 0, stale: 0 },
+    dropped: 0,
+    error: null,
+    createdAt: '2026-10-11T10:00:00.000Z',
+    finishedAt: null,
+    ...over
+  }
+}
+
+const PASS_CHANGE: EditChange = {
+  id: 'ec-1',
+  passId: 'pass-1',
+  nodeId: 'sc-1',
+  kind: 'change',
+  position: 0,
+  original: 'very slowly',
+  replacement: 'slowly',
+  rationale: 'Tighter.',
+  category: null,
+  flagged: false,
+  violation: null,
+  status: 'pending',
+  proposalId: 'p-pass'
+}
 
 /**
  * `conversations:get` answers with `stored`; writes record; `ai:route` picks `routeAction` at
@@ -79,6 +127,7 @@ function install(stored: Conversations): void {
           ok: true,
           action: routeAction,
           instruction: null,
+          edit: null,
           routedBy: 'local',
           usage: { inputTokens: 0, outputTokens: 0 },
           costUsd: 0,
@@ -126,6 +175,21 @@ function install(stored: Conversations): void {
         } as Output<C>
       }
       if (channel === 'library:list') return [] as Output<C>
+      if (channel === 'editPass:start') {
+        const start = input as Input<'editPass:start'>
+        passStarts.push(start)
+        return {
+          ok: true,
+          pass: editPassSummary({ type: start.type, nodeIds: start.nodeIds })
+        } as Output<C>
+      }
+      if (channel === 'editPass:get') {
+        return {
+          pass: editPassSummary({ status: 'done' }),
+          changes: [PASS_CHANGE],
+          titles: { 'sc-1': 'Scene 1' }
+        } as Output<C>
+      }
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -152,6 +216,7 @@ const message = (
   directions: null,
   action: null,
   agent: null,
+  edit: null,
   ...over
 })
 
@@ -241,6 +306,7 @@ beforeEach(() => {
   sets = []
   cancels = []
   clears = []
+  passStarts = []
   resetChangesStore()
   resetLibraryStore()
   resetLayoutStore()
@@ -1141,5 +1207,137 @@ describe('AssistantPanel suggestions (2026-10-06)', () => {
     expect(seen).toContain('Proofread this scene')
     expect(seen).toContain('What happens next here?')
     expect([...seen].some((text) => text.includes(mara.name))).toBe(true)
+  })
+})
+
+describe('AssistantPanel edit requests (F-5.26)', () => {
+  const ASK: EditTurn = {
+    target: { kind: 'scene', nodeIds: ['sc-1'], title: 'Scene 1', excerpt: null },
+    choices: ['line', 'developmental', 'dialogue', 'proofread', 'critique'],
+    instruction: null,
+    picked: null,
+    passId: null
+  }
+  const withEdit = (edit: EditTurn = ASK, content = EDIT_ASK_QUESTION): Conversations => ({
+    active: 'c-1',
+    items: [
+      conversation({
+        messages: [
+          message('m-1', 'user', 'Make this scene better'),
+          message('m-2', 'assistant', content, {
+            action: 'editPass',
+            model: 'gpt-fast',
+            costUsd: 0.00006,
+            edit
+          })
+        ]
+      })
+    ]
+  })
+  const choices = (): HTMLElement[] => within(log()).getAllByTestId('edit-choice')
+  const choice = (id: string): HTMLElement =>
+    choices().find((el) => el.dataset.choice === id) ?? document.body
+
+  let editor: Editor
+  beforeEach(() => {
+    resetEditPassStore()
+    resetAccountStore()
+    useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
+    editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' })
+    })
+  })
+  afterEach(() => {
+    resetEditPassStore()
+    resetAccountStore()
+    resetActiveEditorStore()
+    useTreeStore.getState().clear()
+    editor.destroy()
+  })
+
+  it('asks with the quick picks, each with what it would cost, and a pick starts its pass', async () => {
+    act(() => useActiveEditorStore.getState().set('sc-1', editor))
+    await mountOpen(withEdit())
+    expect(turns()[1]).toHaveTextContent(EDIT_ASK_QUESTION)
+    expect(choices().map((el) => el.querySelector('span')?.textContent)).toEqual([
+      'Tighten prose',
+      'Pacing & structure',
+      'Dialogue',
+      'Proofread',
+      "Editor's notes"
+    ])
+    // Scene 1 has 1,200 words: a pass shows its estimate; Editor's notes is not a pass.
+    expect(choice('line')).toHaveTextContent(/about \$/)
+    expect(choice('line').getAttribute('title')).toMatch(/^With MythScribe: about \$/)
+    expect(choice('critique')).not.toHaveTextContent('$')
+    await userEvent.click(choice('line'))
+    expect(passStarts).toEqual([
+      { type: 'line', instruction: null, nodeIds: ['sc-1'], excerpt: null }
+    ])
+    const status = await within(log()).findByTestId('edit-request-status')
+    expect(status).toHaveAttribute('data-status', 'running')
+    expect(status).toHaveTextContent('Line edit: 0 of 1 scene read.')
+    expect(within(log()).queryAllByTestId('edit-choice')).toHaveLength(0)
+  })
+
+  it('the picks are off with the reason in Plan, while the turn waits, and while a pass runs', async () => {
+    act(() => useActiveEditorStore.getState().set('sc-1', editor))
+    await mountOpen(withEdit(), settings({ chatMode: 'plan' }))
+    expect(choice('line')).toBeDisabled()
+    expect(choice('line')).toHaveAttribute('title', PLAN_NO_EDITS_MESSAGE)
+    act(() => useAiSettingsStore.setState({ settings: settings() }))
+    expect(choice('line')).toBeEnabled()
+    act(() =>
+      useEditPassStore.setState({
+        byId: { other: editPassSummary({ id: 'other' }) },
+        ids: ['other']
+      })
+    )
+    expect(choice('line')).toBeDisabled()
+    expect(choice('line')).toHaveAttribute(
+      'title',
+      'An edit pass is already running. Stop it or wait for it to finish.'
+    )
+    // Editor's notes is not a pass: a running pass does not hold it, the scene's length does.
+    expect(choice('critique')).toHaveAttribute('title', 'Write 200 characters first')
+  })
+
+  it('on MythScribe Cloud a quote over the threshold asks once more before it starts', async () => {
+    act(() => useActiveEditorStore.getState().set('sc-1', editor))
+    act(() =>
+      useAccountStore.setState({ pricing: { ...bundledPricing(), quoteThresholdMicros: 0 } })
+    )
+    await mountOpen(withEdit(), settings({ source: 'cloud' }))
+    expect(choice('proofread')).toHaveTextContent(/up to about <?\$/)
+    await userEvent.click(choice('proofread'))
+    expect(passStarts).toHaveLength(0)
+    expect(within(log()).getByTestId('edit-choice-quote')).toHaveTextContent(
+      /^This pass takes up to about <?\$.* from your MythScribe Cloud balance/
+    )
+    await userEvent.click(within(log()).getByTestId('edit-choice-confirm'))
+    expect(passStarts).toEqual([
+      { type: 'proofread', instruction: null, nodeIds: ['sc-1'], excerpt: null }
+    ])
+  })
+
+  it('a finished pass offers its review deck over the tracked changes', async () => {
+    act(() =>
+      useEditPassStore.setState({
+        byId: {
+          'pass-1': editPassSummary({
+            status: 'done',
+            doneNodeIds: ['sc-1'],
+            counts: { pending: 1, accepted: 0, rejected: 0, stale: 0 }
+          })
+        },
+        ids: ['pass-1']
+      })
+    )
+    await mountOpen(withEdit({ ...ASK, picked: 'line', passId: 'pass-1' }, 'Line edit started.'))
+    expect(within(log()).getByTestId('edit-request-status')).toHaveTextContent(
+      'Line edit finished: 1 change to review.'
+    )
+    await userEvent.click(within(log()).getByTestId('edit-request-review'))
+    await expect.poll(() => useEditPassStore.getState().review?.currentId).toBe('ec-1')
   })
 })
