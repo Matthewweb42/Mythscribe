@@ -5,6 +5,8 @@ import {
   AI_SETTINGS_KEY,
   AiSettings,
   defaultAiSettings,
+  StoredAiSettings,
+  unknownFeatureToggles,
   type AiSettingsInput
 } from '@shared/aiSettings'
 import {
@@ -120,25 +122,33 @@ export function setEditorSettings(db: TreeDb, value: EditorSettingsInput): Edito
  * defaults do not vary by format, and a refused row can never turn a feature on.
  */
 export function getAiSettings(db: TreeDb): AiSettings {
-  const row = db.select().from(settings).where(eq(settings.key, AI_SETTINGS_KEY)).get()
-  if (!row) return defaultAiSettings()
-  let json: unknown
-  try {
-    json = JSON.parse(row.value)
-  } catch {
-    return defaultAiSettings()
-  }
-  const parsed = AiSettings.safeParse(json)
+  const parsed = StoredAiSettings.safeParse(storedAiSettingsJson(db))
   return parsed.success ? parsed.data : defaultAiSettings()
+}
+
+/** The stored AI settings row as JSON; null when there is no row or it is not JSON. */
+function storedAiSettingsJson(db: TreeDb): unknown {
+  const row = db.select().from(settings).where(eq(settings.key, AI_SETTINGS_KEY)).get()
+  if (!row) return null
+  try {
+    return JSON.parse(row.value)
+  } catch {
+    return null
+  }
 }
 
 /**
  * Replaces the project's AI settings (upsert on the settings key) and returns what was stored.
  * Takes the pre-parse shape so a caller without the F-5.3 `ghostText` block gets the default.
+ * The toggles are strict (a bad one is refused), and the stored row's toggles for ids this build
+ * does not know are carried over (F-16.2), so a newer build's off toggle survives an older save.
  */
 export function setAiSettings(db: TreeDb, value: AiSettingsInput): AiSettings {
   const stored = AiSettings.parse(value)
-  const serialized = JSON.stringify(stored)
+  const serialized = JSON.stringify({
+    ...stored,
+    features: { ...unknownFeatureToggles(storedAiSettingsJson(db)), ...stored.features }
+  })
   db.insert(settings)
     .values({ key: AI_SETTINGS_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })

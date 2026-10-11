@@ -1008,10 +1008,17 @@ const dateTime = (iso: string): string => {
 
 /**
  * In / out tokens of one row, with the prompt-cache hits when the provider reported any, and
- * (F-16.1) the output tokens the model spent thinking when it said: "+N thinking".
+ * (F-16.1) how many of the output tokens the model spent thinking when it said: "(N thinking)".
+ * Thinking tokens are part of the output count, never on top of it.
  */
-const rowTokens = (row: AiUsageRecent): string =>
-  `${formatCount(row.promptTokens)} / ${formatCount(row.completionTokens)}${row.cachedTokens ? ` (${formatCount(row.cachedTokens)} cached)` : ''}${row.reasoningTokens ? ` +${formatCount(row.reasoningTokens)} thinking` : ''}`
+const rowTokens = (row: AiUsageRecent): string => {
+  const notes = [
+    row.cachedTokens ? `${formatCount(row.cachedTokens)} cached` : null,
+    row.reasoningTokens ? `${formatCount(row.reasoningTokens)} thinking` : null
+  ].filter((note) => note !== null)
+  const tokens = `${formatCount(row.promptTokens)} / ${formatCount(row.completionTokens)}`
+  return notes.length === 0 ? tokens : `${tokens} (${notes.join(', ')})`
+}
 
 /** F-16.1: where a row's cost came from, as the cost cell's title says it. */
 const COST_SOURCE_TITLE = {

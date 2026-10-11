@@ -155,6 +155,49 @@ describe('chat model (F-5.4)', () => {
     expect(kept?.[0]?.model).toBe('deepseek/deepseek-v4-pro')
   })
 
+  it('keeps the chat history when a turn’s mode is retired or one turn is broken (F-16.2)', () => {
+    const turn = (id: string, mode: unknown): Record<string, unknown> => ({
+      id,
+      role: 'assistant',
+      content: `Turn ${id}`,
+      created: '2026-10-11T10:00:00.000Z',
+      proposalId: null,
+      model: null,
+      costUsd: null,
+      mode
+    })
+    const conversation = (id: string, messages: unknown[], mode?: unknown): unknown => ({
+      id,
+      title: id,
+      ...(mode === undefined ? {} : { mode }),
+      paragraphs: 1,
+      messages,
+      created: '2026-10-11T10:00:00.000Z',
+      modified: '2026-10-11T10:00:00.000Z'
+    })
+    const parsed = parseStoredConversations({
+      active: 'c2',
+      items: [
+        // A turn mode and a conversation mode retired at the switch-over read as absent.
+        conversation('c1', [turn('m1', 'retiredMode'), turn('m2', 'plan')], 'retiredMode'),
+        // One broken turn (no content) is dropped; the rest of its conversation is kept.
+        conversation('c2', [turn('m3', 'plan'), { id: 'm4', role: 'assistant' }]),
+        // A conversation that is not one at all is dropped, never the whole history.
+        { id: 'c3' }
+      ]
+    })
+    expect(parsed.active).toBe('c2')
+    expect(parsed.items.map((item) => item.id)).toEqual(['c1', 'c2'])
+    expect(parsed.items[0]?.messages.map((message) => message.mode)).toEqual([null, 'plan'])
+    expect(parsed.items[0]?.mode).toBeUndefined()
+    expect(parsed.items[1]?.messages.map((message) => message.content)).toEqual(['Turn m3'])
+    // The active tab falls back to the first kept conversation when its own was dropped.
+    expect(
+      parseStoredConversations({ active: 'c3', items: [conversation('c1', []), { id: 'c3' }] })
+        .active
+    ).toBe('c1')
+  })
+
   it('reads a turn stored before F-5.9, with no usage field, as usage: null', () => {
     const stored = {
       active: 'c1',

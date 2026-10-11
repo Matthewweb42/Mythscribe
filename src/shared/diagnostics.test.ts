@@ -164,13 +164,24 @@ describe('diagnostics settings (F-15.8)', () => {
     })
   })
 
-  it('refuses a day that is not a calendar day, a counter outside the set, and a long queue', () => {
+  it('refuses a day that is not a calendar day and a long queue, and drops a counter outside the set', () => {
     expect(
       DiagnosticsSettings.safeParse({ counts: { 'last week': { 'app.launch': 1 } } }).success
     ).toBe(false)
+    // F-16.2: an unknown counter (a retired `ai.request.*` id) or a bad count is dropped, never
+    // failing the block, so it is never stored and never sent.
     expect(
-      DiagnosticsSettings.safeParse({ counts: { '2026-09-21': { 'scene.opened': 1 } } }).success
-    ).toBe(false)
+      DiagnosticsSettings.parse({
+        counts: {
+          '2026-09-21': {
+            'scene.opened': 1,
+            'ai.request.retiredThing': 3,
+            'ai.request.chat': 1.5,
+            'app.launch': 2
+          }
+        }
+      }).counts
+    ).toEqual({ '2026-09-21': { 'app.launch': 2 } })
     expect(
       DiagnosticsSettings.safeParse({ counts: { '2026-09-21': { 'app.launch': 3 } } }).success
     ).toBe(true)

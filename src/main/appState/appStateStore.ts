@@ -39,9 +39,12 @@ export const AppState = z.object({
   updates: UpdateSettings.default(defaultUpdateSettings),
   /**
    * F-15.8: the diagnostics switch (off on every install, including older files) and whatever
-   * it has recorded but not sent. Nothing is recorded while it is off.
+   * it has recorded but not sent. Nothing is recorded while it is off. Read leniently (F-16.2):
+   * an unreadable block resets only itself (to off), never the whole file.
    */
-  diagnostics: DiagnosticsSettings.default(defaultDiagnosticsSettings),
+  diagnostics: DiagnosticsSettings.default(defaultDiagnosticsSettings).catch(
+    defaultDiagnosticsSettings
+  ),
   /**
    * F-15.9: the last verified Supporter license token and the chosen accent; defaulted so older
    * files load as unlicensed. The token is signed, so plain JSON is safe: a tampered one fails

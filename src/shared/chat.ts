@@ -110,8 +110,11 @@ export const ChatMessage = z.object({
   costUsd: z.number().nullable(),
   /** The tokens the turn spent (F-5.9); null for the author's and for rows written before it. */
   usage: AiUsage.nullable().default(null),
-  /** The mode the turn was made in; an Author turn's text went to the editor, not the chat. */
-  mode: ChatMode.nullable(),
+  /**
+   * The mode the turn was made in; an Author turn's text went to the editor, not the chat. Read
+   * leniently (F-16.2): a mode this build no longer has reads as null and the turn keeps its text.
+   */
+  mode: ChatMode.nullable().catch(null),
   /**
    * A Query turn's citations and flags (F-5.7); null for every other turn and for rows written
    * before it. Every structured part of a turn reads leniently (F-16.2): a part that no longer
@@ -142,8 +145,8 @@ export type ChatMessage = z.infer<typeof ChatMessage>
 export const Conversation = z.object({
   id: z.string(),
   title: z.string().max(CHAT_TITLE_MAX),
-  /** Stored before 2026-10-07; ignored and no longer written (`ConversationMode`). */
-  mode: ConversationMode.optional(),
+  /** Stored before 2026-10-07; ignored and no longer written (`ConversationMode`); read leniently. */
+  mode: ConversationMode.optional().catch(undefined),
   paragraphs: z.number().int().min(CHAT_PARAGRAPHS_MIN).max(CHAT_PARAGRAPHS_MAX),
   messages: z.array(ChatMessage).max(CHAT_MAX_MESSAGES),
   created: z.string(),
@@ -162,10 +165,41 @@ export function defaultConversations(): Conversations {
   return { active: null, items: [] }
 }
 
-/** Lenient read of the stored row: anything off-shape is a fresh, empty state. */
+/**
+ * Lenient read of the stored row (F-16.2). A row that parses whole is used as it is. Otherwise
+ * each conversation is salvaged on its own: a turn that no longer parses is dropped and the rest
+ * of its conversation kept, and a conversation that still does not parse is dropped, so one bad
+ * turn can never empty the whole chat history. A row that is not even a list of conversations is
+ * a fresh, empty state.
+ */
 export function parseStoredConversations(raw: unknown): Conversations {
   const parsed = Conversations.safeParse(raw)
-  return parsed.success ? parsed.data : defaultConversations()
+  if (parsed.success) return parsed.data
+  const stored = z.object({ active: z.unknown(), items: z.array(z.unknown()) }).safeParse(raw)
+  if (!stored.success) return defaultConversations()
+  const items = stored.data.items
+    .map(salvageConversation)
+    .filter((item): item is Conversation => item !== null)
+    .slice(0, CHAT_MAX_CONVERSATIONS)
+  const active = stored.data.active
+  return {
+    active:
+      typeof active === 'string' && items.some((item) => item.id === active)
+        ? active
+        : (items[0]?.id ?? null),
+    items
+  }
+}
+
+function salvageConversation(raw: unknown): Conversation | null {
+  const whole = Conversation.safeParse(raw)
+  if (whole.success) return whole.data
+  if (typeof raw !== 'object' || raw === null || !('messages' in raw)) return null
+  const messages = Array.isArray(raw.messages)
+    ? raw.messages.filter((message: unknown) => ChatMessage.safeParse(message).success)
+    : []
+  const kept = Conversation.safeParse({ ...raw, messages })
+  return kept.success ? kept.data : null
 }
 
 /** A conversation's title is its first message, cut to fit. */

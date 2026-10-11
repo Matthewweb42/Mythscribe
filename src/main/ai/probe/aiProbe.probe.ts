@@ -10,11 +10,14 @@ import {
   PROBED_MODELS,
   parseEndpoints,
   parseModelsListing,
+  parseSavedProbe,
   proposePrices,
   renderPriceModule,
   renderProbeReport,
+  spendOf,
   summariseRuns,
   type EndpointPrice,
+  type ListedPrice,
   type ProbeResult,
   type ProbeRun
 } from './probe'
@@ -25,14 +28,20 @@ import {
  * four requests sharing a ~2,000-token prefix (rules plus one test-book scene) with a varying
  * tail, `max_tokens` 16, reasoning off, two seconds apart; then one short JSON extraction over a
  * test-book passage, three times each with reasoning default, off and low. 26 calls, about 5¢; it
- * stops if the reported cost passes $0.25. It writes the dated report and its numbers (no prompt
- * text, no key) next to the design, and compares the proposed price module with the committed
- * one: a plain run fails and shows the differences, `npm run ai:probe -- -u` writes them.
+ * stops once the cost passes $0.25 (the reported cost, or the table estimate for a run that
+ * reported none). It writes the dated report and its numbers (no prompt text, no key) next to
+ * the design, and compares the proposed price module with the committed one: a plain run passes
+ * when the prices match and fails showing the differences when they do not; with `-- -u` the
+ * same single run writes them. `AI_PROBE_REPLAY=<a saved ai-probe-<date>.json> npm run ai:probe
+ * -- -u` writes the module from a saved run without calling anything, so a plain run that found
+ * differences never has to be paid for twice.
  */
 
 const KEY = process.env.OPENROUTER_API_KEY ?? ''
+const REPLAY = process.env.AI_PROBE_REPLAY ?? ''
 const PROBING = process.env.npm_lifecycle_event === 'ai:probe'
-const LIVE = PROBING && KEY !== ''
+const REPLAYING = PROBING && REPLAY !== ''
+const LIVE = PROBING && !REPLAYING && KEY !== ''
 
 const COST_LIMIT_USD = 0.25
 const CACHE_RUNS = 4
@@ -98,7 +107,23 @@ async function measure(
   }
 }
 
-describe.runIf(PROBING && !LIVE)('the price probe without a key', () => {
+/** The summaries and the proposed module for a set of runs; the live run and the replay share it. */
+function propose(
+  listing: readonly ListedPrice[],
+  runs: readonly ProbeRun[]
+): Pick<ProbeResult, 'summaries' | 'proposed'> {
+  const summaries = PROBED_MODELS.map((model: ProbedModelId) =>
+    summariseRuns(
+      model,
+      runs,
+      OPENROUTER_PROBED_PRICES[model],
+      listing.find((entry) => entry.id === model)
+    )
+  )
+  return { summaries, proposed: proposePrices(listing, summaries, OPENROUTER_PROBED_PRICES) }
+}
+
+describe.runIf(PROBING && !LIVE && !REPLAYING)('the price probe without a key', () => {
   it('needs an OpenRouter key', () => {
     throw new Error('Set OPENROUTER_API_KEY=sk-or-… to run the probe (about 5¢).')
   })
@@ -119,9 +144,10 @@ describe.runIf(LIVE)('the price probe (F-16.1)', () => {
     const runs: ProbeRun[] = []
     let spent = 0
     let stoppedAtLimit = false
-    const record = (run: ProbeRun): void => {
-      runs.push(run)
-      spent += run.reportedCostUsd ?? 0
+    const record = (model: ProbedModelId, measured: ProbeRun): void => {
+      const spentUsd = spendOf(measured, OPENROUTER_PROBED_PRICES[model])
+      runs.push({ ...measured, spentUsd })
+      spent += spentUsd
       if (spent > COST_LIMIT_USD) stoppedAtLimit = true
     }
 
@@ -134,7 +160,7 @@ describe.runIf(LIVE)('the price probe (F-16.1)', () => {
           { role: 'system', content: `${CACHE_RULES}\n\n${scene}` },
           { role: 'user', content: `Question ${i + 1}: who danced every dance?` }
         ]
-        record(await measure(provider, model, 'cache', 'off', messages, 16))
+        record(model, await measure(provider, model, 'cache', 'off', messages, 16))
       }
       for (const mode of ['default', 'off', 'low'] as const) {
         for (let i = 0; i < REASONING_RUNS && !stoppedAtLimit; i += 1) {
@@ -142,21 +168,17 @@ describe.runIf(LIVE)('the price probe (F-16.1)', () => {
             { role: 'system', content: EXTRACT_RULES },
             { role: 'user', content: passage }
           ]
-          record(await measure(provider, model, 'reasoning', mode, messages, 400))
+          record(model, await measure(provider, model, 'reasoning', mode, messages, 400))
         }
       }
     }
 
-    const summaries = PROBED_MODELS.map((model: ProbedModelId) =>
-      summariseRuns(model, runs, OPENROUTER_PROBED_PRICES[model])
-    )
     const result: ProbeResult = {
       date: new Date().toISOString().slice(0, 10),
       listing: listing.filter((entry) => PROBED_MODELS.some((model) => model === entry.id)),
       endpoints,
       table: OPENROUTER_PROBED_PRICES,
-      summaries,
-      proposed: proposePrices(listing, summaries, OPENROUTER_PROBED_PRICES),
+      ...propose(listing, runs),
       stoppedAtLimit
     }
     fs.mkdirSync(OUT_DIR, { recursive: true })
@@ -167,9 +189,24 @@ describe.runIf(LIVE)('the price probe (F-16.1)', () => {
     )
 
     expect(stoppedAtLimit, 'the probe passed its $0.25 cost limit').toBe(false)
-    // A plain run fails here and shows the price differences; `-- -u` writes them.
+    // A plain run passes when the prices match and fails showing the differences when they do
+    // not; `-- -u` writes them (or `AI_PROBE_REPLAY` later, without spending again).
     await expect(renderPriceModule(result.proposed)).toMatchFileSnapshot(
       '../../../shared/modelPrices.ts'
     )
   }, 600_000)
+})
+
+describe.runIf(REPLAYING)('the price probe replayed from a saved run (no calls)', () => {
+  it('proposes the price module from the saved listing and runs', async () => {
+    const saved = parseSavedProbe(JSON.parse(fs.readFileSync(path.resolve(REPLAY), 'utf8')))
+    if (saved === null)
+      throw new Error(`${REPLAY} is not a saved probe run (ai-probe-<date>.json).`)
+    const { listing, runs } = saved
+    expect(listing.length, 'the saved run lists no probed model').toBeGreaterThan(0)
+    expect(runs.length, 'the saved run has no runs').toBeGreaterThan(0)
+    await expect(renderPriceModule(propose(listing, runs).proposed)).toMatchFileSnapshot(
+      '../../../shared/modelPrices.ts'
+    )
+  })
 })

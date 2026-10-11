@@ -149,9 +149,11 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
 
   it.each([
     ['index', 0.12],
-    ['openQuestion', 0.02],
+    ['openQuestion', 0.015],
+    ['openQuestionWidened', 0.03],
     ['session', 0.013],
-    ['checkBook', 0.035]
+    ['checkBook', 0.035],
+    ['whatIf', 0.11]
   ] as const)(
     'keeps %s within ±30 %% of the design’s figure at the corrected prices',
     (id, design) => {
@@ -160,6 +162,20 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
       expect(cost).toBeLessThan(design * 1.3)
     }
   )
+
+  it('averages an open question near the design’s 2¢ with one in five widened', () => {
+    const average =
+      0.8 * plannedTaskCost(task('openQuestion'), 'ownKey') +
+      0.2 * plannedTaskCost(task('openQuestionWidened'), 'ownKey')
+    expect(average).toBeGreaterThan(0.02 * 0.7)
+    expect(average).toBeLessThan(0.02 * 1.3)
+  })
+
+  it('keeps the heavy month inside the design’s $1.60–2.30, give or take 30 %', () => {
+    const month = plannedTaskCost(task('heavyMonth'), 'ownKey')
+    expect(month).toBeGreaterThan(1.6 * 0.7)
+    expect(month).toBeLessThan(2.3 * 1.3)
+  })
 
   it('marks a planned feature existing exactly when it is already an AiFeatureId', () => {
     const known: readonly string[] = AI_FEATURE_IDS

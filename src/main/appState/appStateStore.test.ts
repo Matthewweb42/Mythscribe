@@ -381,7 +381,7 @@ describe('AppStateStore', () => {
     expect(EMPTY_APP_STATE.diagnostics).toEqual(defaultDiagnosticsSettings())
   })
 
-  it('round-trips the diagnostics switch and its counts, and refuses an unknown counter', () => {
+  it('round-trips the diagnostics switch and its counts, and drops an unknown counter', () => {
     const store = new AppStateStore(file)
     const diagnostics = {
       enabled: true,
@@ -391,16 +391,53 @@ describe('AppStateStore', () => {
     }
     expect(store.update((s) => ({ ...s, diagnostics })).diagnostics).toEqual(diagnostics)
     expect(new AppStateStore(file).get().diagnostics).toEqual(diagnostics)
-    // A counter the enum does not know — which only a hand-edited file can hold, since the
-    // type refuses one — is rejected on the way back out too.
-    const invented: Record<string, number> = { 'scene.opened': 1 }
-    expect(() =>
-      store.update((s) => ({
-        ...s,
-        diagnostics: { ...diagnostics, counts: { '2026-09-21': invented } }
-      }))
-    ).toThrow()
-    expect(new AppStateStore(file).get().diagnostics).toEqual(diagnostics)
+    // A counter the enum does not know (only a hand-edited file can hold one, since the type
+    // refuses it) is dropped on the way out, so it is never stored and never sent.
+    const invented: Record<string, number> = { 'scene.opened': 1, 'app.launch': 3 }
+    store.update((s) => ({
+      ...s,
+      diagnostics: { ...diagnostics, counts: { '2026-09-21': invented } }
+    }))
+    expect(new AppStateStore(file).get().diagnostics.counts).toEqual({
+      '2026-09-21': { 'app.launch': 3 }
+    })
+  })
+
+  it('keeps the recents and the trial when a stored day counts a retired AI feature (F-16.2)', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const trial = { startedAt: 5, lastSeenAt: 9 }
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        recents: [entry],
+        trial,
+        diagnostics: {
+          enabled: true,
+          counts: {
+            '2026-10-11': { 'ai.request.retiredThing': 3, 'app.launch': 1, 'ai.request.tags': -1 }
+          },
+          queue: [],
+          lastSentDay: null
+        }
+      }),
+      'utf8'
+    )
+    const state = new AppStateStore(file).get()
+    expect(state.recents).toEqual([entry])
+    expect(state.trial).toEqual(trial)
+    expect(state.diagnostics.enabled).toBe(true)
+    expect(state.diagnostics.counts).toEqual({ '2026-10-11': { 'app.launch': 1 } })
+    // A diagnostics block that is unreadable as a whole resets only itself, to off.
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ version: 1, recents: [entry], trial, diagnostics: { enabled: 'yes' } }),
+      'utf8'
+    )
+    const reset = new AppStateStore(file).get()
+    expect(reset.recents).toEqual([entry])
+    expect(reset.trial).toEqual(trial)
+    expect(reset.diagnostics).toEqual(defaultDiagnosticsSettings())
   })
 
   it('parses a file written before F-7.10 (no view) as 100 % and Medium', () => {

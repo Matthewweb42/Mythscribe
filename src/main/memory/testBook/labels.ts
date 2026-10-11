@@ -138,7 +138,7 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
     { id: 'greyhallow', name: 'Greyhallow', kind: 'place', aliases: [{ text: 'Greyhallow' }] },
     { id: 'elsdale', name: 'Elsdale', kind: 'place', aliases: [{ text: 'Elsdale' }] },
     { id: 'the-bell', name: 'The Bell', kind: 'place', aliases: [{ text: 'The Bell' }] },
-    { id: 'brighton', name: 'Brighton', kind: 'place', aliases: [{ text: 'Brighton' }] },
+    { id: 'gullhaven', name: 'Gullhaven', kind: 'place', aliases: [{ text: 'Gullhaven' }] },
     {
       id: 'secret-engagement',
       name: "Lottie's engagement to Mr. Dunmore",
@@ -657,7 +657,7 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       records: [
         'lottie',
         'pocock',
-        'brighton',
+        'gullhaven',
         'johanna',
         'dunmore',
         'bel',

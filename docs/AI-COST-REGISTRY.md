@@ -195,23 +195,36 @@ table above when its feature ships. Cached input is not discounted; task totals 
 | `reader.v1:window` | `reader` | P2a | fast | background | 4000 / 300 | $0.000644 | $0.000805 | $0.00435 | A window read: the changed paragraphs ±2 when the author leaves a scene or pauses. |
 | `verify.v1` | `verify` | P2a | fast | background | 1300 / 110 | $0.000213 | $0.000266 | $0.00147 | One batch per reading: the claims code could not prove, with their sentences ±1. |
 | `verify.v1:pro` | `verify` | P2a | strong | background | 700 / 40 | $0.00136 | $0.00170 | $0.00235 | Spot checks: 20 verified claims per rebuild on the strong model, with more surrounding text. |
+| `verify.v1:spot` | `verify` | P2a | fast | background | 260 / 15 | $0.0000406 | $0.0000508 | $0.000262 | Spot checks: 50 literal claims per rebuild re-checked on the fast model (sized from design Part 5’s index total). |
+| `reader.v1:card` | `reader` | P2a | fast | background | 4000 / 300 | $0.000644 | $0.000805 | $0.00435 | An instant card that is out of date: one window read for its scene (about one card in five; the rest are local and free). |
+| `synopsis.v2` | `synopsis` (existing) | P2a | fast | on request | 495 / 120 | $0.000103 | $0.000129 | $0.000911 | Suggest a synopsis, re-pointed from the summary to the scene card; priced like synopsis.v1. |
+| `notesSuggest.v3` | `notesSuggest` (existing) | P2a | fast | on request | 961 / 300 | $0.000219 | $0.000273 | $0.00207 | Suggest key points for the notes, re-pointed to the scene card; priced like notesSuggest.v2. |
+| `reader.v2:first` | `reader` | P2b | fast | background | 3800 / 520 | $0.000678 | $0.000847 | $0.00519 | reader.v1:first with knows and thread claims added; replaces it from P2b; priced like it until measured. |
+| `reader.v2:window` | `reader` | P2b | fast | background | 4000 / 300 | $0.000644 | $0.000805 | $0.00435 | reader.v1:window with knows and thread claims added; replaces it from P2b; priced like it until measured. |
+| `verify.v2` | `verify` | P2b | fast | background | 1300 / 110 | $0.000213 | $0.000266 | $0.00147 | verify.v1 with knows and thread claims; replaces it from P2b; priced like it until measured. |
 | `planLinks.v2` | `planLinks` (existing) | P2a | fast | background | 1500 / 100 | $0.000238 | $0.000298 | $0.00158 | Plan links applied automatically after a scene settles (decision 2). |
 | `contextImport.v3` | `contextImport` (existing) | P1 | strong | on request | 3200 / 1500 | $0.0108 | $0.0135 | $0.0305 | Filing an upload into Pinned, once, one request per chunk, reasoning off (decision 6). |
+| `reviewChat.v3` | `reviewChat` (existing) | P1 | strong | on request | 676 / 300 | $0.00222 | $0.00278 | $0.00619 | A message on the upload review that changes what is filed into Pinned; priced like reviewChat.v2. |
 | `navigator.v1` | `navigator` | P3 | fast | every chat message | 6000 / 150 | $0.000882 | $0.00110 | $0.00517 | An open question: up to two steps choosing which passages Ms Scribe reads. |
 | `agent.v9:open` | `agent` (existing) | P3 | strong | every chat message | 6500 / 350 | $0.0125 | $0.0157 | $0.0215 | Ms Scribe answers an open question from the passages the navigator found. |
+| `agent.v9:widened` | `agent` (existing) | P3 | strong | every chat message | 13000 / 400 | $0.0240 | $0.0300 | $0.0385 | An open question the first passages could not answer, widened to more passages (about one question in five). |
 | `agent.v9:lookup` | `agent` (existing) | P3 | strong | every chat message | 4500 / 120 | $0.00825 | $0.0103 | $0.0131 | Ms Scribe answers a lookup that the instant answers (F-16.24) could not. |
 | `cite.v1` | `cite` | P3 | fast | every chat message | 1000 / 60 | $0.000157 | $0.000196 | $0.00102 | After each answer: checks every citation against its passage. |
 | `judge.v1` | `judge` | P4 | fast | background | 1500 / 300 | $0.000294 | $0.000368 | $0.00248 | Up to 10 contradiction pairs per call, each judged twice with the quotes swapped. |
 | `judge.v1:pro` | `judge` | P4 | strong | on request | 600 / 90 | $0.00136 | $0.00170 | $0.00285 | Check the book: the strong model confirms up to 20 pairs called a contradiction both ways. |
+| `agent.v9:try` | `agent` (existing) | P5 | strong | on request | 7000 / 700 | $0.0146 | $0.0183 | $0.0280 | A Try chat turn (a what-if, after the launch line): reasoning low, never read into memory. |
+| `agent.v9:version` | `agent` (existing) | P5 | strong | on request | 7000 / 1500 | $0.0174 | $0.0217 | $0.0400 | A what-if written out as a scene Version (P5), never read into memory. |
 
 ### Per task
 
 | Task | Requests | Own key (OpenRouter) | Hosted | OpenAI key |
 | --- | --- | --- | --- | --- |
-| Index the book once (= Rebuild memory; 90 scenes) | 212 | $0.116 | $0.145 | $0.710 |
-| A 2-hour writing session | 30 | $0.0125 | $0.0157 | $0.0870 |
+| Index the book once (= Rebuild memory; 90 scenes) | 262 | $0.118 | $0.148 | $0.724 |
+| A 2-hour writing session (3 card refreshes, about one needing a read) | 31 | $0.0132 | $0.0165 | $0.0916 |
 | A lookup through Ms Scribe | 2 | $0.00882 | $0.0110 | $0.0148 |
 | An open question | 4 | $0.0152 | $0.0190 | $0.0345 |
+| An open question, widened (about one in five) | 5 | $0.0282 | $0.0352 | $0.0578 |
 | Check the book | 40 | $0.0347 | $0.0433 | $0.112 |
 | File a 20,000-word upload, once | 14 | $0.159 | $0.198 | $0.448 |
-| A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions, 2 checks) | 926 | $1.26 | $1.57 | $4.01 |
+| A what-if (P5): 5 Try turns and 1 Version | 16 | $0.104 | $0.130 | $0.243 |
+| A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions with 10 widened, 2 checks, 1 what-if) | 972 | $1.51 | $1.88 | $4.58 |

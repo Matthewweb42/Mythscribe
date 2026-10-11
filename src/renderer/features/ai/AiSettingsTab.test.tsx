@@ -898,7 +898,7 @@ describe('AiSettingsTab usage history (AI-BILLING-SPEC E7, C4)', () => {
     ]
     await userEvent.click(screen.getByTestId('ai-usage-history-toggle'))
     const table = await screen.findByTestId('ai-usage-history')
-    expect(within(table).getByText('4,000 / 400 +250 thinking')).toBeInTheDocument()
+    expect(within(table).getByText('4,000 / 400 (250 thinking)')).toBeInTheDocument()
     expect(within(table).getByText('2,000 / 90')).toBeInTheDocument()
     const [reported, estimated, older] = within(table)
       .getAllByRole('row')

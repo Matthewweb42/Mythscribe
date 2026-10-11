@@ -6,6 +6,7 @@ import {
   CrashReport,
   DIAGNOSTIC_QUEUE_MAX,
   DIAGNOSTIC_ROWS_MAX,
+  DiagnosticCounter,
   DiagnosticCountRow,
   DiagnosticsEnvironment
 } from './diagnostics'
@@ -368,7 +369,8 @@ export const IdempotencyKey = z.string().regex(/^[A-Za-z0-9._:-]{8,128}$/)
  * story-memory requests) instead of refusing it. The app sends only `AiFeatureId` values (typed
  * in the Cloud adapter's `bodyFor`); the Worker stores the id as text and shows an unknown one raw.
  */
-export const CloudFeatureId = z.string().regex(/^[a-z][A-Za-z0-9]{1,39}$/)
+const CLOUD_FEATURE_ID_PATTERN = '[a-z][A-Za-z0-9]{1,39}'
+export const CloudFeatureId = z.string().regex(new RegExp(`^${CLOUD_FEATURE_ID_PATTERN}$`))
 
 /**
  * The reasoning a request may ask the Worker for (F-16.2): only less than its price table's
@@ -457,8 +459,21 @@ export const AI_STREAM_CONTENT_TYPE = 'application/x-ndjson'
 /** Bytes the Worker reads at most; a longer body is refused outright. */
 export const DIAGNOSTICS_BODY_MAX = 32 * 1024
 
+/**
+ * A counter as the Worker accepts it (F-16.2): one of this build's (`DiagnosticCounter`), or the
+ * request counter of an AI feature this build does not know (`ai.request.` and a well-formed
+ * `CloudFeatureId`, never free text), so an older Worker still counts a newer app's feature
+ * instead of refusing the report, and every report after it, since the app keeps what failed.
+ */
+export const DiagnosticWireCounter = z.union([
+  DiagnosticCounter,
+  z.string().regex(new RegExp(`^ai\\.request\\.${CLOUD_FEATURE_ID_PATTERN}$`))
+])
+
 export const DiagnosticsBody = DiagnosticsEnvironment.extend({
-  counts: z.array(DiagnosticCountRow).max(DIAGNOSTIC_ROWS_MAX),
+  counts: z
+    .array(DiagnosticCountRow.extend({ counter: DiagnosticWireCounter }))
+    .max(DIAGNOSTIC_ROWS_MAX),
   crashes: z.array(CrashReport).max(DIAGNOSTIC_QUEUE_MAX)
 })
 export type DiagnosticsBody = z.infer<typeof DiagnosticsBody>

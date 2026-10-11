@@ -7,13 +7,16 @@ import {
   cacheAdvice,
   parseEndpoints,
   parseModelsListing,
+  parseSavedProbe,
   perMillion,
   proposePrices,
   reasoningAdvice,
   renderPriceModule,
   renderProbeReport,
   routingAdvice,
+  spendOf,
   summariseRuns,
+  type ListedPrice,
   type ProbeResult,
   type ProbeRun
 } from './probe'
@@ -31,8 +34,10 @@ const LISTING = parseModelsListing(fixture('models.json'))
 const RUNS = fixture('runs.json') as ProbeRun[]
 const FLASH = 'deepseek/deepseek-v4-flash'
 const PRO = 'deepseek/deepseek-v4-pro'
+const listed = (model: string): ListedPrice | undefined =>
+  LISTING.find((entry) => entry.id === model)
 const SUMMARIES = PROBED_MODELS.map((model) =>
-  summariseRuns(model, RUNS, OPENROUTER_PROBED_PRICES[model])
+  summariseRuns(model, RUNS, OPENROUTER_PROBED_PRICES[model], listed(model))
 )
 
 function result(): ProbeResult {
@@ -103,6 +108,54 @@ describe('summariseRuns', () => {
     expect(pro?.cachedBilledLower).toBe(false)
   })
 
+  it('judges the discount against the listed price, never a stale table (no under-count)', () => {
+    // The table says $0.14 in; OpenRouter lists and bills $0.10. The runs report cache hits but
+    // are billed at the full $0.10 rate, which is under 95 % of the stale table's price.
+    const billed = (cached: number): ProbeRun => ({
+      model: FLASH,
+      kind: 'cache',
+      reasoning: 'off',
+      inputTokens: 2_100,
+      outputTokens: 1,
+      cachedInputTokens: cached,
+      reasoningTokens: 0,
+      reportedCostUsd: (2_100 * 0.1 + 0.28) / 1_000_000,
+      finishReason: 'stop',
+      ms: 900
+    })
+    const runs = [billed(0), billed(1_920), billed(1_920)]
+    const stale = { inUsdPerM: 0.14, outUsdPerM: 0.28 }
+    const real: ListedPrice = { id: FLASH, inUsdPerM: 0.1, outUsdPerM: 0.28, cachedInUsdPerM: 0.01 }
+    const summary = summariseRuns(FLASH, runs, stale, real)
+    expect(summary.cachedBilledLower).toBe(false)
+    const proposed = proposePrices([real], [summary], OPENROUTER_PROBED_PRICES)
+    expect(proposed[FLASH].cachedInUsdPerM).toBeNull()
+    // Without the cold run's bill, the listed price alone still decides.
+    expect(summariseRuns(FLASH, runs.slice(1), stale, real).cachedBilledLower).toBe(false)
+    // A cold run billed below the listed price makes the bar stricter, never looser.
+    const cheapCold = { ...billed(0), reportedCostUsd: 0.00005 }
+    expect(summariseRuns(FLASH, [cheapCold, ...runs.slice(1)], stale, real).cachedBilledLower).toBe(
+      false
+    )
+  })
+
+  it('counts a run that reported no cost at the table estimate against the limit', () => {
+    const run = RUNS[0]
+    if (run === undefined) throw new Error('no runs')
+    expect(spendOf(run, OPENROUTER_PROBED_PRICES[FLASH])).toBe(run.reportedCostUsd)
+    expect(spendOf({ ...run, reportedCostUsd: null }, { inUsdPerM: 1, outUsdPerM: 2 })).toBeCloseTo(
+      (2_100 * 1 + 1 * 2) / 1_000_000,
+      12
+    )
+    const summary = summariseRuns(
+      FLASH,
+      [{ ...run, reportedCostUsd: null }, ...RUNS.slice(1)],
+      OPENROUTER_PROBED_PRICES[FLASH],
+      listed(FLASH)
+    )
+    expect(summary.unreportedCostRuns).toBe(1)
+  })
+
   it('gives the reasoning tokens per mode, the cut-offs, and the finish-reason mix', () => {
     const [flash, pro] = SUMMARIES
     expect(flash?.reasoning.default).toEqual({
@@ -136,17 +189,41 @@ describe('proposePrices', () => {
       cachedInUsdPerM: 0.028,
       source: 'probe'
     })
+    // Pro's listed prices match the table and its hits were not billed lower: kept as it is.
     expect(proposed[PRO]).toEqual({
       inUsdPerM: 1.74,
       outUsdPerM: 3.48,
       cachedInUsdPerM: null,
-      source: 'probe'
+      source: 'list'
     })
   })
 
   it('keeps the current price of a model the listing lacks', () => {
     const proposed = proposePrices([], SUMMARIES, OPENROUTER_PROBED_PRICES)
     expect(proposed).toEqual(OPENROUTER_PROBED_PRICES)
+  })
+
+  it('keeps a confirmed price and its source, so a plain run passes when nothing changed', () => {
+    const [flash, pro] = SUMMARIES
+    if (flash === undefined || pro === undefined) throw new Error('no summaries')
+    const unchanged = [flash, pro].map((summary) => ({ ...summary, cachedBilledLower: false }))
+    const proposed = proposePrices(LISTING, unchanged, OPENROUTER_PROBED_PRICES)
+    expect(proposed).toEqual(OPENROUTER_PROBED_PRICES)
+    expect(renderPriceModule(proposed)).toBe(renderPriceModule(OPENROUTER_PROBED_PRICES))
+  })
+})
+
+describe('parseSavedProbe', () => {
+  it('reads a saved run back for a replay, and refuses anything else', () => {
+    const saved = { ...result(), runs: RUNS }
+    const parsed = parseSavedProbe(JSON.parse(JSON.stringify(saved)))
+    expect(parsed?.listing).toEqual(LISTING)
+    expect(parsed?.runs).toEqual(RUNS)
+    expect(proposePrices(parsed?.listing ?? [], SUMMARIES, OPENROUTER_PROBED_PRICES)).toEqual(
+      result().proposed
+    )
+    expect(parseSavedProbe({ listing: 'x', runs: [] })).toBeNull()
+    expect(parseSavedProbe(null)).toBeNull()
   })
 })
 
@@ -159,10 +236,10 @@ describe('the price module', () => {
     expect(renderPriceModule(OPENROUTER_PROBED_PRICES)).toBe(committed)
   })
 
-  it('writes a probed cached price as a number and the source as probe', () => {
+  it('writes a probed cached price as a number and the source as probe, a confirmed one unchanged', () => {
     const text = renderPriceModule(proposePrices(LISTING, SUMMARIES, OPENROUTER_PROBED_PRICES))
     expect(text).toContain("cachedInUsdPerM: 0.028,\n    source: 'probe'")
-    expect(text).toContain("cachedInUsdPerM: null,\n    source: 'probe'")
+    expect(text).toContain("cachedInUsdPerM: null,\n    source: 'list'")
     expect(text).not.toContain('2026')
   })
 })
@@ -174,9 +251,9 @@ describe('the report', () => {
     expect(cacheAdvice(flash, LISTING[0])).toMatch(/billed lower: carry the listed cached price/)
     expect(cacheAdvice(pro, LISTING[1])).toMatch(/not billed lower: keep `cachedInUsdPerM: null`/)
     expect(reasoningAdvice(pro)).toMatch(/^Thinks by default \(median 310/)
-    expect(
-      reasoningAdvice({ ...flash, reasoning: { ...flash.reasoning, default: null } })
-    ).toBe('Not measured.')
+    expect(reasoningAdvice({ ...flash, reasoning: { ...flash.reasoning, default: null } })).toBe(
+      'Not measured.'
+    )
     expect(routingAdvice(result().endpoints[FLASH] ?? [])).toMatch(/within 20 %/)
     expect(routingAdvice([])).toMatch(/^One provider/)
   })

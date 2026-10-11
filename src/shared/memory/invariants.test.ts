@@ -60,6 +60,16 @@ describe('checkMemoryInvariants (F-16.3)', () => {
     })
   })
 
+  it('reports a live claim with an empty anchor, which could otherwise never go stale', () => {
+    expect(checkMemoryInvariants(input({ claims: [{ ...CLAIM, anchor: [] }] }))).toEqual([
+      { kind: 'anchorEmpty', claimId: 'c1', sceneId: 's1' }
+    ])
+    // Not reported twice as a missing anchor, and a stale claim may have lost its anchor.
+    expect(
+      checkMemoryInvariants(input({ claims: [{ ...CLAIM, state: 'stale', anchor: [] }] }))
+    ).toEqual([])
+  })
+
   it('reports a claim that is neither literal nor verified', () => {
     expect(checkMemoryInvariants(input({ claims: [{ ...CLAIM, proof: 'guessed' }] }))).toEqual([
       { kind: 'unproved', claimId: 'c1', proof: 'guessed' }

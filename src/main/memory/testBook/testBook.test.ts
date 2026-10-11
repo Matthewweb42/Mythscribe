@@ -113,9 +113,9 @@ describe('the test book (F-16.3)', () => {
     }
   })
 
-  it('never names the original characters or places', () => {
+  it('never names the original characters or places, nor opens with the novel’s first line', () => {
     const banned =
-      /\b(Bennet|Darcy|Bingley|Elizabeth|Netherfield|Longbourn|Wickham|Meryton|Lucas)\b/i
+      /\b(Bennet|Darcy|Bingley|Elizabeth|Eliza|Lizzy|Jane|Kitty|Lydia|Charlotte|Collins|Hurst|Netherfield|Longbourn|Wickham|Meryton|Lucas|Pemberley|Derbyshire|Hertfordshire|London|Brighton|St\.? James's)\b|universally acknowledged/i
     for (const scene of TEST_BOOK) {
       expect(scene.title).not.toMatch(banned)
       for (const paragraph of scene.paragraphs) expect(paragraph).not.toMatch(banned)

@@ -582,4 +582,28 @@ describe('usageOf', () => {
       })
     ).toEqual({ inputTokens: 9, outputTokens: 4 })
   })
+
+  it('counts a BYOK request at OpenRouter’s fee plus the upstream cost, or not at all (F-16.1)', () => {
+    const usage = { prompt_tokens: 1_000, completion_tokens: 100 }
+    expect(usageOf({ ...usage, cost: 0.002, is_byok: false }, true).reportedCostUsd).toBe(0.002)
+    expect(
+      usageOf(
+        { ...usage, cost: 0.0001, is_byok: true, cost_details: { upstream_inference_cost: 0.002 } },
+        true
+      ).reportedCostUsd
+    ).toBeCloseTo(0.0021, 10)
+    // A BYOK answer that leaves out the provider's charge reports nothing: the table estimate wins.
+    expect(usageOf({ ...usage, cost: 0.0001, is_byok: true }, true)).not.toHaveProperty(
+      'reportedCostUsd'
+    )
+    expect(
+      usageOf(
+        { ...usage, cost: 0.0001, is_byok: true, cost_details: { upstream_inference_cost: null } },
+        true
+      )
+    ).not.toHaveProperty('reportedCostUsd')
+    // Never read without `reportsCost`, and a bad cost is no cost.
+    expect(usageOf({ ...usage, cost: 0.002 })).not.toHaveProperty('reportedCostUsd')
+    expect(usageOf({ ...usage, cost: -1 }, true)).not.toHaveProperty('reportedCostUsd')
+  })
 })

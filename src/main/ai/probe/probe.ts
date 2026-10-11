@@ -1,4 +1,5 @@
-import { costOf, type ReasoningMode, REASONING_MODES } from '@shared/ai'
+import { z } from 'zod'
+import { costOf, ReasoningMode, REASONING_MODES } from '@shared/ai'
 import type { ProbedModelId, ProbedPrice } from '@shared/modelPrices'
 
 /**
@@ -43,6 +44,12 @@ export interface ProbeRun {
   reasoningTokens: number
   /** OpenRouter's `usage.cost`; null when it did not report one. */
   reportedCostUsd: number | null
+  /**
+   * What the run counted against the probe's cost limit: the reported cost, or the table
+   * estimate when none was reported (`spendOf`), so the limit holds either way. Absent in runs
+   * recorded before it existed.
+   */
+  spentUsd?: number
   finishReason: string | null
   ms: number
 }
@@ -69,6 +76,8 @@ export interface RunSummary {
   finishReasons: Record<string, number>
   /** Sum of the costs OpenRouter reported. */
   reportedCostUsd: number
+  /** Runs that reported no cost (the limit counted their table estimate instead). */
+  unreportedCostRuns: number
   /** Sum of the same runs priced at the app's table, cached input at the input rate. */
   estimatedCostUsd: number
 }
@@ -106,7 +115,11 @@ function pricesOf(
   const input = perMillion(pricing.prompt)
   const output = perMillion(pricing.completion)
   if (input === null || output === null) return null
-  return { inUsdPerM: input, outUsdPerM: output, cachedInUsdPerM: perMillion(pricing.input_cache_read) }
+  return {
+    inUsdPerM: input,
+    outUsdPerM: output,
+    cachedInUsdPerM: perMillion(pricing.input_cache_read)
+  }
 }
 
 /** `GET /api/v1/models`: every model's id and list price; malformed entries are skipped. */
@@ -145,6 +158,42 @@ export function parseEndpoints(json: unknown): EndpointPrice[] {
   return parsed
 }
 
+const Usd = z.number().nonnegative()
+const Count = z.number().int().nonnegative()
+
+/** The parts of a saved `ai-probe-<date>.json` a replay needs: the listing and the runs. */
+const SavedProbe = z.object({
+  listing: z.array(
+    z.object({ id: z.string(), inUsdPerM: Usd, outUsdPerM: Usd, cachedInUsdPerM: Usd.nullable() })
+  ),
+  runs: z.array(
+    z.object({
+      model: z.string(),
+      kind: z.enum(['cache', 'reasoning']),
+      reasoning: ReasoningMode,
+      inputTokens: Count,
+      outputTokens: Count,
+      cachedInputTokens: Count,
+      reasoningTokens: Count,
+      reportedCostUsd: Usd.nullable(),
+      finishReason: z.string().nullable(),
+      ms: z.number().nonnegative(),
+      spentUsd: Usd.optional()
+    })
+  )
+})
+
+/**
+ * A saved probe run read back for a replay (`AI_PROBE_REPLAY`): its listing and its runs, or null
+ * when the file is not one. The replay proposes prices from them without calling anything.
+ */
+export function parseSavedProbe(
+  json: unknown
+): { listing: ListedPrice[]; runs: ProbeRun[] } | null {
+  const parsed = SavedProbe.safeParse(json)
+  return parsed.success ? parsed.data : null
+}
+
 function median(values: readonly number[]): number {
   if (values.length === 0) return 0
   const sorted = [...values].sort((a, b) => a - b)
@@ -157,23 +206,55 @@ function median(values: readonly number[]): number {
 /** A reported cost this far under the uncached estimate counts as a cache discount. */
 const CACHE_DISCOUNT_SEEN = 0.95
 
-/** One model's runs summarised against the app's table price for it. */
+type InOutPrice = Pick<ProbedPrice, 'inUsdPerM' | 'outUsdPerM'>
+
+/**
+ * What a run counts against the probe's cost limit: the cost OpenRouter reported, or, when a
+ * response left it out, the run priced at the app's table, so the limit never stops counting.
+ */
+export function spendOf(run: ProbeRun, table: InOutPrice): number {
+  return run.reportedCostUsd ?? costOf(table, run.inputTokens, run.outputTokens, 0)
+}
+
+/**
+ * One model's runs summarised. `table` is the app's price before the run (the report's "Table
+ * estimate"); `listed` is the price OpenRouter lists, which is what a request is billed at. A run
+ * with cache hits counts as billed lower only when its reported cost is under what the same run
+ * costs uncached at the listed price, and under the first cold cache run's measured bill scaled
+ * to its tokens, never against the table: the table is what the probe exists to check, and a
+ * stale one would make a full-price run look discounted (then cached input would be under-counted).
+ */
 export function summariseRuns(
   model: string,
   runs: readonly ProbeRun[],
-  table: Pick<ProbedPrice, 'inUsdPerM' | 'outUsdPerM'>
+  table: InOutPrice,
+  listed: InOutPrice | undefined
 ): RunSummary {
   const own = runs.filter((run) => run.model === model)
   const uncached = { inUsdPerM: table.inUsdPerM, outUsdPerM: table.outUsdPerM }
+  const billedAt = listed ?? uncached
   const cacheRuns = own.filter((run) => run.kind === 'cache').slice(1)
   const cacheInput = cacheRuns.reduce((sum, run) => sum + run.inputTokens, 0)
   const cachedInput = cacheRuns.reduce((sum, run) => sum + run.cachedInputTokens, 0)
+  const cold = own.find(
+    (run): run is ProbeRun & { reportedCostUsd: number } =>
+      run.kind === 'cache' &&
+      run.cachedInputTokens === 0 &&
+      run.reportedCostUsd !== null &&
+      run.inputTokens > 0
+  )
+  const uncachedCost = (run: ProbeRun): number => {
+    const listedCost = costOf(billedAt, run.inputTokens, run.outputTokens, 0)
+    if (cold === undefined) return listedCost
+    const coldListed = costOf(billedAt, cold.inputTokens, cold.outputTokens, 0)
+    if (coldListed <= 0) return listedCost
+    return Math.min(listedCost, (cold.reportedCostUsd * listedCost) / coldListed)
+  }
   const cachedBilledLower = own.some(
     (run) =>
       run.cachedInputTokens > 0 &&
       run.reportedCostUsd !== null &&
-      run.reportedCostUsd <
-        CACHE_DISCOUNT_SEEN * costOf(uncached, run.inputTokens, run.outputTokens, 0)
+      run.reportedCostUsd < CACHE_DISCOUNT_SEEN * uncachedCost(run)
   )
   const modeSummary = (mode: ReasoningMode): ModeSummary | null => {
     const modeRuns = own.filter((run) => run.kind === 'reasoning' && run.reasoning === mode)
@@ -206,6 +287,7 @@ export function summariseRuns(
     reasoning,
     finishReasons,
     reportedCostUsd: own.reduce((sum, run) => sum + (run.reportedCostUsd ?? 0), 0),
+    unreportedCostRuns: own.filter((run) => run.reportedCostUsd === null).length,
     estimatedCostUsd: own.reduce(
       (sum, run) => sum + costOf(uncached, run.inputTokens, run.outputTokens, 0),
       0
@@ -216,7 +298,9 @@ export function summariseRuns(
 /**
  * The prices the app should carry: OpenRouter's list price for input and output, and the listed
  * cached price only when the runs saw cache hits billed lower (otherwise cached input bills at
- * the input rate, over-counted, never under-counted). A model the listing lacks keeps its price.
+ * the input rate, over-counted, never under-counted). A model the listing lacks keeps its price,
+ * and so does a model whose three prices the run confirmed (its `source` too), so a plain run
+ * passes when nothing changed.
  */
 export function proposePrices(
   listing: readonly ListedPrice[],
@@ -228,15 +312,23 @@ export function proposePrices(
     const listed = listing.find((entry) => entry.id === model)
     if (listed === undefined) continue
     const billedLower = summaries.find((s) => s.model === model)?.cachedBilledLower ?? false
-    proposed[model] = {
-      inUsdPerM: listed.inUsdPerM,
-      outUsdPerM: listed.outUsdPerM,
-      cachedInUsdPerM:
-        billedLower && listed.cachedInUsdPerM !== null && listed.cachedInUsdPerM < listed.inUsdPerM
-          ? listed.cachedInUsdPerM
-          : null,
-      source: 'probe'
-    }
+    const cachedInUsdPerM =
+      billedLower && listed.cachedInUsdPerM !== null && listed.cachedInUsdPerM < listed.inUsdPerM
+        ? listed.cachedInUsdPerM
+        : null
+    const now = current[model]
+    const unchanged =
+      now.inUsdPerM === listed.inUsdPerM &&
+      now.outUsdPerM === listed.outUsdPerM &&
+      now.cachedInUsdPerM === cachedInUsdPerM
+    proposed[model] = unchanged
+      ? now
+      : {
+          inUsdPerM: listed.inUsdPerM,
+          outUsdPerM: listed.outUsdPerM,
+          cachedInUsdPerM,
+          source: 'probe'
+        }
   }
   return proposed
 }
@@ -389,7 +481,7 @@ export function renderProbeReport(result: ProbeResult): string {
       .map(([reason, count]) => `${reason} ${count}`)
       .join(', ')
     lines.push(
-      `| \`${summary.model}\` | ${summary.runs} | ${summary.medianInputTokens} / ${summary.medianOutputTokens} | ${percent(summary.cacheHitShare)} | ${mode('default')} / ${mode('off')} / ${mode('low')} | ${cutOff} | ${finish} | ${usd(summary.reportedCostUsd)} | ${usd(summary.estimatedCostUsd)} |`
+      `| \`${summary.model}\` | ${summary.runs} | ${summary.medianInputTokens} / ${summary.medianOutputTokens} | ${percent(summary.cacheHitShare)} | ${mode('default')} / ${mode('off')} / ${mode('low')} | ${cutOff} | ${finish} | ${usd(summary.reportedCostUsd)}${summary.unreportedCostRuns > 0 ? ` (${summary.unreportedCostRuns} runs unreported)` : ''} | ${usd(summary.estimatedCostUsd)} |`
     )
   }
   lines.push('', '## Recommendations', '')
@@ -398,13 +490,19 @@ export function renderProbeReport(result: ProbeResult): string {
     lines.push(`### \`${summary.model}\``, '')
     lines.push(`- **Cached price:** ${cacheAdvice(summary, listed)}`)
     lines.push(`- **Reasoning entry:** ${reasoningAdvice(summary)}`)
-    lines.push(`- **Provider routing:** ${routingAdvice(result.endpoints[summary.model] ?? [])}`, '')
+    lines.push(
+      `- **Provider routing:** ${routingAdvice(result.endpoints[summary.model] ?? [])}`,
+      ''
+    )
   }
   lines.push(
     '## Next steps',
     '',
-    '1. If the proposed prices differ from the table, run `npm run ai:probe -- -u` to write them',
-    '   into `src/shared/modelPrices.ts` (`source: probe`).',
+    '1. If the proposed prices differ from the table: after `npm run ai:probe -- -u` they are',
+    '   already in `src/shared/modelPrices.ts` (check with `git diff`); after a plain run (which',
+    '   fails on the difference), write them from this run’s saved numbers without calling',
+    '   anything: `AI_PROBE_REPLAY=<path to this report’s .json> npm run ai:probe -- -u`.',
+    '   If they match, a plain run passes and there is nothing to write.',
     '2. Run `npm run eval:ai -- -u` to reprice `docs/AI-COST-REGISTRY.md`.',
     '3. Commit this report, its JSON, the price module and the registry diff; then update the',
     '   Worker’s `models` row (`docs/OPERATOR-SETUP.md` 4.3) if it is deployed.'

@@ -44,11 +44,25 @@ export function aiRequestCounter(feature: AiFeatureId): DiagnosticCounter {
 export const DiagnosticDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
 export type DiagnosticDay = z.infer<typeof DiagnosticDay>
 
-/** Counts for one day. Partial: a counter that never fired has no key, not a zero. */
-export const DiagnosticCounterTally = z.partialRecord(
-  DiagnosticCounter,
-  z.number().int().nonnegative()
-)
+const DiagnosticCount = z.number().int().nonnegative()
+
+/**
+ * Counts for one day. Partial: a counter that never fired has no key, not a zero. Read leniently
+ * (F-16.2): a counter this build does not have (an `ai.request.*` id retired at the story-memory
+ * switch-over, F-16.31) or a count that is not one is dropped, so one stale key can never fail
+ * app-state.json and reset the recents, the trial clock and every other app setting.
+ */
+export const DiagnosticCounterTally = z
+  .record(z.string(), z.unknown())
+  .transform((stored) =>
+    Object.fromEntries(
+      Object.entries(stored).filter(
+        ([counter, n]) =>
+          DiagnosticCounter.safeParse(counter).success && DiagnosticCount.safeParse(n).success
+      )
+    )
+  )
+  .pipe(z.partialRecord(DiagnosticCounter, DiagnosticCount))
 export type DiagnosticCounterTally = z.infer<typeof DiagnosticCounterTally>
 
 /** Everything counted so far, by day; days older than `DIAGNOSTIC_DAYS_MAX` are dropped. */

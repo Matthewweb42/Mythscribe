@@ -348,9 +348,9 @@ export type AiFeatureId = z.infer<typeof AiFeatureId>
 /**
  * A stored per-feature record read leniently (F-16.2, story memory P0): a key that is not an
  * `AiFeatureId` of this build (an id retired at the switch-over, F-16.31, or one a newer build
- * wrote) and a value that does not parse are dropped, and the rest is kept. Every stored row that
- * is keyed by feature reads through this one helper, so retiring an id can never fail a whole row
- * (which would reset Use AI to off, or drop the routing overrides).
+ * wrote) and a value that does not parse are dropped, and the rest is kept, so retiring an id can
+ * never fail a whole row (which would drop the routing overrides). The AI toggles do not use it:
+ * a broken toggle must read as off, not fall back to on (`StoredAiSettings` in `aiSettings.ts`).
  */
 export function lenientFeatureRecord<V extends z.ZodType>(
   value: V

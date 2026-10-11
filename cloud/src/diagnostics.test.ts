@@ -166,6 +166,26 @@ describe('POST /diagnostics', () => {
     expect(store.diagnosticCounts()).toEqual([])
   })
 
+  it('counts a newer app’s AI feature it does not know, but never free text (F-16.2)', async () => {
+    await expectAccepted(
+      report({ counts: [{ day: '2026-09-20', counter: 'ai.request.reader', n: 2 }] })
+    )
+    expect(store.diagnosticCounts()).toEqual([
+      {
+        day: '2026-09-20',
+        appVersion: '1.4.0',
+        platform: 'win32',
+        counter: 'ai.request.reader',
+        total: 2
+      }
+    ])
+    for (const counter of ['ai.request.Mara is on the ridge', 'ai.request.', 'ai.requestXreader']) {
+      const response = await send({ ...report(), counts: [{ day: '2026-09-20', counter, n: 1 }] })
+      expect(response.status).toBe(400)
+    }
+    expect(store.diagnosticCounts()).toHaveLength(1)
+  })
+
   it('refuses a day that is not a calendar day', async () => {
     const response = await send({
       ...report(),

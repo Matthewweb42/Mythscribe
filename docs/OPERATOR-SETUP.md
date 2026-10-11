@@ -90,10 +90,14 @@ The 2026-10-07 figures ($0.03 / $1.28 and $0.21 / $0.42) were wrong: Flash's $0.
 `-latest` listing, and Pro's was an expired promotion (about an eighth of list). Both the app's own-key table and the
 Worker's default `models` read one generated module, `src/shared/modelPrices.ts`.
 
-**Check them with the probe.** `OPENROUTER_API_KEY=sk-or-… npm run ai:probe` (about 5¢) reads OpenRouter's listing and
-per-provider prices, measures prompt-cache hits and thinking tokens, and writes a dated report to
-`docs/research/story-memory-2026-10-11/probe/`. If its proposed prices differ, `npm run ai:probe -- -u` regenerates the
-module; then run `npm run eval:ai -- -u` and update the `models` row (4.3) from the report.
+**Check them with the probe.** `OPENROUTER_API_KEY=sk-or-… npm run ai:probe -- -u` (about 5¢, one live run) reads
+OpenRouter's listing and per-provider prices, measures prompt-cache hits and thinking tokens, writes a dated report and its
+numbers to `docs/research/story-memory-2026-10-11/probe/`, and, only where OpenRouter's prices differ from the table,
+rewrites `src/shared/modelPrices.ts` (check with `git diff`). A cached-input price is written only when the runs show cache
+hits billed lower than the listed price. Then run `npm run eval:ai -- -u` and update the `models` row (4.3) from the report.
+Without `-u` the same run only compares: it passes when the prices match and fails showing the differences. To accept those
+afterwards without spending again, replay the saved numbers:
+`AI_PROBE_REPLAY=docs/research/story-memory-2026-10-11/probe/ai-probe-<date>.json npm run ai:probe -- -u` (no calls).
 
 Prices move. To check today's prices without logging in:
 ```bash
@@ -135,6 +139,11 @@ story-memory reader later) under small output caps, where thinking would eat the
 - **Prices first.** The Worker is not deployed yet, so its first deploy already carries the corrected default prices
   (F-16.1). If it ever goes live before that change, set the `models` row (4.3) first, or V4 Pro is charged at about an
   eighth of its cost.
+- **The probe before the first deploy.** Until the probe (1.6) has run, both default models carry
+  `cachedInputUsdPerM: null`, so the Worker bills cached prompt tokens at the full input rate. Most strong-tier input is a
+  cached prefix, so Cloud would charge well above provider cost + 25 % for it. Run the probe and commit its price module
+  before the Worker's first deploy, or set `cachedInputUsdPerM` by hand in the `models` row (4.3) from OpenRouter's listed
+  `input_cache_read` price once you have seen cache hits billed lower on the Activity page (1.7).
 
 ---
 
@@ -257,6 +266,8 @@ the trial** (that safeguard keeps your own installed app writable). Once you pas
 ## Part 4 — Deploy the Worker
 
 ### 4.1 Migrate and deploy
+Before the first deploy, run the price probe and commit its price module (1.6; why in 1.8, "The probe before the first
+deploy").
 ```bash
 npm run cloud:migrate     # applies 0003–0005 to the live D1 database (0005 = ledger, holds, config)
 npm run cloud:deploy      # deploys the Worker and registers the 5-minute cron that releases expired holds
@@ -266,7 +277,7 @@ Check it's up:
 curl -s https://api.mythscribe.app/                  # {"service":"mythscribe-api"}
 curl -s https://api.mythscribe.app/pricing | head    # price table, packs, markup, routing
 ```
-`/pricing` should list `deepseek/deepseek-v4-flash` and `deepseek/deepseek-v4-pro`, a markup of `0.2`, and your three packs.
+`/pricing` should list `deepseek/deepseek-v4-flash` and `deepseek/deepseek-v4-pro`, a markup of `0.25`, and your three packs.
 
 ### 4.2 Sign-in email
 Sign-in needs Resend (`RESEND_API_KEY`). It was already set up for F-15.2. If sign-in emails don't arrive, see "Setting up

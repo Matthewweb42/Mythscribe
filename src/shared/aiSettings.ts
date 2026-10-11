@@ -1,11 +1,5 @@
 import { z } from 'zod'
-import {
-  AI_FEATURE_IDS,
-  type AiFeatureId,
-  type AiProviderId,
-  type OwnKeyProvider,
-  lenientFeatureRecord
-} from './ai'
+import { AI_FEATURE_IDS, AiFeatureId, type AiProviderId, type OwnKeyProvider } from './ai'
 import { DEFAULT_HONESTY, Honesty } from './critique'
 
 /** Settings-table key under which the AI dial and toggles (F-14.4) are stored as JSON. */
@@ -182,37 +176,94 @@ export function defaultFeatureToggles(): Record<AiFeatureId, boolean> {
   return Object.fromEntries(AI_FEATURE_IDS.map((id) => [id, true])) as Record<AiFeatureId, boolean>
 }
 
-export const AiSettings = z
-  .object({
-    dial: AiDial,
-    /** F-5.21's Auto bit, read only to migrate a row stored before `chatMode` (2026-10-07). */
-    auto: z.boolean().optional(),
-    /** The assistant chat's mode; absent on a row stored before 2026-10-07 (`storedAssistantMode`). */
-    chatMode: AssistantMode.optional(),
-    /**
-     * One toggle per feature. A stored row from before a feature existed lacks its key, so the
-     * missing toggles are filled from the defaults (on) instead of the whole row falling back
-     * and resetting the dial (F-14.10 added `rewrite` after projects had settings rows). Read
-     * leniently (F-16.2): a key this build does not know (an id retired at the story-memory
-     * switch-over) and a value that is not a boolean are dropped, never failing the row.
-     */
-    features: lenientFeatureRecord(z.boolean()).transform(
-      (stored): Record<AiFeatureId, boolean> => ({ ...defaultFeatureToggles(), ...stored })
-    ),
-    /** Defaulted, so a row stored before F-5.3 (no `ghostText` key) still parses instead of falling back wholesale. */
-    ghostText: GhostTextSettings.default(defaultGhostTextSettings),
-    /** Defaulted likewise for a row stored before F-14.8. */
-    critique: CritiqueSettings.default(defaultCritiqueSettings),
-    /** Defaulted likewise for a row stored before F-15.4: an existing project keeps its own key. */
-    source: AiSource.default('ownKey')
-  })
-  .transform(({ auto, chatMode, ...rest }) => ({
-    ...rest,
-    chatMode: storedAssistantMode({ dial: rest.dial, auto, chatMode })
-  }))
+/** The missing toggles filled from the defaults (on): a row stored before a feature existed lacks its key. */
+function withDefaultToggles(
+  stored: Partial<Record<AiFeatureId, boolean>>
+): Record<AiFeatureId, boolean> {
+  return { ...defaultFeatureToggles(), ...stored }
+}
+
+/**
+ * The toggles as a write takes them (`aiSettings:set`, `setAiSettings`): every key a feature of
+ * this build and every value a boolean, or the write is refused. A missing id fills from the
+ * defaults (F-14.10 added `rewrite` after projects had settings rows).
+ */
+const FeatureToggles = z.partialRecord(AiFeatureId, z.boolean()).transform(withDefaultToggles)
+
+/**
+ * The toggles as a stored row is read (F-16.2, `getAiSettings`). A key this build does not know
+ * (an id retired at the story-memory switch-over, or one a newer build wrote to the Drive-synced
+ * project) is dropped here, never failing the row; `setAiSettings` keeps it in the row, so the
+ * build that knows it reads it back unchanged. A known id whose value is not a boolean reads as
+ * off: a broken toggle fails closed, never turning a feature on (CLAUDE.md, author control 3).
+ */
+const StoredFeatureToggles = z
+  .record(z.string(), z.unknown())
+  .transform((stored) =>
+    withDefaultToggles(
+      Object.fromEntries(
+        AI_FEATURE_IDS.filter((id) => id in stored).map((id) => [id, stored[id] === true])
+      )
+    )
+  )
+
+/**
+ * The toggles of a stored row that this build does not know, kept as they are (booleans only) so
+ * a save never erases a newer build's off toggle (F-16.2).
+ */
+export function unknownFeatureToggles(row: unknown): Record<string, boolean> {
+  if (typeof row !== 'object' || row === null || !('features' in row)) return {}
+  const features: unknown = row.features
+  if (typeof features !== 'object' || features === null) return {}
+  return Object.fromEntries(
+    Object.entries(features).filter(
+      (entry): entry is [string, boolean] =>
+        !AiFeatureId.safeParse(entry[0]).success && typeof entry[1] === 'boolean'
+    )
+  )
+}
+
+const AiSettingsFields = z.object({
+  dial: AiDial,
+  /** F-5.21's Auto bit, read only to migrate a row stored before `chatMode` (2026-10-07). */
+  auto: z.boolean().optional(),
+  /** The assistant chat's mode; absent on a row stored before 2026-10-07 (`storedAssistantMode`). */
+  chatMode: AssistantMode.optional(),
+  /** One toggle per feature (F-14.4); strict here, lenient in `StoredAiSettings`. */
+  features: FeatureToggles,
+  /** Defaulted, so a row stored before F-5.3 (no `ghostText` key) still parses instead of falling back wholesale. */
+  ghostText: GhostTextSettings.default(defaultGhostTextSettings),
+  /** Defaulted likewise for a row stored before F-14.8. */
+  critique: CritiqueSettings.default(defaultCritiqueSettings),
+  /** Defaulted likewise for a row stored before F-15.4: an existing project keeps its own key. */
+  source: AiSource.default('ownKey')
+})
+
+type AiSettingsRow = z.output<typeof AiSettingsFields>
+
+/** The row as the app uses it: the chat mode resolved (`storedAssistantMode`), the old Auto bit gone. */
+function withChatMode({
+  auto,
+  chatMode,
+  ...rest
+}: AiSettingsRow): Omit<AiSettingsRow, 'auto' | 'chatMode'> & { chatMode: AssistantMode } {
+  return { ...rest, chatMode: storedAssistantMode({ dial: rest.dial, auto, chatMode }) }
+}
+
+/** The project's AI settings as a write takes them (`aiSettings:set`): strict toggles. */
+export const AiSettings = AiSettingsFields.transform(withChatMode)
 export type AiSettings = z.infer<typeof AiSettings>
 /** The shape before parsing: `ghostText` may be absent (a row stored before F-5.3) and `features` may lack newer ids. */
 export type AiSettingsInput = z.input<typeof AiSettings>
+
+/**
+ * The project's AI settings as a stored row is read (`getAiSettings`): the same shape with the
+ * toggles read leniently (`StoredFeatureToggles`), so a retired id never resets Use AI to off and
+ * a broken toggle reads as off.
+ */
+export const StoredAiSettings = AiSettingsFields.extend({
+  features: StoredFeatureToggles
+}).transform(withChatMode)
 
 /** Installs at Off (F-14.4) with every toggle on, so raising the dial is the one act that enables anything. */
 export function defaultAiSettings(): AiSettings {

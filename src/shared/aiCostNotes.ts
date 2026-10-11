@@ -230,7 +230,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
  * priced at the corrected prices before any of them is built, so the registry shows what the
  * redesign will cost and a drift from the design's budget fails a test. One row per request
  * shape; a prompt with two shapes (a first read and a window read) has a row each. When a row's
- * feature ships (P1–P4) it moves into `AI_COST_NOTES`, where the compile check takes over.
+ * feature ships (P1–P5) it moves into `AI_COST_NOTES`, where the compile check takes over.
  */
 export interface PlannedCostNote {
   /** The row's own key: the prompt version, with a suffix for a second shape of it. */
@@ -241,7 +241,7 @@ export interface PlannedCostNote {
   feature: string
   /** True when `feature` is already an `AiFeatureId` (a new version of an existing prompt). */
   existing: boolean
-  phase: 'P1' | 'P2a' | 'P2b' | 'P3' | 'P4'
+  phase: 'P1' | 'P2a' | 'P2b' | 'P3' | 'P4' | 'P5'
   tier: Tier
   trigger: AiCostNote['trigger']
   when: string
@@ -305,6 +305,97 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     callsPerUse: 1
   },
   {
+    id: 'verify.v1:spot',
+    prompt: 'verify.v1',
+    feature: 'verify',
+    existing: false,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'Spot checks: 50 literal claims per rebuild re-checked on the fast model (sized from design Part 5’s index total).',
+    typicalInTokens: 260,
+    typicalOutTokens: 15,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v1:card',
+    prompt: 'reader.v1',
+    feature: 'reader',
+    existing: false,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'An instant card that is out of date: one window read for its scene (about one card in five; the rest are local and free).',
+    typicalInTokens: 4_000,
+    typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
+    id: 'synopsis.v2',
+    prompt: 'synopsis.v2',
+    feature: 'synopsis',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'on request',
+    when: 'Suggest a synopsis, re-pointed from the summary to the scene card; priced like synopsis.v1.',
+    typicalInTokens: 495,
+    typicalOutTokens: 120,
+    callsPerUse: 1
+  },
+  {
+    id: 'notesSuggest.v3',
+    prompt: 'notesSuggest.v3',
+    feature: 'notesSuggest',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'on request',
+    when: 'Suggest key points for the notes, re-pointed to the scene card; priced like notesSuggest.v2.',
+    typicalInTokens: 961,
+    typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v2:first',
+    prompt: 'reader.v2',
+    feature: 'reader',
+    existing: false,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'reader.v1:first with knows and thread claims added; replaces it from P2b; priced like it until measured.',
+    typicalInTokens: 3_800,
+    typicalOutTokens: 520,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v2:window',
+    prompt: 'reader.v2',
+    feature: 'reader',
+    existing: false,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'reader.v1:window with knows and thread claims added; replaces it from P2b; priced like it until measured.',
+    typicalInTokens: 4_000,
+    typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
+    id: 'verify.v2',
+    prompt: 'verify.v2',
+    feature: 'verify',
+    existing: false,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'verify.v1 with knows and thread claims; replaces it from P2b; priced like it until measured.',
+    typicalInTokens: 1_300,
+    typicalOutTokens: 110,
+    callsPerUse: 1
+  },
+  {
     id: 'planLinks.v2',
     prompt: 'planLinks.v2',
     feature: 'planLinks',
@@ -331,6 +422,19 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     callsPerUse: 1
   },
   {
+    id: 'reviewChat.v3',
+    prompt: 'reviewChat.v3',
+    feature: 'reviewChat',
+    existing: true,
+    phase: 'P1',
+    tier: 'strong',
+    trigger: 'on request',
+    when: 'A message on the upload review that changes what is filed into Pinned; priced like reviewChat.v2.',
+    typicalInTokens: 676,
+    typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
     id: 'navigator.v1',
     prompt: 'navigator.v1',
     feature: 'navigator',
@@ -354,6 +458,19 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     when: 'Ms Scribe answers an open question from the passages the navigator found.',
     typicalInTokens: 6_500,
     typicalOutTokens: 350,
+    callsPerUse: 1
+  },
+  {
+    id: 'agent.v9:widened',
+    prompt: 'agent.v9',
+    feature: 'agent',
+    existing: true,
+    phase: 'P3',
+    tier: 'strong',
+    trigger: 'every chat message',
+    when: 'An open question the first passages could not answer, widened to more passages (about one question in five).',
+    typicalInTokens: 13_000,
+    typicalOutTokens: 400,
     callsPerUse: 1
   },
   {
@@ -407,6 +524,32 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     typicalInTokens: 600,
     typicalOutTokens: 90,
     callsPerUse: 1
+  },
+  {
+    id: 'agent.v9:try',
+    prompt: 'agent.v9',
+    feature: 'agent',
+    existing: true,
+    phase: 'P5',
+    tier: 'strong',
+    trigger: 'on request',
+    when: 'A Try chat turn (a what-if, after the launch line): reasoning low, never read into memory.',
+    typicalInTokens: 7_000,
+    typicalOutTokens: 700,
+    callsPerUse: 1
+  },
+  {
+    id: 'agent.v9:version',
+    prompt: 'agent.v9',
+    feature: 'agent',
+    existing: true,
+    phase: 'P5',
+    tier: 'strong',
+    trigger: 'on request',
+    when: 'A what-if written out as a scene Version (P5), never read into memory.',
+    typicalInTokens: 7_000,
+    typicalOutTokens: 1_500,
+    callsPerUse: 1
   }
 ]
 
@@ -429,14 +572,16 @@ export const PLANNED_TASK_COSTS: readonly PlannedTask[] = [
       { row: 'reader.v1:first', calls: 90 },
       { row: 'verify.v1', calls: 90 },
       { row: 'judge.v1', calls: 12 },
+      { row: 'verify.v1:spot', calls: 50 },
       { row: 'verify.v1:pro', calls: 20 }
     ]
   },
   {
     id: 'session',
-    label: 'A 2-hour writing session',
+    label: 'A 2-hour writing session (3 card refreshes, about one needing a read)',
     calls: [
       { row: 'reader.v1:window', calls: 12 },
+      { row: 'reader.v1:card', calls: 1 },
       { row: 'verify.v1', calls: 12 },
       { row: 'judge.v1', calls: 4 },
       { row: 'planLinks.v2', calls: 2 }
@@ -460,6 +605,15 @@ export const PLANNED_TASK_COSTS: readonly PlannedTask[] = [
     ]
   },
   {
+    id: 'openQuestionWidened',
+    label: 'An open question, widened (about one in five)',
+    calls: [
+      { row: 'navigator.v1', calls: 3 },
+      { row: 'agent.v9:widened', calls: 1 },
+      { row: 'cite.v1', calls: 1 }
+    ]
+  },
+  {
     id: 'checkBook',
     label: 'Check the book',
     calls: [
@@ -473,18 +627,32 @@ export const PLANNED_TASK_COSTS: readonly PlannedTask[] = [
     calls: [{ row: 'contextImport.v3', calls: 14 }]
   },
   {
-    id: 'heavyMonth',
-    label: 'A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions, 2 checks)',
+    id: 'whatIf',
+    label: 'A what-if (P5): 5 Try turns and 1 Version',
     calls: [
-      { row: 'reader.v1:window', calls: 12 * 20 + 6 },
+      { row: 'navigator.v1', calls: 2 * 5 },
+      { row: 'agent.v9:try', calls: 5 },
+      { row: 'agent.v9:version', calls: 1 }
+    ]
+  },
+  {
+    id: 'heavyMonth',
+    label:
+      'A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions with 10 widened, 2 checks, 1 what-if)',
+    calls: [
+      { row: 'reader.v1:window', calls: 12 * 20 },
+      { row: 'reader.v1:card', calls: 20 + 6 },
       { row: 'verify.v1', calls: 12 * 20 },
       { row: 'judge.v1', calls: 4 * 20 + 20 * 2 },
       { row: 'planLinks.v2', calls: 2 * 20 },
       { row: 'agent.v9:lookup', calls: 20 },
-      { row: 'navigator.v1', calls: 2 * 50 },
-      { row: 'agent.v9:open', calls: 50 },
+      { row: 'navigator.v1', calls: 2 * 40 + 3 * 10 + 2 * 5 },
+      { row: 'agent.v9:open', calls: 40 },
+      { row: 'agent.v9:widened', calls: 10 },
       { row: 'cite.v1', calls: 20 + 50 },
-      { row: 'judge.v1:pro', calls: 20 * 2 }
+      { row: 'judge.v1:pro', calls: 20 * 2 },
+      { row: 'agent.v9:try', calls: 5 },
+      { row: 'agent.v9:version', calls: 1 }
     ]
   }
 ]

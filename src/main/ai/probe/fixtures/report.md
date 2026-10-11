@@ -51,8 +51,11 @@ The run finished under its $0.25 cost limit.
 
 ## Next steps
 
-1. If the proposed prices differ from the table, run `npm run ai:probe -- -u` to write them
-   into `src/shared/modelPrices.ts` (`source: probe`).
+1. If the proposed prices differ from the table: after `npm run ai:probe -- -u` they are
+   already in `src/shared/modelPrices.ts` (check with `git diff`); after a plain run (which
+   fails on the difference), write them from this run’s saved numbers without calling
+   anything: `AI_PROBE_REPLAY=<path to this report’s .json> npm run ai:probe -- -u`.
+   If they match, a plain run passes and there is nothing to write.
 2. Run `npm run eval:ai -- -u` to reprice `docs/AI-COST-REGISTRY.md`.
 3. Commit this report, its JSON, the price module and the registry diff; then update the
    Worker’s `models` row (`docs/OPERATOR-SETUP.md` 4.3) if it is deployed.

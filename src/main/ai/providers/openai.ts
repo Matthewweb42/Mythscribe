@@ -66,14 +66,36 @@ interface UsageBlock {
   completion_tokens: number
   prompt_tokens_details?: { cached_tokens?: number } | null
   completion_tokens_details?: { reasoning_tokens?: number } | null
-  /** F-16.1: OpenRouter's usage accounting (`usage: { include: true }`): the request's cost in USD. */
+  /** F-16.1: OpenRouter's usage accounting (`usage: { include: true }`): what OpenRouter charged, in USD. */
   cost?: number
+  /** OpenRouter: true when the request ran on the author's own provider key attached in OpenRouter. */
+  is_byok?: boolean
+  /** OpenRouter: on a BYOK request, what the upstream provider charged the author's own key. */
+  cost_details?: { upstream_inference_cost?: number | null } | null
+}
+
+const isCost = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0
+
+/**
+ * What the request cost the author, from OpenRouter's usage accounting, or undefined when it did
+ * not say. On a BYOK request `cost` is only OpenRouter's fee and the provider's own charge is
+ * `cost_details.upstream_inference_cost`, so the two are added; a BYOK answer without the
+ * upstream cost reports nothing, and the request path falls back to the price table rather than
+ * counting a few percent of the real spend.
+ */
+function reportedCostOf(usage: UsageBlock | undefined | null): number | undefined {
+  const cost = usage?.cost
+  if (!isCost(cost)) return undefined
+  if (usage?.is_byok !== true) return cost
+  const upstream = usage.cost_details?.upstream_inference_cost
+  return isCost(upstream) ? cost + upstream : undefined
 }
 
 /**
  * The SDK's usage in the provider-neutral shape; `cachedInputTokens` only when the provider
  * reported prompt-cache hits (OpenAI and OpenRouter both use `prompt_tokens_details`).
- * `reportsCost` (OpenRouter only, F-16.1) maps a finite, non-negative `cost` to
+ * `reportsCost` (OpenRouter only, F-16.1) maps the reported cost (`reportedCostOf`) to
  * `reportedCostUsd`; OpenAI and local servers are never asked for it, so never read for it.
  */
 export function usageOf(
@@ -82,15 +104,13 @@ export function usageOf(
 ): CompletionUsage {
   const cached = usage?.prompt_tokens_details?.cached_tokens
   const reasoning = usage?.completion_tokens_details?.reasoning_tokens
-  const cost = reportsCost ? usage?.cost : undefined
+  const cost = reportsCost ? reportedCostOf(usage) : undefined
   return {
     inputTokens: usage?.prompt_tokens ?? 0,
     outputTokens: usage?.completion_tokens ?? 0,
     ...(typeof cached === 'number' && cached >= 0 ? { cachedInputTokens: cached } : {}),
     ...(typeof reasoning === 'number' && reasoning > 0 ? { reasoningTokens: reasoning } : {}),
-    ...(typeof cost === 'number' && Number.isFinite(cost) && cost >= 0
-      ? { reportedCostUsd: cost }
-      : {})
+    ...(cost === undefined ? {} : { reportedCostUsd: cost })
   }
 }
 

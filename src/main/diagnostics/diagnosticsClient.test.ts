@@ -93,9 +93,7 @@ describe('createDiagnosticsSend (F-15.8)', () => {
   it('refuses a body the shared schema does not accept, before anything leaves', async () => {
     const send = createDiagnosticsSend({ baseUrl: BASE, fetch: fetchFake })
     const invented = { counter: 'project.title', day: '2026-09-20', n: 1 }
-    await expect(
-      send({ ...body(), counts: [invented] } as unknown as DiagnosticsBody)
-    ).rejects.toThrow()
+    await expect(send({ ...body(), counts: [invented] })).rejects.toThrow()
     expect(calls).toEqual([])
   })
 

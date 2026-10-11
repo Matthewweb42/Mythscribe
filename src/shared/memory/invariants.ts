@@ -45,6 +45,7 @@ export interface InvariantCitation {
 
 export type InvariantViolation =
   | { kind: 'anchorMissing'; claimId: string; sceneId: string; missing: string[] }
+  | { kind: 'anchorEmpty'; claimId: string; sceneId: string }
   | { kind: 'unproved'; claimId: string; proof: string | null }
   | { kind: 'aliasClash'; norm: string; recordIds: string[] }
   | { kind: 'unreadableSource'; claimId: string; source: MemorySource }
@@ -61,8 +62,10 @@ export interface InvariantInput {
 const NO_HASHES: ReadonlySet<string> = new Set()
 
 /**
- * Every violation of the five invariants (claims first, then aliases, then citations):
+ * Every violation of the invariants (claims first, then aliases, then citations):
  * - `anchorMissing`: a live claim whose anchor hashes are not all in its scene;
+ * - `anchorEmpty`: a live claim with no anchor at all (its quote named no sentence of the scene,
+ *   `anchorFor` gave `[]`), which `anchorHolds` would pass vacuously and no edit could ever stale;
  * - `unproved`: a claim whose proof is neither `literal` nor `verified`;
  * - `aliasClash`: one `norm` belonging to two or more records when not every one of its aliases
  *   is shared;
@@ -74,7 +77,9 @@ export function checkMemoryInvariants(input: InvariantInput): InvariantViolation
   const violations: InvariantViolation[] = []
 
   for (const claim of input.claims) {
-    if (claim.state === 'live') {
+    if (claim.state === 'live' && claim.anchor.length === 0) {
+      violations.push({ kind: 'anchorEmpty', claimId: claim.id, sceneId: claim.sceneId })
+    } else if (claim.state === 'live') {
       const present = input.sceneHashes.get(claim.sceneId) ?? NO_HASHES
       if (!anchorHolds(claim.anchor, present)) {
         violations.push({

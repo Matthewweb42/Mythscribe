@@ -131,7 +131,7 @@ const HOSTED_ENTRIES: readonly HostedEntry[] = [
 
 /**
  * The defaults the Worker serves until the operator overrides a key in `billing_config`
- * (author decisions 2026-10-07: cost + 20 %, a $2.00 trial grant, $10 minimum pack). The default
+ * (`DEFAULT_BILLING_TERMS`: cost + 25 % since 2026-10-08, no trial grant, $10 minimum pack). The default
  * models were approved by the author on 2026-10-07: DeepSeek V4 Flash (fast) and V4 Pro (strong)
  * through OpenRouter. F-16.1: their prices come from the one price module the probe regenerates
  * (`src/shared/modelPrices.ts`; the researched list prices until it runs), and every

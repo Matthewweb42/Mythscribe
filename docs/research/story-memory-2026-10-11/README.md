@@ -3,7 +3,7 @@
 The author asked for a from-zero redesign of story memory (tags, lookups, sheets, auto-updates) optimised
 for accuracy, ease of use, and token efficiency. **Approved by the author on 2026-10-11**, with the
 recommended defaults except decision 3, which the author changed (see `design.md` › "Decisions
-(2026-10-11)"). Building has started: P0 is in progress.
+(2026-10-11)"). Building has started: P0 is done (2026-10-11; the author's probe run is still open), P1 is next.
 
 - The spec: `FEATURES.md` §2.16 (F-16.1–16.38); milestones M8 (P0–P4 and the switch-over, before
   launch) and M9 (P5–P9, after launch) in `FEATURES.md` §6. The approval entry is in `QUESTIONS.md`

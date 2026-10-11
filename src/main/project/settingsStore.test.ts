@@ -187,7 +187,7 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     expect(getAiSettings(db)).toEqual(defaultAiSettings())
   })
 
-  it('keeps the stored level when only a toggle no longer parses: a retired id or a bad value is dropped (F-16.2)', () => {
+  it('keeps the stored level when only a toggle no longer parses: a retired id is dropped and a bad value reads as off (F-16.2)', () => {
     open('novel')
     setRaw(
       JSON.stringify({
@@ -196,11 +196,31 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
       }),
       AI_SETTINGS_KEY
     )
+    // A broken toggle fails closed: it never turns its feature on.
     expect(getAiSettings(db)).toEqual({
       ...defaultAiSettings(),
       dial: 1,
-      features: { ...defaultAiSettings().features, summary: false, tags: false }
+      features: { ...defaultAiSettings().features, ghostText: false, summary: false, tags: false }
     })
+  })
+
+  it('keeps a toggle this build does not know through a save, so a newer build reads it back (F-16.2)', () => {
+    open('novel')
+    setRaw(
+      JSON.stringify({ dial: 1, features: { chat: false, reader: false, oddValue: 'x' } }),
+      AI_SETTINGS_KEY
+    )
+    const read = getAiSettings(db)
+    expect(read.features).not.toHaveProperty('reader')
+    setAiSettings(db, { ...read, chatMode: 'plan' })
+    const stored = JSON.parse(rows(AI_SETTINGS_KEY)[0]?.value ?? '{}') as {
+      features: Record<string, unknown>
+    }
+    expect(stored.features.reader).toBe(false)
+    expect(stored.features.chat).toBe(false)
+    // Only booleans are carried over.
+    expect(stored.features).not.toHaveProperty('oddValue')
+    expect(getAiSettings(db).chatMode).toBe('plan')
   })
 
   it('fills toggles missing from an older row with on instead of resetting the dial (F-14.10)', () => {
