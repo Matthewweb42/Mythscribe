@@ -6,12 +6,14 @@ import {
   GHOST_IDLE_MS_MAX,
   GHOST_IDLE_MS_MIN,
   USE_AI_LABEL,
-  USE_AI_MEANING
+  USE_AI_MEANING,
+  dataSharingSends
 } from '@shared/aiSettings'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { providerOf, useAiStore } from './aiStore'
 import { useAssistantName } from '@renderer/features/shell/viewStore'
 import { nameAssistant } from '@shared/assistantName'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 
 const FIELD = 'w-24 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 
@@ -36,6 +38,8 @@ export function AiDialSection(): React.JSX.Element | null {
   const provider = providerOf(status, source)
   const headingId = useId()
   const useAiHintId = useId()
+  // F-16.4: a v2 project sends records and Research where v1 sends tags and sheets.
+  const memory = useStoryMemory()
 
   if (settings === null) return null
   const { dial, features, ghostText } = settings
@@ -113,7 +117,8 @@ export function AiDialSection(): React.JSX.Element | null {
         </thead>
         <tbody className="align-top">
           {AI_FEATURES_BY_LEVEL.map((id) => {
-            const { label, sends } = AI_DATA_SHARING[id]
+            const { label } = AI_DATA_SHARING[id]
+            const sends = dataSharingSends(id, memory)
             return (
               <tr key={id}>
                 <th scope="row" className="pr-2 text-left font-normal whitespace-nowrap">

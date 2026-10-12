@@ -460,6 +460,7 @@ import {
   stalePassageOwners
 } from '../memory/passageIndexer'
 import { answerQuestion, listNameQuestions, resetNameQuestionCache } from '../memory/questions'
+import { applyRename, clearRenameUndo, previewRename, undoRename } from '../memory/renameStore'
 import {
   createRecord,
   deleteRecord,
@@ -3564,7 +3565,8 @@ export function registerHandlers({
           message,
           history,
           selection,
-          requestId
+          requestId,
+          memory: memory()
         })
         const { action, instruction, edit, routedBy, usage, costUsd, cached, model } = result
         return {
@@ -3793,7 +3795,7 @@ export function registerHandlers({
         const result = await runAgent(
           db,
           deps,
-          { nodeId, message, history, access, focus, requestId },
+          { nodeId, message, history, access, focus, requestId, memory: memory() },
           (step) => emit(windows(), 'ai:agentStep', { requestId, step }),
           {
             answer: (delta) => emit(windows(), 'ai:agentDelta', { requestId, delta, reset: false }),
@@ -4658,6 +4660,35 @@ export function registerHandlers({
     return result
   })
 
+  // F-16.13: Rename in book. The apply and the undo are bulk document saves like Replace in
+  // project's, so each ends in `documentsWritten` for what main wrote (the open scene is saved
+  // by its editor), and the renamed name is a roster change.
+  register('rename:preview', (request) => previewRename(manager.require().connection.orm, request))
+
+  register('rename:apply', (request) => {
+    const db = manager.require().connection.orm
+    const result = applyRename(db, request, new Date())
+    clearSearchCache()
+    documentsWritten(
+      db,
+      result.written.map((each) => each.id)
+    )
+    rosterChanged(db, [request.recordId])
+    return result
+  })
+
+  register('rename:undo', () => {
+    const db = manager.require().connection.orm
+    const result = undoRename(db, new Date())
+    clearSearchCache()
+    documentsWritten(
+      db,
+      result.restored.map((each) => each.id)
+    )
+    if (result.record !== null) rosterChanged(db, [result.record.id])
+    return result
+  })
+
   register('passages:search', ({ query, sources, limit }) =>
     searchMemoryPassages(manager.require().connection.orm, query, {
       limit,
@@ -4778,6 +4809,8 @@ export function registerHandlers({
     clearSearchCache()
     // F-10.2: the last replace's undo holds another project's documents.
     clearReplaceUndo()
+    // F-16.13: so does the last rename's.
+    clearRenameUndo()
     // F-10.3: the session's words and active time start again with every project.
     resetGoalsSession()
     // F-9.14: Later holds for one session of one project.

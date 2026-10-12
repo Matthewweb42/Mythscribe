@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   localRoute,
+  routeForMemory,
   ROUTE_CHAPTER_MAX,
   ROUTE_HISTORY_TURNS,
   ROUTE_INSTRUCTION_MAX,
@@ -16,6 +17,7 @@ import {
   type RouteEdit,
   type RouteSituation
 } from '@shared/assistantRoute'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { getAiSettings } from '../project/settingsStore'
 import { getNode, type TreeDb } from '../tree/treeStore'
 import { headTruncate } from './context/chatContext'
@@ -36,6 +38,8 @@ export interface RouteInput {
   selection: { text: string } | null
   /** The caller's id for `ai:cancel` (F-5.10); optional so tests can run without one. */
   requestId?: string
+  /** F-16.4: the project's story memory; v2 answers a consistency check through the agent. */
+  memory: StoryMemoryVersion
 }
 
 export interface RouteResult extends RouteDecision {
@@ -88,7 +92,7 @@ export async function runRoute(
   const local = localRoute(input.message, situation)
   if (local !== null) {
     return {
-      ...local,
+      ...routeForMemory(local, input.memory),
       routedBy: 'local',
       usage: { inputTokens: 0, outputTokens: 0 },
       costUsd: 0,
@@ -124,7 +128,7 @@ export async function runRoute(
   })
 
   return {
-    ...settleRoute(parseRouteAnswer(result.text), situation),
+    ...routeForMemory(settleRoute(parseRouteAnswer(result.text), situation), input.memory),
     routedBy: 'model',
     usage: result.usage,
     costUsd: result.costUsd,

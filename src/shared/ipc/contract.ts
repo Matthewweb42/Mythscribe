@@ -222,6 +222,13 @@ import { AuthorTodo, AuthorTodoCreate, AuthorTodoPatch } from '../memory/authorT
 import { Dismissed, DismissedList } from '../memory/dismissed'
 import { NameAnswer, NameAnswerResult, NameQuestion } from '../memory/nameQuestions'
 import { NamedInRow, NameMentionView } from '../memory/nameScan'
+import {
+  RenameApplyRequest,
+  RenameApplyResult,
+  RenamePreview,
+  RenameRequest,
+  RenameUndoResult
+} from '../memory/rename'
 import { MemoryPassageHit, MemoryPassageQuery } from '../memory/passages'
 import {
   RECORD_ALIASES_MAX,
@@ -3227,6 +3234,19 @@ export const contract = {
   'names:questions': { input: z.undefined(), output: z.array(NameQuestion) },
   /** Answers a question: *Add as* · *Not a name*, or *Yes* · *No*. */
   'names:answer': { input: z.object({ answer: NameAnswer }), output: NameAnswerResult },
+  /**
+   * Rename in book (F-16.13): the matches of one of a record's names per scene of the active
+   * draft, and in the inactive drafts. Writes nothing.
+   */
+  'rename:preview': { input: RenameRequest, output: RenamePreview },
+  /**
+   * Applies a rename: an automatic snapshot, then every manuscript scene but `openId` (the
+   * renderer applies `match` to it through the editor), the inactive drafts, the name and the
+   * Not a mention keys that hold it, in one transaction. The renderer flushes pending saves first.
+   */
+  'rename:apply': { input: RenameApplyRequest, output: RenameApplyResult },
+  /** Takes the last rename back where the text still reads as the rename left it (session only). */
+  'rename:undo': { input: z.undefined(), output: RenameUndoResult },
   /** Word search over the local passage index, each hit labelled with its source and canon status. */
   'passages:search': { input: MemoryPassageQuery, output: z.array(MemoryPassageHit) },
   /** F-16.8: every Research document's meta (origin, original, Not canon), in tree order. */

@@ -1,21 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import type { StoryRecordSummary, RecordKind } from '@shared/memory/records'
 import {
   ALSO_HERE_MAX,
-  emptySceneDetails,
   parseStoryYear,
   STORY_YEAR_MAX,
-  STORY_YEAR_MIN,
-  type SceneDetails
+  STORY_YEAR_MIN
 } from '@shared/memory/sceneDetails'
 import { SCENE_META_FIELD_MAX } from '@shared/sceneMeta'
 import { LabelPicker } from '@renderer/features/labels/LabelPicker'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
-import { describeError } from '@renderer/lib/errors'
-import { useSceneDetailStore } from './sceneDetailStore'
+import { useSceneDetailsEditor, type SceneDetailsEditor } from './sceneDetailsEditor'
 
 const FIELD =
   'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-px text-xs leading-5 disabled:opacity-50'
@@ -64,45 +61,85 @@ export function SceneDetailsFields({
   )
 }
 
-function TypedDetails({ id }: { id: string }): React.JSX.Element {
-  const view = useSceneDetailStore((s) => s.docs[id])
+/** The POV picker: a Characters record, or *New character…* through the creation dialog. */
+export function PovField({
+  editor,
+  inputId
+}: {
+  editor: SceneDetailsEditor
+  inputId: string
+}): React.JSX.Element {
   const characters = useRecordsOfKind('character')
-  const places = useRecordsOfKind('place')
+  const byId = useRecordStore((s) => s.byId)
+  const { details, disabled, save, createFor } = editor
+  return (
+    <RecordSelect
+      id={inputId}
+      value={details.povRecordId}
+      options={characters}
+      byId={byId}
+      none="Nobody chosen"
+      create="New character…"
+      disabled={disabled}
+      onChange={(povRecordId) => save({ povRecordId })}
+      onCreate={() => createFor('character', (povRecordId) => save({ povRecordId }))}
+    />
+  )
+}
+
+/** *+ also here*: the chips of the records present without being named, each removable, and the picker. */
+export function AlsoHereField({ editor }: { editor: SceneDetailsEditor }): React.JSX.Element {
   const everyone = useRecordsOfKind(null)
   const byId = useRecordStore((s) => s.byId)
-
-  useEffect(() => {
-    useSceneDetailStore
-      .getState()
-      .load(id)
-      .catch((err: unknown) => toast.error(describeError(err)))
-  }, [id])
-
-  const disabled = view === undefined
-  const details: SceneDetails = view ?? emptySceneDetails()
-  /** Saves a change over the details as the store holds them now (a picker answers later). */
-  const save = (
-    patch: Partial<SceneDetails> | ((current: SceneDetails) => Partial<SceneDetails>)
-  ): void => {
-    const now = useSceneDetailStore.getState().docs[id]
-    if (now === undefined) return
-    const current: SceneDetails = {
-      povRecordId: now.povRecordId,
-      place: now.place,
-      time: now.time,
-      storyYear: now.storyYear,
-      alsoHere: now.alsoHere
-    }
-    const change = typeof patch === 'function' ? patch(current) : patch
-    useSceneDetailStore
-      .getState()
-      .save(id, { ...current, ...change })
-      .catch((err: unknown) => toast.error(describeError(err)))
-  }
-  /** The creation dialog for `categoryId`; the record made (or picked as the same) is chosen. */
-  const createFor = (categoryId: string, choose: (recordId: string) => void): void =>
-    useRecordStore.getState().startCreate(categoryId, choose)
+  const { details, disabled, save } = editor
   const addable = everyone.filter((record) => !details.alsoHere.includes(record.id))
+  return (
+    <>
+      {details.alsoHere.map((recordId) => (
+        <span
+          key={recordId}
+          className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs"
+        >
+          {byId[recordId]?.name ?? 'Gone'}
+          <button
+            type="button"
+            aria-label={`Not here: ${byId[recordId]?.name ?? 'gone record'}`}
+            disabled={disabled}
+            onClick={() => save({ alsoHere: details.alsoHere.filter((each) => each !== recordId) })}
+            className="flex size-4 items-center justify-center rounded-full text-fg-muted hover:bg-surface-raised hover:text-fg"
+          >
+            <X size={10} aria-hidden="true" />
+          </button>
+        </span>
+      ))}
+      {addable.length > 0 && details.alsoHere.length < ALSO_HERE_MAX ? (
+        <select
+          aria-label="Also here"
+          value=""
+          disabled={disabled}
+          onChange={(event) => {
+            const recordId = event.target.value
+            if (recordId !== '') save({ alsoHere: [...details.alsoHere, recordId] })
+          }}
+          className="rounded-md border border-line bg-bg px-1 py-px text-xs leading-5"
+        >
+          <option value="">+ also here…</option>
+          {addable.map((record) => (
+            <option key={record.id} value={record.id}>
+              {record.name}
+            </option>
+          ))}
+        </select>
+      ) : null}
+    </>
+  )
+}
+
+function TypedDetails({ id }: { id: string }): React.JSX.Element {
+  const editor = useSceneDetailsEditor(id)
+  const places = useRecordsOfKind('place')
+  const byId = useRecordStore((s) => s.byId)
+  const { details, disabled, save, createFor } = editor
 
   return (
     <>
@@ -110,17 +147,7 @@ function TypedDetails({ id }: { id: string }): React.JSX.Element {
         <label htmlFor={`${id}-pov`} className={LABEL}>
           POV
         </label>
-        <RecordSelect
-          id={`${id}-pov`}
-          value={details.povRecordId}
-          options={characters}
-          byId={byId}
-          none="Nobody chosen"
-          create="New character…"
-          disabled={disabled}
-          onChange={(povRecordId) => save({ povRecordId })}
-          onCreate={() => createFor('character', (povRecordId) => save({ povRecordId }))}
-        />
+        <PovField editor={editor} inputId={`${id}-pov`} />
       </div>
       <div className={ROW}>
         <label htmlFor={`${id}-place`} className={LABEL}>
@@ -188,44 +215,7 @@ function TypedDetails({ id }: { id: string }): React.JSX.Element {
       </div>
       <div className={`${ROW} flex-wrap`}>
         <span className={LABEL}>Also here</span>
-        {details.alsoHere.map((recordId) => (
-          <span
-            key={recordId}
-            className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs"
-          >
-            {byId[recordId]?.name ?? 'Gone'}
-            <button
-              type="button"
-              aria-label={`Not here: ${byId[recordId]?.name ?? 'gone record'}`}
-              disabled={disabled}
-              onClick={() =>
-                save({ alsoHere: details.alsoHere.filter((each) => each !== recordId) })
-              }
-              className="flex size-4 items-center justify-center rounded-full text-fg-muted hover:bg-surface-raised hover:text-fg"
-            >
-              <X size={10} aria-hidden="true" />
-            </button>
-          </span>
-        ))}
-        {addable.length > 0 && details.alsoHere.length < ALSO_HERE_MAX ? (
-          <select
-            aria-label="Also here"
-            value=""
-            disabled={disabled}
-            onChange={(event) => {
-              const recordId = event.target.value
-              if (recordId !== '') save({ alsoHere: [...details.alsoHere, recordId] })
-            }}
-            className="rounded-md border border-line bg-bg px-1 py-px text-xs leading-5"
-          >
-            <option value="">+ also here…</option>
-            {addable.map((record) => (
-              <option key={record.id} value={record.id}>
-                {record.name}
-              </option>
-            ))}
-          </select>
-        ) : null}
+        <AlsoHereField editor={editor} />
       </div>
     </>
   )

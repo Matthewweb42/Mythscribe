@@ -7,9 +7,15 @@ import {
   OPENROUTER_DEFAULT_MODELS,
   type AiStatus
 } from '@shared/ai'
-import { AI_DATA_SHARING, AiSettings, defaultAiSettings } from '@shared/aiSettings'
+import {
+  AI_DATA_SHARING,
+  AiSettings,
+  dataSharingSends,
+  defaultAiSettings
+} from '@shared/aiSettings'
 import { DEFAULT_ASSISTANT_NAME, nameAssistant } from '@shared/assistantName'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
+import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, IpcRequestError, type IpcClient } from '@renderer/lib/ipc'
 import { AiDialSection } from './AiDialSection'
@@ -89,6 +95,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetAiSettingsStore()
+  useProjectStore.setState({ current: null })
 })
 
 describe('AiDialSection (F-14.4, F-5.21)', () => {
@@ -205,6 +212,31 @@ describe('AiDialSection (F-14.4, F-5.21)', () => {
       expect(row).toHaveTextContent(sends)
       expect(row).toHaveTextContent('OpenAI')
     }
+  })
+
+  it('shows what a story memory v2 project sends where that differs (F-16.4)', async () => {
+    useProjectStore.setState({
+      current: {
+        id: 'p-2',
+        name: 'Memory',
+        format: 'novel',
+        path: '/books/Memory.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 33,
+        storyMemory: 'v2'
+      }
+    })
+    await open()
+    const table = screen.getByRole('table', { name: 'What each AI feature sends' })
+    const agent = nameAssistant(AI_DATA_SHARING.agent.label, DEFAULT_ASSISTANT_NAME)
+    const row = within(table).getByRole('row', { name: new RegExp(`^${agent} `) })
+    expect(row).toHaveTextContent(
+      nameAssistant(dataSharingSends('agent', 'v2'), DEFAULT_ASSISTANT_NAME)
+    )
+    expect(row).toHaveTextContent('your to-dos')
+    expect(row).not.toHaveTextContent('tag names')
   })
 })
 

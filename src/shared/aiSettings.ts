@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { AI_FEATURE_IDS, AiFeatureId, type AiProviderId, type OwnKeyProvider } from './ai'
 import { DEFAULT_HONESTY, Honesty } from './critique'
+import type { StoryMemoryVersion } from './storyMemory'
 
 /** Settings-table key under which the AI dial and toggles (F-14.4) are stored as JSON. */
 export const AI_SETTINGS_KEY = 'ai'
@@ -283,6 +284,12 @@ export interface AiDataSharing {
   /** Exactly what leaves the machine when the feature runs; the rule "no text the panel does not list" refers to this. */
   sends: string
   /**
+   * F-16.4: what the feature sends in a story memory v2 project, where that differs (records,
+   * names and Research in place of tags and sheets); the panel shows it for a v2 project
+   * (`dataSharingSends`), so a v1 project's text is unchanged. Absent: the same as `sends`.
+   */
+  sendsV2?: string
+  /**
    * The lowest stored level at which the feature may run: 1 (Use AI on) for every feature since
    * the one switch (F-5.21); off runs nothing.
    */
@@ -367,6 +374,12 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'voice profile (stylometric rules, learned style notes, and up to 3 exemplar passages) with your author rules ' +
       'and banned phrases, and up to 200 words to leave alone: the names of your story-bible ' +
       'entries and tags and the words in the project dictionary.',
+    sendsV2:
+      "The scene's text (the first 20,000 characters), or only the passage you selected, its " +
+      "brief plus the previous scene's reader-knows-after line and the next scene's goal, the " +
+      'voice profile (stylometric rules, learned style notes, and up to 3 exemplar passages) with your author rules ' +
+      'and banned phrases, and up to 200 words to leave alone: the names and nicknames of your ' +
+      'records and the words in the project dictionary.',
     minDial: 1
   },
   whatNext: {
@@ -500,6 +513,19 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'story-bible sheets, tag names, and the To do list. When it may edit, the voice ' +
       'profile (stylometric rules, learned style notes, and up to 3 exemplar passages) and ' +
       'your author rules and banned phrases go too.',
+    sendsV2:
+      `Your message, the recent turns of the conversation, ${STORY_MAP_SENDS}, the open ` +
+      "document's title, synopsis, " +
+      'notes (the first 1,500 characters), and stored summary, up to 1,500 characters before ' +
+      'the caret and 2,000 of the selected passage, and then, one lookup at a time (at most 6 ' +
+      'per message), what the assistant asks to read: a record (its names, its Pinned lines ' +
+      'except those marked Not canon, its Ideas labelled as ideas, the scenes it is the point ' +
+      'of view of with their typed place and time, and where the book names it), scene cards, ' +
+      'matching paragraphs of the manuscript, scene notes, Pinned, Ideas and Research ' +
+      'documents (each labelled canon, plan or idea), the outline of titles and word counts, ' +
+      'up to 6,000 characters of a document per read, notes, and your to-dos. When it may ' +
+      'edit, the voice profile (stylometric rules, learned style notes, and up to 3 exemplar ' +
+      'passages) and your author rules and banned phrases go too.',
     minDial: 1
   },
   contextImport: {
@@ -568,6 +594,15 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends: "The active scene's text, referenced notes, the scene brief, and your instruction.",
     minDial: 1
   }
+}
+
+/**
+ * What the data-sharing panel says a feature sends in a project with story memory `memory`
+ * (F-16.4): the row's v2 text in a v2 project when it has one, else its text.
+ */
+export function dataSharingSends(feature: AiFeatureId, memory: StoryMemoryVersion): string {
+  const row = AI_DATA_SHARING[feature]
+  return memory === 'v2' ? (row.sendsV2 ?? row.sends) : row.sends
 }
 
 /** The features in display order: by the level they need, then as `AI_FEATURE_IDS` lists them. */

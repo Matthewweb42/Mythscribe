@@ -113,6 +113,12 @@ import { useSceneDetailStore } from '@renderer/features/editor/sceneDetailStore'
 import { LabelsDialog } from '@renderer/features/labels/LabelsDialog'
 import { useLabelStore } from '@renderer/features/labels/labelStore'
 import { useNameMentionStore } from '@renderer/features/records/nameMentionStore'
+import { useRenameStore } from '@renderer/features/records/renameStore'
+import { useAuthorTodoStore } from '@renderer/features/thisScene/authorTodoStore'
+import { DismissedDialog } from '@renderer/features/thisScene/DismissedDialog'
+import { useDismissedStore } from '@renderer/features/thisScene/dismissedStore'
+import { useQuestionStore } from '@renderer/features/thisScene/questionStore'
+import { ThisSceneColumn, ThisSceneToggleButton } from '@renderer/features/thisScene/ThisScenePanel'
 import { RecordCreateDialog } from '@renderer/features/records/RecordCreateDialog'
 import { RecordSheet } from '@renderer/features/records/RecordSheet'
 import { useRecordStore } from '@renderer/features/records/recordStore'
@@ -335,6 +341,11 @@ export function App(): React.JSX.Element {
       useLabelStore.getState().clear()
       useNameMentionStore.getState().clear()
       useSceneDetailStore.getState().clear()
+      // F-16.10, F-16.12, F-16.13: and the name questions, to-dos, Dismissed list and rename undo.
+      useQuestionStore.getState().clear()
+      useAuthorTodoStore.getState().clear()
+      useDismissedStore.getState().clear()
+      useRenameStore.getState().clear()
       useFactStore.getState().clear()
       // F-9.13: the Changes log belongs to the project that closed.
       useChangesStore.getState().clear()
@@ -429,6 +440,12 @@ export function App(): React.JSX.Element {
       useNameMentionStore.getState().subscribe()
       useNameMentionStore.getState().load().catch(failed)
       useSceneDetailStore.getState().subscribe()
+      // F-16.12, F-16.10: the This scene panel's questions, to-dos and Dismissed list.
+      useQuestionStore.getState().subscribe()
+      useQuestionStore.getState().load().catch(failed)
+      useAuthorTodoStore.getState().load().catch(failed)
+      useDismissedStore.getState().subscribe()
+      useDismissedStore.getState().load().catch(failed)
     }
     useEditorSettingsStore
       .getState()
@@ -573,8 +590,8 @@ export function App(): React.JSX.Element {
                 <IndexingIndicator />
                 <SearchButton />
                 <ReferencesToggleButton />
-                {/* F-16.4: no tags in story memory v2. */}
-                {current.storyMemory === 'v2' ? null : <TagsToggleButton />}
+                {/* F-16.4, F-16.12: no tags in story memory v2; its slot is This scene. */}
+                {current.storyMemory === 'v2' ? <ThisSceneToggleButton /> : <TagsToggleButton />}
                 <AssistantToggleButton />
               </>
             ) : null}
@@ -1049,6 +1066,14 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       ? false
       : (s.byId[nodeId]?.parentId ?? null) !== null && s.sectionOf[nodeId] !== 'research'
   )
+  // F-16.4, F-16.12: story memory v2 has no tags; the tags panel's slot (its id kept, so a stored
+  // layout opens it where it was) holds the This scene panel, about the open manuscript scene.
+  const v2 = useStoryMemory() === 'v2'
+  const sceneId = useTreeStore((s) =>
+    nodeId !== null && s.byId[nodeId]?.kind === 'document' && s.sectionOf[nodeId] === 'manuscript'
+      ? nodeId
+      : null
+  )
   const render = (id: DockPanelId): React.ReactNode => {
     switch (id) {
       case 'sidebar':
@@ -1056,7 +1081,7 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       case 'notes':
         return <NotesPanel id={nodeId} />
       case 'tags':
-        return <TagsColumn id={taggable ? nodeId : null} />
+        return v2 ? <ThisSceneColumn id={sceneId} /> : <TagsColumn id={taggable ? nodeId : null} />
       case 'references':
         return <ReferencePanel />
       case 'assistant':
@@ -1065,15 +1090,10 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
         return null
     }
   }
-  // F-16.4: story memory v2 has no tags, so the tags panel is not shown (slice 4 makes its slot
-  // the This scene panel); the layout keeps it, so a v1 project opens it where it was.
-  const v2 = useStoryMemory() === 'v2'
   // One keyed list in and out of focus mode, so the editor column is never remounted by it.
   const shown = focus
     ? [['editor' as const]]
-    : layout.dock.columns
-        .map((column) => (v2 ? column.filter((panel) => panel !== 'tags') : column))
-        .filter((column) => column.length > 0 && isColumnShown(layout, column))
+    : layout.dock.columns.filter((column) => isColumnShown(layout, column))
   const editorAt = shown.findIndex((column) => column.includes('editor'))
   return (
     <>
@@ -1110,6 +1130,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <GoalsDialog />
       {/* F-9.14: the conversion pass's cost and go-ahead, open while main says scenes wait (v1). */}
       {v2 ? null : <ConversionDialog />}
+      {/* F-16.10: the one Dismissed list, opened from the This scene panel's footer (v2). */}
+      {v2 ? <DismissedDialog /> : null}
       {/* F-7.12: the long jobs' finished / failed drops, and Open's big review dialog. */}
       <ActivityWatch />
       <ActivityDrops />

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { localRoute, ROUTE_ACTIONS, settleRoute, type RouteDecision } from './assistantRoute'
+import {
+  localRoute,
+  ROUTE_ACTIONS,
+  routeForMemory,
+  settleRoute,
+  type RouteDecision
+} from './assistantRoute'
 
 const open = { hasNode: true, hasSelection: true }
 const scene = { hasNode: true, hasSelection: false }
@@ -148,5 +154,23 @@ describe('localRoute (F-5.19)', () => {
   it('leaves anything else to the model', () => {
     expect(localRoute('Proofread this please', open)).toBeNull()
     expect(localRoute('Who is Tomas?', open)).toBeNull()
+  })
+})
+
+describe('routeForMemory (F-16.4)', () => {
+  it('answers a consistency check through the agent in a v2 project, instruction kept', () => {
+    expect(routeForMemory(plain('continuity', 'the boat'), 'v2')).toEqual(
+      plain('query', 'the boat')
+    )
+    expect(routeForMemory(localRoute('continuity', open) ?? plain('chat'), 'v2')).toEqual(
+      plain('query')
+    )
+  })
+
+  it('leaves every decision alone in v1, and every other decision in v2', () => {
+    expect(routeForMemory(plain('continuity'), 'v1')).toEqual(plain('continuity'))
+    for (const action of ROUTE_ACTIONS.filter((each) => each !== 'continuity')) {
+      expect(routeForMemory(plain(action), 'v2')).toEqual(plain(action))
+    }
   })
 })

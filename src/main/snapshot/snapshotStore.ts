@@ -170,6 +170,21 @@ export function takeSnapshot(db: TreeDb, input: TakeSnapshot): SnapshotList {
 }
 
 /**
+ * Keeps the live text of every document of the book as an `auto` snapshot named `name` and prunes
+ * the autos beyond the keep limit, inside the caller's transaction (Rename in book, F-16.13, takes
+ * one before it rewrites the manuscript). Answers the snapshot's id.
+ */
+export function takeAutoSnapshot(db: TreeDb, name: string): string {
+  const id = insertSnapshot(
+    db,
+    { name: cleanName(name), note: '', kind: 'auto', scope: 'project', nodeId: null },
+    projectDocuments(db)
+  )
+  pruneAutos(db, id)
+  return id
+}
+
+/**
  * Renames a snapshot, edits its note, or flags it: `milestone: true` makes it a milestone,
  * `false` turns a milestone back into a manual snapshot (an automatic one stays automatic).
  */

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { AI_FEATURE_IDS } from './ai'
 import {
   AI_DATA_SHARING,
+  dataSharingSends,
   AI_SOURCE_LABEL,
   AI_SOURCE_MEANING,
   AiSource,
@@ -143,6 +144,22 @@ describe('defaultAiSettings (F-14.4)', () => {
     expect(
       AiSettings.safeParse({ ...defaultAiSettings(), critique: { honesty: 'harsh' } }).success
     ).toBe(false)
+  })
+})
+
+describe('dataSharingSends (F-16.4)', () => {
+  it('gives the v2 text in a v2 project where a row has one, else the v1 text', () => {
+    for (const id of AI_FEATURE_IDS) {
+      expect(dataSharingSends(id, 'v1')).toBe(AI_DATA_SHARING[id].sends)
+      expect(dataSharingSends(id, 'v2')).toBe(
+        AI_DATA_SHARING[id].sendsV2 ?? AI_DATA_SHARING[id].sends
+      )
+    }
+    // The agent reads records, Research and the author's to-dos in v2, never tags or sheets.
+    expect(AI_DATA_SHARING.agent.sendsV2).toContain('Research')
+    expect(AI_DATA_SHARING.agent.sendsV2).toContain('your to-dos')
+    expect(AI_DATA_SHARING.agent.sendsV2).not.toMatch(/tag names|story-bible sheets|To do list/)
+    expect(AI_DATA_SHARING.proofread.sendsV2).toContain('names and nicknames of your records')
   })
 })
 

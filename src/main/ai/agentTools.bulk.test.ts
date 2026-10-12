@@ -68,7 +68,11 @@ describe('bulk tag and move (F-5.25, fix 3)', () => {
     const { scenes, otherScenes } = binder()
     const tag = createTag(db, { name: 'storm', category: 'tone' })
     addDocumentTag(db, scenes[0]!, tag.id)
-    const edit = resolved(loadAgentProject(db), { edit: 'tag', ids: 'all', tag: 'storm' })
+    const edit = resolved(loadAgentProject(db, null, 'v1'), {
+      edit: 'tag',
+      ids: 'all',
+      tag: 'storm'
+    })
     expect(edit).toMatchObject({ kind: 'tagMany', tag: 'storm', add: true })
     if (edit.kind !== 'tagMany') throw new Error('not tagMany')
     expect(edit.nodes.map((n) => n.nodeId).sort()).toEqual([...otherScenes].sort())
@@ -78,7 +82,7 @@ describe('bulk tag and move (F-5.25, fix 3)', () => {
     const { other, otherScenes } = binder()
     const tag = createTag(db, { name: 'storm', category: 'tone' })
     addDocumentTag(db, otherScenes[1]!, tag.id)
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     const edit = resolved(project, {
       edit: 'tag',
       ids: refOf(project, other),
@@ -99,7 +103,7 @@ describe('bulk tag and move (F-5.25, fix 3)', () => {
 
   it('moves every child of one folder into another, and never a folder into itself', () => {
     const { chapter, scenes, other, otherScenes } = binder()
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     const edit = resolved(project, {
       edit: 'move',
       from: refOf(project, other),
@@ -131,7 +135,7 @@ describe('story-bible edits (F-5.25, fix 4)', () => {
   it('renames a tag, refusing a name another tag has', () => {
     createTag(db, { name: 'storm', category: 'tone' })
     createTag(db, { name: 'gale', category: 'tone' })
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     expect(resolved(project, { edit: 'rename_tag', tag: 'storm', title: 'Tempest' })).toMatchObject(
       {
         kind: 'tagRename',
@@ -147,7 +151,7 @@ describe('story-bible edits (F-5.25, fix 4)', () => {
   it('renames a sheet and moves a whole category’s sheets into another', () => {
     createEntity(db, { kind: 'character', name: 'Mara' })
     createEntity(db, { kind: 'character', name: 'Tomas' })
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     expect(
       resolved(project, { edit: 'rename_sheet', name: 'Mara', title: 'Mara Vell' })
     ).toMatchObject({
@@ -165,7 +169,7 @@ describe('story-bible edits (F-5.25, fix 4)', () => {
   it('merges sheets (a deletion that asks) and makes a new empty sheet, refusing a taken name', () => {
     createEntity(db, { kind: 'character', name: 'Mara', fields: { age: '19' } })
     createEntity(db, { kind: 'character', name: 'Mara Vell' })
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     expect(
       resolved(project, { edit: 'merge_sheets', sheets: ['Mara'], into: 'Mara Vell' })
     ).toMatchObject({
@@ -193,7 +197,7 @@ describe('list_sheets with a field (F-5.25, fix 6)', () => {
   it('lists one field across the sheets, or only the sheets where it is blank', () => {
     createEntity(db, { kind: 'character', name: 'Mara', fields: { age: '19' } })
     createEntity(db, { kind: 'character', name: 'Tomas' })
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     const all = runAgentTool(project, null, 'list_sheets', { kind: 'character', field: 'Age' })
     expect(all.result).toContain('- Mara: 19')
     expect(all.result).toContain('- Tomas: (empty)')

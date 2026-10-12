@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   DOCK_EDGE_PX,
   DOCK_PANELS,
+  DOCK_PANEL_LABEL,
+  dockPanelLabel,
   defaultDock,
   dropTargetAt,
   isValidDock,
@@ -257,5 +259,15 @@ describe('dropTargetAt', () => {
       panel: 'editor',
       side: 'right'
     })
+  })
+})
+
+describe('dockPanelLabel (F-16.12)', () => {
+  it('calls the tags slot This scene in a story memory v2 project, and leaves v1 as it was', () => {
+    expect(dockPanelLabel('tags', 'v2')).toBe('This scene')
+    for (const id of DOCK_PANELS) expect(dockPanelLabel(id, 'v1')).toBe(DOCK_PANEL_LABEL[id])
+    for (const id of DOCK_PANELS.filter((each) => each !== 'tags')) {
+      expect(dockPanelLabel(id, 'v2')).toBe(DOCK_PANEL_LABEL[id])
+    }
   })
 })

@@ -465,6 +465,94 @@ export function addAlias(db: TreeDb, id: string, entry: NewAlias, now: Date): St
   return requireRecord(db, id)
 }
 
+/** One name as Rename in book (F-16.13) changes it and its undo puts it back. */
+export interface AliasText {
+  text: string
+  norm: string
+  caseRule: CaseRule
+}
+
+/** One of a record's names, or NOT_FOUND when the record or that name is gone. */
+export function requireAlias(db: TreeDb, recordId: string, aliasId: string): RecordAlias {
+  const row = db
+    .select()
+    .from(alias)
+    .where(and(eq(alias.id, aliasId), eq(alias.recordId, recordId)))
+    .get()
+  if (row === undefined) {
+    requireRecord(db, recordId)
+    throw new AppError('NOT_FOUND', "That name is no longer one of the record's", { aliasId })
+  }
+  return toAlias(row)
+}
+
+/**
+ * Renames one of a record's names in place (Rename in book, F-16.13; the caller's transaction):
+ * the row keeps its id, origin, shared flag and case rule (the case rule follows the new text
+ * when it was the default for the old one). Refused when the new name is another of the record's
+ * names or another record's unshared name; a name made a record's leaves Dismissed's `name` list
+ * and the record's own `alias` dismissal of it. Answers the text before and after.
+ */
+export function renameAlias(
+  db: TreeDb,
+  recordId: string,
+  aliasId: string,
+  to: string,
+  now: Date
+): { before: AliasText; after: AliasText } {
+  const current = requireAlias(db, recordId, aliasId)
+  const text = to.normalize('NFC').trim().replace(/\s+/g, ' ')
+  const norm = normName(text)
+  if (norm.length === 0)
+    throw new AppError('VALIDATION', 'A name needs at least one letter or digit')
+  if (text === current.text) throw new AppError('VALIDATION', `"${text}" is already its name`)
+  const siblings = requireRecord(db, recordId).aliases.filter((entry) => entry.id !== aliasId)
+  if (siblings.some((entry) => entry.norm === norm)) {
+    throw new AppError('VALIDATION', `"${text}" is already another name of this record`, { text })
+  }
+  refuseClash(db, recordId, text, current.shared)
+  const caseRule =
+    current.caseRule === defaultCaseRule(current.text) ? defaultCaseRule(text) : current.caseRule
+  forgetNotAName(db, text)
+  forgetDismissed(db, 'alias', dismissedKey({ kind: 'alias', recordId, alias: text }))
+  db.update(alias).set({ text, norm, caseRule }).where(eq(alias.id, aliasId)).run()
+  db.update(record).set({ modified: now.toISOString() }).where(eq(record.id, recordId)).run()
+  return {
+    before: { text: current.text, norm: current.norm, caseRule: current.caseRule },
+    after: { text, norm, caseRule }
+  }
+}
+
+/**
+ * Puts a renamed name back (the rename's undo): only while the name still reads `expected` and
+ * no other record has taken the old name unshared since. Answers whether it was put back.
+ */
+export function restoreAliasText(
+  db: TreeDb,
+  aliasId: string,
+  expected: string,
+  before: AliasText,
+  now: Date
+): boolean {
+  const row = db.select().from(alias).where(eq(alias.id, aliasId)).get()
+  if (row?.text !== expected) return false
+  if (clashOwner(db, row.recordId, before.norm, row.shared) !== null) return false
+  const sibling = db
+    .select({ id: alias.id })
+    .from(alias)
+    .where(
+      and(eq(alias.recordId, row.recordId), eq(alias.norm, before.norm), ne(alias.id, aliasId))
+    )
+    .get()
+  if (sibling !== undefined) return false
+  db.update(alias)
+    .set({ text: before.text, norm: before.norm, caseRule: before.caseRule })
+    .where(eq(alias.id, aliasId))
+    .run()
+  db.update(record).set({ modified: now.toISOString() }).where(eq(record.id, row.recordId)).run()
+  return true
+}
+
 /** Whether a page holds any text; an empty one is stored as null. */
 function isBlank(doc: TiptapNodeT | null): boolean {
   return doc === null || docToText(doc).trim() === ''

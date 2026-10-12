@@ -21,6 +21,7 @@ import { useAssistantName } from '@renderer/features/shell/viewStore'
 import { describeError } from '@renderer/lib/errors'
 import { namedInOf, useNameMentionStore } from './nameMentionStore'
 import { useRecordStore, type AliasesInput } from './recordStore'
+import { RenameInBook } from './RenameInBook'
 import {
   aliasesInputOf,
   CASE_RULE_HINT,
@@ -45,7 +46,8 @@ const HEADING = 'm-0 text-xs font-semibold tracking-wide text-fg-muted uppercase
  * (merge another record into this one, with a preview of what moves) and *Split* (move nicknames
  * to a new record), its image and category, **Pinned** (the author's own lines, canon) and
  * **Ideas** (read by the assistant, never treated as true) as pages, and *Named in* (the scenes
- * that name it, from the local name scan; a click selects the first mention).
+ * that name it, from the local name scan; a click selects the first mention). *Rename in book…*
+ * (F-16.13) renames one of its names everywhere the manuscript writes it, with one Undo.
  * Knows, Relationships, Threads, Age and "From the book, as of …" arrive with their phases.
  */
 export function RecordSheet({ id }: { id: string }): React.JSX.Element | null {
@@ -150,6 +152,7 @@ function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
 
         <Names record={record} busy={busy} run={run} saveNames={saveNames} />
         <SameAsAndSplit record={record} busy={busy} run={run} />
+        <RenameInBook record={record} busy={busy} />
 
         <section aria-label="Pinned" className="flex flex-col gap-1">
           <h3 className={HEADING}>Pinned</h3>

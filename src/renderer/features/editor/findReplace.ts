@@ -89,7 +89,7 @@ export function findStateOf(state: EditorState): FindState {
  * project-wide replace (F-10.2): a block boundary, a hard break, or an inline tag token ends it,
  * so a match never spans one.
  */
-function matchesIn(doc: PmNode, find: (text: string) => FindMatch[]): DocMatch[] {
+export function matchesIn(doc: PmNode, find: (text: string) => FindMatch[]): DocMatch[] {
   const matches: DocMatch[] = []
   const flush = (text: string, start: number): void => {
     if (text === '') return
@@ -183,7 +183,7 @@ function replacementFor(state: FindState, match: DocMatch, replacement: string):
 }
 
 /** Replaces `[from, to)` with `text` (marks taken at `from`), or deletes it for empty text. */
-function replaceRange(tr: Transaction, from: number, to: number, text: string): void {
+export function replaceRange(tr: Transaction, from: number, to: number, text: string): void {
   tr.setStoredMarks(null)
   if (text === '') tr.delete(from, to)
   else tr.insertText(text, from, to)

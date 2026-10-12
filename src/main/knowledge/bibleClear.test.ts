@@ -370,7 +370,7 @@ describe('clearStoryBible (F-5.25)', () => {
 describe('the clear edit (agent.v7)', () => {
   it('resolves "everything in the story bible" to every kind the request named, ticked', async () => {
     await seed()
-    const resolved = resolveAgentEdit(loadAgentProject(db), {
+    const resolved = resolveAgentEdit(loadAgentProject(db, null, 'v1'), {
       edit: 'clear',
       sheets: 'all',
       tags: 'all',
@@ -386,7 +386,7 @@ describe('the clear edit (agent.v7)', () => {
 
   it('reads category names leniently and refuses a request naming nothing the project has', async () => {
     await seed()
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     const resolved = resolveAgentEdit(project, { edit: 'clear', sheets: ['Characters'] })
     if (!('edit' in resolved) || resolved.edit.kind !== 'clear') throw new Error('not a clear')
     expect(resolved.edit.options.filter((o) => o.checked).map((o) => o.id)).toEqual(['character'])

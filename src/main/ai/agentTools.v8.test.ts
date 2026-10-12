@@ -60,7 +60,7 @@ const doc = (text: string): string =>
 
 describe('notes cleared (fix 5)', () => {
   it('reads "text":"" as a clear of the notes, a deletion; refuses empty notes', () => {
-    let project = loadAgentProject(db)
+    let project = loadAgentProject(db, null, 'v1')
     expect(errorOf(project, { edit: 'notes', id: ref(project), text: '' })).toBe(
       'the notes are empty'
     )
@@ -68,7 +68,7 @@ describe('notes cleared (fix 5)', () => {
       .set({ notes: doc('Pell lies here.') })
       .where(eq(node.id, scene))
       .run()
-    project = loadAgentProject(db)
+    project = loadAgentProject(db, null, 'v1')
     const edit = resolved(project, { edit: 'notes', id: ref(project), text: '' })
     expect(edit).toMatchObject({ kind: 'notesClear', nodeId: scene })
     expect(isDeletion(edit)).toBe(true)
@@ -79,7 +79,7 @@ describe('notes cleared (fix 5)', () => {
 describe('statuses (fix 7)', () => {
   it('marks a record, naming its status before; no change is refused', () => {
     const mara = createEntity(db, { kind: 'character', name: 'Mara Vell' }).entity
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     expect(resolved(project, { edit: 'status', name: 'Mara', status: 'Idea' })).toEqual({
       kind: 'status',
       target: 'record',
@@ -113,7 +113,7 @@ describe('statuses (fix 7)', () => {
     const age = facts.find((f) => f.attribute === 'age')
     const enemy = facts.find((f) => f.attribute === 'relation:enemy')
     if (age === undefined || enemy === undefined) throw new Error('facts not written')
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     expect(
       resolved(project, { edit: 'status', name: 'Mara Vell', field: 'Age', status: 'plan' })
     ).toEqual({
@@ -139,7 +139,7 @@ describe('statuses (fix 7)', () => {
     ).toMatchObject({ target: 'facts', items: [{ id: enemy.id, before: 'canon' }] })
     setFactStatus(db, age.id, 'plan')
     expect(
-      errorOf(loadAgentProject(db), {
+      errorOf(loadAgentProject(db, null, 'v1'), {
         edit: 'status',
         name: 'Mara Vell',
         field: 'age',
@@ -149,7 +149,7 @@ describe('statuses (fix 7)', () => {
   })
 
   it('marks a document’s notes, plan by default', () => {
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     expect(resolved(project, { edit: 'status', id: ref(project), status: 'canon' })).toEqual({
       kind: 'status',
       target: 'notes',
@@ -186,7 +186,7 @@ describe('To do items settled (fix 5)', () => {
   it('names the items by the refs the todo tool printed; done false dismisses', () => {
     add('g1', 'gap')
     add('l1', 'looseEnd')
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     const listed = runAgentTool(project, null, 'todo', { kind: 'gap' }).result
     // The refs count across the whole list, so a filtered call keeps them.
     expect(listed).toBe('Open To do items:\nt2 [Gap] Item g1: Why g1.')
@@ -208,7 +208,7 @@ describe('To do items settled (fix 5)', () => {
 
 describe('answer actions (fix 8)', () => {
   it('resolves undo, summaries, and open; only open runs at once, only undo asks', () => {
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     const undo = resolved(project, { edit: 'undo' })
     expect(undo).toEqual({ kind: 'undoTurn' })
     expect(isDeletion(undo)).toBe(true)

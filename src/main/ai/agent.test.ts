@@ -111,6 +111,7 @@ const run = (over: Partial<AgentInput> = {}): ReturnType<typeof runAgent> =>
       history: [],
       access: 'read',
       focus: { beforeCaret: '', selection: '' },
+      memory: 'v1',
       ...over
     },
     (step) => steps.push(step)
@@ -118,7 +119,7 @@ const run = (over: Partial<AgentInput> = {}): ReturnType<typeof runAgent> =>
 
 /** The ref the run gives `nodeId` (tree order is stable within a test). */
 const ref = (nodeId: string | undefined): string =>
-  loadAgentProject(db).refOf.get(nodeId ?? '') ?? ''
+  loadAgentProject(db, null, 'v1').refOf.get(nodeId ?? '') ?? ''
 
 const request = (call: number): CompletionRequest => {
   const value = complete.mock.calls[call]?.[0]
@@ -351,7 +352,7 @@ describe('runAgent, write runs (F-5.22)', () => {
       {
         kind: 'text',
         nodeId: scenes[0],
-        title: loadAgentProject(db).titleOf(scenes[0] ?? ''),
+        title: loadAgentProject(db, null, 'v1').titleOf(scenes[0] ?? ''),
         find: 'The rain came after.',
         replace: 'Rain followed.',
         brief: ''
@@ -359,7 +360,7 @@ describe('runAgent, write runs (F-5.22)', () => {
       {
         kind: 'insert',
         nodeId: scenes[1],
-        title: loadAgentProject(db).titleOf(scenes[1] ?? ''),
+        title: loadAgentProject(db, null, 'v1').titleOf(scenes[1] ?? ''),
         after: '',
         text: 'The lantern guttered.',
         brief: '',
@@ -391,7 +392,7 @@ describe('runAgent, write runs (F-5.22)', () => {
       ]
     })
     const result = await run({ access: 'write' })
-    const title = loadAgentProject(db).titleOf(scenes[0] ?? '')
+    const title = loadAgentProject(db, null, 'v1').titleOf(scenes[0] ?? '')
     expect(result.changes).toEqual([
       {
         edit: {
@@ -488,7 +489,8 @@ describe('runAgent, replies that cannot be used (2026-10-07)', () => {
         history: [],
         access: 'write',
         focus: { beforeCaret: '', selection: '' },
-        requestId: 'r-9'
+        requestId: 'r-9',
+        memory: 'v1'
       },
       () => undefined,
       {
@@ -536,7 +538,8 @@ describe('runAgent, replies that cannot be used (2026-10-07)', () => {
         message: 'Where?',
         history: [],
         access: 'read',
-        focus: { beforeCaret: '', selection: '' }
+        focus: { beforeCaret: '', selection: '' },
+        memory: 'v1'
       },
       () => undefined,
       { answer: (delta) => answers.push(delta) }
@@ -608,6 +611,17 @@ describe('the organise request (F-9.10, agent.v4)', () => {
       instruction: 'Merge the duplicate sheets.'
     })
   })
+
+  it('is dropped in a story memory v2 project, which has no Organise (F-16.4)', async () => {
+    replies({
+      answer: 'I will plan a tidier story bible.',
+      found: true,
+      organise: { scope: ['sheets'], instruction: 'Merge the duplicate sheets.' }
+    })
+    const result = await run({ memory: 'v2' })
+    expect(result.organise).toBeNull()
+    expect(result.answer).toBe('I will plan a tidier story bible.')
+  })
 })
 
 describe('parseAgentReply', () => {
@@ -627,7 +641,7 @@ describe('parseAgentReply', () => {
 describe('the agent tools (F-5.22)', () => {
   it('outlines the project with refs and word counts, and pages through a long scene', () => {
     saveDocument(db, scenes[1]!, doc('a'.repeat(7_000)))
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     const outline = runAgentTool(project, null, 'outline', {}).result
     expect(outline).toContain(`${ref(scenes[0])} `)
     // F-5.23: each manuscript document's progress after its word count.
@@ -644,7 +658,7 @@ describe('the agent tools (F-5.22)', () => {
     saveNotes(db, scenes[0]!, doc('Keep the elm visible.'))
     createEntity(db, { kind: 'character', name: 'Mara Vell', fields: { age: '34' } })
     createTag(db, { name: 'grim', category: 'tone' })
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     expect(runAgentTool(project, null, 'read_notes', { id: ref(scenes[0]) }).result).toBe(
       `${project.titleOf(scenes[0]!)}, the author's notes [plan]:\n` +
         'Synopsis: Mara hides the copy.\nNotes:\nKeep the elm visible.'
@@ -665,7 +679,7 @@ describe('the agent tools (F-5.22)', () => {
       fields: { background: 'Dies in the war.' }
     })
     // Now is the second scene: the first is before it, the third after it.
-    const project = loadAgentProject(db, scenes[1])
+    const project = loadAgentProject(db, scenes[1] ?? null, 'v1')
     expect(project.time.nowId).toBe(scenes[1])
     const read = (id: string | undefined): string =>
       runAgentTool(project, null, 'read_scene', { id: ref(id) }).result
@@ -690,15 +704,18 @@ describe('the agent tools (F-5.22)', () => {
   })
 
   it('puts now at the latest written scene when no manuscript scene is open (F-5.23)', () => {
-    expect(loadAgentProject(db, null).time).toMatchObject({ nowId: scenes[1], basis: 'latest' })
-    const later = runAgentTool(loadAgentProject(db, scenes[0]), null, 'read_scene', {
+    expect(loadAgentProject(db, null, 'v1').time).toMatchObject({
+      nowId: scenes[1],
+      basis: 'latest'
+    })
+    const later = runAgentTool(loadAgentProject(db, scenes[0] ?? null, 'v1'), null, 'read_scene', {
       id: ref(scenes[1])
     }).result
     expect(later).toContain('(after now: has not happened yet)')
   })
 
   it('reads the open To do list, by kind and capped (F-9.16)', () => {
-    const empty = runAgentTool(loadAgentProject(db), null, 'todo', {})
+    const empty = runAgentTool(loadAgentProject(db, null, 'v1'), null, 'todo', {})
     expect(empty.step).toEqual({ tool: 'todo', label: 'Reading the To do list…' })
     expect(empty.result).toBe('The To do list is empty: nothing is left to figure out right now.')
     const at = NOW.toISOString()
@@ -723,7 +740,7 @@ describe('the agent tools (F-5.22)', () => {
     add('g1', 'gap')
     add('l1', 'looseEnd')
     add('d1', 'gap', 'done')
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     const all = runAgentTool(project, null, 'todo', { kind: '' }).result
     expect(all).toBe(
       'Open To do items:\n' +
@@ -735,7 +752,7 @@ describe('the agent tools (F-5.22)', () => {
       'The To do list has no open contradiction items.'
     )
     for (let i = 0; i < AGENT_TODO_ITEMS + 5; i++) add(`x${i}`, 'gap')
-    const capped = runAgentTool(loadAgentProject(db), null, 'todo', {}).result
+    const capped = runAgentTool(loadAgentProject(db, null, 'v1'), null, 'todo', {}).result
     expect(capped.split('\n').filter((line) => /^t\d+ \[/.test(line))).toHaveLength(
       AGENT_TODO_ITEMS
     )
@@ -743,7 +760,7 @@ describe('the agent tools (F-5.22)', () => {
   })
 
   it('keeps agent.v5’s search and read_summary out of agent.v6’s tools (F-5.24)', () => {
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     for (const tool of ['search', 'read_summary']) {
       expect(
         runAgentTool(project, null, tool, { query: 'ledger', id: ref(scenes[0]) }).result
@@ -791,7 +808,7 @@ describe('the agent tools (F-5.22)', () => {
       objectEntityId: null,
       nodeId: scenes[0]!
     })
-    const project = loadAgentProject(db, scenes[1])
+    const project = loadAgentProject(db, scenes[1] ?? null, 'v1')
     const r = (id: string | undefined): string => project.refOf.get(id ?? '') ?? ''
     const found = runAgentTool(project, null, 'lookup', { name: 'mara' })
     expect(found.step).toEqual({ tool: 'lookup', label: 'Looking up mara…' })
@@ -813,9 +830,9 @@ describe('the agent tools (F-5.22)', () => {
     expect(other).toContain(`Relations: Mentored by Mara (${r(scenes[0])})`)
     expect(other).toContain(`Named in 1 scene (1 up to now): first ${r(scenes[0])} ¶0`)
     createEntity(db, { kind: 'character', name: 'Pell' })
-    expect(runAgentTool(loadAgentProject(db), null, 'lookup', { name: 'Pell' }).result).toContain(
-      'Named in no scene yet.'
-    )
+    expect(
+      runAgentTool(loadAgentProject(db, null, 'v1'), null, 'lookup', { name: 'Pell' }).result
+    ).toContain('Named in no scene yet.')
     const own = runAgentTool(project, null, 'lookup', { name: 'The copied ledger' }).result
     expect(own).toContain(`Thread: open; question: Who copied it?; set up (${r(scenes[0])})`)
     expect(runAgentTool(project, null, 'lookup', { name: 'Nobody' }).result).toBe(
@@ -830,7 +847,9 @@ describe('the agent tools (F-5.22)', () => {
       name: 'Wordy',
       fields: { appearance: 'w'.repeat(3_000), personality: 'p'.repeat(3_000) }
     })
-    const result = runAgentTool(loadAgentProject(db), null, 'lookup', { name: 'Wordy' }).result
+    const result = runAgentTool(loadAgentProject(db, null, 'v1'), null, 'lookup', {
+      name: 'Wordy'
+    }).result
     expect(result.length).toBeLessThanOrEqual(AGENT_LOOKUP_CHARS + 1)
     expect(result.endsWith('…')).toBe(true)
   })
@@ -849,7 +868,7 @@ describe('the agent tools (F-5.22)', () => {
       saveDocument(db, extra.id, doc(`Mara walked the ${i} mile.`))
     }
     for (const row of manuscriptDocuments(db)) scanMentions(db, row.id, NOW)
-    const project = loadAgentProject(db, scenes[0])
+    const project = loadAgentProject(db, scenes[0] ?? null, 'v1')
     const r = (id: string | undefined): string => project.refOf.get(id ?? '') ?? ''
     const byIds = runAgentTool(project, null, 'cards', { ids: [r(scenes[0]), r(scenes[1])] })
     expect(byIds.step).toEqual({ tool: 'cards', label: 'Reading 2 scene cards…' })
@@ -874,7 +893,7 @@ describe('the agent tools (F-5.22)', () => {
   it('finds passages in the local index with their paragraph and position, and reads on from a paragraph (F-5.24)', () => {
     saveDocument(db, scenes[1]!, doc(QUIET, 'The ledger was gone by morning.', 'Nobody spoke.'))
     for (const id of scenes) scanMentions(db, id, NOW)
-    const project = loadAgentProject(db, scenes[1])
+    const project = loadAgentProject(db, scenes[1] ?? null, 'v1')
     const r = (id: string | undefined): string => project.refOf.get(id ?? '') ?? ''
     const found = runAgentTool(project, null, 'find_passages', { query: 'ledger' })
     expect(found.step).toEqual({ tool: 'find_passages', label: 'Finding passages…' })
@@ -900,7 +919,7 @@ describe('the agent tools (F-5.22)', () => {
   it('pages a long scene by paragraph (F-5.24)', () => {
     const para = 'x'.repeat(2_500)
     saveDocument(db, scenes[1]!, doc(para, para, para, para))
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     const read = runAgentTool(project, null, 'read_scene', { id: ref(scenes[1]), para: 0 }).result
     expect(read).toContain('¶0–¶1 of 4:')
     expect(read).toContain('(continues; read on with "para":2)')
@@ -909,7 +928,7 @@ describe('the agent tools (F-5.22)', () => {
   it('marks the notes with their status (F-5.24)', () => {
     setSceneMeta(db, scenes[0]!, { ...emptySceneMeta(), notesStatus: 'canon' })
     saveNotes(db, scenes[0]!, doc('The elm is real.'))
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     expect(runAgentTool(project, null, 'read_notes', { id: ref(scenes[0]) }).result).toContain(
       `${project.titleOf(scenes[0]!)}, the author's notes [canon]:`
     )
@@ -925,7 +944,7 @@ describe('the agent tools (F-5.22)', () => {
 describe('resolveAgentEdit (F-5.22)', () => {
   it('resolves structure, sheet, tag, and delete edits and refuses what it cannot place', () => {
     createEntity(db, { kind: 'character', name: 'Mara Vell', fields: { age: '34' } })
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v1')
     const chapter = project.rows.find((row) => row.id === project.byId.get(scenes[0]!)?.parentId)
     if (!chapter) throw new Error('no chapter')
     const chapterRef = project.refOf.get(chapter.id) ?? ''

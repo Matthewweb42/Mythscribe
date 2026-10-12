@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { GripVertical, MoreHorizontal } from 'lucide-react'
 import {
-  DOCK_PANEL_LABEL,
+  dockPanelLabel,
   dropTargetAt,
   movePanel,
   stepPanel,
@@ -14,6 +14,8 @@ import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
 import { DOCK_DRAG_TYPE, resetDockDrag, useDockDragStore } from './dockDragStore'
 import { isColumnShown, resizePanelBy, useLayoutStore } from './layoutStore'
 import { ResizeHandle } from './ResizeHandle'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { useAssistantName } from './viewStore'
 
 // Muted, not subtle (F-7.14): the grips sit on the title strips, where subtle falls under 3:1.
@@ -28,14 +30,17 @@ const COMPACT = 'rounded text-fg-muted hover:text-fg focus-visible:text-fg'
  */
 export const PANEL_TITLE = 'flex shrink-0 items-center gap-2 bg-panel-title py-1.5 pr-3 pl-2'
 
-/** What a panel's grip, menu, and resize handle call it: the assistant goes by its name (F-7.13). */
-function panelLabel(id: DockPanelId, assistantName: string): string {
-  return nameAssistant(DOCK_PANEL_LABEL[id], assistantName)
+/**
+ * What a panel's grip, menu, and resize handle call it: the assistant goes by its name (F-7.13),
+ * the tags slot of a story memory v2 project is This scene (F-16.12).
+ */
+function panelLabel(id: DockPanelId, assistantName: string, memory: StoryMemoryVersion): string {
+  return nameAssistant(dockPanelLabel(id, memory), assistantName)
 }
 
 /** The label inside a sentence ("Drag to move notes"); a name keeps its capitals. */
-function panelNoun(id: DockPanelId, assistantName: string): string {
-  const label = panelLabel(id, assistantName)
+function panelNoun(id: DockPanelId, assistantName: string, memory: StoryMemoryVersion): string {
+  const label = panelLabel(id, assistantName, memory)
   return id === 'assistant' ? label : label.toLowerCase()
 }
 
@@ -55,7 +60,8 @@ export function DockPanelControls({
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
   const layout = useLayoutStore((s) => s.layout)
   const assistantName = useAssistantName()
-  const label = panelLabel(id, assistantName)
+  const memory = useStoryMemory()
+  const label = panelLabel(id, assistantName, memory)
   const shown = (column: readonly DockPanelId[]): boolean => isColumnShown(layout, column)
   const canMove = (direction: 'left' | 'right'): boolean =>
     stepPanel(layout.dock.columns, id, direction, shown) !== layout.dock.columns
@@ -76,7 +82,7 @@ export function DockPanelControls({
         type="button"
         draggable
         aria-label={`Move ${label}`}
-        title={`Drag to move ${panelNoun(id, assistantName)}`}
+        title={`Drag to move ${panelNoun(id, assistantName, memory)}`}
         onDragStart={(event) => {
           event.dataTransfer.effectAllowed = 'move'
           event.dataTransfer.setData(DOCK_DRAG_TYPE, id)
@@ -204,6 +210,7 @@ export function DockColumn({
 }): React.JSX.Element | null {
   const layout = useLayoutStore((s) => s.layout)
   const assistantName = useAssistantName()
+  const memory = useStoryMemory()
   if (!isColumnShown(layout, column)) return null
   const open = column.filter((id): id is LayoutPanel => id !== 'editor' && layout[id].open)
   const first = open[0]
@@ -226,7 +233,7 @@ export function DockColumn({
         value={width}
         min={min}
         max={max}
-        ariaLabel={`Resize ${panelNoun(first, assistantName)}`}
+        ariaLabel={`Resize ${panelNoun(first, assistantName, memory)}`}
         onChange={(deltaPx) => resizePanelBy(first, deltaPx)}
       />
     </div>

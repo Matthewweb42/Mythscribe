@@ -11,7 +11,7 @@ import {
 import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
 import type { ResearchDoc } from '../src/shared/research'
 import type { TiptapNodeT } from '../src/shared/tiptap'
-import { caretToEnd } from './support'
+import { caretToEnd, clickIntoEditor } from './support'
 
 /**
  * Story memory v2 (FEATURES.md §2.16; plan P1), the AI-off path. The app is launched with
@@ -471,4 +471,144 @@ test('story memory v2: sheets, labels, typed details and the v2 editor (P1 slice
   expect(
     (await invoke<ResearchDoc[]>('research:list', undefined)).filter((d) => d.origin === 'upload')
   ).toHaveLength(2)
+})
+
+/** The stored plain text of a document, paragraphs joined by new lines. */
+async function storedText(id: string): Promise<string> {
+  return (await storedParagraphs(id)).map((paragraph) => paragraph.text).join('\n')
+}
+
+test('story memory v2: This scene, Needs a look, Dismissed and Rename in book (P1 slice 4)', async () => {
+  // Continues in the project the slice 3 test made (Mara Vell, nickname "Mara", and Tomas Harrow).
+  const scenes = (await invoke<TreeNode[]>('tree:list', undefined)).filter(
+    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
+  )
+  const first = scenes[0]
+  if (!first) throw new Error('no scene in the seed')
+  const records = (): Promise<StoredRecord[]> => invoke<StoredRecord[]>('record:list', undefined)
+  const maraId = (await records()).find((r) => r.name === 'Mara Vell')?.id ?? ''
+  await showSection('Manuscript')
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  await bookTree.getByRole('treeitem', { name: first.title }).first().click()
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await clickIntoEditor(editor)
+  await page.keyboard.press('Control+A')
+  await page.keyboard.type('Mara walked in.')
+
+  // F-16.12: the This scene panel sits in the tags panel's slot (its header toggle in v2).
+  const panel = page.getByTestId('this-scene-panel')
+  if ((await panel.count()) === 0) {
+    await page.getByRole('button', { name: 'This scene', exact: true }).click()
+  }
+  await expect(panel.getByRole('tab', { name: 'This scene' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  // Here: the POV the slice 3 test chose.
+  await expect(panel.getByRole('region', { name: 'Here' }).getByLabel('POV')).toHaveValue(maraId)
+
+  // F-16.5: "Mara walked in." gives a Named chip once the local scan has read the saved text
+  // (the scene named "Mara Vell" before, so the chip is waited for on the new mention).
+  await expect
+    .poll(
+      async () =>
+        (await invoke<{ text: string }[]>('names:forNode', { nodeId: first.id })).map(
+          (m) => m.text
+        ),
+      { timeout: 15_000 }
+    )
+    .toEqual(['Mara'])
+  const chips = panel.getByTestId('named-chips')
+  const maraChip = chips.getByRole('button', { name: /^Mara Vell/ })
+  await expect(maraChip).toBeVisible({ timeout: 15_000 })
+  await expect(maraChip).toHaveAttribute('title', 'named once: ¶1')
+
+  // Not a mention takes it off and lands on the one Dismissed list (F-16.10).
+  const before = (await invoke<{ count: number }>('dismissed:list', undefined)).count
+  await maraChip.click()
+  const why = panel.getByRole('group', { name: 'Why Mara Vell is here' })
+  await why.getByRole('button', { name: 'Not a mention' }).click()
+  await expect(maraChip).toHaveCount(0)
+  const dismissedButton = panel.getByRole('button', { name: `Dismissed (${before + 1})` })
+  await expect(dismissedButton).toBeVisible()
+  await dismissedButton.click()
+  const dismissedDialog = page.getByRole('dialog', { name: /^Dismissed \(/ })
+  await expect(dismissedDialog.getByRole('heading')).toHaveText(`Dismissed (${before + 1})`)
+  const undoRow = dismissedDialog.getByRole('button', { name: /^Undo: "Mara walked" is not/ })
+  await expect(undoRow).toBeVisible()
+  // Undo brings it back: the chip returns once the scan reads the scene again.
+  await undoRow.click()
+  await expect(dismissedDialog.getByRole('heading')).toHaveText(`Dismissed (${before})`)
+  await dismissedDialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dismissedDialog).toHaveCount(0)
+  await expect(maraChip).toBeVisible({ timeout: 15_000 })
+
+  // F-16.4: "Hesk" written in two scenes becomes a question in Needs a look.
+  await caretToEnd(editor)
+  await page.keyboard.type(' They waited for Hesk.')
+  await page.getByRole('button', { name: 'New scene' }).click()
+  const renameBox = page.getByRole('textbox', { name: 'Rename' })
+  await expect(renameBox).toBeFocused()
+  await renameBox.fill('Two')
+  await renameBox.press('Enter')
+  await expect(renameBox).toBeHidden()
+  await bookTree.getByRole('treeitem', { name: 'Two', exact: true }).click()
+  await caretToEnd(editor)
+  await page.keyboard.type('The boat belonged to Hesk.')
+  const second = (await invoke<TreeNode[]>('tree:list', undefined)).find((n) => n.title === 'Two')
+  if (!second) throw new Error('the second scene was not made')
+  const needs = panel.getByRole('region', { name: 'Needs a look' })
+  const questions = needs.getByRole('group', { name: 'Questions' })
+  await expect(questions).toContainText('Hesk: named in 2 scenes', { timeout: 15_000 })
+  // Its badge counts conflicts only: questions never light it.
+  await expect(panel.getByTestId('needs-a-look-badge')).toHaveCount(0)
+  await questions
+    .getByRole('combobox', { name: 'Add Hesk as' })
+    .selectOption({ label: 'Character' })
+  await expect.poll(async () => (await records()).map((r) => r.name)).toContain('Hesk')
+  await expect(questions).toHaveCount(0)
+
+  // F-16.10: a to-do for this scene, added and ticked.
+  await needs.getByRole('button', { name: 'Add a to-do' }).click()
+  await needs.getByRole('textbox', { name: 'New to-do' }).fill('Check the tide tables')
+  await needs.getByRole('button', { name: 'Add', exact: true }).click()
+  const tick = needs.getByRole('checkbox', { name: 'Done: Check the tide tables' })
+  await expect(tick).toBeVisible()
+  await tick.check()
+  await expect
+    .poll(async () =>
+      (
+        await invoke<{ text: string; done: boolean; nodeId: string | null }[]>(
+          'authorTodo:list',
+          undefined
+        )
+      ).map((t) => [t.text, t.done, t.nodeId])
+    )
+    .toEqual([['Check the tide tables', true, second.id]])
+
+  // F-16.13: Rename in book, from Hesk's chip in the open scene: the preview counts 2 matches in
+  // 2 scenes; Rename changes the open scene in its editor and the other one in main.
+  const heskChip = chips.getByRole('button', { name: /^Hesk/ })
+  await expect(heskChip).toBeVisible({ timeout: 15_000 })
+  await heskChip.click()
+  const heskCard = panel.getByRole('group', { name: 'Why Hesk is here' })
+  await heskCard.getByRole('button', { name: 'Rename in book…' }).click()
+  await heskCard.getByRole('textbox', { name: 'New name' }).fill('Haskel')
+  await expect(heskCard.getByTestId('rename-preview')).toContainText('2 matches in 2 scenes')
+  await heskCard.getByRole('button', { name: 'Rename', exact: true }).click()
+  await expect(editor).toContainText('The boat belonged to Haskel.')
+  await expect.poll(() => storedText(first.id)).toBe('Mara walked in. They waited for Haskel.')
+  await expect.poll(async () => (await records()).map((r) => r.name)).toContain('Haskel')
+  const renamed = page
+    .getByRole('status')
+    .locator('div')
+    .filter({ hasText: 'Renamed “Hesk” to “Haskel”: 2 matches in 2 scenes.' })
+  await expect(renamed).toBeVisible()
+
+  // One Undo restores both scenes and the name.
+  await renamed.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(editor).toContainText('The boat belonged to Hesk.')
+  await expect.poll(() => storedText(first.id)).toBe('Mara walked in. They waited for Hesk.')
+  await expect.poll(() => storedText(second.id)).toBe('The boat belonged to Hesk.')
+  await expect.poll(async () => (await records()).map((r) => r.name)).toContain('Hesk')
 })

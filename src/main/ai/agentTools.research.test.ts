@@ -66,7 +66,7 @@ afterEach(() => {
 
 describe('the chat agent leaves Research out until P3 (F-16.8)', () => {
   it('gives no Research node a ref, an outline line, or a place in the run', () => {
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v2')
     const research = listNodes(db).filter(
       (row) => row.sectionType === 'research' || [page.id, maybe.id].includes(row.id)
     )
@@ -84,7 +84,7 @@ describe('the chat agent leaves Research out until P3 (F-16.8)', () => {
   })
 
   it('reads no page and merges, moves or writes into none: every ref past the book is unknown', () => {
-    const project = loadAgentProject(db)
+    const project = loadAgentProject(db, null, 'v2')
     const unknown = `n${project.rows.length + 1}`
     const read = runAgentTool(project, null, 'read_scene', { id: unknown }).result
     expect(read).toContain('is not an id')
@@ -98,7 +98,7 @@ describe('the chat agent leaves Research out until P3 (F-16.8)', () => {
 
   it('does not focus a Research page the author has open, Not canon or not', () => {
     for (const open of [page.id, maybe.id]) {
-      const project = loadAgentProject(db, open)
+      const project = loadAgentProject(db, open, 'v2')
       expect(project.byId.get(open)).toBeUndefined()
       expect(project.time.nowId).not.toBe(open)
     }

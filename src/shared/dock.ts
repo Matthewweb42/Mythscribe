@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { StoryMemoryVersion } from './storyMemory'
 
 /**
  * The dockable columns of the project screen (layout 3c, author request 2026-10-06): which panel
@@ -31,6 +32,15 @@ export const DOCK_PANEL_LABEL: Record<DockPanelId, string> = {
   tags: 'Tags',
   references: 'References',
   assistant: 'Assistant'
+}
+
+/**
+ * What a panel is called in a project with story memory `memory` (F-16.12): in v2 the tags
+ * panel's slot holds the This scene panel (its id stays `tags`, so a stored layout opens it where
+ * the tags were).
+ */
+export function dockPanelLabel(id: DockPanelId, memory: StoryMemoryVersion): string {
+  return memory === 'v2' && id === 'tags' ? 'This scene' : DOCK_PANEL_LABEL[id]
 }
 
 /**

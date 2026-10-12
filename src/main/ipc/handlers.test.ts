@@ -3341,7 +3341,7 @@ describe('ai:agent (F-5.22)', () => {
         edits: [
           {
             edit: 'text',
-            id: loadAgentProject(manager.require().connection.orm).refOf.get(scene.id),
+            id: loadAgentProject(manager.require().connection.orm, null, 'v1').refOf.get(scene.id),
             find: 'Mara copied the ledger twice',
             replace: 'Mara copied it twice'
           }
@@ -3374,7 +3374,7 @@ describe('ai:agent (F-5.22)', () => {
         edit: {
           kind: 'text',
           nodeId: scene.id,
-          title: loadAgentProject(manager.require().connection.orm).titleOf(scene.id),
+          title: loadAgentProject(manager.require().connection.orm, null, 'v1').titleOf(scene.id),
           find: 'Mara copied the ledger twice',
           replace: 'Mara copied it twice',
           brief: ''

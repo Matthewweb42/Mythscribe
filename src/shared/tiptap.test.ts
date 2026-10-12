@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY_DOC, TiptapMark, TiptapNode, type TiptapNodeT } from './tiptap'
+import { EMPTY_DOC, sameTiptap, TiptapMark, TiptapNode, type TiptapNodeT } from './tiptap'
 
 describe('TiptapNode', () => {
   it('accepts a nested document with marks and attrs', () => {
@@ -42,5 +42,33 @@ describe('TiptapNode', () => {
     expect(TiptapNode.safeParse({ type: 'text', text: 1 }).success).toBe(false)
     expect(TiptapNode.safeParse({ type: 'text', text: 'a', marks: [{}] }).success).toBe(false)
     expect(TiptapMark.safeParse({ type: 'bold', attrs: 'x' }).success).toBe(false)
+  })
+})
+
+describe('sameTiptap (F-16.13)', () => {
+  it('compares documents whatever the order of their keys, absent keys as missing', () => {
+    const a = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', attrs: { a: 1, b: 2 }, content: [{ type: 'text', text: 'x' }] }
+      ]
+    }
+    const b = {
+      content: [
+        { content: [{ text: 'x', type: 'text' }], attrs: { b: 2, a: 1 }, type: 'paragraph' }
+      ],
+      type: 'doc',
+      marks: undefined
+    }
+    expect(sameTiptap(a, b)).toBe(true)
+    expect(sameTiptap(a, { ...b, content: [] })).toBe(false)
+    expect(
+      sameTiptap(a, {
+        type: 'doc',
+        content: [
+          { type: 'paragraph', attrs: { a: 1, b: 3 }, content: [{ type: 'text', text: 'x' }] }
+        ]
+      })
+    ).toBe(false)
   })
 })

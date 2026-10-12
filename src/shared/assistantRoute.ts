@@ -3,6 +3,7 @@ import type { AiFeatureId } from './ai'
 import { EDIT_PASS_TYPES } from './editPass'
 import { PROPOSAL_NOTE_MAX } from './proposal'
 import { QUICK_ACTION_IDS, type QuickActionId } from './quickActions'
+import type { StoryMemoryVersion } from './storyMemory'
 
 /**
  * The assistant router (F-5.19): one fast-tier JSON call that reads the author's chat message
@@ -172,6 +173,16 @@ export function settleRoute(decision: RouteDecision, situation: RouteSituation):
   }
   if (ROUTE_NODE_ACTIONS.includes(action) && !situation.hasNode) return CHAT
   return decision.edit === null ? decision : { ...decision, edit: null }
+}
+
+/**
+ * F-16.4: in a story memory v2 project the consistency check is retired (P4 brings contradictions
+ * back), so a turn routed to it is answered by the chat agent as a question about the book
+ * (`query`, read only, cited), its instruction kept. Every other decision is left as it is.
+ */
+export function routeForMemory(decision: RouteDecision, memory: StoryMemoryVersion): RouteDecision {
+  if (memory !== 'v2' || decision.action !== 'continuity') return decision
+  return { action: 'query', instruction: decision.instruction, edit: null }
 }
 
 /** The quick-action ids (F-5.17) as router actions; the recap is a Story Intelligence question. */

@@ -87,7 +87,8 @@ const tally = (ids: Iterable<string | null>): Map<string, number> => {
 }
 
 export function loadOrganiseProject(db: TreeDb): OrganiseProject {
-  const agent = loadAgentProject(db)
+  // Organise is v1's (refused in a v2 project by its channels' gate).
+  const agent = loadAgentProject(db, null, 'v1')
   const tags = listTags(db)
   const sheets = agent.entities
   const tagRefs = refs(tags, 't')

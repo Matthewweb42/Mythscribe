@@ -24,6 +24,7 @@ import {
   type QueryTurn
 } from '@shared/query'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { STORY_MAP_TOKEN_BUDGET } from '@shared/storyTime'
 import { getSummary } from '../document/summaryStore'
 import { getAiSettings } from '../project/settingsStore'
@@ -61,6 +62,12 @@ export interface AgentInput {
   focus: AgentFocus
   /** The caller's id for `ai:cancel` (F-5.10); optional so tests can run without one. */
   requestId?: string
+  /**
+   * F-16.4: the project's story memory. In v2 the tag and sheet tools are refused, lookup,
+   * find_passages, todo and cards read the v2 records (`agentToolsV2.ts`), and an organise
+   * request is dropped (Organise is v1's).
+   */
+  memory: StoryMemoryVersion
 }
 
 /** An edit the answer proposes, with the voice check's complaint about its prose, if any. */
@@ -292,7 +299,7 @@ export async function runAgent(
   hooks: AgentHooks = {}
 ): Promise<AgentResult> {
   assertFeatureAllowed(getAiSettings(db), 'agent')
-  const project = loadAgentProject(db, input.nodeId)
+  const project = loadAgentProject(db, input.nodeId, input.memory)
   // F-5.23: the story map, with now at the open scene (or the latest written one).
   const map = buildStoryMap(db, project.time, {
     maxTokens: STORY_MAP_TOKEN_BUDGET,
@@ -603,5 +610,7 @@ function finishAnswer(
   } else {
     dropped += reply.edits.length
   }
-  return { answer, query, changes, dropped, organise: readOrganiseRequest(reply.organise) }
+  // F-16.4: Organise is v1's; a v2 answer carries no organise run.
+  const organise = project.memory === 'v2' ? null : readOrganiseRequest(reply.organise)
+  return { answer, query, changes, dropped, organise }
 }

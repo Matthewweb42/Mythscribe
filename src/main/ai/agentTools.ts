@@ -28,10 +28,12 @@ import {
 import { ENTITY_NAME_MAX, toEntityNameKey } from '@shared/entities'
 import { FactStatus, isFieldFact, sheetAt, type Fact } from '@shared/facts'
 import type { Entity } from '@shared/ipc/contract'
+import type { StoryRecordSummary } from '@shared/memory/records'
 import { passageParagraphs } from '@shared/mentions'
 import { RELATION_INVERSE_LABEL, RELATION_LABEL, relationTypeOf } from '@shared/relations'
 import { renderCard } from '@shared/sceneCard'
 import { SCENE_SYNOPSIS_MAX, parseStoredSceneMeta } from '@shared/sceneMeta'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { STORY_MAP_NOW_MARK, sceneProgress } from '@shared/storyTime'
 import { TAG_CATEGORIES, TAG_CATEGORY_LABEL, toTagName, type TagCategory } from '@shared/tags'
 import { THREAD_KIND, THREAD_STATUS_LABEL, deriveThreads, type ThreadView } from '@shared/threads'
@@ -53,6 +55,17 @@ import { findTagByNameOrAlias, getTag, listTags } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { listTodo } from '../knowledge/todoStore'
 import { documentJson, documentText } from '../voice/profile'
+import { nowIndex, readingIndex, refsOf, sceneHead } from './agentRefs'
+import {
+  AGENT_V2_REFUSED,
+  AGENT_V2_REFUSED_TOOLS,
+  findPassagesV2,
+  lookupV2,
+  recordByNameV2,
+  refusesV2Edit,
+  scenesNaming,
+  todoV2
+} from './agentToolsV2'
 import { headTruncate } from './context/chatContext'
 import { rankCandidates, sceneTitles } from './context/queryContext'
 import { notesText } from './context/scenePanel'
@@ -79,6 +92,14 @@ export interface AgentProject {
    * …), read once per run so a settle edit names the item the model was shown.
    */
   todo?: TodoItem[]
+  /**
+   * F-16.4: the project's story memory. In v2 the tag and sheet tools and edits are refused
+   * (`AGENT_V2_REFUSED`), `entities` is empty, and lookup, find_passages, todo and cards read
+   * the v2 records, passage index and to-dos (`agentToolsV2.ts`).
+   */
+  memory: StoryMemoryVersion
+  /** F-16.4 (v2): the records, read once per run. */
+  records?: StoryRecordSummary[]
 }
 
 /**
@@ -90,7 +111,11 @@ export interface AgentProject {
  * not the run's focus. Ms Scribe reads Research from P3, through its own labelled tools, and never
  * a Not canon page or paragraph as true (design §2.2). A v1 project has no Research.
  */
-export function loadAgentProject(db: TreeDb, activeId: string | null = null): AgentProject {
+export function loadAgentProject(
+  db: TreeDb,
+  activeId: string | null,
+  memory: StoryMemoryVersion
+): AgentProject {
   const all = listNodes(db)
   const research = researchSubtree(all)
   const rows = nodesInTreeOrder(all).filter((row) => !research.has(row.id))
@@ -108,8 +133,10 @@ export function loadAgentProject(db: TreeDb, activeId: string | null = null): Ag
     refOf,
     byRef,
     titleOf: sceneTitles(db),
-    entities: listEntities(db),
-    time: storyTime(db, activeId, all)
+    // F-16.4: a v2 run never reads the v1 sheets.
+    entities: memory === 'v2' ? [] : listEntities(db),
+    time: storyTime(db, activeId, all),
+    memory
   }
 }
 
@@ -179,6 +206,10 @@ export function runAgentTool(
       result: `There is no tool "${str(name)}". Use one of the tools listed.`
     }
   }
+  if (project.memory === 'v2') {
+    const v2 = runAgentToolV2(project, tool.data, args)
+    if (v2 !== null) return v2
+  }
   switch (tool.data) {
     case 'search':
       return search(project, activeId, str(args.query))
@@ -213,6 +244,31 @@ export function runAgentTool(
 }
 
 /**
+ * F-16.4: a v2 run's answer for the tools that have a v2 source or none (the tag and sheet reads,
+ * refused with `AGENT_V2_REFUSED`); null for the tools that read the same in both (the outline,
+ * scenes and notes, and `cards` by ids).
+ */
+function runAgentToolV2(
+  project: AgentProject,
+  tool: AgentTool,
+  args: Record<string, unknown>
+): ToolOutcome | null {
+  if (AGENT_V2_REFUSED_TOOLS.includes(tool)) {
+    return { step: { tool, label: 'Looking around…' }, result: AGENT_V2_REFUSED }
+  }
+  switch (tool) {
+    case 'lookup':
+      return lookupV2(project, args.name)
+    case 'find_passages':
+      return findPassagesV2(project, str(args.query))
+    case 'todo':
+      return { step: { tool: 'todo', label: 'Reading your to-dos…' }, result: todoV2(project) }
+    default:
+      return null
+  }
+}
+
+/**
  * F-5.24: how a v6 result marks where a source stands (D7): `[canon]` the story as written,
  * `[plan]` the author's intent not on the page yet, `[idea]` a maybe. The prompt's status rule
  * reads the same three words.
@@ -227,32 +283,6 @@ export function recordByName(project: AgentProject, name: unknown): Entity | und
   if (sheet !== undefined || typeof name !== 'string') return sheet
   const tagId = findTagByNameOrAlias(project.db, toTagName(name))
   return tagId === undefined ? undefined : project.entities.find((e) => e.tagId === tagId)
-}
-
-/** A scene's index in reading order; -1 for an undated statement, past the end for one outside it. */
-function readingIndex(project: AgentProject, nodeId: string | null): number {
-  if (nodeId === null) return -1
-  const at = project.time.order.indexOf(nodeId)
-  return at === -1 ? project.time.order.length : at
-}
-
-/** Now's index in reading order; with no now, the end of the book. */
-function nowIndex(project: AgentProject): number {
-  const at = project.time.nowId === null ? -1 : project.time.order.indexOf(project.time.nowId)
-  return at === -1 ? project.time.order.length : at
-}
-
-/** The refs of the scenes behind a value, in order, without repeats. */
-function refsOf(project: AgentProject, nodeIds: readonly (string | null)[]): string {
-  const refs = [
-    ...new Set(
-      nodeIds.flatMap((id) => {
-        const ref = id === null ? undefined : project.refOf.get(id)
-        return ref === undefined ? [] : [ref]
-      })
-    )
-  ]
-  return refs.length > 0 ? ` (${refs.join(', ')})` : ''
 }
 
 /**
@@ -368,11 +398,6 @@ function lookup(project: AgentProject, nameArg: unknown): ToolOutcome {
   return { step, result: headTruncate(lines.join('\n'), AGENT_LOOKUP_CHARS) }
 }
 
-/** `n7 Chapter 1 › The ferry landing (before now: has happened)`, as the v6 tools head a scene. */
-function sceneHead(project: AgentProject, nodeId: string): string {
-  return `${project.refOf.get(nodeId) ?? '?'} ${project.titleOf(nodeId)} (${positionNote(project.time, nodeId)})`
-}
-
 /** The threads as of now: thread events stated after now are left out (`deriveThreads`). */
 function threadsAtNow(project: AgentProject, records: readonly Entity[]): ThreadView[] {
   const now = nowIndex(project)
@@ -446,6 +471,26 @@ function cards(project: AgentProject, idsArg: unknown, nameArg: unknown): ToolOu
         })
       )
     ]
+  } else if (project.memory === 'v2') {
+    // F-16.4: the record by its names, its scenes by the name scan.
+    const record = recordByNameV2(project, nameArg)
+    if (record === undefined) {
+      const name = str(nameArg).trim()
+      return {
+        step: { tool: 'cards', label: 'Reading scene cards…' },
+        result:
+          name === ''
+            ? 'cards needs "ids" (scene ids) or a "name".'
+            : `No record is called "${name}". Try find_passages, or name the scene ids.`
+      }
+    }
+    nodeIds = scenesNaming(project, record.id).map((each) => each.nodeId)
+    if (nodeIds.length === 0) {
+      return {
+        step: { tool: 'cards', label: 'Reading scene cards…' },
+        result: `No scene names ${record.name} yet.`
+      }
+    }
   } else {
     const entity = recordByName(project, nameArg)
     if (entity === undefined) {
@@ -880,6 +925,8 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
   if (typeof raw !== 'object' || raw === null) return { error: 'not an object' }
   const edit = raw as Record<string, unknown>
   const kind = str(edit.edit)
+  // F-16.4: a v2 project has no tags, sheets, statuses, To do items or summaries to edit.
+  if (project.memory === 'v2' && refusesV2Edit(edit)) return { error: AGENT_V2_REFUSED }
   const nameOf = (row: NodeRow): string => project.titleOf(row.id) || row.title
   const documentArg = (): NodeRow | string => {
     const row = nodeByRef(project, edit.id)
