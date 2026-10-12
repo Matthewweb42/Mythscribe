@@ -1,7 +1,8 @@
 import { asc, sql } from 'drizzle-orm'
+import { estimateTokens } from '@shared/ai'
 import { parseAliases, aliasKey } from '@shared/aliases'
 import { categoryOf, type StoryCategory } from '@shared/categories'
-import { ChangeUndo, changeSourceOf, type ChangeSource } from '@shared/changes'
+import { CHANGES_MAX, ChangeUndo, changeSourceOf, type ChangeSource } from '@shared/changes'
 import type { ContextFileType } from '@shared/contextLibrary'
 import { PROJECT_NOTES_NAME } from '@shared/contextLibrary'
 import { docToText } from '@shared/docText'
@@ -42,6 +43,7 @@ import { RELATION_LABEL, relationTypeOf } from '@shared/relations'
 import { resolveTagId } from '@shared/tagExchange'
 import { THREAD_EVENT_LABEL, threadEventOf } from '@shared/threads'
 import { LABELS_MAX, type LabelKind } from '@shared/storyLabels'
+import type { TimelineEvent } from '@shared/timeline'
 import type { TagCategory } from '@shared/tags'
 import type { TiptapNodeT } from '@shared/tiptap'
 import {
@@ -68,6 +70,7 @@ import {
 } from '../../project/settingsStore'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
 import { documentJson, manuscriptDocuments } from '../../voice/profile'
+import { sceneStatuses } from '../passageIndexer'
 
 /**
  * The switch-over's model (F-16.15, plan P1 §6.2): everything the conversion will write, worked
@@ -97,10 +100,14 @@ export interface PlannedRecord {
   legacyTagId: string | null
   pinned: PageLine[]
   ideas: PageLine[]
-  /** Sheet text the AI wrote: Pinned's "Filed by AI earlier: please check" block. */
+  /** Sheet text the AI wrote: the "Filed by AI earlier: please check" block, Not canon. */
   filedByAi: string[]
+  /** The page that block goes on: Pinned, or Ideas for a Plan or Idea sheet. */
+  filedIn: 'pinned' | 'ideas'
   /** Where it comes from, for the dry run. */
   from: 'sheet' | 'tag' | 'pov'
+  /** A sheet the AI made that the author added to (a dated line, a picture, a status). */
+  aiSheet: boolean
   /** The v1 tag ids whose links and tokens mean this record. */
   tagIds: string[]
 }
@@ -115,7 +122,7 @@ export interface PlannedLabel {
 
 export type PlannedResearch =
   | { kind: 'upload'; contextFileId: string; name: string; type: ContextFileType }
-  | { kind: 'notes'; entityId: string; title: string; lines: PageLine[]; notCanon: boolean }
+  | { kind: 'notes'; title: string; lines: PageLine[]; notCanon: boolean }
 
 export interface PlannedDetails {
   nodeId: string
@@ -181,6 +188,22 @@ function sceneNumbers(scenes: readonly NodeRow[]): Map<string, string> {
   return out
 }
 
+/** The written Research note the timeline's events go to (P1-D8 hides the Timeline in v2). */
+export const TIMELINE_NOTE_TITLE = 'Timeline'
+
+/** One event as a line: `The flood (Spring, year 1820; scenes 1.1, 1.2): its note`. */
+function timelineLine(event: TimelineEvent, scenes: readonly string[]): string {
+  const when = [event.when.trim(), event.year === null ? '' : `year ${event.year}`]
+    .filter((part) => part !== '')
+    .join(', ')
+  const linked =
+    scenes.length === 0 ? '' : `${scenes.length === 1 ? 'scene' : 'scenes'} ${scenes.join(', ')}`
+  const about = [when, linked].filter((part) => part !== '').join('; ')
+  const head = about === '' ? event.label.trim() : `${event.label.trim()} (${about})`
+  const note = event.note.trim()
+  return note === '' ? head : `${head}: ${note}`
+}
+
 /** The text a stored column holds, read leniently (a broken cell reads as none). */
 function storedDoc(raw: string | null): TiptapNodeT | null {
   return documentJson({ content: raw })
@@ -220,14 +243,16 @@ interface TagRowLite {
  * The consent screen's rows: every distinct inline tag token, grouped by the tag it stands for
  * now (merges followed through `TagAliases`; a token of a deleted tag is its own row), in order of
  * first appearance, with its count over every text the conversion rewrites and a sample. The
- * replacement is the linked sheet's name when one is kept, otherwise the tag name with hyphens as
- * spaces (the token's own name for a deleted tag).
+ * replacement is the name of the record the tag becomes (its sheet's, or the tag's own as a
+ * record names it: "Tomas" for #tomas), so the name scan finds it in the prose; a label tag, a
+ * dropped tag and a deleted one get the tag name with hyphens as spaces (decided by Claude,
+ * unconfirmed: QUESTIONS.md "P1 slice 6 review").
  */
 function inlineTagRows(
   db: TreeDb,
   texts: Texts,
   tags: ReadonlyMap<string, TagRowLite>,
-  sheetNameOfTag: ReadonlyMap<string, string>
+  recordNameOfTag: ReadonlyMap<string, string>
 ): InlineTagRow[] {
   const merges = getTagAliases(db)
   const rows = new Map<string, InlineTagRow>()
@@ -247,7 +272,7 @@ function inlineTagRows(
           tag: `#${name}`,
           count: 0,
           sample: samples.get(token.id) ?? '',
-          replacement: sheetNameOfTag.get(key) ?? tagNameAsWords(name),
+          replacement: recordNameOfTag.get(key) ?? tagNameAsWords(name),
           tokenIds: []
         }
         rows.set(key, row)
@@ -271,20 +296,43 @@ export function plannedUploads(db: TreeDb): Extract<PlannedResearch, { kind: 'up
     .map((row) => ({ kind: 'upload', contextFileId: row.id, name: row.name, type: row.type }))
 }
 
+/**
+ * How long after an AI run's Changes row a sheet's `modified` stamp may move and still be that
+ * run's write: sheet sync stamps its row before it asks the model and writes after the answer.
+ */
+export const AI_RUN_SLACK_MS = 5 * 60_000
+
 /** Per entity, what the AI wrote that still stands (decision 8). */
 interface AiWritten {
-  /** Fields whose value still equals the `after` of their latest applied AI change. */
-  fields: Map<string, Set<string>>
-  /** Page paragraphs (`paragraphKey`) the latest AI change of the page added. */
+  /**
+   * Per entity, per field: every paragraph (`paragraphKey`) an applied AI change added to that
+   * field, across all of them. A paragraph the author has edited since has another key.
+   */
+  fields: Map<string, Map<string, Set<string>>>
+  /** Per entity: every page paragraph (`paragraphKey`) an applied AI change added. */
   body: Map<string, Set<string>>
-  /** Sheets an AI source made whose `modified` has not moved since: all their text. */
+  /**
+   * Sheets an AI source made that nothing but AI runs has written since: `modified` is still the
+   * one the creation logged, or no later than the sheet's latest AI run (`AI_RUN_SLACK_MS`). An
+   * author edit between two AI runs cannot be told apart (logged in QUESTIONS.md).
+   */
   made: Set<string>
+}
+
+/** `keys` with every paragraph `pageEdits` finds added from `before` to `after`. */
+function addAdded(
+  keys: Set<string>,
+  before: string | null | undefined,
+  after: string | null | undefined
+): Set<string> {
+  for (const paragraph of pageEdits(before, after).added) keys.add(paragraphKey(paragraph))
+  return keys
 }
 
 function aiWritten(db: TreeDb, entities: ReadonlyMap<string, EntityRow>): AiWritten {
   const out: AiWritten = { fields: new Map(), body: new Map(), made: new Set() }
-  const latestField = new Map<string, string>()
-  const latestBody = new Map<string, { before: string | null; after: string | null }>()
+  const createdAs = new Map<string, string>()
+  const lastRun = new Map<string, number>()
   const rows = db
     .select()
     .from(knowledgeChange)
@@ -300,33 +348,37 @@ function aiWritten(db: TreeDb, entities: ReadonlyMap<string, EntityRow>): AiWrit
     } catch {
       continue
     }
-    if (undo.type === 'restoreSheet') {
-      for (const [id, value] of Object.entries(undo.after.fields ?? {})) {
-        latestField.set(`${undo.entityId}\u0000${id}`, value)
-      }
-      if (undo.after.body !== undefined) {
-        latestBody.set(undo.entityId, {
-          before: undo.before.body ?? null,
-          after: undo.after.body
-        })
-      }
-    } else if (undo.type === 'deleteSheet') {
-      const sheet = entities.get(undo.entityId)
-      if (sheet !== undefined && undo.modified !== undefined && undo.modified === sheet.modified) {
-        out.made.add(undo.entityId)
-      }
+    if (undo.type !== 'restoreSheet' && undo.type !== 'deleteSheet') continue
+    const at = Date.parse(row.createdAt)
+    if (Number.isFinite(at))
+      lastRun.set(undo.entityId, Math.max(lastRun.get(undo.entityId) ?? at, at))
+    if (undo.type === 'deleteSheet') {
+      if (undo.modified !== undefined) createdAs.set(undo.entityId, undo.modified)
+      continue
+    }
+    for (const [id, value] of Object.entries(undo.after.fields ?? {})) {
+      const byField = out.fields.get(undo.entityId) ?? new Map<string, Set<string>>()
+      byField.set(id, addAdded(byField.get(id) ?? new Set(), undo.before.fields?.[id], value))
+      out.fields.set(undo.entityId, byField)
+    }
+    if (undo.after.body !== undefined) {
+      out.body.set(
+        undo.entityId,
+        addAdded(out.body.get(undo.entityId) ?? new Set(), undo.before.body, undo.after.body)
+      )
     }
   }
-  for (const [key, value] of latestField) {
-    const [entityId = '', fieldId = ''] = key.split('\u0000')
+  for (const [entityId, modified] of createdAs) {
     const sheet = entities.get(entityId)
     if (sheet === undefined) continue
-    if (parseEntityFields(sheet.fields)[fieldId] !== value || value === '') continue
-    out.fields.set(entityId, (out.fields.get(entityId) ?? new Set()).add(fieldId))
-  }
-  for (const [entityId, change] of latestBody) {
-    const added = new Set(pageEdits(change.before, change.after).added.map(paragraphKey))
-    if (added.size > 0) out.body.set(entityId, added)
+    const last = lastRun.get(entityId)
+    const stamp = Date.parse(sheet.modified)
+    if (
+      sheet.modified === modified ||
+      (last !== undefined && Number.isFinite(stamp) && stamp <= last + AI_RUN_SLACK_MS)
+    ) {
+      out.made.add(entityId)
+    }
   }
   return out
 }
@@ -338,25 +390,35 @@ interface SheetLines {
   writeUps: number
 }
 
-function sheetLines(row: EntityRow, category: StoryCategory, written: AiWritten): SheetLines {
+/**
+ * Splits a sheet's text (`allAi`: a sheet the AI made, all of it the AI's). A field's paragraphs
+ * split like the page's, so the author's own words in a field an AI run appended to stay hers;
+ * each part keeps the field's label.
+ */
+function sheetLines(
+  row: EntityRow,
+  category: StoryCategory,
+  written: AiWritten,
+  allAi: boolean
+): SheetLines {
   const out: SheetLines = { author: [], ai: [], writeUps: 0 }
-  const made = written.made.has(row.id)
-  const aiFields = written.fields.get(row.id) ?? new Set<string>()
-  const fields = parseEntityFields(row.fields)
-  const defs = sheetFieldDefs(category, parseExtraFields(row.extraFields))
-  for (const def of defs) {
-    const value = fields[def.id]
-    if (value === undefined || value.trim() === '') continue
-    const lines = pinnedFromFields([def], { [def.id]: value })
-    if (made || aiFields.has(def.id)) out.ai.push(...lines)
-    else out.author.push(...lines)
+  const aiFields = written.fields.get(row.id)
+  const mine: Record<string, string> = {}
+  const theirs: Record<string, string> = {}
+  for (const [id, value] of Object.entries(parseEntityFields(row.fields))) {
+    const keys = aiFields?.get(id)
+    const ai: string[] = []
+    const own: string[] = []
+    for (const paragraph of textParagraphs(value)) {
+      if (allAi || keys?.has(paragraphKey(paragraph)) === true) ai.push(paragraph)
+      else own.push(paragraph)
+    }
+    if (own.length > 0) mine[id] = own.join('\n\n')
+    if (ai.length > 0) theirs[id] = ai.join('\n\n')
   }
-  const known = new Set(defs.map((def) => def.id))
-  const rest: Record<string, string> = {}
-  for (const [id, value] of Object.entries(fields)) if (!known.has(id) && value) rest[id] = value
-  const restLines = pinnedFromFields([], rest)
-  if (made) out.ai.push(...restLines)
-  else out.author.push(...restLines)
+  const defs = sheetFieldDefs(category, parseExtraFields(row.extraFields))
+  out.author.push(...pinnedFromFields(defs, mine))
+  out.ai.push(...pinnedFromFields(defs, theirs))
   const writeUps = new Set(parseStoredSheetSync(row.sync)?.aiParagraphs ?? [])
   const aiBody = written.body.get(row.id) ?? new Set<string>()
   for (const paragraph of textParagraphs(row.body)) {
@@ -364,7 +426,7 @@ function sheetLines(row: EntityRow, category: StoryCategory, written: AiWritten)
       out.writeUps += 1
       continue
     }
-    if (made || aiBody.has(paragraphKey(paragraph))) out.ai.push(paragraph)
+    if (allAi || aiBody.has(paragraphKey(paragraph))) out.ai.push(paragraph)
     else out.author.push(paragraph)
   }
   return out
@@ -393,16 +455,19 @@ export interface BuildModelOptions {
  * Works out the switch-over from the v1 tables (see the module comment). Reads only. The rules,
  * in the order they apply:
  * - every author sheet becomes a record (category, image, names kept; a tag linked to it merges
- *   in); an AI sheet is dropped; the Project notes sheet becomes a Research note instead;
+ *   in); an AI sheet is dropped unless the author added a dated line, a relationship, a picture
+ *   or a Plan or Idea status to it; the Project notes sheet becomes a Research note instead;
  * - an author tag without a kept sheet becomes a record when it names something (character,
  *   setting, world building) or is a plot thread, a label when it is tone, content or custom; an
- *   AI tag is dropped;
+ *   AI tag is dropped; nesting is dropped and named;
  * - a sheet's filled fields, dated author lines, relationships and thread events, and page
- *   paragraphs become Pinned lines (Ideas for a Plan or Idea sheet or line); what the AI wrote goes
- *   to the Not canon block; page paragraphs a write-up made are dropped;
+ *   paragraphs become Pinned lines (Ideas for a Plan or Idea sheet or line); every paragraph an
+ *   AI run wrote that still stands goes to the Not canon block (in Ideas on a Plan or Idea sheet);
+ *   page paragraphs a write-up made are dropped;
  * - typed details from scene meta (POV and place by name or alias; a POV no record answers to
  *   becomes a character), timeline years on the first scene of each run, "+ also here" from the
- *   author's character and place links on scenes that do not name the record;
+ *   author's character and place links on scenes that do not name the record; the timeline's
+ *   events as a written Research note;
  * - uploads become Research documents; dismissals that still mean something are mapped.
  */
 export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}): SwitchoverModel {
@@ -437,134 +502,26 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
   const links = db.select().from(documentTag).all()
   const written = aiWritten(db, entities)
 
-  // ---- Records: sheets first, so a tag linked to a sheet merges into it.
-  const records: PlannedRecord[] = []
-  const recordOfTag = new Map<string, PlannedRecord>()
-  const recordOfEntity = new Map<string, PlannedRecord>()
-  const research: PlannedResearch[] = []
-  const aiSheets: string[] = []
-  let writeUps = 0
-  for (const row of entityRows) {
-    if (row.origin === 'ai') {
-      aiSheets.push(row.name)
-      continue
-    }
-    const category = categoryOf(row.kind, categories)
-    const lines = sheetLines(row, category, written)
-    writeUps += lines.writeUps
-    if (isProjectNotes(row)) {
-      const ai: PageLine[] =
-        lines.ai.length === 0
-          ? []
-          : [
-              { text: FILED_BY_AI_HEADING, heading: true, notCanon: true },
-              ...lines.ai.map((text) => ({ text, notCanon: true }))
-            ]
-      research.push({
-        kind: 'notes',
-        entityId: row.id,
-        title: PROJECT_NOTES_NAME,
-        lines: [...lines.author.map((text) => ({ text })), ...ai],
-        notCanon: row.status !== 'canon'
-      })
-      continue
-    }
-    const linked = row.tagId === null ? undefined : tags.get(row.tagId)
-    // Two sheets may share one tag (F-9.4 links a sheet to a tag of its name): the first keeps it.
-    const owned = linked !== undefined && !recordOfTag.has(linked.id) ? linked : undefined
-    const known = categories.some((each) => each.id === row.kind) || category.builtIn
-    if (!known) notes.push(`${row.name}: its category is gone; it becomes a World record.`)
-    const planned: PlannedRecord = {
-      key: `entity:${row.id}`,
-      name: row.name,
-      categoryId: known ? row.kind : 'world',
-      image: row.image,
-      aliases: [],
-      legacyEntityId: row.id,
-      legacyTagId: owned?.id ?? null,
-      pinned: [],
-      ideas: [],
-      filedByAi: lines.ai,
-      from: 'sheet',
-      tagIds: owned === undefined ? [] : [owned.id]
-    }
-    const own = linked === undefined ? parseAliases(row.aliases) : linked.aliases
-    for (const name of own) addName(planned, name)
-    if (linked !== undefined) addName(planned, tagNameAsWords(linked.name))
-    const target = row.status === 'canon' ? planned.pinned : planned.ideas
-    target.push(...lines.author.map((text) => ({ text })))
-    records.push(planned)
-    recordOfEntity.set(row.id, planned)
-    if (owned !== undefined) recordOfTag.set(owned.id, planned)
-  }
-
-  // ---- Tags without a kept sheet: records, labels, or dropped.
-  const labels: PlannedLabel[] = []
-  const aiTags: string[] = []
-  const nested: string[] = []
-  for (const row of tagRows) {
-    if (recordOfTag.has(row.id)) continue
-    if (row.origin === 'ai') {
-      aiTags.push(`#${row.name}`)
-      continue
-    }
-    const fromTag = recordFromTag(row)
-    if (fromTag !== null) {
-      const planned: PlannedRecord = {
-        key: `tag:${row.id}`,
-        name: fromTag.name,
-        categoryId: fromTag.categoryId,
-        image: null,
-        aliases: [],
-        legacyEntityId: null,
-        legacyTagId: row.id,
-        pinned: [],
-        ideas: [],
-        filedByAi: [],
-        from: 'tag',
-        tagIds: [row.id]
-      }
-      for (const name of fromTag.aliases) addName(planned, name)
-      records.push(planned)
-      recordOfTag.set(row.id, planned)
-      continue
-    }
-    const asLabel = labelFromTag(row)
-    if (asLabel === null) continue
-    if (row.parentId !== null) {
-      const parent = tags.get(row.parentId)
-      nested.push(`#${row.name}${parent === undefined ? '' : ` under #${parent.name}`}`)
-    }
-    if (labels.length >= LABELS_MAX) {
-      notes.push(`#${row.name}: a project keeps at most ${LABELS_MAX} labels; it is not converted.`)
-      continue
-    }
-    const nodeIds = links
-      .filter((link) => link.tagId === row.id && link.source === 'author')
-      .map((link) => link.nodeId)
-    labels.push({ tagId: row.id, ...asLabel, nodeIds })
-  }
-
-  // ---- Dated author lines, relationships and thread events.
+  // ---- Dated author lines, relationships and thread events, per sheet (the AI's are dropped).
   const scenes = manuscriptDocuments(db, rows)
   const numbers = sceneNumbers(scenes)
   const titleOf = new Map(rows.map((row) => [row.id, row.title]))
   const sceneRef = (nodeId: string | null): string | null =>
     nodeId === null ? null : sceneReference(numbers.get(nodeId) ?? '', titleOf.get(nodeId) ?? '')
-  const factRows = db
+  const aiFacts = new Map<string, number>()
+  /** Per sheet, its author lines in the order written, and whether each is canon. */
+  const factLines = new Map<string, { text: string; canon: boolean }[]>()
+  for (const row of db
     .select()
     .from(fact)
     .orderBy(asc(fact.createdAt), sql`rowid`)
-    .all()
-  const aiFacts = new Map<string, number>()
-  for (const row of factRows) {
-    const planned = recordOfEntity.get(row.entityId)
+    .all()) {
     if (row.origin === 'ai') {
       const name = entities.get(row.entityId)?.name ?? 'a sheet'
       aiFacts.set(name, (aiFacts.get(name) ?? 0) + 1)
       continue
     }
-    if (planned === undefined || row.hidden) continue
+    if (row.hidden) continue
     const relation = relationTypeOf(row.attribute)
     const event = threadEventOf(row.attribute)
     let lines: string[]
@@ -592,9 +549,132 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
     } else {
       continue
     }
-    const sheetCanon = entities.get(row.entityId)?.status === 'canon'
-    const target = sheetCanon && row.status === 'canon' ? planned.pinned : planned.ideas
-    target.push(...lines.map((text) => ({ text })))
+    const list = factLines.get(row.entityId) ?? []
+    list.push(...lines.map((text) => ({ text, canon: row.status === 'canon' })))
+    factLines.set(row.entityId, list)
+  }
+
+  // ---- Records: sheets first, so a tag linked to a sheet merges into it.
+  const records: PlannedRecord[] = []
+  const recordOfTag = new Map<string, PlannedRecord>()
+  const research: PlannedResearch[] = []
+  const aiSheets: string[] = []
+  let writeUps = 0
+  for (const row of entityRows) {
+    const dated = factLines.get(row.id) ?? []
+    // A sheet the AI made is dropped unless the author added to it: a dated line, a
+    // relationship, a picture, or a Plan or Idea status (none of which makes it hers in v1).
+    const aiSheet = row.origin === 'ai'
+    if (aiSheet && dated.length === 0 && row.image === null && row.status === 'canon') {
+      aiSheets.push(row.name)
+      continue
+    }
+    const category = categoryOf(row.kind, categories)
+    const lines = sheetLines(row, category, written, aiSheet || written.made.has(row.id))
+    writeUps += lines.writeUps
+    const sheetCanon = row.status === 'canon'
+    if (isProjectNotes(row)) {
+      const ai: PageLine[] =
+        lines.ai.length === 0
+          ? []
+          : [
+              { text: FILED_BY_AI_HEADING, heading: true, notCanon: true },
+              ...lines.ai.map((text) => ({ text, notCanon: true }))
+            ]
+      research.push({
+        kind: 'notes',
+        title: PROJECT_NOTES_NAME,
+        lines: [
+          ...lines.author.map((text) => ({ text })),
+          ...dated.map((line) => ({ text: line.text })),
+          ...ai
+        ],
+        notCanon: !sheetCanon
+      })
+      continue
+    }
+    const linked = row.tagId === null ? undefined : tags.get(row.tagId)
+    // Two sheets may share one tag (F-9.4 links a sheet to a tag of its name): the first keeps it.
+    const owned = linked !== undefined && !recordOfTag.has(linked.id) ? linked : undefined
+    const known = categories.some((each) => each.id === row.kind) || category.builtIn
+    if (!known) notes.push(`${row.name}: its category is gone; it becomes a World record.`)
+    const planned: PlannedRecord = {
+      key: `entity:${row.id}`,
+      name: row.name,
+      categoryId: known ? row.kind : 'world',
+      image: row.image,
+      aliases: [],
+      legacyEntityId: row.id,
+      legacyTagId: owned?.id ?? null,
+      pinned: [],
+      ideas: [],
+      filedByAi: lines.ai,
+      // A Plan or Idea sheet was never canon: what the AI wrote in it goes to Ideas too.
+      filedIn: sheetCanon ? 'pinned' : 'ideas',
+      from: 'sheet',
+      aiSheet,
+      tagIds: owned === undefined ? [] : [owned.id]
+    }
+    const own = linked === undefined ? parseAliases(row.aliases) : linked.aliases
+    for (const name of own) addName(planned, name)
+    if (linked !== undefined) addName(planned, tagNameAsWords(linked.name))
+    const target = sheetCanon ? planned.pinned : planned.ideas
+    target.push(...lines.author.map((text) => ({ text })))
+    for (const line of dated) {
+      ;(sheetCanon && line.canon ? planned.pinned : planned.ideas).push({ text: line.text })
+    }
+    records.push(planned)
+    if (owned !== undefined) recordOfTag.set(owned.id, planned)
+  }
+
+  // ---- Tags without a kept sheet: records, labels, or dropped.
+  const labels: PlannedLabel[] = []
+  const aiTags: string[] = []
+  const nested: string[] = []
+  for (const row of tagRows) {
+    if (row.origin === 'ai' && !recordOfTag.has(row.id)) {
+      aiTags.push(`#${row.name}`)
+      continue
+    }
+    // Nesting converts to nothing, whatever the tag becomes: each nested author tag is named.
+    if (row.origin === 'author' && row.parentId !== null) {
+      const parent = tags.get(row.parentId)
+      nested.push(`#${row.name}${parent === undefined ? '' : ` under #${parent.name}`}`)
+    }
+    if (recordOfTag.has(row.id)) continue
+    const fromTag = recordFromTag(row)
+    if (fromTag !== null) {
+      const planned: PlannedRecord = {
+        key: `tag:${row.id}`,
+        name: fromTag.name,
+        categoryId: fromTag.categoryId,
+        image: null,
+        aliases: [],
+        legacyEntityId: null,
+        legacyTagId: row.id,
+        pinned: [],
+        ideas: [],
+        filedByAi: [],
+        filedIn: 'pinned',
+        from: 'tag',
+        aiSheet: false,
+        tagIds: [row.id]
+      }
+      for (const name of fromTag.aliases) addName(planned, name)
+      records.push(planned)
+      recordOfTag.set(row.id, planned)
+      continue
+    }
+    const asLabel = labelFromTag(row)
+    if (asLabel === null) continue
+    if (labels.length >= LABELS_MAX) {
+      notes.push(`#${row.name}: a project keeps at most ${LABELS_MAX} labels; it is not converted.`)
+      continue
+    }
+    const nodeIds = links
+      .filter((link) => link.tagId === row.id && link.source === 'author')
+      .map((link) => link.nodeId)
+    labels.push({ tagId: row.id, ...asLabel, nodeIds })
   }
 
   // ---- Typed details.
@@ -667,7 +747,9 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
         pinned: [],
         ideas: [],
         filedByAi: [],
+        filedIn: 'pinned',
         from: 'pov',
+        aiSheet: false,
         tagIds: []
       })
       createdPovs.push(name)
@@ -679,7 +761,8 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
 
   // Story years: the first scene of each run of consecutive scenes linked to one event.
   const years = new Map<string, number>()
-  const events = new Map(getProjectTimeline(db).events.map((event) => [event.id, event]))
+  const timeline = getProjectTimeline(db).events
+  const events = new Map(timeline.map((event) => [event.id, event]))
   let previous: string | undefined
   for (const scene of scenes) {
     const eventId = metaOf.get(scene.id)?.eventId
@@ -687,14 +770,31 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
     if (eventId !== undefined && eventId !== previous && year !== null) years.set(scene.id, year)
     previous = eventId
   }
+  // The events themselves (the author's labels, times and notes, linked or not) stay readable in
+  // v2, where the Timeline section is hidden until P2b: one written Research note, a line each.
+  if (timeline.length > 0) {
+    research.push({
+      kind: 'notes',
+      title: TIMELINE_NOTE_TITLE,
+      lines: timeline.map((event) => ({
+        text: timelineLine(
+          event,
+          scenes
+            .filter((scene) => metaOf.get(scene.id)?.eventId === event.id)
+            .map((scene) => numbers.get(scene.id) ?? '')
+            .filter((number) => number !== '')
+        )
+      })),
+      notCanon: false
+    })
+  }
 
   // Replacements: the consent's words, else each row's default, per stored token id.
-  const sheetNameOfTag = new Map<string, string>()
+  const recordNameOfTag = new Map<string, string>()
   for (const planned of records) {
-    if (planned.from !== 'sheet') continue
-    for (const tagId of planned.tagIds) sheetNameOfTag.set(tagId, planned.name)
+    for (const tagId of planned.tagIds) recordNameOfTag.set(tagId, planned.name)
   }
-  const inlineTags = inlineTagRows(db, allTexts(db, rows), tags, sheetNameOfTag)
+  const inlineTags = inlineTagRows(db, allTexts(db, rows), tags, recordNameOfTag)
   const tokenText = new Map<string, string>()
   for (const row of inlineTags) {
     const text = (options.replacements?.get(row.key) ?? row.replacement).trim()
@@ -738,7 +838,8 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
       const candidates = sceneTags
         .map((row) => recordOfTag.get(row.id))
         .filter((planned): planned is PlannedRecord => planned !== undefined)
-        .filter((planned) => planned.key !== pov?.key)
+        // The POV and the place are on their own lines already.
+        .filter((planned) => planned.key !== pov?.key && planned.key !== place?.key)
       if (candidates.length > 0) {
         const row = rows.find((each) => each.id === nodeId)
         const doc = storedDoc(row?.content ?? null)
@@ -789,6 +890,14 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
     names: [planned.name, ...planned.aliases]
   }))
   const nameOfKey = new Map(records.map((planned) => [planned.key, planned.name]))
+  /** A record's name with its category, so two records of one name can be told apart. */
+  const nameWithNoun = (planned: PlannedRecord): string =>
+    `${planned.name} (${categoryOf(planned.categoryId, categories).noun})`
+  const recordOfKey = new Map(records.map((planned) => [planned.key, planned]))
+  const categoryOfKey = (key: string): string => {
+    const planned = recordOfKey.get(key)
+    return planned === undefined ? '' : categoryOf(planned.categoryId, categories).noun
+  }
 
   // ---- Dismissals.
   const dismissals: PlannedDismissal[] = []
@@ -864,8 +973,10 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
     .map((pair) => ({
       keep: pair.a,
       keepName: nameOfKey.get(pair.a) ?? pair.a,
+      keepCategory: categoryOfKey(pair.a),
       merge: pair.b,
       mergeName: nameOfKey.get(pair.b) ?? pair.b,
+      mergeCategory: categoryOfKey(pair.b),
       rule: pair.rule,
       name: pair.name,
       matched: pair.matched
@@ -909,9 +1020,11 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
   for (const planned of records) {
     const from =
       planned.from === 'sheet'
-        ? planned.legacyTagId === null
-          ? 'from its sheet'
-          : 'from its sheet and tag'
+        ? planned.aiSheet
+          ? 'from a sheet the AI made, kept for what you added to it'
+          : planned.legacyTagId === null
+            ? 'from its sheet'
+            : 'from its sheet and tag'
         : planned.from === 'tag'
           ? 'from its tag'
           : 'the POV of a scene, with no sheet or tag'
@@ -921,7 +1034,9 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
     if (lines > 0) parts.push(`${plural(lines, 'Pinned line')}`)
     if (planned.ideas.length > 0) parts.push(`${plural(planned.ideas.length, 'Ideas line')}`)
     if (planned.filedByAi.length > 0)
-      parts.push(`${plural(planned.filedByAi.length, 'line')} filed by AI, Not canon`)
+      parts.push(
+        `${plural(planned.filedByAi.length, 'line')} filed by AI, Not canon${planned.filedIn === 'ideas' ? ', in Ideas' : ''}`
+      )
     converted.push({
       name: planned.name,
       detail: `Record (${categoryOf(planned.categoryId, categories).noun}): ${parts.join('; ')}.`
@@ -995,8 +1110,15 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
       detail: `${plural(writeUps, 'page paragraph')} the AI wrote up from fields that convert anyway.`
     })
   const planLinks = getPlanLinkState(db)
-  const aiPlan = planLinks.aiApplied.length + planLinks.suggestions.length
-  if (aiPlan > 0) dropped.push({ name: 'AI plan links', detail: plural(aiPlan, 'link') })
+  const aiPlan = [
+    planLinks.aiApplied.length === 0
+      ? ''
+      : `${plural(planLinks.aiApplied.length, 'link')} the AI applied, taken off the outline`,
+    planLinks.suggestions.length === 0
+      ? ''
+      : `${plural(planLinks.suggestions.length, 'suggestion')} waiting`
+  ].filter((part) => part !== '')
+  if (aiPlan.length > 0) dropped.push({ name: 'AI plan links', detail: aiPlan.join('; ') })
   const obsolete: [string, number][] = [
     ['AI tags taken off scenes', count('document_tag_dismissal')],
     ['Hidden observed facts', count('observed_fact', 'hidden = 1')],
@@ -1023,19 +1145,21 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
       [planned.name, ...planned.aliases].some((name) => normName(name) === norm)
     )
     notes.push(
-      `“${norm}” is a name of ${holders.map((each) => each.name).join(' and ')}; it is marked shared on each.`
+      `“${norm}” is a name of ${holders.map(nameWithNoun).join(' and ')}; it is marked shared on each.`
     )
   }
   notes.push(...cannot)
   notes.push(
-    'The Changes log keeps only its newest 5,000 rows, so sheet text the AI wrote before that counts as yours.'
+    `The Changes log keeps only its newest ${CHANGES_MAX.toLocaleString('en-US')} rows, so sheet text the AI wrote before that counts as yours.`
   )
 
+  // The rebuild never reads an Idea scene or one left out of compile (design §2.2).
+  const statuses = sceneStatuses(db, rows)
   const rebuildScenes = scenes
-    .filter((row) => metaOf.get(row.id)?.status !== 'idea')
+    .filter((row) => !statuses.idea.has(row.id) && !statuses.excluded.has(row.id))
     .map((row) => {
       const doc = storedDoc(row.content)
-      return doc === null ? 0 : Math.ceil(docToText(doc).length / 4)
+      return doc === null ? 0 : estimateTokens(docToText(doc))
     })
     .filter((tokensOf) => tokensOf > 0)
 

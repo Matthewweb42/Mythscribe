@@ -952,16 +952,15 @@ test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', asy
   )
   await dryRun.getByRole('button', { name: 'Next' }).click()
 
-  // The consent screen: the replacement (the linked sheet's name), edited to "Mara".
+  // The consent screen: the replacement (the record's name), edited to other words.
   const replacement = page.getByRole('textbox', { name: 'Replacement for #mara' })
   await expect(replacement).toHaveValue('Mara')
-  await replacement.fill('')
-  await replacement.fill('Mara')
+  await replacement.fill('Mara of the Reef')
   await page.getByRole('button', { name: 'Convert' }).click()
   const done = page.getByRole('dialog', { name: 'Switched over' })
   await expect(done).toBeVisible({ timeout: 15_000 })
 
-  // The copy opens on v2: plain "Mara" in the scene, and a Mara record.
+  // The copy opens on v2: the edited words in the scene, and a Mara record.
   const copy = await invoke<ProjectInfo | null>('project:current', undefined)
   expect(copy?.storyMemory).toBe('v2')
   expect(path.basename(copy?.path ?? '')).toMatch(
@@ -969,7 +968,7 @@ test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', asy
   )
   const converted = await storedText()
   expect(converted).not.toContain('inlineTag')
-  expect(converted).toContain('Then Mara left.')
+  expect(converted).toContain('Then Mara of the Reef left.')
   expect((await invoke<{ name: string }[]>('record:list', undefined)).map((r) => r.name)).toEqual([
     'Mara'
   ])
@@ -979,7 +978,7 @@ test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', asy
     .getByRole('tree', { name: 'Document tree' })
     .getByText(scene.title, { exact: true })
     .click()
-  await expect(editor).toContainText('Then Mara left.')
+  await expect(editor).toContainText('Then Mara of the Reef left.')
   await expect(editor.locator('[data-inline-tag]')).toHaveCount(0)
 
   // The original reopens (File › Open project…) as v1, its inline tag as it was.

@@ -73,6 +73,24 @@ export function planLinkKey(link: { plan: PlanRef; sceneId: string }): string {
   return `${planKey(link.plan)}>${link.sceneId}`
 }
 
+/** A `planLinkKey` read back: the plan and the scene, or null for a key that does not read. */
+export function parsePlanLinkKey(key: string): { plan: PlanRef; sceneId: string } | null {
+  const at = key.lastIndexOf('>')
+  if (at <= 0) return null
+  const plan = key.slice(0, at)
+  const sceneId = key.slice(at + 1)
+  let ref: unknown = null
+  if (plan.startsWith('scene:')) ref = { kind: 'scene', nodeId: plan.slice('scene:'.length) }
+  else if (plan.startsWith('beat:')) {
+    const rest = plan.slice('beat:'.length)
+    const colon = rest.indexOf(':')
+    if (colon > 0)
+      ref = { kind: 'beat', template: rest.slice(0, colon), beatId: rest.slice(colon + 1) }
+  }
+  const parsed = PlanRef.safeParse(ref)
+  return parsed.success && sceneId !== '' ? { plan: parsed.data, sceneId } : null
+}
+
 /** `key` added to the dismissed list, the oldest forgotten past the cap. */
 export function withDismissed(dismissed: readonly string[], key: string): string[] {
   const next = [...dismissed.filter((each) => each !== key), key]

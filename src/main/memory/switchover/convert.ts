@@ -8,6 +8,7 @@ import { STORY_YEAR_MAX, STORY_YEAR_MIN } from '@shared/memory/sceneDetails'
 import type { SwitchoverConsent, SwitchoverCounts } from '@shared/memory/switchover'
 import { pageFromLines, pinnedPage } from '@shared/memory/switchoverMapping'
 import { EMPTY_DOC } from '@shared/tiptap'
+import { dropAiPlanLinks } from '../../ai/planLinks'
 import { contextFile, draftText } from '../../db/schema'
 import { saveDocument } from '../../document/documentStore'
 import { saveNotes } from '../../document/notesStore'
@@ -77,8 +78,8 @@ export const ALREADY_SWITCHED =
  * the consented words in every node's content and notes and every inactive draft; the records are
  * written with their names and pages; the labels with their links; Research (uploads and the
  * Project notes); the typed scene details; the dismissals that still apply; the merges the author
- * ticked (only pairs the dry run offered); then `storyMemory` is v2. VALIDATION when the stored
- * version is v2 already: it runs once.
+ * ticked (only pairs the dry run offered); the plan links the AI applied come off; then
+ * `storyMemory` is v2. VALIDATION when the stored version is v2 already: it runs once.
  */
 export function convertSwitchover(
   db: TreeDb,
@@ -145,8 +146,8 @@ export function convertSwitchover(
           image: planned.image,
           aliases: planned.aliases.map((text) => ({ text, shared: shared(text) })),
           mainShared: shared(planned.name),
-          pinned: pinnedPage(planned.pinned, planned.filedByAi),
-          ideas: pageFromLines(planned.ideas),
+          pinned: pinnedPage(planned.pinned, planned.filedIn === 'pinned' ? planned.filedByAi : []),
+          ideas: pinnedPage(planned.ideas, planned.filedIn === 'ideas' ? planned.filedByAi : []),
           legacyEntityId: planned.legacyEntityId,
           legacyTagId: planned.legacyTagId
         },
@@ -258,7 +259,10 @@ export function convertSwitchover(
     }
     unshareLoneConvertedNames(tx)
 
-    // 8. The switch.
+    // 8. The plan links the AI made come off (design Part 3); hers stay.
+    dropAiPlanLinks(tx)
+
+    // 9. The switch.
     setStoryMemory(tx, 'v2', now)
     return counts
   })

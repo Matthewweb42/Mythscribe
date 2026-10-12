@@ -40,6 +40,11 @@ interface ProjectState {
    * when a dialog was cancelled.
    */
   restoreBackup: (file?: string) => Promise<ProjectInfo | null>
+  /**
+   * F-16.15: makes the story-memory switch-over's test copy of the open project and opens it (main
+   * closes the original), settling first like every switch. Answers the copy's folder.
+   */
+  openSwitchoverCopy: () => Promise<string>
   close: () => Promise<void>
   /**
    * Answers `window:close-requested`: flushes pending saves, then lets main close the window.
@@ -144,6 +149,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // No recovery offer: a backup never carries the crash journal.
         if (info) set({ current: info })
         return info
+      })
+    },
+
+    openSwitchoverCopy() {
+      return run(async () => {
+        await settle('switch')
+        const made = await ipc().invoke('switchover:trialCopy', undefined)
+        // No recovery offer: a fresh copy has no crash journal.
+        set({ current: made.info })
+        return made.folder
       })
     },
 

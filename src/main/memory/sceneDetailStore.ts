@@ -1,4 +1,5 @@
 import { eq, inArray } from 'drizzle-orm'
+import type { z } from 'zod'
 import { emptySceneDetails, SceneDetails, type SceneDetailsView } from '@shared/memory/sceneDetails'
 import { record, sceneDetail, type SceneDetailRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
@@ -20,15 +21,27 @@ function parseAlsoHere(raw: string): string[] {
   }
 }
 
+/**
+ * A stored row read field by field: a column that does not parse reads as empty on its own, so
+ * one bad value never hides the others.
+ */
 function toDetails(row: SceneDetailRow): SceneDetails {
-  const parsed = SceneDetails.safeParse({
-    povRecordId: row.povRecordId,
-    place: { recordId: row.placeRecordId, text: row.placeText },
-    time: { text: row.timeText },
-    storyYear: row.storyYear,
-    alsoHere: parseAlsoHere(row.alsoHere)
-  })
-  return parsed.success ? parsed.data : emptySceneDetails()
+  const shape = SceneDetails.shape
+  const empty = emptySceneDetails()
+  const read = <T>(schema: z.ZodType<T>, value: unknown, fallback: T): T => {
+    const parsed = schema.safeParse(value)
+    return parsed.success ? parsed.data : fallback
+  }
+  return {
+    povRecordId: read(shape.povRecordId, row.povRecordId, empty.povRecordId),
+    place: {
+      recordId: read(shape.place.shape.recordId, row.placeRecordId, empty.place.recordId),
+      text: read(shape.place.shape.text, row.placeText, empty.place.text)
+    },
+    time: { text: read(shape.time.shape.text, row.timeText, empty.time.text) },
+    storyYear: read(shape.storyYear, row.storyYear, empty.storyYear),
+    alsoHere: read(shape.alsoHere, parseAlsoHere(row.alsoHere), empty.alsoHere)
+  }
 }
 
 /** Whether `nodeId` is under the manuscript root (the root itself excluded). */

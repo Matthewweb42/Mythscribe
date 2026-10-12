@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { SCENE_META_FIELD_MAX } from '../sceneMeta'
+import { SCENE_META_FIELD_MAX, SCENE_META_TIMELINE_MAX } from '../sceneMeta'
 
 /**
  * Typed scene details (F-16.11): a scene's POV, place, time, story year and "+ also here", which
@@ -15,6 +15,8 @@ export const STORY_YEAR_MIN = -100_000
 export const STORY_YEAR_MAX = 100_000
 
 const DetailText = z.string().trim().max(SCENE_META_FIELD_MAX)
+/** The time takes what v1's timeline text took, which the switch-over copies into it. */
+const TimeText = z.string().trim().max(SCENE_META_TIMELINE_MAX)
 
 export const SceneDetails = z.object({
   /** The POV character's record. */
@@ -22,7 +24,7 @@ export const SceneDetails = z.object({
   /** The place: a record, free text, or both (the text says more than the record). */
   place: z.object({ recordId: z.string().nullable(), text: DetailText }),
   /** When, in the author's words ("December, evening"). */
-  time: z.object({ text: DetailText }),
+  time: z.object({ text: TimeText }),
   /** One typed year per time jump; ages count from it (decision 5). */
   storyYear: z.number().int().min(STORY_YEAR_MIN).max(STORY_YEAR_MAX).nullable(),
   /** Records present without being named ("+ also here"), in the author's order. */

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
-import type { SwitchoverItem } from '@shared/memory/switchover'
+import { INLINE_TAG_REPLACEMENT_MAX, type SwitchoverItem } from '@shared/memory/switchover'
 import { formatCount } from '@renderer/features/ai/usageFormat'
 import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
 import { mergeKey, useSwitchoverStore } from './switchoverStore'
@@ -113,7 +113,7 @@ function SwitchoverBody(): React.JSX.Element {
                         useSwitchoverStore.getState().toggleMerge(pair.keep, pair.merge)
                       }
                     />
-                    Merge {pair.mergeName} into {pair.keepName}
+                    {`Merge ${pair.mergeName} (${pair.mergeCategory}) into ${pair.keepName} (${pair.keepCategory})`}
                   </label>
                 </li>
               ))}
@@ -191,7 +191,7 @@ function SwitchoverBody(): React.JSX.Element {
                       aria-label={`Replacement for ${row.tag}`}
                       value={row.replacement}
                       disabled={busy}
-                      maxLength={200}
+                      maxLength={INLINE_TAG_REPLACEMENT_MAX}
                       onChange={(event) =>
                         useSwitchoverStore.getState().setReplacement(row.key, event.target.value)
                       }
@@ -244,8 +244,7 @@ function SwitchoverBody(): React.JSX.Element {
           , {formatCount(counts.tokens, 'inline tag')} as words.
         </p>
         <p className="m-0 break-all text-xs text-fg-muted">
-          Dated copy: {datedCopy}
-          {backup === null ? '' : ` · Backup: ${backup}`}
+          Dated copy: {datedCopy} · Backup: {backup}
         </p>
       </>
     )

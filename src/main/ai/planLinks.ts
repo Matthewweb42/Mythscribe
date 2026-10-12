@@ -4,6 +4,7 @@ import {
   PLAN_LINKS_SCENES_MAX,
   PLAN_LINKS_SUGGESTIONS_MAX,
   PLAN_LINKS_TEXT_MAX,
+  parsePlanLinkKey,
   planKey,
   planLinkKey,
   withKey,
@@ -366,6 +367,45 @@ export function dismissPlanLink(db: TreeDb, key: string): void {
     suggestions: state.suggestions.filter((each) => each !== link),
     dismissed: withKey(state.dismissed, key, true)
   })
+}
+
+/**
+ * The switch-over (F-16.15, design Part 3) drops the plan links the AI made: each link the job
+ * applied itself at chat mode Auto comes off while it still stands as applied (a planned scene's
+ * `fulfilledBy`, a scene's beat), and the open suggestions go. The links the author confirmed or
+ * dismissed stay. Answers the nodes it rewrote.
+ */
+export function dropAiPlanLinks(db: TreeDb): string[] {
+  const state = getPlanLinkState(db)
+  const board = planBoard(db)
+  const changed: string[] = []
+  for (const key of state.aiApplied) {
+    const link = parsePlanLinkKey(key)
+    if (link === null) continue
+    const { plan, sceneId } = link
+    if (plan.kind === 'scene') {
+      const meta = board.metaOf.get(plan.nodeId)
+      if (meta?.fulfilledBy !== sceneId) continue
+      const next: SceneMeta = { ...meta }
+      delete next.fulfilledBy
+      setSceneMeta(db, plan.nodeId, next)
+      board.metaOf.set(plan.nodeId, next)
+      changed.push(plan.nodeId)
+    } else {
+      const meta = board.metaOf.get(sceneId)
+      if (meta?.beats[plan.template] !== plan.beatId) continue
+      const beats = { ...meta.beats }
+      delete beats[plan.template]
+      const next: SceneMeta = { ...meta, beats }
+      setSceneMeta(db, sceneId, next)
+      board.metaOf.set(sceneId, next)
+      changed.push(sceneId)
+    }
+  }
+  if (state.aiApplied.length > 0 || state.suggestions.length > 0) {
+    setPlanLinkState(db, { ...state, suggestions: [], aiApplied: [] })
+  }
+  return changed
 }
 
 /**

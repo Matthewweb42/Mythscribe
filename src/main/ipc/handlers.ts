@@ -4956,7 +4956,10 @@ export function registerHandlers({
     // Step 1, safety, just before the only write: the Drive working copy copied back, the full
     // backup (a failure stops here), and a dated copy beside the project wherever it lives.
     session.workingCopy?.syncNow(session.connection.sqlite)
-    const backup = backups.backupNow().backups[0]?.file ?? null
+    const backup = backups.backupNow().backups[0]?.file
+    if (backup === undefined) {
+      throw new AppError('VALIDATION', 'The backup was not listed; nothing was converted.')
+    }
     const datedCopy = saveSafetyCopy(
       { folder: session.folder, sqlite: session.connection.sqlite },
       now

@@ -84,6 +84,7 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
       'violence',
       'grief',
       'Project notes',
+      'Timeline',
       'Harbour notes.docx',
       'Tide tables.pdf',
       'Portrait.png',
@@ -105,7 +106,8 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
       'Research note, Not canon (it was Plan or Idea).'
     )
     expect(detailOf(plan.converted, 'Scene details')).toBe(
-      '4 scenes: 3 POVs and 2 places as records, 3 story years, 2 “also here”.'
+      // Oren only: with the default words, scene 1 names Tomas, so he is not "also here".
+      '4 scenes: 3 POVs and 2 places as records, 3 story years, 1 “also here”.'
     )
     expect(detailOf(plan.converted, 'Dismissals')).toBe(
       '4 dismissals that still apply, into Dismissed.'
@@ -132,6 +134,11 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
     expect(
       plan.merges.map((pair) => `${pair.keepName} ← ${pair.mergeName} (${pair.rule})`)
     ).toEqual(['Mara Vell ← Vell (subset)', 'Harrow ← Harrow (alias)'])
+    // Each side carries its category, so two records of one name can be told apart.
+    expect(plan.merges.map((pair) => `${pair.keepCategory}/${pair.mergeCategory}`)).toEqual([
+      'character/character',
+      'character/place'
+    ])
     expect(
       plan.merges.some((pair) => pair.mergeName === 'Tomaz' || pair.keepName === 'Tomaz')
     ).toBe(false)
@@ -147,7 +154,7 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
       'Ilse: a POV no sheet or tag names; a Character record is made for it.',
       'Tag nesting is dropped: #grief under #melancholy.',
       'Custom tags become custom labels, which only filter: in v1 they steered prose as themes. Change a label’s kind to Theme to keep that.',
-      '“harrow” is a name of Harrow and Harrow; it is marked shared on each.',
+      '“harrow” is a name of Harrow (character) and Harrow (place); it is marked shared on each.',
       '“tomas”: dismissed as a name, but it is a record now.',
       '“falseer”: a kept spelling, but not two records to keep apart.',
       'The Changes log keeps only its newest 5,000 rows, so sheet text the AI wrote before that counts as yours.'
@@ -184,17 +191,18 @@ describe('inlineTagReplacements: the consent rows (step 3)', () => {
     expect(
       inlineTagReplacements(fixture.session.connection.orm).map(({ key: _key, ...row }) => row)
     ).toEqual([
+      // A tag that becomes a record is replaced by the record's name, so the name scan finds it.
       {
         tag: '#tomas',
         count: 2,
         sample: 'Mara walked to the harbour with #tomas at dusk.',
-        replacement: 'tomas'
+        replacement: 'Tomas'
       },
       {
         tag: '#the-burned-mill',
         count: 2,
         sample: 'The #the-burned-mill smoked.',
-        replacement: 'the burned mill'
+        replacement: 'The Burned Mill'
       },
       // A sheet's tag is replaced by the sheet's name.
       { tag: '#mara-vell', count: 1, sample: 'Ask #mara-vell later.', replacement: 'Mara Vell' }

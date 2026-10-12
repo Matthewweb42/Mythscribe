@@ -53,11 +53,11 @@ afterEach(() => {
 
 const db = (): ProjectSession['connection']['orm'] => session.connection.orm
 
-/** The consent with every default replacement, the tag for Tomas edited, and no merges. */
+/** The consent with every default replacement, the thread tag's words edited, and no merges. */
 function consent(overrides: Partial<SwitchoverConsent> = {}): SwitchoverConsent {
   const replacements = inlineTagReplacements(db()).map((row) => ({
     key: row.key,
-    text: row.key === fixture.tags.tomas ? 'Tomas' : row.replacement
+    text: row.key === fixture.tags.mill ? 'the burned mill' : row.replacement
   }))
   return { replacements, merges: [], ...overrides }
 }
@@ -208,10 +208,20 @@ describe('convertSwitchover (F-16.15, plan P1 §6.2)', () => {
       'Harbour notes:upload:docx:false:false',
       'Portrait:upload:image:false:false',
       'Project notes:written:-:false:true',
-      'Tide tables:upload:pdf:true:false'
+      'Tide tables:upload:pdf:true:false',
+      'Timeline:written:-:false:false'
     ])
-    const notes = docs.find((meta) => meta.origin === 'written')
+    const titleOf = (nodeId: string): string =>
+      db().select().from(node).where(eq(node.id, nodeId)).get()?.title ?? ''
+    const written = docs.filter((meta) => meta.origin === 'written')
+    const notes = written.find((meta) => titleOf(meta.nodeId) === 'Project notes')
     expect(textOf(notes?.nodeId ?? '')).toBe('The book ends at the harbour.\nMaybe a sequel.')
+    // The timeline's events stay readable while the Timeline section is hidden (P1-D8).
+    const timeline = written.find((meta) => titleOf(meta.nodeId) === 'Timeline')
+    expect(textOf(timeline?.nodeId ?? '').split('\n')).toEqual([
+      'The flood (Spring, year 1820; scenes 1.1, 2.1, 4.1)',
+      'The trial (year 1821; scene 3.1)'
+    ])
     const tide = docs.find((meta) => meta.fileType === 'pdf')
     expect(textOf(tide?.nodeId ?? '')).toContain('Tide tables for 1820.')
     expect(docs.every((meta) => meta.origin === 'written' || meta.contextFileId !== null)).toBe(
@@ -245,6 +255,25 @@ describe('convertSwitchover (F-16.15, plan P1 §6.2)', () => {
     expect(nameOf(detail(s3)?.povRecordId)).toBe('Oren Hale')
     expect(detail(s3)?.storyYear).toBe(1821)
     expect(detail(s4)?.storyYear).toBe(1820)
+  })
+
+  it('by default names each record in the prose, so a scene that names it lists it under no “also here”', async () => {
+    const [s1] = fixture.scenes
+    const defaults = inlineTagReplacements(db()).map((row) => ({
+      key: row.key,
+      text: row.replacement
+    }))
+    await convert({ replacements: defaults, merges: [] })
+    expect(textOf(s1 ?? '')).toBe(
+      'Mara walked to the harbour with Tomas at dusk.\nThe The Burned Mill smoked.'
+    )
+    const row = db()
+      .select()
+      .from(sceneDetail)
+      .where(eq(sceneDetail.nodeId, s1 ?? ''))
+      .get()
+    const nameOf = (id: string): string | null => getRecord(db(), id)?.name ?? null
+    expect((JSON.parse(row?.alsoHere ?? '[]') as string[]).map(nameOf)).toEqual(['Oren Hale'])
   })
 
   it('rewrites inline tags in contents, notes and inactive drafts with the edited words; snapshots stay byte for byte', async () => {

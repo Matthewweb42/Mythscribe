@@ -142,13 +142,19 @@ describe('convertLegacyProject (F-1.6)', () => {
       raw
         .prepare('INSERT INTO document_tags (id, document_id, tag_id, created) VALUES (?, ?, ?, ?)')
         .run('l9', 's1', 't-grim', 'x')
+      // A place of the same name as the character: v1 keeps both sheets, and so does v2.
+      raw
+        .prepare(
+          'INSERT INTO reference_docs (id, name, category, content, created, modified) VALUES (?, ?, ?, ?, ?, ?)'
+        )
+        .run('r9', 'Mara', 'setting', 'A fishing village.', 'x', 'x')
     } finally {
       raw.close()
     }
     const location = locateProject(file)
     if (location.kind !== 'legacy') throw new Error('expected a v0 project')
     const result = convertLegacyProject(location, NOW, 'v2')
-    expect(result).toMatchObject({ tags: 0, entities: 0, records: 4, labels: 1 })
+    expect(result).toMatchObject({ tags: 0, entities: 0, records: 5, labels: 1 })
 
     session = openProject(file)
     const db = session.connection.orm
@@ -157,14 +163,30 @@ describe('convertLegacyProject (F-1.6)', () => {
     const records = listRecords(db)
     expect(records.map((r) => `${r.name} (${r.categoryId}, ${r.origin})`).sort()).toEqual([
       'Mara (character, conversion)',
+      'Mara (setting, conversion)',
       'The Debt (thread, conversion)',
       'The Landing (setting, conversion)',
       'Young Mara (character, conversion)'
     ])
     // The reference's page is Mara's Pinned; her tag merged into the record the reference made.
-    const mara = getRecord(db, records.find((r) => r.name === 'Mara')?.id ?? '')
+    const mara = getRecord(
+      db,
+      records.find((r) => r.name === 'Mara' && r.categoryId === 'character')?.id ?? ''
+    )
     expect(pageTextBlocks(mara?.pinned ?? { type: 'doc' }).map((block) => block.text)).toEqual([
       'Grey eyes.\nAfraid of deep water.'
+    ])
+    const village = getRecord(
+      db,
+      records.find((r) => r.name === 'Mara' && r.categoryId === 'setting')?.id ?? ''
+    )
+    expect(pageTextBlocks(village?.pinned ?? { type: 'doc' }).map((block) => block.text)).toEqual([
+      'A fishing village.'
+    ])
+    // The name two records hold is shared on both (identity rule 4).
+    expect([mara, village].map((each) => each?.aliases.every((alias) => alias.shared))).toEqual([
+      true,
+      true
     ])
     const labels = listLabels(db)
     expect(labels.map((l) => [l.name, l.kind, l.colour])).toEqual([['Grim', 'tone', '#123456']])

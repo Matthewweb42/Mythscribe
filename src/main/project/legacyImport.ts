@@ -316,8 +316,10 @@ function buildProject(
  * Story memory v2 (F-16.15): the v0 tags and references as records and labels, through the same
  * mapping as the switch-over. A name tag (character, setting, world building) or a plot thread
  * becomes a record; a reference becomes one too, its page as Pinned paragraphs, and a tag of the
- * same name merges into it (the reference spells the name). Tone, content and custom tags become
- * labels on the documents v0 linked them to. A name two records hold is shared on both.
+ * same name merges into it (the reference spells the name; one of the tag's category first).
+ * References are one per name within a category, as v1's sheets are: a character and a place may
+ * share a name, and then it is shared on both, as the switch-over marks it. Tone, content and
+ * custom tags become labels on the documents v0 linked them to.
  */
 function buildMemoryV2(
   db: TreeDb,
@@ -332,19 +334,25 @@ function buildMemoryV2(
     pinned: string[]
   }
   const records: Planned[] = []
+  const inCategory = (categoryId: string, name: string): string =>
+    `${categoryId}\u0000${normName(name)}`
+  const byKey = new Map<string, Planned>()
   const byNorm = new Map<string, Planned>()
+  const add = (planned: Planned): void => {
+    records.push(planned)
+    byKey.set(inCategory(planned.categoryId, planned.name), planned)
+    if (!byNorm.has(normName(planned.name))) byNorm.set(normName(planned.name), planned)
+  }
   for (const reference of data.references) {
     const categoryId = ENTITY_KIND_OF[reference.category]
     const name = reference.name.trim().slice(0, ENTITY_NAME_MAX)
-    if (categoryId === undefined || name === '' || byNorm.has(normName(name))) continue
-    const planned: Planned = {
+    if (categoryId === undefined || name === '' || byKey.has(inCategory(categoryId, name))) continue
+    add({
       name,
       categoryId,
       aliases: [],
       pinned: textParagraphs(slateToText(reference.content).slice(0, ENTITY_BODY_MAX))
-    }
-    records.push(planned)
-    byNorm.set(normName(name), planned)
+    })
   }
   const labelTags: { id: string; label: NonNullable<ReturnType<typeof labelFromTag>> }[] = []
   const seenLabels = new Set<string>()
@@ -353,12 +361,10 @@ function buildMemoryV2(
     const kebab = toTagName(tag.name).slice(0, TAG_NAME_MAX)
     const fromTag = recordFromTag({ name: kebab, category, aliases: [] })
     if (fromTag !== null) {
-      const known = byNorm.get(normName(fromTag.name))
-      if (known === undefined) {
-        const planned: Planned = { ...fromTag, pinned: [] }
-        records.push(planned)
-        byNorm.set(normName(fromTag.name), planned)
-      }
+      const known =
+        byKey.get(inCategory(fromTag.categoryId, fromTag.name)) ??
+        byNorm.get(normName(fromTag.name))
+      if (known === undefined) add({ ...fromTag, pinned: [] })
       continue
     }
     // A label keeps the author's own spelling of the v0 tag ("Grim"), a record its name's words.
@@ -369,8 +375,8 @@ function buildMemoryV2(
   }
   const holders = new Map<string, number>()
   for (const planned of records) {
-    for (const text of [planned.name, ...planned.aliases]) {
-      holders.set(normName(text), (holders.get(normName(text)) ?? 0) + 1)
+    for (const norm of new Set([planned.name, ...planned.aliases].map(normName))) {
+      holders.set(norm, (holders.get(norm) ?? 0) + 1)
     }
   }
   const shared = (text: string): boolean => (holders.get(normName(text)) ?? 0) > 1

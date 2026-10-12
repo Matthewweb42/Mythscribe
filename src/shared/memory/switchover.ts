@@ -41,8 +41,11 @@ export type SwitchoverItem = z.infer<typeof SwitchoverItem>
 export const SwitchoverMerge = z.object({
   keep: z.string(),
   keepName: z.string(),
+  /** The category's noun ("character"), so two records of one name can be told apart. */
+  keepCategory: z.string(),
   merge: z.string(),
   mergeName: z.string(),
+  mergeCategory: z.string(),
   rule: TwinRule,
   /** The name that matched, and what it matched. */
   name: z.string(),
@@ -92,7 +95,9 @@ export const INLINE_TAG_REPLACEMENT_MAX = 200
 /**
  * One row of the consent screen (`switchover:consent`): one inline tag (by the tag its tokens
  * resolve to, merges followed), how many tokens, a sample, and the words that replace it: the
- * linked sheet's name, otherwise the tag name with hyphens as spaces. Editable per row.
+ * name of the record the tag becomes (its sheet's, or the tag's own as a record names it),
+ * otherwise (a label, a dropped or deleted tag) the tag name with hyphens as spaces. Editable per
+ * row.
  */
 export const InlineTagReplacement = z.object({
   key: z.string(),
@@ -133,13 +138,13 @@ export const SwitchoverCounts = z.object({
 export type SwitchoverCounts = z.infer<typeof SwitchoverCounts>
 
 /**
- * What `switchover:convert` answers: the counts, the safety copies made first (the backup is null
- * when backups could not be written; the conversion does not start then), and the folder, which
- * main has closed so the renderer reopens it on v2.
+ * What `switchover:convert` answers: the counts, the safety copies made first (the backup file
+ * and the dated copy; when either cannot be written the call fails and nothing converts), and
+ * the folder, which main has closed so the renderer reopens it on v2.
  */
 export const SwitchoverResult = z.object({
   folder: z.string(),
-  backup: z.string().nullable(),
+  backup: z.string(),
   datedCopy: z.string(),
   counts: SwitchoverCounts
 })

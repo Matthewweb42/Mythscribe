@@ -8,7 +8,7 @@ import {
   STORY_YEAR_MAX,
   STORY_YEAR_MIN
 } from '@shared/memory/sceneDetails'
-import { SCENE_META_FIELD_MAX } from '@shared/sceneMeta'
+import { SCENE_META_FIELD_MAX, SCENE_META_TIMELINE_MAX } from '@shared/sceneMeta'
 import { LabelPicker } from '@renderer/features/labels/LabelPicker'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -186,6 +186,7 @@ function TypedDetails({ id }: { id: string }): React.JSX.Element {
           key={`time:${details.time.text}`}
           label="Time"
           placeholder="December, evening"
+          maxLength={SCENE_META_TIMELINE_MAX}
           value={details.time.text}
           disabled={disabled}
           onCommit={(text) => save({ time: { text } })}
@@ -283,6 +284,7 @@ function TextField({
   value,
   disabled,
   inputMode,
+  maxLength = SCENE_META_FIELD_MAX,
   onCommit
 }: {
   label: string
@@ -290,6 +292,7 @@ function TextField({
   value: string
   disabled: boolean
   inputMode?: 'numeric'
+  maxLength?: number
   onCommit: (text: string) => boolean | void
 }): React.JSX.Element {
   const [text, setText] = useState(value)
@@ -304,7 +307,7 @@ function TextField({
       value={text}
       disabled={disabled}
       inputMode={inputMode}
-      maxLength={SCENE_META_FIELD_MAX}
+      maxLength={maxLength}
       onChange={(event) => setText(event.target.value)}
       onBlur={commit}
       onKeyDown={(event) => {

@@ -12,10 +12,11 @@ import { ipc } from '@renderer/lib/ipc'
 
 /**
  * The story-memory switch-over on a copy (F-16.15, plan P1 §6.1): Help › Try the story-memory
- * switch-over on a copy… (unpackaged builds only). The flow: pending saves are written, main
- * makes and opens the test copy; the dry run; the consent screen with each inline tag's words,
- * editable; the conversion, after which main closes the copy and this store opens it again on
- * v2. App-wide (it outlives the project switch it causes), so the dialog is mounted outside the
+ * switch-over on a copy… (unpackaged builds only). The flow: the project store settles the open
+ * project (pending saves, the cloud copy) and has main make and open the test copy; the dry run;
+ * the consent screen with each inline tag's words, editable; pending saves again, then the
+ * conversion, after which main closes the copy and the project store opens it again on v2.
+ * App-wide (it outlives the project switch it causes), so the dialog is mounted outside the
  * project screen.
  */
 
@@ -83,13 +84,11 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => ({
     const mine = ++generation
     set({ ...EMPTY, phase: 'copying' })
     try {
-      await flushPendingSaves()
-      const made = await ipc().invoke('switchover:trialCopy', undefined)
+      const copy = await useProjectStore.getState().openSwitchoverCopy()
       if (mine !== generation) return
-      useProjectStore.setState({ current: made.info })
       const plan = await ipc().invoke('switchover:plan', undefined)
       if (mine !== generation) return
-      set({ phase: 'plan', copy: made.folder, plan })
+      set({ phase: 'plan', copy, plan })
     } catch (err) {
       if (mine !== generation) return
       set({ ...EMPTY, error: describeError(err) })
@@ -141,15 +140,30 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => ({
         .map((pair) => ({ keep: pair.keep, merge: pair.merge }))
     }
     set({ phase: 'converting', error: null })
+    let result: SwitchoverResult
     try {
-      const result = await ipc().invoke('switchover:convert', consent)
-      if (mine !== generation) return
-      // Main closed the copy; it opens again here, now on v2.
-      await useProjectStore.getState().open(result.folder)
-      if (mine !== generation) return
-      set({ phase: 'done', result })
+      // The scene open behind the dialog may hold an unsaved edit: it is written into the copy
+      // before the conversion reads it, and nothing is pending when main closes the copy.
+      await flushPendingSaves()
+      result = await ipc().invoke('switchover:convert', consent)
     } catch (err) {
       if (mine === generation) set({ phase: 'consent', error: describeError(err) })
+      return
+    }
+    if (mine !== generation) return
+    // Converted: main closed the copy. A failure from here on is the reopen's, never the
+    // conversion's, so the done screen says so rather than offering Convert again.
+    set({ result })
+    try {
+      await useProjectStore.getState().open(result.folder)
+      if (mine === generation) set({ phase: 'done' })
+    } catch (err) {
+      if (mine === generation) {
+        set({
+          phase: 'done',
+          error: `The copy is converted, but it did not open again: ${describeError(err)} Open it from File › Open project….`
+        })
+      }
     }
   },
 

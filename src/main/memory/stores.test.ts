@@ -2,7 +2,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
+import { SCENE_META_TIMELINE_MAX } from '@shared/sceneMeta'
 import { LABEL_DEFAULT_COLOUR } from '@shared/storyLabels'
+import { sceneDetail } from '../db/schema'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { createNode, deleteNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -199,6 +202,32 @@ describe('sceneDetailStore (F-16.11)', () => {
     expect(() => setSceneDetails(db, scene, { ...saved, povRecordId: 'missing' }, at(1))).toThrow(
       /no longer exists/
     )
+  })
+
+  it('reads a stored row field by field: one value that does not parse empties only itself', () => {
+    const mara = record('Mara')
+    setSceneDetails(
+      db,
+      scene,
+      {
+        povRecordId: mara,
+        place: { recordId: null, text: 'the harbour' },
+        time: { text: 'x'.repeat(SCENE_META_TIMELINE_MAX) },
+        storyYear: 1811,
+        alsoHere: []
+      },
+      at(0)
+    )
+    db.update(sceneDetail)
+      .set({ timeText: 'x'.repeat(SCENE_META_TIMELINE_MAX + 1) })
+      .where(eq(sceneDetail.nodeId, scene))
+      .run()
+    expect(getSceneDetails(db, scene)).toMatchObject({
+      povRecordId: mara,
+      place: { text: 'the harbour' },
+      time: { text: '' },
+      storyYear: 1811
+    })
   })
 
   it('refuses a node outside the manuscript, and a section root', () => {
