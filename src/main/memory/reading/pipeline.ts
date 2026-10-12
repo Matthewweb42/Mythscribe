@@ -85,12 +85,13 @@ import {
 import {
   anchoredLine,
   cardLine,
-  knownWords,
   loadReadingScene,
   namingParas,
   nearLines,
   positionLine,
+  readBook,
   typedLine,
+  type Book,
   type ReadingScene
 } from './readerContext'
 import { insertReading } from './readingStore'
@@ -161,6 +162,11 @@ export interface RunReadingInput {
   spotEvery?: number | null
   /** Told how each proposed fact ended (the eval's per-slot scoring); nothing in the app listens. */
   observe?: (event: ReadingItemEvent) => void
+  /**
+   * Each request's reported cost as it returns (the Cloud monthly tally), so a reading that fails
+   * after its first request still counts what it spent.
+   */
+  onSpend?: (usd: number) => void
 }
 
 /** How one proposed fact ended: kept (literal, verified, waiting) or refused, and why. */
@@ -260,6 +266,7 @@ async function send(
     spend.tokensOut += result.usage.outputTokens
     spend.reasoning += result.usage.reasoningTokens ?? 0
     spend.costUsd += result.costUsd
+    input.onSpend?.(result.costUsd)
     if (request.feature === 'verify') spend.verifySent = true
     const local = deps.ai.providers.get()?.id === 'local'
     if (local && result.text.trim() === '' && result.finishReason === 'length') {
@@ -502,9 +509,14 @@ export interface SceneGate {
  * reader service asks before it queues a reading (leave, idle, the backlog). Local. Null when the
  * reader may not read the scene (an Idea, left out of compile, not in the manuscript).
  */
-export function gateScene(db: TreeDb, nodeId: string, caretPara: number | null): SceneGate | null {
-  if (!readerMayRead(claimSources(db)(nodeId))) return null
-  const scene = loadReadingScene(db, nodeId)
+export function gateScene(
+  db: TreeDb,
+  nodeId: string,
+  caretPara: number | null,
+  book: Book = readBook(db)
+): SceneGate | null {
+  if (!readerMayRead(book.sourceOf(nodeId))) return null
+  const scene = loadReadingScene(db, nodeId, book)
   if (scene === null) return null
   const draftId = activeDraftId(db)
   const names = scene.shared.index
@@ -522,7 +534,7 @@ export function gateScene(db: TreeDb, nodeId: string, caretPara: number | null):
     partials: previous?.partials ?? 0,
     staleParas: new Set(stored.filter((claim) => claim.state === 'stale').map((c) => c.para)),
     cardStale: card?.anchor.some((hash) => !present.has(hash)) === true,
-    knownWords: unread.length > 0 ? knownWords(db, nodeId, scene.shared) : new Set<string>()
+    knownWords: unread.length > 0 ? book.knownWords(nodeId) : new Set<string>()
   })
   return { scene, draftId, current, readSet, stored, card, decision }
 }

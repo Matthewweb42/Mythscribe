@@ -101,6 +101,8 @@ import {
 import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
 import { seedClaims } from '../memory/reading/claimFixture'
 import { getClaim } from '../memory/reading/claimStore'
+import { writeSceneRead } from '../memory/reading/sceneReadStore'
+import { activeDraftId } from '../draft/draftStore'
 import { listRecords } from '../memory/recordStore'
 import { enqueueJob, listJobs } from '../jobs/jobStore'
 import { NOT_A_TRIAL } from '../memory/switchover/trial'
@@ -108,7 +110,7 @@ import { createTag } from '../tag/tagStore'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { withObservedDismissed } from '@shared/observedFacts'
-import { aiProposal } from '../db/schema'
+import { aiProposal, memoryBackfill } from '../db/schema'
 import { AppStateStore } from '../appState/appStateStore'
 import { BackupService } from '../backups/backupService'
 import { DiagnosticsService } from '../diagnostics/diagnosticsService'
@@ -6703,6 +6705,28 @@ describe('account:getCredits / account:buyCredits (F-15.3) and the license (F-15
     expect(credits).toHaveBeenCalledWith(SESSION.token)
   })
 
+  // F-16.19 (P2a-D10): the Cloud reading tally is raised to the server's reading spend this month.
+  it('raises the Cloud reading tally from the server’s reading spend', async () => {
+    credits.mockResolvedValueOnce({
+      balanceMicros: 2_500_000,
+      spend: [],
+      periodDays: USAGE_PERIOD_DAYS,
+      periodSpend: [
+        { feature: 'reader', micros: 300_000, requests: 3, tokens: 9_000 },
+        { feature: 'verify', micros: 100_000, requests: 3, tokens: 3_000 },
+        { feature: 'ghostText', micros: 900_000, requests: 9, tokens: 900 }
+      ],
+      periodFirstChargeAt: Date.now(),
+      packs: [],
+      starter: null,
+      refunds: []
+    })
+    await creditsInvoke('account:getCredits', undefined)
+    const cap = await creditsInvoke('cloudCap:get', undefined)
+    expect(cap).toMatchObject({ askedUsd: 0 })
+    expect((cap as { backgroundUsd: number }).backgroundUsd).toBeCloseTo(0.4)
+  })
+
   it('answers usage pages and the cached price table (E7, P5)', async () => {
     expect(await creditsInvoke('account:getUsage', { cursor: null })).toEqual({
       entries: [],
@@ -8914,6 +8938,29 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       })
       await vi.advanceTimersByTimeAsync(10)
       expect(getClaim(db, again ?? '')?.state).toBe('stale')
+      // The chat's save of a scene it never opened is a write outside the editor too (F-16.16).
+      const [third] = seedClaims(
+        db,
+        scene,
+        [
+          {
+            recordId: made.record.id,
+            slot: 'eyes',
+            value: 'grey',
+            quote: "Mara's eyes were grey",
+            para: 1,
+            proof: 'verified'
+          }
+        ],
+        now
+      )
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs('The ridge was bitter.', "Mara's eyes were brown. She waited."),
+        outsideEditor: true
+      })
+      await vi.advanceTimersByTimeAsync(10)
+      expect(getClaim(db, third ?? '')?.state).toBe('stale')
       expect(complete).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
@@ -9084,6 +9131,80 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     expect(await invoke('recovery:list', undefined)).toEqual([])
   })
 
+  // F-16.17 (plan P2a §3.4): a record made, or a name added, after scenes naming it were read gets
+  // the lazy back-fill, whichever channel added it (the names it had before get none).
+  it('notes the lazy back-fill for names added by record:create, record:setAliases, names:answer and filing', async () => {
+    const scene = await openV2()
+    const db = manager.require().connection.orm
+    await invoke('document:save', {
+      id: scene,
+      content: paragraphs(
+        'Hesk rowed out.',
+        'Rowan waved from the quay.',
+        'Oska swam to the buoy.',
+        'Tamsin mended the nets.'
+      )
+    })
+    writeSceneRead(
+      db,
+      { nodeId: scene, draftId: activeDraftId(db), entries: [], full: true, readingId: null },
+      new Date()
+    )
+    const rows = (): string[] =>
+      db
+        .select()
+        .from(memoryBackfill)
+        .all()
+        .map((row) => `${row.norm}:${row.state}:${row.pages}`)
+        .sort()
+    const made = await invoke('record:create', { name: 'Hesk', categoryId: 'character' })
+    if (!('record' in made)) throw new Error('blocked')
+    expect(rows()).toEqual(['hesk:due:1'])
+    await invoke('record:setAliases', {
+      id: made.record.id,
+      name: { text: 'Hesk' },
+      aliases: [{ text: 'Rowan' }]
+    })
+    expect(rows()).toEqual(['hesk:due:1', 'rowan:due:1'])
+    await invoke('names:answer', {
+      answer: { kind: 'addAs', name: 'Tamsin', categoryId: 'character' }
+    })
+    expect(rows()).toEqual(['hesk:due:1', 'rowan:due:1', 'tamsin:due:1'])
+    const page = await invoke('research:create', { title: 'Swimmers' })
+    await invoke('research:applyFiling', {
+      review: {
+        docId: page.node.id,
+        docTitle: 'Swimmers',
+        docHash: 'hash',
+        items: [
+          {
+            id: 'item-1',
+            recordId: null,
+            name: 'Oska',
+            categoryId: 'character',
+            known: [],
+            pinned: [],
+            aliases: [],
+            lines: [],
+            sameAs: null,
+            image: null,
+            include: true
+          }
+        ],
+        taken: [],
+        categories: [],
+        dropped: { quote: 0, duplicate: 0, dismissed: 0, alias: 0, shared: 0 },
+        proposalIds: [],
+        chunks: 1,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        costUsd: 0,
+        model: 'gpt-5.4-mini',
+        promptVersion: 'contextImport.v3'
+      }
+    })
+    expect(rows()).toEqual(['hesk:due:1', 'oska:due:1', 'rowan:due:1', 'tamsin:due:1'])
+  })
+
   // F-16.16, F-16.17 (plan P2a §3.2, §3.7): `summary.v5` is off in v2, and the reader's queue
   // owns jobs:* there; a v1 project keeps its summary queue as it was.
   it('drops summary jobs on a v2 open, never queues one there, and gives jobs:* to the reader', async () => {
@@ -9131,7 +9252,7 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       expect(await invoke('cloudCap:get', undefined)).toMatchObject({ capUsd: 1, reached: false })
       expect(await invoke('cloudCap:set', { capUsd: 2.5 })).toMatchObject({ capUsd: 2.5 })
       expect(await invoke('memory:rebuildEstimate', undefined)).toMatchObject({ scenes: 1 })
-      expect(await invoke('memory:rebuild', { requestId: 'rebuild-1' })).toMatchObject({
+      expect(await invoke('memory:rebuild', undefined)).toMatchObject({
         ok: false,
         code: 'NO_KEY'
       })

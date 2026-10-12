@@ -400,8 +400,11 @@ export function sceneClaimRows(db: TreeDb, nodeId: string, draftId: string): Cla
  * with the Idea status `ideaScene`, one left out of compile `excludedScene`, and a node outside
  * the manuscript `notCanon` (never real).
  */
-export function claimSources(db: TreeDb): (nodeId: string) => MemorySource {
-  const scenes = new Set(manuscriptDocuments(db).map((row) => row.id))
+export function claimSources(
+  db: TreeDb,
+  rows: readonly { id: string }[] = manuscriptDocuments(db)
+): (nodeId: string) => MemorySource {
+  const scenes = new Set(rows.map((row) => row.id))
   const statuses = sceneStatuses(db)
   return (nodeId) => {
     if (!scenes.has(nodeId)) return 'notCanon'

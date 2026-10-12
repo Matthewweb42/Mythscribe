@@ -42,8 +42,8 @@ import {
  * - hard (no key, bad key, quota, over budget, the feature turned off): the whole queue pauses
  *   with that reason and the job stays queued — hammering a missing key is pointless. Reopening
  *   the project, Retry, or a Summarize now that works clears the pause;
- * - quiet (the scene is under the floor or left the manuscript): the row goes, the node goes
- *   idle, and nothing is shown — there was never anything to do;
+ * - quiet (the scene is under the floor or left the manuscript, or the run skipped itself,
+ *   `JobSkippedError`): the row goes, the node goes idle, and nothing is shown;
  * - cancelled: the row was already deleted by `cancelAll`; nothing is recorded.
  *
  * The one exception is the author's own Summarize now against a turned-off feature: the channel
@@ -52,6 +52,19 @@ import {
  * Nothing here throws into a timer: the background path swallows, and only `runNow` (the
  * author's Summarize now) rejects, so `ai:summarize` can answer the exact failure.
  */
+
+/**
+ * A run that refused itself for now (F-16.16: background reading held back by the Cloud cap, the
+ * health gate or a local cut-off): the row goes quietly, nothing is recorded or retried, and the
+ * queue is not paused, so the work behind it (what the author asked for) still runs. Whatever the
+ * job was for is found again once the hold lifts.
+ */
+export class JobSkippedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'JobSkippedError'
+  }
+}
 
 /** A job as the queue hands it to the runner. */
 export interface QueuedJob {
@@ -111,8 +124,12 @@ export interface IndexQueue<T> {
   runNow(kind: JobKind, nodeId: string, requestId: string): Promise<T>
   /** A project opened: take up the jobs it left behind and start working. */
   load(): void
-  /** Queues one job per node, skipping the ones already queued; answers how many were new. */
-  indexAll(kind: JobKind, nodeIds: string[]): number
+  /**
+   * Queues one job per node, skipping the ones already queued; answers how many were new.
+   * `afterRunning`: a node whose job is running now runs once more when it ends (a change made
+   * while it ran), as `touch` does.
+   */
+  indexAll(kind: JobKind, nodeIds: string[], options?: { afterRunning?: boolean }): number
   /** Stop: abort what is running, drop every job and debounce, clear the pause. */
   cancelAll(): IndexQueueStatus
   /** Try again: clear the pause, put the failed jobs back in the queue, start working. */
@@ -148,6 +165,7 @@ type Outcome = 'quiet' | 'cancelled' | 'transient' | 'hard'
 /** What went wrong, from the queue's point of view. */
 function classify(err: unknown): Outcome {
   if (err instanceof AiCancelledError) return 'cancelled'
+  if (err instanceof JobSkippedError) return 'quiet'
   // A scene below the gate, or one that left the manuscript while the job waited: there is
   // nothing to summarise and nothing the author could act on.
   if (err instanceof AppError && (err.code === 'VALIDATION' || err.code === 'NOT_FOUND')) {
@@ -566,12 +584,12 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
       kick()
     },
 
-    indexAll(kind, nodeIds) {
+    indexAll(kind, nodeIds, options) {
       const db = database()
       if (db === null) return 0
       let queued = 0
       for (const nodeId of nodeIds) {
-        if (!queueJob(db, kind, nodeId, false)) continue
+        if (!queueJob(db, kind, nodeId, options?.afterRunning === true)) continue
         queued += 1
         announce(nodeId, 'pending', null)
       }

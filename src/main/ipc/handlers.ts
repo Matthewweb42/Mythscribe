@@ -1394,18 +1394,30 @@ export function registerHandlers({
    * The editor's write of one document: `document:save` and crash recovery (F-8.3) both end
    * here, so a recovered scene counts as words written and is re-summarized like a typed one.
    */
-  const saveFromEditor = (db: TreeDb, id: string, content: TiptapNodeT): SaveResult => {
+  const saveFromEditor = (
+    db: TreeDb,
+    id: string,
+    content: TiptapNodeT,
+    origin: 'editor' | 'bulk' = 'editor'
+  ): SaveResult => {
     // F-10.3: only the editor's saves of manuscript documents count as words written, so the
     // count before the save is read here and not in `documentsWritten` (replace writes too).
     const previous = manuscriptWordCount(db, id)
     const saved = saveDocument(db, id, content)
     if (previous !== null) recordWriting(db, saved.wordCount - previous)
-    documentsWritten(db, [id], 'editor')
+    documentsWritten(db, [id], origin)
     return saved
   }
 
-  register('document:save', ({ id, content }) =>
-    saveFromEditor(manager.require().connection.orm, id, content)
+  // F-16.16: a scene the chat writes without opening it (a new or split scene) is a write
+  // outside the editor: the backlog check reads it, as it does after Replace.
+  register('document:save', ({ id, content, outsideEditor }) =>
+    saveFromEditor(
+      manager.require().connection.orm,
+      id,
+      content,
+      outsideEditor === true ? 'bulk' : 'editor'
+    )
   )
 
   register('notes:get', ({ id }) => getNotes(manager.require().connection.orm, id))
@@ -5078,8 +5090,21 @@ export function registerHandlers({
   register('research:applyFiling', ({ review }) => {
     const session = manager.require()
     const db = session.connection.orm
+    // F-16.17: the names each record had before, so the ones filing adds get the lazy back-fill.
+    const before = new Map(
+      listRecords(db).map((record) => [record.id, new Set(namesOf(record).map(normName))])
+    )
     const result = applyFiling(db, session.folder, review, new Date())
     rosterChanged(db, result.recordIds)
+    for (const id of result.recordIds) {
+      const record = getRecord(db, id)
+      if (record === null) continue
+      const known = before.get(id)
+      reader.namesAdded(
+        id,
+        namesOf(record).filter((text) => known?.has(normName(text)) !== true)
+      )
+    }
     return result
   })
 

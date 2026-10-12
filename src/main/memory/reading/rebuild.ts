@@ -13,7 +13,7 @@ import { answerNameQuestion } from '../questions'
 import { getRecord } from '../recordStore'
 import { readableScenes } from './backlog'
 import { deleteClaims, draftClaims } from './claimStore'
-import { loadReadingScene, type ReadingScene } from './readerContext'
+import { loadReadingScene, readBook, type Book, type ReadingScene } from './readerContext'
 import { getRebuild, setRebuild } from './readerRows'
 import { markRosterForRebuild } from './roster'
 
@@ -42,20 +42,11 @@ export function startRebuild(db: TreeDb, now: Date): { nodeIds: string[]; progre
   return { nodeIds, progress }
 }
 
-/**
- * One scene of the rebuild read (or found unreadable), `remaining` scenes still queued: answers
- * whether this one ended the rebuild (once only).
- */
-export function rebuildSceneDone(db: TreeDb, now: Date, remaining: number): boolean {
+/** One scene of the rebuild read (or found unreadable): counted while the rebuild runs. */
+export function rebuildSceneDone(db: TreeDb): void {
   const progress = getRebuild(db)
-  if (progress?.finishedAt !== null) return false
-  const ended = remaining === 0
-  setRebuild(db, {
-    ...progress,
-    done: Math.min(progress.total, progress.done + 1),
-    finishedAt: ended ? now.toISOString() : null
-  })
-  return ended
+  if (progress?.finishedAt !== null) return
+  setRebuild(db, { ...progress, done: Math.min(progress.total, progress.done + 1) })
 }
 
 /** The claims the rebuild's readings stored (not the ones it kept or revived). */
@@ -129,9 +120,13 @@ function statingOf(scene: ReadingScene, claim: Claim): string[] | null {
 export function dismissClaimsNotRight(db: TreeDb, claims: readonly Claim[], now: Date): number {
   const scenes = new Map<string, ReadingScene | null>()
   const gone: string[] = []
+  let book: Book | null = null
   for (const claim of claims) {
     if (claim.recordId === null) continue
-    if (!scenes.has(claim.nodeId)) scenes.set(claim.nodeId, loadReadingScene(db, claim.nodeId))
+    if (!scenes.has(claim.nodeId)) {
+      book ??= readBook(db)
+      scenes.set(claim.nodeId, loadReadingScene(db, claim.nodeId, book))
+    }
     const scene = scenes.get(claim.nodeId) ?? null
     const stating = scene === null ? null : statingOf(scene, claim)
     if (stating !== null) {
@@ -196,10 +191,14 @@ export function applyRebuildAction(
   return { changed: names.size, nodeIds: [...nodeIds], recordIds: [], names: names.size > 0 }
 }
 
-/** *Stop* (the queue's Cancel): an unfinished rebuild ends where it stood, without its spot checks. */
-export function stopRebuild(db: TreeDb, now: Date): void {
+/**
+ * An unfinished rebuild ends where it stood: *Stop* (the queue's Cancel, without its spot checks),
+ * or its last scene job ended (the reader service then queues them). Answers whether it was open.
+ */
+export function stopRebuild(db: TreeDb, now: Date): boolean {
   const progress = getRebuild(db)
-  if (progress?.finishedAt !== null) return
+  if (progress?.finishedAt !== null) return false
   setRebuild(db, { ...progress, finishedAt: now.toISOString() })
+  return true
 }
 

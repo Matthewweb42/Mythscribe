@@ -1,6 +1,7 @@
 import { passageParagraphs, type Paragraph } from '@shared/mentions'
 import { sceneSentences, type SceneSentence } from '@shared/memory/anchor'
 import { setsState, type Card, type Claim } from '@shared/memory/claims'
+import type { KnownWords } from '@shared/memory/gate'
 import type { LadderSentence } from '@shared/memory/ladder'
 import { sentenceNames } from '@shared/memory/literal'
 import { scanNames, type NameMention } from '@shared/memory/nameScan'
@@ -8,13 +9,16 @@ import type { RecordKind } from '@shared/memory/records'
 import type { SceneDetails } from '@shared/memory/sceneDetails'
 import { splitSentences, type SentenceSpan } from '@shared/memory/sentences'
 import { slotGroup } from '@shared/memory/slots'
+import type { MemorySource } from '@shared/memory/sources'
 import { searchableText } from '@shared/search'
 import { EMPTY_DOC } from '@shared/tiptap'
+import type { NodeRow } from '../../db/schema'
 import { getProjectDictionary } from '../../project/settingsStore'
 import type { TreeDb } from '../../tree/treeStore'
 import { documentJson, documentText, manuscriptDocuments } from '../../voice/profile'
 import { nameScanShared, type NameScanShared } from '../nameIndexer'
 import { storedSceneDetails } from '../sceneDetailStore'
+import { claimSources } from './claimStore'
 import type { ReaderRoster } from './rosterCache'
 
 /**
@@ -44,15 +48,82 @@ export interface ReadingScene {
   ladderSentence: (position: number) => LadderSentence
 }
 
+/**
+ * The active manuscript read once (F-16.16): its rows, the name scan's roster, where each scene
+ * may be read from, and the cosmetic skip's known words. A walk over many scenes (the backlog
+ * check, the back-fill's sizing, the spot checks) shares one, so it reads the tree, the roster and
+ * every scene's words once rather than once per scene; one scene's reading builds its own.
+ */
+export interface Book {
+  rows: readonly NodeRow[]
+  row: (nodeId: string) => NodeRow | undefined
+  shared: NameScanShared
+  sourceOf: (nodeId: string) => MemorySource
+  /**
+   * The words the cosmetic skip treats as known for one scene (P2a-D3): every word of the active
+   * manuscript's other scenes, the roster's names, and the project dictionary, lower case.
+   */
+  knownWords: (nodeId: string) => KnownWords
+}
+
+/** The words of a text, lower case, as the cosmetic skip compares them. */
+function wordsOf(text: string): Set<string> {
+  return new Set(text.toLowerCase().match(/[\p{L}\p{N}]+(?:['-][\p{L}\p{N}]+)*/gu) ?? [])
+}
+
+export function readBook(db: TreeDb): Book {
+  const rows = manuscriptDocuments(db)
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const shared = nameScanShared(db)
+  // Built on the first question only: most walks never need it (nothing unread, P2a-D3).
+  let words: { own: Map<string, Set<string>>; count: Map<string, number>; extra: Set<string> } | null =
+    null
+  const index = (): { own: Map<string, Set<string>>; count: Map<string, number>; extra: Set<string> } => {
+    if (words !== null) return words
+    const own = new Map<string, Set<string>>()
+    const count = new Map<string, number>()
+    for (const row of rows) {
+      const set = wordsOf(documentText(row))
+      own.set(row.id, set)
+      for (const word of set) count.set(word, (count.get(word) ?? 0) + 1)
+    }
+    const extra = new Set<string>()
+    for (const norm of shared.index.byNorm.keys()) for (const word of wordsOf(norm)) extra.add(word)
+    for (const entry of getProjectDictionary(db).words) {
+      for (const word of wordsOf(entry)) extra.add(word)
+    }
+    words = { own, count, extra }
+    return words
+  }
+  return {
+    rows,
+    row: (nodeId) => byId.get(nodeId),
+    shared,
+    sourceOf: claimSources(db, rows),
+    knownWords: (nodeId) => {
+      const { own, count, extra } = index()
+      const mine = own.get(nodeId)
+      return {
+        has: (word) =>
+          extra.has(word) || (count.get(word) ?? 0) - (mine?.has(word) === true ? 1 : 0) > 0
+      }
+    }
+  }
+}
+
 /** Loads a manuscript scene for reading; null when the node is no manuscript document. */
-export function loadReadingScene(db: TreeDb, nodeId: string): ReadingScene | null {
-  const row = manuscriptDocuments(db).find((document) => document.id === nodeId)
+export function loadReadingScene(
+  db: TreeDb,
+  nodeId: string,
+  book: Book = readBook(db)
+): ReadingScene | null {
+  const row = book.row(nodeId)
   if (row === undefined) return null
   const paragraphs = passageParagraphs(documentJson(row) ?? EMPTY_DOC)
   const texts = paragraphs.map((paragraph) => paragraph.text)
   const sentences = sceneSentences(texts)
   const spans = texts.map((text) => splitSentences(text))
-  const shared = nameScanShared(db)
+  const shared = book.shared
   const details = storedSceneDetails(db, nodeId)
   const mentions = scanNames(paragraphs, shared.index, {
     povRecordId: details.povRecordId,
@@ -92,23 +163,6 @@ export function loadReadingScene(db: TreeDb, nodeId: string): ReadingScene | nul
 /** The paragraphs that name a record for certain (where a window may start, `planWindows`). */
 export function namingParas(scene: ReadingScene): Set<number> {
   return new Set(scene.mentions.filter((mention) => !mention.ambiguous).map((m) => m.para))
-}
-
-/**
- * The words the cosmetic skip treats as known (P2a-D3): every word of the active manuscript's
- * other scenes, the roster's names, and the project dictionary, lower case.
- */
-export function knownWords(db: TreeDb, nodeId: string, shared: NameScanShared): Set<string> {
-  const words = new Set<string>()
-  const add = (text: string): void => {
-    for (const word of text.toLowerCase().match(/[\p{L}\p{N}]+(?:['-][\p{L}\p{N}]+)*/gu) ?? []) {
-      words.add(word)
-    }
-  }
-  for (const row of manuscriptDocuments(db)) if (row.id !== nodeId) add(documentText(row))
-  for (const norm of shared.index.byNorm.keys()) add(norm)
-  for (const word of getProjectDictionary(db).words) add(word)
-  return words
 }
 
 /** "Scene 14.2 “The Quay”, page 1 of 2 (the whole scene)", or "…, the changed paragraphs". */

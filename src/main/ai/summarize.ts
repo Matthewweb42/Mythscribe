@@ -157,6 +157,18 @@ function sourceOfRow(db: TreeDb, row: NodeRow): SummarySource {
   }
 }
 
+/**
+ * A node's stored summary only while it still describes the text (its content hash matches the
+ * scene now), else null. Story memory v2 writes no summaries (`summary.v5` is off there, plan P2a
+ * §3.7), so its rows are frozen at their last write: v2 readers take them only through this until
+ * P2a slice 5 points them at the reader's cards.
+ */
+export function currentSummary(db: TreeDb, nodeId: string): StoredSceneSummary | null {
+  const stored = getSummary(db, nodeId)
+  if (stored === null) return null
+  return summarySource(db, nodeId)?.contentHash === stored.contentHash ? stored : null
+}
+
 /** The hash of what shapes the messages: the text as sent, the metadata line, and the known names. */
 function sourceHash(sceneText: string, meta: PromptSceneMeta | null, known: KnownNames): string {
   return sha256(

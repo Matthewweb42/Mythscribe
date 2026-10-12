@@ -40,6 +40,8 @@ import { THREAD_KIND, THREAD_STATUS_LABEL, deriveThreads, type ThreadView } from
 import { TODO_KINDS, TODO_KIND_NOUN, TodoKind, type TodoItem } from '@shared/todo'
 import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
+import type { StoredSceneSummary } from '@shared/summary'
+import { currentSummary } from './summarize'
 import { listCategories } from '../entity/categoryStore'
 import { clearOptions, type ClearWanted } from '../knowledge/bibleClear'
 import { isEmptySheet } from '../organise/organiseProject'
@@ -532,7 +534,7 @@ function cards(project: AgentProject, idsArg: unknown, nameArg: unknown): ToolOu
     const head = sceneHead(project, nodeId)
     const card = sceneCardFor(project.db, nodeId)
     if (card !== null) return renderCard(head, card)
-    const summary = getSummary(project.db, nodeId)?.summary.trim() ?? ''
+    const summary = summaryOf(project, nodeId)?.summary.trim() ?? ''
     return `${head}\n${summary === '' ? 'No card yet; read the scene.' : headTruncate(summary, 300)}`
   })
   const tail = more > 0 ? `\n…and ${more} more scenes; name their ids for their cards.` : ''
@@ -741,6 +743,14 @@ function readNotes(project: AgentProject, ref: unknown): ToolOutcome {
   }
 }
 
+/**
+ * A scene's stored summary as the chat may use it: in v2 only while it still describes the text
+ * (v2 writes no summaries, so a row there is frozen; `currentSummary`).
+ */
+function summaryOf(project: AgentProject, nodeId: string): StoredSceneSummary | null {
+  return project.memory === 'v2' ? currentSummary(project.db, nodeId) : getSummary(project.db, nodeId)
+}
+
 function readSummary(project: AgentProject, ref: unknown): ToolOutcome {
   const found = documentFor(project, ref)
   if ('error' in found) {
@@ -748,7 +758,7 @@ function readSummary(project: AgentProject, ref: unknown): ToolOutcome {
   }
   const { row, title } = found
   const step: AgentStep = { tool: 'read_summary', label: `Reading the summary of ${title}…` }
-  const summary = getSummary(project.db, row.id)
+  const summary = summaryOf(project, row.id)
   if (summary === null) return { step, result: `${title} has no summary yet; read the scene.` }
   const points = summary.keyPoints.map((point) => `- ${point}`).join('\n')
   const when = positionNote(project.time, row.id)

@@ -40,22 +40,23 @@ import {
 } from '../../ai/cloudTally'
 import { assertFeatureAllowed } from '../../ai/dial'
 import { registerInflight, releaseInflight } from '../../ai/inflight'
-import { AiDisabledError, AiProviderError } from '../../ai/providers/types'
+import { AiProviderError } from '../../ai/providers/types'
 import type { AiRequestDeps } from '../../ai/request'
 import { aiUsage, reading } from '../../db/schema'
 import { currentDraftId } from '../../draft/draftStore'
 import { AppError } from '../../ipc/errors'
-import { createIndexQueue, type JobRun } from '../../jobs/indexQueue'
+import { createIndexQueue, JobSkippedError, type JobRun } from '../../jobs/indexQueue'
 import { deleteAllJobs, listJobs } from '../../jobs/jobStore'
 import type { TreeDb } from '../../tree/treeStore'
 import { manuscriptRootId } from '../../voice/voiceJob'
 import { getRecord } from '../recordStore'
 import {
-  BACKFILL_UNASKED_PAGES,
   backfillPlan,
+  backfillsByRecord,
   noteLateNames,
   openBackfills,
-  setBackfillState
+  setBackfillState,
+  type OpenBackfill
 } from './backfill'
 import {
   BACKLOG_UNASKED,
@@ -70,6 +71,7 @@ import { recentReadings } from './readingStore'
 import {
   getAsked,
   getHealthChoices,
+  getRebuild,
   getSpotState,
   keepReading,
   setAsked
@@ -97,11 +99,16 @@ import type { RebuildContext } from '../switchover/plan'
  *   never read is priced like *Rebuild memory*); the **back-fill** of late names (up to 3 pages,
  *   more asked); *Rebuild memory*; the spot checks after a rebuild and every 5 strong ones due.
  * - **Gates, in order, before any request**: Use AI and the **Story memory reading** switch; a
- *   provider (the request path's); then, for work nobody asked for, a local cut-off pause, the
- *   health gate (one probe read per 10 due scenes while a model is paused) and the Cloud monthly
- *   cap. A blocked job stays queued and the queue pauses on it (one notice), never a retry loop.
- * - **Spend**: every Cloud reading's reported cost goes into the app-wide monthly tally, as
- *   background or asked (P2a-D9); `/credits` raises it, never lowers it (P2a-D10).
+ *   provider (the request path's); the health gate for the bulk work the author asked for
+ *   (*Rebuild memory*, a priced backlog or back-fill; *Read now* of one scene passes); then, for
+ *   work nobody asked for, a local cut-off pause, the Cloud monthly cap and the health gate (one
+ *   probe read per 10 due scenes while a model is paused). A job such a gate holds back is dropped
+ *   quietly (`JobSkippedError`): the queue never pauses for it, so asked work behind it runs, and
+ *   the scene stays unread until the hold lifts, when the backlog and the back-fills are checked
+ *   again. The notices (computed) say why.
+ * - **Spend**: every Cloud request's reported cost goes into the app-wide monthly tally as it
+ *   returns, as background or asked (P2a-D9), so a run that fails part-way still counts;
+ *   `/credits` raises it, never lowers it (P2a-D10).
  * - **Pushes**: `memory:changed` after a reading, `memory:statusChanged` and
  *   `memory:noticesChanged` when they move, `jobs:changed` for the indicator.
  */
@@ -159,7 +166,7 @@ export interface SettleInput {
 export interface ReaderService {
   readNow(nodeId: string, requestId: string): Promise<ReadNowResult>
   settle(input: SettleInput): SettleResult
-  /** A write outside the editor (Replace, a revert, a draft switch, the chat's bulk tools). */
+  /** A write outside the editor (Replace, a revert, a draft switch, the chat's new scenes). */
   bulkWritten(): void
   /** A v2 project opened: its leftover jobs, the backlog, the back-fills. */
   opened(): void
@@ -191,15 +198,24 @@ interface ReaderValue {
   outcome: ReadingOutcome | null
 }
 
-/** Background reading paused by a gate the author can lift (health, the Cloud cap, a cut-off). */
-class ReadingPausedError extends AiDisabledError {
-  constructor(
-    readonly pause: Extract<MemoryPause, 'health' | 'cloudCap' | 'localCutoff'>,
-    message: string
-  ) {
-    super(message)
-  }
+/**
+ * Which gates a job passes (see the module comment): `switch` only Use AI and the reading switch
+ * (*Read now*; a rebuild's spot checks, priced with it); `health` the health gate too (the bulk
+ * work the author asked for); `all` every gate (work nobody asked for).
+ */
+type GateLevel = 'switch' | 'health' | 'all'
+
+type Hold = Extract<MemoryPause, 'health' | 'cloudCap' | 'localCutoff'>
+
+const HOLD_MESSAGE: Record<Hold, string> = {
+  health: 'Story memory paused: this model’s readings aren’t reliable enough.',
+  cloudCap: 'Background reading reached your Cloud cap for this month.',
+  localCutoff: 'Story memory paused: the local model stopped answering at its limit.'
 }
+
+/** What the author can do about a health pause before asked bulk work (`memory:rebuild`). */
+const HEALTH_NEXT_STEP =
+  'Switch the fast model, or choose Keep reading anyway on the story memory notice.'
 
 const READER_KINDS: readonly JobKind[] = ['read', 'rebuild', 'spotCheck', 'backfill']
 /** How long after a write outside the editor the backlog is checked. */
@@ -231,6 +247,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
   const carets = new Map<string, number>()
   /** Due scenes skipped while the health gate pauses, toward the next probe. */
   let skipped = 0
+  /** Whether unasked work was held back at the last look (its lifting re-checks the backlog). */
+  let heldBack = false
   let localCutoff: string | null = null
   /** The stored notices (the health and Cloud cap ones are computed). */
   const stored = new Map<string, MemoryNotice>()
@@ -242,7 +260,6 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
   let lastStatus: string | null = null
   let lastNotices: string | null = null
   let lastReconcile = 0
-  let probeCounter = 0
 
   const queue = createIndexQueue<ReaderValue>({
     kind: READER_KINDS,
@@ -253,6 +270,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     // `jobs:changed` is the reader's only in a v2 project (the summary queue's in v1).
     onChange: (status) => {
       if (deps.memory() === 'v2') deps.jobs(status)
+      const db = v2Db()
+      if (db !== null) closeRebuild(db, status)
       publish()
     },
     debounceMs: 0,
@@ -280,33 +299,38 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
 
   const month = (): string => monthOf(now())
 
-  /** What holds unasked work back now, or null. */
-  const backgroundBlock = (
-    db: TreeDb
-  ): Extract<MemoryPause, 'health' | 'cloudCap' | 'localCutoff'> | null => {
+  /**
+   * What holds unasked work back now, or null. The cap before the health gate: a probe the health
+   * gate lets through must not spend past the cap.
+   */
+  const backgroundBlock = (db: TreeDb): Hold | null => {
     if (localCutoff !== null) return 'localCutoff'
     const provider = deps.provider(db)
     if (provider === null) return null
-    if (healthPaused(db, provider.fastModel)) return 'health'
     if (provider.id === 'cloud' && capReached(deps.cloud.get(), month())) return 'cloudCap'
+    if (healthPaused(db, provider.fastModel)) return 'health'
     return null
   }
 
-  /** The gates before a job's requests (see the module comment); throws to keep the job queued. */
-  const gate = (db: TreeDb, asked: boolean, probe: boolean): void => {
+  /** What holds the bulk work the author asked for back now: the health gate only, or null. */
+  const askedBlock = (db: TreeDb): 'health' | null => {
+    const provider = deps.provider(db)
+    return provider !== null && healthPaused(db, provider.fastModel) ? 'health' : null
+  }
+
+  /**
+   * The gates before a job's requests (see the module comment). Use AI or the switch off throws
+   * `AiDisabledError` (the queue pauses: nothing runs until it is on); a hold throws
+   * `JobSkippedError` (the job goes quietly; the queue keeps working).
+   */
+  const gate = (db: TreeDb, level: GateLevel, probe: boolean): void => {
     const settings = deps.settings(db)
     assertFeatureAllowed(settings, 'reader')
     assertFeatureAllowed(settings, 'verify')
-    if (asked) return
-    const block = backgroundBlock(db)
+    if (level === 'switch') return
+    const block = level === 'health' ? askedBlock(db) : backgroundBlock(db)
     if (block === null || (block === 'health' && probe)) return
-    const message =
-      block === 'health'
-        ? 'Story memory paused: this model’s readings aren’t reliable enough.'
-        : block === 'cloudCap'
-          ? 'Background reading reached your Cloud cap for this month.'
-          : 'Story memory paused: the local model stopped answering at its limit.'
-    throw new ReadingPausedError(block, message)
+    throw new JobSkippedError(HOLD_MESSAGE[block])
   }
 
   // ---- Spend --------------------------------------------------------------------------------
@@ -413,9 +437,25 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     return list
   }
 
-  /** Pushes the status and the notices when they moved (a v2 project only). */
+  /**
+   * Pushes the status and the notices when they moved (a v2 project only). A hold on unasked work
+   * that has lifted since the last look (the cap allowed or raised, a new month, the health gate
+   * passed or overruled, a cut-off lifted) re-checks the backlog and the back-fills, so the
+   * scenes left unread meanwhile are read (≤5) or asked about with the price.
+   */
   function publish(): void {
-    if (v2Db() === null) return
+    const db = v2Db()
+    if (db === null) return
+    if (readingAllowed(db)) {
+      const held = backgroundBlock(db) !== null
+      if (heldBack && !held) {
+        heldBack = false
+        scheduleBacklog()
+        checkBackfill()
+        return
+      }
+      heldBack = held
+    }
     const status = computeStatus()
     const statusJson = JSON.stringify(status)
     if (statusJson !== lastStatus) {
@@ -444,7 +484,9 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
 
   /**
    * Queues a scene's reading nobody asked for, unless a gate holds unasked work back: then the
-   * scene stays unread (read when it is next left), and the health gate lets one in 10 through.
+   * scene stays unread (the backlog check finds it once the hold lifts), and the health gate lets
+   * one in 10 through as a probe. A scene being read right now is read once more after (an edit
+   * saved while it was read).
    */
   const queueBackground = (db: TreeDb, nodeId: string, caretPara: number | null): boolean => {
     const block = backgroundBlock(db)
@@ -455,16 +497,16 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       }
       skipped = 0
       probes.add(nodeId)
-      probeCounter += 1
-      // Ahead of the paused queue; whatever it throws is the queue's to record.
-      void queue.runNow('read', nodeId, `reader-probe-${probeCounter}`).catch(() => undefined)
-      return true
-    }
-    if (block !== null) return false
+    } else if (block !== null) return false
     if (caretPara === null) carets.delete(nodeId)
     else carets.set(nodeId, caretPara)
-    queue.indexAll('read', [nodeId])
+    queue.indexAll('read', [nodeId], { afterRunning: true })
     return true
+  }
+
+  /** The queue was stopped by a hard failure (no key, over budget): the author's ask retries it. */
+  const resumeIfPaused = (): void => {
+    if (queue.status().paused !== null) queue.resume()
   }
 
   /** Queues every scene of `scenes` as asked (a priced backlog the author confirmed). */
@@ -473,6 +515,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     for (const id of nodeIds) asked.add(id)
     setAsked(db, asked)
     queue.indexAll('read', [...nodeIds])
+    resumeIfPaused()
   }
 
   const root = (db: TreeDb): string | null => manuscriptRootId(db)
@@ -515,45 +558,51 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     publish()
   }
 
-  /** The back-fills: ≤3 pages queued, more asked with the price (plan P2a §3.4). */
-  const checkBackfill = (): void => {
-    const db = v2Db()
-    if (db === null) return
-    const open = openBackfills(db)
-    const byRecord = new Map<string, { due: number; asked: boolean }>()
-    for (const row of open) {
-      const entry = byRecord.get(row.recordId) ?? { due: 0, asked: false }
-      if (row.state === 'due') entry.due += row.pages
-      else entry.asked = true
-      byRecord.set(row.recordId, entry)
+  /**
+   * The back-fill notices: one per record whose due pages come to more than 3 (all its names
+   * together), with the price; a record with nothing left to ask about loses its notice. Answers
+   * whether any back-fill may run now (asked rows, or a record at 3 pages or fewer).
+   */
+  function backfillNotices(db: TreeDb): boolean {
+    const records = backfillsByRecord(openBackfills(db))
+    const asking = new Set(records.filter((entry) => entry.ask).map((entry) => entry.recordId))
+    for (const id of [...stored.keys()]) {
+      if (id.startsWith('backfill:') && !asking.has(id.slice('backfill:'.length))) stored.delete(id)
     }
     let queueIt = false
-    for (const [recordId, entry] of byRecord) {
-      const id = `backfill:${recordId}`
-      if (entry.asked) queueIt = true
-      if (entry.due === 0) {
-        stored.delete(id)
-        continue
-      }
-      if (entry.due <= BACKFILL_UNASKED_PAGES) {
-        stored.delete(id)
-        queueIt = true
-        continue
-      }
+    for (const entry of records) {
+      if (entry.asked.length > 0 || (entry.due.length > 0 && !entry.ask)) queueIt = true
+      if (!entry.ask) continue
+      const id = `backfill:${entry.recordId}`
       stored.set(id, {
         id,
         kind: 'backfill',
-        recordId,
-        name: getRecord(db, recordId)?.name ?? '',
-        pages: entry.due,
+        recordId: entry.recordId,
+        name: getRecord(db, entry.recordId)?.name ?? '',
+        pages: entry.duePages,
         priceUsd: priceReads(
-          Array.from({ length: entry.due }, () => ({ read: 'window' as const, proseTokens: 0 })),
+          Array.from({ length: entry.duePages }, () => ({
+            read: 'window' as const,
+            proseTokens: 0
+          })),
           rebuildContext(db)
         ).costUsd
       })
     }
+    return queueIt
+  }
+
+  /**
+   * The back-fills (plan P2a §3.4): the notices, and the job when any may run. A back-fill job
+   * running now runs once more after (it read the rows as they were when it started).
+   */
+  function checkBackfill(): void {
+    const db = v2Db()
+    if (db === null) return
     const at = root(db)
-    if (queueIt && at !== null && readingAllowed(db)) queue.indexAll('backfill', [at])
+    if (backfillNotices(db) && at !== null && readingAllowed(db)) {
+      queue.indexAll('backfill', [at], { afterRunning: true })
+    }
     publish()
   }
 
@@ -572,28 +621,16 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
 
   // ---- Runs ---------------------------------------------------------------------------------
 
-  /** What follows a reading: the tally, the pushes, the health notice, the spot checks. */
-  const afterReading = (
-    db: TreeDb,
-    nodeId: string,
-    outcome: ReadingOutcome,
-    asked: boolean
-  ): void => {
+  /** What follows a reading: the pushes, the health notice, the spot checks, the backlog's count. */
+  const afterReading = (db: TreeDb, nodeId: string, outcome: ReadingOutcome): void => {
     if (!outcome.read) {
       if (outcome.reason !== 'localCutoff') return
-      tally(db, outcome.costUsd, asked)
+      // Unasked reading stops here (the gate holds it back); asked work goes on.
       localCutoff = outcome.model
       stored.set('localCutoff', { id: 'localCutoff', kind: 'localCutoff', model: outcome.model })
       publish()
-      if (!asked) {
-        throw new ReadingPausedError(
-          'localCutoff',
-          'Story memory paused: the local model stopped answering at its limit.'
-        )
-      }
       return
     }
-    tally(db, outcome.costUsd, asked)
     deps.changed({ nodeIds: [nodeId], recordIds: outcome.recordIds })
     if (outcome.names.length > 0) deps.questions()
     const at = root(db)
@@ -629,31 +666,52 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
 
   const requested = (outcome: ReadingOutcome): boolean => outcome.read || 'costUsd' in outcome
 
+  /** Each request's cost into the Cloud tally as it returns (a run that fails part-way counts). */
+  const spender = (db: TreeDb, asked: boolean) => (usd: number) => tally(db, usd, asked)
+
   async function runRead(db: TreeDb, nodeId: string, requestId: string): Promise<JobRun<ReaderValue>> {
-    const askedRows = getAsked(db)
-    const asked = askedNow.has(nodeId) || askedRows.has(nodeId)
+    const clicked = askedNow.has(nodeId)
+    const listed = getAsked(db).has(nodeId)
+    const confirmed = !clicked && listed
+    const asked = clicked || confirmed
     const probe = probes.has(nodeId)
-    gate(db, asked, probe)
-    const caretPara = asked ? null : (carets.get(nodeId) ?? null)
-    const outcome = await withSignal(requestId, (signal) =>
-      runReading(
-        db,
-        { ai: deps.requestDeps(db) },
-        {
-          nodeId,
-          caretPara,
-          requestId,
-          signal,
-          ...(probe ? { purpose: 'probe' as const } : {}),
-          spotEvery: getSpotState(db).rebuiltAt === null ? null : SPOT_EVERY
-        }
+    const caret = carets.get(nodeId)
+    let settled = false
+    try {
+      try {
+        gate(db, clicked ? 'switch' : confirmed ? 'health' : 'all', probe)
+      } catch (err) {
+        settled = err instanceof JobSkippedError
+        throw err
+      }
+      const outcome = await withSignal(requestId, (signal) =>
+        runReading(
+          db,
+          { ai: deps.requestDeps(db) },
+          {
+            nodeId,
+            caretPara: asked ? null : (caret ?? null),
+            requestId,
+            signal,
+            ...(probe ? { purpose: 'probe' as const } : {}),
+            spotEvery: getSpotState(db).rebuiltAt === null ? null : SPOT_EVERY,
+            onSpend: spender(db, asked)
+          }
+        )
       )
-    )
-    carets.delete(nodeId)
-    probes.delete(nodeId)
-    if (askedRows.delete(nodeId)) setAsked(db, askedRows)
-    afterReading(db, nodeId, outcome, asked)
-    return { requested: requested(outcome), value: { outcome } }
+      settled = true
+      afterReading(db, nodeId, outcome)
+      return { requested: requested(outcome), value: { outcome } }
+    } finally {
+      // A caret a later idle pause set while this ran is that run's (the job runs once more).
+      if (carets.get(nodeId) === caret) carets.delete(nodeId)
+      probes.delete(nodeId)
+      // A confirmed scene stays asked through a retry; read, or held back, it is asked no more.
+      if (listed && settled) {
+        const rows = getAsked(db)
+        if (rows.delete(nodeId)) setAsked(db, rows)
+      }
+    }
   }
 
   async function runRebuildScene(
@@ -661,36 +719,57 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     nodeId: string,
     requestId: string
   ): Promise<JobRun<ReaderValue>> {
-    gate(db, true, false)
+    // Asked and priced: past the Cloud cap, never past the health gate (P2a-D25 replaces claims).
+    gate(db, 'health', false)
     const outcome = await withSignal(requestId, (signal) =>
       runReading(
         db,
         { ai: deps.requestDeps(db) },
-        { nodeId, caretPara: null, requestId, signal, purpose: 'rebuild' }
+        {
+          nodeId,
+          caretPara: null,
+          requestId,
+          signal,
+          purpose: 'rebuild',
+          onSpend: spender(db, true)
+        }
       )
     )
-    afterReading(db, nodeId, outcome, true)
-    const remaining = listJobs(db, 'rebuild').filter(
-      (job) => job.status === 'queued' && job.nodeId !== nodeId
-    ).length
-    const at = root(db)
-    if (rebuildSceneDone(db, now(), remaining) && at !== null) {
-      // The rebuild's spot checks, then 1 in 20 from now on (P2a-D8).
-      markRebuilt(db, now())
-      queue.indexAll('spotCheck', [at])
-    }
-    publish()
+    afterReading(db, nodeId, outcome)
+    // Counted; the rebuild closes once its last scene job ends, however it ends (`closeRebuild`).
+    rebuildSceneDone(db)
     return { requested: requested(outcome), value: { outcome } }
   }
 
+  /**
+   * A rebuild whose scene jobs have all ended (read, failed for good, or held back) closes, and,
+   * when it read any scene, its spot checks follow, then 1 in 20 from now on (P2a-D8). Called on
+   * every queue change; a stopped rebuild (`cancelAll`) was closed already, with no checks.
+   */
+  function closeRebuild(db: TreeDb, status: IndexQueueStatus): void {
+    if (status.running?.kind === 'rebuild') return
+    const progress = getRebuild(db)
+    if (progress?.finishedAt !== null) return
+    if (listJobs(db, 'rebuild').some((job) => job.status === 'queued')) return
+    stopRebuild(db, now())
+    const at = root(db)
+    if (progress.done > 0 && at !== null) {
+      markRebuilt(db, now())
+      queue.indexAll('spotCheck', [at])
+    }
+  }
+
   async function runSpot(db: TreeDb, requestId: string): Promise<JobRun<ReaderValue>> {
-    // A rebuild's checks were priced with it: spent as asked.
+    // A rebuild's checks were priced with it: spent as asked, past the cap and the health gate.
     const asked = getSpotState(db).rebuildPass
-    gate(db, asked, false)
+    gate(db, asked ? 'switch' : 'all', false)
     const run = await withSignal(requestId, (signal) =>
-      runSpotChecks(db, { ai: deps.requestDeps(db) }, { requestId, signal })
+      runSpotChecks(
+        db,
+        { ai: deps.requestDeps(db) },
+        { requestId, signal, onSpend: spender(db, asked) }
+      )
     )
-    tally(db, run.costUsd, asked)
     if (run.deleted.length > 0) {
       deps.log?.(
         `Story memory spot check: the strong model refused ${run.deleted.length} claim(s); deleted.`
@@ -701,35 +780,61 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     return { requested: run.requested, value: { outcome: null } }
   }
 
+  /**
+   * The back-fills, record by record: the rows the author asked for (gated as asked bulk work),
+   * then the due rows of a record whose names come to 3 pages or fewer together (gated as
+   * unasked work); a record over 3 waits for its notice. One record's names are read together, a
+   * paragraph naming it twice once. A group a gate holds back stays open for when the hold lifts.
+   */
   async function runBackfill(db: TreeDb, requestId: string): Promise<JobRun<ReaderValue>> {
     let sent = false
     await withSignal(requestId, async (signal) => {
       let n = 0
-      for (const row of openBackfills(db)) {
-        const asked = row.state === 'asked'
-        // Over 3 pages, a back-fill waits for the author's answer.
-        if (!asked && row.pages > BACKFILL_UNASKED_PAGES) continue
-        gate(db, asked, false)
-        for (const scene of backfillPlan(db, row.recordId, row.norm)) {
-          n += 1
-          const outcome = await runReading(
+      for (const record of backfillsByRecord(openBackfills(db))) {
+        const groups: { rows: OpenBackfill[]; asked: boolean }[] = [
+          { rows: record.asked, asked: true },
+          { rows: record.ask ? [] : record.due, asked: false }
+        ]
+        for (const group of groups) {
+          if (group.rows.length === 0) continue
+          try {
+            gate(db, group.asked ? 'health' : 'all', false)
+          } catch (err) {
+            if (err instanceof JobSkippedError) continue
+            throw err
+          }
+          const plan = backfillPlan(
             db,
-            { ai: deps.requestDeps(db) },
-            {
-              nodeId: scene.nodeId,
-              caretPara: null,
-              requestId: `${requestId}:b${n}`,
-              signal,
-              purpose: 'backfill',
-              paras: scene.paras
-            }
+            record.recordId,
+            group.rows.map((row) => row.norm)
           )
-          sent ||= requested(outcome)
-          afterReading(db, scene.nodeId, outcome, asked)
+          for (const scene of plan) {
+            n += 1
+            const outcome = await runReading(
+              db,
+              { ai: deps.requestDeps(db) },
+              {
+                nodeId: scene.nodeId,
+                caretPara: null,
+                requestId: `${requestId}:b${n}`,
+                signal,
+                purpose: 'backfill',
+                paras: scene.paras,
+                onSpend: spender(db, group.asked)
+              }
+            )
+            sent ||= requested(outcome)
+            afterReading(db, scene.nodeId, outcome)
+          }
+          for (const row of group.rows) {
+            setBackfillState(db, record.recordId, 'done', now(), row.norm)
+          }
         }
-        setBackfillState(db, row.recordId, 'done', now(), row.norm)
       }
     })
+    // The notices of records read through go. Nothing is queued from here: what a hold refused
+    // waits for the hold to lift (`publish`), never a loop of runs.
+    backfillNotices(db)
     publish()
     return { requested: sent, value: { outcome: null } }
   }
@@ -849,35 +954,40 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
           if (provider !== null) deps.useFlash?.(provider.id)
         }
         if (action === 'dismiss') closedHealth.add(health)
-        if (action !== 'dismiss') queue.resume()
       } else if (id.startsWith('cloudCap:')) {
         if (action === 'allowMore') {
           deps.cloud.update((state) => markCapNotice(allowMore(state, month()), month()))
-          queue.resume()
         } else if (action === 'dismiss') {
           deps.cloud.update((state) => markCapNotice(state, month()))
         }
       } else {
         const notice = stored.get(id)
         if (notice !== undefined) {
+          // Asked bulk work waits while the health gate pauses the model: the notice stays, beside
+          // the health notice that says why (its Keep reading anyway or Switch lifts it).
+          const held = action === 'read' && askedBlock(db) !== null
           if (notice.kind === 'localCutoff' && action === 'keepReading') {
             localCutoff = null
             stored.delete(id)
-            queue.resume()
+          } else if (held) {
+            // Nothing is queued; the notice stays.
           } else if (notice.kind === 'backlog') {
             if (action === 'read') queueAsked(db, offered.map((scene) => scene.nodeId))
             stored.delete(id)
             offered = []
           } else if (notice.kind === 'draftUnread') {
-            // A draft never read is read as *Rebuild memory* (its price is the rebuild's).
-            if (action === 'read') service.rebuild()
-            stored.delete(id)
-            offered = []
+            // A draft never read is read as *Rebuild memory* (its price is the rebuild's); a
+            // rebuild that cannot start (no provider) leaves the notice.
+            if (action !== 'read' || service.rebuild().ok) {
+              stored.delete(id)
+              offered = []
+            }
           } else if (notice.kind === 'backfill') {
             if (action === 'read') {
               setBackfillState(db, notice.recordId, 'asked', now())
               const at = root(db)
-              if (at !== null) queue.indexAll('backfill', [at])
+              if (at !== null) queue.indexAll('backfill', [at], { afterRunning: true })
+              resumeIfPaused()
             } else if (action === 'later') {
               setBackfillState(db, notice.recordId, 'declined', now())
             }
@@ -956,11 +1066,21 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       if (deps.provider(db) === null) {
         return aiFailure('NO_KEY', 'Story memory needs an AI provider to rebuild.')
       }
+      // A rebuild replaces what it does not prove again (P2a-D25): never on a model the health
+      // gate has paused, unless the author chose Keep reading anyway for it.
+      if (askedBlock(db) !== null) {
+        return {
+          ok: false,
+          code: 'DISABLED',
+          message: HOLD_MESSAGE.health,
+          nextStep: HEALTH_NEXT_STEP
+        }
+      }
       const estimate = rebuildEstimate(db, rebuildContext(db))
       const { nodeIds } = startRebuild(db, now())
       // The rebuild replaces scene by scene: leftover reads of those scenes are its to do.
       queue.indexAll('rebuild', nodeIds)
-      if (queue.status().paused !== null) queue.resume()
+      resumeIfPaused()
       publish()
       return { ok: true, queued: nodeIds.length, estimate }
     },
@@ -985,10 +1105,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
 
     setCloudCap(capUsd) {
       const next = deps.cloud.update((state) => setCap(state, capUsd, month()))
-      const db = v2Db()
-      if (db !== null && !capReached(next, month()) && queue.status().paused !== null) {
-        queue.resume()
-      }
+      // A cap raised past the spend lifts the hold: `publish` re-checks the backlog.
       publish()
       return cloudCapState(next, month())
     },
@@ -1031,6 +1148,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       closedHealth.clear()
       offered = []
       skipped = 0
+      heldBack = false
       localCutoff = null
       lastStatus = null
       lastNotices = null

@@ -11,7 +11,7 @@ import { AiRateLimitError } from '../../ai/providers/types'
 import type { CompletionRequest } from '../../ai/providers/types'
 import { saveDocument } from '../../document/documentStore'
 import { activeDraftId } from '../../draft/draftStore'
-import { listJobs } from '../../jobs/jobStore'
+import { enqueueJob, listJobs } from '../../jobs/jobStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { createNode, getNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
@@ -26,7 +26,8 @@ import {
   sentParagraphs,
   type FakeAi
 } from './readingFixture'
-import { getRebuild } from './readerRows'
+import { gateScene } from './pipeline'
+import { getRebuild, getSpotState, setSpotState } from './readerRows'
 import { createReaderService, type ReaderService, type ReaderServiceDeps } from './readerService'
 import { emptyYields } from '@shared/memory/claims'
 
@@ -106,42 +107,47 @@ async function drained(reader: ReaderService): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 5))
 }
 
-/** The fake reader: Mara's eyes in every paragraph that states them; the checker passes all. */
+/** The fake reader's answer: Mara's eyes in every paragraph that states them; the checker passes all. */
+function answerReading(request: CompletionRequest): { text: string } {
+  if (requestKind(request) === 'verify') {
+    return {
+      text: JSON.stringify({
+        v: sentChecks(request).map((check) => ({
+          i: check.i,
+          ok: true,
+          r: check.who[0] ?? null,
+          voice: 'narration',
+          mode: 'now'
+        }))
+      })
+    }
+  }
+  const mara = rosterIds(request).get('Mara Vell') ?? ''
+  const claims = [...sentParagraphs(request)].flatMap(([p, text]) => {
+    const eyes = /Mara's eyes were (\w+)/.exec(text)
+    return eyes === null
+      ? []
+      : [
+          {
+            p,
+            r: mara,
+            s: 'eyes',
+            v: eyes[1],
+            q: `Mara's eyes were ${eyes[1] ?? ''}`,
+            voice: 'narration',
+            mode: 'now'
+          }
+        ]
+  })
+  return { text: JSON.stringify({ c: claims, n: [] }) }
+}
+
+/** The fake reader (`answerReading`), on an own key unless told otherwise. */
 const reading = (options: { providerId?: 'cloud' | 'openai'; fail?: boolean } = {}): FakeAi =>
   fakeAi(
     (request: CompletionRequest) => {
       if (options.fail === true) throw new AiRateLimitError('OpenAI is rate-limiting this key.')
-      if (requestKind(request) === 'verify') {
-        return {
-          text: JSON.stringify({
-            v: sentChecks(request).map((check) => ({
-              i: check.i,
-              ok: true,
-              r: check.who[0] ?? null,
-              voice: 'narration',
-              mode: 'now'
-            }))
-          })
-        }
-      }
-      const mara = rosterIds(request).get('Mara Vell') ?? ''
-      const claims = [...sentParagraphs(request)].flatMap(([p, text]) => {
-        const eyes = /Mara's eyes were (\w+)/.exec(text)
-        return eyes === null
-          ? []
-          : [
-              {
-                p,
-                r: mara,
-                s: 'eyes',
-                v: eyes[1],
-                q: `Mara's eyes were ${eyes[1] ?? ''}`,
-                voice: 'narration',
-                mode: 'now'
-              }
-            ]
-      })
-      return { text: JSON.stringify({ c: claims, n: [] }) }
+      return answerReading(request)
     },
     { providerId: options.providerId ?? 'openai', now: NOW }
   )
@@ -290,6 +296,41 @@ describe('leaving a scene and the idle pause (F-16.16)', () => {
     expect(lastReading(db, scene, activeDraftId(db))?.purpose).toBe('window')
   })
 
+  it('reads a scene once more when it is left again while its reading runs', async () => {
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let first = true
+    const ai = fakeAi(
+      async (request: CompletionRequest) => {
+        if (requestKind(request) === 'reader' && first) {
+          first = false
+          await held
+        }
+        return answerReading(request)
+      },
+      { now: NOW }
+    )
+    const reader = service(ai)
+    expect(reader.settle({ nodeId: scene, reason: 'leave', caretPara: null }).queued).toBe(true)
+    await until(() => readerRequests(ai).length === 1, 'the first reading to be sent')
+    saveDocument(db, scene, doc("Mara's eyes were blue.", 'At dawn the boats went out.'))
+    expect(reader.settle({ nodeId: scene, reason: 'leave', caretPara: null })).toEqual({
+      queued: true,
+      reason: null
+    })
+    release()
+    await until(() => readerRequests(ai).length === 2, 'the second reading')
+    await drained(reader)
+    expect(gateScene(db, scene, null)?.decision.read).toBe('nothing')
+    expect(
+      sceneClaims(db, scene, activeDraftId(db))
+        .filter((claim) => claim.state === 'live')
+        .map((claim) => claim.value)
+    ).toEqual(['blue'])
+  })
+
   it('queues nothing with Use AI off: the status says reading is off', async () => {
     const ai = reading()
     const reader = service(ai)
@@ -375,6 +416,79 @@ describe('the lazy back-fill (F-16.17, P2a §3.4)', () => {
     expect(readerRequests(ai)).toHaveLength(2)
   })
 
+  it('counts a record’s names together: over 3 pages waits for its notice while another runs; Read reads them', async () => {
+    const scenes = [
+      addScene('Scene 2', 'Hesk rowed out.'),
+      addScene('Scene 3', 'Hesk rowed back.'),
+      addScene('Scene 4', 'Rowan waved from the quay.'),
+      addScene('Scene 5', 'Rowan waved again.'),
+      addScene('Scene 6', 'Oska swam to the buoy.')
+    ]
+    const ai = reading()
+    const reader = service(ai)
+    for (const each of scenes) await reader.readNow(each, `read-${each}`)
+    const before = readerRequests(ai).length
+    const made = createRecord(
+      db,
+      { name: 'Hesk', categoryId: 'character', aliases: [{ text: 'Rowan' }] },
+      NOW
+    )
+    if (!('record' in made)) throw new Error('blocked')
+    const hesk = made.record.id
+    // Two names of 2 pages each: 4 pages together, so it asks (one by one each is under 3).
+    reader.namesAdded(hesk, ['Hesk', 'Rowan'])
+    expect(reader.notices()).toEqual([
+      expect.objectContaining({ kind: 'backfill', recordId: hesk, pages: 4 })
+    ])
+    const oska = createRecord(db, { name: 'Oska', categoryId: 'character', aliases: [] }, NOW)
+    if (!('record' in oska)) throw new Error('blocked')
+    reader.namesAdded(oska.record.id, ['Oska'])
+    await until(() => readerRequests(ai).length === before + 1, 'Oska’s back-fill')
+    await drained(reader)
+    expect(readerRequests(ai)).toHaveLength(before + 1)
+    expect(reader.notices()).toEqual([
+      expect.objectContaining({ kind: 'backfill', recordId: hesk, pages: 4 })
+    ])
+    // Read: asked, each scene once, and the notice goes.
+    expect(reader.answerNotice(`backfill:${hesk}`, 'read')).toEqual([])
+    await until(() => readerRequests(ai).length === before + 5, 'Hesk’s back-fill')
+    await drained(reader)
+    expect(readerRequests(ai)).toHaveLength(before + 5)
+    expect(reader.notices()).toEqual([])
+  })
+
+  it('runs a back-fill noted while another back-fill job runs', async () => {
+    const scenes = [addScene('Scene 2', 'Hesk rowed out.'), addScene('Scene 3', 'Oska swam out.')]
+    let hold = false
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const ai = fakeAi(
+      async (request: CompletionRequest) => {
+        if (hold && requestKind(request) === 'reader') {
+          hold = false
+          await held
+        }
+        return answerReading(request)
+      },
+      { now: NOW }
+    )
+    const reader = service(ai)
+    for (const each of [scene, ...scenes]) await reader.readNow(each, `read-${each}`)
+    const before = readerRequests(ai).length
+    hold = true
+    reader.namesAdded(hesk(), ['Hesk'])
+    await until(() => readerRequests(ai).length === before + 1, 'Hesk’s back-fill to be sent')
+    const oska = createRecord(db, { name: 'Oska', categoryId: 'character', aliases: [] }, NOW)
+    if (!('record' in oska)) throw new Error('blocked')
+    reader.namesAdded(oska.record.id, ['Oska'])
+    release()
+    await until(() => readerRequests(ai).length === before + 2, 'Oska’s back-fill')
+    await drained(reader)
+    expect(readerRequests(ai)).toHaveLength(before + 2)
+  })
+
   it('asks with the price over 3 pages; Not now declines it for good', async () => {
     const scenes = [scene]
     for (let i = 1; i <= 3; i += 1) scenes.push(addScene(`Scene ${i + 1}`, 'Hesk rowed out.'))
@@ -422,6 +536,66 @@ describe('the health gate (F-16.17, design §2.3)', () => {
       )
     }
   }
+
+  it('lets no probe past the Cloud cap', async () => {
+    badReadings()
+    cloud = { ...defaultMemoryCloudState(), month: '2026-10', backgroundUsd: 1 }
+    const ai = reading({ providerId: 'cloud' })
+    const reader = service(ai)
+    expect(reader.status().paused).toBe('cloudCap')
+    const scenes = Array.from({ length: 10 }, (_, i) =>
+      addScene(`Scene ${i + 2}`, `Mara's eyes were green ${i}.`)
+    )
+    for (const id of scenes) {
+      expect(reader.settle({ nodeId: id, reason: 'leave', caretPara: null })).toEqual({
+        queued: false,
+        reason: 'paused'
+      })
+    }
+    await drained(reader)
+    expect(ai.requests).toEqual([])
+  })
+
+  it('holds the bulk work the author asks for while the model is paused; Switch asks for Flash', async () => {
+    badReadings()
+    const flashed: string[] = []
+    const ai = reading()
+    const reader = service(ai, { useFlash: (provider) => void flashed.push(provider) })
+    expect(reader.rebuild()).toMatchObject({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Story memory paused: this model’s readings aren’t reliable enough.'
+    })
+    expect(listJobs(db)).toEqual([])
+    for (let i = 1; i <= 6; i += 1) addScene(`Scene ${i + 1}`, `Mara's eyes were green ${i}.`)
+    await reader.readNow(scene, 'read-held')
+    reader.bulkWritten()
+    await until(() => reader.notices().some((notice) => notice.kind === 'backlog'), 'the backlog')
+    // Read waits: the notice stays beside the health notice that says why.
+    expect(reader.answerNotice('backlog', 'read').map((notice) => notice.kind)).toEqual([
+      'backlog',
+      'health'
+    ])
+    expect(listJobs(db, 'read')).toEqual([])
+    reader.answerNotice('health:gpt-5.4-mini', 'switchModel')
+    expect(flashed).toEqual(['openai'])
+  })
+
+  it('closes a rebuild whose scene jobs the health gate holds back, with no spot checks', async () => {
+    addScene('Scene 2', "Mara's eyes were green.")
+    const ai = reading()
+    const reader = service(ai)
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 2 })
+    // The model's readings fall below the bars before the first scene job runs.
+    badReadings()
+    await until(() => typeof getRebuild(db)?.finishedAt === 'string', 'the rebuild to close')
+    await drained(reader)
+    expect(getRebuild(db)).toMatchObject({ total: 2, done: 0 })
+    expect(ai.requests).toEqual([])
+    expect(getSpotState(db).rebuildPass).toBe(false)
+    expect(reader.queueStatus()).toMatchObject({ paused: null, queued: 0 })
+    expect(listJobs(db)).toEqual([])
+  })
 
   it('pauses background reading, probes one due scene in 10, and Keep reading anyway lifts it', async () => {
     badReadings()
@@ -483,6 +657,83 @@ describe('the Cloud monthly cap (F-16.19, P2a §3.6)', () => {
     expect(reader.cloudCap()).toMatchObject({ capUsd: 1, extraUsd: 1, limitUsd: 2, reached: false })
   })
 
+  it('runs asked work queued behind background work the cap holds back, and never pauses the queue', async () => {
+    const second = addScene('Scene 2', "Mara's eyes were green.")
+    cloud = { ...defaultMemoryCloudState(), month: '2026-10', backgroundUsd: 1 }
+    // A leave's reading left from before the cap was reached, first in line.
+    enqueueJob(db, 'read', second, new Date(NOW.getTime() - 60_000))
+    const ai = reading({ providerId: 'cloud' })
+    const reader = service(ai)
+    reader.opened()
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 2 })
+    await until(() => typeof getRebuild(db)?.finishedAt === 'string', 'the rebuild')
+    await drained(reader)
+    expect(getRebuild(db)).toMatchObject({ total: 2, done: 2 })
+    expect(reader.queueStatus().paused).toBeNull()
+    // The rebuild's spot checks ran too, as asked.
+    expect(getSpotState(db).rebuildPass).toBe(false)
+    expect(listJobs(db)).toEqual([])
+    expect(cloud.backgroundUsd).toBe(1)
+    expect(cloud.askedUsd).toBeGreaterThan(0)
+  })
+
+  it('reads a confirmed backlog past the cap', async () => {
+    const ai = reading({ providerId: 'cloud' })
+    const reader = service(ai)
+    await reader.readNow(scene, 'read-cap')
+    cloud = { ...cloud, backgroundUsd: 1 }
+    for (let i = 1; i <= 6; i += 1) addScene(`Scene ${i + 1}`, `Mara's eyes were green ${i}.`)
+    reader.bulkWritten()
+    await until(() => reader.notices().some((notice) => notice.kind === 'backlog'), 'the backlog')
+    reader.answerNotice('backlog', 'read')
+    await until(() => readerRequests(ai).length === 7, 'the six asked readings')
+    await drained(reader)
+    expect(reader.queueStatus().paused).toBeNull()
+    expect(cloud.backgroundUsd).toBe(1)
+  })
+
+  it('lifts the cap at a new month and reads what was left meanwhile', async () => {
+    let clock = new Date(2026, 9, 31, 12)
+    cloud = { ...defaultMemoryCloudState(), month: '2026-10', backgroundUsd: 1 }
+    const ai = reading({ providerId: 'cloud' })
+    const reader = service(ai, { now: () => clock })
+    expect(reader.settle({ nodeId: scene, reason: 'leave', caretPara: null })).toEqual({
+      queued: false,
+      reason: 'paused'
+    })
+    clock = new Date(2026, 10, 1, 9)
+    const other = addScene('Scene 2', "Mara's eyes were green.")
+    expect(reader.settle({ nodeId: other, reason: 'leave', caretPara: null })).toEqual({
+      queued: true,
+      reason: null
+    })
+    // The scene left during the pause comes back through the backlog check.
+    await until(() => readerRequests(ai).length === 2, 'both scenes read')
+    await drained(reader)
+    expect(reader.status().paused).toBeNull()
+    expect(gateScene(db, scene, null)?.decision.read).toBe('nothing')
+  })
+
+  it('counts what a reading spent even when it fails part-way', async () => {
+    const long = (n: number): string => `${'The boats went out at dawn and came back late. '.repeat(220)}${n}.`
+    saveDocument(db, scene, doc(long(1), long(2), long(3)))
+    let readers = 0
+    const ai = fakeAi(
+      (request: CompletionRequest) => {
+        if (requestKind(request) === 'reader') {
+          readers += 1
+          if (readers === 2) throw new AiRateLimitError('Cloud is busy.')
+        }
+        return answerReading(request)
+      },
+      { providerId: 'cloud', now: NOW }
+    )
+    const reader = service(ai)
+    expect(await reader.readNow(scene, 'read-part')).toMatchObject({ ok: false, code: 'RATE_LIMIT' })
+    expect(readers).toBe(2)
+    expect(cloud.askedUsd).toBeGreaterThan(0)
+  })
+
   it('has no cap on an own key', async () => {
     cloud = { ...defaultMemoryCloudState(), month: '2026-10', backgroundUsd: 5 }
     const ai = reading()
@@ -517,6 +768,12 @@ describe('Rebuild memory (F-16.19, P2a §3.6)', () => {
     await drained(second2)
     expect(getRebuild(db)).toMatchObject({ total: 2, done: 2 })
     expect(lastReading(db, second, activeDraftId(db))?.purpose).toBe('rebuild')
+    // The spot checks ran: the claims proved in code went back to the fast checker.
+    expect(getSpotState(db).rebuildPass).toBe(false)
+    expect(typeof getSpotState(db).rebuiltAt).toBe('string')
+    expect(
+      sceneClaims(db, second, activeDraftId(db)).every((claim) => claim.spot === 'agree')
+    ).toBe(true)
     const summary = second2.rebuildSummary()
     expect(summary?.sheets).toEqual([
       expect.objectContaining({ name: 'Mara Vell', lines: 2 })
@@ -537,5 +794,17 @@ describe('Rebuild memory (F-16.19, P2a §3.6)', () => {
     expect(listJobs(db)).toEqual([])
     expect(getRebuild(db)?.finishedAt).toEqual(expect.any(String))
     expect(ai.requests).toEqual([])
+  })
+})
+
+describe('spot checks after a reading (F-16.17, P2a-D8)', () => {
+  it('runs the strong batch once 5 claims wait for it', async () => {
+    setSpotState(db, { ...getSpotState(db), strongDue: ['c1', 'c2', 'c3', 'c4', 'c5'] })
+    const ai = reading()
+    const reader = service(ai)
+    expect(reader.settle({ nodeId: scene, reason: 'leave', caretPara: null }).queued).toBe(true)
+    await until(() => getSpotState(db).strongDue.length === 0, 'the strong batch')
+    await drained(reader)
+    expect(listJobs(db)).toEqual([])
   })
 })

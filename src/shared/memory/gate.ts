@@ -228,6 +228,11 @@ const bare = (gate: string): string =>
     .replace(/\s+/g, ' ')
     .trim()
 
+/** The words the cosmetic skip treats as known, lower case (a `Set`, or a lookup over the book). */
+export interface KnownWords {
+  has(word: string): boolean
+}
+
 /**
  * Whether `after` is a cosmetic edit of `before` (both gate texts): the same words with only
  * whitespace or punctuation changed, or one word changed by at most two letters where the old
@@ -237,7 +242,7 @@ const bare = (gate: string): string =>
 export function isCosmetic(
   before: string,
   after: string,
-  options: { knownWords: ReadonlySet<string> }
+  options: { knownWords: KnownWords }
 ): boolean {
   const a = bare(before)
   const b = bare(after)
@@ -266,7 +271,7 @@ export interface ReadDecisionInput {
   staleParas: ReadonlySet<number>
   /** A sentence the card's quotes rest on changed (`cardStale`): no edit there is cosmetic. */
   cardStale: boolean
-  knownWords: ReadonlySet<string>
+  knownWords: KnownWords
 }
 
 export type ReadDecision =

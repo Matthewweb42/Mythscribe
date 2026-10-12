@@ -563,9 +563,12 @@ export async function setSheetField(
   await patchSheet(entityId, () => ({ fields: { [field]: value } }))
 }
 
-/** Saves a document main has not had yet (a new scene) and records its word count in the tree. */
+/**
+ * Saves a document main has not had yet (a new scene) and records its word count in the tree.
+ * Not the editor's write: story memory v2 reads it through the backlog check (F-16.16).
+ */
 async function writeDocument(nodeId: string, content: TiptapNodeT): Promise<void> {
-  const saved = await ipc().invoke('document:save', { id: nodeId, content })
+  const saved = await ipc().invoke('document:save', { id: nodeId, content, outsideEditor: true })
   useTreeStore.getState().setWordCount(nodeId, saved.wordCount)
 }
 

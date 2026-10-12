@@ -11,7 +11,7 @@ import { documentJson, documentText, manuscriptDocuments } from '../../voice/pro
 import { estimateRebuild, plannedRow, type RebuildContext } from '../switchover/plan'
 import { claimSources } from './claimStore'
 import { gateScene } from './pipeline'
-import { namingParas } from './readerContext'
+import { namingParas, readBook, type Book } from './readerContext'
 
 /**
  * What is left to read (F-16.16; design §2.3 "Changes made outside the editor", plan P2a §3.3):
@@ -33,8 +33,8 @@ export interface DueScene {
 }
 
 /** The gate's answer as a due scene, or null when it reads nothing. */
-function asDue(db: TreeDb, nodeId: string): DueScene | null {
-  const gate = gateScene(db, nodeId, null)
+function asDue(db: TreeDb, nodeId: string, book: Book): DueScene | null {
+  const gate = gateScene(db, nodeId, null, book)
   if (gate === null || gate.decision.read === 'nothing') return null
   const decision: Exclude<ReadDecision, { read: 'nothing' }> = gate.decision
   const pieces =
@@ -54,9 +54,11 @@ function asDue(db: TreeDb, nodeId: string): DueScene | null {
  */
 export function dueScenes(db: TreeDb, only?: ReadonlySet<string>): DueScene[] {
   const due: DueScene[] = []
-  for (const row of manuscriptDocuments(db)) {
+  // One read of the book for the whole walk (the tree, the roster, every scene's words).
+  const book = readBook(db)
+  for (const row of book.rows) {
     if (only !== undefined && !only.has(row.id)) continue
-    const scene = asDue(db, row.id)
+    const scene = asDue(db, row.id, book)
     if (scene !== null) due.push(scene)
   }
   return due
@@ -69,8 +71,9 @@ export function draftEverRead(db: TreeDb, draftId: string): boolean {
 
 /** The readable scenes of the active draft with text, each with its prose tokens (*Rebuild memory*). */
 export function readableScenes(db: TreeDb): { nodeId: string; proseTokens: number }[] {
-  const sourceOf = claimSources(db)
-  return manuscriptDocuments(db)
+  const rows = manuscriptDocuments(db)
+  const sourceOf = claimSources(db, rows)
+  return rows
     .filter((row) => readerMayRead(sourceOf(row.id)) && documentJson(row) !== null)
     .map((row) => ({ nodeId: row.id, proseTokens: estimateTokens(documentText(row)) }))
     .filter((scene) => scene.proseTokens > 0)

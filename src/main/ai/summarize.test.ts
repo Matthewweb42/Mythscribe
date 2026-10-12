@@ -46,6 +46,7 @@ import type { ObservedFactsChange } from './observedFacts'
 import type { AiRequestDeps } from './request'
 import {
   parseSummaryAnswer,
+  currentSummary,
   staleSummaryNodeIds,
   summarizeScene,
   summarySource,
@@ -295,6 +296,16 @@ describe('summarizeScene (F-5.6)', () => {
     await summarize()
     expect(complete).toHaveBeenCalledTimes(4)
     expect(sent(3).system).toContain('Story-bible names in this scene: characters Mara.')
+  })
+
+  // F-16.17 (P2a slice 3 review): v2 writes no summaries, so its readers take a row only while it
+  // still describes the text.
+  it('answers the stored summary as current only while its text is unchanged', async () => {
+    await summarize()
+    expect(currentSummary(db, scene)?.summary).toBe(getSummary(db, scene)?.summary)
+    saveDocument(db, scene, doc(`${SCENE} The lantern went out.`))
+    expect(getSummary(db, scene)).not.toBeNull()
+    expect(currentSummary(db, scene)).toBeNull()
   })
 
   it('head-truncates a long scene to the character budget and records it as truncated', async () => {

@@ -27,6 +27,7 @@ import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { STORY_MAP_TOKEN_BUDGET } from '@shared/storyTime'
 import { getSummary } from '../document/summaryStore'
+import { currentSummary } from './summarize'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, documentText, type VoiceProfile } from '../voice/profile'
@@ -321,7 +322,10 @@ export async function runAgent(
         level: active.hierarchyLevel ?? active.kind,
         synopsis: parseStoredSceneMeta(active.sceneMeta).synopsis.trim(),
         notes: headTruncate(notesText(active.notes, active.id), AGENT_NOTES_CHARS),
-        summary: getSummary(db, active.id)?.summary ?? '',
+        // F-16.17: v2 writes no summaries; one the text has moved past is left out.
+        summary:
+          (input.memory === 'v2' ? currentSummary(db, active.id) : getSummary(db, active.id))
+            ?.summary ?? '',
         beforeCaret: input.focus.beforeCaret.trim(),
         selection: input.focus.selection.trim()
       })

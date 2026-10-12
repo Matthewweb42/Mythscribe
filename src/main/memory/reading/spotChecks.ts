@@ -18,7 +18,7 @@ import { runAiRequest, sha256, type AiRequestDeps } from '../../ai/request'
 import type { TreeDb } from '../../tree/treeStore'
 import { deleteClaims, draftClaims, getClaim, setClaimSpot } from './claimStore'
 import { agrees, claimCheck, type ClaimCheck } from './pipeline'
-import { loadReadingScene, type ReadingScene } from './readerContext'
+import { loadReadingScene, readBook, type Book, type ReadingScene } from './readerContext'
 import { getSpotState, setSpotState, type SpotState } from './readerRows'
 import { readerRoster } from './rosterCache'
 
@@ -46,6 +46,8 @@ export interface SpotRun {
 export interface SpotRunInput {
   requestId: string
   signal?: AbortSignal
+  /** Each request's reported cost as it returns, so a run that fails part-way still counts it. */
+  onSpend?: (usd: number) => void
 }
 
 /** Live claims of the active draft with no spot check yet, proved this way, in a stable order. */
@@ -107,8 +109,12 @@ export async function runSpotChecks(
   }
   const roster = readerRoster(db)
   const scenes = new Map<string, ReadingScene | null>()
+  let book: Book | null = null
   const sceneOf = (nodeId: string): ReadingScene | null => {
-    if (!scenes.has(nodeId)) scenes.set(nodeId, loadReadingScene(db, nodeId))
+    if (!scenes.has(nodeId)) {
+      book ??= readBook(db)
+      scenes.set(nodeId, loadReadingScene(db, nodeId, book))
+    }
     return scenes.get(nodeId) ?? null
   }
   const checkOf = (claim: Claim, around: number): ClaimCheck | null => {
@@ -144,6 +150,7 @@ export async function runSpotChecks(
       })
       if (!result.cached) run.requested = true
       run.costUsd += result.costUsd
+      input.onSpend?.(result.costUsd)
       return parseVerifyAnswer(result.text)
     } finally {
       inFlight = null

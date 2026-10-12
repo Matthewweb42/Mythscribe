@@ -1133,9 +1133,15 @@ export const contract = {
   /**
    * Replaces a document's content (F-3.2) and caches its word count on the row. Folders and
    * sections are refused with VALIDATION. Returns the new count and the row's `modified` stamp.
+   * `outsideEditor`: a write the editor did not make (the chat's new and split scenes, F-5.25),
+   * which story memory v2 treats like Replace: the backlog check follows (F-16.16).
    */
   'document:save': {
-    input: z.object({ id: z.string(), content: TiptapNode }),
+    input: z.object({
+      id: z.string(),
+      content: TiptapNode,
+      outsideEditor: z.boolean().optional()
+    }),
     output: z.object({ wordCount: z.number().int().nonnegative(), modified: z.string() })
   },
   /**
@@ -3431,9 +3437,11 @@ export const contract = {
   /**
    * F-16.19: *Rebuild memory*, confirmed with its price: one full read per readable scene of the
    * active draft (each replaces that scene's claims it did not prove again), then the spot checks.
-   * Resumes after a close. AI failures (Use AI or the reading switch off, no provider) as data.
+   * Resumes after a close. AI failures (Use AI or the reading switch off, no provider, the
+   * health gate pausing the fast model) as data. It spans many jobs and survives a close, so it is
+   * stopped with the queue's Stop (`jobs:cancel`), not `ai:cancel`.
    */
-  'memory:rebuild': { input: z.object({ requestId: z.string() }), output: RebuildStartResult },
+  'memory:rebuild': { input: z.undefined(), output: RebuildStartResult },
   /** F-16.19: what the last rebuild changed, grouped by sheet; null before any rebuild. */
   'memory:rebuildSummary': { input: z.undefined(), output: RebuildSummary.nullable() },
   /** F-16.19: the summary's bulk actions (*Not right* for a sheet's new lines, *Not names*). */
