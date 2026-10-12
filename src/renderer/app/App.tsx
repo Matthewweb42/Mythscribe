@@ -99,7 +99,7 @@ import { SideWorkBar } from '@renderer/features/sideWork/SideWorkStatus'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { DropOverlay } from '@renderer/features/library/DropOverlay'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
-import { currentStoryMemory } from '@renderer/features/project/storyMemory'
+import { currentStoryMemory, useStoryMemory } from '@renderer/features/project/storyMemory'
 import { usePageStore } from '@renderer/features/research/pageStore'
 import { ResearchPage } from '@renderer/features/research/ResearchPage'
 import { useResearchStore } from '@renderer/features/research/researchStore'
@@ -109,6 +109,13 @@ import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
 import { EditPassWorkspace } from '@renderer/features/editPass/EditPassWorkspace'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import { useSceneDetailStore } from '@renderer/features/editor/sceneDetailStore'
+import { LabelsDialog } from '@renderer/features/labels/LabelsDialog'
+import { useLabelStore } from '@renderer/features/labels/labelStore'
+import { useNameMentionStore } from '@renderer/features/records/nameMentionStore'
+import { RecordCreateDialog } from '@renderer/features/records/RecordCreateDialog'
+import { RecordSheet } from '@renderer/features/records/RecordSheet'
+import { useRecordStore } from '@renderer/features/records/recordStore'
 import { useFactStore } from '@renderer/features/entities/factStore'
 import { useChangesStore } from '@renderer/features/changes/changesStore'
 import { TodoReviewStrip } from '@renderer/features/todo/TodoReviewStrip'
@@ -323,6 +330,11 @@ export function App(): React.JSX.Element {
       // F-16.8: and so do the Research meta and the open pages.
       useResearchStore.getState().clear()
       usePageStore.getState().clear()
+      // F-16.6, F-16.7, F-16.11: and the records, labels, mention counts and typed details.
+      useRecordStore.getState().clear()
+      useLabelStore.getState().clear()
+      useNameMentionStore.getState().clear()
+      useSceneDetailStore.getState().clear()
       useFactStore.getState().clear()
       // F-9.13: the Changes log belongs to the project that closed.
       useChangesStore.getState().clear()
@@ -403,12 +415,20 @@ export function App(): React.JSX.Element {
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
-    // F-16.8: story memory v2's Research section (its channels answer only in v2).
+    // F-16.8: story memory v2's Research section (its channels answer only in v2), and (F-16.6,
+    // F-16.7, F-16.11) its records, labels, mention counts and typed details; main says which
+    // records and scenes changed, so the stores refetch only those.
     if (currentStoryMemory() === 'v2') {
-      useResearchStore
-        .getState()
-        .load()
-        .catch((err: unknown) => toast.error(describeError(err)))
+      const failed = (err: unknown): void => {
+        toast.error(describeError(err))
+      }
+      useResearchStore.getState().load().catch(failed)
+      useRecordStore.getState().subscribe()
+      useRecordStore.getState().load().catch(failed)
+      useLabelStore.getState().load().catch(failed)
+      useNameMentionStore.getState().subscribe()
+      useNameMentionStore.getState().load().catch(failed)
+      useSceneDetailStore.getState().subscribe()
     }
     useEditorSettingsStore
       .getState()
@@ -553,7 +573,8 @@ export function App(): React.JSX.Element {
                 <IndexingIndicator />
                 <SearchButton />
                 <ReferencesToggleButton />
-                <TagsToggleButton />
+                {/* F-16.4: no tags in story memory v2. */}
+                {current.storyMemory === 'v2' ? null : <TagsToggleButton />}
                 <AssistantToggleButton />
               </>
             ) : null}
@@ -1044,10 +1065,15 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
         return null
     }
   }
+  // F-16.4: story memory v2 has no tags, so the tags panel is not shown (slice 4 makes its slot
+  // the This scene panel); the layout keeps it, so a v1 project opens it where it was.
+  const v2 = useStoryMemory() === 'v2'
   // One keyed list in and out of focus mode, so the editor column is never remounted by it.
   const shown = focus
     ? [['editor' as const]]
-    : layout.dock.columns.filter((column) => isColumnShown(layout, column))
+    : layout.dock.columns
+        .map((column) => (v2 ? column.filter((panel) => panel !== 'tags') : column))
+        .filter((column) => column.length > 0 && isColumnShown(layout, column))
   const editorAt = shown.findIndex((column) => column.includes('editor'))
   return (
     <>
@@ -1066,6 +1092,9 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       {focus ? <FocusFloatingPanels /> : null}
       {/* F-9.3: the entity creation dialog, open while a kind is being created. */}
       <EntityCreateDialog />
+      {/* F-16.6, F-16.7 (story memory v2): the record creation dialog and the Labels dialog. */}
+      <RecordCreateDialog />
+      <LabelsDialog />
       <CategoryCreateDialog />
       {/* F-9.5: the entity import review, open only while a plan is under review. */}
       <EntityImportDialog />
@@ -1079,8 +1108,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <ReplaceDialog />
       {/* F-10.3: the Goals dialog, open while the goals store says so. */}
       <GoalsDialog />
-      {/* F-9.14: the conversion pass's cost and go-ahead, open while main says scenes wait. */}
-      <ConversionDialog />
+      {/* F-9.14: the conversion pass's cost and go-ahead, open while main says scenes wait (v1). */}
+      {v2 ? null : <ConversionDialog />}
       {/* F-7.12: the long jobs' finished / failed drops, and Open's big review dialog. */}
       <ActivityWatch />
       <ActivityDrops />
@@ -1140,10 +1169,13 @@ function EditorColumn({ format }: { format: NovelFormat }): React.JSX.Element {
  */
 function useMainNodeId(): string | null {
   const entityId = useEntityStore((s) => s.selectedId)
+  // F-16.6: so does a record's sheet (story memory v2).
+  const recordId = useRecordStore((s) => s.selectedId)
   // F-14.15: the Edits workspace or a report takes the pane like an entity page does.
   const editView = useEditPassViewStore((s) => s.view)
   return useTreeStore((s) =>
     entityId === null &&
+    recordId === null &&
     editView === null &&
     s.selectedId !== null &&
     s.byId[s.selectedId] !== undefined
@@ -1156,6 +1188,7 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
   // F-9.3: an entity picked in a tab takes the whole pane; selecting a document closes it again
   // (`treeStore.select`), so the manuscript comes back exactly where it was.
   const entityId = useEntityStore((s) => s.selectedId)
+  const recordId = useRecordStore((s) => s.selectedId)
   const node = useTreeStore((s) => (s.selectedId === null ? undefined : s.byId[s.selectedId]))
   // F-14.15: the Edits workspace or a pass's report; picking a document or an entity closes it.
   const editView = useEditPassViewStore((s) => s.view)
@@ -1180,22 +1213,24 @@ function MainPane({ format }: { format: NovelFormat }): React.JSX.Element {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <TodoReviewStrip />
         <div className="flex min-h-0 min-w-0 flex-1">
-          <PaneContent format={format} entityId={entityId} node={node} />
+          <PaneContent format={format} entityId={entityId} recordId={recordId} node={node} />
         </div>
       </div>
     )
   }
-  return <PaneContent format={format} entityId={entityId} node={node} />
+  return <PaneContent format={format} entityId={entityId} recordId={recordId} node={node} />
 }
 
 /** What the main pane shows: a sheet, the empty state, a document, or a folder. */
 function PaneContent({
   format,
   entityId,
+  recordId,
   node
 }: {
   format: NovelFormat
   entityId: string | null
+  recordId: string | null
   node: TreeNode | undefined
 }): React.JSX.Element {
   const focus = useFocusStore((s) => s.active)
@@ -1205,6 +1240,14 @@ function PaneContent({
     return (
       <WithSideWorkBar>
         <EntityEditor key={entityId} id={entityId} />
+      </WithSideWorkBar>
+    )
+  }
+  // F-16.6: a record's sheet (story memory v2) takes the pane as an entity page does.
+  if (recordId !== null) {
+    return (
+      <WithSideWorkBar>
+        <RecordSheet key={recordId} id={recordId} />
       </WithSideWorkBar>
     )
   }

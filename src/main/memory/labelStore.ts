@@ -5,7 +5,8 @@ import {
   LABELS_MAX,
   labelNameKey,
   type Label,
-  type LabelKind
+  type LabelKind,
+  type LabelLink
 } from '@shared/storyLabels'
 import { label, labelLink, node, type LabelRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
@@ -164,6 +165,16 @@ export function nodesOfLabel(db: TreeDb, labelId: string): string[] {
     .where(eq(labelLink.labelId, labelId))
     .all()
     .map((row) => row.nodeId)
+}
+
+/** Every label link, by node then label order: what the renderer's chips and filters read. */
+export function listLabelLinks(db: TreeDb): LabelLink[] {
+  return db
+    .select({ labelId: labelLink.labelId, nodeId: labelLink.nodeId })
+    .from(labelLink)
+    .innerJoin(label, eq(label.id, labelLink.labelId))
+    .orderBy(asc(labelLink.nodeId), asc(label.position))
+    .all()
 }
 
 /** Puts a label on a node (once). Answers the node's labels. */

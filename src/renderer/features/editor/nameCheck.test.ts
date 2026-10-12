@@ -2,6 +2,9 @@ import { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
+import { useProjectStore } from '@renderer/features/project/projectStore'
+import { recordFixture } from '@renderer/features/records/recordFixture'
+import { resetRecordStore, useRecordStore } from '@renderer/features/records/recordStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { setSpellChecker } from '@renderer/lib/spellcheck'
@@ -64,6 +67,7 @@ function rightClick(target: Element, x = 40, y = 60): boolean {
 
 beforeEach(() => {
   resetEntityStore()
+  resetRecordStore()
   resetTagStore()
   resetDictionaryStore()
   resetNameMenuStore()
@@ -76,6 +80,8 @@ afterEach(() => {
   editor.destroy()
   setSpellChecker(null)
   resetEntityStore()
+  resetRecordStore()
+  useProjectStore.setState({ current: null })
   resetTagStore()
   resetDictionaryStore()
   resetNameMenuStore()
@@ -91,6 +97,37 @@ describe('NameCheck (F-3.14)', () => {
       ['Vosss', 'Voss']
     ])
     expect(spans()[0]?.getAttribute('spellcheck')).toBe('false')
+  })
+
+  it('takes story memory v2’s names from the records, nicknames included, never the tags (F-16.4)', () => {
+    setEntityNames('Zorvath')
+    setTag('dark-forest', 'setting')
+    useRecordStore.setState({
+      byId: { 'r-mara': recordFixture('r-mara', 'character', ['Mara Voss', 'Forest']) },
+      ids: ['r-mara'],
+      loaded: true
+    })
+    useProjectStore.setState({
+      current: {
+        id: 'p-2',
+        name: 'Memory',
+        format: 'novel',
+        path: '/books/Memory.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 33,
+        storyMemory: 'v2'
+      }
+    })
+    // Zorvatt is one letter from the v1 sheet's Zorvath, which v2 does not read.
+    misspelled.add('Zorvatt')
+    build('Marra met Vosss by the forrest; Zorvatt waited.')
+    expect(nearMisses()).toEqual([
+      ['Marra', 'Mara'],
+      ['Vosss', 'Voss'],
+      ['forrest', 'Forest']
+    ])
   })
 
   it('waits until the caret has left the word being typed', () => {

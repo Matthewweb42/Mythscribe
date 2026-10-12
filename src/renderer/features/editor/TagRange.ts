@@ -21,6 +21,11 @@ const LINE_WIDTH = 2
 export interface TagRangeOptions {
   /** Runs on Mod+Alt+T with a non-empty selection: the editor opens the tag picker for it. */
   onTagSelection: ((editor: Editor) => void) | null
+  /**
+   * Story memory v2 (F-16.4): the mark stays in the schema, so stored ranges load and keep, but it
+   * draws nothing and takes no shortcut (decision P1-D11: left inert until P9).
+   */
+  inert: boolean
 }
 
 /** A stretch of text carrying the same set of range marks, by stored tag id in mark order. */
@@ -192,7 +197,7 @@ export const TagRange = Mark.create<TagRangeOptions>({
   spanning: true,
 
   addOptions() {
-    return { onTagSelection: null }
+    return { onTagSelection: null, inert: false }
   },
 
   addAttributes() {
@@ -252,6 +257,7 @@ export const TagRange = Mark.create<TagRangeOptions>({
   addKeyboardShortcuts() {
     return {
       'Mod-Alt-t': () => {
+        if (this.options.inert) return false
         if (this.editor.state.selection.empty || !this.options.onTagSelection) return false
         this.options.onTagSelection(this.editor)
         return true
@@ -260,6 +266,7 @@ export const TagRange = Mark.create<TagRangeOptions>({
   },
 
   addProseMirrorPlugins() {
+    if (this.options.inert) return []
     const type = this.type
     return [
       new Plugin<DecorationSet>({

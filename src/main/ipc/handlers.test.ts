@@ -8805,6 +8805,14 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
         (await invoke('names:forNode', { nodeId: scene })).map((m) => [m.recordId, m.text])
       ).toEqual([[made.record.id, 'Mara']])
       expect(sentOf('names:changed')).toContainEqual({ nodeIds: [scene] })
+      // F-16.6: the sheet's Named in reads the counts per scene.
+      expect(await invoke('names:byRecord', undefined)).toEqual([
+        { recordId: made.record.id, nodeId: scene, count: 1 }
+      ])
+      // F-16.7: the label chips and filters read every link at once.
+      const wry = await invoke('label:create', { name: 'Wry', kind: 'tone' })
+      await invoke('label:assign', { labelId: wry.id, nodeId: scene })
+      expect(await invoke('label:links', undefined)).toEqual([{ labelId: wry.id, nodeId: scene }])
       expect(
         (await invoke('passages:search', { query: 'harbour' })).map((hit) => [
           hit.source,

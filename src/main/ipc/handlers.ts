@@ -435,6 +435,7 @@ import {
   createLabel,
   deleteLabel,
   labelsForNode,
+  listLabelLinks,
   listLabels,
   reorderLabels,
   unassignLabel,
@@ -443,6 +444,7 @@ import {
 import {
   listNameMentions,
   markNotAMention,
+  namedInCounts,
   scanNamesFor,
   staleNameScans
 } from '../memory/nameIndexer'
@@ -4570,6 +4572,7 @@ export function registerHandlers({
     unassignLabel(manager.require().connection.orm, labelId, nodeId)
   )
   register('label:forNode', ({ nodeId }) => labelsForNode(manager.require().connection.orm, nodeId))
+  register('label:links', () => listLabelLinks(manager.require().connection.orm))
 
   register('dismissed:list', () => listDismissed(manager.require().connection.orm))
 
@@ -4611,6 +4614,8 @@ export function registerHandlers({
   register('names:forNode', ({ nodeId }) =>
     listNameMentions(manager.require().connection.orm, nodeId)
   )
+
+  register('names:byRecord', () => namedInCounts(manager.require().connection.orm))
 
   register('names:notAMention', ({ mentionId }) => {
     const db = manager.require().connection.orm

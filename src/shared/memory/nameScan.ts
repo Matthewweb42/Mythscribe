@@ -126,6 +126,17 @@ export const NameMentionView = z.object({
 })
 export type NameMentionView = z.infer<typeof NameMentionView>
 
+/**
+ * How often one scene names one record (`names:byRecord`): the sheet's *Named in* and the lists'
+ * "named in N scenes". Only certain mentions count; an ambiguous span names nobody yet.
+ */
+export const NamedInRow = z.object({
+  recordId: z.string(),
+  nodeId: z.string(),
+  count: z.number().int().positive()
+})
+export type NamedInRow = z.infer<typeof NamedInRow>
+
 /** A match before the shared-alias and sentence-start rules: where, what, and who it may be. */
 interface RawHit {
   para: number

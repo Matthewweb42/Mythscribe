@@ -21,7 +21,16 @@ import {
 export interface InlineTagOptions {
   /** The document the tokens link tags to (F-4.4); null leaves the `#` suggestion out (notes). */
   nodeId: string | null
+  /**
+   * Story memory v2 (F-16.4): tags are gone, so a token is inert. No `#` suggestion, and the
+   * token renders its stored name muted, never the tag bank's, until the switch-over turns it
+   * into plain text (F-16.15).
+   */
+  inert: boolean
 }
+
+/** The class an inert token (story memory v2) carries beside `inline-tag`. */
+export const INLINE_TAG_INERT_CLASS = 'inline-tag-inert'
 
 /** What a token stores: the tag's id and its name at insertion time (the label if the tag is deleted). */
 export interface InlineTagAttrs {
@@ -34,6 +43,8 @@ export type SuggestItem = { kind: 'tag'; tag: Tag } | { kind: 'create'; name: st
 
 /** The DOM attribute every token carries; the right-click handler and the resync pass select on it. */
 export const INLINE_TAG_SELECTOR = '[data-inline-tag]'
+/** A live token (v1): what the resync pass and the token menu act on; an inert one is left alone. */
+const LIVE_TOKEN_SELECTOR = '[data-inline-tag]:not([data-inert])'
 
 /**
  * The rows for a query (F-4.6): the bank tags whose name contains the typed text
@@ -92,7 +103,7 @@ export function resyncInlineTags(
   byId: Record<string, Tag>,
   aliases: TagAliases
 ): void {
-  for (const span of dom.querySelectorAll<HTMLElement>(INLINE_TAG_SELECTOR)) {
+  for (const span of dom.querySelectorAll<HTMLElement>(LIVE_TOKEN_SELECTOR)) {
     const tag = tokenTag(span.dataset.id ?? '', byId, aliases)
     const label = `#${tag?.name ?? span.dataset.name ?? ''}`
     if (span.textContent !== label) span.textContent = label
@@ -123,7 +134,7 @@ export const InlineTag = Node.create<InlineTagOptions>({
   marks: '',
 
   addOptions() {
-    return { nodeId: null }
+    return { nodeId: null, inert: false }
   },
 
   addAttributes() {
@@ -147,6 +158,17 @@ export const InlineTag = Node.create<InlineTagOptions>({
 
   renderHTML({ node, HTMLAttributes }) {
     const { id, name } = readAttrs(node.attrs)
+    if (this.options.inert) {
+      return [
+        'span',
+        mergeAttributes(HTMLAttributes, {
+          'data-inline-tag': '',
+          'data-inert': '',
+          class: `inline-tag ${INLINE_TAG_INERT_CLASS}`
+        }),
+        name
+      ]
+    }
     const bank = useTagStore.getState()
     const tag = tokenTag(id, bank.byId, bank.aliases)
     const attrs: Record<string, string> = { 'data-inline-tag': '', class: 'inline-tag' }
@@ -157,13 +179,14 @@ export const InlineTag = Node.create<InlineTagOptions>({
   /** Copied as plain text (F-3.13): the token reads as the `#name` it shows, never as nothing. */
   renderText({ node }) {
     const { id, name } = readAttrs(node.attrs)
+    if (this.options.inert) return name
     const bank = useTagStore.getState()
     return `#${tokenTag(id, bank.byId, bank.aliases)?.name ?? name}`
   },
 
   addProseMirrorPlugins() {
-    const { nodeId } = this.options
-    if (nodeId === null) return []
+    const { nodeId, inert } = this.options
+    if (nodeId === null || inert) return []
     const type = this.name
     return [
       Suggestion<SuggestItem, InlineTagAttrs>({

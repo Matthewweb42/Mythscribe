@@ -72,8 +72,10 @@ const pageStore = createAutosaveStore<TiptapNodeT, PageSaved>({
     useTreeStore.getState().setWordCount(owner.id, saved.wordCount)
     useGoalsStore.getState().refreshSoon()
   },
-  // F-8.3: a Research page is a document, so its unsaved typing is journalled as one; record
-  // pages have no journal kind yet (slice 3 decides).
+  // F-8.3: a Research page is a document, so its unsaved typing is journalled as one. A record's
+  // Pinned and Ideas are not journalled in P1 (decided by Claude, unconfirmed, P1 slice 3): the
+  // recovery journal knows documents and notes only, and a page saves a second after typing
+  // stops, when its sheet closes, and on close and quit.
   journal: {
     stash: (key, content) => {
       const owner = pageOwnerOf(key)

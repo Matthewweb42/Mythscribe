@@ -263,3 +263,36 @@ describe('tag range decorations (F-4.8)', () => {
     expect(TAG_RANGE_KEY.getState(editor.state)?.find()).toEqual([])
   })
 })
+
+describe('TagRange inert in story memory v2 (F-16.4, P1-D11)', () => {
+  it('keeps stored ranges in the document but draws nothing and takes no shortcut', () => {
+    editor.destroy()
+    editor = new Editor({
+      extensions: buildExtensions({
+        sceneBreak: '~~~',
+        onSave: () => {},
+        inlineTagNodeId: 'sc-1',
+        inertTags: true,
+        onTagSelection: (e) => onTagSelection(e)
+      }),
+      content: paragraphs([{ type: 'text', text: TEXT, marks: [range('t-mara')] }])
+    })
+    expect(inline()[0]?.marks).toEqual([range('t-mara')])
+    expect(runs()).toEqual([])
+    expect(editor.view.dom.querySelector(`.${TAG_RANGE_BLOCK_CLASS}`)).toBeNull()
+    editor.commands.setTextSelection({ from: 1, to: 5 })
+    const handled = !editor.view.dom.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 't',
+        code: 'KeyT',
+        keyCode: 84,
+        ctrlKey: true,
+        altKey: true,
+        bubbles: true,
+        cancelable: true
+      })
+    )
+    expect(handled).toBe(false)
+    expect(onTagSelection).not.toHaveBeenCalled()
+  })
+})

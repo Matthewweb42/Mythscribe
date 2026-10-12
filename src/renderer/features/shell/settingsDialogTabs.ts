@@ -12,6 +12,7 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { AccountSettingsTab } from '@renderer/features/account/AccountSettingsTab'
 import { AiSettingsTab } from '@renderer/features/ai/AiSettingsTab'
 import { BackupsSettingsTab } from '@renderer/features/backups/BackupsSettingsTab'
@@ -129,14 +130,24 @@ export const SETTINGS_DIALOG_TABS: SettingsDialogTabs = [
   }
 ]
 
-/** The tabs the dialog shows: all of them with a project open, only the app-wide ones without. */
+/**
+ * The tabs the dialog shows: all of them with a project open, only the app-wide ones without.
+ * F-16.6: a project on story memory v2 has no Story bible settings (its sheets are one view, with
+ * no fields, write-up style or default view), so that tab is left out there.
+ */
 export function settingsTabsFor(
   format: NovelFormat | null,
-  tabs: SettingsDialogTabs = SETTINGS_DIALOG_TABS
+  tabs: SettingsDialogTabs = SETTINGS_DIALOG_TABS,
+  memory: StoryMemoryVersion = 'v1'
 ): SettingsDialogTabs {
-  if (format !== null) return tabs
-  const app = tabs.filter((tab) => tab.scope === 'app')
-  const [first, ...rest] = app
+  const kept =
+    format === null
+      ? tabs.filter((tab) => tab.scope === 'app')
+      : memory === 'v2'
+        ? tabs.filter((tab) => tab.id !== 'storyBible')
+        : tabs
+  if (kept === tabs) return tabs
+  const [first, ...rest] = kept
   if (first === undefined) throw new Error('The Settings dialog needs at least one app-wide tab')
   return [first, ...rest]
 }

@@ -22,6 +22,7 @@ import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
+import { resetRecordStore, useRecordStore } from '@renderer/features/records/recordStore'
 import { resetReplaceStore, useReplaceStore } from '@renderer/features/search/replaceStore'
 import { resetSearchStore, useSearchStore } from '@renderer/features/search/searchStore'
 import { resetWelcomeStore, useWelcomeStore } from '@renderer/features/project/welcomeStore'
@@ -37,6 +38,7 @@ import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import {
   NO_DOCUMENT_TO_FIND_MESSAGE,
   NO_PROJECT_MESSAGE,
+  NO_TAGS_MESSAGE,
   closeProjectWithConfirm,
   runMenuAction
 } from './menuActions'
@@ -119,6 +121,7 @@ beforeEach(() => {
   resetUpdateStore()
   resetViewStore()
   resetWelcomeStore()
+  resetRecordStore()
   useProjectStore.setState({ current: null, ready: true, busy: false, recents: [] })
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
@@ -352,6 +355,21 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useFocusStore.getState().active).toBe(false)
     expect(useEntityStore.getState().creating).toBe('world')
     expect(toasts()).toEqual([])
+  })
+
+  it('in story memory v2, Insert makes a record and the tag items say there are no tags (F-16.4, F-16.6)', async () => {
+    useProjectStore.setState({ current: { ...info, storyMemory: 'v2' }, ready: true })
+    await useTreeStore.getState().load()
+    await runMenuAction('insertCharacter')
+    expect(useRecordStore.getState().creating).toBe('character')
+    expect(useEntityStore.getState().creating).toBeNull()
+    await runMenuAction('insertWorldItem')
+    expect(useRecordStore.getState().creating).toBe('world')
+    await runMenuAction('toggleTags')
+    await runMenuAction('openTags')
+    expect(useLayoutStore.getState().layout.tags.open).toBe(false)
+    expect(useLayoutStore.getState().layout.sidebar.tab).not.toBe('tags')
+    expect(toasts()).toEqual([NO_TAGS_MESSAGE, NO_TAGS_MESSAGE])
   })
 
   it('Insert › Character with no project open toasts instead (F-9.3)', async () => {

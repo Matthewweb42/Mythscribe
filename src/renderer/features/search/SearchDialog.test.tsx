@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import {
   SEARCH_MAX_RESULTS,
-  SEARCH_TYPES,
   searchTypesFor,
   type SearchRequest,
   type SearchResponse,
@@ -225,7 +224,7 @@ describe('SearchDialog (F-10.1)', () => {
     await waitFor(() => expect(requests[3]?.tagId).toBeNull())
   })
 
-  it('offers Research in a story memory v2 project and labels its hits source documents (F-16.8)', async () => {
+  it('offers Research and records in a story memory v2 project, filtered by label (F-16.6, F-16.7, F-16.8)', async () => {
     useProjectStore.setState({
       current: {
         id: 'p-2',
@@ -246,9 +245,19 @@ describe('SearchDialog (F-10.1)', () => {
         'aria-pressed',
         'true'
       )
+      // The v1 sheets give way to records, and the tag filter to the label filter.
+      expect(screen.getByRole('button', { name: 'Sheets' })).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.queryByRole('button', { name: 'Characters' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('combobox', { name: 'Filter by tag' })).not.toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: 'Filter by label' })).toBeInTheDocument()
       await userEvent.type(box(), 'waited')
       await waitFor(() => expect(requests).toHaveLength(1))
-      expect(requests[0]?.types).toEqual([...SEARCH_TYPES])
+      expect(requests[0]).toEqual({
+        query: 'waited',
+        types: ['document', 'notes', 'record', 'research'],
+        tagId: null,
+        labelId: null
+      })
       act(() =>
         useSearchStore.setState({
           status: 'done',

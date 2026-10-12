@@ -149,7 +149,14 @@ describe('searchStore (F-10.1)', () => {
     state().toggleType('document')
     state().toggleType('world')
     state().toggleType('document')
-    expect(state().types).toEqual(['document', 'notes', 'character', 'setting', 'research'])
+    expect(state().types).toEqual([
+      'document',
+      'notes',
+      'character',
+      'setting',
+      'record',
+      'research'
+    ])
     state().setTagId('t-1')
     expect(requests.slice(1).map((r) => [r.types.length, r.tagId])).toEqual([
       [4, null],

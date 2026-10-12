@@ -9,6 +9,8 @@ import { node, type NodeRow } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
 import { createEntity } from '../entity/entityStore'
+import { assignLabel, createLabel } from '../memory/labelStore'
+import { createRecord, savePage } from '../memory/recordStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { addDocumentTag } from '../tag/documentTagStore'
 import { replaceNodeMentions } from '../tag/mentionStore'
@@ -286,5 +288,71 @@ describe('searchProject (F-10.1)', () => {
       .where(eq(node.id, scene(0).id))
       .run()
     expect(search('lantern').results.map((r) => r.id)).toEqual([scene(1).id])
+  })
+})
+
+describe('searchProject in story memory v2 (F-16.6, F-16.7)', () => {
+  const at = new Date(Date.UTC(2026, 9, 12, 9, 0, 0))
+  const v2 = (
+    query: string,
+    patch: Partial<SearchRequest> = {}
+  ): ReturnType<typeof searchProject> =>
+    search(query, { types: ['document', 'notes', 'record', 'research'], ...patch })
+
+  const makeRecord = (name: string, aliases: string[] = []): string => {
+    const made = createRecord(
+      db,
+      { name, categoryId: 'character', aliases: aliases.map((text) => ({ text })), force: true },
+      at
+    )
+    if (!('record' in made)) throw new Error('blocked')
+    return made.record.id
+  }
+
+  it('finds a record by its name, a nickname, its Pinned page and its Ideas, each labelled', () => {
+    const mara = makeRecord('Mara Vell', ['Little Wren'])
+    savePage(db, mara, 'pinned', doc('Eyes: grey as the harbour.'), at)
+    savePage(db, mara, 'ideas', doc('Maybe she sings to the gulls.'), at)
+    const byName = v2('mara')
+    expect(byName.results).toEqual([
+      expect.objectContaining({
+        type: 'record',
+        id: mara,
+        title: 'Mara Vell',
+        location: 'character',
+        titleHighlights: [[0, 4]],
+        count: 1
+      })
+    ])
+    expect(v2('wren').results[0]).toMatchObject({ type: 'record', field: 'Nicknames' })
+    expect(v2('harbour').results[0]).toMatchObject({
+      type: 'record',
+      field: 'Pinned',
+      snippet: { text: 'Eyes: grey as the harbour.' }
+    })
+    expect(v2('gulls').results[0]).toMatchObject({ type: 'record', field: 'your idea' })
+    // A v1 request never names the type, so a v1 search finds no record.
+    expect(
+      search('mara', { types: ['document', 'notes', 'character', 'setting', 'world'] }).total
+    ).toBe(0)
+  })
+
+  it('filters scenes and their notes by a label, and leaves records out under it', () => {
+    makeRecord('Lantern Keeper')
+    saveDocument(db, scene(0).id, doc('The lantern swung.'))
+    saveDocument(db, scene(1).id, doc('A lantern again.'))
+    saveNotes(db, scene(1).id, doc('lantern note'))
+    const wry = createLabel(db, { name: 'Wry', kind: 'tone' }, at)
+    assignLabel(db, wry.id, scene(1).id)
+    expect(v2('lantern').results.map((r) => [r.type, r.id])).toEqual([
+      ['document', scene(0).id],
+      ['document', scene(1).id],
+      ['notes', scene(1).id],
+      ['record', expect.any(String)]
+    ])
+    expect(v2('lantern', { labelId: wry.id }).results.map((r) => [r.type, r.id])).toEqual([
+      ['document', scene(1).id],
+      ['notes', scene(1).id]
+    ])
   })
 })

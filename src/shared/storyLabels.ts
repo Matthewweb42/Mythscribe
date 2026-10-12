@@ -40,6 +40,10 @@ export const Label = z.object({
 })
 export type Label = z.infer<typeof Label>
 
+/** One label on one scene or Research document (`label:links`). */
+export const LabelLink = z.object({ labelId: z.string(), nodeId: z.string() })
+export type LabelLink = z.infer<typeof LabelLink>
+
 /** The key label names are unique by (case-insensitively, as sheet names are). */
 export function labelNameKey(name: string): string {
   return name.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase()

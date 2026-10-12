@@ -45,6 +45,12 @@ export interface EditorSchemaOptions {
   inlineTagNodeId?: string
   /** Runs on Mod+Alt+T over a selection in a manuscript document (F-4.8): open the range tag picker. */
   onTagSelection?: (editor: Editor) => void
+  /**
+   * Story memory v2 (F-16.4): the inline tag token and the tag range mark stay in the schema, so
+   * stored documents load unchanged, but they are inert: no `#` suggestion, no bank colours, no
+   * range highlight or shortcut. The schema itself is the same either way.
+   */
+  inertTags?: boolean
 }
 
 export interface SaveShortcutOptions {
@@ -275,19 +281,20 @@ export function buildExtensions({
   onSave,
   onEscape,
   inlineTagNodeId,
-  onTagSelection
+  onTagSelection,
+  inertTags = false
 }: EditorSchemaOptions): Extensions {
   const extensions: Extensions = coreExtensions(OriginParagraph, sceneBreak, onSave)
   if (inlineTagNodeId !== undefined) {
     extensions.push(
-      InlineTag.configure({ nodeId: inlineTagNodeId }),
+      InlineTag.configure({ nodeId: inlineTagNodeId, inert: inertTags }),
       AiOrigin,
       GhostText,
       RewriteTarget,
       Typewriter,
       NameCheck,
       FindReplace,
-      TagRange.configure({ onTagSelection: onTagSelection ?? null }),
+      TagRange.configure({ onTagSelection: onTagSelection ?? null, inert: inertTags }),
       TrackedChanges
     )
   }

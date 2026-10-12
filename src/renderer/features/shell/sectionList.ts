@@ -15,6 +15,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { ALWAYS_SHOWN_CATEGORIES, categoryOf, type StoryCategory } from '@shared/categories'
 import type { NovelFormat } from '@shared/ipc/contract'
 import type { SidebarToolId } from '@shared/sidebarTabs'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { THREAD_KIND } from '@shared/threads'
 import { ChangesTab } from '@renderer/features/changes/ChangesTab'
 import { useChangesStore } from '@renderer/features/changes/changesStore'
@@ -30,6 +31,8 @@ import { ManuscriptTab } from '@renderer/features/manuscript/ManuscriptTab'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { OutlineTab } from '@renderer/features/outline/OutlineTab'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
+import { RecordTab } from '@renderer/features/records/RecordTab'
+import { useRecordStore } from '@renderer/features/records/recordStore'
 import { ResearchTab } from '@renderer/features/research/ResearchTab'
 import { TagsTab } from '@renderer/features/tags/TagsTab'
 import { useTagStore } from '@renderer/features/tags/tagStore'
@@ -52,6 +55,9 @@ import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
  * (its categories, then the tags as its Index: a record's tag beside its sheet, the labels apart)
  * | Threads | Outline | Timeline | Library | To do | Edits | Changes. The ids are unchanged
  * (`tags` is the Index, `thread` is Threads), so a stored section still opens.
+ *
+ * F-16.6 (story memory v2, decision P1-D8): Manuscript | the categories as record lists |
+ * Research | Outline | Edits. A stored section v2 does not list opens on Manuscript.
  */
 export type SectionGroup = 'manuscript' | 'bible' | 'tools'
 
@@ -82,12 +88,8 @@ export interface SectionCounts {
   sheets: Readonly<Record<string, number>>
   /** F-16.8: the documents of the Research section (story memory v2; 0 in v1, which has none). */
   research: number
-}
-
-/** What the open project's story memory adds to the list. */
-export interface SectionOptions {
-  /** F-16.8: story memory v2 lists Research after the categories; v1's list is as it was. */
-  research: boolean
+  /** F-16.6: records per category id (story memory v2; empty in v1, which has none). */
+  records: Readonly<Record<string, number>>
 }
 
 interface ToolDef {
@@ -195,6 +197,57 @@ function toolSection(tool: ToolDef, counts: SectionCounts, group: SectionGroup):
   }
 }
 
+/**
+ * F-16.6 (story memory v2): a category as a record list. The thread category is a plain list
+ * too until P2b brings threads back as claims.
+ */
+function recordSection(category: StoryCategory, records: number): SidebarSection {
+  return {
+    id: category.id,
+    label: category.name,
+    icon: CATEGORY_ICON[category.icon],
+    group: 'bible',
+    count: records,
+    used: ALWAYS_SHOWN_CATEGORIES.includes(category.id) || records > 0,
+    render: () => createElement(RecordTab, { categoryId: category.id })
+  }
+}
+
+/** The categories plus any category a sheet or record names that the list does not carry. */
+function withStrays(
+  categories: readonly StoryCategory[],
+  held: Readonly<Record<string, number>>
+): StoryCategory[] {
+  const listed = new Set(categories.map((category) => category.id))
+  const strays = Object.keys(held)
+    .filter((kind) => !listed.has(kind))
+    .map((kind) => categoryOf(kind, categories))
+  return [...categories, ...strays]
+}
+
+/**
+ * Story memory v2's list (F-16.6, decision P1-D8): Manuscript, the categories as record lists,
+ * Research, Outline and Edits. Index, Threads, Timeline, Library, To do and Changes are not in
+ * it; the This scene | Book panel and the Book views bring their content back (P1 slice 4, P2b–P4).
+ */
+const V2_TOOLS: readonly SidebarToolId[] = ['outline', 'edits']
+
+function buildV2Sections(
+  categories: readonly StoryCategory[],
+  counts: SectionCounts
+): SidebarSection[] {
+  return [
+    toolSection(MANUSCRIPT, counts, 'manuscript'),
+    ...withStrays(categories, counts.records).map((category) =>
+      recordSection(category, counts.records[category.id] ?? 0)
+    ),
+    toolSection(RESEARCH, counts, 'tools'),
+    ...TOOLS.filter((tool) => V2_TOOLS.includes(tool.id)).map((tool) =>
+      toolSection(tool, counts, 'tools')
+    )
+  ]
+}
+
 function categorySection(
   category: StoryCategory,
   sheets: number,
@@ -219,19 +272,16 @@ function categorySection(
  * Every section in picker order, used or not. A category a sheet names that the list does not
  * carry (never expected) still gets its section, so no sheet is ever out of reach. F-9.15: the
  * thread category is Threads, the first of the tools, and the tags close the story bible as its
- * Index. F-16.8: in story memory v2 Research leads the tools, right after the story bible
- * (slice 3 finishes the v2 list). Pure.
+ * Index. Story memory v2 has its own list (`buildV2Sections`); v1's is as it was (pinned by a
+ * snapshot in the tests). Pure.
  */
 export function buildSections(
   categories: readonly StoryCategory[],
   counts: SectionCounts,
-  options: SectionOptions = { research: false }
+  memory: StoryMemoryVersion
 ): SidebarSection[] {
-  const listed = new Set(categories.map((category) => category.id))
-  const strays = Object.keys(counts.sheets)
-    .filter((kind) => !listed.has(kind))
-    .map((kind) => categoryOf(kind, categories))
-  const all = [...categories, ...strays]
+  if (memory === 'v2') return buildV2Sections(categories, counts)
+  const all = withStrays(categories, counts.sheets)
   const threads = all.find((category) => category.id === THREAD_KIND)
   return [
     toolSection(MANUSCRIPT, counts, 'manuscript'),
@@ -239,7 +289,6 @@ export function buildSections(
       .filter((category) => category !== threads)
       .map((category) => categorySection(category, counts.sheets[category.id] ?? 0, 'bible')),
     toolSection(INDEX, counts, 'bible'),
-    ...(options.research ? [toolSection(RESEARCH, counts, 'tools')] : []),
     ...(threads === undefined
       ? []
       : [categorySection(threads, counts.sheets[threads.id] ?? 0, 'tools')]),
@@ -290,9 +339,19 @@ export function useSidebarSections(): SidebarSection[] {
       return counts
     })
   )
+  const records = useRecordStore(
+    useShallow((s) => {
+      const counts: Record<string, number> = {}
+      for (const id of s.ids) {
+        const categoryId = s.byId[id]?.categoryId
+        if (categoryId !== undefined) counts[categoryId] = (counts[categoryId] ?? 0) + 1
+      }
+      return counts
+    })
+  )
   return buildSections(
     categories,
-    { documents, tags, timeline, edits, library, changes, todo, sheets, research },
-    { research: memory === 'v2' }
+    { documents, tags, timeline, edits, library, changes, todo, sheets, research, records },
+    memory
   )
 }

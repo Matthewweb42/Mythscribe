@@ -15,18 +15,29 @@ import {
 } from './search'
 
 describe('search vocabulary (F-10.1)', () => {
-  it('lists the types with a chip label each; Research is offered only in story memory v2', () => {
-    expect(SEARCH_TYPES).toEqual(['document', 'notes', 'character', 'setting', 'world', 'research'])
+  it('lists the types with a chip label each; records and Research are offered only in v2', () => {
+    expect(SEARCH_TYPES).toEqual([
+      'document',
+      'notes',
+      'character',
+      'setting',
+      'world',
+      'record',
+      'research'
+    ])
     expect(SEARCH_TYPES.map((type) => SEARCH_TYPE_LABEL[type])).toEqual([
       'Documents',
       'Notes',
       'Characters',
       'Settings',
       'World',
+      'Sheets',
       'Source documents'
     ])
+    // v1 is exactly as it was; v2 searches records in place of the v1 sheets (F-16.6).
     expect(searchTypesFor('v1')).toEqual(['document', 'notes', 'character', 'setting', 'world'])
-    expect(searchTypesFor('v2')).toEqual(SEARCH_TYPES)
+    expect(searchTypesFor('v2')).toEqual(['document', 'notes', 'record', 'research'])
+    expect(SEARCH_RESULT_KIND.record).toBeNull()
     // F-16.8: a Research hit says it is a source document.
     expect(SEARCH_RESULT_KIND.research).toBe('Source document')
     expect(SEARCH_RESULT_KIND.notes).toBe('Notes')
@@ -42,6 +53,15 @@ describe('search vocabulary (F-10.1)', () => {
     expect(SearchRequest.safeParse({ query: 'ab', types: ['folder'], tagId: null }).success).toBe(
       false
     )
+    // F-16.7: v2's label filter is optional, so a v1 request parses exactly as before.
+    expect(SearchRequest.parse({ query: 'ab', types: [], tagId: null })).toEqual({
+      query: 'ab',
+      types: [],
+      tagId: null
+    })
+    expect(
+      SearchRequest.parse({ query: 'ab', types: ['record'], tagId: null, labelId: 'l-1' }).labelId
+    ).toBe('l-1')
   })
 })
 

@@ -43,3 +43,15 @@ export function emptySceneDetails(): SceneDetails {
     alsoHere: []
   }
 }
+
+/**
+ * A story year as the author types it: "1814" → 1814, "-40" → -40, "" → null (no year);
+ * anything else, or a year out of range, → undefined, which the field refuses.
+ */
+export function parseStoryYear(text: string): number | null | undefined {
+  const trimmed = text.trim()
+  if (trimmed === '') return null
+  if (!/^-?\d+$/.test(trimmed)) return undefined
+  const year = Number(trimmed)
+  return year >= STORY_YEAR_MIN && year <= STORY_YEAR_MAX ? year : undefined
+}

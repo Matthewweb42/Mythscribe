@@ -11,6 +11,7 @@ import { ThreadsTab } from '@renderer/features/threads/ThreadsTab'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetLayoutStore, useLayoutStore } from './layoutStore'
 import { SidebarSections } from './SidebarSections'
+import { RecordTab } from '@renderer/features/records/RecordTab'
 import { ResearchTab } from '@renderer/features/research/ResearchTab'
 import { buildSections, type SidebarSection } from './sectionList'
 
@@ -193,29 +194,35 @@ describe('buildSections (F-9.11)', () => {
     changes: 0,
     todo: 0,
     sheets: {},
-    research: 0
+    research: 0,
+    records: {}
   }
   const used = (built: SidebarSection[]): string[] => built.filter((s) => s.used).map((s) => s.id)
 
   it('always uses Manuscript, Characters, Places, the Index, and To do; the rest once they hold something', () => {
-    expect(used(buildSections(BUILTIN_CATEGORIES, counts))).toEqual([
+    expect(used(buildSections(BUILTIN_CATEGORIES, counts, 'v1'))).toEqual([
       'manuscript',
       'character',
       'setting',
       'tags',
       'todo'
     ])
-    const busy = buildSections(BUILTIN_CATEGORIES, {
-      documents: 4,
-      tags: 2,
-      timeline: 1,
-      edits: 1,
-      library: 3,
-      changes: 2,
-      todo: 3,
-      sheets: { magic: 2, world: 1 },
-      research: 0
-    })
+    const busy = buildSections(
+      BUILTIN_CATEGORIES,
+      {
+        documents: 4,
+        tags: 2,
+        timeline: 1,
+        edits: 1,
+        library: 3,
+        changes: 2,
+        todo: 3,
+        sheets: { magic: 2, world: 1 },
+        research: 0,
+        records: {}
+      },
+      'v1'
+    )
     expect(used(busy)).toEqual([
       'manuscript',
       'character',
@@ -240,10 +247,11 @@ describe('buildSections (F-9.11)', () => {
 
   it('lists a project category after the library, and a stray kind a sheet names', () => {
     const ships = categoryFromInput('c-ships', { name: 'Ships', fields: [] }, 'author')
-    const built = buildSections([...BUILTIN_CATEGORIES, ships], {
-      ...counts,
-      sheets: { 'c-ships': 1, 'c-gone': 1 }
-    })
+    const built = buildSections(
+      [...BUILTIN_CATEGORIES, ships],
+      { ...counts, sheets: { 'c-ships': 1, 'c-gone': 1 } },
+      'v1'
+    )
     const bible = built.filter((s) => s.group === 'bible').map((s) => s.label)
     expect(bible.slice(-3)).toEqual(['Ships', 'c-gone', 'Index'])
     expect(used(built)).toEqual([
@@ -258,9 +266,9 @@ describe('buildSections (F-9.11)', () => {
   })
 
   it('shows Threads first of the tools once it has a thread, through the Threads section (F-9.14, F-9.15)', () => {
-    const quiet = buildSections(ALL_BUILTIN_CATEGORIES, counts)
+    const quiet = buildSections(ALL_BUILTIN_CATEGORIES, counts, 'v1')
     expect(quiet.find((s) => s.id === 'thread')).toMatchObject({ label: 'Threads', used: false })
-    const built = buildSections(ALL_BUILTIN_CATEGORIES, { ...counts, sheets: { thread: 2 } })
+    const built = buildSections(ALL_BUILTIN_CATEGORIES, { ...counts, sheets: { thread: 2 } }, 'v1')
     const threads = built.find((s) => s.id === 'thread')
     expect(threads).toMatchObject({ used: true, count: 2, group: 'tools' })
     const tools = built.filter((s) => s.group === 'tools').map((s) => s.id)
@@ -270,7 +278,7 @@ describe('buildSections (F-9.11)', () => {
   })
 
   it('closes the story bible with the tags as its Index (F-9.15)', () => {
-    const built = buildSections(ALL_BUILTIN_CATEGORIES, counts)
+    const built = buildSections(ALL_BUILTIN_CATEGORIES, counts, 'v1')
     const bible = built.filter((s) => s.group === 'bible')
     expect(bible.at(-1)).toMatchObject({ id: 'tags', label: 'Index', used: true })
     expect(bible.map((s) => s.id)).not.toContain('thread')
@@ -282,21 +290,57 @@ describe('buildSections (F-9.11)', () => {
     )
   })
 
-  it('lists Research only in story memory v2, first of the tools and always shown (F-16.8)', () => {
-    const v1 = buildSections(ALL_BUILTIN_CATEGORIES, { ...counts, research: 3 })
-    expect(v1.map((s) => s.id)).not.toContain('research')
-    expect(v1.map((s) => [s.id, s.group, s.used])).toEqual(
-      buildSections(ALL_BUILTIN_CATEGORIES, counts).map((s) => [s.id, s.group, s.used])
+  it('pins the v1 list: story memory v2 never changes it (P1 §0)', () => {
+    const busy = { ...counts, sheets: { thread: 1, magic: 2 }, research: 3, records: { lore: 4 } }
+    expect(
+      buildSections(ALL_BUILTIN_CATEGORIES, busy, 'v1').map((s) => [
+        s.id,
+        s.label,
+        s.group,
+        s.count,
+        s.used
+      ])
+    ).toMatchSnapshot()
+  })
+
+  it('lists story memory v2’s sections: Manuscript, record lists, Research, Outline, Edits (F-16.6)', () => {
+    const ships = categoryFromInput('c-ships', { name: 'Ships', fields: [] }, 'author')
+    const v2 = buildSections(
+      [...ALL_BUILTIN_CATEGORIES, ships],
+      { ...counts, research: 3, edits: 1, records: { character: 2, thread: 1, 'c-gone': 1 } },
+      'v2'
     )
-    const v2 = buildSections(ALL_BUILTIN_CATEGORIES, { ...counts, research: 3 }, { research: true })
-    const tools = v2.filter((s) => s.group === 'tools').map((s) => s.id)
-    expect(tools[0]).toBe('research')
-    expect(v2.find((s) => s.id === 'research')).toMatchObject({
-      label: 'Research',
-      used: true,
-      count: 3
-    })
-    const panel = v2.find((s) => s.id === 'research')?.render('novel')
-    expect(isValidElement(panel) ? panel.type : null).toBe(ResearchTab)
+    const ids = v2.map((s) => s.id)
+    expect(ids[0]).toBe('manuscript')
+    expect(ids.slice(-3)).toEqual(['research', 'outline', 'edits'])
+    for (const gone of ['tags', 'timeline', 'library', 'todo', 'changes']) {
+      expect(ids).not.toContain(gone)
+    }
+    // Every category is a record list in the story bible, Threads included, then the strays.
+    const bible = v2.filter((s) => s.group === 'bible')
+    expect(bible.map((s) => s.id)).toEqual([
+      ...ALL_BUILTIN_CATEGORIES.map((c) => c.id),
+      'c-ships',
+      'c-gone'
+    ])
+    expect(v2.find((s) => s.id === 'character')).toMatchObject({ count: 2, used: true })
+    expect(v2.find((s) => s.id === 'thread')).toMatchObject({ count: 1, used: true })
+    expect(v2.find((s) => s.id === 'magic')).toMatchObject({ count: 0, used: false })
+    const panel = v2.find((s) => s.id === 'thread')?.render('novel')
+    expect(isValidElement(panel) ? panel.type : null).toBe(RecordTab)
+    expect(isValidElement(panel) ? panel.props : null).toEqual({ categoryId: 'thread' })
+    const research = v2.find((s) => s.id === 'research')
+    expect(research).toMatchObject({ label: 'Research', used: true, count: 3, group: 'tools' })
+    const page = research?.render('novel')
+    expect(isValidElement(page) ? page.type : null).toBe(ResearchTab)
+    expect(used(v2)).toEqual([
+      'manuscript',
+      'character',
+      'setting',
+      'thread',
+      'c-gone',
+      'research',
+      'edits'
+    ])
   })
 })

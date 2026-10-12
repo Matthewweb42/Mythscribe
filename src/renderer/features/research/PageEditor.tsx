@@ -18,6 +18,11 @@ export interface PageEditorProps {
   label: string
   /** What an empty page says. */
   placeholder: string
+  /**
+   * A page inside a longer view (a sheet's Pinned and Ideas, F-16.6): it grows with its text and
+   * scrolls with the view, instead of filling the pane and scrolling on its own.
+   */
+  inline?: boolean
 }
 
 /**
@@ -27,7 +32,12 @@ export interface PageEditorProps {
  * so a paragraph can be marked Not canon and carries its AI marks until the author edits it. The
  * toolbar holds only the Not canon toggle; the StarterKit shortcuts apply, and Ctrl+S saves.
  */
-export function PageEditor({ owner, label, placeholder }: PageEditorProps): React.JSX.Element {
+export function PageEditor({
+  owner,
+  label,
+  placeholder,
+  inline = false
+}: PageEditorProps): React.JSX.Element {
   const key = pageKey(owner)
   const content = usePageStore((s) => s.docs[key]?.content ?? null)
   const load = usePageStore((s) => s.load)
@@ -45,6 +55,7 @@ export function PageEditor({ owner, label, placeholder }: PageEditorProps): Reac
       content={content}
       label={label}
       placeholder={placeholder}
+      inline={inline}
     />
   )
 }
@@ -57,12 +68,14 @@ function PageInstance({
   pageKey: key,
   content,
   label,
-  placeholder
+  placeholder,
+  inline
 }: {
   pageKey: string
   content: TiptapNodeT | null
   label: string
   placeholder: string
+  inline: boolean
 }): React.JSX.Element {
   const edit = usePageStore((s) => s.edit)
   const extensions = useMemo(
@@ -87,7 +100,7 @@ function PageInstance({
       editable: ready,
       editorProps: {
         attributes: {
-          class: 'ms-editor ms-page',
+          class: inline ? 'ms-editor ms-page ms-page-inline' : 'ms-editor ms-page',
           role: 'textbox',
           'aria-multiline': 'true',
           'aria-label': label
@@ -106,10 +119,10 @@ function PageInstance({
   }, [editor, editable])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className={inline ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'}>
       <div
         role="toolbar"
-        aria-label="Page"
+        aria-label={inline ? `${label} page` : 'Page'}
         className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1 text-xs"
       >
         <button
@@ -124,11 +137,17 @@ function PageInstance({
           Not canon
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-6 py-4 pl-24">
-          <EditorContent editor={editor} className="flex min-h-0 flex-1 flex-col" />
+      {inline ? (
+        <div className="py-2 pr-3 pl-20">
+          <EditorContent editor={editor} className="flex flex-col" />
         </div>
-      </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-3xl px-6 py-4 pl-24">
+            <EditorContent editor={editor} className="flex min-h-0 flex-1 flex-col" />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

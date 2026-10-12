@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { X } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import {
@@ -7,6 +7,7 @@ import {
   type SettingsDialogTabId,
   type SettingsDialogTabs
 } from '@renderer/features/shell/settingsDialogTabs'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 
 interface SettingsDialogProps {
   /** The open project's format, or null on the welcome screen (only app-wide tabs then). */
@@ -35,8 +36,14 @@ export function SettingsDialog({
   format,
   onClose,
   initialTab = null,
-  tabs = settingsTabsFor(format)
+  tabs: given
 }: SettingsDialogProps): React.JSX.Element {
+  // F-16.6: story memory v2 has no Story bible tab.
+  const memory = useStoryMemory()
+  const tabs = useMemo(
+    () => given ?? settingsTabsFor(format, undefined, memory),
+    [given, format, memory]
+  )
   const titleId = useId()
   const panelId = useId()
   const openOn =

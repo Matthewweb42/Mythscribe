@@ -17,7 +17,7 @@ import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { SettingsDialog } from './SettingsDialog'
 import { resetViewStore } from './viewStore'
-import type { SettingsDialogTab } from './settingsDialogTabs'
+import { SETTINGS_DIALOG_TABS, settingsTabsFor, type SettingsDialogTab } from './settingsDialogTabs'
 
 /** Two fake tabs with the real ids, so the dialog's tab handling is driven without the real panels. */
 const tabs: readonly [SettingsDialogTab, ...SettingsDialogTab[]] = [
@@ -198,5 +198,19 @@ describe('SettingsDialog (F-7.5)', () => {
     expect(panel()).toHaveTextContent('formatting here')
     await userEvent.keyboard('{End}')
     expect(panel()).toHaveTextContent('keys here')
+  })
+})
+
+describe('settingsTabsFor (F-7.5, F-16.6)', () => {
+  it('keeps every tab for a v1 project, drops Story bible in story memory v2, and only app tabs with none', () => {
+    const ids = (tabs: readonly SettingsDialogTab[]): string[] => tabs.map((tab) => tab.id)
+    expect(settingsTabsFor('novel')).toBe(SETTINGS_DIALOG_TABS)
+    expect(ids(settingsTabsFor('novel', SETTINGS_DIALOG_TABS, 'v1'))).toContain('storyBible')
+    const v2 = ids(settingsTabsFor('novel', SETTINGS_DIALOG_TABS, 'v2'))
+    expect(v2).not.toContain('storyBible')
+    expect(v2).toEqual(ids(SETTINGS_DIALOG_TABS).filter((id) => id !== 'storyBible'))
+    expect(
+      settingsTabsFor(null, SETTINGS_DIALOG_TABS, 'v2').every((tab) => tab.scope === 'app')
+    ).toBe(true)
   })
 })

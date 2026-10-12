@@ -15,6 +15,7 @@ import {
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { APP_SHORTCUTS, formatShortcut } from '@renderer/features/shell/shortcuts'
+import { useLabelStore } from '@renderer/features/labels/labelStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { describeError } from '@renderer/lib/errors'
 import { useReplaceStore } from './replaceStore'
@@ -103,9 +104,14 @@ function SearchDialogBody(): React.JSX.Element {
   const toggleType = useSearchStore((s) => s.toggleType)
   const setTagId = useSearchStore((s) => s.setTagId)
   const tagIds = useTagStore((s) => s.ids)
-  // F-16.8: a v2 project's search offers its Research documents too.
-  const offered = searchTypesFor(useStoryMemory())
+  // F-16.8: a v2 project's search offers its Research documents too, and (F-16.6) its records
+  // in place of the v1 sheets; (F-16.7) its filter is by label, not by tag.
+  const memory = useStoryMemory()
+  const offered = searchTypesFor(memory)
   const tagsById = useTagStore((s) => s.byId)
+  const labelId = useSearchStore((s) => s.labelId)
+  const setLabelId = useSearchStore((s) => s.setLabelId)
+  const labels = useLabelStore((s) => s.labels)
   // The active row belongs to the answer it was chosen in: a new answer starts at its first row.
   const [active, setActiveRow] = useState({ response, index: 0 })
 
@@ -212,19 +218,37 @@ function SearchDialogBody(): React.JSX.Element {
               </button>
             ))}
           </div>
-          <select
-            aria-label="Filter by tag"
-            value={tagId ?? ''}
-            onChange={(event) => setTagId(event.target.value === '' ? null : event.target.value)}
-            className="ml-auto max-w-[40%] rounded-md border border-line bg-surface px-2 py-0.5 text-xs text-fg"
-          >
-            <option value="">Any tag</option>
-            {tagIds.map((id) => (
-              <option key={id} value={id}>
-                {tagsById[id]?.name ?? id}
-              </option>
-            ))}
-          </select>
+          {memory === 'v2' ? (
+            <select
+              aria-label="Filter by label"
+              value={labelId ?? ''}
+              onChange={(event) =>
+                setLabelId(event.target.value === '' ? null : event.target.value)
+              }
+              className="ml-auto max-w-[40%] rounded-md border border-line bg-surface px-2 py-0.5 text-xs text-fg"
+            >
+              <option value="">Any label</option>
+              {labels.map((label) => (
+                <option key={label.id} value={label.id}>
+                  {label.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <select
+              aria-label="Filter by tag"
+              value={tagId ?? ''}
+              onChange={(event) => setTagId(event.target.value === '' ? null : event.target.value)}
+              className="ml-auto max-w-[40%] rounded-md border border-line bg-surface px-2 py-0.5 text-xs text-fg"
+            >
+              <option value="">Any tag</option>
+              {tagIds.map((id) => (
+                <option key={id} value={id}>
+                  {tagsById[id]?.name ?? id}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-line">

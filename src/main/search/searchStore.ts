@@ -2,8 +2,10 @@ import { eq } from 'drizzle-orm'
 import { docToText } from '@shared/docText'
 import { categoryOf, type StoryCategory } from '@shared/categories'
 import type { Entity } from '@shared/ipc/contract'
+import type { StoryRecordSummary } from '@shared/memory/records'
 import {
   EMPTY_SEARCH_RESPONSE,
+  RECORD_SEARCH_FIELD,
   SEARCH_MAX_RESULTS,
   buildSnippet,
   findOccurrences,
@@ -15,10 +17,12 @@ import {
   type SearchResponse,
   type SearchResult
 } from '@shared/search'
-import { documentTag, tagMention, type NodeRow } from '../db/schema'
+import { documentTag, record, tagMention, type NodeRow } from '../db/schema'
 import { parseStoredTiptap } from '../document/documentStore'
 import { listCategories } from '../entity/categoryStore'
 import { listEntities } from '../entity/entityStore'
+import { nodesOfLabel } from '../memory/labelStore'
+import { listRecords } from '../memory/recordStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { researchSubtree } from '../research/researchTree'
 
@@ -34,7 +38,13 @@ interface CachedText {
   text: string
 }
 
-/** Keyed `<column>:<node id>`. Belongs to the open project: `clearSearchCache` on every project change. */
+/** A stored Tiptap column: a node's text or notes, or (F-16.6) a record's Pinned or Ideas page. */
+type TextColumn = 'content' | 'notes' | 'pinned' | 'ideas'
+
+/**
+ * Keyed `<column>:<node or record id>`. Belongs to the open project: `clearSearchCache` on every
+ * project change.
+ */
 const textCache = new Map<string, CachedText>()
 
 /** Drops every cached text (the project closed or another one opened). */
@@ -51,7 +61,7 @@ export function searchCacheSize(): number {
  * The searchable text of a stored Tiptap column. A null column and one that no longer parses
  * both read as no text: one corrupt row must not fail every search.
  */
-function storedText(column: 'content' | 'notes', id: string, raw: string | null): string {
+function storedText(column: TextColumn, id: string, raw: string | null): string {
   if (raw === null) return ''
   const key = `${column}:${id}`
   const cached = textCache.get(key)
@@ -61,7 +71,7 @@ function storedText(column: 'content' | 'notes', id: string, raw: string | null)
   return text
 }
 
-function readText(column: 'content' | 'notes', id: string, raw: string): string {
+function readText(column: TextColumn, id: string, raw: string): string {
   try {
     return searchableText(docToText(parseStoredTiptap(raw, id, column)))
   } catch {
@@ -130,14 +140,17 @@ function nodeIdsWithTag(db: TreeDb, tagId: string): Set<string> {
 /** A matching source before its snippet is cut: only the rows under the cap pay for one. */
 type Hit = () => SearchResult
 
-/** One text of an entity: a template field (with its label) or the blank page (no label). */
-interface EntityText {
+/**
+ * One text of a sheet: an entity's template field (with its label) or its blank page (no label),
+ * or a record's nicknames, Pinned or Ideas (F-16.6).
+ */
+interface SheetText {
   field: string | null
   text: string
 }
 
-function entityTexts(entity: Entity, category: StoryCategory): EntityText[] {
-  const texts: EntityText[] = []
+function entityTexts(entity: Entity, category: StoryCategory): SheetText[] {
+  const texts: SheetText[] = []
   for (const def of category.fields) {
     const value = entity.fields[def.id]
     if (value !== undefined) texts.push({ field: def.label, text: searchableText(value) })
@@ -179,10 +192,19 @@ function entityType(kind: string): 'character' | 'setting' | 'world' {
   return kind === 'character' || kind === 'setting' ? kind : 'world'
 }
 
-function entityHit(entity: Entity, category: StoryCategory, query: string): Hit | null {
-  const title = searchableText(entity.name)
+/** A sheet as one result: its name as the title, its texts in order, where it lives. */
+interface SheetSource {
+  type: 'character' | 'setting' | 'world' | 'record'
+  id: string
+  name: string
+  location: string
+  texts: readonly SheetText[]
+}
+
+function sheetHit(sheet: SheetSource, query: string): Hit | null {
+  const title = searchableText(sheet.name)
   const titleHighlights = findOccurrences(title, query)
-  const texts = entityTexts(entity, category).map((entry) => ({
+  const texts = sheet.texts.map((entry) => ({
     ...entry,
     occurrences: findOccurrences(entry.text, query)
   }))
@@ -192,10 +214,10 @@ function entityHit(entity: Entity, category: StoryCategory, query: string): Hit 
   const matched = texts.find((entry) => entry.occurrences.length > 0)
   const shown = matched ?? texts[0]
   return () => ({
-    type: entityType(entity.kind),
-    id: entity.id,
+    type: sheet.type,
+    id: sheet.id,
     title,
-    location: category.noun,
+    location: sheet.location,
     field: matched?.field ?? null,
     snippet: buildSnippet(shown?.text ?? '', shown?.occurrences ?? []),
     titleHighlights,
@@ -203,12 +225,67 @@ function entityHit(entity: Entity, category: StoryCategory, query: string): Hit 
   })
 }
 
+function entityHit(entity: Entity, category: StoryCategory, query: string): Hit | null {
+  return sheetHit(
+    {
+      type: entityType(entity.kind),
+      id: entity.id,
+      name: entity.name,
+      location: category.noun,
+      texts: entityTexts(entity, category)
+    },
+    query
+  )
+}
+
+/** A record's stored pages, as `record` holds them. */
+interface RecordPages {
+  pinned: string | null
+  ideas: string | null
+}
+
+/**
+ * F-16.6: a record found by its name, a nickname (field "Nicknames"), its Pinned page ("Pinned")
+ * or its Ideas ("your idea", never taken as true).
+ */
+function recordHit(
+  summary: StoryRecordSummary,
+  pages: RecordPages | undefined,
+  category: StoryCategory,
+  query: string
+): Hit | null {
+  const nicknames = summary.aliases.filter((entry) => !entry.isMain).map((entry) => entry.text)
+  const texts: SheetText[] = [
+    { field: RECORD_SEARCH_FIELD.aliases, text: searchableText(nicknames.join(', ')) },
+    {
+      field: RECORD_SEARCH_FIELD.pinned,
+      text: storedText('pinned', summary.id, pages?.pinned ?? null)
+    },
+    {
+      field: RECORD_SEARCH_FIELD.ideas,
+      text: storedText('ideas', summary.id, pages?.ideas ?? null)
+    }
+  ]
+  return sheetHit(
+    {
+      type: 'record',
+      id: summary.id,
+      name: summary.name,
+      location: category.noun,
+      texts: texts.filter((entry) => entry.text !== '')
+    },
+    query
+  )
+}
+
 /**
  * Searches the open project (F-10.1): documents (title and text) in tree order, then notes in
- * tree order, then entities (name, template fields, page) in story-bible order, then (F-16.8,
- * story memory v2) the Research section's documents as source documents; one result per
- * matching source, the first `SEARCH_MAX_RESULTS` of them. A query shorter than the minimum, and
- * a request with no type, answer nothing rather than failing.
+ * tree order, then entities (name, template fields, page) in story-bible order, then (story
+ * memory v2) records by name (F-16.6: names, Pinned, Ideas) and the Research section's documents
+ * as source documents (F-16.8); one result per matching source, the first `SEARCH_MAX_RESULTS`
+ * of them. A label filter (F-16.7) keeps the scenes and Research documents carrying the label and
+ * their notes; sheets and records carry no labels, so it leaves them out. A query shorter than
+ * the minimum, and a request with no type, answer nothing rather than failing.
  */
 export function searchProject(db: TreeDb, request: SearchRequest): SearchResponse {
   const query = normalizeQuery(request.query)
@@ -225,9 +302,16 @@ export function searchProject(db: TreeDb, request: SearchRequest): SearchRespons
   // F-16.8: Research is no part of the book: its documents are source documents, not documents.
   const research = researchSubtree(rows)
   const locationOf = (row: NodeRow): string => nodeLocation(byId, row)
+  const labelled =
+    request.labelId === null || request.labelId === undefined
+      ? null
+      : new Set(nodesOfLabel(db, request.labelId))
+  const hasLabel = (row: NodeRow): boolean => labelled === null || labelled.has(row.id)
   if (types.has('document') || types.has('notes')) {
     const tagged = request.tagId === null ? null : nodeIdsWithTag(db, request.tagId)
-    const nodes = nodesInTreeOrder(rows).filter((row) => tagged === null || tagged.has(row.id))
+    const nodes = nodesInTreeOrder(rows).filter(
+      (row) => (tagged === null || tagged.has(row.id)) && hasLabel(row)
+    )
     if (types.has('document')) {
       for (const row of nodes) {
         if (row.kind !== 'document' || research.has(row.id)) continue
@@ -244,7 +328,8 @@ export function searchProject(db: TreeDb, request: SearchRequest): SearchRespons
     }
   }
 
-  if (types.has('character') || types.has('setting') || types.has('world')) {
+  const sheets = labelled === null
+  if (sheets && (types.has('character') || types.has('setting') || types.has('world'))) {
     const categories = listCategories(db)
     for (const entity of listEntities(db)) {
       if (!types.has(entityType(entity.kind))) continue
@@ -253,10 +338,27 @@ export function searchProject(db: TreeDb, request: SearchRequest): SearchRespons
     }
   }
 
+  // F-16.6: records carry no tags or labels, so either filter finds none of them.
+  if (sheets && types.has('record') && request.tagId === null) {
+    const categories = listCategories(db)
+    const pages = new Map(
+      db
+        .select({ id: record.id, pinned: record.pinned, ideas: record.ideas })
+        .from(record)
+        .all()
+        .map((row) => [row.id, row])
+    )
+    for (const summary of listRecords(db)) {
+      add(
+        recordHit(summary, pages.get(summary.id), categoryOf(summary.categoryId, categories), query)
+      )
+    }
+  }
+
   // Research documents carry no tags, so a tag filter finds none of them.
   if (types.has('research') && request.tagId === null && research.size > 0) {
     for (const row of nodesInTreeOrder(rows)) {
-      if (row.kind !== 'document' || !research.has(row.id)) continue
+      if (row.kind !== 'document' || !research.has(row.id) || !hasLabel(row)) continue
       const text = storedText('content', row.id, row.content)
       // A page right under the Research root has no folder to name.
       const parent = row.parentId === null ? undefined : byId.get(row.parentId)

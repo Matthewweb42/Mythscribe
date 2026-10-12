@@ -17,6 +17,8 @@ import { ContextMenu } from './ContextMenu'
 import { LevelIcon } from './LevelIcon'
 import { INCLUDE_ITEM_ID, templateIdOf, treeContextMenuItems } from './contextMenuItems'
 import { resolveDropTarget, resolveGenericTarget, type DropZone } from './placement'
+import { useLabelFilterView } from '@renderer/features/labels/labelFilter'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { tagFilterView } from './tagFilter'
 import { useTreeStore, type TreeIndex } from './treeStore'
 
@@ -410,7 +412,8 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
  * Manuscript rows with a word target (F-10.3) show their count against it; the menu sets and
  * clears it. F-16.8: `roots` picks the sections shown: the book's three by default (the
  * Manuscript tab), the Research root alone in the Research tab, which takes no tag filter and no
- * compile ticks.
+ * compile ticks. F-16.7: in story memory v2 each tree is filtered by its own label filter
+ * (`labelStore.filter`), never by a tag.
  */
 export function ManuscriptTree({
   format,
@@ -457,11 +460,19 @@ export function ManuscriptTree({
     () => ({ byId, childrenOf, rootIds, sectionOf, wordCountRollup }),
     [byId, childrenOf, rootIds, sectionOf, wordCountRollup]
   )
+  // F-16.7: story memory v2 filters by the author's labels (each tree its own), v1 by a tag.
+  const memory = useStoryMemory()
+  const labelView = useLabelFilterView(research ? 'research' : 'manuscript', index)
   const filter = useMemo<TreeFilter | null>(() => {
+    if (memory === 'v2') {
+      return labelView === null
+        ? null
+        : { visible: labelView.visible, matches: labelView.matches, color: labelView.colour }
+    }
     if (!filterTag || research) return null
     const view = tagFilterView(index, tagIdsByNode, filterTag.id)
     return { visible: view.visible, matches: new Set(view.matches), color: filterTag.color }
-  }, [index, tagIdsByNode, filterTag, research])
+  }, [index, tagIdsByNode, filterTag, research, memory, labelView])
   const rows = useMemo(
     () => listVisibleRows(rootIds, childrenOf, collapsed, filter?.visible),
     [rootIds, childrenOf, collapsed, filter]

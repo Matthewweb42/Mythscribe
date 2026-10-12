@@ -19,6 +19,7 @@ import {
   createLabel,
   deleteLabel,
   labelsForNode,
+  listLabelLinks,
   listLabels,
   nodesOfLabel,
   reorderLabels,
@@ -99,6 +100,30 @@ describe('labelStore (F-16.7)', () => {
     deleteNode(db, scene)
     expect(nodesOfLabel(db, tone.id)).toEqual([])
     expect(listLabels(db)).toHaveLength(1)
+  })
+
+  it('lists every link by node, each node’s labels in label order (F-16.7 chips and filters)', () => {
+    const wry = createLabel(db, { name: 'Wry', kind: 'tone' }, at(0))
+    const grim = createLabel(db, { name: 'Grim', kind: 'tone' }, at(1))
+    const other = createNode(db, 'novel', {
+      parentId: listNodes(db).find((row) => row.id === scene)?.parentId ?? '',
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'Two'
+    }).id
+    assignLabel(db, grim.id, scene)
+    assignLabel(db, wry.id, scene)
+    assignLabel(db, wry.id, other)
+    const links = listLabelLinks(db)
+    expect(links.filter((link) => link.nodeId === scene).map((link) => link.labelId)).toEqual([
+      wry.id,
+      grim.id
+    ])
+    expect(links.filter((link) => link.nodeId === other)).toEqual([
+      { labelId: wry.id, nodeId: other }
+    ])
+    deleteLabel(db, wry.id)
+    expect(listLabelLinks(db)).toEqual([{ labelId: grim.id, nodeId: scene }])
   })
 })
 

@@ -14,12 +14,14 @@ import { STRUCTURE_TEMPLATES, isTemplateBeat, type StructureTemplateId } from '@
 import type { TagCategory } from '@shared/tags'
 import { eventForText, eventText } from '@shared/timeline'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { StatusSelect } from '@renderer/features/outline/status'
 import { useStructureStore } from '@renderer/features/outline/structureStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
 import { describeError } from '@renderer/lib/errors'
+import { SceneDetailsFields } from './SceneDetailsFields'
 import { useSceneMetaStore } from './sceneMetaStore'
 import { BriefDraftButton, SuggestButton, SynopsisSuggestion } from './SceneSuggestions'
 import { SuggestInput } from './SuggestInput'
@@ -57,6 +59,8 @@ function useTagNames(category: TagCategory): string[] {
  * to date in the background (F-5.6) for a manuscript document. While the project has a
  * structure template (F-11.1b) and the node is in the manuscript, a Beat picker after Status
  * sets the beat the node sits on in that template (stored per template in `meta.beats`).
+ * F-16.11: in story memory v2 Location, POV and Timeline give way to the typed details that point
+ * at records, with the node's labels (`SceneDetailsFields`); the rest is unchanged.
  */
 export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const meta = useSceneMetaStore((s) => s.docs[id]?.content ?? null)
@@ -71,6 +75,7 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const events = useTimelineStore((s) => s.events)
   const eventTexts = useMemo(() => events.map(eventText), [events])
   const inManuscript = useTreeStore((s) => s.sectionOf[id] === 'manuscript')
+  const memory = useStoryMemory()
 
   useEffect(() => {
     load(id).catch((err: unknown) => toast.error(describeError(err)))
@@ -108,30 +113,37 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
 
   return (
     <div role="group" aria-label="Scene metadata" className="flex min-w-0 flex-col gap-1">
-      <SuggestInput
-        label="Location"
-        value={value.location}
-        onChange={(location) => set({ location })}
-        options={settings}
-        placeholder="e.g. dark-forest"
-        disabled={disabled}
-      />
-      <SuggestInput
-        label="POV"
-        value={value.pov}
-        onChange={(pov) => set({ pov })}
-        options={characters}
-        placeholder="Whose eyes"
-        disabled={disabled}
-      />
-      <SuggestInput
-        label="Timeline"
-        value={value.timeline}
-        onChange={setTimeline}
-        options={eventTexts}
-        placeholder="e.g. Day 3, after the storm"
-        disabled={disabled}
-      />
+      {memory === 'v2' ? (
+        // F-16.11, F-16.7: story memory v2's typed details point at records, and the labels.
+        <SceneDetailsFields id={id} inManuscript={inManuscript} />
+      ) : (
+        <>
+          <SuggestInput
+            label="Location"
+            value={value.location}
+            onChange={(location) => set({ location })}
+            options={settings}
+            placeholder="e.g. dark-forest"
+            disabled={disabled}
+          />
+          <SuggestInput
+            label="POV"
+            value={value.pov}
+            onChange={(pov) => set({ pov })}
+            options={characters}
+            placeholder="Whose eyes"
+            disabled={disabled}
+          />
+          <SuggestInput
+            label="Timeline"
+            value={value.timeline}
+            onChange={setTimeline}
+            options={eventTexts}
+            placeholder="e.g. Day 3, after the storm"
+            disabled={disabled}
+          />
+        </>
+      )}
       <StatusSelect
         value={value.status}
         onChange={(status) => set({ status })}

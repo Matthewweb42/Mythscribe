@@ -13,6 +13,8 @@ export const SEARCH_TYPES = [
   'character',
   'setting',
   'world',
+  // F-16.6 (story memory v2): a record's names, Pinned and Ideas.
+  'record',
   'research'
 ] as const
 export const SearchType = z.enum(SEARCH_TYPES)
@@ -25,6 +27,7 @@ export const SEARCH_TYPE_LABEL: Record<SearchType, string> = {
   character: 'Characters',
   setting: 'Settings',
   world: 'World',
+  record: 'Sheets',
   research: 'Source documents'
 }
 
@@ -38,16 +41,31 @@ export const SEARCH_RESULT_KIND: Record<SearchType, string | null> = {
   character: null,
   setting: null,
   world: null,
+  record: null,
   research: 'Source document'
 }
 
+/** The v1 sheets' types (F-9.1, F-9.11), which story memory v2's records replace. */
+const SHEET_TYPES: readonly SearchType[] = ['character', 'setting', 'world']
+/** Story memory v2's own types: Research's documents (F-16.8) and records (F-16.6). */
+const V2_TYPES: readonly SearchType[] = ['record', 'research']
+
 /**
- * The types a project's search offers: story memory v2 adds Research's documents (F-16.8); a v1
- * project has no Research section, so its chips are as they were.
+ * The types a project's search offers. Story memory v2 searches records (names, Pinned, Ideas)
+ * in place of the v1 sheets, and Research's documents (F-16.8); a v1 project has neither, so its
+ * chips are as they were.
  */
 export function searchTypesFor(memory: 'v1' | 'v2'): readonly SearchType[] {
-  return memory === 'v2' ? SEARCH_TYPES : SEARCH_TYPES.filter((type) => type !== 'research')
+  const left = memory === 'v2' ? SHEET_TYPES : V2_TYPES
+  return SEARCH_TYPES.filter((type) => !left.includes(type))
 }
+
+/** What a record hit's field says for each page (F-16.6): Pinned is canon, Ideas never are. */
+export const RECORD_SEARCH_FIELD = {
+  aliases: 'Nicknames',
+  pinned: 'Pinned',
+  ideas: 'your idea'
+} as const
 
 /** The shortest query that is searched; anything shorter answers nothing. */
 export const SEARCH_QUERY_MIN = 2
@@ -67,7 +85,12 @@ export const SearchRequest = z.object({
   /** The types to search; none answers nothing. */
   types: z.array(SearchType),
   /** Only sources carrying this tag (linked or mentioned for a node, `tagId` for an entity). */
-  tagId: z.string().nullable()
+  tagId: z.string().nullable(),
+  /**
+   * F-16.7 (story memory v2): only scenes and Research documents carrying this label, and their
+   * notes. Records carry no labels, so a label filter leaves them out. Left out by v1.
+   */
+  labelId: z.string().nullable().optional()
 })
 export type SearchRequest = z.infer<typeof SearchRequest>
 
@@ -78,15 +101,18 @@ export const SearchSnippet = z.object({
 })
 export type SearchSnippet = z.infer<typeof SearchSnippet>
 
-/** One matching source: a document, a node's notes, or an entity. Never one row per occurrence. */
+/** One matching source: a document, a node's notes, an entity or a record. Never one row per occurrence. */
 export const SearchResult = z.object({
   type: SearchType,
-  /** The node id (`document`, `notes`) or the entity id. */
+  /** The node id (`document`, `notes`, `research`), the entity id or the record id. */
   id: z.string(),
   title: z.string(),
   /** The parent's title for a node; the kind's noun for an entity. */
   location: z.string(),
-  /** The label of the template field the snippet comes from; null for anything else. */
+  /**
+   * The label of the template field the snippet comes from, or a record's page (Pinned, "your
+   * idea") or its nicknames; null for anything else.
+   */
   field: z.string().nullable(),
   snippet: SearchSnippet,
   /** The occurrences inside `title`. */

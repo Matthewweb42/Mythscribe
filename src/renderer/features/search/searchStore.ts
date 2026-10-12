@@ -28,6 +28,8 @@ interface SearchState {
   query: string
   types: SearchType[]
   tagId: string | null
+  /** F-16.7 (story memory v2): the label the search is narrowed to; never sent by v1. */
+  labelId: string | null
   /** The last answer for the current query and filters; null before one arrived. */
   response: SearchResponse | null
   /** The normalized query `response` answers: what the rows highlight and a jump looks for. */
@@ -40,6 +42,7 @@ interface SearchState {
   setQuery: (query: string) => void
   toggleType: (type: SearchType) => void
   setTagId: (tagId: string | null) => void
+  setLabelId: (labelId: string | null) => void
   /** Closes the dialog and forgets everything: the project closed. */
   reset: () => void
 }
@@ -49,6 +52,7 @@ const initial = {
   query: '',
   types: [...SEARCH_TYPES] as SearchType[],
   tagId: null,
+  labelId: null,
   response: null,
   answeredQuery: '',
   status: 'idle' as SearchStatus,
@@ -75,7 +79,7 @@ export const useSearchStore = create<SearchState>((set, get) => {
   const run = async (): Promise<void> => {
     cancelTimer()
     const mine = ++generation
-    const { query, tagId } = get()
+    const { query, tagId, labelId } = get()
     const types = offeredSearchTypes(get().types)
     const normalized = normalizeQuery(query)
     if (!isSearchable(normalized) || types.length === 0) {
@@ -84,7 +88,12 @@ export const useSearchStore = create<SearchState>((set, get) => {
     }
     set({ status: 'searching', error: null })
     try {
-      const response = await ipc().invoke('search:query', { query: normalized, types, tagId })
+      // A v1 project asks exactly as it always did; v2 adds its label filter (F-16.7).
+      const request =
+        currentStoryMemory() === 'v2'
+          ? { query: normalized, types, tagId: null, labelId }
+          : { query: normalized, types, tagId }
+      const response = await ipc().invoke('search:query', request)
       if (mine !== generation) return // a newer request, a close, or a reset overtook this one
       set({ response, answeredQuery: normalized, status: 'done' })
     } catch (err) {
@@ -126,6 +135,11 @@ export const useSearchStore = create<SearchState>((set, get) => {
 
     setTagId(tagId) {
       set({ tagId })
+      void run()
+    },
+
+    setLabelId(labelId) {
+      set({ labelId })
       void run()
     },
 

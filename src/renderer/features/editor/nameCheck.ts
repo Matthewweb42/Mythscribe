@@ -3,9 +3,13 @@ import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { create } from 'zustand'
 import type { Entity, Tag } from '@shared/ipc/contract'
+import type { StoryRecordSummary } from '@shared/memory/records'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { buildNameIndex, nearName, wordsIn, type NameIndex } from '@shared/storyNames'
 import type { TagCategory } from '@shared/tags'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import { currentStoryMemory } from '@renderer/features/project/storyMemory'
+import { useRecordStore } from '@renderer/features/records/recordStore'
 import { useTagStore } from '@renderer/features/tags/tagStore'
 import { isWordMisspelled } from '@renderer/lib/spellcheck'
 import { useDictionaryStore } from './dictionaryStore'
@@ -66,8 +70,11 @@ const NAME_TAG_CATEGORIES: ReadonlySet<TagCategory> = new Set<TagCategory>([
 
 /** What the index was built from, by identity, with the answers given since. */
 interface IndexCache {
+  memory: StoryMemoryVersion
   entities: Record<string, Entity>
   tags: Record<string, Tag>
+  /** F-16.4: story memory v2's records, whose names and nicknames are the story's names. */
+  records: Record<string, StoryRecordSummary>
   words: string[] | null
   notNames: string[] | null
   index: NameIndex
@@ -78,18 +85,24 @@ interface IndexCache {
 let cache: IndexCache | null = null
 
 /**
- * The name index for what the three stores hold now, shared by every open editor and rebuilt
- * only when the entities, the tags, or the dictionary changed identity. The per-word answers
- * live and die with it, so typing costs one lookup per word already seen.
+ * The name index for what the stores hold now, shared by every open editor and rebuilt only when
+ * the entities, the tags, the records, the dictionary or the project's story memory changed
+ * identity. In v1 the names are the entities' and the name tags'; in story memory v2 (F-16.4)
+ * every record's names and nicknames, as the author spells them. The per-word answers live and
+ * die with it, so typing costs one lookup per word already seen.
  */
 function currentIndex(): IndexCache {
+  const memory = currentStoryMemory()
   const entities = useEntityStore.getState().byId
   const tags = useTagStore.getState().byId
+  const records = useRecordStore.getState().byId
   const { words, notNames } = useDictionaryStore.getState()
   if (
     cache !== null &&
+    cache.memory === memory &&
     cache.entities === entities &&
     cache.tags === tags &&
+    cache.records === records &&
     cache.words === words &&
     cache.notNames === notNames
   ) {
@@ -97,20 +110,24 @@ function currentIndex(): IndexCache {
   }
   const nameTagNames: string[] = []
   const accepted: string[] = [...(words ?? []), ...(notNames ?? [])]
-  for (const tag of Object.values(tags)) {
-    if (NAME_TAG_CATEGORIES.has(tag.category)) nameTagNames.push(tag.name)
-    else accepted.push(tag.name)
+  let names: string[]
+  if (memory === 'v2') {
+    names = Object.values(records).flatMap((record) => record.aliases.map((entry) => entry.text))
+  } else {
+    names = Object.values(entities).map((entity) => entity.name)
+    for (const tag of Object.values(tags)) {
+      if (NAME_TAG_CATEGORIES.has(tag.category)) nameTagNames.push(tag.name)
+      else accepted.push(tag.name)
+    }
   }
   cache = {
+    memory,
     entities,
     tags,
+    records,
     words,
     notNames,
-    index: buildNameIndex({
-      entityNames: Object.values(entities).map((entity) => entity.name),
-      nameTagNames,
-      accepted
-    }),
+    index: buildNameIndex({ entityNames: names, nameTagNames, accepted }),
     near: new Map()
   }
   return cache
@@ -247,6 +264,7 @@ export const NameCheck = Extension.create({
           const offs = [
             useEntityStore.subscribe(onChange),
             useTagStore.subscribe(onChange),
+            useRecordStore.subscribe(onChange),
             useDictionaryStore.subscribe(onChange)
           ]
           return {

@@ -128,6 +128,11 @@ select {
   line-height: 1.6;
 }
 
+/* F-16.6: a sheet's Pinned and Ideas sit in the sheet's own scroll, so they start short. */
+.ms-editor.ms-page.ms-page-inline {
+  min-height: 4rem;
+}
+
 .ms-editor.ms-page p {
   margin-bottom: 0.6em;
   text-indent: 0;
@@ -243,6 +248,19 @@ select {
 
 .ms-editor .inline-tag.ProseMirror-selectednode {
   outline: 1px solid var(--tag-color, var(--ms-fg-muted));
+}
+
+/*
+ * F-16.4 (story memory v2): an inert token reads as the plain name it stored, muted, with no
+ * tint and no hover, until the switch-over makes it text.
+ */
+.ms-editor .inline-tag.inline-tag-inert,
+.ms-editor .inline-tag.inline-tag-inert:hover {
+  padding: 0;
+  background: none;
+  color: var(--ms-fg-muted);
+  font-size: inherit;
+  white-space: normal;
 }
 
 /*

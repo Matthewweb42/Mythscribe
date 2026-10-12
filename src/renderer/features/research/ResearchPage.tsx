@@ -1,6 +1,7 @@
 import { ExternalLink } from 'lucide-react'
 import { researchSourceLine } from '@shared/research'
 import { useCanWrite } from '@renderer/features/account/appAccessStore'
+import { LabelPicker } from '@renderer/features/labels/LabelPicker'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -11,7 +12,7 @@ import { useResearchDoc } from './researchView'
 /**
  * A Research document in the main pane (F-16.8): its title; where its text came from, with *Open
  * original* for an upload ("Converted from PDF", an image's caption page); the page's *Not canon*
- * switch; and the page itself, edited with the page schema.
+ * switch; its labels (F-16.7); and the page itself, edited with the page schema.
  */
 export function ResearchPage({ nodeId }: { nodeId: string }): React.JSX.Element {
   const title = useTreeStore((s) => s.byId[nodeId]?.title ?? '')
@@ -65,6 +66,10 @@ export function ResearchPage({ nodeId }: { nodeId: string }): React.JSX.Element 
           />
           Whole page Not canon
         </label>
+        {/* F-16.7: the page's labels, to filter Research by. */}
+        <div className="basis-full">
+          <LabelPicker nodeId={nodeId} />
+        </div>
       </header>
       {doc.notCanon ? (
         <p className="m-0 border-b border-line bg-surface px-4 py-1 text-xs text-fg-muted">

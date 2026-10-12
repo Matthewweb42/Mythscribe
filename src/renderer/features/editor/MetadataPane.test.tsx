@@ -9,6 +9,7 @@ import type {
   Input,
   Output
 } from '@shared/ipc/contract'
+import { emptySceneDetails } from '@shared/memory/sceneDetails'
 import {
   BRIEF_TEXT_MIN,
   EMPTY_SCENE_BRIEF,
@@ -30,6 +31,10 @@ import { resetBriefDraftStore, useBriefDraftStore } from './briefDraftStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { useProjectStore } from '@renderer/features/project/projectStore'
+import { resetLabelStore, useLabelStore } from '@renderer/features/labels/labelStore'
+import { labelFixture, recordFixture } from '@renderer/features/records/recordFixture'
+import { resetRecordStore, useRecordStore } from '@renderer/features/records/recordStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetStructureStore, useStructureStore } from '@renderer/features/outline/structureStore'
 import { resetLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -39,6 +44,7 @@ import { orderedIds, resetTagStore, useTagStore } from '@renderer/features/tags/
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetDocumentStore, useDocumentStore } from './documentStore'
 import { MetadataPane, SynopsisBox } from './MetadataPane'
+import { resetSceneDetailStore } from './sceneDetailStore'
 import { resetSceneMetaStore, useSceneMetaStore } from './sceneMetaStore'
 import { resetSummaryStore } from './summaryStore'
 
@@ -801,5 +807,132 @@ describe('MetadataPane summary (F-5.6)', () => {
     )
     act(() => useAiSettingsStore.setState({ settings: defaultAiSettings() }))
     expect(refreshButton().getAttribute('title')).toContain('needs Use AI turned on')
+  })
+})
+
+describe('MetadataPane in story memory v2 (F-16.11, F-16.7)', () => {
+  const MARA = recordFixture('r-mara', 'character', ['Mara Vell', 'Mara'])
+  const TOMAS = recordFixture('r-tomas', 'character', ['Tomas Harrow'])
+  const QUAY = recordFixture('r-quay', 'setting', ['North Quay'])
+  const WRY = labelFixture('l-wry', 'Wry', 0)
+
+  beforeEach(() => {
+    resetRecordStore()
+    resetLabelStore()
+    resetSceneDetailStore()
+    useProjectStore.setState({
+      current: {
+        id: 'p-2',
+        name: 'Memory',
+        format: 'novel',
+        path: '/books/Memory.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 33,
+        storyMemory: 'v2'
+      }
+    })
+  })
+  afterEach(() => {
+    resetRecordStore()
+    resetLabelStore()
+    resetSceneDetailStore()
+    useProjectStore.setState({ current: null })
+  })
+
+  /** The fake main for the v2 fields: details stored per scene, every set echoed back. */
+  function installV2(): { details: Input<'sceneDetail:set'>[] } {
+    const details: Input<'sceneDetail:set'>[] = []
+    const { release } = install({
+      'record:list': () => [MARA, QUAY, TOMAS],
+      'label:list': () => [WRY],
+      'label:links': () => [],
+      'label:assign': () => [WRY],
+      'sceneDetail:get': () => ({ ...emptySceneDetails(), gone: [] }),
+      'sceneDetail:set': (input) => {
+        const sent = input as Input<'sceneDetail:set'>
+        details.push(sent)
+        return { ...sent.details, gone: [] }
+      }
+    })
+    release()
+    return { details }
+  }
+
+  it('shows POV, place, time, story year, + also here and labels in place of the tag fields, and saves each', async () => {
+    const { details } = installV2()
+    ready()
+    await act(async () => {
+      await useRecordStore.getState().load()
+      await useLabelStore.getState().load()
+    })
+    render(<MetadataPane id="sc-1" />)
+    const pov = await screen.findByRole('combobox', { name: 'POV' })
+    await waitFor(() => expect(pov).toBeEnabled())
+    expect(screen.queryByRole('combobox', { name: 'Location' })).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Timeline' })).toBeNull()
+    // POV offers the Characters only; Place the places.
+    expect(
+      within(pov)
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['Nobody chosen', 'Mara Vell', 'Tomas Harrow'])
+    fireEvent.change(pov, { target: { value: 'r-mara' } })
+    await waitFor(() => expect(details).toHaveLength(1))
+    expect(details[0]).toEqual({
+      nodeId: 'sc-1',
+      details: { ...emptySceneDetails(), povRecordId: 'r-mara' }
+    })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Place' }), {
+      target: { value: 'r-quay' }
+    })
+    await waitFor(() => expect(details).toHaveLength(2))
+    const placeText = screen.getByRole('textbox', { name: 'Place, in your words' })
+    fireEvent.change(placeText, { target: { value: 'at the steps' } })
+    fireEvent.blur(placeText)
+    await waitFor(() => expect(details).toHaveLength(3))
+    expect(details[2]?.details.place).toEqual({ recordId: 'r-quay', text: 'at the steps' })
+    const time = screen.getByRole('textbox', { name: 'Time' })
+    fireEvent.change(time, { target: { value: 'December, evening' } })
+    fireEvent.keyDown(time, { key: 'Enter' })
+    await waitFor(() => expect(details).toHaveLength(4))
+    expect(details[3]?.details.time).toEqual({ text: 'December, evening' })
+    // A story year is a whole number: anything else is refused and the field goes back.
+    const year = screen.getByRole('textbox', { name: 'Story year' })
+    fireEvent.change(year, { target: { value: 'spring' } })
+    fireEvent.blur(year)
+    expect(toasts()[0]).toMatch(/whole number/)
+    expect(year).toHaveValue('')
+    fireEvent.change(year, { target: { value: '1814' } })
+    fireEvent.blur(year)
+    await waitFor(() => expect(details).toHaveLength(5))
+    expect(details[4]?.details.storyYear).toBe(1814)
+    fireEvent.change(screen.getByRole('combobox', { name: 'Also here' }), {
+      target: { value: 'r-tomas' }
+    })
+    await waitFor(() => expect(details).toHaveLength(6))
+    expect(details[5]?.details).toMatchObject({
+      povRecordId: 'r-mara',
+      storyYear: 1814,
+      alsoHere: ['r-tomas']
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Not here: Tomas Harrow' }))
+    await waitFor(() => expect(details).toHaveLength(7))
+    expect(details[6]?.details.alsoHere).toEqual([])
+    // Labels sit with the details.
+    fireEvent.change(screen.getByRole('combobox', { name: 'Add a label' }), {
+      target: { value: 'l-wry' }
+    })
+    await waitFor(() => expect(screen.getByTestId('label-chip')).toHaveTextContent('Wry'))
+  })
+
+  it('shows only the labels outside the manuscript (front matter has no typed details)', async () => {
+    installV2()
+    ready()
+    await act(() => useLabelStore.getState().load())
+    render(<MetadataPane id="title-page" />)
+    await screen.findByTestId('label-picker')
+    expect(screen.queryByRole('combobox', { name: 'POV' })).toBeNull()
   })
 })

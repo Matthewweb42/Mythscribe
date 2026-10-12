@@ -221,7 +221,7 @@ import { StoryMemoryVersion } from '../storyMemory'
 import { AuthorTodo, AuthorTodoCreate, AuthorTodoPatch } from '../memory/authorTodo'
 import { Dismissed, DismissedList } from '../memory/dismissed'
 import { NameAnswer, NameAnswerResult, NameQuestion } from '../memory/nameQuestions'
-import { NameMentionView } from '../memory/nameScan'
+import { NamedInRow, NameMentionView } from '../memory/nameScan'
 import { MemoryPassageHit, MemoryPassageQuery } from '../memory/passages'
 import {
   RECORD_ALIASES_MAX,
@@ -235,7 +235,7 @@ import {
 } from '../memory/records'
 import { SceneDetails, SceneDetailsView } from '../memory/sceneDetails'
 import { TwinGateBlocked, TwinGateVerdict } from '../memory/twinGate'
-import { Label, LabelColour, LabelKind, LabelName } from '../storyLabels'
+import { Label, LabelColour, LabelKind, LabelLink, LabelName } from '../storyLabels'
 
 /**
  * The single IPC contract shared by main, preload, and renderer.
@@ -3180,6 +3180,8 @@ export const contract = {
   },
   /** A node's labels, in label order. */
   'label:forNode': { input: z.object({ nodeId: z.string() }), output: z.array(Label) },
+  /** Every label link (F-16.7): what the label chips and the label filters read. */
+  'label:links': { input: z.undefined(), output: z.array(LabelLink) },
   /** The one Dismissed list (F-16.10), newest first, with its count. */
   'dismissed:list': { input: z.undefined(), output: DismissedList },
   /** Undo on a Dismissed row: the tombstone goes, so the thing may come back. */
@@ -3206,6 +3208,11 @@ export const contract = {
   },
   /** Where a scene names its records (F-16.5), as last scanned, in document order. */
   'names:forNode': { input: z.object({ nodeId: z.string() }), output: z.array(NameMentionView) },
+  /**
+   * How often each scene names each record (F-16.5, F-16.6), certain mentions only, as last
+   * scanned: the sheet's *Named in* and the record lists' "named in N scenes".
+   */
+  'names:byRecord': { input: z.undefined(), output: z.array(NamedInRow) },
   /** *Not a mention*: the phrase is never a mention of that record again; answers the tombstone. */
   'names:notAMention': { input: z.object({ mentionId: z.string() }), output: Dismissed },
   /** New names and nicknames to ask about, most named first. */

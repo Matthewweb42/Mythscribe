@@ -21,6 +21,7 @@ import { useImportStore } from '@renderer/features/import/importStore'
 import { resolveCreateTarget } from '@renderer/features/manuscript/placement'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useProjectStore } from '@renderer/features/project/projectStore'
+import { useRecordStore } from '@renderer/features/records/recordStore'
 import { useReplaceStore } from '@renderer/features/search/replaceStore'
 import { useSearchStore } from '@renderer/features/search/searchStore'
 import { useWelcomeStore } from '@renderer/features/project/welcomeStore'
@@ -35,6 +36,13 @@ import { ipc } from '@renderer/lib/ipc'
 
 /** What a `project` item says when it runs with nothing open (a native accelerator can still reach it). */
 export const NO_PROJECT_MESSAGE = 'Open a project first.'
+
+/**
+ * What View › Tags and Tools › Tags say in a project on story memory v2 (F-16.4), which has no
+ * tags: names and records replace them, in the category sections.
+ */
+export const NO_TAGS_MESSAGE =
+  'This project has no tags: names and nicknames on its sheets replace them (Characters, Places and the other categories).'
 
 /** What Find… / Replace… and Ctrl+F / Ctrl+H say with no document open to search (F-3.10). */
 export const NO_DOCUMENT_TO_FIND_MESSAGE = 'Open a document first.'
@@ -171,7 +179,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         // F-9.3: the dialog is part of the project screen, so focus mode is left first, like Tools › Tags.
         const focus = useFocusStore.getState()
         if (focus.active) await focus.exit()
-        useEntityStore.getState().startCreate(INSERT_ENTITY_KIND[id])
+        // F-16.6: story memory v2 makes a record of that category (with its twin-gate warning).
+        if (project?.storyMemory === 'v2')
+          useRecordStore.getState().startCreate(INSERT_ENTITY_KIND[id])
+        else useEntityStore.getState().startCreate(INSERT_ENTITY_KIND[id])
         return
       }
       case 'insertSceneBreak': {
@@ -194,6 +205,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         return
       case 'toggleReferences':
       case 'toggleTags': {
+        if (id === 'toggleTags' && project?.storyMemory === 'v2') {
+          toast.info(NO_TAGS_MESSAGE)
+          return
+        }
         // F-9.6: the panel is part of the project screen and does not float, so focus mode is
         // left first, like Tools › Tags; the tags column is the same.
         const focus = useFocusStore.getState()
@@ -235,6 +250,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         useShellDialogStore.getState().show('snapshots')
         return
       case 'openTags': {
+        if (project?.storyMemory === 'v2') {
+          toast.info(NO_TAGS_MESSAGE)
+          return
+        }
         const focus = useFocusStore.getState()
         if (focus.active) await focus.exit()
         const layout = useLayoutStore.getState()

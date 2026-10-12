@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { asc, eq, sql } from 'drizzle-orm'
+import { asc, count, eq, sql } from 'drizzle-orm'
 import { passageParagraphs, type Paragraph } from '@shared/mentions'
 import { dismissedKey, type Dismissed } from '@shared/memory/dismissed'
 import {
   buildNameIndex,
   mentionPhrase,
   scanNames,
+  type NamedInRow,
   type NameIndex,
   type NameMention
 } from '@shared/memory/nameScan'
@@ -119,6 +120,25 @@ export function listNameMentions(db: TreeDb, nodeId: string): (NameMention & { i
     .orderBy(asc(nameMention.from), asc(nameMention.to), sql`rowid`)
     .all()
     .map(toMention)
+}
+
+/**
+ * How often each scene names each record, certain mentions only (an ambiguous span names nobody
+ * yet): one row per record and scene, by record then scene id. What *Named in* and the lists'
+ * "named in N scenes" read.
+ */
+export function namedInCounts(db: TreeDb): NamedInRow[] {
+  return db
+    .select({
+      recordId: nameMention.recordId,
+      nodeId: nameMention.nodeId,
+      count: count()
+    })
+    .from(nameMention)
+    .where(eq(nameMention.ambiguous, false))
+    .groupBy(nameMention.recordId, nameMention.nodeId)
+    .orderBy(asc(nameMention.recordId), asc(nameMention.nodeId))
+    .all()
 }
 
 /** Every stored field but the row id, so a shifted paragraph or a new spelling rewrites the rows. */

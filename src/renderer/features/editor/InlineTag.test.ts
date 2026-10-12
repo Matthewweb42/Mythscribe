@@ -175,3 +175,47 @@ describe('InlineTag node (F-4.6)', () => {
     notes.destroy()
   })
 })
+
+describe('InlineTag inert in story memory v2 (F-16.4)', () => {
+  it('renders the stored name muted, never the bank’s, copies as the name, and offers no # suggestion', () => {
+    const inert = new Editor({
+      extensions: buildExtensions({
+        sceneBreak: '~~~',
+        onSave: () => {},
+        inlineTagNodeId: 'sc-1',
+        inertTags: true
+      }),
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Into the ' },
+              token('t-forest', 'old-name'),
+              { type: 'text', text: ' at dusk.' }
+            ]
+          }
+        ]
+      }
+    })
+    // The schema is the same: the stored token loads and keeps its attributes.
+    expect(Object.keys(inert.schema.nodes)).toEqual(Object.keys(editor.schema.nodes))
+    expect(inert.getJSON().content?.[0]?.content?.[1]).toEqual(token('t-forest', 'old-name'))
+    expect(inert.getHTML()).toContain(
+      '<span data-id="t-forest" data-name="old-name" data-inline-tag="" data-inert="" class="inline-tag inline-tag-inert">old-name</span>'
+    )
+    expect(inert.getText()).toBe('Into the old-name at dusk.')
+    expect(INLINE_TAG_SUGGESTION_KEY.get(inert.state)).toBeUndefined()
+    // Typing # opens nothing: the character is just text.
+    inert.commands.focus('end')
+    inert.commands.insertContent('#ma')
+    expect(inert.getText()).toBe('Into the old-name at dusk.#ma')
+    // The resync pass leaves an inert token alone.
+    resyncInlineTags(inert.view.dom, useTagStore.getState().byId, {})
+    const span = inert.view.dom.querySelector<HTMLElement>('[data-inline-tag]')
+    expect(span?.textContent).toBe('old-name')
+    expect(span?.style.getPropertyValue('--tag-color')).toBe('')
+    inert.destroy()
+  })
+})

@@ -13,7 +13,13 @@ import { setSceneMeta } from '../document/sceneMetaStore'
 import { createNode, deleteNode, getNode, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { listDismissed } from './dismissedStore'
-import { listNameMentions, markNotAMention, scanNamesFor, staleNameScans } from './nameIndexer'
+import {
+  listNameMentions,
+  markNotAMention,
+  namedInCounts,
+  scanNamesFor,
+  staleNameScans
+} from './nameIndexer'
 import {
   dropOwner,
   indexOwner,
@@ -90,6 +96,19 @@ describe('nameIndexer (F-16.5)', () => {
     expect(listNameMentions(db, scene()).map((m) => m.text)).toEqual(['Mara Vell'])
   })
 
+  it('counts each record’s certain mentions per scene for Named in (F-16.6)', () => {
+    const mara = record('Mara Vell', ['Mara'])
+    const tomas = record('Tomas')
+    saveDocument(db, scene(), doc('Mara waited.', 'Then Mara Vell left. Tomas stayed.'))
+    scanNamesFor(db, scene(), at(1))
+    expect(namedInCounts(db)).toEqual(
+      [
+        { recordId: mara, nodeId: scene(), count: 2 },
+        { recordId: tomas, nodeId: scene(), count: 1 }
+      ].sort((a, b) => a.recordId.localeCompare(b.recordId))
+    )
+  })
+
   it('settles a shared alias by the typed POV, which is part of the hash', () => {
     const mr = record('Mr. Harrow')
     const mrs = record('Mrs. Harrow')
@@ -111,6 +130,8 @@ describe('nameIndexer (F-16.5)', () => {
       [mr, true],
       [mrs, true]
     ])
+    // An ambiguous span names nobody yet, so Named in does not count it.
+    expect(namedInCounts(db)).toEqual([])
     setSceneDetails(
       db,
       scene(),

@@ -15,6 +15,7 @@ import { escapeFocusMode, useFocusStore } from '@renderer/features/focus/focusSt
 import { centreCaret } from './typewriter'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useSessionStore } from '@renderer/features/project/sessionStore'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useEditorZoom, usePageEdges } from '@renderer/features/shell/viewStore'
@@ -142,14 +143,22 @@ const NO_EXCLUSIONS: string[] = []
  * and Ask AI (2026-10-06, the selection bubble's two) follow while the dial allows them; Rewrite
  * is disabled with the reason while the selection is out of its bounds or a rewrite runs.
  */
-function rangeMenuItems(editor: Editor, menu: RangeMenu, settings: AiSettings | null): MenuItem[] {
+function rangeMenuItems(
+  editor: Editor,
+  menu: RangeMenu,
+  settings: AiSettings | null,
+  inertTags: boolean
+): MenuItem[] {
   if (menu.at !== null) return [{ id: 'clear-tags-here', label: 'Clear tags here' }]
   const type = editor.schema.marks[TAG_RANGE_MARK]
   const tagged = type !== undefined && editor.state.doc.rangeHasMark(menu.from, menu.to, type)
-  const items: MenuItem[] = [
-    { id: 'tag-selection', label: 'Tag selection…' },
-    { id: 'clear-tags', label: 'Clear tags in selection', disabled: !tagged }
-  ]
+  // F-16.4: story memory v2 has no tags, so the menu holds only the AI's two.
+  const items: MenuItem[] = inertTags
+    ? []
+    : [
+        { id: 'tag-selection', label: 'Tag selection…' },
+        { id: 'clear-tags', label: 'Clear tags in selection', disabled: !tagged }
+      ]
   const offer = selectionOffer(settings)
   if (offer.rewrite) {
     const reason = rewriteReason(settings, captureRewriteText(editor).text.length)
@@ -216,6 +225,8 @@ function RegionEditor({
   const [picker, setPicker] = useState<RangePicker | null>(null)
   const settings = useEditorSettings(format)
   const { sceneBreak } = settings
+  // F-16.4: story memory v2 has no tags: tokens and ranges are inert, and no tag menu opens.
+  const inertTags = useStoryMemory() === 'v2'
   const extensions = useMemo(
     () =>
       buildExtensions({
@@ -223,9 +234,10 @@ function RegionEditor({
         onSave: () => void useDocumentStore.getState().saveNow(),
         onEscape: escapeFocusMode,
         inlineTagNodeId: id,
-        onTagSelection: (editor) => setPicker(pickerAtSelection(editor))
+        inertTags,
+        onTagSelection: inertTags ? undefined : (editor) => setPicker(pickerAtSelection(editor))
       }),
-    [sceneBreak, id]
+    [sceneBreak, id, inertTags]
   )
   const ready = content !== null
   const tagsById = useTagStore((s) => s.byId)
@@ -327,8 +339,8 @@ function RegionEditor({
   useScrollMemory(scroller, id, ready && toolbar)
 
   useEffect(() => {
-    resyncInlineTags(editor.view.dom, tagsById, tagAliases)
-  }, [editor, tagsById, tagAliases])
+    if (!inertTags) resyncInlineTags(editor.view.dom, tagsById, tagAliases)
+  }, [editor, tagsById, tagAliases, inertTags])
 
   useEffect(() => () => useRewriteStore.getState().dismissFor(id), [editor, id])
 
@@ -397,7 +409,7 @@ function RegionEditor({
       const selection = before ?? editor.state.selection
       before = null
       const target = event.target instanceof Element ? event.target : null
-      const token = target?.closest<HTMLElement>(INLINE_TAG_SELECTOR) ?? null
+      const token = inertTags ? null : (target?.closest<HTMLElement>(INLINE_TAG_SELECTOR) ?? null)
       if (token) {
         event.preventDefault()
         setMenu({
@@ -410,8 +422,13 @@ function RegionEditor({
       }
       if (!editor.isEditable) return
       const { from, to } = selection
-      const range = target?.closest<HTMLElement>(TAG_RANGE_SELECTOR) ?? null
+      const range = inertTags ? null : (target?.closest<HTMLElement>(TAG_RANGE_SELECTOR) ?? null)
       if (from === to && !range) return
+      // In v2 the menu holds only the AI's items: with none offered, the browser's menu stays.
+      if (inertTags) {
+        const offer = selectionOffer(useAiSettingsStore.getState().settings)
+        if (!offer.rewrite && !offer.ask) return
+      }
       event.preventDefault()
       setRangeMenu({
         x: event.clientX,
@@ -427,7 +444,7 @@ function RegionEditor({
       dom.removeEventListener('mousedown', onMouseDown, true)
       dom.removeEventListener('contextmenu', onContextMenu)
     }
-  }, [editor])
+  }, [editor, inertTags])
 
   const onMenuSelect = (itemId: string): void => {
     if (!menu) return
@@ -502,7 +519,7 @@ function RegionEditor({
         <ContextMenu
           x={rangeMenu.x}
           y={rangeMenu.y}
-          items={rangeMenuItems(editor, rangeMenu, aiSettings)}
+          items={rangeMenuItems(editor, rangeMenu, aiSettings, inertTags)}
           onSelect={onRangeMenuSelect}
           onClose={() => setRangeMenu(null)}
         />

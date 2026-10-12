@@ -23,6 +23,11 @@ import { caretToEnd } from './support'
  * not in the Manuscript tree; a Markdown upload opens as an editable page; a paragraph is marked
  * Not canon; the page is switched Not canon; word search finds it as a source document; the
  * compiled preview leaves it out.
+ *
+ * P1 slice 3 (F-16.6, F-16.7, F-16.11, the v2 shell): the picker lists v2's sections only; a
+ * record is made with a nickname, and creating that nickname warns through the twin gate; Pinned
+ * and Ideas lines are saved; *Same as* merges a second record and *Split* brings it back; a tone
+ * label is made, put on a scene and filtered by; Mara is the scene's POV; `#` opens no suggestion.
  */
 
 let app: ElectronApplication
@@ -227,4 +232,171 @@ test('story memory v2: the Research section and Not canon pages (P1 slice 2)', a
   await expect(preview).not.toContainText('Reef notes')
   await page.keyboard.press('Escape')
   await expect(compiled).toHaveCount(0)
+})
+
+/** One record as `record:get` answers it, with its pages' text. */
+interface StoredRecord {
+  id: string
+  name: string
+  aliases: { id: string; text: string }[]
+  pinned: TiptapNodeT | null
+  ideas: TiptapNodeT | null
+}
+
+const pageText = (doc: TiptapNodeT | null): string =>
+  (doc?.content ?? [])
+    .map((block) => (block.content ?? []).map((child) => child.text ?? '').join(''))
+    .join('\n')
+
+test('story memory v2: sheets, labels, typed details and the v2 editor (P1 slice 3)', async () => {
+  // Continues in the project the slice 2 test made. Records replace the v1 sheets and tags.
+  const sectionNames = async (): Promise<string[]> => {
+    await page.getByRole('button', { name: /^Section: / }).click()
+    const list = page.getByRole('listbox', { name: 'Sections' })
+    const unused = list.getByRole('option', { name: /^Show unused sections/ })
+    if ((await unused.count()) > 0) await unused.click()
+    const names = await list.getByRole('option').allTextContents()
+    await page.keyboard.press('Escape')
+    await expect(list).toHaveCount(0)
+    return names
+  }
+  // (The thread category stays, as a plain record list, until P2b.)
+  const names = (await sectionNames()).join(' | ')
+  for (const gone of ['Index', 'Timeline', 'Library', 'To do', 'Changes']) {
+    expect(names).not.toMatch(new RegExp(`(^| )${gone}( |\\d|$)`))
+  }
+  expect(names).toContain('Research')
+  expect(names).toContain('Outline')
+
+  // F-16.6: create "Mara Vell" in Characters; the gate is clear, so it is made and opened.
+  await showSection('Characters')
+  const createDialog = page.getByRole('dialog', { name: 'New character' })
+  await page.getByRole('button', { name: 'New character…' }).click()
+  await createDialog.getByRole('textbox', { name: 'Name' }).fill('Mara Vell')
+  await createDialog.getByRole('button', { name: 'Create' }).click()
+  await expect(createDialog).toHaveCount(0)
+  const sheet = page.getByTestId('record-sheet')
+  await expect(sheet.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Mara Vell')
+  const records = (): Promise<StoredRecord[]> => invoke<StoredRecord[]>('record:list', undefined)
+  const maraId = (await records()).find((r) => r.name === 'Mara Vell')?.id ?? ''
+  expect(maraId).not.toBe('')
+
+  // Add the nickname "Mara".
+  await sheet.getByRole('textbox', { name: 'New nickname' }).fill('Mara')
+  await sheet.getByRole('button', { name: 'Add', exact: true }).click()
+  const nicknames = sheet.getByRole('list', { name: 'Nicknames' })
+  await expect(nicknames.getByRole('listitem', { name: 'Mara' })).toBeVisible()
+
+  // Creating "Mara" now shows the twin gate's warning (decision P1-D4: warned, never blocked).
+  await page.getByRole('button', { name: 'New character…' }).click()
+  await createDialog.getByRole('textbox', { name: 'Name' }).fill('Mara')
+  const warning = createDialog.getByTestId('record-gate-warning')
+  await expect(warning).toContainText('Looks like Mara Vell')
+  await expect(warning.getByRole('button', { name: 'Same as Mara Vell' })).toBeVisible()
+  await expect(warning.getByRole('button', { name: 'Create anyway' })).toBeVisible()
+  await expect(createDialog.getByRole('button', { name: 'Create', exact: true })).toBeDisabled()
+  await createDialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(createDialog).toHaveCount(0)
+
+  // A Pinned line and an Ideas line, each saved on the record's own page.
+  const pinned = sheet.getByRole('textbox', { name: 'Pinned' })
+  await caretToEnd(pinned)
+  await page.keyboard.type('Eyes: grey as the harbour.')
+  const ideas = sheet.getByRole('textbox', { name: 'Ideas' })
+  await caretToEnd(ideas)
+  await page.keyboard.type('Maybe she was a smuggler once.')
+  await expect
+    .poll(async () => {
+      const stored = await invoke<StoredRecord>('record:get', { id: maraId })
+      return [pageText(stored.pinned), pageText(stored.ideas)]
+    })
+    .toEqual(['Eyes: grey as the harbour.', 'Maybe she was a smuggler once.'])
+
+  // A second record, then Same as: it joins Mara Vell; Split brings it back.
+  await page.getByRole('button', { name: 'New character…' }).click()
+  await createDialog.getByRole('textbox', { name: 'Name' }).fill('Tomas Harrow')
+  await createDialog.getByRole('button', { name: 'Create' }).click()
+  await expect(createDialog).toHaveCount(0)
+  await expect(sheet.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(
+    'Tomas Harrow'
+  )
+  await page
+    .getByRole('list', { name: 'Characters' })
+    .getByRole('button', { name: /^Mara Vell/ })
+    .click()
+  await expect(sheet.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Mara Vell')
+  await sheet.getByRole('button', { name: 'Same as…' }).click()
+  await sheet
+    .getByRole('combobox', { name: /Which record is the same/ })
+    .selectOption({ label: 'Tomas Harrow' })
+  await expect(sheet).toContainText('Tomas Harrow becomes part of Mara Vell')
+  await sheet.getByRole('button', { name: 'Merge into Mara Vell' }).click()
+  await expect(nicknames.getByRole('listitem', { name: 'Tomas Harrow' })).toBeVisible()
+  await expect.poll(async () => (await records()).map((r) => r.name)).toEqual(['Mara Vell'])
+  await sheet.getByRole('button', { name: 'Split…' }).click()
+  await sheet.getByRole('checkbox', { name: 'Tomas Harrow' }).check()
+  await sheet.getByRole('button', { name: 'Split into a new record' }).click()
+  await expect(nicknames.getByRole('listitem', { name: 'Tomas Harrow' })).toHaveCount(0)
+  await expect
+    .poll(async () => (await records()).map((r) => r.name).sort())
+    .toEqual(['Mara Vell', 'Tomas Harrow'])
+  // Merged pages stay on Mara's sheet.
+  await expect(pinned).toContainText('Eyes: grey as the harbour.')
+
+  // F-16.7 and F-16.11: open the first scene; its details take a tone label and Mara as POV.
+  const scene = (await invoke<TreeNode[]>('tree:list', undefined)).find(
+    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
+  )
+  if (!scene) throw new Error('no scene in the seed')
+  await showSection('Manuscript')
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  await bookTree.getByRole('treeitem', { name: scene.title }).first().click()
+  await expect(sheet).toHaveCount(0)
+  const notesColumn = page.getByTestId('notes-panel')
+  if ((await notesColumn.count()) === 0) {
+    await page.getByRole('button', { name: 'Notes', exact: true }).click()
+  }
+  const detailsToggle = notesColumn.getByRole('button', { name: 'Scene details' })
+  if ((await detailsToggle.getAttribute('aria-expanded')) !== 'true') await detailsToggle.click()
+  const metadata = notesColumn.getByRole('group', { name: 'Scene metadata' })
+  await expect(metadata.getByRole('combobox', { name: 'Location' })).toHaveCount(0)
+
+  // A tone label, made in the Labels dialog and put on the scene.
+  await metadata.getByRole('button', { name: 'Manage labels…' }).click()
+  const labelsDialog = page.getByRole('dialog', { name: 'Labels' })
+  await labelsDialog.getByRole('textbox', { name: 'New label name' }).fill('Wry')
+  await labelsDialog.getByRole('combobox', { name: 'New label kind' }).selectOption('tone')
+  await labelsDialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(labelsDialog.getByRole('listitem', { name: 'Wry' })).toBeVisible()
+  await labelsDialog.getByRole('button', { name: 'Done' }).click()
+  await expect(labelsDialog).toHaveCount(0)
+  await metadata.getByRole('combobox', { name: 'Add a label' }).selectOption({ label: 'Wry' })
+  await expect(metadata.getByTestId('label-chip')).toHaveText(['Wry'])
+
+  // The Manuscript tree filters by it.
+  await page.getByRole('combobox', { name: 'Filter by label' }).selectOption({ label: 'Wry' })
+  await expect(page.getByText('1 document carries Wry')).toBeVisible()
+  await expect(bookTree.getByRole('treeitem', { name: scene.title })).toBeVisible()
+  await page.getByRole('button', { name: 'Clear filter' }).click()
+
+  // Mara as the POV, stored as the record's id.
+  const pov = metadata.getByRole('combobox', { name: 'POV' })
+  await expect(pov).toBeEnabled()
+  await pov.selectOption({ label: 'Mara Vell' })
+  await expect
+    .poll(
+      async () =>
+        (await invoke<{ povRecordId: string | null }>('sceneDetail:get', { nodeId: scene.id }))
+          .povRecordId
+    )
+    .toBe(maraId)
+
+  // F-16.4: typing # in the scene opens no tag suggestion (tags are gone in v2).
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await caretToEnd(editor)
+  await page.keyboard.type(' #Ma')
+  await expect(editor).toContainText('#Ma')
+  await expect(page.getByRole('listbox', { name: 'Tag suggestions' })).toHaveCount(0)
+  // Nor is there a tags column or its toggle.
+  await expect(page.getByRole('button', { name: 'Tags', exact: true })).toHaveCount(0)
 })

@@ -15,7 +15,10 @@ import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
 import { SceneCardView } from '@renderer/features/editor/SceneCardView'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useSummaryStore } from '@renderer/features/editor/summaryStore'
+import { LabelFilterBar } from '@renderer/features/labels/LabelFilterBar'
+import { useLabelFilterView } from '@renderer/features/labels/labelFilter'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { BeatBoard } from './BeatsView'
 import { listOutline } from './outlineRows'
 import { useOutlineViewStore, type OutlineMode } from './outlineViewStore'
@@ -40,11 +43,18 @@ const OUTLINE_MODES: readonly { mode: OutlineMode; label: string }[] = [
   { mode: 'beats', label: 'Beats' }
 ]
 
-/** The view on screen: Beats needs a template, so without one the stored choice reads as Outline. */
+/**
+ * The view on screen: Beats needs a template, so without one the stored choice reads as Outline.
+ * Story memory v2 has no Threads view until P2b brings threads back as claims (decision P1-D8):
+ * there the stored choice reads as Outline too.
+ */
 function useShownMode(): OutlineMode {
   const template = useStructureStore((s) => s.template)
   const mode = useOutlineViewStore((s) => s.outlineMode)
-  return mode === 'beats' && template === null ? 'outline' : mode
+  const memory = useStoryMemory()
+  if (mode === 'beats' && template === null) return 'outline'
+  if (mode === 'threads' && memory === 'v2') return 'outline'
+  return mode
 }
 
 /**
@@ -85,6 +95,7 @@ function StructureHeader(): React.JSX.Element {
   const setTemplate = useStructureStore((s) => s.setTemplate)
   const mode = useShownMode()
   const setMode = useOutlineViewStore((s) => s.setOutlineMode)
+  const memory = useStoryMemory()
   const selectId = useId()
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-2">
@@ -113,19 +124,21 @@ function StructureHeader(): React.JSX.Element {
         aria-label="Outline view"
         className="flex shrink-0 gap-0.5 rounded-md border border-line p-0.5"
       >
-        {OUTLINE_MODES.filter((option) => option.mode !== 'beats' || template !== null).map(
-          (option) => (
-            <button
-              key={option.mode}
-              type="button"
-              aria-pressed={option.mode === mode}
-              onClick={() => setMode(option.mode)}
-              className="rounded px-2 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:bg-surface-raised aria-pressed:text-fg"
-            >
-              {option.label}
-            </button>
-          )
-        )}
+        {OUTLINE_MODES.filter(
+          (option) =>
+            (option.mode !== 'beats' || template !== null) &&
+            (option.mode !== 'threads' || memory === 'v1')
+        ).map((option) => (
+          <button
+            key={option.mode}
+            type="button"
+            aria-pressed={option.mode === mode}
+            onClick={() => setMode(option.mode)}
+            className="rounded px-2 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-pressed:bg-surface-raised aria-pressed:text-fg"
+          >
+            {option.label}
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -145,10 +158,14 @@ function OutlineList(): React.JSX.Element {
   const sectionOf = useTreeStore((s) => s.sectionOf)
   const byId = useTreeStore((s) => s.byId)
   const metas = useSceneMetaStore((s) => s.docs)
-  const rows = useMemo(
-    () => listOutline(rootIds, childrenOf, sectionOf),
-    [rootIds, childrenOf, sectionOf]
-  )
+  const memory = useStoryMemory()
+  const index = useMemo(() => ({ rootIds, childrenOf }), [rootIds, childrenOf])
+  // F-16.7: story memory v2's label filter keeps the scenes carrying the label and their folders.
+  const labelView = useLabelFilterView('outline', index)
+  const rows = useMemo(() => {
+    const all = listOutline(rootIds, childrenOf, sectionOf)
+    return labelView === null ? all : all.filter((row) => labelView.visible.has(row.id))
+  }, [rootIds, childrenOf, sectionOf, labelView])
 
   useEffect(() => {
     void usePlanLinksStore.getState().load()
@@ -204,12 +221,21 @@ function OutlineList(): React.JSX.Element {
     .map(({ progress, n }) => `${n} ${SCENE_PROGRESS_LABEL[progress].toLowerCase()}`)
     .join(' · ')
 
+  const filterBar = memory === 'v2' ? <LabelFilterBar surface="outline" /> : null
   if (rows.length === 0) {
-    return <p className="m-0 p-3 text-sm text-fg-muted">The manuscript is empty.</p>
+    return (
+      <>
+        {filterBar}
+        <p className="m-0 p-3 text-sm text-fg-muted">
+          {labelView === null ? 'The manuscript is empty.' : 'No scene carries this label.'}
+        </p>
+      </>
+    )
   }
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
+      {filterBar}
       <p data-testid="outline-counts" className="m-0 px-3 pt-2 pb-1 text-xs text-fg-muted">
         {summary}
       </p>
