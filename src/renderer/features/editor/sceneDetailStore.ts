@@ -9,8 +9,9 @@ import { ipc, IpcRequestError } from '@renderer/lib/ipc'
  * scene's POV, place, time, story year and "+ also here", which point at records. A save is
  * optimistic: the pane shows the new details at once, main's answer replaces them, and a refusal
  * puts the last saved ones back (and propagates). Only the newest save of a scene may land, so a
- * slow answer never undoes a quicker click. A roster change (`record:changed`: a merge re-points
- * details, a delete leaves a "+ also here" id gone) reads the loaded scenes again.
+ * slow answer never undoes a quicker click. A roster change (`record:changed` with `roster`: a
+ * merge re-points details, a delete leaves a "+ also here" id gone) reads again only the loaded
+ * scenes whose details name one of its records.
  */
 interface SceneDetailState {
   docs: Record<string, SceneDetailsView>
@@ -22,8 +23,18 @@ interface SceneDetailState {
   clear: () => void
 }
 
+/** Whether a scene's details point at any of these records (POV, place, "+ also here"). */
+export function namesAny(view: SceneDetailsView, recordIds: ReadonlySet<string>): boolean {
+  return [view.povRecordId, view.place.recordId, ...view.alsoHere, ...view.gone].some(
+    (id) => id !== null && recordIds.has(id)
+  )
+}
+
 let generation = 0
-/** The newest save per scene: an older answer never lands over it. */
+/**
+ * The newest save per scene, kept until `clear`: neither an older save's answer nor a read sent
+ * before it ever lands over it, whatever order the answers come in.
+ */
 const latest = new Map<string, number>()
 let saves = 0
 let unsubscribe: (() => void) | null = null
@@ -33,9 +44,10 @@ export const useSceneDetailStore = create<SceneDetailState>((set, get) => ({
 
   async load(nodeId) {
     const mine = generation
+    const before = latest.get(nodeId)
     const view = await ipc().invoke('sceneDetail:get', { nodeId })
     // A save sent meanwhile is newer than this read.
-    if (mine !== generation || latest.has(nodeId)) return
+    if (mine !== generation || latest.get(nodeId) !== before) return
     set({ docs: { ...get().docs, [nodeId]: view } })
   },
 
@@ -45,11 +57,7 @@ export const useSceneDetailStore = create<SceneDetailState>((set, get) => ({
     latest.set(nodeId, ticket)
     const before = get().docs[nodeId]
     set({ docs: { ...get().docs, [nodeId]: { ...details, gone: before?.gone ?? [] } } })
-    const settle = (): boolean => {
-      const newest = latest.get(nodeId) === ticket
-      if (newest) latest.delete(nodeId)
-      return newest && mine === generation
-    }
+    const settle = (): boolean => latest.get(nodeId) === ticket && mine === generation
     try {
       const view = await ipc().invoke('sceneDetail:set', { nodeId, details })
       if (settle()) set({ docs: { ...get().docs, [nodeId]: view } })
@@ -60,8 +68,11 @@ export const useSceneDetailStore = create<SceneDetailState>((set, get) => ({
   },
 
   subscribe() {
-    unsubscribe ??= ipc().on('record:changed', () => {
-      for (const nodeId of Object.keys(get().docs)) {
+    unsubscribe ??= ipc().on('record:changed', ({ recordIds, roster }) => {
+      if (!roster) return
+      const changed = new Set(recordIds)
+      for (const [nodeId, view] of Object.entries(get().docs)) {
+        if (!namesAny(view, changed)) continue
         get()
           .load(nodeId)
           .catch((err: unknown) => {

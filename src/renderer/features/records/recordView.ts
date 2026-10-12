@@ -1,3 +1,4 @@
+import { normName } from '@shared/memory/names'
 import type { NamedInRow } from '@shared/memory/nameScan'
 import type { CaseRule, RecordAlias, StoryRecordSummary } from '@shared/memory/records'
 import type { TwinGateResult, TwinRule } from '@shared/memory/twinGate'
@@ -62,6 +63,33 @@ export function sharedWith(
       other.id !== entry.recordId &&
       other.aliases.some((name) => name.norm === entry.norm && name.shared)
   )
+}
+
+/** The other records that already answer to `text` (by its normal form), each with that name. */
+export function holdersOf(
+  text: string,
+  records: readonly StoryRecordSummary[],
+  exceptId: string
+): { record: StoryRecordSummary; entry: RecordAlias }[] {
+  const norm = normName(text)
+  return records.flatMap((record) => {
+    if (record.id === exceptId) return []
+    const entry = record.aliases.find((name) => name.norm === norm)
+    return entry === undefined ? [] : [{ record, entry }]
+  })
+}
+
+/** A record's names as `setAliases` takes them, with the one whose normal form is `norm` shared. */
+export function sharingInput(record: StoryRecordSummary, norm: string): AliasesInput {
+  const input = aliasesInputOf(record)
+  const main = record.aliases.find((entry) => entry.isMain)
+  return {
+    name: main?.norm === norm ? { ...input.name, shared: true } : input.name,
+    aliases: nicknamesOf(record).map((entry, index) => {
+      const each = input.aliases[index] ?? { text: entry.text }
+      return entry.norm === norm ? { ...each, shared: true } : each
+    })
+  }
 }
 
 /** "named in 3 scenes", "named in 1 scene", "not named yet". */

@@ -1,11 +1,13 @@
 import { create } from 'zustand'
 import type { Label, LabelKind, LabelLink } from '@shared/storyLabels'
+import { useSearchStore } from '@renderer/features/search/searchStore'
 import { ipc } from '@renderer/lib/ipc'
 
 /**
  * The author's labels in the renderer (F-16.7, story memory v2; answer 2): the one owner of the
  * labels in her order, of which scene or Research document carries which (`byNode`), of the
- * label each surface is filtered by, and of whether the Labels dialog is open. The AI never
+ * label each surface is filtered by (word search's own filter stays the search store's, cleared
+ * here when its label goes), and of whether the Labels dialog is open. The AI never
  * touches any of it. Loaded on a v2 open; every action merges what main answers.
  */
 
@@ -90,6 +92,9 @@ export const useLabelStore = create<LabelState>((set, get) => {
       ids.map((labelId) => ({ labelId, nodeId }))
     )
     set({ labels, byNode: linksByNode(links, labels), filter })
+    // Word search's label filter is the search store's; one on a gone label clears the same way.
+    const search = useSearchStore.getState()
+    if (search.labelId !== null && !known.has(search.labelId)) search.setLabelId(null)
   }
 
   return {

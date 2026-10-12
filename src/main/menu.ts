@@ -85,7 +85,7 @@ export function installApplicationMenu({
 } {
   const apply = (): void => {
     const template = buildMenuTemplate(
-      menuFor({ devTools: devTools() }),
+      menuFor({ devTools: devTools(), storyMemory: manager.current()?.storyMemory ?? null }),
       { format: manager.current()?.format ?? null, platform, assistantName: assistantName() },
       (id) => {
         const win = target()

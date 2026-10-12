@@ -26,8 +26,10 @@ import { caretToEnd } from './support'
  *
  * P1 slice 3 (F-16.6, F-16.7, F-16.11, the v2 shell): the picker lists v2's sections only; a
  * record is made with a nickname, and creating that nickname warns through the twin gate; Pinned
- * and Ideas lines are saved; *Same as* merges a second record and *Split* brings it back; a tone
- * label is made, put on a scene and filtered by; Mara is the scene's POV; `#` opens no suggestion.
+ * and Ideas lines are saved; *Same as* merges a second record and *Split* brings it back; a
+ * surname is shared by two records; a tone label is made, put on a scene and filtered by; Mara is
+ * the scene's POV; a click in her *Named in* selects her name in the scene; `#` opens no
+ * suggestion; a file dropped on the window becomes a Research page.
  */
 
 let app: ElectronApplication
@@ -238,7 +240,7 @@ test('story memory v2: the Research section and Not canon pages (P1 slice 2)', a
 interface StoredRecord {
   id: string
   name: string
-  aliases: { id: string; text: string }[]
+  aliases: { id: string; text: string; shared: boolean }[]
   pinned: TiptapNodeT | null
   ideas: TiptapNodeT | null
 }
@@ -343,6 +345,37 @@ test('story memory v2: sheets, labels, typed details and the v2 editor (P1 slice
   // Merged pages stay on Mara's sheet.
   await expect(pinned).toContainText('Eyes: grey as the harbour.')
 
+  // Identity rule 4: Tomas has the surname "Harrow"; adding it to Mara offers to share it, and
+  // Share marks it shared on both.
+  const characters = page.getByRole('list', { name: 'Characters' })
+  await characters.getByRole('button', { name: /^Tomas Harrow/ }).click()
+  await expect(sheet.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(
+    'Tomas Harrow'
+  )
+  await sheet.getByRole('textbox', { name: 'New nickname' }).fill('Harrow')
+  await sheet.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(nicknames.getByRole('listitem', { name: 'Harrow' })).toBeVisible()
+  await characters.getByRole('button', { name: /^Mara Vell/ }).click()
+  await expect(sheet.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Mara Vell')
+  await sheet.getByRole('textbox', { name: 'New nickname' }).fill('Harrow')
+  await sheet.getByRole('button', { name: 'Add', exact: true }).click()
+  const share = page.getByRole('dialog', { name: 'Share “Harrow”?' })
+  await expect(share).toContainText('already a name of Tomas Harrow')
+  await share.getByRole('button', { name: 'Share' }).click()
+  await expect(nicknames.getByRole('listitem', { name: 'Harrow' })).toContainText(
+    'Shared with Tomas Harrow'
+  )
+  await expect
+    .poll(async () =>
+      (await records())
+        .flatMap((r) => r.aliases.filter((a) => a.text === 'Harrow').map((a) => [r.name, a.shared]))
+        .sort()
+    )
+    .toEqual([
+      ['Mara Vell', true],
+      ['Tomas Harrow', true]
+    ])
+
   // F-16.7 and F-16.11: open the first scene; its details take a tone label and Mara as POV.
   const scene = (await invoke<TreeNode[]>('tree:list', undefined)).find(
     (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
@@ -391,12 +424,51 @@ test('story memory v2: sheets, labels, typed details and the v2 editor (P1 slice
     )
     .toBe(maraId)
 
-  // F-16.4: typing # in the scene opens no tag suggestion (tags are gone in v2).
+  // F-16.5, F-16.6: the scene names Mara Vell; once the local name scan has run, her sheet's
+  // Named in lists the scene, and a click there selects her name in it.
   const editor = page.getByRole('textbox', { name: 'Document' })
+  await caretToEnd(editor)
+  await page.keyboard.type(' Mara Vell waited by the steps.')
+  await expect
+    .poll(
+      async () =>
+        (await invoke<{ recordId: string; nodeId: string }[]>('names:byRecord', undefined)).some(
+          (row) => row.recordId === maraId && row.nodeId === scene.id
+        ),
+      { timeout: 15_000 }
+    )
+    .toBe(true)
+  await showSection('Characters')
+  await characters.getByRole('button', { name: /^Mara Vell/ }).click()
+  const namedIn = sheet.getByRole('region', { name: 'Named in' })
+  await namedIn.getByRole('button', { name: new RegExp(scene.title) }).click()
+  await expect(sheet).toHaveCount(0)
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+    .toBe('Mara Vell')
+
+  // F-16.4: typing # in the scene opens no tag suggestion (tags are gone in v2).
   await caretToEnd(editor)
   await page.keyboard.type(' #Ma')
   await expect(editor).toContainText('#Ma')
   await expect(page.getByRole('listbox', { name: 'Tag suggestions' })).toHaveCount(0)
   // Nor is there a tags column or its toggle.
   await expect(page.getByRole('button', { name: 'Tags', exact: true })).toHaveCount(0)
+
+  // F-16.8: a file dropped on the window becomes a Research page (no Library, no sort).
+  await page.evaluate(() => {
+    const files = new DataTransfer()
+    files.items.add(new File(['The tide turns at the second buoy.'], 'Harbour log.md'))
+    const options = { dataTransfer: files, bubbles: true, cancelable: true }
+    window.dispatchEvent(new DragEvent('dragenter', options))
+    window.dispatchEvent(new DragEvent('drop', options))
+  })
+  const researchTree = page.getByRole('tree', { name: 'Document tree' })
+  await expect(researchTree.getByRole('treeitem', { name: 'Harbour log' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Research page' })).toContainText(
+    'The tide turns at the second buoy.'
+  )
+  expect(
+    (await invoke<ResearchDoc[]>('research:list', undefined)).filter((d) => d.origin === 'upload')
+  ).toHaveLength(2)
 })

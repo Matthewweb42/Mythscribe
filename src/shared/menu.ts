@@ -3,6 +3,7 @@ import type { NovelFormat } from './ipc/contract'
 import { DEFAULT_ASSISTANT_NAME, nameAssistant } from './assistantName'
 import { levelLabel, type HierarchyLevel } from './labels'
 import { APP_SHORTCUTS, type Chord, type ShortcutId } from './shortcuts'
+import type { StoryMemoryVersion } from './storyMemory'
 
 /**
  * The one menu definition (F-7.1): main renders it as the native application menu (with the
@@ -89,6 +90,11 @@ export interface MenuItem {
   /** The hierarchy level this Insert item creates, so its label follows the project's format. */
   level?: HierarchyLevel
   when: MenuWhen
+  /**
+   * Only in a project on this story memory (F-16.4): a v2 project has no tags, so its menu leaves
+   * the tag items out. Absent: in every project.
+   */
+  memory?: StoryMemoryVersion
 }
 
 export interface MenuSeparator {
@@ -191,7 +197,7 @@ export const MENU: readonly MenuSection[] = [
       // F-9.6: the quick reference panel.
       { id: 'toggleReferences', label: 'References', when: 'project' },
       // The tags column, which replaced the tag bar above the editor (2026-10-06).
-      { id: 'toggleTags', label: 'Tags', when: 'project' },
+      { id: 'toggleTags', label: 'Tags', when: 'project', memory: 'v1' },
       // Layout 3c: the columns back to the default arrangement and widths.
       { id: 'resetLayout', label: 'Reset layout', when: 'project' },
       // F-3.12: the read-only compiled preview of the manuscript.
@@ -212,7 +218,7 @@ export const MENU: readonly MenuSection[] = [
     id: 'tools',
     label: 'Tools',
     entries: [
-      { id: 'openTags', label: 'Tags', when: 'project' },
+      { id: 'openTags', label: 'Tags', when: 'project', memory: 'v1' },
       { id: 'openGoals', label: 'Goals…', when: 'project' },
       { id: 'openWordCount', label: 'Word count…', when: 'project' },
       { id: 'openStatistics', label: 'Statistics…', when: 'project' },
@@ -248,14 +254,28 @@ export const DEVELOPER_MENU_ENTRIES: readonly MenuEntry[] = [
   { id: 'openChromiumDevTools', label: 'Chromium DevTools', when: 'always' }
 ]
 
-/** The menu as shown now: `MENU`, plus Help's developer items while developer tools are on. */
-export function menuFor(options: { devTools: boolean }): readonly MenuSection[] {
-  if (!options.devTools) return MENU
-  return MENU.map((section) =>
-    section.id === 'help'
-      ? { ...section, entries: [...section.entries, ...DEVELOPER_MENU_ENTRIES] }
-      : section
-  )
+/**
+ * The menu as shown now: `MENU`, plus Help's developer items while developer tools are on, less
+ * the items of the other story memory (`memory`) while a project is open (`storyMemory` null:
+ * none is, and every item shows as it always did).
+ */
+export function menuFor(options: {
+  devTools: boolean
+  storyMemory: StoryMemoryVersion | null
+}): readonly MenuSection[] {
+  const { devTools, storyMemory } = options
+  const fits = (entry: MenuEntry): boolean =>
+    isSeparator(entry) ||
+    entry.memory === undefined ||
+    storyMemory === null ||
+    entry.memory === storyMemory
+  if (!devTools && MENU.every((section) => section.entries.every(fits))) return MENU
+  return MENU.map((section) => {
+    const entries = section.entries.filter(fits)
+    return section.id === 'help' && devTools
+      ? { ...section, entries: [...entries, ...DEVELOPER_MENU_ENTRIES] }
+      : { ...section, entries }
+  })
 }
 
 export function isSeparator(entry: MenuEntry): entry is MenuSeparator {

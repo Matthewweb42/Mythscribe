@@ -23,6 +23,11 @@ export interface PageEditorProps {
    * scrolls with the view, instead of filling the pane and scrolling on its own.
    */
   inline?: boolean
+  /**
+   * Whether the toolbar offers Not canon (default true). Off for a record's Ideas page, which is
+   * never canon whatever its marks (answer 3), so the page has no toolbar at all.
+   */
+  notCanonToggle?: boolean
 }
 
 /**
@@ -30,13 +35,15 @@ export interface PageEditorProps {
  * page store. It loads its owner's page on mount (and again when the owner changes) and unloads on
  * unmount, which saves any pending edit. The schema is the page schema (`buildPageExtensions`),
  * so a paragraph can be marked Not canon and carries its AI marks until the author edits it. The
- * toolbar holds only the Not canon toggle; the StarterKit shortcuts apply, and Ctrl+S saves.
+ * toolbar holds only the Not canon toggle (none on Ideas); the StarterKit shortcuts apply, and
+ * Ctrl+S saves.
  */
 export function PageEditor({
   owner,
   label,
   placeholder,
-  inline = false
+  inline = false,
+  notCanonToggle = true
 }: PageEditorProps): React.JSX.Element {
   const key = pageKey(owner)
   const content = usePageStore((s) => s.docs[key]?.content ?? null)
@@ -56,6 +63,7 @@ export function PageEditor({
       label={label}
       placeholder={placeholder}
       inline={inline}
+      notCanonToggle={notCanonToggle}
     />
   )
 }
@@ -69,13 +77,15 @@ function PageInstance({
   content,
   label,
   placeholder,
-  inline
+  inline,
+  notCanonToggle
 }: {
   pageKey: string
   content: TiptapNodeT | null
   label: string
   placeholder: string
   inline: boolean
+  notCanonToggle: boolean
 }): React.JSX.Element {
   const edit = usePageStore((s) => s.edit)
   const extensions = useMemo(
@@ -120,23 +130,25 @@ function PageInstance({
 
   return (
     <div className={inline ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'}>
-      <div
-        role="toolbar"
-        aria-label={inline ? `${label} page` : 'Page'}
-        className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1 text-xs"
-      >
-        <button
-          type="button"
-          aria-pressed={notCanon}
-          disabled={!editable}
-          title="Mark the paragraphs the selection touches as Not canon: ideas and maybes, never treated as true"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => editor.chain().focus().toggleNotCanon().run()}
-          className="rounded-md px-2 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-50 aria-pressed:bg-surface-raised aria-pressed:text-fg"
+      {notCanonToggle ? (
+        <div
+          role="toolbar"
+          aria-label={inline ? `${label} page` : 'Page'}
+          className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1 text-xs"
         >
-          Not canon
-        </button>
-      </div>
+          <button
+            type="button"
+            aria-pressed={notCanon}
+            disabled={!editable}
+            title="Mark the paragraphs the selection touches as Not canon: ideas and maybes, never treated as true"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => editor.chain().focus().toggleNotCanon().run()}
+            className="rounded-md px-2 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-50 aria-pressed:bg-surface-raised aria-pressed:text-fg"
+          >
+            Not canon
+          </button>
+        </div>
+      ) : null}
       {inline ? (
         <div className="py-2 pr-3 pl-20">
           <EditorContent editor={editor} className="flex flex-col" />

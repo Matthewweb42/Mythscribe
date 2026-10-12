@@ -8792,7 +8792,7 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
         aliases: [{ text: 'Mara' }]
       })
       if (!('record' in made)) throw new Error('blocked')
-      expect(sentOf('record:changed')).toContainEqual({ recordIds: [made.record.id] })
+      expect(sentOf('record:changed')).toContainEqual({ recordIds: [made.record.id], roster: true })
       // The spellchecker accepts the record's names.
       expect(spellSync.mock.calls.at(-1)?.[0]).toEqual(expect.arrayContaining(['Mara', 'Vell']))
 
@@ -8927,12 +8927,15 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       }
     })
     expect(details).toMatchObject({ povRecordId: made.record.id, storyYear: 1811, gone: [] })
+    const changedBefore = sentOf('record:changed').length
     const saved = await invoke('record:savePage', {
       id: made.record.id,
       page: 'pinned',
       doc: paragraphs('Eyes: grey')
     })
     expect(saved.pinned).toEqual(paragraphs('Eyes: grey'))
+    // A page save moves no names: the windows are not told to read anything again.
+    expect(sentOf('record:changed')).toHaveLength(changedBefore)
     expect(await invoke('record:gate', { name: 'Mar' })).toMatchObject({
       outcome: 'blocked',
       rule: 'prefix',
@@ -8940,6 +8943,29 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     })
     const blocked = await invoke('record:create', { name: 'Mar', categoryId: 'character' })
     expect('gate' in blocked).toBe(true)
+    // F-8.3: a page's unsaved typing is journalled under its own kind and recovered by the name
+    // of its record; one equal to the stored page, and one of a gone record, are dropped.
+    await invoke('recovery:stash', {
+      kind: 'ideas',
+      id: made.record.id,
+      content: paragraphs('Maybe a twin.')
+    })
+    await invoke('recovery:stash', {
+      kind: 'pinned',
+      id: made.record.id,
+      content: paragraphs('Eyes: grey')
+    })
+    await invoke('recovery:stash', { kind: 'pinned', id: 'gone-record', content: paragraphs('x') })
+    expect(await invoke('recovery:list', undefined)).toEqual([
+      { kind: 'ideas', id: made.record.id, title: 'Mara' }
+    ])
+    expect(await invoke('recovery:restore', undefined)).toEqual([
+      { kind: 'ideas', id: made.record.id, wordCount: null }
+    ])
+    expect((await invoke('record:get', { id: made.record.id })).ideas).toEqual(
+      paragraphs('Maybe a twin.')
+    )
+    expect(await invoke('recovery:list', undefined)).toEqual([])
   })
 
   // F-16.8 (plan P1 slice 2): the Research section is made on the v2 open only.
@@ -8974,6 +9000,12 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       })
       contextFiles = null
       expect(await invoke('research:add', {})).toBeNull()
+      // A file dropped on the window lands in Research too (its bytes, no dialog, no sort).
+      const dropped = await invoke('research:addData', {
+        files: [{ name: 'harbour.md', data: new TextEncoder().encode('The harbour silts up.') }]
+      })
+      expect(dropped.nodes.map((n) => [n.title, n.parentId])).toEqual([['harbour', roots[3]?.id]])
+      expect(dropped.docs[0]).toMatchObject({ origin: 'upload', fileType: 'md' })
 
       await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
       expect(
@@ -8996,7 +9028,8 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       )
       expect((await invoke('research:list', undefined)).map((doc) => doc.nodeId)).toEqual([
         note.node.id,
-        upload
+        upload,
+        dropped.nodes[0]?.id
       ])
 
       await invoke('research:openOriginal', { nodeId: upload })

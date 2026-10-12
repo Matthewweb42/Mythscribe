@@ -979,6 +979,25 @@ export const ProvenanceReport = z.object({
 })
 export type ProvenanceReport = z.infer<typeof ProvenanceReport>
 
+/** Files dropped on the window (F-9.8; F-16.8 in story memory v2), carried as bytes. */
+const DroppedFiles = z
+  .array(
+    z.object({
+      name: z.string().min(1),
+      data: z
+        .instanceof(Uint8Array)
+        .refine((data) => data.byteLength <= CONTEXT_FILE_MAX_BYTES, 'The file is too large')
+    })
+  )
+  .min(1)
+
+/** What a Research upload answers (F-16.8): the new nodes and their meta, and what was skipped. */
+const ResearchAddResult = z.object({
+  nodes: z.array(TreeNode),
+  docs: z.array(ResearchDoc),
+  skipped: z.array(ContextSkipped)
+})
+
 export const contract = {
   'app:info': {
     input: z.undefined(),
@@ -1854,18 +1873,7 @@ export const contract = {
   },
   /** The same as `library:add` for files dropped on the window, carried as bytes. */
   'library:addData': {
-    input: z.object({
-      files: z
-        .array(
-          z.object({
-            name: z.string().min(1),
-            data: z
-              .instanceof(Uint8Array)
-              .refine((data) => data.byteLength <= CONTEXT_FILE_MAX_BYTES, 'The file is too large')
-          })
-        )
-        .min(1)
-    }),
+    input: z.object({ files: DroppedFiles }),
     output: ContextAddResult
   },
   /** Opens a stored original in the OS's own app for its type. NOT_FOUND for an unknown id. */
@@ -3235,13 +3243,15 @@ export const contract = {
       paths: z.array(z.string()).min(1).optional(),
       parentId: z.string().optional()
     }),
-    output: z
-      .object({
-        nodes: z.array(TreeNode),
-        docs: z.array(ResearchDoc),
-        skipped: z.array(ContextSkipped)
-      })
-      .nullable()
+    output: ResearchAddResult.nullable()
+  },
+  /**
+   * F-16.8: the same as `research:add` for files dropped on the window, carried as bytes (story
+   * memory v2's window drop; v1 drops go to `library:addData`). Nothing is sorted and no AI runs.
+   */
+  'research:addData': {
+    input: z.object({ files: DroppedFiles, parentId: z.string().optional() }),
+    output: ResearchAddResult
   },
   /**
    * F-16.8: a written Research note, an empty document under `parentId` (default the root),
@@ -3379,8 +3389,13 @@ export const events = {
   'backups:changed': BackupState,
   /** The app's access changed (M1): the trial ended, or a license was verified or dropped. */
   'app:accessChanged': AppAccess,
-  /** F-16.4 (v2): these records changed (made, renamed, merged, split, deleted, a page saved); the store refetches them. */
-  'record:changed': z.object({ recordIds: z.array(z.string()) }),
+  /**
+   * F-16.4 (v2): these records changed and the store refetches them. `roster`: their names or kind
+   * moved (made, renamed, re-categorised, merged, split, deleted), so scene details and mentions
+   * naming them are read again too; false: only the summary did (an image). A page save is not
+   * pushed: the renderer's page store holds the text it saved.
+   */
+  'record:changed': z.object({ recordIds: z.array(z.string()), roster: z.boolean() }),
   /** F-16.5 (v2): the recorded mentions of these scenes changed (a scan wrote rows). */
   'names:changed': z.object({ nodeIds: z.array(z.string()) }),
   /** F-16.4 (v2): the name questions changed (a scan, a record, an answer); the whole list. Only a real change is pushed. */

@@ -1,6 +1,7 @@
-import type { RecoveryItem } from '@shared/recovery'
+import type { RecoveryItem, RecoveryKind } from '@shared/recovery'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { refreshRewrittenDocuments } from '@renderer/features/editor/rewrittenDocuments'
+import { pageKey, usePageStore } from '@renderer/features/research/pageStore'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -9,11 +10,19 @@ import { flushPendingSaves } from './pendingSaves'
 /** How many recovered records the prompt names before it says "and N more". */
 const LISTED_MAX = 5
 
-/** The prompt's list: `"Title" (text)`, `"Title" (notes)`, at most `LISTED_MAX`, then "and N more". */
+/** What the prompt calls each kind's part of its record. */
+const KIND_WORD: Record<RecoveryKind, string> = {
+  document: 'text',
+  notes: 'notes',
+  pinned: 'Pinned',
+  ideas: 'Ideas'
+}
+
+/** The prompt's list: `"Title" (text)`, `"Title" (notes)`, `"Name" (Pinned)`, at most `LISTED_MAX`, then "and N more". */
 export function describeRecoveryItems(items: readonly RecoveryItem[]): string {
   const named = items
     .slice(0, LISTED_MAX)
-    .map((item) => `"${item.title || 'Untitled'}" (${item.kind === 'document' ? 'text' : 'notes'})`)
+    .map((item) => `"${item.title || 'Untitled'}" (${KIND_WORD[item.kind]})`)
   const more = items.length - named.length
   return more > 0 ? `${named.join(', ')} and ${more} more` : named.join(', ')
 }
@@ -38,9 +47,14 @@ export async function offerRecovery(): Promise<void> {
       await flushPendingSaves()
       const restored = await ipc().invoke('recovery:restore', undefined)
       const notes = restored.filter((r) => r.kind === 'notes').map((r) => r.id)
+      // F-16.6: a record's Pinned and Ideas open in a sheet are read again too.
+      const pages = restored.flatMap((r) =>
+        r.kind === 'pinned' || r.kind === 'ideas' ? [pageKey({ kind: r.kind, id: r.id })] : []
+      )
       await Promise.all([
         refreshRewrittenDocuments(restored.filter((r) => r.kind === 'document')),
-        useNotesStore.getState().reload(notes)
+        useNotesStore.getState().reload(notes),
+        usePageStore.getState().reload(pages)
       ])
       toast.success(
         restored.length === 1

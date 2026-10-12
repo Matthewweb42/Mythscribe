@@ -1100,7 +1100,7 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <EntityImportDialog />
       {/* F-9.8: the context library's estimate; the pass and its review are side work. */}
       <ContextUploadDialog />
-      {/* F-9.8: files dropped anywhere on the window go to the Library. */}
+      {/* F-9.8: files dropped anywhere on the window go to the Library (Research in v2, F-16.8). */}
       <DropOverlay />
       {/* F-10.1: the project search, open while the search store says so. */}
       <SearchDialog />

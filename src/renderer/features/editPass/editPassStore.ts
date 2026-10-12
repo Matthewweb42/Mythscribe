@@ -13,6 +13,7 @@ import { locateAll } from '@renderer/features/editor/locateText'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
+import { useRecordStore } from '@renderer/features/records/recordStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -326,11 +327,13 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
 
   openWorkspace() {
     useEntityStore.getState().select(null)
+    useRecordStore.getState().select(null)
     useEditPassViewStore.getState().open({ kind: 'workspace' })
   },
 
   async openReport(passId) {
     useEntityStore.getState().select(null)
+    useRecordStore.getState().select(null)
     useEditPassViewStore.getState().open({ kind: 'report', passId })
     if (get().detail?.pass.id !== passId) set({ detail: null })
     const mine = generation

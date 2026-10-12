@@ -3,6 +3,7 @@ import { ImagePlus, Pin } from 'lucide-react'
 import { hasPin, pinKey, type ReferencePin } from '@shared/references'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { DockPanelControls, PANEL_TITLE } from '@renderer/features/shell/Dock'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -80,13 +81,16 @@ export function AddReferenceImageButton(): React.JSX.Element {
 
 /**
  * The reference panel's scrolling body: the open scene's story bible sheets, then the pins.
- * Hosted by the docked panel and by the focus-mode References window (2026-10-07).
+ * Hosted by the docked panel and by the focus-mode References window (2026-10-07). In story
+ * memory v2 (F-16.6) only the pins: "In this scene" reads v1's tags and sheets, and the This
+ * scene panel (P1 slice 4) takes its place.
  */
 export function ReferencesBody(): React.JSX.Element {
+  const v2 = useStoryMemory() === 'v2'
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 pb-4">
-      <InThisScene />
-      <PinList />
+      {v2 ? null : <InThisScene />}
+      <PinList v2={v2} />
     </div>
   )
 }
@@ -147,7 +151,7 @@ function InThisScene(): React.JSX.Element | null {
  * it from the stored list on the next load), and the move buttons step over it, so a card always
  * trades places with the card the author sees next to it. Cards reorder by drag and drop too.
  */
-function PinList(): React.JSX.Element {
+function PinList({ v2 }: { v2: boolean }): React.JSX.Element {
   const pins = useReferenceStore((s) => s.pins)
   const entities = useEntityStore((s) => s.byId)
   const nodes = useTreeStore((s) => s.byId)
@@ -166,7 +170,9 @@ function PinList(): React.JSX.Element {
   if (shown.length === 0) {
     return (
       <p className="m-0 text-sm text-fg-muted">
-        Nothing pinned yet. Pin a character, a setting, notes, or an image.
+        {v2
+          ? 'Nothing pinned yet. Pin notes or an image.'
+          : 'Nothing pinned yet. Pin a character, a setting, notes, or an image.'}
       </p>
     )
   }

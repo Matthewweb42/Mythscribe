@@ -62,3 +62,31 @@ export function openMention(
     return null
   })
 }
+
+/**
+ * Opens the document and selects one mention the name scan of story memory v2 recorded (F-16.6's
+ * *Named in*). `text` is the mention as the scan read it and `names` the record's names. Each is
+ * taken as written, never as a tag name, so a hyphen stays inside the name ("Anne-Marie"). The
+ * stored range is used while it still reads one of them, case ignored; otherwise the first place
+ * one of them is written, the mention's own text first. None found: `openPassage` says so.
+ */
+export function openNameMention(
+  nodeId: string,
+  range: MentionRange,
+  text: string,
+  names: readonly string[]
+): Promise<void> {
+  const spellings = [text, ...names].filter((each) => each.trim() !== '')
+  return openPassage(nodeId, (doc) => {
+    const [from, to] = range
+    if (from < to && to <= doc.content.size) {
+      const here = doc.textBetween(from, to, ' ').toLowerCase()
+      if (spellings.some((each) => each.toLowerCase() === here)) return { from, to }
+    }
+    for (const each of spellings) {
+      const found = locateText(doc, each, { ignoreCase: true })
+      if (found !== null) return found
+    }
+    return null
+  })
+}

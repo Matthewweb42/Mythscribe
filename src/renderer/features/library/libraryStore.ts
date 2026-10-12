@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { AI_DATA_SHARING, isFeatureAllowed, needsSwitchText } from '@shared/aiSettings'
 import {
-  CONTEXT_FILE_MAX_BYTES,
   declineReviewCategory,
   renameReviewCategory,
   reviewHasChanges,
@@ -25,6 +24,7 @@ import type { ReviewDecision } from '@renderer/features/review/reviewDeckModel'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import { readDropped } from './droppedFiles'
 import { decidedReview } from './uploadReview'
 
 /**
@@ -286,14 +286,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => {
 
     async addDropped(dropped) {
       const mine = generation
-      const files: { name: string; data: Uint8Array<ArrayBuffer> }[] = []
-      for (const file of dropped) {
-        if (file.size > CONTEXT_FILE_MAX_BYTES) {
-          toast.warning(`${file.name}: The file is larger than 25 MB.`)
-          continue
-        }
-        files.push({ name: file.name, data: new Uint8Array(await file.arrayBuffer()) })
-      }
+      const files = await readDropped(dropped)
       if (files.length === 0) return
       const result = await ipc().invoke('library:addData', { files })
       if (mine !== generation) return

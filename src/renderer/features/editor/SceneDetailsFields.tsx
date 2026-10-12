@@ -21,6 +21,8 @@ const FIELD =
   'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-px text-xs leading-5 disabled:opacity-50'
 const ROW = 'flex min-w-0 items-center gap-2'
 const LABEL = 'w-16 shrink-0 text-xs text-fg-muted'
+/** A picker's "New character…" choice; never a record id (those are UUIDs). */
+const NEW_RECORD = 'new:'
 
 /** The records of one kind, by name. */
 function useRecordsOfKind(kind: RecordKind | null): StoryRecordSummary[] {
@@ -39,8 +41,10 @@ function useRecordsOfKind(kind: RecordKind | null): StoryRecordSummary[] {
  * chapter or part: POV (a Characters record), Place (a place record plus free text), Time (free
  * text), Story year (one typed year per time jump, decision 5), *+ also here* (records present
  * without being named) and Labels (F-16.7). Each change saves at once through the scene detail
- * store; a text field saves when it loses focus or on Enter. Synopsis, brief, beats and status
- * stay in the scene meta beside them. Outside the manuscript only the labels show.
+ * store; a text field saves when it loses focus or on Enter. POV and Place offer *New
+ * character…* and *New place…*, the record creation dialog (twin gate included), whose record is
+ * then chosen. Synopsis, brief, beats and status stay in the scene meta beside them. Outside the
+ * manuscript only the labels show.
  */
 export function SceneDetailsFields({
   id,
@@ -76,20 +80,28 @@ function TypedDetails({ id }: { id: string }): React.JSX.Element {
 
   const disabled = view === undefined
   const details: SceneDetails = view ?? emptySceneDetails()
-  const save = (patch: Partial<SceneDetails>): void => {
-    if (view === undefined) return
+  /** Saves a change over the details as the store holds them now (a picker answers later). */
+  const save = (
+    patch: Partial<SceneDetails> | ((current: SceneDetails) => Partial<SceneDetails>)
+  ): void => {
+    const now = useSceneDetailStore.getState().docs[id]
+    if (now === undefined) return
     const current: SceneDetails = {
-      povRecordId: view.povRecordId,
-      place: view.place,
-      time: view.time,
-      storyYear: view.storyYear,
-      alsoHere: view.alsoHere
+      povRecordId: now.povRecordId,
+      place: now.place,
+      time: now.time,
+      storyYear: now.storyYear,
+      alsoHere: now.alsoHere
     }
+    const change = typeof patch === 'function' ? patch(current) : patch
     useSceneDetailStore
       .getState()
-      .save(id, { ...current, ...patch })
+      .save(id, { ...current, ...change })
       .catch((err: unknown) => toast.error(describeError(err)))
   }
+  /** The creation dialog for `categoryId`; the record made (or picked as the same) is chosen. */
+  const createFor = (categoryId: string, choose: (recordId: string) => void): void =>
+    useRecordStore.getState().startCreate(categoryId, choose)
   const addable = everyone.filter((record) => !details.alsoHere.includes(record.id))
 
   return (
@@ -104,8 +116,10 @@ function TypedDetails({ id }: { id: string }): React.JSX.Element {
           options={characters}
           byId={byId}
           none="Nobody chosen"
+          create="New character…"
           disabled={disabled}
           onChange={(povRecordId) => save({ povRecordId })}
+          onCreate={() => createFor('character', (povRecordId) => save({ povRecordId }))}
         />
       </div>
       <div className={ROW}>
@@ -118,8 +132,14 @@ function TypedDetails({ id }: { id: string }): React.JSX.Element {
           options={places}
           byId={byId}
           none="No place chosen"
+          create="New place…"
           disabled={disabled}
           onChange={(recordId) => save({ place: { ...details.place, recordId } })}
+          onCreate={() =>
+            createFor('setting', (recordId) =>
+              save((current) => ({ place: { ...current.place, recordId } }))
+            )
+          }
         />
       </div>
       <div className={ROW}>
@@ -211,23 +231,30 @@ function TypedDetails({ id }: { id: string }): React.JSX.Element {
   )
 }
 
-/** A record picker: None, then the options by name; a chosen record that is gone reads "Gone". */
+/**
+ * A record picker: None, then the options by name, then `create` (a new record, made through
+ * `onCreate`); a chosen record that is gone reads "Gone".
+ */
 function RecordSelect({
   id,
   value,
   options,
   byId,
   none,
+  create,
   disabled,
-  onChange
+  onChange,
+  onCreate
 }: {
   id: string
   value: string | null
   options: readonly StoryRecordSummary[]
   byId: Readonly<Record<string, StoryRecordSummary>>
   none: string
+  create: string
   disabled: boolean
   onChange: (recordId: string | null) => void
+  onCreate: () => void
 }): React.JSX.Element {
   const listed = value === null || options.some((record) => record.id === value)
   return (
@@ -235,7 +262,11 @@ function RecordSelect({
       id={id}
       value={value ?? ''}
       disabled={disabled}
-      onChange={(event) => onChange(event.target.value === '' ? null : event.target.value)}
+      onChange={(event) => {
+        const picked = event.target.value
+        if (picked === NEW_RECORD) onCreate()
+        else onChange(picked === '' ? null : picked)
+      }}
       className={FIELD}
     >
       <option value="">{none}</option>
@@ -247,6 +278,7 @@ function RecordSelect({
           {record.name}
         </option>
       ))}
+      <option value={NEW_RECORD}>{create}</option>
     </select>
   )
 }

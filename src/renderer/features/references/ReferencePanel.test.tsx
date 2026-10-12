@@ -15,6 +15,7 @@ import { resetFactStore } from '@renderer/features/entities/factStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { useProjectStore } from '@renderer/features/project/projectStore'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -121,6 +122,7 @@ function reset(): void {
   resetLayoutStore()
   resetPendingSaves()
   useTreeStore.getState().clear()
+  useProjectStore.setState({ current: null })
   useDialogStore.setState({ modals: [], toasts: [] })
 }
 
@@ -450,6 +452,27 @@ describe('In this scene (F-9.7)', () => {
     expect(section).toHaveTextContent('Tall, with a scar across her left palm.')
     expect(within(section).queryByRole('button', { name: 'Move up' })).not.toBeInTheDocument()
     expect(screen.getByText('Nothing pinned yet.', { exact: false })).toBeInTheDocument()
+  })
+
+  it('is left out in story memory v2, whose pins say nothing of characters (F-16.6)', async () => {
+    useProjectStore.setState({
+      current: {
+        id: 'p-2',
+        name: 'Memory',
+        format: 'novel',
+        path: '/books/Memory.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 33,
+        storyMemory: 'v2'
+      }
+    })
+    await openPanel()
+    act(() => useTreeStore.getState().select('sc-1'))
+    expect(screen.queryByRole('region', { name: 'In this scene' })).not.toBeInTheDocument()
+    expect(screen.getByText('Nothing pinned yet. Pin notes or an image.')).toBeInTheDocument()
+    expect(calls).not.toContain('mention:listForNode')
   })
 
   it('follows the scene the author opens and the scan of the open scene', async () => {

@@ -10,7 +10,7 @@ import {
   type RecordAlias,
   type StoryRecordSummary
 } from '@shared/memory/records'
-import { openMention } from '@renderer/features/editor/openPassage'
+import { openNameMention } from '@renderer/features/editor/openPassage'
 import { useCategory, useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { listOutline } from '@renderer/features/outline/outlineRows'
@@ -25,10 +25,12 @@ import {
   aliasesInputOf,
   CASE_RULE_HINT,
   CASE_RULE_LABEL,
+  holdersOf,
   mergePreview,
   mergeSummary,
   nicknamesOf,
-  sharedWith
+  sharedWith,
+  sharingInput
 } from './recordView'
 
 const BUTTON =
@@ -39,10 +41,11 @@ const HEADING = 'm-0 text-xs font-semibold tracking-wide text-fg-muted uppercase
 /**
  * A record's sheet (F-16.6, story memory v2; answer 7): one view, no Structured/Blank pair, no
  * sync. Its name and nicknames (each with its case rule, *Shared* and remove, which goes to
- * Dismissed), *Same as…* (merge another record into this one, with a preview of what moves) and
- * *Split* (move nicknames to a new record), its image and category, **Pinned** (the author's own
- * lines, canon) and **Ideas** (read by the assistant, never treated as true) as pages, and *Named
- * in* (the scenes that name it, from the local name scan; a click jumps to the first mention).
+ * Dismissed; a nickname another record already has is offered as shared with it), *Same as…*
+ * (merge another record into this one, with a preview of what moves) and *Split* (move nicknames
+ * to a new record), its image and category, **Pinned** (the author's own lines, canon) and
+ * **Ideas** (read by the assistant, never treated as true) as pages, and *Named in* (the scenes
+ * that name it, from the local name scan; a click selects the first mention).
  * Knows, Relationships, Threads, Age and "From the book, as of …" arrive with their phases.
  */
 export function RecordSheet({ id }: { id: string }): React.JSX.Element | null {
@@ -57,19 +60,22 @@ function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
   const categories = useCategoryStore((s) => s.categories)
   const [busy, setBusy] = useState(false)
 
-  const run = async (action: () => Promise<void>): Promise<void> => {
-    if (busy) return
+  /** Runs one change; a refusal is toasted. Answers whether it went through. */
+  const run = async (action: () => Promise<void>): Promise<boolean> => {
+    if (busy) return false
     setBusy(true)
     try {
       await action()
+      return true
     } catch (err) {
       toast.error(describeError(err))
+      return false
     } finally {
       setBusy(false)
     }
   }
 
-  const saveNames = (change: (input: AliasesInput) => AliasesInput): Promise<void> =>
+  const saveNames = (change: (input: AliasesInput) => AliasesInput): Promise<boolean> =>
     run(async () => {
       await useRecordStore.getState().setAliases(record.id, change(aliasesInputOf(record)))
     })
@@ -142,7 +148,7 @@ function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
           </button>
         </header>
 
-        <Names record={record} busy={busy} saveNames={saveNames} />
+        <Names record={record} busy={busy} run={run} saveNames={saveNames} />
         <SameAsAndSplit record={record} busy={busy} run={run} />
 
         <section aria-label="Pinned" className="flex flex-col gap-1">
@@ -171,6 +177,7 @@ function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
               label="Ideas"
               placeholder="Maybe she was a smuggler once…"
               inline
+              notCanonToggle={false}
             />
           </div>
         </section>
@@ -189,7 +196,7 @@ function RecordImage({
 }: {
   record: StoryRecordSummary
   busy: boolean
-  run: (action: () => Promise<void>) => Promise<void>
+  run: (action: () => Promise<void>) => Promise<boolean>
 }): React.JSX.Element {
   const update = (image: 'choose' | 'remove'): void =>
     void run(async () => {
@@ -234,7 +241,10 @@ function RecordImage({
   )
 }
 
-/** A text field that saves on Enter or when it loses focus, only when the trimmed text changed. */
+/**
+ * A text field that saves on Enter or when it loses focus, only when the trimmed text changed. A
+ * save main refuses puts the saved name back, so the field never shows a name the record lacks.
+ */
 function NameInput({
   value,
   label,
@@ -246,7 +256,7 @@ function NameInput({
   label: string
   maxLength: number
   className: string
-  onCommit: (text: string) => Promise<void>
+  onCommit: (text: string) => Promise<boolean>
 }): React.JSX.Element {
   const [text, setText] = useState(value)
   const commit = (): void => {
@@ -255,7 +265,9 @@ function NameInput({
       setText(value)
       return
     }
-    void onCommit(next)
+    void onCommit(next).then((saved) => {
+      if (!saved) setText(value)
+    })
   }
   return (
     <input
@@ -308,15 +320,21 @@ function CaseRuleSelect({
   )
 }
 
-/** The record's own name's case rule, its nicknames as chips, and the field that adds one. */
+/**
+ * The record's own name's case rule, its nicknames as chips, and the field that adds one. A
+ * nickname another record already answers to (a surname) is offered as shared (identity rule 4):
+ * on Share, the other record's name is marked shared first, then this one's is added shared.
+ */
 function Names({
   record,
   busy,
+  run,
   saveNames
 }: {
   record: StoryRecordSummary
   busy: boolean
-  saveNames: (change: (input: AliasesInput) => AliasesInput) => Promise<void>
+  run: (action: () => Promise<void>) => Promise<boolean>
+  saveNames: (change: (input: AliasesInput) => AliasesInput) => Promise<boolean>
 }): React.JSX.Element {
   const all = useRecordStore(useShallow((s) => s.ids.flatMap((id) => s.byId[id] ?? [])))
   const [adding, setAdding] = useState('')
@@ -327,7 +345,7 @@ function Names({
   const patchNickname = (
     entry: RecordAlias,
     patch: Partial<AliasesInput['aliases'][number]>
-  ): Promise<void> =>
+  ): Promise<boolean> =>
     saveNames((input) => ({
       ...input,
       aliases: input.aliases.map((each, index) =>
@@ -335,12 +353,32 @@ function Names({
       )
     }))
 
-  const add = (): void => {
+  const add = async (): Promise<void> => {
     const text = adding.trim()
     if (text === '') return
-    void saveNames((input) => ({ ...input, aliases: [...input.aliases, { text }] })).then(() =>
-      setAdding('')
-    )
+    const holders = holdersOf(text, all, record.id)
+    if (holders.length > 0) {
+      const owners = holders.map((holder) => holder.record.name).join(', ')
+      const ok = await dialogs.confirm({
+        title: `Share “${text}”?`,
+        message: `“${text}” is already a name of ${owners}. Shared, both answer to it, and the scene around it decides who is meant.`,
+        confirmLabel: 'Share'
+      })
+      if (!ok) return
+    }
+    // The typed nickname stays in the field when main refuses it.
+    const saved = await run(async () => {
+      const store = useRecordStore.getState()
+      for (const { record: other, entry } of holders) {
+        if (!entry.shared) await store.setAliases(other.id, sharingInput(other, entry.norm))
+      }
+      const input = aliasesInputOf(record)
+      await store.setAliases(record.id, {
+        ...input,
+        aliases: [...input.aliases, { text, shared: holders.length > 0 }]
+      })
+    })
+    if (saved) setAdding('')
   }
 
   return (
@@ -413,7 +451,7 @@ function Names({
         className="flex gap-1.5"
         onSubmit={(event) => {
           event.preventDefault()
-          add()
+          void add()
         }}
       >
         <input
@@ -440,7 +478,7 @@ function SameAsAndSplit({
 }: {
   record: StoryRecordSummary
   busy: boolean
-  run: (action: () => Promise<void>) => Promise<void>
+  run: (action: () => Promise<void>) => Promise<boolean>
 }): React.JSX.Element {
   const [open, setOpen] = useState<'sameAs' | 'split' | null>(null)
   const [mergeId, setMergeId] = useState('')
@@ -453,7 +491,7 @@ function SameAsAndSplit({
   const merging = others.find((other) => other.id === mergeId)
   const nicknames = nicknamesOf(record)
 
-  const merge = (): Promise<void> =>
+  const merge = (): Promise<boolean> =>
     run(async () => {
       if (merging === undefined) return
       // The merge appends the pages main holds, so the open ones are written first, and read
@@ -470,7 +508,7 @@ function SameAsAndSplit({
       setMergeId('')
     })
 
-  const split = (): Promise<void> =>
+  const split = (): Promise<boolean> =>
     run(async () => {
       if (splitting.length === 0) return
       const { into } = await useRecordStore.getState().split(record.id, splitting, null)
@@ -603,7 +641,7 @@ function NamedIn({ record }: { record: StoryRecordSummary }): React.JSX.Element 
       useTreeStore.getState().select(nodeId)
       return
     }
-    await openMention(nodeId, [first.from, first.to], first.text, names)
+    await openNameMention(nodeId, [first.from, first.to], first.text, names)
   }
 
   return (

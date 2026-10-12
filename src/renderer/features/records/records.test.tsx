@@ -1,9 +1,16 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import type { NamedInRow } from '@shared/memory/nameScan'
 import type { StoryRecordSummary } from '@shared/memory/records'
 import type { TiptapNodeT } from '@shared/tiptap'
+import {
+  resetActiveEditorStore,
+  useActiveEditorStore
+} from '@renderer/features/editor/activeEditorStore'
+import { buildExtensions } from '@renderer/features/editor/extensions'
+import { locateText } from '@renderer/features/editor/locateText'
 import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -83,6 +90,7 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
         return withPages(id === 'r-mara' ? MARA : TOMAS) as Output<C>
       }
       if (channel === 'layout:set') return input as Output<C>
+      if (channel === 'recovery:stash' || channel === 'recovery:clear') return null as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on<E extends EventName>(event: E, listener: (payload: EventPayload<E>) => void) {
@@ -122,6 +130,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.useRealTimers()
+  resetActiveEditorStore()
   resetRecordStore()
   resetNameMentionStore()
   resetPageStore()
@@ -187,7 +196,7 @@ describe('recordStore (F-16.6)', () => {
     useRecordStore.getState().subscribe()
     await act(async () => {
       for (const listener of listeners['record:changed'] ?? []) {
-        listener({ recordIds: ['r-mara', 'r-tomas'] })
+        listener({ recordIds: ['r-mara', 'r-tomas'], roster: true })
       }
       await Promise.resolve()
     })
@@ -195,6 +204,81 @@ describe('recordStore (F-16.6)', () => {
     expect(useRecordStore.getState().byId['r-mara']?.name).toBe('Mara Vell-Orrin')
     // The open sheet was the gone record's: the pane lets go of it.
     expect(useRecordStore.getState().selectedId).toBeNull()
+  })
+
+  it('keeps byId as it was when a refetch answers the same, and toasts a refetch that fails', async () => {
+    let failing = false
+    install({
+      'record:get': () => {
+        if (failing) throw new IpcRequestError({ code: 'INTERNAL', message: 'The disk is full' })
+        return withPages(MARA)
+      }
+    })
+    await loaded()
+    useRecordStore.getState().subscribe()
+    const before = useRecordStore.getState().byId
+    const fire = async (recordIds: string[]): Promise<void> => {
+      await act(async () => {
+        for (const listener of listeners['record:changed'] ?? []) {
+          listener({ recordIds, roster: false })
+        }
+        await Promise.resolve()
+      })
+    }
+    await fire(['r-mara'])
+    await waitFor(() => expect(sent('record:get')).toHaveLength(1))
+    // Same summary: the name index built from byId is not rebuilt.
+    expect(useRecordStore.getState().byId).toBe(before)
+    failing = true
+    await fire(['r-mara'])
+    await waitFor(() => expect(toasts()).toContain('The disk is full'))
+  })
+})
+
+describe('nameMentionStore (F-16.5, F-16.6)', () => {
+  it('reads again what a scan or a roster change touched, never the world', async () => {
+    const mention = (nodeId: string, recordId: string): Output<'names:forNode'>[number] => ({
+      id: `m-${nodeId}-${recordId}`,
+      recordId,
+      para: 0,
+      from: 1,
+      to: 5,
+      text: 'Mara',
+      ambiguous: false,
+      spanKey: 'k'
+    })
+    install({
+      'names:forNode': (input) => {
+        const { nodeId } = input as Input<'names:forNode'>
+        return nodeId === 'sc-1' ? [mention('sc-1', 'r-mara')] : [mention(nodeId, 'r-tomas')]
+      }
+    })
+    await loaded()
+    const store = useNameMentionStore.getState()
+    await act(async () => {
+      await store.loadNode('sc-1')
+      await store.loadNode('sc-2')
+    })
+    store.subscribe()
+    const fire = async (event: 'names:changed' | 'record:changed', payload: unknown) => {
+      calls = []
+      await act(async () => {
+        for (const listener of listeners[event] ?? []) listener(payload)
+        await Promise.resolve()
+      })
+    }
+    // A scan of sc-1 and sc-3: the counts and the loaded scene among them.
+    await fire('names:changed', { nodeIds: ['sc-1', 'sc-3'] })
+    await waitFor(() => expect(sent('names:forNode')).toEqual([{ nodeId: 'sc-1' }]))
+    expect(sent('names:byRecord')).toHaveLength(1)
+    // An image change, and a record nothing names yet: nothing is read.
+    await fire('record:changed', { recordIds: ['r-mara'], roster: false })
+    await fire('record:changed', { recordIds: ['r-new'], roster: true })
+    expect(calls).toEqual([])
+    // Tomas merged away: the counts and the scene naming him.
+    await fire('record:changed', { recordIds: ['r-mara', 'r-tomas'], roster: true })
+    await waitFor(() => expect(sent('names:byRecord')).toHaveLength(1))
+    expect(sent('names:forNode')).toEqual([{ nodeId: 'sc-1' }, { nodeId: 'sc-2' }])
   })
 })
 
@@ -306,9 +390,34 @@ describe('RecordSheet (F-16.6)', () => {
     act(() => useRecordStore.getState().select(id))
     render(<RecordSheet id={id} />)
     await waitFor(() =>
-      expect(screen.getByRole('textbox', { name: 'Pinned' })).toHaveTextContent('Eyes: grey.')
+      expect(screen.getByRole('textbox', { name: 'Pinned' })).toHaveTextContent(
+        id === 'r-mara' ? 'Eyes: grey.' : ''
+      )
     )
   }
+
+  /** `record:setAliases` answering the record as sent, the fixture's other fields kept. */
+  const echoAliases = (input: unknown): Output<'record:setAliases'> => {
+    const { id, name, aliases } = input as Input<'record:setAliases'>
+    const held = [MARA, TOMAS, ELLA, QUAY].find((record) => record.id === id) ?? MARA
+    return withPages(
+      recordFixture(id, held.categoryId, [
+        { text: name.text, caseRule: name.caseRule, shared: name.shared },
+        ...aliases.map((entry) => ({
+          text: entry.text,
+          caseRule: entry.caseRule,
+          shared: entry.shared
+        }))
+      ])
+    )
+  }
+
+  const confirmOpen = async (): Promise<{ id: string; title: string }> =>
+    waitFor(() => {
+      const open = useDialogStore.getState().modals[0]
+      if (open?.kind !== 'confirm') throw new Error('no confirm yet')
+      return { id: open.id, title: open.options.title }
+    })
 
   it('changes a nickname’s case rule and shared flag, adds one and removes one (to Dismissed)', async () => {
     const answers: StoryRecordSummary[] = []
@@ -358,6 +467,157 @@ describe('RecordSheet (F-16.6)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Remove Mara' }))
     await waitFor(() => expect(answers).toHaveLength(4))
     expect(sent('record:setAliases')[3]).toMatchObject({ aliases: [{ text: 'Little Wren' }] })
+  })
+
+  it('offers a nickname another record has as shared, marking it shared there first', async () => {
+    install({ 'record:setAliases': echoAliases })
+    await sheet('r-ella')
+    const field = screen.getByRole('textbox', { name: 'New nickname' })
+    // Declined: nothing is written and the typed name stays.
+    fireEvent.change(field, { target: { value: 'Mara' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    const declined = await confirmOpen()
+    expect(declined.title).toBe('Share “Mara”?')
+    act(() => useDialogStore.getState().resolveConfirm(declined.id, false))
+    await waitFor(() => expect(useDialogStore.getState().modals).toEqual([]))
+    expect(sent('record:setAliases')).toEqual([])
+    expect(field).toHaveValue('Mara')
+    // Shared: Mara Vell's "Mara" is marked shared, then Ella gets it shared too.
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    act(() =>
+      useDialogStore.getState().resolveConfirm(useDialogStore.getState().modals[0]?.id ?? '', true)
+    )
+    await waitFor(() => expect(sent('record:setAliases')).toHaveLength(2))
+    expect(sent('record:setAliases')).toEqual([
+      {
+        id: 'r-mara',
+        name: { text: 'Mara Vell', caseRule: 'auto', shared: false },
+        aliases: [{ text: 'Mara', caseRule: 'auto', shared: true }]
+      },
+      {
+        id: 'r-ella',
+        name: { text: 'Ella Harrow', caseRule: 'auto', shared: false },
+        aliases: [
+          { text: 'Harrow', caseRule: 'auto', shared: true },
+          { text: 'Mara', shared: true }
+        ]
+      }
+    ])
+    await waitFor(() => expect(field).toHaveValue(''))
+    // Both now say who they share it with.
+    expect(screen.getByRole('listitem', { name: 'Mara' })).toHaveTextContent(
+      'Shared with Mara Vell'
+    )
+  })
+
+  it('keeps a refused nickname in its field and puts a refused rename back', async () => {
+    install({
+      'record:setAliases': () => {
+        throw new IpcRequestError({
+          code: 'VALIDATION',
+          message: '"Harrow" is already a name of Tomas Harrow.'
+        })
+      }
+    })
+    await sheet()
+    const field = screen.getByRole('textbox', { name: 'New nickname' })
+    fireEvent.change(field, { target: { value: 'Wren' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(toasts()).toContain('"Harrow" is already a name of Tomas Harrow.'))
+    expect(field).toHaveValue('Wren')
+    const name = screen.getByRole('textbox', { name: 'Name' })
+    fireEvent.change(name, { target: { value: 'Mara Orrin' } })
+    fireEvent.keyDown(name, { key: 'Enter' })
+    await waitFor(() => expect(sent('record:setAliases')).toHaveLength(2))
+    await waitFor(() => expect(name).toHaveValue('Mara Vell'))
+  })
+
+  it('Named in jumps to the recorded mention in the scene', async () => {
+    const editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' }),
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Later, Mara left.' }] }]
+      }
+    })
+    try {
+      const at = locateText(editor.state.doc, 'Mara')
+      if (at === null) throw new Error('fixture')
+      install({
+        'names:forNode': () => [
+          {
+            id: 'm-1',
+            recordId: 'r-mara',
+            para: 0,
+            from: at.from,
+            to: at.to,
+            text: 'Mara',
+            ambiguous: false,
+            spanKey: 'k'
+          }
+        ]
+      })
+      await sheet()
+      useActiveEditorStore.getState().set('sc-1', editor)
+      const named = screen.getByRole('region', { name: 'Named in' })
+      fireEvent.click(within(named).getByRole('button', { name: /Scene 1/ }))
+      await waitFor(() => {
+        const { from, to } = editor.state.selection
+        expect(editor.state.doc.textBetween(from, to)).toBe('Mara')
+      })
+      expect(sent('names:forNode')).toEqual([{ nodeId: 'sc-1' }])
+      expect(useTreeStore.getState().selectedId).toBe('sc-1')
+      expect(useRecordStore.getState().selectedId).toBeNull()
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('adds, changes and removes the image, moves the record to another category, and deletes it', async () => {
+    let current = MARA
+    install({
+      'record:update': (input) => {
+        const { image, categoryId } = input as Input<'record:update'>
+        current = {
+          ...current,
+          ...(categoryId === undefined ? {} : { categoryId, kind: 'place' as const }),
+          ...(image === 'choose' ? { image: 'mara.0a1b2c3d.png' } : {}),
+          ...(image === 'remove' ? { image: null } : {})
+        }
+        return withPages(current)
+      },
+      'record:delete': () => null
+    })
+    await sheet()
+    fireEvent.click(screen.getByRole('button', { name: 'Add image' }))
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Mara Vell' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }))
+    await waitFor(() => expect(sent('record:update')).toHaveLength(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove image' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add image' })).toBeEnabled())
+    expect(sent('record:update')).toEqual([
+      { id: 'r-mara', image: 'choose' },
+      { id: 'r-mara', image: 'choose' },
+      { id: 'r-mara', image: 'remove' }
+    ])
+    fireEvent.change(screen.getByRole('combobox', { name: 'Category' }), {
+      target: { value: 'setting' }
+    })
+    await waitFor(() =>
+      expect(useRecordStore.getState().byId['r-mara']?.categoryId).toBe('setting')
+    )
+    expect(sent('record:update')[3]).toEqual({ id: 'r-mara', categoryId: 'setting' })
+    // Delete asks first, writes the open pages, then removes the record and lets go of its sheet.
+    usePageStore.getState().edit(pageKey({ kind: 'pinned', id: 'r-mara' }), page('Last line.'))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Mara Vell' }))
+    const asked = await confirmOpen()
+    expect(asked.title).toBe('Delete "Mara Vell"?')
+    act(() => useDialogStore.getState().resolveConfirm(asked.id, true))
+    await waitFor(() => expect(useRecordStore.getState().byId['r-mara']).toBeUndefined())
+    const order = calls.map(([channel]) => channel)
+    expect(order.indexOf('record:savePage')).toBeGreaterThan(-1)
+    expect(order.indexOf('record:savePage')).toBeLessThan(order.indexOf('record:delete'))
+    expect(useRecordStore.getState().selectedId).toBeNull()
   })
 
   it('Same as previews the merge, flushes and reloads the pages, and keeps this sheet open', async () => {
@@ -414,6 +674,9 @@ describe('RecordSheet (F-16.6)', () => {
     await sheet()
     expect(screen.getByText(/never treats them as true/)).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Ideas' })).toBeInTheDocument()
+    // Pinned offers Not canon; Ideas is never canon, so it offers nothing to mark.
+    expect(screen.getByRole('toolbar', { name: 'Pinned page' })).toBeInTheDocument()
+    expect(screen.queryByRole('toolbar', { name: 'Ideas page' })).toBeNull()
     usePageStore
       .getState()
       .edit(pageKey({ kind: 'pinned', id: 'r-mara' }), page('Eyes: grey as rain.'))

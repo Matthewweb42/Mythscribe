@@ -39,7 +39,8 @@ export const NO_PROJECT_MESSAGE = 'Open a project first.'
 
 /**
  * What View › Tags and Tools › Tags say in a project on story memory v2 (F-16.4), which has no
- * tags: names and records replace them, in the category sections.
+ * tags: names and records replace them, in the category sections. The menu leaves both items out
+ * of a v2 project (`menuFor`), so this answers only a click that raced the project's opening.
  */
 export const NO_TAGS_MESSAGE =
   'This project has no tags: names and nicknames on its sheets replace them (Characters, Places and the other categories).'

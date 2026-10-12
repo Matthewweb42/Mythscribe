@@ -8,8 +8,9 @@ import { ipc } from '@renderer/lib/ipc'
  * Where the book names its records (F-16.5, F-16.6; story memory v2), as main's local name scan
  * last recorded it: the one owner of the per-scene counts (*Named in* on a sheet, "named in N
  * scenes" in the lists) and of the mentions of the scenes a view asked for. Main pushes
- * `names:changed` after a scan and `record:changed` after a roster change (a merge re-points
- * mentions); both refresh what is held, never the world.
+ * `names:changed` after a scan (the counts and the scenes it names are read again) and
+ * `record:changed` after a roster change (a merge, split or delete re-points or drops mentions
+ * without a scan): only the counts and loaded scenes naming one of its records are read again.
  */
 interface NameMentionState {
   /** One row per record and scene, certain mentions only. */
@@ -75,9 +76,21 @@ export const useNameMentionStore = create<NameMentionState>((set, get) => ({
         if (get().byNode[nodeId] !== undefined) get().loadNode(nodeId).catch(failed)
       }
     }
+    const rosterChanged = (recordIds: readonly string[]): void => {
+      const changed = new Set(recordIds)
+      const { namedIn, byNode } = get()
+      if (namedIn.some((row) => changed.has(row.recordId))) get().load().catch(failed)
+      for (const [nodeId, mentions] of Object.entries(byNode)) {
+        if (mentions.some((mention) => changed.has(mention.recordId))) {
+          get().loadNode(nodeId).catch(failed)
+        }
+      }
+    }
     offs = [
       ipc().on('names:changed', ({ nodeIds }) => refresh(nodeIds)),
-      ipc().on('record:changed', () => refresh(Object.keys(get().byNode)))
+      ipc().on('record:changed', ({ recordIds, roster }) => {
+        if (roster) rosterChanged(recordIds)
+      })
     ]
   },
 

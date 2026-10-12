@@ -87,9 +87,18 @@ function CreateForm({ categoryId }: { categoryId: string }): React.JSX.Element {
     if (event.target === event.currentTarget) cancel()
   }
 
-  /** Opens a record's sheet and its category's section, and closes the dialog. */
+  /**
+   * Opens a record's sheet and its category's section, and closes the dialog; opened from a
+   * picker, the picker gets the record instead and the author stays where she was.
+   */
   const open = (id: string, sectionId: string): void => {
     const store = useRecordStore.getState()
+    const pick = store.picking
+    if (pick !== null) {
+      store.cancelCreate()
+      pick(id)
+      return
+    }
     store.select(id)
     const layout = useLayoutStore.getState()
     layout.setSidebarTab(sectionId)

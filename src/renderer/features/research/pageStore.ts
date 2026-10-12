@@ -1,3 +1,4 @@
+import type { RecoveryKind } from '@shared/recovery'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -9,7 +10,7 @@ import { createAutosaveStore, type LoadedRecord } from '@renderer/features/edito
  * page and its autosave, keyed by its owner. A Research document is a node, read and written
  * through `document:get`/`document:save` (so its word count, `modified` and the crash-recovery
  * journal behave as any document's); a record's Pinned and Ideas pages (slice 3's sheets) go
- * through `record:get`/`record:savePage`. One autosave instance, so a page and the manuscript
+ * through `record:get`/`record:savePage` and are journalled under their own recovery kinds. One autosave instance, so a page and the manuscript
  * document beside it save independently and a failure in one never blocks the other.
  */
 
@@ -40,6 +41,12 @@ const ownerOf = (key: string): PageOwner => {
   if (owner === null) throw new Error(`Not a page key: ${key}`)
   return owner
 }
+
+/** Where a page's unsaved typing is journalled (F-8.3): its kind and id there. */
+const journalEntryOf = (owner: PageOwner): { kind: RecoveryKind; id: string } => ({
+  kind: owner.kind === 'research' ? 'document' : owner.kind,
+  id: owner.id
+})
 
 /** One loaded page. */
 export type LoadedPage = LoadedRecord<TiptapNodeT>
@@ -72,21 +79,14 @@ const pageStore = createAutosaveStore<TiptapNodeT, PageSaved>({
     useTreeStore.getState().setWordCount(owner.id, saved.wordCount)
     useGoalsStore.getState().refreshSoon()
   },
-  // F-8.3: a Research page is a document, so its unsaved typing is journalled as one. A record's
-  // Pinned and Ideas are not journalled in P1 (decided by Claude, unconfirmed, P1 slice 3): the
-  // recovery journal knows documents and notes only, and a page saves a second after typing
-  // stops, when its sheet closes, and on close and quit.
+  // F-8.3: a Research page is a document, so its unsaved typing is journalled as one; a record's
+  // Pinned and Ideas under their own kinds, by record id, so a crash loses no page's words.
   journal: {
     stash: (key, content) => {
-      const owner = pageOwnerOf(key)
-      if (owner?.kind !== 'research') return Promise.resolve(null)
-      return ipc().invoke('recovery:stash', { kind: 'document', id: owner.id, content })
+      const owner = ownerOf(key)
+      return ipc().invoke('recovery:stash', { ...journalEntryOf(owner), content })
     },
-    clear: (key) => {
-      const owner = pageOwnerOf(key)
-      if (owner?.kind !== 'research') return Promise.resolve(null)
-      return ipc().invoke('recovery:clear', { kind: 'document', id: owner.id })
-    }
+    clear: (key) => ipc().invoke('recovery:clear', journalEntryOf(ownerOf(key)))
   }
 })
 

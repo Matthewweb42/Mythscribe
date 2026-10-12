@@ -66,6 +66,7 @@ import type {
   Entity,
   IpcError,
   JobsIndexAllResult,
+  Output,
   TreeNode
 } from '@shared/ipc/contract'
 import {
@@ -210,7 +211,8 @@ import {
   addContextFiles,
   listContextFiles,
   requireContextFileRow,
-  storedPath
+  storedPath,
+  type ContextSource
 } from '../library/libraryStore'
 import { getNotes, saveNotes } from '../document/notesStore'
 import { getSceneMeta, setSceneMeta } from '../document/sceneMetaStore'
@@ -422,6 +424,7 @@ import { isWriteChannel } from './channelAccess'
 import { emit, register as registerChannel, type EmitTarget, type Handler } from './registry'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
+import type { RecordPage, StoryRecord } from '@shared/memory/records'
 import {
   createAuthorTodo,
   deleteAuthorTodo,
@@ -461,6 +464,7 @@ import {
   createRecord,
   deleteRecord,
   gateName,
+  getRecord,
   listRecords,
   requireRecord,
   sameAs,
@@ -1295,6 +1299,24 @@ export function registerHandlers({
   })
 
   /**
+   * A record's Pinned or Ideas page written (F-16.6): the sheet's autosave and crash recovery
+   * (F-8.3) both end here. No `record:changed`: the page store that saved holds the text, and the
+   * roster is as it was.
+   */
+  const saveRecordPage = (
+    db: TreeDb,
+    id: string,
+    page: RecordPage,
+    doc: TiptapNodeT | null
+  ): StoryRecord => {
+    const saved = savePage(db, id, page, doc, new Date())
+    // F-16.5: Pinned and Ideas are passages; one root job indexes every page that changed.
+    const root = manuscriptRootId(db)
+    if (root !== null) mentionQueue.touch('passages', root)
+    return saved
+  }
+
+  /**
    * The journal entries that still differ from what is stored (F-8.3). Entries whose node is gone
    * or no longer fits the kind (the getters refuse with an AppError), and entries equal to the
    * stored content, are deleted on the way.
@@ -1307,7 +1329,9 @@ export function registerHandlers({
         stored =
           entry.kind === 'document'
             ? getDocumentContent(db, entry.id).content
-            : getNotes(db, entry.id).notes
+            : entry.kind === 'notes'
+              ? getNotes(db, entry.id).notes
+              : requireRecord(db, entry.id)[entry.kind]
       } catch (err) {
         if (!(err instanceof AppError)) throw err
         clearRecovery(folder, entry.kind, entry.id)
@@ -1338,7 +1362,10 @@ export function registerHandlers({
     return liveRecoveryEntries(db, session.localFolder).map(({ kind, id }) => ({
       kind,
       id,
-      title: getNode(db, id)?.title ?? ''
+      title:
+        kind === 'pinned' || kind === 'ideas'
+          ? (getRecord(db, id)?.name ?? '')
+          : (getNode(db, id)?.title ?? '')
     }))
   })
 
@@ -1348,7 +1375,8 @@ export function registerHandlers({
     return liveRecoveryEntries(db, session.localFolder).map(({ kind, id, content }) => {
       let wordCount: number | null = null
       if (kind === 'document') wordCount = saveFromEditor(db, id, content).wordCount
-      else saveNotes(db, id, content)
+      else if (kind === 'notes') saveNotes(db, id, content)
+      else saveRecordPage(db, id, kind, content)
       clearRecovery(session.localFolder, kind, id)
       return { kind, id, wordCount }
     })
@@ -4440,7 +4468,7 @@ export function registerHandlers({
    * its hash), the questions and the spellchecker's names follow.
    */
   const rosterChanged = (db: TreeDb, recordIds: readonly string[]): void => {
-    emit(windows(), 'record:changed', { recordIds: [...recordIds] })
+    emit(windows(), 'record:changed', { recordIds: [...recordIds], roster: true })
     queueMemoryIndex(db)
     publishQuestions()
     void syncSpelling()
@@ -4491,7 +4519,7 @@ export function registerHandlers({
     }
     // A category is a kind, which the name scan reads (a group answers plurals).
     if (categoryId !== undefined) rosterChanged(db, [id])
-    else emit(windows(), 'record:changed', { recordIds: [id] })
+    else emit(windows(), 'record:changed', { recordIds: [id], roster: false })
     return updated
   })
 
@@ -4502,15 +4530,9 @@ export function registerHandlers({
     return updated
   })
 
-  register('record:savePage', ({ id, page, doc }) => {
-    const db = manager.require().connection.orm
-    const saved = savePage(db, id, page, doc, new Date())
-    emit(windows(), 'record:changed', { recordIds: [id] })
-    // F-16.5: Pinned and Ideas are passages; one root job indexes every page that changed.
-    const root = manuscriptRootId(db)
-    if (root !== null) mentionQueue.touch('passages', root)
-    return saved
-  })
+  register('record:savePage', ({ id, page, doc }) =>
+    saveRecordPage(manager.require().connection.orm, id, page, doc)
+  )
 
   register('record:delete', ({ id }) => {
     const session = manager.require()
@@ -4647,15 +4669,13 @@ export function registerHandlers({
   // other; these channels make them, switch a page Not canon, and open an upload's original.
   register('research:list', () => listResearchDocs(manager.require().connection.orm))
 
-  register('research:add', async ({ paths, parentId }) => {
+  /** Uploads these files into Research (F-16.8) and answers the new pages, each queued to index. */
+  const uploadResearch = async (
+    sources: readonly ContextSource[],
+    parentId: string | undefined
+  ): Promise<Output<'research:addData'>> => {
     const session = manager.require()
-    const chosen = paths ?? (await dialogs.chooseContextFiles())
-    if (chosen === null) return null
     const db = session.connection.orm
-    const sources = chosen.map((file) => ({
-      name: path.basename(file),
-      read: () => fs.readFileSync(file)
-    }))
     const result = await addResearchFiles(
       db,
       session.folder,
@@ -4674,7 +4694,25 @@ export function registerHandlers({
       docs: result.created.map((id) => researchDocOf(db, id)),
       skipped: result.skipped
     }
+  }
+
+  register('research:add', async ({ paths, parentId }) => {
+    manager.require()
+    const chosen = paths ?? (await dialogs.chooseContextFiles())
+    if (chosen === null) return null
+    const sources = chosen.map((file) => ({
+      name: path.basename(file),
+      read: () => fs.readFileSync(file)
+    }))
+    return uploadResearch(sources, parentId)
   })
+
+  register('research:addData', ({ files, parentId }) =>
+    uploadResearch(
+      files.map((file) => ({ name: file.name, read: () => Buffer.from(file.data) })),
+      parentId
+    )
+  )
 
   register('research:create', ({ parentId, afterId, title }) => {
     const session = manager.require()

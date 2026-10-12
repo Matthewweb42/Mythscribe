@@ -24,17 +24,28 @@ describe('menu definition (F-7.1)', () => {
 
   it('uses every item id exactly once, and every id is an item', () => {
     // The developer items join only while developer tools are on (2026-10-07).
-    const ids = menuItems(menuFor({ devTools: true })).map((item) => item.id)
+    const ids = menuItems(menuFor({ devTools: true, storyMemory: null })).map((item) => item.id)
     expect([...ids].sort()).toEqual([...MENU_ITEM_IDS].sort())
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it('leaves the tag items out of a project on story memory v2, which has no tags (F-16.4)', () => {
+    const ids = (storyMemory: 'v1' | 'v2' | null, devTools = false): string[] =>
+      menuItems(menuFor({ devTools, storyMemory })).map((item) => item.id)
+    expect(ids('v1')).toEqual(expect.arrayContaining(['toggleTags', 'openTags']))
+    expect(ids(null)).toEqual(ids('v1'))
+    expect(ids('v1').filter((id) => !ids('v2').includes(id))).toEqual(['toggleTags', 'openTags'])
+    expect(ids('v2', true)).toEqual(expect.arrayContaining(['openDeveloperTools', 'openSettings']))
+    expect(ids('v2', true)).not.toContain('openTags')
+  })
+
   it('adds Help › Developer tools and Chromium DevTools only while developer tools are on', () => {
-    expect(menuFor({ devTools: false })).toBe(MENU)
+    expect(menuFor({ devTools: false, storyMemory: null })).toBe(MENU)
+    expect(menuFor({ devTools: false, storyMemory: 'v1' })).toBe(MENU)
     const ids = (devTools: boolean): string[] =>
-      menuItems(menuFor({ devTools })).map((item) => item.id)
+      menuItems(menuFor({ devTools, storyMemory: 'v1' })).map((item) => item.id)
     expect(ids(false)).not.toContain('openDeveloperTools')
-    const help = menuFor({ devTools: true }).find((s) => s.id === 'help')!
+    const help = menuFor({ devTools: true, storyMemory: null }).find((s) => s.id === 'help')!
     expect(help.entries.slice(-2).map((e) => (isSeparator(e) ? '-' : e.label))).toEqual([
       'Developer tools',
       'Chromium DevTools'

@@ -8,10 +8,14 @@ export const LABEL_KIND_LABEL: Record<LabelKind, string> = {
   custom: 'Custom'
 }
 
-/** What each kind does (custom labels never steer, decision P1-D6). */
+/**
+ * What each kind does today. Every label only filters until the prompts read them (P1 slice 5's
+ * Story notes block and its data-sharing rows); that change rewords these in the same commit.
+ * Custom labels will never steer (decision P1-D6).
+ */
 export const LABEL_KIND_HINT: Record<LabelKind, string> = {
-  tone: 'Filters, and asks the AI to write in this tone',
-  content: 'Filters, and asks the AI to keep to it (a content warning)',
-  theme: 'Filters, and asks the AI to keep the theme in view',
-  custom: 'Filters only; never sent to the AI'
+  tone: 'A tone, to filter by',
+  content: 'A content note, to filter by',
+  theme: 'A theme, to filter by',
+  custom: 'Your own label, to filter by'
 }

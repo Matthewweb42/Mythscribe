@@ -107,6 +107,21 @@ describe('nameIndexer (F-16.5)', () => {
         { recordId: tomas, nodeId: scene(), count: 1 }
       ].sort((a, b) => a.recordId.localeCompare(b.recordId))
     )
+    // A scene placed outside the manuscript (an import into the project can re-place one in
+    // front matter) keeps its rows, but it is no longer named in the book.
+    const front = db.all<{ id: string }>(
+      sql`SELECT id FROM node WHERE parent_id IS NULL AND section_type = 'front'`
+    )[0]
+    const home = getNode(db, scene())?.parentId
+    if (front === undefined || typeof home !== 'string') throw new Error('no front matter')
+    const placeIn = (parentId: string): void => {
+      db.run(sql`UPDATE node SET parent_id = ${parentId} WHERE id = ${scene()}`)
+    }
+    placeIn(front.id)
+    expect(listNameMentions(db, scene())).toHaveLength(3)
+    expect(namedInCounts(db)).toEqual([])
+    placeIn(home)
+    expect(namedInCounts(db)).toHaveLength(2)
   })
 
   it('settles a shared alias by the typed POV, which is part of the hash', () => {

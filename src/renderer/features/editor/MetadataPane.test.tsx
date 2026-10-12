@@ -33,6 +33,7 @@ import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStor
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { resetLabelStore, useLabelStore } from '@renderer/features/labels/labelStore'
+import { RecordCreateDialog } from '@renderer/features/records/RecordCreateDialog'
 import { labelFixture, recordFixture } from '@renderer/features/records/recordFixture'
 import { resetRecordStore, useRecordStore } from '@renderer/features/records/recordStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -877,7 +878,7 @@ describe('MetadataPane in story memory v2 (F-16.11, F-16.7)', () => {
       within(pov)
         .getAllByRole('option')
         .map((o) => o.textContent)
-    ).toEqual(['Nobody chosen', 'Mara Vell', 'Tomas Harrow'])
+    ).toEqual(['Nobody chosen', 'Mara Vell', 'Tomas Harrow', 'New character…'])
     fireEvent.change(pov, { target: { value: 'r-mara' } })
     await waitFor(() => expect(details).toHaveLength(1))
     expect(details[0]).toEqual({
@@ -925,6 +926,59 @@ describe('MetadataPane in story memory v2 (F-16.11, F-16.7)', () => {
       target: { value: 'l-wry' }
     })
     await waitFor(() => expect(screen.getByTestId('label-chip')).toHaveTextContent('Wry'))
+  })
+
+  it('New character… makes the record through the creation dialog and chooses it as the POV', async () => {
+    const details: Input<'sceneDetail:set'>[] = []
+    const made = recordFixture('r-ella', 'character', ['Ella Harrow'])
+    const { release } = install({
+      'record:list': () => [MARA, QUAY, TOMAS],
+      'label:list': () => [WRY],
+      'label:links': () => [],
+      'sceneDetail:get': () => ({ ...emptySceneDetails(), gone: [] }),
+      'sceneDetail:set': (input) => {
+        const sent = input as Input<'sceneDetail:set'>
+        details.push(sent)
+        return { ...sent.details, gone: [] }
+      },
+      'record:gate': () => ({ outcome: 'clear' }),
+      'record:create': () => ({ record: { ...made, pinned: null, ideas: null } })
+    })
+    release()
+    ready()
+    await act(async () => {
+      await useRecordStore.getState().load()
+      await useLabelStore.getState().load()
+    })
+    render(
+      <>
+        <MetadataPane id="sc-1" />
+        <RecordCreateDialog />
+      </>
+    )
+    const pov = await screen.findByRole('combobox', { name: 'POV' })
+    await waitFor(() => expect(pov).toBeEnabled())
+    fireEvent.change(pov, { target: { value: 'new:' } })
+    expect(useRecordStore.getState().creating).toBe('character')
+    // Nothing is saved while the dialog is open, and the picker still reads Nobody chosen.
+    expect(details).toEqual([])
+    expect(pov).toHaveValue('')
+    const dialog = await screen.findByRole('dialog', { name: 'New character' })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Ella Harrow' }
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(details).toHaveLength(1))
+    expect(details[0]?.details.povRecordId).toBe('r-ella')
+    expect(useRecordStore.getState().creating).toBeNull()
+    // The author stays in the scene: no sheet opens.
+    expect(useRecordStore.getState().selectedId).toBeNull()
+    await waitFor(() => expect(pov).toHaveValue('r-ella'))
+    // New place… opens the dialog for the Settings category.
+    fireEvent.change(screen.getByRole('combobox', { name: 'Place' }), {
+      target: { value: 'new:' }
+    })
+    expect(useRecordStore.getState().creating).toBe('setting')
   })
 
   it('shows only the labels outside the manuscript (front matter has no typed details)', async () => {

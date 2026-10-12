@@ -18,9 +18,15 @@ export function LabelFilterBar({ surface }: { surface: LabelSurface }): React.JS
   const index = useTreeStore(useShallow((s) => ({ rootIds: s.rootIds, childrenOf: s.childrenOf })))
   const view = useLabelFilterView(surface, index)
   const sectionOf = useTreeStore((s) => s.sectionOf)
-  const section = surface === 'research' ? 'research' : 'manuscript'
-  const count =
-    view === null ? 0 : [...view.matches].filter((id) => sectionOf[id] === section).length
+  // What the filtered view shows: the Manuscript tree holds front and end matter too, which may
+  // carry labels; the Outline is the manuscript only; Research is its own tree.
+  const shows = (id: string): boolean => {
+    const section = sectionOf[id]
+    if (surface === 'research') return section === 'research'
+    if (surface === 'outline') return section === 'manuscript'
+    return section !== undefined && section !== 'research'
+  }
+  const count = view === null ? 0 : [...view.matches].filter(shows).length
 
   if (labels.length === 0) return null
   return (

@@ -16,6 +16,7 @@ import { resetStructureStore } from '@renderer/features/outline/structureStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { labelFixture } from '@renderer/features/records/recordFixture'
+import { resetSearchStore, useSearchStore } from '@renderer/features/search/searchStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import { LabelFilterBar } from './LabelFilterBar'
@@ -86,6 +87,7 @@ const v2 = (): void =>
 beforeEach(() => {
   install()
   resetLabelStore()
+  resetSearchStore()
   resetPendingSaves()
   resetSceneMetaStore()
   resetSummaryStore()
@@ -99,6 +101,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetLabelStore()
+  resetSearchStore()
   resetSceneMetaStore()
   resetSummaryStore()
   resetPlanLinksStore()
@@ -133,10 +136,13 @@ describe('labelStore (F-16.7)', () => {
     await act(() => useLabelStore.getState().unassign('l-wry', 'sc-4'))
     expect(useLabelStore.getState().byNode['sc-4']).toEqual(['l-tw'])
     act(() => useLabelStore.getState().setFilter('outline', 'l-wry'))
+    // Word search's filter on the same label (the search store's) clears with it.
+    act(() => useSearchStore.setState({ labelId: 'l-wry' }))
     await act(() => useLabelStore.getState().remove('l-wry'))
     expect(useLabelStore.getState().labels.map((label) => label.id)).toEqual(['l-grim', 'l-tw'])
     expect(useLabelStore.getState().byNode['sc-1']).toEqual(['l-grim'])
     expect(useLabelStore.getState().filter.outline).toBeNull()
+    expect(useSearchStore.getState().labelId).toBeNull()
   })
 })
 
@@ -237,6 +243,43 @@ describe('LabelPicker (F-16.7)', () => {
   })
 })
 
+describe('LabelsDialog colour (F-16.7)', () => {
+  it('saves a colour once the picker commits it, not while it is dragged', async () => {
+    await act(() => useLabelStore.getState().load())
+    install({
+      'label:update': (input) => {
+        const { colour } = input as Input<'label:update'>
+        return { ...GRIM, ...(colour === undefined ? {} : { colour }) }
+      }
+    })
+    act(() => useLabelStore.getState().openManager())
+    render(<LabelsDialog />)
+    const colour = screen.getByLabelText('Colour of Grim')
+    if (!(colour instanceof HTMLInputElement)) throw new Error('no colour input')
+    expect(colour).toHaveValue('#222222')
+    // Dragging through colours fires input events only: nothing is saved.
+    fireEvent.input(colour, { target: { value: '#884400' } })
+    expect(sent('label:update')).toEqual([])
+    // The native change fires once the picker closes on a colour.
+    act(() => {
+      colour.value = '#aa0000'
+      colour.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await waitFor(() => expect(sent('label:update')).toEqual([{ id: 'l-grim', colour: '#aa0000' }]))
+    await waitFor(() =>
+      expect(useLabelStore.getState().labels.find((label) => label.id === 'l-grim')?.colour).toBe(
+        '#aa0000'
+      )
+    )
+    // The same colour again is no change.
+    act(() => {
+      const again = screen.getByLabelText('Colour of Grim')
+      again.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(sent('label:update')).toHaveLength(1)
+  })
+})
+
 describe('the label filter (F-16.7)', () => {
   it('narrows the Manuscript tree to the scenes carrying the label, with their folders', async () => {
     await act(() => useLabelStore.getState().load())
@@ -257,6 +300,14 @@ describe('the label filter (F-16.7)', () => {
     expect(within(tree).getByText('Scene 1')).toBeInTheDocument()
     expect(within(tree).getByText('Scene 4')).toBeInTheDocument()
     expect(within(tree).getByText('Chapter 1')).toBeInTheDocument()
+    // A front matter page carrying the label shows in this tree, so it counts as well.
+    act(() =>
+      useLabelStore.setState({
+        byNode: { ...useLabelStore.getState().byNode, 'title-page': ['l-wry'] }
+      })
+    )
+    expect(screen.getByText(labelCountLabel(3, 'Wry'))).toBeInTheDocument()
+    expect(within(tree).getByText('Title Page')).toBeInTheDocument()
     // Only this tree is filtered: the Research tree and the Outline keep their own.
     expect(useLabelStore.getState().filter).toEqual({
       manuscript: 'l-wry',

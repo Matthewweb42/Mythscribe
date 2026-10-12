@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import type { RecordAliasInput, StoryRecordSummary } from '@shared/memory/records'
 import type { TwinGateResult } from '@shared/memory/twinGate'
 import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
+import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { describeError } from '@renderer/lib/errors'
 import { ipc, IpcRequestError } from '@renderer/lib/ipc'
 
 /**
@@ -9,7 +11,8 @@ import { ipc, IpcRequestError } from '@renderer/lib/ipc'
  * summary (its names, category, image), the record open in the main pane, and the category the
  * creation dialog is open for. The pages (Pinned, Ideas) are the page store's. Loaded on a v2
  * open; every action merges what main answers, and `record:changed` refetches only the records it
- * names (made, renamed, merged, split, deleted, a page saved), never the whole list.
+ * names (made, renamed, merged, split, deleted, an image), never the whole list. A summary that
+ * comes back as it was keeps its object, so the name index built from `byId` stays as it is.
  */
 
 /** The names a record is saved with by `setAliases`: its own and the others, in order. */
@@ -31,6 +34,11 @@ interface RecordState {
   selectedId: string | null
   /** The category the creation dialog is open for, or null while it is closed. */
   creating: string | null
+  /**
+   * What a creation dialog opened from a picker (a scene's POV or place, F-16.11) does with the
+   * record made or chosen (*Same as…*), in place of opening its sheet; null otherwise.
+   */
+  picking: ((recordId: string) => void) | null
   load: () => Promise<void>
   clear: () => void
   /** Opens the one `record:changed` subscription (idempotent); call it where a v2 project opens. */
@@ -64,7 +72,8 @@ interface RecordState {
     intoId: string | null
   ) => Promise<{ from: StoryRecordSummary; into: StoryRecordSummary }>
   select: (id: string | null) => void
-  startCreate: (categoryId: string) => void
+  /** Opens the creation dialog; `onPick` gets the record instead of its sheet opening. */
+  startCreate: (categoryId: string, onPick?: (recordId: string) => void) => void
   cancelCreate: () => void
 }
 
@@ -94,9 +103,14 @@ let unsubscribe: (() => void) | null = null
 
 export const useRecordStore = create<RecordState>((set, get) => {
   const merge = (records: readonly StoryRecordSummary[], gone: readonly string[] = []): void => {
-    const byId = { ...get().byId }
+    const held = get().byId
+    const fresh = records.map(summaryOf)
+    const same = (record: StoryRecordSummary): boolean =>
+      held[record.id] !== undefined && JSON.stringify(held[record.id]) === JSON.stringify(record)
+    if (gone.every((id) => held[id] === undefined) && fresh.every(same)) return
+    const byId = { ...held }
     for (const id of gone) delete byId[id]
-    for (const record of records) byId[record.id] = summaryOf(record)
+    for (const record of fresh) byId[record.id] = record
     const selectedId = get().selectedId
     set({
       byId,
@@ -111,6 +125,7 @@ export const useRecordStore = create<RecordState>((set, get) => {
     loaded: false,
     selectedId: null,
     creating: null,
+    picking: null,
 
     async load() {
       const mine = generation
@@ -123,12 +138,14 @@ export const useRecordStore = create<RecordState>((set, get) => {
 
     clear() {
       generation++
-      set({ byId: {}, ids: [], loaded: false, selectedId: null, creating: null })
+      set({ byId: {}, ids: [], loaded: false, selectedId: null, creating: null, picking: null })
     },
 
     subscribe() {
       unsubscribe ??= ipc().on('record:changed', ({ recordIds }) => {
-        void get().refetch(recordIds)
+        get()
+          .refetch(recordIds)
+          .catch((err: unknown) => toast.error(describeError(err)))
       })
     },
 
@@ -206,12 +223,12 @@ export const useRecordStore = create<RecordState>((set, get) => {
       if (get().selectedId !== id) set({ selectedId: id })
     },
 
-    startCreate(categoryId) {
-      set({ creating: categoryId })
+    startCreate(categoryId, onPick) {
+      set({ creating: categoryId, picking: onPick ?? null })
     },
 
     cancelCreate() {
-      set({ creating: null })
+      set({ creating: null, picking: null })
     }
   }
 })

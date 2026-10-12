@@ -355,6 +355,7 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'passages:search': 'read',
   'research:list': 'read',
   'research:add': 'write',
+  'research:addData': 'write',
   'research:create': 'write',
   'research:setNotCanon': 'write',
   'research:openOriginal': 'read'
@@ -711,6 +712,7 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'passages:search': 'v2',
   'research:list': 'v2',
   'research:add': 'v2',
+  'research:addData': 'v2',
   'research:create': 'v2',
   'research:setNotCanon': 'v2',
   'research:openOriginal': 'v2'

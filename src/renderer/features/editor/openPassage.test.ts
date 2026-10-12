@@ -11,10 +11,11 @@ import {
   OPEN_SCENE_TIMEOUT_MS,
   PASSAGE_GONE_MESSAGE,
   openMention,
+  openNameMention,
   openPassage
 } from './openPassage'
 
-const TEXT = 'Mara waited at the dark forest. Rose waited too.'
+const TEXT = 'Mara waited at the dark forest. Rose waited too. Then Anne-Marie left.'
 
 let editor: Editor
 /** A second document's editor, to prove the wait is for the right one. */
@@ -124,5 +125,32 @@ describe('openMention (F-4.12)', () => {
     await openMention('sc-1', [2, 6], 'gone-name')
     expect(toasts()).toEqual([PASSAGE_GONE_MESSAGE])
     expect(selectedText()).toBe('')
+  })
+})
+
+describe('openNameMention (F-16.6)', () => {
+  it('selects the recorded range of a hyphenated name, which a tag name would split', async () => {
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await openNameMention('sc-1', rangeOf('Anne-Marie'), 'Anne-Marie', ['Anne-Marie', 'Annie'])
+    expect(selectedText()).toBe('Anne-Marie')
+    expect(toasts()).toEqual([])
+  })
+
+  it('reads the range case-insensitively, and searches the mention, then the names, when it moved', async () => {
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await openNameMention('sc-1', rangeOf('Mara'), 'MARA', ['Mara Vell'])
+    expect(selectedText()).toBe('Mara')
+    const drifted = rangeOf('Anne-Marie')
+    await openNameMention('sc-1', [drifted[0] + 3, drifted[1] + 3], 'Anne-Marie', [])
+    expect(selectedText()).toBe('Anne-Marie')
+    // The mention's own words are gone; one of the record's names is still there.
+    await openNameMention('sc-1', [9_000, 9_004], 'Annie', ['Anne-Marie'])
+    expect(selectedText()).toBe('Anne-Marie')
+  })
+
+  it('toasts when neither the range nor any of the names is in the document', async () => {
+    useActiveEditorStore.getState().set('sc-1', editor)
+    await openNameMention('sc-1', [2, 6], 'Tomas', ['Tomas Harrow'])
+    expect(toasts()).toEqual([PASSAGE_GONE_MESSAGE])
   })
 })

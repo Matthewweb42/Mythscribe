@@ -7,6 +7,8 @@ import { resetNotesStore } from '@renderer/features/editor/notesStore'
 import { resetGoalsStore } from '@renderer/features/goals/goalsStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { withPages, recordFixture } from '@renderer/features/records/recordFixture'
+import { pageKey, resetPageStore, usePageStore } from '@renderer/features/research/pageStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetPendingSaves } from './pendingSaves'
@@ -67,6 +69,7 @@ const toasts = (): string[] => useDialogStore.getState().toasts.map((t) => t.mes
 beforeEach(() => {
   resetDocumentStore()
   resetNotesStore()
+  resetPageStore()
   resetGoalsStore()
   resetPendingSaves()
   useTreeStore.getState().clear()
@@ -77,6 +80,7 @@ beforeEach(() => {
 afterEach(() => {
   resetDocumentStore()
   resetNotesStore()
+  resetPageStore()
   useTreeStore.getState().clear()
   setIpcClient(null)
 })
@@ -92,6 +96,13 @@ describe('describeRecoveryItems', () => {
     expect(describeRecoveryItems(many)).toBe(
       '"Untitled" (text), "S1" (text), "S2" (text), "S3" (text), "S4" (text) and 2 more'
     )
+    // F-16.6: a record's pages go by the record's name.
+    expect(
+      describeRecoveryItems([
+        { kind: 'pinned', id: 'r-mara', title: 'Mara Vell' },
+        { kind: 'ideas', id: 'r-mara', title: 'Mara Vell' }
+      ])
+    ).toBe('"Mara Vell" (Pinned), "Mara Vell" (Ideas)')
   })
 })
 
@@ -118,6 +129,32 @@ describe('offerRecovery (F-8.3)', () => {
     expect(useTreeStore.getState().byId['sc-2']?.wordCount).toBe(3)
     expect(useDocumentStore.getState().docs['sc-2']?.content).toEqual(para('Lost words here.'))
     expect(toasts()).toEqual(['Recovered 2 unsaved changes.'])
+  })
+
+  it('reads a recovered Pinned page again when its sheet has it open (F-16.6)', async () => {
+    const mara = recordFixture('r-mara', 'character', ['Mara Vell'])
+    let pinned = para('Eyes: grey.')
+    listed = [{ kind: 'pinned', id: 'r-mara', title: 'Mara Vell' }]
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'recovery:list') return listed
+      if (channel === 'recovery:restore') {
+        pinned = para('Eyes: grey as rain.')
+        return [{ kind: 'pinned', id: 'r-mara', wordCount: null }]
+      }
+      if (channel === 'record:get') return { ...withPages(mara), pinned }
+      return null
+    })
+    setIpcClient({
+      invoke: <C extends Channel>(channel: C) => invoke(channel) as Promise<Output<C>>,
+      on: () => () => undefined
+    })
+    const key = pageKey({ kind: 'pinned', id: 'r-mara' })
+    await usePageStore.getState().load(key)
+    const offering = offerRecovery()
+    expect(await answer(true)).toContain('"Mara Vell" (Pinned)')
+    await offering
+    expect(usePageStore.getState().docs[key]?.content).toEqual(para('Eyes: grey as rain.'))
+    expect(toasts()).toEqual(['Recovered 1 unsaved change.'])
   })
 
   it('discards only after the second confirmation, and keeps the journal otherwise', async () => {

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { asc, count, eq, sql } from 'drizzle-orm'
+import { and, asc, count, eq, sql } from 'drizzle-orm'
 import { passageParagraphs, type Paragraph } from '@shared/mentions'
 import { dismissedKey, type Dismissed } from '@shared/memory/dismissed'
 import {
@@ -125,9 +125,15 @@ export function listNameMentions(db: TreeDb, nodeId: string): (NameMention & { i
 /**
  * How often each scene names each record, certain mentions only (an ambiguous span names nobody
  * yet): one row per record and scene, by record then scene id. What *Named in* and the lists'
- * "named in N scenes" read.
+ * "named in N scenes" read. Only scenes in the manuscript count: a scene moved to front or end
+ * matter keeps its rows (the scan skips it, and its hash still holds should it come back), but it
+ * is not named in the book.
  */
 export function namedInCounts(db: TreeDb): NamedInRow[] {
+  const manuscript = sql`WITH RECURSIVE book(id) AS (
+      SELECT id FROM node WHERE parent_id IS NULL AND section_type = 'manuscript'
+      UNION SELECT node.id FROM node JOIN book ON node.parent_id = book.id
+    ) SELECT id FROM book`
   return db
     .select({
       recordId: nameMention.recordId,
@@ -135,7 +141,7 @@ export function namedInCounts(db: TreeDb): NamedInRow[] {
       count: count()
     })
     .from(nameMention)
-    .where(eq(nameMention.ambiguous, false))
+    .where(and(eq(nameMention.ambiguous, false), sql`${nameMention.nodeId} IN (${manuscript})`))
     .groupBy(nameMention.recordId, nameMention.nodeId)
     .orderBy(asc(nameMention.recordId), asc(nameMention.nodeId))
     .all()
