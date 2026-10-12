@@ -1259,6 +1259,10 @@ export async function runReading(
         value: item.value,
         valueKey: valueKey(item.value),
         objectId: item.objectId,
+        // P2b: knows and thread claims come with `reader.v2` (slice 2).
+        how: null,
+        fromId: null,
+        topicQuoteId: null,
         voice: at.voice,
         speakerId,
         mode: at.mode,
@@ -1514,7 +1518,10 @@ export async function runReading(
         anchor: claim.anchor,
         proof: claim.proof,
         change: claim.change,
-        state: claim.pending === null ? 'live' : 'waiting'
+        state: claim.pending === null ? 'live' : 'waiting',
+        how: claim.how,
+        fromId: claim.fromId,
+        topicQuoteId: claim.topicQuoteId
       }))
       const ids = insertClaims(tx, inserts, at0)
       for (const [i, id] of ids.entries()) {

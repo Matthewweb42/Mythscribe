@@ -12,6 +12,23 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-12 · F-16.22, F-16.23 · P2b slice 1 (who-knows-what data, threads, years and ages; no AI, nothing to see yet): calls made while building it
+- Question: Building the data layer and the pure rules of P2b needed calls the plan did not spell out. Nothing changes in v1.
+- Chosen (decided by Claude, unconfirmed):
+  1. **A secret stays on the grid while its reveal is re-checked.** "Readers have known since" counts a reveal or a learning line whose sentence you just edited (shown dimmed) until the next reading confirms or drops it, so an edit never makes a secret vanish for a moment.
+  2. **A secret you made yourself that no scene reveals yet is still a row** of the grid ("not revealed yet"), so your *Knew before the book* marks have a place; it never makes a tension line, since readers do not know it.
+  3. **"Touched in this scene"** includes a suspicion or a mistaken belief shown there, not only someone learning it or its reveal.
+  4. **A thread opens at its reveal** (the sentence that sets it up, checked by a second AI read), even before any "opens" line is stored.
+  5. **Someone's own words** show what they hold ("I knew it all along", telling someone) and what they suspect or wrongly believe; "I saw him sell it" in their own words does not count as learning it unless the narration says so.
+  6. **Your own secrets and threads:** no name check; an exact duplicate of another secret's (or thread's) label is warned about, and making it anyway adds " (secret)" / " (thread)"; a label another record holds (a character "Ashby", a thread "Ashby") gets that added silently. A secret or thread has one label and no nicknames, its category cannot change, it merges (*Same as…*) only with its own kind, and it splits by reveal, never by names.
+  7. **An AI-made secret or thread with nothing left behind it is removed** after a reading, a record deleted or a scene deleted (one it only came from). One you wrote on (Pinned, Ideas) or marked *Knew before the book* is kept.
+  8. **Ages "since then"** list the year-crossing hints of the scenes after the one that states the age (that scene's own hint is not "since"), and leave flashbacks out. Any season counts as crossing a year ("a summer later"), as the plan says; "two months" does not.
+  9. **Rename in book** renames a person inside a secret's reveal and the label the reader gave it ("waiting for Hesk" becomes "waiting for Haskel"); the secret's own name is yours and is renamed only on its sheet.
+  10. **The panel and sheet fields** for secrets, knows, threads and ages are added with the slices that fill them (4 and 5), so `memory:scene` and `memory:sheet` never carry empty placeholders in between.
+  11. **The test book** gains two scenes of about 370 words each (h13, h14) and a group record "the regiment"; the new records are left out of the first reader's eval roster, so its token rows stay as they were. The new rule checks (a knows line about something that is not a secret, a topic in the name index, an AI topic nothing backs) heal on save like the others but are not counted in diagnostics (no Worker change).
+- Alternatives: drop a re-checked secret from the grid until it is read again; hide your unrevealed secrets; touched = counted lines only; threads open only with an "opens" line; count "I saw it" in dialogue; refuse a clashing label instead of renaming it; prune only after readings; list a stated scene's own hint; leave the reveal's label alone on rename; add the view fields now with empty values.
+- To change it: `src/shared/memory/whoKnows.ts` (1–3), `threadsAsOf.ts` (4), `knows.ts` `knowsLine` (5), `src/main/memory/recordStore.ts` `createTopicRecord`, `insertTopicRecord`, `updateRecord`, `sameAs` (6), `pruneTopics` and `tree:delete` in `src/main/ipc/handlers.ts` (7), `src/shared/memory/years.ts` `hintsSince`, `elapsedBreaks` (8), `src/main/memory/reading/renameEvidence.ts` (9), `src/shared/memory/views.ts` (10), `src/main/memory/testBook/` and `src/main/ai/eval/memoryFixtures.ts` (11).
+
 ## 2026-10-12 · F-16.22–16.23 · P2b plan: the calls the design left open
 - Question: Planning P2b, who knows what, threads and time (`docs/research/story-memory-2026-10-11/plans/P2b.md`, five slices, nothing built yet), needed calls the design did not make. Details are in the plan's §7 (P2b-D1 to P2b-D23).
 - Chosen (decided by Claude, unconfirmed):

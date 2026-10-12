@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(36)
+    expect(result.version).toBe(37)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1512,7 +1512,7 @@ describe('story reading tables (0034, F-16.17) leave every older table untouched
       "INSERT INTO plan_link (plan_id, scene_id, origin, created) VALUES ('plan', 'done', 'code', 'x')"
     ).run()
     const before = db.prepare('SELECT * FROM plan_link').all() as Record<string, unknown>[]
-    expect(migrate(db).applied).toEqual(['0035_plan_link_draft'])
+    expect(migrate(db, loadMigrations().slice(0, 36)).applied).toEqual(['0035_plan_link_draft'])
     const columns = (
       db.prepare('PRAGMA table_info(plan_link)').all() as { name: string; notnull: number }[]
     ).map((column) => [column.name, column.notnull])
@@ -1526,5 +1526,171 @@ describe('story reading tables (0034, F-16.17) leave every older table untouched
     db.prepare("UPDATE plan_link SET draft_id = 'd3' WHERE plan_id = 'plan'").run()
     db.prepare("DELETE FROM draft WHERE id = 'd3'").run()
     expect(db.prepare('SELECT COUNT(*) AS n FROM plan_link').get()).toEqual({ n: 0 })
+  })
+})
+
+describe('who knows what (0036, F-16.22, F-16.23) leaves every older row and column', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, loadMigrations().slice(0, 36))
+    fillEveryTable(db)
+  })
+  afterEach(() => db.close())
+
+  const columnsOf = (table: string): { name: string; notnull: number; dflt_value: unknown }[] =>
+    db.prepare(`PRAGMA table_info("${table}")`).all() as {
+      name: string
+      notnull: number
+      dflt_value: unknown
+    }[]
+
+  it('keeps every older table and value, adds two empty tables and three defaulted columns', () => {
+    const tablesBefore = tableNamesOf(db)
+    for (const table of tablesBefore) {
+      if (table === 'schema_migrations' || table.startsWith('memory_passage_fts_')) continue
+      expect(
+        (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n,
+        table
+      ).toBeGreaterThan(0)
+    }
+    const objectsBefore = schemaOf(db)
+    const rowsBefore = dumpOf(
+      db,
+      tablesBefore.filter((table) => table !== 'schema_migrations')
+    )
+    const claimColumns = columnsOf('claim').map((column) => column.name)
+    const readColumns = columnsOf('scene_read').map((column) => column.name)
+
+    expect(migrate(db).applied).toEqual(['0036_story_knows'])
+
+    // Every table but the two that gained a column is byte-identical, definition and rows.
+    const widened = new Set(['claim', 'scene_read'])
+    const kept = schemaOf(db).filter(
+      (object) =>
+        !widened.has(object.name) &&
+        objectsBefore.some((before) => before.type === object.type && before.name === object.name)
+    )
+    expect(JSON.stringify(kept)).toBe(
+      JSON.stringify(objectsBefore.filter((object) => !widened.has(object.name)))
+    )
+    const unchanged = Object.keys(rowsBefore).filter((table) => !widened.has(table))
+    expect(JSON.stringify(dumpOf(db, unchanged))).toBe(
+      JSON.stringify(Object.fromEntries(unchanged.map((table) => [table, rowsBefore[table]])))
+    )
+    // The two widened tables keep every old column and value and gain the new ones.
+    expect(columnsOf('claim').map((column) => column.name)).toEqual([
+      ...claimColumns,
+      'topic_quote_id'
+    ])
+    expect(columnsOf('scene_read').map((column) => column.name)).toEqual([
+      ...readColumns,
+      'topics_read',
+      'settled'
+    ])
+    expect(db.prepare('SELECT * FROM claim').all()).toEqual(
+      (rowsBefore.claim ?? []).map((row) => ({ ...(row as object), topic_quote_id: null }))
+    )
+    expect(db.prepare('SELECT * FROM scene_read').all()).toEqual(
+      (rowsBefore.scene_read ?? []).map((row) => ({
+        ...(row as object),
+        topics_read: 0,
+        settled: 0
+      }))
+    )
+    for (const name of ['topics_read', 'settled']) {
+      expect(columnsOf('scene_read').find((column) => column.name === name)?.notnull).toBe(1)
+    }
+
+    const added = tableNamesOf(db).filter((table) => !tablesBefore.includes(table))
+    expect(added.sort()).toEqual(['knew_before', 'topic_quote'])
+    for (const table of added) {
+      expect(
+        (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n,
+        table
+      ).toBe(0)
+    }
+    const addedObjects = schemaOf(db)
+      .filter(
+        (object) =>
+          !objectsBefore.some(
+            (before) => before.type === object.type && before.name === object.name
+          )
+      )
+      .map((object) => `${object.type} ${object.name}`)
+    expect(addedObjects.sort()).toEqual([
+      'index sqlite_autoindex_knew_before_1',
+      'index sqlite_autoindex_topic_quote_1',
+      'index topic_quote_node_idx',
+      'index topic_quote_record_idx',
+      'table knew_before',
+      'table topic_quote'
+    ])
+  })
+
+  it('cascades topic quotes and knew-before with their records, scene and draft; a claim keeps its row', () => {
+    migrate(db)
+    db.pragma('foreign_keys = ON')
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
+       VALUES ('s1', 'ms', NULL, 'document', 'One', 0, NULL, '2026-10-12', '2026-10-12')`
+    ).run()
+    db.prepare(
+      "INSERT INTO draft (id, name, position, created, modified) VALUES ('d2', 'Two', 1, 'x', 'x')"
+    ).run()
+    const record = db.prepare(
+      "INSERT INTO record (id, category_id, origin, created, modified) VALUES (?, ?, 'ai', 'x', 'x')"
+    )
+    record.run('secret1', 'secret')
+    record.run('mara', 'character')
+    record.run('tomas', 'character')
+    const quote = db.prepare(
+      `INSERT INTO topic_quote (id, record_id, draft_id, node_id, role, label, para, quote, state,
+         created, proved)
+       VALUES (?, ?, 'd2', 's1', ?, 'the sold map', 0, 'Tomas sold the map.', 'live', 'x', 'x')`
+    )
+    quote.run('q1', 'secret1', 'defining')
+    quote.run('q2', 'secret1', 'merged')
+    db.prepare(
+      `INSERT INTO claim (id, node_id, draft_id, record_id, slot, value, value_key, object_id, how,
+         voice, mode, quote, para, proof, state, created, proved, topic_quote_id)
+       VALUES ('c1', 's1', 'd2', 'mara', 'knows', 'overheard', 'overheard', 'secret1', 'overheard',
+         'narration', 'now', 'q', 0, 'verified', 'live', 'x', 'x', 'q2')`
+    ).run()
+    const knew = db.prepare(
+      "INSERT INTO knew_before (secret_id, record_id, created) VALUES ('secret1', ?, 'x')"
+    )
+    knew.run('mara')
+    knew.run('tomas')
+    const n = (table: string): number =>
+      (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n
+
+    // A merged reveal that goes leaves its claims, untagged.
+    db.prepare("DELETE FROM topic_quote WHERE id = 'q2'").run()
+    expect(db.prepare("SELECT topic_quote_id FROM claim WHERE id = 'c1'").get()).toEqual({
+      topic_quote_id: null
+    })
+    // A knower that goes takes its knew-before row.
+    db.prepare("DELETE FROM record WHERE id = 'tomas'").run()
+    expect(n('knew_before')).toBe(1)
+    // The secret that goes takes its reveals and knew-before rows; the knows claim's object clears.
+    db.prepare("DELETE FROM record WHERE id = 'secret1'").run()
+    expect(n('topic_quote')).toBe(0)
+    expect(n('knew_before')).toBe(0)
+    expect(db.prepare("SELECT object_id FROM claim WHERE id = 'c1'").get()).toEqual({
+      object_id: null
+    })
+    // A scene's and a draft's reveals go with them.
+    record.run('thread1', 'thread')
+    quote.run('q3', 'thread1', 'defining')
+    quote.run('q4', 'thread1', 'merged')
+    db.prepare(
+      "UPDATE topic_quote SET draft_id = (SELECT id FROM draft WHERE id <> 'd2' LIMIT 1) WHERE id = 'q4'"
+    ).run()
+    db.prepare("DELETE FROM draft WHERE id = 'd2'").run()
+    expect(n('topic_quote')).toBe(1)
+    db.prepare("DELETE FROM node WHERE id = 's1'").run()
+    expect(n('topic_quote')).toBe(0)
   })
 })

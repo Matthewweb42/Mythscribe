@@ -496,6 +496,7 @@ import {
   gateName,
   getRecord,
   listRecords,
+  pruneTopics,
   requireRecord,
   sameAs,
   savePage,
@@ -1259,13 +1260,19 @@ export function registerHandlers({
   })
 
   register('tree:delete', ({ id }) => {
-    const entityIds = deleteNode(manager.require().connection.orm, id)
+    const db = manager.require().connection.orm
+    const entityIds = deleteNode(db, id)
     // F-13.4: the scene's findings went with it (cascade), and the panel holds a copy.
     emit(windows(), 'continuity:changed', { nodeIds: [id] })
     // F-9.13: and so did what it stated; the sheets that held its facts refetch.
     if (entityIds.length > 0) emit(windows(), 'fact:changed', { entityIds })
+    // P2b-D12: a secret or thread the AI made that only this scene backed goes with it.
+    if (memory() === 'v2') {
+      const pruned = pruneTopics(db)
+      if (pruned.length > 0) emit(windows(), 'record:changed', { recordIds: pruned, roster: false })
+    }
     // F-9.16: the scene's items lose their passage; the rules count one scene fewer.
-    queueTodo(manager.require().connection.orm)
+    queueTodo(db)
     return null
   })
 

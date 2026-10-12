@@ -96,6 +96,25 @@ describe('nameIndexer (F-16.5)', () => {
     expect(listNameMentions(db, scene()).map((m) => m.text)).toEqual(['Mara Vell'])
   })
 
+  it('never records a mention of a secret or a thread (P2b-D2)', () => {
+    const ashby = record('Ashby')
+    const thread = createRecord(db, { name: "Ashby's Return", categoryId: 'thread' }, at(0))
+    const secret = createRecord(db, { name: 'The Sold Map', categoryId: 'secret' }, at(0))
+    if (!('record' in thread) || !('record' in secret)) throw new Error('blocked')
+    saveDocument(
+      db,
+      scene(),
+      doc("They spoke of Ashby's Return.", 'Nobody mentioned The Sold Map.')
+    )
+    scanNamesFor(db, scene(), at(1))
+    const named = listNameMentions(db, scene()).map((m) => m.recordId)
+    expect(named).toEqual([ashby])
+    // A topic's label changing rescans nothing: it is not in the roster's hash.
+    expect(staleNameScans(db)).not.toContain(scene())
+    setAliases(db, thread.record.id, { name: { text: 'Ned comes back' }, aliases: [] }, at(2))
+    expect(staleNameScans(db)).not.toContain(scene())
+  })
+
   it('counts each record’s certain mentions per scene for Named in (F-16.6)', () => {
     const mara = record('Mara Vell', ['Mara'])
     const tomas = record('Tomas')

@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import type { ReadEntry } from '@shared/memory/gate'
 import { sceneRead, type SceneReadRow } from '../../db/schema'
@@ -18,6 +18,10 @@ export interface SceneReadState {
   fullAt: string | null
   readingId: string | null
   updated: string
+  /** P2b-D9: a reader that reads knows and threads (`reader.v2`+) has read the whole scene. */
+  topicsRead: boolean
+  /** P2b-D9: nothing finished in the scene is unread. */
+  settled: boolean
 }
 
 function parseEntries(raw: string): ReadEntry[] {
@@ -37,7 +41,9 @@ export function getSceneRead(db: TreeDb, nodeId: string, draftId: string): Scene
     partials: row.partials,
     fullAt: row.fullAt,
     readingId: row.readingId,
-    updated: row.updated
+    updated: row.updated,
+    topicsRead: row.topicsRead,
+    settled: row.settled
   }
 }
 
@@ -54,7 +60,10 @@ export function getSceneReadRow(db: TreeDb, nodeId: string, draftId: string): Sc
 
 /**
  * Records a reading of a scene: the new read set, one more partial for a window read (none after
- * a full one, which also stamps `full_at`), and the reading that did it.
+ * a full one, which also stamps `full_at`), and the reading that did it. P2b-D9's flags: `topics`
+ * says the reader reads knows and threads (`reader.v2`+): a full read by one sets `topics_read`, a
+ * window read by one keeps it, any read by an older reader clears it (left out: kept as it was);
+ * `settled` is whether the reading left nothing finished unread (left out: kept).
  */
 export function writeSceneRead(
   db: TreeDb,
@@ -64,11 +73,14 @@ export function writeSceneRead(
     entries: readonly ReadEntry[]
     full: boolean
     readingId: string | null
+    topics?: boolean
+    settled?: boolean
   },
   now: Date
 ): void {
   const previous = getSceneRead(db, input.nodeId, input.draftId)
   const at = now.toISOString()
+  const before = previous?.topicsRead ?? false
   const row: SceneReadRow = {
     nodeId: input.nodeId,
     draftId: input.draftId,
@@ -76,9 +88,55 @@ export function writeSceneRead(
     partials: input.full ? 0 : (previous?.partials ?? 0) + 1,
     fullAt: input.full ? at : (previous?.fullAt ?? null),
     readingId: input.readingId,
-    updated: at
+    updated: at,
+    topicsRead: input.topics === undefined ? before : input.topics && (input.full || before),
+    settled: input.settled ?? previous?.settled ?? false
   }
   writeSceneReadRow(db, row)
+}
+
+/**
+ * Sets a scene's `settled` flag (P2b-D9): the gate found nothing finished unread (`nothing` or
+ * `cosmetic`), or the anchors job found a save left an unread finished sentence. A scene never
+ * read keeps no row (it is not checked).
+ */
+export function setSceneSettled(
+  db: TreeDb,
+  nodeId: string,
+  draftId: string,
+  settled: boolean
+): boolean {
+  const changed = db
+    .update(sceneRead)
+    .set({ settled })
+    .where(
+      and(
+        eq(sceneRead.nodeId, nodeId),
+        eq(sceneRead.draftId, draftId),
+        ne(sceneRead.settled, settled)
+      )
+    )
+    .run()
+  return changed.changes > 0
+}
+
+/** Every scene's P2b-D9 flags in one draft, by scene (what "checked up to" reads). */
+export function sceneReadFlags(
+  db: TreeDb,
+  draftId: string
+): Map<string, { topicsRead: boolean; settled: boolean }> {
+  return new Map(
+    db
+      .select({
+        nodeId: sceneRead.nodeId,
+        topicsRead: sceneRead.topicsRead,
+        settled: sceneRead.settled
+      })
+      .from(sceneRead)
+      .where(eq(sceneRead.draftId, draftId))
+      .all()
+      .map((row) => [row.nodeId, { topicsRead: row.topicsRead, settled: row.settled }])
+  )
 }
 
 /** Writes a row as it is (a rename's rewrite, its undo). */

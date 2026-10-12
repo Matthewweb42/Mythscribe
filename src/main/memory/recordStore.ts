@@ -5,6 +5,15 @@ import { dismissedKey } from '@shared/memory/dismissed'
 import type { InvariantAlias } from '@shared/memory/invariants'
 import { gateWords, normName } from '@shared/memory/names'
 import {
+  isNamedKind,
+  isTopicCategory,
+  isTopicKind,
+  SECRET_CATEGORY_ID,
+  TOPIC_CATEGORY,
+  uniqueTopicLabel,
+  type TopicKind
+} from '@shared/memory/topics'
+import {
   defaultCaseRule,
   RECORD_ALIASES_MAX,
   recordKindOf,
@@ -33,7 +42,12 @@ import { hasCategory } from '../entity/categoryStore'
 import { AppError } from '../ipc/errors'
 import type { TreeDb } from '../tree/treeStore'
 import { dismiss, dismissedKeys, forgetDismissed } from './dismissedStore'
-import { mergeEvidence, splitEvidence } from './reading/recordEvidence'
+import {
+  deleteKnowsAbout,
+  emptyTopics,
+  mergeEvidence,
+  splitEvidence
+} from './reading/recordEvidence'
 import { markRosterForRebuild } from './reading/roster'
 
 /**
@@ -43,6 +57,11 @@ import { markRosterForRebuild } from './reading/roster'
  * 4), which `setAliases` and `addAlias` enforce and `aliasClash` checks. A new record runs the
  * twin gate first; the author's own is warned about (`force` to create it anyway), never
  * silently blocked (decision P1-D4).
+ *
+ * P2b: secrets and threads are records too (categories `secret` and `thread`, fixed: no record
+ * moves into or out of them, P2b-D1), but their labels are not names (P2b-D2): the twin gate,
+ * the name scan's roster and its hash read `NAMED_KINDS` only, and a label another record holds
+ * gets " (secret)" / " (thread)" added rather than being refused.
  */
 
 export type BlockedGate = Extract<TwinGateResult, { outcome: 'blocked' }>
@@ -128,17 +147,21 @@ export function requireRecord(db: TreeDb, id: string): StoryRecord {
   return found
 }
 
-/** The roster as the twin gate takes it: every record's names, its own name first. */
+/**
+ * The roster as the twin gate takes it: every named record's names, its own name first. Secrets
+ * and threads are not names (P2b-D2): their labels never block a name, nor a name question.
+ */
 export function rosterOf(
   db: TreeDb,
   options: { withoutShared?: boolean } = {}
 ): TwinRosterRecord[] {
   const byRecord = aliasesOf(db)
   return db
-    .select({ id: record.id })
+    .select({ id: record.id, categoryId: record.categoryId })
     .from(record)
     .orderBy(asc(record.created), sql`rowid`)
     .all()
+    .filter((row) => isNamedKind(recordKindOf(row.categoryId)))
     .map((row) => ({
       id: row.id,
       names: (byRecord.get(row.id) ?? [])
@@ -159,8 +182,9 @@ export function gateName(db: TreeDb, name: string, exceptId?: string): TwinGateR
 }
 
 /**
- * The hash of everything the name scan reads from the roster (records, their kinds, every name
- * with its case rule and shared flag): a change makes every scene's scan stale.
+ * The hash of everything the name scan reads from the roster (named records, their kinds, every
+ * name with its case rule and shared flag): a change makes every scene's scan stale. A secret's or
+ * thread's label is not read (P2b-D2), so renaming one rescans nothing.
  */
 export function rosterHash(db: TreeDb): string {
   const rows = db
@@ -178,14 +202,16 @@ export function rosterHash(db: TreeDb): string {
     .all()
   return sha256(
     JSON.stringify(
-      rows.map((row) => [
-        row.recordId,
-        recordKindOf(row.categoryId),
-        row.norm,
-        row.text,
-        row.caseRule,
-        row.shared
-      ])
+      rows
+        .filter((row) => isNamedKind(recordKindOf(row.categoryId)))
+        .map((row) => [
+          row.recordId,
+          recordKindOf(row.categoryId),
+          row.norm,
+          row.text,
+          row.caseRule,
+          row.shared
+        ])
     )
   )
 }
@@ -231,6 +257,8 @@ function refuseClash(db: TreeDb, recordId: string | null, text: string, shared: 
 }
 
 function requireCategoryId(db: TreeDb, categoryId: string): void {
+  // P2b-D1: the v2-only Secrets category is built in for records, not a library category.
+  if (categoryId === SECRET_CATEGORY_ID) return
   if (!hasCategory(db, categoryId)) {
     throw new AppError('VALIDATION', `There is no category "${categoryId}"`, { categoryId })
   }
@@ -312,6 +340,7 @@ export type CreateRecordResult = { record: StoryRecord } | { gate: BlockedGate }
  */
 export function createRecord(db: TreeDb, input: CreateRecordInput, now: Date): CreateRecordResult {
   requireCategoryId(db, input.categoryId)
+  if (isTopicCategory(input.categoryId)) return createTopicRecord(db, input, now)
   const gate = gateName(db, input.name)
   if (gate.outcome === 'blocked' && input.force !== true) return { gate }
   const extra = input.aliases ?? []
@@ -345,6 +374,110 @@ export function createRecord(db: TreeDb, input: CreateRecordInput, now: Date): C
     for (const entry of extra) insertAlias(tx, id, { ...entry, isMain: false }, now)
   })
   return { record: requireRecord(db, id) }
+}
+
+/** The norm of every name and label any record holds (what a topic's label must not take). */
+function takenNorms(db: TreeDb): (norm: string) => boolean {
+  const held = new Set(
+    db
+      .select({ norm: alias.norm })
+      .from(alias)
+      .all()
+      .map((row) => row.norm)
+  )
+  return (norm) => held.has(norm)
+}
+
+/**
+ * Inserts a secret or thread with its label as its one name (P2b-D1): no twin gate (a label is not
+ * a name, P2b-D2), and a label whose norm another record holds gets " (secret)" / " (thread)",
+ * then the scene reference (`ref`, asked only when needed), added. Answers the new id and the
+ * label it got. The caller holds the transaction.
+ */
+export function insertTopicRecord(
+  db: TreeDb,
+  input: { kind: TopicKind; label: string; origin: RecordOrigin; ref?: () => string | null },
+  now: Date
+): { id: string; label: string } {
+  const label = input.label.normalize('NFC').trim().replace(/\s+/g, ' ')
+  if (normName(label) === '') {
+    throw new AppError('VALIDATION', 'A label needs at least one letter or digit')
+  }
+  const taken = takenNorms(db)
+  const unique = taken(normName(label))
+    ? uniqueTopicLabel(label, input.kind, input.ref?.() ?? null, taken)
+    : label
+  const id = randomUUID()
+  const at = now.toISOString()
+  db.insert(record)
+    .values({
+      id,
+      categoryId: TOPIC_CATEGORY[input.kind],
+      image: null,
+      origin: input.origin,
+      pinned: null,
+      ideas: null,
+      legacyEntityId: null,
+      legacyTagId: null,
+      created: at,
+      modified: at
+    })
+    .run()
+  db.insert(alias)
+    .values({
+      id: randomUUID(),
+      recordId: id,
+      text: unique,
+      norm: normName(unique),
+      isMain: true,
+      caseRule: defaultCaseRule(unique),
+      origin: input.origin === 'ai' ? 'ai' : 'author',
+      shared: false,
+      created: at
+    })
+    .run()
+  return { id, label: unique }
+}
+
+/**
+ * The author's *New secret* / *New thread* (P2b-D19): no twin gate. A label that is exactly
+ * another secret's or thread's of the same kind is warned about (`force` to make it anyway, with
+ * " (secret)" / " (thread)" added); one another kind of record holds gets that added silently.
+ * Topics keep one name: other names are refused.
+ */
+function createTopicRecord(db: TreeDb, input: CreateRecordInput, now: Date): CreateRecordResult {
+  const kind = recordKindOf(input.categoryId)
+  if (!isTopicKind(kind)) throw new AppError('VALIDATION', 'Not a secret or thread category')
+  if ((input.aliases ?? []).length > 0) {
+    throw new AppError('VALIDATION', 'A secret or thread has one label and no other names')
+  }
+  const norm = normName(input.name)
+  const twin = listRecords(db).find(
+    (each) => each.kind === kind && each.aliases.some((entry) => entry.norm === norm)
+  )
+  if (twin !== undefined && input.force !== true) {
+    return { gate: { outcome: 'blocked', rule: 'alias', recordId: twin.id, matched: twin.name } }
+  }
+  let id = ''
+  db.transaction((tx) => {
+    id = insertTopicRecord(
+      tx,
+      { kind, label: input.name, origin: input.origin ?? 'author' },
+      now
+    ).id
+  })
+  return { record: requireRecord(db, id) }
+}
+
+/**
+ * Deletes the AI-made secrets and threads nothing backs any more (P2b-D12; `emptyTopics`): no
+ * reveal and no claim in any draft, and nothing from the author. Answers their ids. Runs after a
+ * reading, the anchors job and a record deleted.
+ */
+export function pruneTopics(db: TreeDb): string[] {
+  const ids = emptyTopics(db)
+  if (ids.length > 0) db.delete(record).where(inArray(record.id, ids)).run()
+  return ids
 }
 
 /** A record made from v1 or v0 data (F-16.15: the switch-over, and the v0 import in v2). */
@@ -437,8 +570,17 @@ export function updateRecord(
   patch: { categoryId?: string; image?: string | null },
   now: Date
 ): StoryRecord {
-  requireRecord(db, id)
-  if (patch.categoryId !== undefined) requireCategoryId(db, patch.categoryId)
+  const current = requireRecord(db, id)
+  if (patch.categoryId !== undefined) {
+    requireCategoryId(db, patch.categoryId)
+    // P2b-D1: a secret's or thread's category is fixed, and nothing else moves into one.
+    if (
+      patch.categoryId !== current.categoryId &&
+      (isTopicCategory(current.categoryId) || isTopicCategory(patch.categoryId))
+    ) {
+      throw new AppError('VALIDATION', 'Secrets and threads keep their own category')
+    }
+  }
   db.update(record)
     .set({
       ...(patch.categoryId === undefined ? {} : { categoryId: patch.categoryId }),
@@ -612,7 +754,15 @@ export function checkAliasRename(
   if (norm.length === 0)
     throw new AppError('VALIDATION', 'A name needs at least one letter or digit')
   if (text === current.text) throw new AppError('VALIDATION', `"${text}" is already its name`)
-  const siblings = requireRecord(db, recordId).aliases.filter((entry) => entry.id !== aliasId)
+  const owner = requireRecord(db, recordId)
+  // P2b-D2: a secret's or thread's label is not a name in the book; it is renamed on its sheet.
+  if (isTopicKind(owner.kind)) {
+    throw new AppError(
+      'VALIDATION',
+      'A secret or thread is not named in the book: rename its label on its sheet'
+    )
+  }
+  const siblings = owner.aliases.filter((entry) => entry.id !== aliasId)
   if (siblings.some((entry) => entry.norm === norm)) {
     throw new AppError('VALIDATION', `"${text}" is already another name of this record`, { text })
   }
@@ -722,14 +872,19 @@ export function savePage(
 
 /**
  * Deletes a record; its names, mentions, dismissals and claims (F-16.17) go with it, and the
- * reader's roster is rebuilt. Answers what it was.
+ * reader's roster is rebuilt. P2b: a secret takes the knows claims about it (their object would be
+ * cleared, leaving orphans) and its reveals and knew-before rows (cascaded); an AI-made topic left
+ * with nothing behind it goes too (`pruneTopics`). Answers what it was.
  */
 export function deleteRecord(db: TreeDb, id: string): StoryRecord {
   const gone = requireRecord(db, id)
   db.transaction((tx) => {
     removeFromAlsoHere(tx, id, null)
+    if (gone.kind === 'secret') deleteKnowsAbout(tx, id)
     tx.delete(record).where(eq(record.id, id)).run()
-    markRosterForRebuild(tx)
+    pruneTopics(tx)
+    // A topic is not in the roster's record lines: its own part follows by comparing (P2b-D10).
+    if (!isTopicKind(gone.kind)) markRosterForRebuild(tx)
   })
   return gone
 }
@@ -780,13 +935,21 @@ function rekey(kind: string, key: string, from: string, to: string): string | nu
     if (pair[0] === pair[1]) return null
     return dismissedKey({ kind: 'notSame', a: pair[0] ?? '', b: pair[1] ?? '' })
   }
+  let next = key
   if (
     (kind === 'alias' || kind === 'notMention' || kind === 'notRight') &&
-    key.startsWith(`${from}|`)
+    next.startsWith(`${from}|`)
   ) {
-    return `${to}${key.slice(from.length)}`
+    next = `${to}${next.slice(from.length)}`
   }
-  return key
+  // P2b-D6: a knows line's key names its secret in the slot (`knows:<secretId>`), a thread step's
+  // its thread (`thread:<threadId>`).
+  if (kind === 'notRight') {
+    next = next
+      .replace(`|knows:${from}|`, `|knows:${to}|`)
+      .replace(`|thread:${from}|`, `|thread:${to}|`)
+  }
+  return next
 }
 
 export interface SameAsResult {
@@ -803,11 +966,18 @@ export interface SameAsResult {
  * between the two goes) and, F-16.17, the reading's claims, cards and back-fill rows
  * (`mergeEvidence`), with the reader's roster marked for a rebuild. The merged record is then
  * deleted. Refused when the kept record would end with more than `RECORD_ALIASES_MAX` other names.
+ * P2b: the knows claims' sources, the knew-before marks and the topics' reveals follow too, and a
+ * knows line's Not right key names the kept secret; a topic merges only with its own kind.
  */
 export function sameAs(db: TreeDb, keepId: string, mergeId: string, now: Date): SameAsResult {
   if (keepId === mergeId) throw new AppError('VALIDATION', 'A record cannot be merged into itself')
   const keep = requireRecord(db, keepId)
   const merge = requireRecord(db, mergeId)
+  // P2b: two secrets or two threads merge (the author's merge, no reveal tagged); a topic never
+  // merges with a name or with the other kind of topic.
+  if ((isTopicKind(keep.kind) || isTopicKind(merge.kind)) && keep.kind !== merge.kind) {
+    throw new AppError('VALIDATION', 'Only two secrets, or two threads, can be the same')
+  }
   const have = new Set(keep.aliases.map((entry) => entry.norm))
   requireAliasRoom(
     keep.name,
@@ -851,7 +1021,7 @@ export function sameAs(db: TreeDb, keepId: string, mergeId: string, now: Date): 
     removeFromAlsoHere(tx, mergeId, keepId)
     tx.update(authorTodo).set({ recordId: keepId }).where(eq(authorTodo.recordId, mergeId)).run()
     mergeEvidence(tx, keepId, mergeId)
-    markRosterForRebuild(tx)
+    if (!isTopicKind(keep.kind)) markRosterForRebuild(tx)
     const tombstones = tx
       .select()
       .from(dismissed)
@@ -902,6 +1072,10 @@ export function splitRecord(
   now: Date
 ): SplitResult {
   const from = requireRecord(db, id)
+  // P2b: a secret or thread splits by reveal (`splitTopic`), never by names.
+  if (isTopicKind(from.kind)) {
+    throw new AppError('VALIDATION', 'A secret or thread splits by its reveals, not by names')
+  }
   if (aliasIds.length === 0) throw new AppError('VALIDATION', 'Pick at least one name to move')
   const moving = from.aliases.filter((entry) => aliasIds.includes(entry.id))
   if (moving.length !== aliasIds.length) {

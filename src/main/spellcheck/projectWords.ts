@@ -1,7 +1,10 @@
+import { eq } from 'drizzle-orm'
 import { spellcheckWords } from '@shared/dictionary'
+import { recordKindOf } from '@shared/memory/records'
+import { isNamedKind } from '@shared/memory/topics'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { storyNameWords } from '@shared/storyNames'
-import { alias } from '../db/schema'
+import { alias, record } from '../db/schema'
 import { listEntities } from '../entity/entityStore'
 import { getProjectDictionary } from '../project/settingsStore'
 import { listTags } from '../tag/tagStore'
@@ -9,16 +12,20 @@ import type { TreeDb } from '../tree/treeStore'
 
 /**
  * The words of the open project's story names (F-3.14): in v1 its entities' and its tags', in v2
- * (F-16.4) its records' names and nicknames, as the author spells them, read fresh on every call
- * so a renamed or deleted name leaves no word behind. Local string work: no AI, whatever the dial.
+ * (F-16.4) its named records' names and nicknames (never a secret's or thread's label, P2b-D2),
+ * as the author spells them, read fresh on every call so a renamed or deleted name leaves no word
+ * behind. Local string work: no AI, whatever the dial.
  */
 export function projectNameWords(db: TreeDb, memory: StoryMemoryVersion): string[] {
   if (memory === 'v2') {
+    // P2b-D2: a secret's or thread's label is not a name the spellchecker should accept.
     return storyNameWords(
       db
-        .select({ text: alias.text })
+        .select({ text: alias.text, categoryId: record.categoryId })
         .from(alias)
+        .innerJoin(record, eq(record.id, alias.recordId))
         .all()
+        .filter((row) => isNamedKind(recordKindOf(row.categoryId)))
         .map((row) => row.text)
     )
   }

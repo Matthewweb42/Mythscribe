@@ -12,8 +12,11 @@ import {
   SpotVerdict
 } from './claims'
 import { Dismissed } from './dismissed'
+import { KnowsHow } from './knows'
+import { RecordOrigin } from './records'
 import { SlotSchema } from './slots'
 import { RebuildEstimate } from './switchover'
+import { ThreadStep } from './topics'
 import { TYPED_FIELDS } from './typedVsText'
 
 /**
@@ -474,3 +477,281 @@ export const CardNotRight = z.object({
   value: z.string()
 })
 export type CardNotRight = z.infer<typeof CardNotRight>
+
+/*
+ * Who knows what, threads and time (F-16.22, F-16.23; plan P2b): what the pure rules of
+ * `whoKnows.ts`, `threadsAsOf.ts` and `years.ts` answer, and the views of slices 4 and 5 carry.
+ * Absence is never a line (P2b rule 9): a view carries only what was proved, plus `checkedUpTo`;
+ * the words "No scene shows … (checked up to …)" are composed in the renderer alone, and nothing
+ * that reaches a prompt reads `checkedUpTo`.
+ */
+
+/** A scene and how it is named ("14.2"). */
+export const SceneRefView = z.object({ nodeId: z.string(), ref: z.string() })
+export type SceneRefView = z.infer<typeof SceneRefView>
+
+/**
+ * A secret's or thread's reveal (`topic_quote`): the sentence that revealed or opened it
+ * (`defining`), or one merged into it as the same (`merged`, with the label it was read as).
+ */
+export const TopicQuoteView = z.object({
+  topicQuoteId: z.string(),
+  role: z.enum(['defining', 'merged']),
+  label: z.string(),
+  quote: z.string(),
+  nodeId: z.string(),
+  ref: z.string(),
+  para: z.number().int(),
+  /** Its sentences changed since it was read: dimmed, re-checking. */
+  stale: z.boolean()
+})
+export type TopicQuoteView = z.infer<typeof TopicQuoteView>
+
+/**
+ * One knower's line about a secret (P2b-D6, D7): from a knows claim, or the author's *Knew before
+ * the book* (`source: 'author'`, no scene). `line` says whether it counts as knowing (`counts`),
+ * is half-knowing (`partial`: suspects, believes otherwise) or does not count (`other`: dialogue
+ * by someone else, a rumour, a hypothetical, a dream). `later`: the knower's first line comes
+ * after the scene the view is read as of ("learns later (17.3)").
+ */
+export const KnowsCellView = z.object({
+  knowerId: z.string(),
+  secretId: z.string(),
+  how: KnowsHow,
+  fromId: z.string().nullable(),
+  source: z.enum(['claim', 'author']),
+  line: z.enum(['counts', 'partial', 'other']),
+  claimId: z.string().nullable(),
+  nodeId: z.string().nullable(),
+  ref: z.string().nullable(),
+  para: z.number().int().nullable(),
+  voice: ClaimVoice.nullable(),
+  mode: ClaimMode.nullable(),
+  speakerId: z.string().nullable(),
+  stale: z.boolean(),
+  later: z.boolean()
+})
+export type KnowsCellView = z.infer<typeof KnowsCellView>
+
+/**
+ * One secret as of a scene: its label, who made it, the scene readers have known it since (the
+ * earliest reveal or counted line, P2b-D7; null when none), whether readers know it as of the
+ * scene, its reveals, one cell per knower (the strongest line as of the scene, the author's
+ * knew-before, or the first later line flagged `later`), the lines that do not count, and the
+ * author's knew-before marks. Never a "doesn't know" cell.
+ */
+export const SecretView = z.object({
+  recordId: z.string(),
+  label: z.string(),
+  origin: RecordOrigin,
+  readersSince: SceneRefView.nullable(),
+  known: z.boolean(),
+  defining: TopicQuoteView.nullable(),
+  merged: z.array(TopicQuoteView),
+  cells: z.array(KnowsCellView),
+  others: z.array(KnowsCellView),
+  knewBefore: z.array(z.string())
+})
+export type SecretView = z.infer<typeof SecretView>
+
+/**
+ * The Book's who-knows-what grid as of a scene (P2b-D20): columns are the characters and groups
+ * with any line or knew-before as of the scene, plus its POV, by how often each is named; rows
+ * the secrets readers know as of the scene (and the author's own not revealed yet), newest
+ * first; `later` counts the secrets readers learn later in the book. `checkedUpTo` scopes every
+ * empty cell (the renderer's words only).
+ */
+export const KnowsGrid = z.object({
+  asOf: z.string().nullable(),
+  asOfRef: z.string().nullable(),
+  checkedUpTo: SceneRefView.nullable(),
+  columns: z.array(z.string()),
+  rows: z.array(SecretView),
+  later: z.number().int().nonnegative()
+})
+export type KnowsGrid = z.infer<typeof KnowsGrid>
+
+/**
+ * A tension line in This scene (P2b-D21): readers know a secret and the POV has no counted line
+ * (`readersKnow`), or someone Here holds it and another Here has none (`hereKnows`). The "has
+ * none" is scoped by `SceneSecrets.checkedUpTo`; never a fact.
+ */
+export const TensionLine = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('readersKnow'), secretId: z.string(), recordId: z.string() }),
+  z.object({
+    kind: z.literal('hereKnows'),
+    secretId: z.string(),
+    holderId: z.string(),
+    recordId: z.string()
+  })
+])
+export type TensionLine = z.infer<typeof TensionLine>
+
+/** A secret touched in the scene, with the Here characters that have no counted line for it. */
+export const SceneSecretView = z.object({ secret: SecretView, without: z.array(z.string()) })
+export type SceneSecretView = z.infer<typeof SceneSecretView>
+
+/**
+ * This scene's Who knows what (P2b-D21): every secret touched in the scene (a line or a reveal
+ * there), at most 3 tension lines, and how many of the grid's other rows "+ N more in Book" opens.
+ */
+export const SceneSecrets = z.object({
+  touched: z.array(SceneSecretView),
+  tension: z.array(TensionLine),
+  more: z.number().int().nonnegative(),
+  checkedUpTo: SceneRefView.nullable()
+})
+export type SceneSecrets = z.infer<typeof SceneSecrets>
+
+/**
+ * One thread step (an `opens`, `advances` or `resolves` claim) as of a scene: `counted` when it is
+ * in mode `now` and not a rumour (it moves the status, P2b-D22); the rest are listed muted.
+ */
+export const ThreadStepView = z.object({
+  claimId: z.string(),
+  step: ThreadStep,
+  value: z.string(),
+  nodeId: z.string(),
+  ref: z.string(),
+  para: z.number().int(),
+  voice: ClaimVoice,
+  mode: ClaimMode,
+  counted: z.boolean(),
+  stale: z.boolean()
+})
+export type ThreadStepView = z.infer<typeof ThreadStepView>
+
+/** A thread's status as of a scene, derived, never stored (P2b-D22). */
+export const THREAD_STATUSES = ['notYet', 'open', 'resolved'] as const
+export const ThreadStatus = z.enum(THREAD_STATUSES)
+export type ThreadStatus = z.infer<typeof ThreadStatus>
+
+/**
+ * One thread as of a scene: its status, where it opened, its last counted step, where it resolved,
+ * its steps as of the scene, how many come later, and its reveals.
+ */
+export const ThreadMemoryView = z.object({
+  recordId: z.string(),
+  label: z.string(),
+  origin: RecordOrigin,
+  status: ThreadStatus,
+  opened: SceneRefView.nullable(),
+  last: SceneRefView.nullable(),
+  resolved: SceneRefView.nullable(),
+  steps: z.array(ThreadStepView),
+  later: z.number().int().nonnegative(),
+  defining: TopicQuoteView.nullable(),
+  merged: z.array(TopicQuoteView)
+})
+export type ThreadMemoryView = z.infer<typeof ThreadMemoryView>
+
+/** The Book's Threads as of a scene; an author's thread with no step reads `notYet`, scoped. */
+export const ThreadsMemory = z.object({
+  asOf: z.string().nullable(),
+  asOfRef: z.string().nullable(),
+  checkedUpTo: SceneRefView.nullable(),
+  threads: z.array(ThreadMemoryView)
+})
+export type ThreadsMemory = z.infer<typeof ThreadsMemory>
+
+/** A topic's sheet section: a secret's or a thread's view. */
+export const TopicView = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('secret'), secret: SecretView }),
+  z.object({ kind: z.literal('thread'), thread: ThreadMemoryView })
+])
+export type TopicView = z.infer<typeof TopicView>
+
+/** An elapsed hint the card quoted ("Three winters later"), where, and whether it crosses a year. */
+export const ElapsedHintView = z.object({
+  text: z.string(),
+  nodeId: z.string(),
+  ref: z.string(),
+  breaks: z.boolean()
+})
+export type ElapsedHintView = z.infer<typeof ElapsedHintView>
+
+/**
+ * A scene's story year (decision 5): typed in its details, quoted in its own text (verified, its
+ * scene only), carried from the last typed year (`from`), or not known (with the hint that ended
+ * the carry, when one did).
+ */
+export const YearView = z.union([
+  z.object({
+    kind: z.enum(['typed', 'quoted', 'carried']),
+    value: z.number().int(),
+    from: SceneRefView
+  }),
+  z.object({ kind: z.literal('unknown'), hint: ElapsedHintView.nullable() })
+])
+export type YearView = z.infer<typeof YearView>
+export type KnownYearView = Extract<YearView, { value: number }>
+
+/** Where a birth year came from: a quoted `born` line in the book, or the record's Pinned page. */
+export const BornView = z.object({
+  year: z.number().int(),
+  source: z.enum(['text', 'pinned']),
+  claimId: z.string().nullable(),
+  nodeId: z.string().nullable(),
+  ref: z.string().nullable()
+})
+export type BornView = z.infer<typeof BornView>
+
+/**
+ * A character's age as of a scene (decision 5, P2b-D15): computed from a birth year and the
+ * scene's year ("about 19 · year from 1.1"), not born yet, or the last stated age with the
+ * year-crossing hints since listed and never added up ("19, stated in 2.1 · since then: 'Three
+ * winters later' (14.1)").
+ */
+export const AgeView = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('computed'),
+    age: z.number().int().nonnegative(),
+    born: BornView,
+    year: z.object({
+      kind: z.enum(['typed', 'quoted', 'carried']),
+      value: z.number().int(),
+      from: SceneRefView
+    })
+  }),
+  z.object({
+    kind: z.literal('notBorn'),
+    born: BornView,
+    year: z.object({
+      kind: z.enum(['typed', 'quoted', 'carried']),
+      value: z.number().int(),
+      from: SceneRefView
+    })
+  }),
+  z.object({
+    kind: z.literal('stated'),
+    value: z.string(),
+    claimId: z.string(),
+    nodeId: z.string(),
+    ref: z.string(),
+    since: z.array(ElapsedHintView)
+  })
+])
+export type AgeView = z.infer<typeof AgeView>
+
+/**
+ * One row of the Book's Timeline (decision 5): a readable scene with its year, whether it is a
+ * flashback, its elapsed hint, the typed time, and ages (who is Here, or one record).
+ */
+export const TimelineRow = z.object({
+  nodeId: z.string(),
+  ref: z.string(),
+  title: z.string(),
+  year: YearView,
+  flashback: z.boolean(),
+  elapsed: ElapsedHintView.nullable(),
+  time: z.string(),
+  ages: z.array(z.object({ recordId: z.string(), age: AgeView }))
+})
+export type TimelineRow = z.infer<typeof TimelineRow>
+
+export const TimelineMemory = z.object({
+  /** The record whose age every row shows; null: who is Here in each. */
+  recordId: z.string().nullable(),
+  rows: z.array(TimelineRow)
+})
+export type TimelineMemory = z.infer<typeof TimelineMemory>

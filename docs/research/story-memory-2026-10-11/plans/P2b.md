@@ -103,6 +103,13 @@ code, on read: knowsAsOf (grid, readers-since, checked-up-to, tension) · thread
 
 **e2e:** none (no request and no UI yet). **Ticks:** none; F-16.22 and F-16.23 note the data layer.
 
+**Slice 1 notes (built 2026-10-12; calls in `QUESTIONS.md`):**
+- `SceneMemory.secrets` and `SheetMemory`'s knows/threads/age/topic are added in slices 4 and 5 with the views that fill them (no placeholder values on `memory:scene`/`memory:sheet` meanwhile); slice 1 defines the view schemas the pure rules answer (`SecretView`, `KnowsGrid`, `SceneSecrets`, `TensionLine`, `ThreadMemoryView`, `ThreadsMemory`, `TopicView`, `YearView`, `BornView`, `AgeView`, `TimelineRow`, `TimelineMemory`).
+- `pruneTopics` lives in `recordStore` (the one writer of `record`), fed by `recordEvidence.emptyTopics`; it runs in `deleteRecord` and after `tree:delete` (v2). The anchors job never deletes evidence, so it does not prune; slice 2's readings call it after reconcile.
+- Slice 2 owes: the gate's `setSceneSettled(true)` on `nothing`/`cosmetic`, `writeSceneRead({ topics: true, settled })` in the pipeline, a rebuild's `replace` deleting the scene's topic quotes it did not state again, and rendering `ReaderRoster.topicLines` (the topics part exists, labels cut to 4 words past 400 tokens). Already in place: reconcile's identity with `how`, `FreshClaim.how/fromId/topicQuoteId` (the pipeline passes null until `reader.v2`), and `notRightLine` keying knows lines by `knows:<secretId>` (used by reconcile and `notRight.ts`).
+- `knowsLine`: a knower's own words also show a `PARTIAL` how; the test book's h14 suspicion is in narration.
+- The P2b records of the test book carry `addedFor: 'P2b'` and are left out of the `reader.v1` eval roster (`memoryFixtures.ts`), so the token report did not move; the P2a oracle replay reads h13 and h14 with their claim labels (`captain-farmer`, `lottie-age-again`).
+
 ---
 
 ## 2. Slice 2: `reader.v2`, `verify.v2` and the pipeline (F-16.22, F-16.23 reading)

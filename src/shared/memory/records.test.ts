@@ -25,6 +25,10 @@ describe('recordKindOf (F-16.4)', () => {
     }
   })
 
+  it('makes the v2 secret category a secret (P2b-D1)', () => {
+    expect(recordKindOf('secret')).toBe('secret')
+  })
+
   it('makes every custom category a thing', () => {
     expect(recordKindOf('c-ships')).toBe('thing')
     expect(recordKindOf('c-houses-of-the-north')).toBe('thing')

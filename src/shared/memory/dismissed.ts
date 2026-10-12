@@ -24,7 +24,10 @@ import { normName } from './names'
  *   line whose quote is no longer in its scene (a stale line) is keyed by its stored anchor
  *   instead: no new sentence can match it, but the row is there to undo. A card's value (its POV,
  *   place, time or year, or a character on the page) the author said is not right is keyed by
- *   the scene, the field and the value: the views and the conflicts then leave it out.
+ *   the scene, the field and the value: the views and the conflicts then leave it out. P2b: a
+ *   knows line uses the slot `knows:<secretId>` with its how as the value (P2b-D6), a thread step
+ *   `thread:<threadId>` with its step; an AI-made secret or thread the author said is not one is
+ *   keyed by its kind and its reveal's sentences (`topic|kind|…`, P2b-D13).
  * - `notProblem`: a conflict that is fine: a filed line's (F-16.9, by the caller's `ref`), the
  *   typed-detail conflict's *Keep mine* (decision 4, F-16.18: `detail`), and P4's findings.
  */
@@ -69,6 +72,15 @@ export type DismissedKeyInput =
       /** A card's value: for `pov` and `present`, the value is the record's id. */
       card: { nodeId: string; field: CardEntryName; value: string }
     }
+  | {
+      kind: 'notRight'
+      /**
+       * An AI-made secret or thread the author said is not one (*Not a secret*, *Not a thread*;
+       * P2b-D13), by the gate texts of its reveal's sentences, so the same sentences never make it
+       * again while a new reveal elsewhere may.
+       */
+      topic: { kind: 'secret' | 'thread'; stating: readonly string[] }
+    }
   | { kind: 'notProblem'; ref: string }
   | { kind: 'notProblem'; detail: { nodeId: string; field: string; value: string } }
 
@@ -94,7 +106,9 @@ export function statingKey(stating: readonly string[]): string {
  * `split` and `notSame` → the two record ids in sorted order; `unlink` → `planId|sceneId`;
  * `notRight` → `recordId|slot|valueKey|statingKey` (a stale line: `recordId|slot|valueKey|a` and
  * its anchor's hash; a card's record value: `recordId|card|nodeId|field`, so a merge re-keys it;
- * another card value: `card|nodeId|field|valueKey`); `notProblem` → the caller's reference, or for
+ * another card value: `card|nodeId|field|valueKey`; an AI-made topic the author said is not one:
+ * `topic|kind|statingKey`; a knows line keys by its learner with the slot `knows:<secretId>` and its
+ * how as the value, so a merge of either record re-keys it); `notProblem` → the caller's reference, or for
  * a typed detail `detail|nodeId|field|valueKey` (the text's value the author kept hers against; for
  * a POV, the text's record id, so a rename never asks again).
  */
@@ -112,6 +126,7 @@ export function dismissedKey(input: DismissedKeyInput): string {
     case 'unlink':
       return `${input.planId}|${input.sceneId}`
     case 'notRight':
+      if ('topic' in input) return `topic|${input.topic.kind}|${statingKey(input.topic.stating)}`
       if ('card' in input) {
         const { nodeId, field, value } = input.card
         return cardEntryIsRecord(field)

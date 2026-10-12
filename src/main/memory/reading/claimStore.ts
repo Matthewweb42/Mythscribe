@@ -10,10 +10,11 @@ import {
   type SpotTier,
   type SpotVerdict
 } from '@shared/memory/claims'
-import type { InvariantClaim } from '@shared/memory/invariants'
+import type { InvariantClaim, InvariantKnows } from '@shared/memory/invariants'
+import { recordKindOf } from '@shared/memory/records'
 import { parseSlot, type Slot } from '@shared/memory/slots'
 import type { MemorySource } from '@shared/memory/sources'
-import { claim, type ClaimRow } from '../../db/schema'
+import { claim, record, type ClaimRow } from '../../db/schema'
 import { currentDraftId } from '../../draft/draftStore'
 import type { TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
@@ -71,7 +72,8 @@ export function toClaim(row: ClaimRow): Claim | null {
     spotTier: row.spotTier,
     spotAt: row.spotAt,
     created: row.created,
-    proved: row.proved
+    proved: row.proved,
+    topicQuoteId: row.topicQuoteId
   }
 }
 
@@ -101,6 +103,13 @@ export interface NewClaim {
   proof: ClaimProof
   change: boolean
   state: ClaimState
+  /**
+   * P2b: a knows claim's how (`KNOWS_HOWS`) and source, a thread step's step (`THREAD_STEPS`), and
+   * the merged reveal the claim came in with (P2b-D5); left out, null.
+   */
+  how?: string | null
+  fromId?: string | null
+  topicQuoteId?: string | null
 }
 
 /** Stores claims; answers their ids, in order. */
@@ -123,8 +132,8 @@ export function insertClaims(db: TreeDb, claims: readonly NewClaim[], now: Date)
           value: each.value,
           valueKey: valueKey(each.value),
           objectId: each.objectId,
-          how: null,
-          fromId: null,
+          how: each.how ?? null,
+          fromId: each.fromId ?? null,
           voice: each.voice,
           speakerId: each.speakerId,
           mode: each.mode,
@@ -135,7 +144,8 @@ export function insertClaims(db: TreeDb, claims: readonly NewClaim[], now: Date)
           change: each.change,
           state: each.state,
           created: at,
-          proved: at
+          proved: at,
+          topicQuoteId: each.topicQuoteId ?? null
         })
         .run()
       ids.push(id)
@@ -431,4 +441,50 @@ export function invariantClaims(db: TreeDb, nodeId?: string): InvariantClaim[] {
     proof: each.proof,
     anchor: each.anchor
   }))
+}
+
+/** One draft's claims of one slot (P2b: the knows lines, the thread steps), oldest first. */
+export function slotClaims(db: TreeDb, slot: 'knows' | 'thread', draftId: string): Claim[] {
+  return toClaims(
+    db
+      .select()
+      .from(claim)
+      .where(and(eq(claim.slot, slot), eq(claim.draftId, draftId)))
+      .orderBy(asc(claim.created), sql`rowid`)
+      .all()
+  )
+}
+
+/**
+ * Every knows claim of every draft as P2b's invariants read them: its learner's kind and its
+ * secret's (`knowsObject`, `knowsLearner`); `nodeId` narrows them to one scene.
+ */
+export function invariantKnows(db: TreeDb, nodeId?: string): InvariantKnows[] {
+  const kinds = new Map(
+    db
+      .select({ id: record.id, categoryId: record.categoryId })
+      .from(record)
+      .all()
+      .map((row) => [row.id, recordKindOf(row.categoryId)])
+  )
+  return db
+    .select({
+      id: claim.id,
+      state: claim.state,
+      recordId: claim.recordId,
+      objectId: claim.objectId
+    })
+    .from(claim)
+    .where(
+      nodeId === undefined
+        ? eq(claim.slot, 'knows')
+        : and(eq(claim.slot, 'knows'), eq(claim.nodeId, nodeId))
+    )
+    .all()
+    .map((row) => ({
+      claimId: row.id,
+      state: row.state,
+      learnerKind: row.recordId === null ? null : (kinds.get(row.recordId) ?? null),
+      objectKind: row.objectId === null ? null : (kinds.get(row.objectId) ?? null)
+    }))
 }

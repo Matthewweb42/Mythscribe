@@ -147,3 +147,18 @@ describe('sheetAsOf (F-16.18)', () => {
     expect(sheet.later).toBe(0)
   })
 })
+
+describe('knows lines and thread steps (P2b)', () => {
+  it('never reach True now or From the book, nor count as later lines', () => {
+    const extra: AsOfClaim[] = [
+      claim({ nodeId: 's1', slot: 'knows', value: 'overheard', objectId: 'secret' }),
+      claim({ nodeId: 's2', slot: 'knows', value: 'tells', voice: 'dialogue', speakerId: 'mara' }),
+      claim({ nodeId: 's5', slot: 'knows', value: 'saw' }),
+      claim({ nodeId: 's3', slot: 'thread', value: 'opens', recordId: 'mara' })
+    ]
+    const sheet = sheetAsOf([...BOOK, ...extra], READING, 's4')
+    const without = sheetAsOf(BOOK, READING, 's4')
+    expect(sheet).toEqual(without)
+    expect(trueNow([...BOOK, ...extra], READING, 's4')).toEqual(trueNow(BOOK, READING, 's4'))
+  })
+})

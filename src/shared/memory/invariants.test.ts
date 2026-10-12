@@ -4,7 +4,9 @@ import {
   checkMemoryInvariants,
   type InvariantAlias,
   type InvariantClaim,
-  type InvariantInput
+  type InvariantInput,
+  type InvariantKnows,
+  type InvariantTopic
 } from './invariants'
 
 const SCENE = ['Mara climbed the ridge. Her eyes were grey.', 'Tomas waited below.']
@@ -112,5 +114,68 @@ describe('checkMemoryInvariants (F-16.3)', () => {
         input({ citations: [{ answerId: 'a2', target: 'card', ref: 'card:s1' }] })
       )
     ).toEqual([{ kind: 'citesCard', answerId: 'a2', ref: 'card:s1' }])
+  })
+
+  it('reports a knows claim about anything but a secret, or learnt by anything but a person or group (P2b)', () => {
+    const knows = (over: Partial<InvariantKnows>): InvariantKnows => ({
+      claimId: 'k1',
+      state: 'live',
+      learnerKind: 'character',
+      objectKind: 'secret',
+      ...over
+    })
+    expect(
+      checkMemoryInvariants(input({ knows: [knows({}), knows({ learnerKind: 'group' })] }))
+    ).toEqual([])
+    expect(checkMemoryInvariants(input({ knows: [knows({ objectKind: null })] }))).toEqual([
+      { kind: 'knowsObject', claimId: 'k1' }
+    ])
+    expect(checkMemoryInvariants(input({ knows: [knows({ objectKind: 'character' })] }))).toEqual([
+      { kind: 'knowsObject', claimId: 'k1' }
+    ])
+    expect(checkMemoryInvariants(input({ knows: [knows({ learnerKind: 'place' })] }))).toEqual([
+      { kind: 'knowsLearner', claimId: 'k1' }
+    ])
+    // A line waiting on its learner has none yet.
+    expect(
+      checkMemoryInvariants(input({ knows: [knows({ state: 'waiting', learnerKind: null })] }))
+    ).toEqual([])
+  })
+
+  it('reports an AI topic nothing backs, and a topic in the name index (P2b)', () => {
+    const topic = (over: Partial<InvariantTopic>): InvariantTopic => ({
+      recordId: 's1',
+      origin: 'ai',
+      quotes: 0,
+      claims: 0,
+      authorTouched: false,
+      ...over
+    })
+    expect(checkMemoryInvariants(input({ topics: [topic({})] }))).toEqual([
+      { kind: 'topicEmpty', recordId: 's1' }
+    ])
+    for (const backed of [
+      topic({ quotes: 1 }),
+      topic({ claims: 2 }),
+      topic({ authorTouched: true }),
+      topic({ origin: 'author' })
+    ]) {
+      expect(checkMemoryInvariants(input({ topics: [backed] }))).toEqual([])
+    }
+    expect(
+      checkMemoryInvariants(
+        input({
+          indexed: [
+            { recordId: 'mara', kind: 'character' },
+            { recordId: 't1', kind: 'thread' },
+            { recordId: 't1', kind: 'thread' },
+            { recordId: 's1', kind: 'secret' }
+          ]
+        })
+      )
+    ).toEqual([
+      { kind: 'topicName', recordId: 't1' },
+      { kind: 'topicName', recordId: 's1' }
+    ])
   })
 })

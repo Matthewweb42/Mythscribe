@@ -1,6 +1,8 @@
 import { anchorInPlace } from './anchor'
 import type { Claim, ClaimPending, ClaimProof } from './claims'
 import { dismissedKey } from './dismissed'
+import { knowsNotRightSlot } from './knows'
+import { threadNotRightSlot } from './topics'
 
 /**
  * Reconciliation (F-16.17; design §2.3 "Reconciliation"): what a reading's fresh claims do to
@@ -27,6 +29,9 @@ import { dismissedKey } from './dismissed'
  *   full read deletes every stale and pronoun-waiting claim it did not revive or restate. Claims
  *   waiting on a new name wait for the author, and claims waiting on a shared alias for the name
  *   scan (P2a-D22).
+ * - P2b: a claim's identity includes its `how`, so two knows lines of one sentence with different
+ *   hows (Bel tells, Clara is told) are two lines; a knows line's Dismissed key names its secret
+ *   in the slot and its how as the value (`notRightLine`, P2b-D6).
  */
 
 /** A stored claim as reconciliation reads it. */
@@ -42,6 +47,7 @@ export type StoredClaim = Pick<
   | 'mode'
   | 'speakerId'
   | 'objectId'
+  | 'how'
   | 'state'
   | 'quote'
   | 'para'
@@ -57,6 +63,12 @@ export interface FreshClaim {
   value: string
   valueKey: string
   objectId: string | null
+  /** P2b: a knows line's how, a thread step's step; null otherwise. */
+  how: string | null
+  /** P2b: a told, overheard or read line's source; null otherwise. */
+  fromId: string | null
+  /** P2b: the merged reveal the claim came in with (P2b-D5); null otherwise. */
+  topicQuoteId: string | null
   voice: Claim['voice']
   speakerId: string | null
   mode: Claim['mode']
@@ -67,6 +79,27 @@ export interface FreshClaim {
   stating: string[]
   proof: ClaimProof
   change: boolean
+}
+
+/**
+ * The slot and value a line's *Not right* key is made of (P2b-D6): a knows line keys under its
+ * learner by `knows:<secretId>` and its how, a thread step under its thread by `thread:<threadId>`
+ * and its step; any other line by its slot and value.
+ */
+export function notRightLine(claim: {
+  recordId: string | null
+  slot: string
+  value: string
+  objectId: string | null
+  how: string | null
+}): { slot: string; value: string } {
+  if (claim.slot === 'knows' && claim.objectId !== null) {
+    return { slot: knowsNotRightSlot(claim.objectId), value: claim.how ?? claim.value }
+  }
+  if (claim.slot === 'thread' && claim.recordId !== null) {
+    return { slot: threadNotRightSlot(claim.recordId), value: claim.how ?? claim.value }
+  }
+  return { slot: claim.slot, value: claim.value }
 }
 
 export interface ReconcileInput {
@@ -136,6 +169,7 @@ const identity = (claim: {
   mode: string
   speakerId: string | null
   objectId: string | null
+  how: string | null
 }): string =>
   [
     subjectOf(claim),
@@ -143,7 +177,8 @@ const identity = (claim: {
     claim.voice,
     claim.mode,
     claim.speakerId ?? '',
-    claim.objectId ?? ''
+    claim.objectId ?? '',
+    claim.how ?? ''
   ].join('|')
 
 const WORD = /[\p{L}\p{N}]+/gu
@@ -197,8 +232,7 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
     const key = dismissedKey({
       kind: 'notRight',
       recordId: item.recordId,
-      slot: item.slot,
-      value: item.value,
+      ...notRightLine(item),
       stating: item.stating
     })
     if (!input.dismissed.has(key)) return [item]

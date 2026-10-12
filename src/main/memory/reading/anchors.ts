@@ -1,11 +1,12 @@
 import { passageParagraphs, type Paragraph } from '@shared/mentions'
 import { anchorInPlace, sceneSentences } from '@shared/memory/anchor'
 import type { Claim } from '@shared/memory/claims'
+import { gateSentences, readSetOf, unreadSentences } from '@shared/memory/gate'
 import { checkMemoryInvariants, type InvariantViolation } from '@shared/memory/invariants'
 import { sentenceNames, type LiteralName } from '@shared/memory/literal'
 import { scanNames, type NameMention } from '@shared/memory/nameScan'
 import { normName } from '@shared/memory/names'
-import { cardParas, checkAnchors } from '@shared/memory/reproof'
+import { cardParas, checkAnchors, type ReproofClaim } from '@shared/memory/reproof'
 import { splitSentences } from '@shared/memory/sentences'
 import { readerMayRead } from '@shared/memory/sources'
 import { EMPTY_DOC } from '@shared/tiptap'
@@ -19,12 +20,21 @@ import {
   attachClaims,
   claimSources,
   invariantClaims,
+  invariantKnows,
   reanchorClaim,
   restoreClaim,
   sceneClaims,
   setClaimPara,
   setClaimsState
 } from './claimStore'
+import { getSceneRead, setSceneSettled } from './sceneReadStore'
+import {
+  restoreTopicQuote,
+  sceneTopicQuotes,
+  setTopicQuotePara,
+  setTopicQuotesState,
+  type TopicQuote
+} from './topicStore'
 
 /**
  * The `anchors` job (F-16.17; plan P2a §1.3): local and free, on the mention queue after every
@@ -43,8 +53,12 @@ import {
  *   settles that span to one of its candidates (P2a-D22);
  * - the card's quotes follow their paragraphs too;
  * - P0's invariants are checked for the scene; a live claim that breaks one is demoted to stale
- *   and the kind is reported for diagnostics (`memory.invariant.<kind>`, P2a-D19).
- * A scene with no claims costs one query. Nothing is sent anywhere.
+ *   and the kind is reported for diagnostics (`memory.invariant.<kind>`, P2a-D19);
+ * - P2b: the secrets' and threads' reveals (`topic_quote`) get the claims' treatment: they hold,
+ *   move, go stale or are restored (never re-proved for free: a reveal is never literal), and are
+ *   parked with the claims in a scene that is not readable; and a save that leaves a finished
+ *   sentence unread clears the scene's `settled` flag ("checked up to" stops before it, P2b-D9).
+ * A scene with no claims, reveals or settled flag costs a few queries. Nothing is sent anywhere.
  */
 
 export interface AnchorsResult {
@@ -58,8 +72,12 @@ export interface AnchorsResult {
   parked: string[]
   /** Invariant violations found and healed (each claim demoted to stale). */
   violations: InvariantViolation['kind'][]
-  /** The records whose lines changed state (what a shown sheet reads again). */
+  /** The records whose lines changed state (what a shown sheet reads again); topics included. */
   recordIds: string[]
+  /** P2b: reveals whose state changed (stale, restored or parked). */
+  topicQuotes: string[]
+  /** P2b-D9: the save left a finished sentence unread, so the scene is no longer settled. */
+  unsettled: boolean
   /**
    * The scene has a card: the views read its fields against the text as it is now, so a shown
    * scene is read again after every check (`heldCard`), whether or not a claim moved.
@@ -76,6 +94,8 @@ const nothing = (): AnchorsResult => ({
   parked: [],
   violations: [],
   recordIds: [],
+  topicQuotes: [],
+  unsettled: false,
   card: false
 })
 
@@ -87,10 +107,28 @@ export function anchorsChanged(result: AnchorsResult): boolean {
       result.restored.length +
       result.attached.length +
       result.parked.length +
-      result.violations.length >
-    0
+      result.violations.length +
+      result.topicQuotes.length >
+      0 || result.unsettled
   )
 }
+
+/** A reveal as the anchor verdicts read it: a verified line (never re-proved for free). */
+const asReproof = (quote: TopicQuote): ReproofClaim => ({
+  id: quote.id,
+  proof: 'verified',
+  state: quote.state,
+  pending: null,
+  anchor: quote.anchor,
+  quote: quote.quote,
+  para: quote.para,
+  recordId: quote.recordId,
+  slot: 'knows',
+  value: quote.label,
+  objectId: null,
+  voice: 'narration',
+  mode: 'now'
+})
 
 /** The scene's paragraphs now (none for a node that is no longer a manuscript document). */
 export function paragraphsOf(db: TreeDb, nodeId: string): Paragraph[] {
@@ -136,20 +174,32 @@ export function runAnchors(
   if (draftId === null) return nothing()
   const claims = sceneClaims(db, nodeId, draftId)
   const card = getCard(db, nodeId, draftId)
-  if (claims.length === 0 && card === null) return nothing()
+  const quotes = sceneTopicQuotes(db, nodeId, draftId)
+  const read = getSceneRead(db, nodeId, draftId)
+  if (claims.length === 0 && card === null && quotes.length === 0 && read?.settled !== true) {
+    return nothing()
+  }
 
   const result = nothing()
   result.card = card !== null
   const recordsOf = (ids: readonly string[]): string[] => {
     const wanted = new Set(ids)
-    return claims.flatMap((each) =>
-      wanted.has(each.id) && each.recordId !== null ? [each.recordId] : []
-    )
+    return claims.flatMap((each) => {
+      if (!wanted.has(each.id)) return []
+      // A knows line's secret shows it too (P2b).
+      return [each.recordId, each.slot === 'knows' ? each.objectId : null].filter(
+        (id): id is string => id !== null
+      )
+    })
   }
+  const topicsOf = (ids: readonly string[]): string[] =>
+    quotes.filter((quote) => ids.includes(quote.id)).map((quote) => quote.recordId)
   if (!readerMayRead(claimSources(db)(nodeId))) {
     result.parked = claims.filter((each) => each.state === 'live').map((each) => each.id)
     setClaimsState(db, result.parked, 'stale')
-    result.recordIds = [...new Set(recordsOf(result.parked))]
+    result.topicQuotes = quotes.filter((quote) => quote.state === 'live').map((quote) => quote.id)
+    setTopicQuotesState(db, result.topicQuotes, 'stale')
+    result.recordIds = [...new Set([...recordsOf(result.parked), ...topicsOf(result.topicQuotes)])]
     return result
   }
 
@@ -231,6 +281,41 @@ export function runAnchors(
       if (moved !== null) moveCardParas(tx, nodeId, draftId, moved)
     }
 
+    // P2b: the reveals follow their sentences like claims, with no free re-proof.
+    const staledQuotes: string[] = []
+    for (const verdict of checkAnchors(quotes.map(asReproof), {
+      paragraphs: texts,
+      sentences,
+      names
+    })) {
+      switch (verdict.verdict) {
+        case 'moved':
+          setTopicQuotePara(tx, verdict.id, verdict.para)
+          break
+        case 'stale':
+          staledQuotes.push(verdict.id)
+          break
+        case 'restored':
+          restoreTopicQuote(tx, verdict.id, verdict.para)
+          result.topicQuotes.push(verdict.id)
+          break
+        case 'holds':
+        case 'reproved':
+          break
+      }
+    }
+    setTopicQuotesState(tx, staledQuotes, 'stale')
+    result.topicQuotes.push(...staledQuotes)
+
+    // P2b-D9: a finished sentence the save left unread means the scene is no longer settled.
+    if (read?.settled === true) {
+      const index = scan().roster.index
+      const current = gateSentences(texts, { caretPara: null, names: index })
+      if (unreadSentences(current, readSetOf(read.entries, index)).length > 0) {
+        result.unsettled = setSceneSettled(tx, nodeId, draftId, false)
+      }
+    }
+
     // The invariants, over what is stored now: a live claim that breaks one is demoted.
     const live = new Set(
       sceneClaims(tx, nodeId, draftId)
@@ -241,7 +326,8 @@ export function runAnchors(
       claims: invariantClaims(tx, nodeId),
       sceneHashes: new Map([[nodeId, new Set(hashes)]]),
       aliases: [],
-      citations: []
+      citations: [],
+      knows: invariantKnows(tx, nodeId)
     }).flatMap((violation) =>
       'claimId' in violation && live.has(violation.claimId) ? [violation] : []
     )
@@ -260,7 +346,8 @@ export function runAnchors(
   result.recordIds = [
     ...new Set([
       ...recordsOf([...result.staled, ...result.reproved, ...result.restored]),
-      ...attachedTo
+      ...attachedTo,
+      ...topicsOf(result.topicQuotes)
     ])
   ]
   return result

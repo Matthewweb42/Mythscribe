@@ -34,8 +34,10 @@ import type { EvalCase, ReaderEvalLabel } from './fixtures'
  * recall per slot; `verify`: each verdict against the label's `expect`).
  */
 
+// P2b's records (h13, h14) stay out: the `reader.v1` cases' roster, and so their token rows, are
+// as P2a wrote them.
 const RECORDS = TEST_BOOK_LABELS.records.filter(
-  (record) => record.kind !== 'secret' && record.kind !== 'thread'
+  (record) => record.kind !== 'secret' && record.kind !== 'thread' && record.addedFor === undefined
 )
 
 /** The test book's roster as the reader sees it, `r1`… in label order. */

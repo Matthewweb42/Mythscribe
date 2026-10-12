@@ -51,7 +51,8 @@ describe('the schemas', () => {
         spotTier: null,
         spotAt: null,
         created: 'x',
-        proved: 'x'
+        proved: 'x',
+        topicQuoteId: null
       }).success
     ).toBe(true)
     expect(

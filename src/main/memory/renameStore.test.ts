@@ -23,9 +23,10 @@ import { dismiss, getDismissedByKey, listDismissed } from './dismissedStore'
 import { nameScanShared } from './nameIndexer'
 import { runAnchors } from './reading/anchors'
 import { getCard, upsertCard } from './reading/cardStore'
-import { anchoredClaim, sceneTexts, seedClaims } from './reading/claimFixture'
+import { anchoredClaim, revealIn, sceneTexts, seedClaims } from './reading/claimFixture'
 import { getClaim, insertClaims, invariantClaims } from './reading/claimStore'
 import { getSceneRead, writeSceneRead } from './reading/sceneReadStore'
+import { createTopic, getTopicQuote } from './reading/topicStore'
 import { sceneMemory } from './reading/views'
 import { createRecord, requireRecord } from './recordStore'
 import {
@@ -514,6 +515,40 @@ describe('Rename in book over the evidence (F-16.17, plan P2a §1.4)', () => {
       expect(runAnchors(db, id, NOW).staled).toEqual([])
       expect(sceneMemory(db, id).unread).toBe(0)
     }
+    clean()
+  })
+
+  it('rewrites a secret’s reveal and its label, and puts them back on undo (P2b)', () => {
+    const topic = createTopic(
+      db,
+      {
+        kind: 'secret',
+        label: 'waiting for Hesk',
+        quote: revealIn(db, scenes[1] ?? '', {
+          para: 0,
+          quote: 'They waited for Hesk',
+          label: 'waiting for Hesk'
+        })
+      },
+      NOW
+    )
+    const before = getTopicQuote(db, topic.topicQuoteId)
+    applyRename(db, applying(), NOW)
+    expect(getTopicQuote(db, topic.topicQuoteId)).toMatchObject({
+      quote: 'They waited for Haskel',
+      label: 'waiting for Haskel',
+      // The gate texts fold names: the Dismissed key's input never moves.
+      stating: before?.stating
+    })
+    expect(runAnchors(db, scenes[1] ?? '', NOW).topicQuotes).toEqual([])
+    expect(getTopicQuote(db, topic.topicQuoteId)?.state).toBe('live')
+    undoRename(db, NOW)
+    expect(getTopicQuote(db, topic.topicQuoteId)).toEqual(before)
+    // The secret's own label is renamed on its sheet, never in the book.
+    const label = requireRecord(db, topic.recordId).aliases[0]?.id ?? ''
+    expect(() =>
+      previewRename(db, { recordId: topic.recordId, aliasId: label, to: 'the long wait' })
+    ).toThrow(/not named in the book/)
     clean()
   })
 

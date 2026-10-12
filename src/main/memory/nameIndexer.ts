@@ -10,7 +10,9 @@ import {
   type NameIndex,
   type NameMention
 } from '@shared/memory/nameScan'
+import type { RecordKind } from '@shared/memory/records'
 import { recordKindOf } from '@shared/memory/records'
+import { isNamedKind } from '@shared/memory/topics'
 import { EMPTY_DOC } from '@shared/tiptap'
 import { sha256 } from '../ai/request'
 import { alias, nameMention, record, type NameMentionRow } from '../db/schema'
@@ -45,18 +47,21 @@ export interface NameScanShared {
 export function nameScanShared(db: TreeDb): NameScanShared {
   // Roster order (records as they were made, names as they were added) is the order an
   // ambiguous span lists its possible owners in.
+  // P2b-D2: secrets and threads are not names: their labels never make a mention.
   const records = db
     .select({ id: record.id, categoryId: record.categoryId })
     .from(record)
     .orderBy(asc(record.created), sql`rowid`)
     .all()
     .map((row) => ({ id: row.id, kind: recordKindOf(row.categoryId) }))
+    .filter((row) => isNamedKind(row.kind))
   const order = new Map(records.map((row, i) => [row.id, i]))
   const aliases = db
     .select()
     .from(alias)
     .orderBy(asc(alias.created), sql`rowid`)
     .all()
+    .filter((row) => order.has(row.recordId))
     .sort((a, b) => (order.get(a.recordId) ?? 0) - (order.get(b.recordId) ?? 0))
     .map((row) => ({
       id: row.id,
@@ -145,6 +150,21 @@ export function namedInCounts(db: TreeDb): NamedInRow[] {
     .groupBy(nameMention.recordId, nameMention.nodeId)
     .orderBy(asc(nameMention.recordId), asc(nameMention.nodeId))
     .all()
+}
+
+/**
+ * Every record the name index holds, with its kind, as the memory invariants read it (P2b's
+ * `topicName`): the scan's roster and every record a stored mention names.
+ */
+export function invariantIndexed(db: TreeDb): { recordId: string; kind: RecordKind }[] {
+  const roster = [...nameScanShared(db).index.kinds].map(([recordId, kind]) => ({ recordId, kind }))
+  const mentioned = db
+    .selectDistinct({ recordId: nameMention.recordId, categoryId: record.categoryId })
+    .from(nameMention)
+    .innerJoin(record, eq(record.id, nameMention.recordId))
+    .all()
+    .map((row) => ({ recordId: row.recordId, kind: recordKindOf(row.categoryId) }))
+  return [...roster, ...mentioned]
 }
 
 /** Every stored field but the row id, so a shifted paragraph or a new spelling rewrites the rows. */

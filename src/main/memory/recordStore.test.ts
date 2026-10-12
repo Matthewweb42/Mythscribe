@@ -122,6 +122,21 @@ describe('createRecord (F-16.4)', () => {
     clean()
   })
 
+  it('lets no secret or thread block a name: labels are not names (P2b-D2)', () => {
+    const thread = createRecord(db, { name: "Ashby's Return", categoryId: 'thread' }, NOW)
+    const secret = createRecord(db, { name: 'the sold map', categoryId: 'secret' }, NOW)
+    expect('record' in thread && 'record' in secret).toBe(true)
+    expect(gateName(db, 'Ashby')).toEqual({ outcome: 'clear' })
+    expect(gateName(db, 'Map')).toEqual({ outcome: 'clear' })
+    const ashby = make('Ashby')
+    expect(gateName(db, 'Ashby')).toMatchObject({ outcome: 'blocked', recordId: ashby })
+    // A character named like a topic's label is made at once, no warning.
+    expect('record' in createRecord(db, { name: 'Sold Map', categoryId: 'character' }, NOW)).toBe(
+      true
+    )
+    clean()
+  })
+
   it('blocks a dismissed name silently in the gate', () => {
     dismiss(
       db,

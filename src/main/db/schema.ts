@@ -47,7 +47,9 @@ import {
   PLAN_LINK_ORIGINS,
   READING_PURPOSES,
   SPOT_TIERS,
-  SPOT_VERDICTS
+  SPOT_VERDICTS,
+  TOPIC_QUOTE_ROLES,
+  TOPIC_QUOTE_STATES
 } from '../../shared/memory/claims'
 import { LABEL_KINDS } from '../../shared/storyLabels'
 import { RESEARCH_ORIGINS } from '../../shared/research'
@@ -1209,7 +1211,20 @@ export const sceneRead = sqliteTable(
     partials: integer('partials').notNull().default(0),
     fullAt: text('full_at'),
     readingId: text('reading_id').references(() => reading.id, { onDelete: 'set null' }),
-    updated: text('updated').notNull()
+    updated: text('updated').notNull(),
+    /**
+     * P2b (migration `0036_story_knows`, additive): a reader that reads knows and threads
+     * (`reader.v2`+) has read the whole scene (a v2 first, full or rebuild read sets it; a v2
+     * window read keeps it). With `settled` it gives "checked up to" without walking the book's
+     * text (P2b-D9).
+     */
+    topicsRead: integer('topics_read', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * Nothing finished is unread: set when the gate decides `nothing` or `cosmetic` and after a v2
+     * reading that leaves nothing unread; cleared by the anchors job when a save leaves an unread
+     * finished sentence.
+     */
+    settled: integer('settled', { mode: 'boolean' }).notNull().default(false)
   },
   (t) => [primaryKey({ columns: [t.nodeId, t.draftId] })]
 )
@@ -1253,8 +1268,8 @@ export type CardInsert = typeof card.$inferInsert
  * One claim (F-16.17): what a scene's prose states about a record, with its quote, paragraph and
  * anchor (JSON hashes of the sentences its proof rests on), its proof (`literal` in code or
  * `verified`), its voice and mode, and its state. `record_id` is null while the claim waits on a
- * new name (`pending`, JSON); `how` and `from_id` are P2b's (knows claims), added now so P2b needs
- * no migration.
+ * new name (`pending`, JSON); `how` and `from_id` are P2b's (knows claims: the learner is the
+ * record, the secret the object, P2b-D6), added in 0034; `topic_quote_id` came with 0036.
  */
 export const claim = sqliteTable(
   'claim',
@@ -1289,7 +1304,14 @@ export const claim = sqliteTable(
     spotTier: text('spot_tier', { enum: SPOT_TIERS }),
     spotAt: text('spot_at'),
     created: text('created').notNull(),
-    proved: text('proved').notNull()
+    proved: text('proved').notNull(),
+    /**
+     * P2b (migration `0036_story_knows`): the merged reveal a knows or thread claim came in with,
+     * so *Split* moves exactly those (P2b-D5). Null for every other claim.
+     */
+    topicQuoteId: text('topic_quote_id').references((): AnySQLiteColumn => topicQuote.id, {
+      onDelete: 'set null'
+    })
   },
   (t) => [
     index('claim_node_idx').on(t.nodeId, t.draftId),
@@ -1299,6 +1321,65 @@ export const claim = sqliteTable(
 )
 export type ClaimRow = typeof claim.$inferSelect
 export type ClaimInsert = typeof claim.$inferInsert
+
+/**
+ * A secret's or thread's reveal (F-16.22, F-16.23; migration `0036_story_knows`, derived): the
+ * sentence that revealed the secret or opened the thread (`defining`), and every reveal another
+ * reading proposed as a new topic that the checker judged the same (`merged`, P2b-D3, D4). Per
+ * draft and anchored like a claim (`anchor`, the sentence hashes; `stating`, the gate texts of the
+ * quote's sentences, a Dismissed key's input); `label` is the reader's label for it (at most 8
+ * words). Live while its sentences stand; a topic with none left and no claim is pruned (P2b-D12).
+ */
+export const topicQuote = sqliteTable(
+  'topic_quote',
+  {
+    id: text('id').primaryKey(),
+    recordId: text('record_id')
+      .notNull()
+      .references(() => record.id, { onDelete: 'cascade' }),
+    draftId: text('draft_id')
+      .notNull()
+      .references(() => draft.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: TOPIC_QUOTE_ROLES }).notNull(),
+    label: text('label').notNull(),
+    para: integer('para').notNull(),
+    quote: text('quote').notNull(),
+    anchor: text('anchor').notNull().default('[]'),
+    stating: text('stating').notNull().default('[]'),
+    readingId: text('reading_id').references(() => reading.id, { onDelete: 'set null' }),
+    state: text('state', { enum: TOPIC_QUOTE_STATES }).notNull(),
+    created: text('created').notNull(),
+    proved: text('proved').notNull()
+  },
+  (t) => [
+    index('topic_quote_record_idx').on(t.recordId),
+    index('topic_quote_node_idx').on(t.nodeId, t.draftId)
+  ]
+)
+export type TopicQuoteRow = typeof topicQuote.$inferSelect
+export type TopicQuoteInsert = typeof topicQuote.$inferInsert
+
+/**
+ * *Knew before the book* (F-16.22, design §2.5; migration `0036_story_knows`): the author says a
+ * character or group knew a secret before the story starts. Author-owned; both ends cascade.
+ */
+export const knewBefore = sqliteTable(
+  'knew_before',
+  {
+    secretId: text('secret_id')
+      .notNull()
+      .references(() => record.id, { onDelete: 'cascade' }),
+    recordId: text('record_id')
+      .notNull()
+      .references(() => record.id, { onDelete: 'cascade' }),
+    created: text('created').notNull()
+  },
+  (t) => [primaryKey({ columns: [t.secretId, t.recordId] })]
+)
+export type KnewBeforeRow = typeof knewBefore.$inferSelect
 
 /**
  * AI-made plan links (F-16.21; P2a-D12): which drafted scene fulfils a planned one, matched in

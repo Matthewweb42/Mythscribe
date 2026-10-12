@@ -47,6 +47,21 @@ afterEach(() => {
 
 const rynna = (): string => listRecords(db)[0]?.id ?? ''
 
+describe('name questions and topics (P2b-D2)', () => {
+  it('asks nothing about a secret or a thread, nor takes their labels as known names', () => {
+    const thread = createRecord(db, { name: "Ashby's Return", categoryId: 'thread' }, NOW)
+    const secret = createRecord(db, { name: 'the sold map', categoryId: 'secret' }, NOW)
+    if (!('record' in thread) || !('record' in secret)) throw new Error('blocked')
+    saveDocument(db, scenes[0] ?? '', doc('They waited for Ashby, and Ashby came at dusk.'))
+    saveDocument(db, scenes[1] ?? '', doc('Later Ashby left.'))
+    const questions = listNameQuestions(db)
+    expect(questions.map((q) => [q.kind, q.name, q.recordId])).toEqual([['newName', 'Ashby', null]])
+    expect(
+      questions.some((q) => q.recordId === thread.record.id || q.recordId === secret.record.id)
+    ).toBe(false)
+  })
+})
+
 describe('name questions (F-16.4)', () => {
   it('asks about a new name and a nickname, and answers each way', () => {
     saveDocument(db, scenes[0] ?? '', doc('They met Hesk at noon, and Ry laughed at Hesk.'))

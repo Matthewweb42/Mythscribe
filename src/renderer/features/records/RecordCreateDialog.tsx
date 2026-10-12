@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { RECORD_NAME_MAX } from '@shared/memory/records'
+import { isTopicCategory } from '@shared/memory/topics'
 import type { TwinGateResult } from '@shared/memory/twinGate'
 import { useCategory } from '@renderer/features/entities/categoryStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -26,7 +27,8 @@ const BUTTON =
  * typed name as a nickname unless it already is one) and *Create anyway* (decision P1-D4: the
  * author's own record is warned about, never silently blocked). A name on Dismissed says so and
  * offers *Create anyway* only. A refusal (a name another record holds unshared) toasts and keeps
- * the dialog, so the typed name is never lost.
+ * the dialog, so the typed name is never lost. A secret or thread (P2b-D19) runs no gate as its
+ * label is typed: only an exact duplicate label, answered by main on *Create*, is warned about.
  */
 export function RecordCreateDialog(): React.JSX.Element | null {
   const categoryId = useRecordStore((s) => s.creating)
@@ -54,7 +56,9 @@ function CreateForm({ categoryId }: { categoryId: string }): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (trimmed === '') return
+    // P2b-D19: a secret's or thread's label is not a name, so no twin gate runs as it is typed;
+    // main still warns about an exact duplicate label when it is created.
+    if (trimmed === '' || isTopicCategory(categoryId)) return
     let live = true
     const timer = window.setTimeout(() => {
       useRecordStore
@@ -72,7 +76,7 @@ function CreateForm({ categoryId }: { categoryId: string }): React.JSX.Element {
       live = false
       window.clearTimeout(timer)
     }
-  }, [trimmed])
+  }, [trimmed, categoryId])
 
   const cancel = (): void => useRecordStore.getState().cancelCreate()
 

@@ -373,6 +373,32 @@ describe('RecordCreateDialog (F-16.4, P1-D4)', () => {
     expect(useRecordStore.getState().selectedId).toBe('r-mara')
   })
 
+  it('runs no gate as a thread’s label is typed, and shows main’s duplicate warning (P2b-D19)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    await loaded()
+    install({
+      'record:gate': () => ({
+        outcome: 'blocked',
+        rule: 'subset',
+        recordId: 'r-mara',
+        matched: 'Mara'
+      }),
+      'record:create': () => ({
+        gate: { outcome: 'blocked', rule: 'alias', recordId: 'r-mara', matched: 'Mara Vell' }
+      })
+    })
+    act(() => useRecordStore.getState().startCreate('thread'))
+    render(<RecordCreateDialog />)
+    await typeName('Mara’s return')
+    expect(sent('record:gate')).toEqual([])
+    expect(screen.queryByTestId('record-gate-warning')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    expect(await screen.findByTestId('record-gate-warning')).toBeInTheDocument()
+    expect(sent('record:create')).toEqual([
+      { name: 'Mara’s return', categoryId: 'thread', aliases: [], force: false }
+    ])
+  })
+
   it('creates a clear name at once, and a gate answer from main shows the warning instead', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     await loaded()

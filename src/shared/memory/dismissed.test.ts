@@ -71,6 +71,33 @@ describe('dismissedKey (F-16.10)', () => {
     ).toBe('card|n1|where|quay')
   })
 
+  it('keys an AI topic the author said is not one by its kind and its reveal (P2b-D13)', () => {
+    const a = dismissedKey({
+      kind: 'notRight',
+      topic: { kind: 'secret', stating: ['⟨r1⟩ sold the map'] }
+    })
+    expect(a).toMatch(/^topic\|secret\|/)
+    // Names fold, so a rename never moves it; the kind keeps a secret and a thread apart.
+    expect(
+      dismissedKey({ kind: 'notRight', topic: { kind: 'secret', stating: ['⟨r9⟩ sold the map'] } })
+    ).toBe(a)
+    expect(
+      dismissedKey({ kind: 'notRight', topic: { kind: 'thread', stating: ['⟨r1⟩ sold the map'] } })
+    ).not.toBe(a)
+  })
+
+  it('keys a knows line under its learner with the secret in the slot (P2b-D6)', () => {
+    expect(
+      dismissedKey({
+        kind: 'notRight',
+        recordId: 'orrin',
+        slot: 'knows:s1',
+        value: 'overheard',
+        stating: ['⟨r2⟩ overheard ⟨r3⟩']
+      })
+    ).toMatch(/^orrin\|knows:s1\|overheard\|/)
+  })
+
   it('keys a kept typed detail by scene, field and the text’s value (decision 4)', () => {
     expect(
       dismissedKey({

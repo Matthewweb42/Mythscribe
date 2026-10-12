@@ -17,7 +17,10 @@ const doc = (texts: readonly string[]): Paragraph[] =>
     content: texts.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] }))
   })
 
-const RECORDS = TEST_BOOK_LABELS.records
+// Secrets and threads are not names (P2b-D2): the scan and the gate never read them.
+const RECORDS = TEST_BOOK_LABELS.records.filter(
+  (record) => record.kind !== 'secret' && record.kind !== 'thread'
+)
 const ALIASES: ScanAlias[] = RECORDS.flatMap((record) =>
   record.aliases.map((alias, i) => ({
     id: `${record.id}:${i}`,

@@ -3,6 +3,15 @@ import { z } from 'zod'
 import { estimateTokens } from '@shared/ai'
 import { normName } from '@shared/memory/names'
 import type { StoryRecordSummary } from '@shared/memory/records'
+import {
+  TOPIC_ID_PREFIX,
+  TOPIC_LABEL_SHORT_WORDS,
+  TOPIC_ROSTER_TOKENS,
+  TopicKind,
+  topicLabel,
+  topicLinesTokens,
+  topicRosterLine
+} from '@shared/memory/topics'
 import { settings } from '../../db/schema'
 import type { TreeDb } from '../../tree/treeStore'
 import {
@@ -25,12 +34,34 @@ import { MEMORY_ROSTER_KEY } from './roster'
  * share `ROSTER_RECORD_TOKENS`: over it, the least-named records are left out (the reader may still
  * propose one as a name, which the twin gate maps back to it); 400 tokens are held for P2b's secrets
  * and threads. Short ids are never reused within a build of the row.
+ *
+ * P2b (P2b-D10): the row's `topics` part holds the secrets and threads (`s3 the sold map ·
+ * secret`, `t2 Ashby's return · thread`), rendered after the record lines, so a topic made,
+ * renamed, merged, split or pruned rebuilds only that part and never moves the record prefix. It
+ * never drops a topic: past `TOPIC_ROSTER_TOKENS`, every label shortens to 4 words, and what is
+ * still over is the prompt's to count (slice 2).
  */
 
 /** The records' share of the roster's 1,600 tokens (P2b's secrets and threads hold the other 400). */
 export const ROSTER_RECORD_TOKENS = 1_200
 
 const Held = z.object({ name: z.string(), kind: z.string(), names: z.array(z.string()) })
+
+const HeldTopic = z.object({ label: z.string(), kind: TopicKind })
+
+/** The topics part (P2b-D10): its own ids, lines and what each line holds. */
+const TopicsPart = z.object({
+  /** recordId → short id ("s3", "t2"). */
+  ids: z.record(z.string(), z.string()),
+  /** The next short id's number per kind. */
+  next: z.object({ secret: z.number().int().positive(), thread: z.number().int().positive() }),
+  base: z.array(z.string()),
+  additions: z.array(z.string()),
+  held: z.record(z.string(), HeldTopic),
+  /** Labels shortened to fit the budget. */
+  short: z.boolean()
+})
+type TopicsPart = z.infer<typeof TopicsPart>
 
 const RosterRow = z.object({
   readerVersion: z.string(),
@@ -43,7 +74,9 @@ const RosterRow = z.object({
   /** What each listed record's lines hold: its name, kind and every name's norm. */
   held: z.record(z.string(), Held),
   /** Records left out for the cap (least named); a record not here and not held is new. */
-  dropped: z.array(z.string())
+  dropped: z.array(z.string()),
+  /** P2b: the secrets and threads (rows written before P2b have none: built on first use). */
+  topics: TopicsPart.optional()
 })
 type RosterRow = z.infer<typeof RosterRow>
 
@@ -57,6 +90,81 @@ export interface ReaderRoster {
   recordOf(shortId: string): string | null
   /** A record's roster line with its short id, for the checker's "Who" ("r12 Mara Vell · character"). */
   whoLine(recordId: string): string
+  /** P2b: the topics block's lines (after the record lines): the base, then the additions. */
+  topicLines: string[]
+  /** A secret's or thread's short id ("s3", "t2"); null when it is not a listed topic. */
+  topicShortOf(recordId: string): string | null
+  /** The topic a short id names, or null. */
+  topicOf(shortId: string): string | null
+}
+
+/** A secret or thread as the topics part lists it. */
+export interface RosterTopic {
+  recordId: string
+  kind: z.infer<typeof TopicKind>
+  label: string
+  created: string
+}
+
+const topicLine = (short: string, topic: RosterTopic, shortLabels: boolean): string =>
+  topicRosterLine(
+    short,
+    shortLabels ? topicLabel(topic.label, TOPIC_LABEL_SHORT_WORDS) : topic.label,
+    topic.kind
+  )
+
+const byAge = <T extends { created: string; recordId: string }>(a: T, b: T): number =>
+  a.created.localeCompare(b.created) || a.recordId.localeCompare(b.recordId)
+
+/** The topics part afresh: every topic oldest first, labels shortened when over the budget. */
+export function buildTopics(topics: readonly RosterTopic[]): TopicsPart {
+  const ordered = [...topics].sort(byAge)
+  const lay = (short: boolean): TopicsPart => {
+    const next = { secret: 1, thread: 1 }
+    const ids: Record<string, string> = {}
+    const base: string[] = []
+    for (const topic of ordered) {
+      const id = `${TOPIC_ID_PREFIX[topic.kind]}${next[topic.kind]}`
+      next[topic.kind] += 1
+      ids[topic.recordId] = id
+      base.push(topicLine(id, topic, short))
+    }
+    const held = Object.fromEntries(
+      ordered.map((topic) => [topic.recordId, { label: topic.label, kind: topic.kind }])
+    )
+    return { ids, next, base, additions: [], held, short }
+  }
+  const full = lay(false)
+  return topicLinesTokens(full.base) <= TOPIC_ROSTER_TOKENS ? full : lay(true)
+}
+
+/**
+ * The topics part brought up to date: null when it must be rebuilt (a topic gone, relabelled or
+ * moved kind, or the lines over the budget), else with every new topic appended.
+ */
+export function appendTopics(part: TopicsPart, topics: readonly RosterTopic[]): TopicsPart | null {
+  const byId = new Map(topics.map((topic) => [topic.recordId, topic]))
+  for (const [id, held] of Object.entries(part.held)) {
+    const topic = byId.get(id)
+    if (topic?.label !== held.label || topic.kind !== held.kind) return null
+  }
+  const next: TopicsPart = {
+    ...part,
+    ids: { ...part.ids },
+    next: { ...part.next },
+    additions: [...part.additions],
+    held: { ...part.held }
+  }
+  for (const topic of [...topics].sort(byAge)) {
+    if (next.held[topic.recordId] !== undefined) continue
+    const id = `${TOPIC_ID_PREFIX[topic.kind]}${next.next[topic.kind]}`
+    next.next[topic.kind] += 1
+    next.ids[topic.recordId] = id
+    next.additions.push(topicLine(id, topic, part.short))
+    next.held[topic.recordId] = { label: topic.label, kind: topic.kind }
+  }
+  if (topicLinesTokens([...next.base, ...next.additions]) > TOPIC_ROSTER_TOKENS) return null
+  return next
 }
 
 /** The kinds P2a's reader reads about; secrets and threads are P2b's. */
@@ -192,16 +300,26 @@ function namedTotals(db: TreeDb): Map<string, number> {
  * written back when it moved.
  */
 export function readerRoster(db: TreeDb): ReaderRoster {
-  const records = listRecords(db).filter((record) => READ_KINDS.has(record.kind))
+  const all = listRecords(db)
+  const records = all.filter((record) => READ_KINDS.has(record.kind))
+  const topics: RosterTopic[] = all.flatMap((record) =>
+    record.kind === 'secret' || record.kind === 'thread'
+      ? [{ recordId: record.id, kind: record.kind, label: record.name, created: record.created }]
+      : []
+  )
   const stored = readRow(db)
   const current =
     stored !== null && stored.readerVersion === READER_PROMPT_VERSION
       ? appended(stored, records)
       : null
-  const row = current ?? build(records, namedTotals(db))
+  const base = current ?? build(records, namedTotals(db))
+  // The topics part follows on its own: rebuilt when it must be, never moving the record lines.
+  const part =
+    (base.topics === undefined ? null : appendTopics(base.topics, topics)) ?? buildTopics(topics)
+  const row: RosterRow = { ...base, topics: part }
   if (stored === null || JSON.stringify(stored) !== JSON.stringify(row)) writeRow(db, row)
 
-  const byId = new Map(listRecords(db).map((record) => [record.id, record]))
+  const byId = new Map(all.map((record) => [record.id, record]))
   const ids = new Map(Object.entries(row.ids))
   const back = new Map([...ids].map(([recordId, short]) => [short, recordId]))
   let extra = row.next
@@ -214,6 +332,8 @@ export function readerRoster(db: TreeDb): ReaderRoster {
     back.set(short, recordId)
     return short
   }
+  const topicIds = new Map(Object.entries(part.ids))
+  const topicBack = new Map([...topicIds].map(([recordId, short]) => [short, recordId]))
   return {
     lines: [...row.base, ...row.additions],
     shortOf,
@@ -221,6 +341,9 @@ export function readerRoster(db: TreeDb): ReaderRoster {
     whoLine: (recordId) => {
       const record = byId.get(recordId)
       return record === undefined ? shortOf(recordId) : rosterLine(shortOf(recordId), record)
-    }
+    },
+    topicLines: [...part.base, ...part.additions],
+    topicShortOf: (recordId) => topicIds.get(recordId) ?? null,
+    topicOf: (short) => topicBack.get(short.trim()) ?? null
   }
 }

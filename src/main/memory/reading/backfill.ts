@@ -9,7 +9,14 @@ import { memoryBackfill, sceneRead } from '../../db/schema'
 import { currentDraftId } from '../../draft/draftStore'
 import type { TreeDb } from '../../tree/treeStore'
 import { documentJson } from '../../voice/profile'
-import { loadReadingScene, namingParas, readBook, type Book, type ReadingScene } from './readerContext'
+import {
+  loadReadingScene,
+  namingParas,
+  readBook,
+  type Book,
+  type ReadingScene
+} from './readerContext'
+import { isTopicRecord } from './recordEvidence'
 
 /**
  * The lazy back-fill (F-16.17; design §2.3 "Invalidation", plan P2a §3.4): a record made, or a
@@ -82,7 +89,11 @@ function namings(db: TreeDb, recordId: string, norms: readonly string[], book: B
 
 /** The pages reading these paragraphs ±2 of a scene takes (`planWindows`). */
 function pagesOf(scene: ReadingScene, paras: readonly number[]): number {
-  return planWindows(scene.texts, [...paras].sort((a, b) => a - b), namingParas(scene)).length
+  return planWindows(
+    scene.texts,
+    [...paras].sort((a, b) => a - b),
+    namingParas(scene)
+  ).length
 }
 
 /**
@@ -105,7 +116,8 @@ export function backfillPlan(
 /**
  * Notes the names a record gained (made, or given nicknames): one row per name it has none for,
  * `due` with its pages, or `done` at once when no scene read before names it. Answers the norms
- * that now wait to be read. The scenes are walked once for all the names.
+ * that now wait to be read. The scenes are walked once for all the names. A secret's or thread's
+ * label is not a name: no back-fill for topics (P2b-D17).
  */
 export function noteLateNames(
   db: TreeDb,
@@ -114,7 +126,7 @@ export function noteLateNames(
   now: Date
 ): string[] {
   const norms = [...new Set(names.map(normName).filter((norm) => norm !== ''))]
-  if (norms.length === 0) return []
+  if (norms.length === 0 || isTopicRecord(db, recordId)) return []
   const known = new Set(
     db
       .select({ norm: memoryBackfill.norm })

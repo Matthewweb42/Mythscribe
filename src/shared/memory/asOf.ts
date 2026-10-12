@@ -7,7 +7,8 @@ import { ALL_SLOTS, slotGroup, type Slot } from './slots'
  * Only narration in `now` mode sets state (`setsState`); everything else is "Mara says…",
  * remembered, supposed or dreamt, and shown apart. Absence is never a line: a slot nobody stated
  * is simply not there. Waiting claims are never shown; stale ones are, flagged, so the panel can
- * dim them ("re-checking after you pause").
+ * dim them ("re-checking after you pause"). Knows lines and thread steps (P2b) are never read here:
+ * `whoKnows.ts` and `threadsAsOf.ts` own them.
  */
 
 export type AsOfClaim = Pick<
@@ -83,6 +84,10 @@ function placed(claims: readonly AsOfClaim[], reading: ReadingOrder): Placed[] {
     .flatMap((claim) => {
       const order = reading.order.get(claim.nodeId)
       if (order === undefined || claim.state === 'waiting' || claim.recordId === null) return []
+      // P2b: knows lines and thread steps have their own sections (`whoKnows`, `threadsAsOf`);
+      // they never set state, and never show in True now or From the book.
+      const group = slotGroup(claim.slot)
+      if (group === 'knows' || group === 'thread') return []
       return [{ claim, order }]
     })
     .sort(
@@ -310,6 +315,7 @@ export function sheetAsOf(
       }
       case 'knows':
       case 'thread':
+        // Left out by `placed`.
         break
     }
   }

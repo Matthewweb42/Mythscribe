@@ -29,6 +29,7 @@ const KIND_OF_CATEGORY: Readonly<Record<string, RecordKind>> = {
   setting: 'place',
   faction: 'group',
   thread: 'thread',
+  secret: 'secret',
   magic: 'term',
   religion: 'term',
   culture: 'term',
@@ -40,15 +41,15 @@ const KIND_OF_CATEGORY: Readonly<Record<string, RecordKind>> = {
 
 /**
  * The kind a record of `categoryId` has: character → character; setting → place; faction →
- * group; thread → thread; magic, religion, culture, history, language, technology and lore →
- * term; world, item, creature and every custom (`c-…`) category → thing. Secrets come from P2b's
- * who-knows-what, never from a category.
+ * group; thread → thread; secret (P2b's v2-only built-in, P2b-D1) → secret; magic, religion,
+ * culture, history, language, technology and lore → term; world, item, creature and every custom
+ * (`c-…`) category → thing.
  */
 export function recordKindOf(categoryId: string): RecordKind {
   return KIND_OF_CATEGORY[categoryId] ?? 'thing'
 }
 
-/** Who made a record. `ai` is reserved for P2a's reader; nothing writes it in P1. */
+/** Who made a record. `ai`: a secret or thread the reader made silently (P2b, `createTopic`). */
 export const RECORD_ORIGINS = ['author', 'conversion', 'filed', 'chat', 'ai'] as const
 export const RecordOrigin = z.enum(RECORD_ORIGINS)
 export type RecordOrigin = z.infer<typeof RecordOrigin>

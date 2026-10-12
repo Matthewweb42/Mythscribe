@@ -67,6 +67,20 @@ export const BACKFILL_STATES = ['due', 'asked', 'done', 'declined'] as const
 export type BackfillState = (typeof BACKFILL_STATES)[number]
 
 /**
+ * A topic quote's role (F-16.22, F-16.23; P2b-D3, D4): the sentence that revealed the secret or
+ * opened the thread (`defining`), or a reveal another reading proposed as a new topic that the
+ * checker judged the same and merged into it (`merged`; *Split* undoes it).
+ */
+export const TOPIC_QUOTE_ROLES = ['defining', 'merged'] as const
+export const TopicQuoteRole = z.enum(TOPIC_QUOTE_ROLES)
+export type TopicQuoteRole = z.infer<typeof TopicQuoteRole>
+
+/** A topic quote is `live` while its sentences stand, `stale` once they changed (as claims). */
+export const TOPIC_QUOTE_STATES = ['live', 'stale'] as const
+export const TopicQuoteState = z.enum(TOPIC_QUOTE_STATES)
+export type TopicQuoteState = z.infer<typeof TopicQuoteState>
+
+/**
  * What a waiting claim waits on: a new name the author is asked about (`name`, with its norm and
  * text as written), or a subject more than one record fits (`subject`, the candidates' ids).
  */
@@ -95,7 +109,10 @@ export const Claim = z.object({
   valueKey: z.string(),
   /** The second record of a kinship or relation claim. */
   objectId: z.string().nullable(),
-  /** P2b's knows claims (`how`, `from`); null in P2a. */
+  /**
+   * P2b's knows and thread claims: a knows claim's `how` (`KNOWS_HOWS`) and `from` (told, overheard
+   * and read only), a thread step's `how` (`THREAD_STEPS`); null for every other claim.
+   */
   how: z.string().nullable(),
   fromId: z.string().nullable(),
   voice: ClaimVoice,
@@ -115,7 +132,12 @@ export const Claim = z.object({
   spotAt: z.string().nullable(),
   created: z.string(),
   /** When its proof last passed (stored, revived, or re-proved for free). */
-  proved: z.string()
+  proved: z.string(),
+  /**
+   * P2b: the merged reveal (`topic_quote`, role `merged`) a knows or thread claim came in with, so
+   * *Split* moves exactly those (P2b-D5); null for every other claim.
+   */
+  topicQuoteId: z.string().nullable()
 })
 export type Claim = z.infer<typeof Claim>
 

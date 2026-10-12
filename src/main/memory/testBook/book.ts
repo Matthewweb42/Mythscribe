@@ -8,7 +8,9 @@ import type { MemorySource } from '@shared/memory/sources'
  *
  * Source. Scenes s01–s05 are adapted excerpts of chapters 1, 2, 3, 6 and 18 of *Pride and
  * Prejudice* by Jane Austen (1813; public domain, Project Gutenberg eBook #1342), shortened in
- * places. Scenes h01–h10 are original, written for this book.
+ * places. Scenes h01–h14 are original, written for this book (h13 and h14 for P2b's who knows
+ * what, threads, years and ages: a group learner, a secret held, deduced, suspected and mistaken,
+ * a rumour, and two scenes with no typed year).
  *
  * Disguise. Every name and place is changed, so a model that answers from memory of the novel
  * answers wrongly, which shows up in scoring:
@@ -425,6 +427,52 @@ export const TEST_BOOK: readonly TestBookScene[] = [
     paragraphs: [
       `Mr. Ashby wrote to Johanna from town. His letter said that he was engaged to Celia’s friend, Miss Daventry, and would not return to Thornmere at all.`,
       `Johanna read it twice and burned it. Clara Pell married Mr. Pruett in the spring, and nobody at Wexley was surprised.`
+    ]
+  },
+  {
+    id: 'h13',
+    chapter: 17,
+    title: 'The regiment hears',
+    source: 'scene',
+    // No typed year: it carries 1814 from h09 (decision 5).
+    details: { pov: 'liesel', place: 'callow-cross', time: 'February' },
+    paragraphs: [
+      `The regiment came back to Callow Cross in February, and Mr. Dunmore came with it, a married man now and very pleased with himself.`,
+      `Lise had walked in with Clara to buy candles, and they had not gone twenty yards along the street before they heard his name.`,
+      `The street was full of red coats and mud, and the baker’s boy had a drum he was not supposed to have.`,
+      `It was Mrs. Pocock, of course, who had the whole of it. Lottie had written to a friend at Gullhaven, and the friend had shown the letter to an officer’s wife, and the officer’s wife had told everybody she met.`,
+      `By Sunday the whole regiment knew of the engagement, and of how long it had been kept from everyone.`,
+      `“Engaged since before Christmas, and not a word to her own mother,” said Mrs. Pocock, as if she had been robbed. “I knew nothing of it, and I know everything.”`,
+      `Lise said that it was all a long time ago, and that Lottie was very happy now, which was true on most days of the week.`,
+      `Mrs. Pocock was not to be comforted. She had been the first to hear of every engagement in the county for as long as anyone could remember, and this one had gone past her like a carriage in the dark.`,
+      `Clara said nothing, as usual. She had known it before any of them, and she had never told a soul.`,
+      `Outside the draper’s a young officer Lise did not know stopped to stare at them, and his friend laughed and pulled him on by the sleeve.`,
+      `Clara bought her candles and a ribbon she did not need, and Lise waited in the doorway and watched the street.`,
+      `On the way home they passed the house on the green where Mr. Ashby had once taken rooms, and Lise remembered the spring when Johanna had come down to breakfast pale from a sleepless night to say that he was coming back to Thornmere at last.`,
+      `It had all come right in the end. Most things did, Lise thought, if one waited long enough and did not mind being the last to know.`
+    ]
+  },
+  {
+    id: 'h14',
+    chapter: 18,
+    title: 'The Captain’s debts',
+    source: 'scene',
+    // No typed year, and it opens a year on: the year is not known (decision 5).
+    details: { pov: 'liesel', place: 'wexley', time: 'spring' },
+    paragraphs: [
+      `A year later, the Captain came to dine at Wexley, which nobody would once have believed of him.`,
+      `The lane was deep in mud after the rain, but he walked the whole way and arrived with his boots in his hand.`,
+      `Mrs. Harrow had decided that he was a man of large fortune, because he never spoke of money, and she put him beside Bel and smiled at him all through the soup.`,
+      `He had left the army at last and was a farmer now, in a small way, somewhere beyond the river.`,
+      `Mr. Harrow sat at the head of the table and talked to the Captain about the price of corn, and noticed nothing at all.`,
+      `Lise noticed a great deal. The Captain’s coat had been turned, and turned well, and when Mr. Varrow’s name came up he set his glass down very carefully and did not pick it up again.`,
+      `Bel talked to him about horses, and he answered her kindly and briefly, and twice he began a sentence about Elsdale and did not finish it.`,
+      `Afterwards, alone in the window seat, she put it together: the coat, the glass, the horse he had sold, and the way he never once looked towards Greyhallow. The Captain owed Mr. Varrow money, and a great deal of it.`,
+      `Johanna, who missed very little, came to sit beside her. She had begun to suspect something of the kind herself, whenever Mr. Varrow was named.`,
+      `In the town, meanwhile, it was said that the Captain had lost an estate at cards in Elsdale, though nobody could say whose estate it had been, or to whom he had lost it.`,
+      `Lise did not believe in the cards, and she did not believe in the estate. It was a plainer thing than that, and a sadder one.`,
+      `Lottie, who was nineteen and expecting her first child, had come over from Gullhaven for the week, and talked of nothing but caps and cradles.`,
+      `When the Captain took his leave, Mr. Harrow shook his hand warmly and told him to come again, and Lise thought that her father was the only person in the room who was quite at ease.`
     ]
   }
 ]

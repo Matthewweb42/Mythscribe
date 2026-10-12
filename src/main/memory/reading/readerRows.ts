@@ -141,7 +141,9 @@ const StashedClaim = z.object({
   spotTier: z.enum(SPOT_TIERS).nullable(),
   spotAt: z.string().nullable(),
   created: z.string(),
-  proved: z.string()
+  proved: z.string(),
+  /** P2b (0036): stashes written before it have none. */
+  topicQuoteId: z.string().nullable().default(null)
 }) satisfies z.ZodType<ClaimRow>
 
 /** The claim rows a *Not right* took away, as stored, by the Dismissed row's id. */

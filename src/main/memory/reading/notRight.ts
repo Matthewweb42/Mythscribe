@@ -4,12 +4,21 @@ import { cardEntryIsRecord, dismissedKey, type Dismissed } from '@shared/memory/
 import { gateText } from '@shared/memory/gate'
 import { locateQuote } from '@shared/memory/quote'
 import { parseVerifyAnswer } from '@shared/memory/readerAnswer'
+import { notRightLine } from '@shared/memory/reconcile'
 import { slotLabel } from '@shared/memory/slots'
 import { SPOT_STRONG_AROUND } from '@shared/memory/spot'
 import type { CardNotRight } from '@shared/memory/views'
 import { VERIFY_PROMPT_VERSION, buildVerifyPrompt } from '../../ai/prompts/verify.v1'
 import { runAiRequest, sha256, type AiRequestDeps } from '../../ai/request'
-import { claim as claimTable, draft, node, reading, record, type ClaimRow } from '../../db/schema'
+import {
+  claim as claimTable,
+  draft,
+  node,
+  reading,
+  record,
+  topicQuote,
+  type ClaimRow
+} from '../../db/schema'
 import { currentDraftId } from '../../draft/draftStore'
 import { AppError } from '../../ipc/errors'
 import type { TreeDb } from '../../tree/treeStore'
@@ -74,7 +83,8 @@ function writeNotRight(
 ): Dismissed {
   const stating = scene === null ? null : statingOf(scene, claim)
   const name = getRecord(db, recordId)?.name ?? ''
-  const about = { recordId, slot: claim.slot, value: claim.value }
+  // P2b-D6: a knows line keys by its secret and how (`notRightLine`), so a merge re-keys it.
+  const about = { recordId, ...notRightLine({ ...claim, recordId }) }
   return dismiss(
     db,
     {
@@ -142,7 +152,7 @@ export function dismissClaimsNotRight(
 /** Whether a row with this id exists in one of the tables a claim points at. */
 function exists(
   db: TreeDb,
-  table: typeof node | typeof draft | typeof reading | typeof record,
+  table: typeof node | typeof draft | typeof reading | typeof record | typeof topicQuote,
   id: string
 ): boolean {
   return db.select({ id: table.id }).from(table).where(eq(table.id, id)).get() !== undefined
@@ -198,7 +208,11 @@ export function restoreNotRight(
         row.readingId !== null && exists(db, reading, row.readingId) ? row.readingId : null,
       objectId: optional(row.objectId),
       speakerId: optional(row.speakerId),
-      fromId: optional(row.fromId)
+      fromId: optional(row.fromId),
+      topicQuoteId:
+        row.topicQuoteId !== null && exists(db, topicQuote, row.topicQuoteId)
+          ? row.topicQuoteId
+          : null
     }
     db.insert(claimTable).values(restored).run()
     nodeIds.add(row.nodeId)

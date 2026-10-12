@@ -1,4 +1,5 @@
 import { anchorHolds, type MemoryAnchor } from './anchor'
+import type { RecordKind } from './records'
 import { readerMayRead, type MemorySource } from './sources'
 
 /**
@@ -43,6 +44,26 @@ export interface InvariantCitation {
   ref: string
 }
 
+/** A knows claim (P2b): its learner's kind and its object's (null when either is gone). */
+export interface InvariantKnows {
+  claimId: string
+  state: 'live' | 'stale' | 'waiting'
+  learnerKind: RecordKind | null
+  objectKind: RecordKind | null
+}
+
+/** A secret or thread record (P2b): who made it and what still backs it. */
+export interface InvariantTopic {
+  recordId: string
+  origin: string
+  /** Its reveals (`topic_quote`) in any draft. */
+  quotes: number
+  /** Claims about it (knows claims' object, thread steps' record) in any draft. */
+  claims: number
+  /** The author wrote on it (Pinned or Ideas) or marked someone as knowing it before the book. */
+  authorTouched: boolean
+}
+
 export type InvariantViolation =
   | { kind: 'anchorMissing'; claimId: string; sceneId: string; missing: string[] }
   | { kind: 'anchorEmpty'; claimId: string; sceneId: string }
@@ -50,6 +71,10 @@ export type InvariantViolation =
   | { kind: 'aliasClash'; norm: string; recordIds: string[] }
   | { kind: 'unreadableSource'; claimId: string; source: MemorySource }
   | { kind: 'citesCard'; answerId: string; ref: string }
+  | { kind: 'knowsObject'; claimId: string }
+  | { kind: 'knowsLearner'; claimId: string }
+  | { kind: 'topicEmpty'; recordId: string }
+  | { kind: 'topicName'; recordId: string }
 
 export interface InvariantInput {
   claims: readonly InvariantClaim[]
@@ -57,6 +82,12 @@ export interface InvariantInput {
   sceneHashes: ReadonlyMap<string, ReadonlySet<string>>
   aliases: readonly InvariantAlias[]
   citations: readonly InvariantCitation[]
+  /** P2b: every knows claim (slot `knows`). */
+  knows?: readonly InvariantKnows[]
+  /** P2b: every secret and thread record. */
+  topics?: readonly InvariantTopic[]
+  /** P2b: every record the name index holds (mentions, the scan's roster), with its kind. */
+  indexed?: readonly { recordId: string; kind: RecordKind }[]
 }
 
 const NO_HASHES: ReadonlySet<string> = new Set()
@@ -70,7 +101,12 @@ const NO_HASHES: ReadonlySet<string> = new Set()
  * - `aliasClash`: one `norm` belonging to two or more records when not every one of its aliases
  *   is shared;
  * - `unreadableSource`: a claim read from anything but a manuscript scene;
- * - `citesCard`: an answer citing a card (a card is a map, never evidence).
+ * - `citesCard`: an answer citing a card (a card is a map, never evidence);
+ * - P2b: `knowsObject`, a knows claim whose object is not a secret; `knowsLearner`, a knows claim
+ *   (not waiting) whose learner is not a character or a group; `topicEmpty`, an AI-made secret or
+ *   thread with no reveal and no claim left in any draft and nothing from the author (it should
+ *   have been pruned, P2b-D12); `topicName`, a secret or thread in the name index (they are not
+ *   names, P2b-D2).
  * An empty list is a clean memory.
  */
 export function checkMemoryInvariants(input: InvariantInput): InvariantViolation[] {
@@ -112,6 +148,31 @@ export function checkMemoryInvariants(input: InvariantInput): InvariantViolation
   for (const citation of input.citations) {
     if (citation.target === 'card') {
       violations.push({ kind: 'citesCard', answerId: citation.answerId, ref: citation.ref })
+    }
+  }
+
+  for (const knows of input.knows ?? []) {
+    if (knows.objectKind !== 'secret') {
+      violations.push({ kind: 'knowsObject', claimId: knows.claimId })
+    }
+    if (
+      knows.state !== 'waiting' &&
+      knows.learnerKind !== 'character' &&
+      knows.learnerKind !== 'group'
+    ) {
+      violations.push({ kind: 'knowsLearner', claimId: knows.claimId })
+    }
+  }
+  for (const topic of input.topics ?? []) {
+    if (topic.origin === 'ai' && topic.quotes === 0 && topic.claims === 0 && !topic.authorTouched) {
+      violations.push({ kind: 'topicEmpty', recordId: topic.recordId })
+    }
+  }
+  const named = new Set<string>()
+  for (const entry of input.indexed ?? []) {
+    if ((entry.kind === 'secret' || entry.kind === 'thread') && !named.has(entry.recordId)) {
+      named.add(entry.recordId)
+      violations.push({ kind: 'topicName', recordId: entry.recordId })
     }
   }
   return violations

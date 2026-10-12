@@ -4,6 +4,8 @@ import { anchorFor, anchorHolds, sceneSentences } from '@shared/memory/anchor'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
 import { locateQuote } from '@shared/memory/quote'
 import { readerMayRead } from '@shared/memory/sources'
+import type { ReadingOrder } from '@shared/memory/asOf'
+import { hintsSince, recordAge, storyYears, type AgeClaim } from '@shared/memory/years'
 import { TEST_BOOK, TEST_BOOK_SOURCE, testBookScene } from './book'
 import { TEST_BOOK_LABELS } from './labels'
 import { TestBookLabels } from './labels.schema'
@@ -66,6 +68,17 @@ describe('the test book (F-16.3)', () => {
     for (const line of LABELS.knows) {
       expect(located(line.scene, line.p, line.quote), line.quote).toBe(true)
     }
+    for (const step of LABELS.threads) {
+      expect(located(step.scene, step.p, step.quote), step.quote).toBe(true)
+    }
+    for (const year of LABELS.years) {
+      if (year.elapsed) {
+        expect(located(year.scene, year.elapsed.p, year.elapsed.quote), year.scene).toBe(true)
+      }
+      if (year.quotedYear) {
+        expect(located(year.scene, year.quotedYear.p, year.quotedYear.quote), year.scene).toBe(true)
+      }
+    }
     for (const record of LABELS.records) {
       if (record.defining) {
         const { scene, p, quote } = record.defining
@@ -96,6 +109,9 @@ describe('the test book (F-16.3)', () => {
     const labelled = [
       ...LABELS.claims.map((claim) => claim.scene),
       ...LABELS.knows.map((line) => line.scene),
+      ...LABELS.threads.map((step) => step.scene),
+      ...LABELS.years.map((year) => year.scene),
+      ...LABELS.ages.map((age) => age.scene),
       ...LABELS.contradictions.flatMap((finding) => [finding.a.scene, finding.b.scene])
     ]
     for (const scene of labelled) expect(NEVER_READ).not.toContain(scene)
@@ -136,6 +152,9 @@ describe('the test book (F-16.3)', () => {
         line.learner,
         ...(line.from ? [line.from] : [])
       ]),
+      ...LABELS.threads.map((step) => step.thread),
+      ...LABELS.ages.map((age) => age.record),
+      ...LABELS.negatives.flatMap((negative) => (negative.secret ? [negative.secret] : [])),
       ...LABELS.contradictions.map((finding) => finding.record),
       ...LABELS.negatives.flatMap((negative) => (negative.record ? [negative.record] : [])),
       ...LABELS.records.flatMap((record) => (record.originator ? [record.originator] : [])),
@@ -176,5 +195,112 @@ describe('the test book (F-16.3)', () => {
       else if (twin.rule === 'dismissed') expect(LABELS.dismissed).toContain(twin.name)
       else expect(twin.blockedBy).toBeDefined()
     }
+  })
+
+  it('labels knows lines with a knower and a secret of the right kinds (P2b)', () => {
+    const kind = new Map(LABELS.records.map((record) => [record.id, record.kind]))
+    for (const line of LABELS.knows) {
+      expect(kind.get(line.secret), line.quote).toBe('secret')
+      expect(['character', 'group'], line.quote).toContain(kind.get(line.learner))
+      // Only told, overheard and read keep a source (P2b-D6).
+      if (line.from !== null) expect(['told', 'overheard', 'read']).toContain(line.how)
+    }
+    for (const step of LABELS.threads) expect(kind.get(step.thread), step.quote).toBe('thread')
+    for (const record of LABELS.records) {
+      if (record.kind === 'secret' || record.kind === 'thread') {
+        expect(record.defining, record.id).toBeDefined()
+      }
+    }
+  })
+})
+
+/** The test book's readable scenes in reading order, as the app reads them as of a scene. */
+const READABLE = TEST_BOOK.filter((scene) => readerMayRead(scene.source))
+const READING: ReadingOrder = {
+  order: new Map(READABLE.map((scene, i) => [scene.id, i])),
+  at: new Map(READABLE.map((scene, i) => [scene.id, i])),
+  refs: new Map(READABLE.map((scene) => [scene.id, scene.id]))
+}
+
+/** Decision 5 over the book's typed years and the labelled card fields. */
+function bookYears(): ReturnType<typeof storyYears> {
+  return storyYears(
+    READABLE.map((scene) => {
+      const label = LABELS.years.find((year) => year.scene === scene.id)
+      return {
+        nodeId: scene.id,
+        ref: scene.id,
+        typedYear: scene.details?.year ?? null,
+        quotedYear: label?.quotedYear?.value ?? null,
+        flashback: label?.flashback ?? false,
+        elapsed: label?.elapsed?.quote ?? null
+      }
+    })
+  )
+}
+
+describe('the test book’s years and ages (P2b, decision 5)', () => {
+  it('labels every readable scene’s year, and storyYears agrees', () => {
+    expect(LABELS.years.map((year) => year.scene)).toEqual(READABLE.map((scene) => scene.id))
+    for (const [i, computed] of bookYears().entries()) {
+      const label = LABELS.years[i]
+      if (label === undefined) throw new Error('missing label')
+      const { year } = computed
+      if (year.kind === 'unknown') {
+        expect([label.source, label.year, year.hint?.nodeId], label.scene).toEqual([
+          'unknown',
+          null,
+          label.hint
+        ])
+      } else {
+        expect([year.kind, year.value], label.scene).toEqual([label.source, label.year])
+        if (year.kind === 'carried') expect(year.from.nodeId, label.scene).toBe(label.from)
+      }
+    }
+  })
+
+  it('gives each labelled age as decision 5 computes it: hints listed, never added up', () => {
+    const years = bookYears()
+    const claims = (record: string, slot: 'age' | 'born'): AgeClaim[] =>
+      LABELS.claims
+        .filter(
+          (claim) => claim.record === record && claim.slot === slot && claim.expect !== 'reject'
+        )
+        .map((claim) => ({
+          id: claim.id,
+          value: claim.value,
+          voice: claim.voice,
+          mode: claim.mode,
+          state: 'live',
+          nodeId: claim.scene,
+          para: claim.p
+        }))
+    for (const label of LABELS.ages) {
+      const age = recordAge({
+        born: claims(label.record, 'born'),
+        ages: claims(label.record, 'age'),
+        pinned: [],
+        years,
+        reading: READING,
+        atId: label.scene
+      })
+      const expected = label.expect
+      if (expected.kind === 'stated') {
+        expect(age, `${label.record} as of ${label.scene}`).toMatchObject({
+          kind: 'stated',
+          claimId: expected.claim
+        })
+        expect(age?.kind === 'stated' ? age.since.map((hint) => hint.nodeId) : null).toEqual(
+          expected.since
+        )
+      } else {
+        expect(age).toMatchObject({ kind: 'computed', age: expected.age })
+      }
+    }
+    // Johanna's "two-and-twenty" in h08 is never moved on by the winters and the year since.
+    expect(hintsSince(years, 'h08', 'h14').map((hint) => hint.text)).toEqual([
+      'Three winters later',
+      'A year later'
+    ])
   })
 })

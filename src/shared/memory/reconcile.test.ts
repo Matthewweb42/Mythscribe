@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { dismissedKey } from './dismissed'
 import {
   containsValue,
+  notRightLine,
   reconcile,
   type FreshClaim,
   type ReconcileInput,
@@ -20,6 +21,7 @@ const stored = (over: Partial<StoredClaim> & { id: string }): StoredClaim => ({
   mode: 'now',
   speakerId: null,
   objectId: null,
+  how: null,
   state: 'live',
   quote: "Mara's eyes were grey",
   para: 1,
@@ -35,6 +37,9 @@ const fresh = (over: Partial<FreshClaim> = {}): FreshClaim => ({
   value: 'grey',
   valueKey: 'grey',
   objectId: null,
+  how: null,
+  fromId: null,
+  topicQuoteId: null,
   voice: 'narration',
   speakerId: null,
   mode: 'now',
@@ -320,5 +325,108 @@ describe('reconcile (F-16.17, design §2.3 Reconciliation)', () => {
     )
     expect(result.deletes).toEqual(['unproved'])
     expect(result.inserts).toEqual([])
+  })
+})
+
+describe('knows lines in reconciliation (P2b)', () => {
+  const knows = (over: Partial<FreshClaim> = {}): FreshClaim =>
+    fresh({
+      recordId: 'bel',
+      subjectText: 'Bel',
+      slot: 'knows',
+      value: 'tells',
+      valueKey: 'tells',
+      objectId: 'engagement',
+      how: 'tells',
+      quote: 'Lottie is to marry Mr. Dunmore',
+      ...over
+    })
+
+  it('keeps two lines of one sentence apart when their hows differ', () => {
+    const result = reconcile(
+      input({
+        fresh: [
+          knows(),
+          knows({
+            recordId: 'clara',
+            subjectText: 'Clara',
+            value: 'told',
+            valueKey: 'told',
+            how: 'told',
+            fromId: 'bel'
+          }),
+          knows({ how: 'refers', value: 'refers', valueKey: 'refers' })
+        ]
+      })
+    )
+    expect(result.inserts.map((item) => [item.recordId, item.how])).toEqual([
+      ['bel', 'tells'],
+      ['clara', 'told'],
+      ['bel', 'refers']
+    ])
+  })
+
+  it('restates a stored knows line only when its how matches', () => {
+    const result = reconcile(
+      input({
+        stored: [
+          stored({
+            id: 'k1',
+            recordId: 'bel',
+            subjectText: 'Bel',
+            slot: 'knows',
+            valueKey: 'tells',
+            objectId: 'engagement',
+            how: 'tells',
+            quote: 'Lottie is to marry Mr. Dunmore'
+          })
+        ],
+        fresh: [knows(), knows({ how: 'refers', value: 'refers', valueKey: 'refers' })]
+      })
+    )
+    expect(result.inserts.map((item) => item.how)).toEqual(['refers'])
+  })
+
+  it('drops a knows line the author said is not right, keyed by its secret and how', () => {
+    expect(
+      notRightLine({ recordId: 'bel', slot: 'knows', value: 'tells', objectId: 's1', how: 'tells' })
+    ).toEqual({
+      slot: 'knows:s1',
+      value: 'tells'
+    })
+    expect(
+      notRightLine({
+        recordId: 't1',
+        slot: 'thread',
+        value: 'he comes back',
+        objectId: null,
+        how: 'resolves'
+      })
+    ).toEqual({ slot: 'thread:t1', value: 'resolves' })
+    expect(
+      notRightLine({ recordId: 'mara', slot: 'eyes', value: 'grey', objectId: null, how: null })
+    ).toEqual({
+      slot: 'eyes',
+      value: 'grey'
+    })
+    const stating = ['⟨r1⟩ is to marry ⟨r2⟩']
+    const key = dismissedKey({
+      kind: 'notRight',
+      recordId: 'bel',
+      slot: 'knows:engagement',
+      value: 'tells',
+      stating
+    })
+    const result = reconcile(
+      input({
+        fresh: [
+          knows({ stating }),
+          knows({ stating, how: 'refers', value: 'refers', valueKey: 'refers' })
+        ],
+        dismissed: new Set([key])
+      })
+    )
+    expect(result.dismissed).toBe(1)
+    expect(result.inserts.map((item) => item.how)).toEqual(['refers'])
   })
 })

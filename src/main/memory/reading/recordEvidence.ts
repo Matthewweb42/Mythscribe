@@ -1,8 +1,11 @@
-import { and, eq, inArray, like, or } from 'drizzle-orm'
+import { and, eq, inArray, like, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { CardFields, CardPresent, ClaimPending } from '@shared/memory/claims'
+import { docToText } from '@shared/docText'
 import { normName } from '@shared/memory/names'
-import { card, claim, memoryBackfill } from '../../db/schema'
+import { isTopicCategory } from '@shared/memory/topics'
+import { TiptapNode } from '@shared/tiptap'
+import { card, claim, knewBefore, memoryBackfill, record, topicQuote } from '../../db/schema'
 import type { TreeDb } from '../../tree/treeStore'
 
 /**
@@ -16,7 +19,11 @@ import type { TreeDb } from '../../tree/treeStore'
  *   a pronoun subject stay with the record. An object or speaker has no name span stored, so it
  *   stays (the next reading of that scene corrects it).
  * A deleted record's claims go with it (foreign keys); a card's on-page entry for a record that
- * is gone is left out when it is read.
+ * is gone is left out when it is read. P2b: a merge also re-points the author's *Knew before the
+ * book* rows (both ends, a pair the kept record already has dropped) and the secrets' and threads'
+ * reveals; a deleted secret takes the knows claims about it (`deleteKnowsAbout`: their object
+ * would be cleared, leaving orphans), and an AI-made topic nothing backs any more is found by
+ * `emptyTopics` for the record store to prune (P2b-D12).
  */
 
 const Present = z.array(CardPresent)
@@ -104,6 +111,30 @@ export function mergeEvidence(db: TreeDb, keepId: string, mergeId: string): void
       .run()
   }
 
+  // P2b: the secrets' and threads' reveals, and the author's knew-before marks (both ends).
+  db.update(topicQuote).set({ recordId: keepId }).where(eq(topicQuote.recordId, mergeId)).run()
+  for (const column of ['secretId', 'recordId'] as const) {
+    for (const row of db.select().from(knewBefore).where(eq(knewBefore[column], mergeId)).all()) {
+      const moved =
+        column === 'secretId' ? { ...row, secretId: keepId } : { ...row, recordId: keepId }
+      const where = and(
+        eq(knewBefore.secretId, row.secretId),
+        eq(knewBefore.recordId, row.recordId)
+      )
+      const taken =
+        moved.secretId === moved.recordId ||
+        db
+          .select({ created: knewBefore.created })
+          .from(knewBefore)
+          .where(
+            and(eq(knewBefore.secretId, moved.secretId), eq(knewBefore.recordId, moved.recordId))
+          )
+          .get() !== undefined
+      if (taken) db.delete(knewBefore).where(where).run()
+      else db.update(knewBefore).set(moved).where(where).run()
+    }
+  }
+
   const kept = new Set(
     db
       .select({ norm: memoryBackfill.norm })
@@ -175,4 +206,120 @@ export function splitEvidence(
     .map((row) => row.id)
   if (ids.length > 0) db.update(claim).set({ recordId: intoId }).where(inArray(claim.id, ids)).run()
   return ids.length
+}
+
+/**
+ * The knows claims about a secret that is going (P2b): their object would be cleared, leaving
+ * orphan lines nobody can read. Answers how many went. The caller holds the transaction.
+ */
+export function deleteKnowsAbout(db: TreeDb, secretId: string): number {
+  return db
+    .delete(claim)
+    .where(and(eq(claim.objectId, secretId), eq(claim.slot, 'knows')))
+    .run().changes
+}
+
+const PageDoc = TiptapNode
+
+/** Whether a stored page (Tiptap JSON) holds any text. */
+function hasText(raw: string | null): boolean {
+  if (raw === null) return false
+  try {
+    const parsed = PageDoc.safeParse(JSON.parse(raw))
+    return parsed.success && docToText(parsed.data).trim() !== ''
+  } catch {
+    return false
+  }
+}
+
+/** What backs one secret or thread: its reveals and claims in any draft, and the author's touch. */
+export interface TopicBacking {
+  recordId: string
+  origin: string
+  quotes: number
+  claims: number
+  /** Pinned or Ideas text, or a knew-before mark. */
+  authorTouched: boolean
+}
+
+/** Every secret's and thread's backing (the invariants' `topicEmpty` and `emptyTopics` read it). */
+export function topicBackings(db: TreeDb): TopicBacking[] {
+  const topics = db
+    .select({
+      id: record.id,
+      categoryId: record.categoryId,
+      origin: record.origin,
+      pinned: record.pinned,
+      ideas: record.ideas
+    })
+    .from(record)
+    .all()
+    .filter((row) => isTopicCategory(row.categoryId))
+  if (topics.length === 0) return []
+  const ids = topics.map((row) => row.id)
+  const count = (rows: { id: string | null; n: number }[]): Map<string, number> =>
+    new Map(rows.flatMap((row) => (row.id === null ? [] : [[row.id, row.n] as const])))
+  const quotes = count(
+    db
+      .select({ id: topicQuote.recordId, n: sql<number>`count(*)` })
+      .from(topicQuote)
+      .where(inArray(topicQuote.recordId, ids))
+      .groupBy(topicQuote.recordId)
+      .all()
+  )
+  const asObject = count(
+    db
+      .select({ id: claim.objectId, n: sql<number>`count(*)` })
+      .from(claim)
+      .where(and(inArray(claim.objectId, ids), eq(claim.slot, 'knows')))
+      .groupBy(claim.objectId)
+      .all()
+  )
+  const asRecord = count(
+    db
+      .select({ id: claim.recordId, n: sql<number>`count(*)` })
+      .from(claim)
+      .where(inArray(claim.recordId, ids))
+      .groupBy(claim.recordId)
+      .all()
+  )
+  const marked = new Set(
+    db
+      .select({ id: knewBefore.secretId })
+      .from(knewBefore)
+      .where(inArray(knewBefore.secretId, ids))
+      .all()
+      .map((row) => row.id)
+  )
+  return topics.map((row) => ({
+    recordId: row.id,
+    origin: row.origin,
+    quotes: quotes.get(row.id) ?? 0,
+    claims: (asObject.get(row.id) ?? 0) + (asRecord.get(row.id) ?? 0),
+    authorTouched: marked.has(row.id) || hasText(row.pinned) || hasText(row.ideas)
+  }))
+}
+
+/**
+ * The AI-made secrets and threads nothing backs any more (P2b-D12): no reveal and no claim left
+ * in any draft, and nothing from the author (no Pinned or Ideas text, no knew-before). The record
+ * store deletes them (`pruneTopics`).
+ */
+export function emptyTopics(db: TreeDb): string[] {
+  return topicBackings(db)
+    .filter(
+      (topic) =>
+        topic.origin === 'ai' && topic.quotes === 0 && topic.claims === 0 && !topic.authorTouched
+    )
+    .map((topic) => topic.recordId)
+}
+
+/** Whether `recordId` is a secret or a thread (its category says so). */
+export function isTopicRecord(db: TreeDb, recordId: string): boolean {
+  const row = db
+    .select({ categoryId: record.categoryId })
+    .from(record)
+    .where(eq(record.id, recordId))
+    .get()
+  return row !== undefined && isTopicCategory(row.categoryId)
 }

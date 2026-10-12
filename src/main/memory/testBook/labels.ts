@@ -146,6 +146,40 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       aliases: [{ text: "Lottie's engagement" }],
       originator: 'lottie',
       defining: { scene: 'h05', p: 2, quote: 'Mr. Dunmore and I are engaged' }
+    },
+    {
+      // P2b: a group learner (h13).
+      id: 'regiment',
+      name: 'the regiment',
+      kind: 'group',
+      aliases: [{ text: 'the regiment' }],
+      addedFor: 'P2b'
+    },
+    {
+      id: 'secret-debts',
+      name: "the Captain's debts",
+      kind: 'secret',
+      aliases: [{ text: "the Captain's debts" }],
+      originator: 'captain',
+      defining: { scene: 'h14', p: 7, quote: 'The Captain owed Mr. Varrow money' },
+      addedFor: 'P2b'
+    },
+    {
+      // Its h07 mention is hypothetical, so it opens in h08 and resolves in h09.
+      id: 'thread-ashby-return',
+      name: "Ashby's return",
+      kind: 'thread',
+      aliases: [{ text: "Ashby's return" }],
+      defining: { scene: 'h08', p: 6, quote: 'he said that he was coming back to Thornmere' },
+      addedFor: 'P2b'
+    },
+    {
+      id: 'thread-lottie-match',
+      name: "Lottie's match",
+      kind: 'thread',
+      aliases: [{ text: "Lottie's match" }],
+      defining: { scene: 'h04', p: 2, quote: 'Lottie is to marry Mr. Dunmore' },
+      addedFor: 'P2b'
     }
   ],
   dismissed: ['Michaelmas'],
@@ -523,6 +557,34 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       expect: 'literal',
       reason:
         'A stated age after the time skip (typed 1814); consistent with "not yet sixteen" in 1811, so no C4.'
+    },
+    {
+      id: 'captain-farmer',
+      scene: 'h14',
+      p: 3,
+      record: 'captain',
+      slot: 'role',
+      value: 'a farmer',
+      quote: 'He had left the army at last and was a farmer now',
+      voice: 'narration',
+      mode: 'now',
+      expect: 'verified',
+      reason:
+        "A pronoun subject: the antecedent span names the Captain (h14 ¶0), so the verifier pins it; the Captain's role now."
+    },
+    {
+      id: 'lottie-age-again',
+      scene: 'h14',
+      p: 11,
+      record: 'lottie',
+      slot: 'age',
+      value: 'nineteen',
+      quote: 'Lottie, who was nineteen',
+      voice: 'narration',
+      mode: 'now',
+      expect: 'verified',
+      reason:
+        'A stated age in a relative clause, a year after h09 ("A year later"): the last stated age as of h14, with no hint since.'
     }
   ],
   mentions: [
@@ -822,6 +884,167 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       scene: 'h08',
       p: 3,
       quote: 'We are engaged, and have been since before Christmas'
+    },
+    {
+      // A group learner, named in its sentence (P2b-D8).
+      secret: 'secret-engagement',
+      learner: 'regiment',
+      how: 'told',
+      from: null,
+      scene: 'h13',
+      p: 4,
+      quote: 'By Sunday the whole regiment knew of the engagement'
+    },
+    {
+      // Mrs. Pocock refers to it in her own words: it counts (P2b-D7).
+      secret: 'secret-engagement',
+      learner: 'pocock',
+      how: 'refers',
+      from: null,
+      scene: 'h13',
+      p: 5,
+      quote: 'Engaged since before Christmas, and not a word to her own mother'
+    },
+    {
+      secret: 'secret-engagement',
+      learner: 'clara',
+      how: 'knewBefore',
+      from: null,
+      scene: 'h13',
+      p: 8,
+      quote: 'She had known it before any of them'
+    },
+    {
+      secret: 'secret-debts',
+      learner: 'harrow-mrs',
+      how: 'believesFalse',
+      from: null,
+      scene: 'h14',
+      p: 2,
+      quote: 'Mrs. Harrow had decided that he was a man of large fortune'
+    },
+    {
+      secret: 'secret-debts',
+      learner: 'liesel',
+      how: 'deduced',
+      from: null,
+      scene: 'h14',
+      p: 7,
+      quote: 'she put it together'
+    },
+    {
+      secret: 'secret-debts',
+      learner: 'johanna',
+      how: 'suspects',
+      from: null,
+      scene: 'h14',
+      p: 8,
+      quote: 'She had begun to suspect something of the kind herself'
+    }
+  ],
+  threads: [
+    {
+      // "If Mr. Ashby came back tomorrow": supposed, so it opens nothing.
+      thread: 'thread-ashby-return',
+      how: 'opens',
+      scene: 'h07',
+      p: 6,
+      quote: 'If Mr. Ashby came back tomorrow',
+      voice: 'dialogue',
+      mode: 'hypothetical'
+    },
+    {
+      thread: 'thread-ashby-return',
+      how: 'opens',
+      scene: 'h08',
+      p: 6,
+      quote: 'he said that he was coming back to Thornmere'
+    },
+    {
+      thread: 'thread-ashby-return',
+      how: 'resolves',
+      scene: 'h09',
+      p: 4,
+      quote: 'Johanna and Mr. Ashby had been married two years'
+    },
+    {
+      // Remembered only: listed muted, it moves nothing.
+      thread: 'thread-ashby-return',
+      how: 'opens',
+      scene: 'h13',
+      p: 11,
+      quote: 'he was coming back to Thornmere at last',
+      mode: 'memory'
+    },
+    {
+      thread: 'thread-lottie-match',
+      how: 'opens',
+      scene: 'h04',
+      p: 2,
+      quote: 'Lottie is to marry Mr. Dunmore',
+      voice: 'dialogue'
+    },
+    {
+      thread: 'thread-lottie-match',
+      how: 'advances',
+      scene: 'h08',
+      p: 3,
+      quote: 'We are engaged, and have been since before Christmas',
+      voice: 'dialogue'
+    },
+    {
+      thread: 'thread-lottie-match',
+      how: 'resolves',
+      scene: 'h09',
+      p: 3,
+      quote: 'Lottie was eighteen now, and married'
+    }
+  ],
+  years: [
+    ...(
+      ['s01', 's02', 's03', 's04', 's05', 'h01', 'h02', 'h03', 'h04', 'h05', 'h06', 'h07'] as const
+    ).map((scene) => ({ scene, year: 1811, source: 'typed' as const })),
+    { scene: 'h08', year: 1812, source: 'typed' },
+    {
+      // A typed year wins over the hint, and starts the carry again.
+      scene: 'h09',
+      year: 1814,
+      source: 'typed',
+      elapsed: { p: 0, quote: 'Three winters later' }
+    },
+    { scene: 'h13', year: 1814, source: 'carried', from: 'h09' },
+    {
+      // "A year later" can cross a year: the carry ends, and no year is typed.
+      scene: 'h14',
+      year: null,
+      source: 'unknown',
+      hint: 'h14',
+      elapsed: { p: 0, quote: 'A year later' }
+    }
+  ],
+  ages: [
+    {
+      record: 'johanna',
+      scene: 'h08',
+      expect: { kind: 'stated', claim: 'johanna-age', since: [] }
+    },
+    {
+      // The hints since are listed, never added up: never "about 25".
+      record: 'johanna',
+      scene: 'h14',
+      expect: { kind: 'stated', claim: 'johanna-age', since: ['h09', 'h14'] }
+    },
+    {
+      record: 'clara',
+      scene: 'h09',
+      expect: { kind: 'stated', claim: 'clara-age', since: ['h09'] }
+    },
+    { record: 'lottie', scene: 'h09', expect: { kind: 'stated', claim: 'lottie-age', since: [] } },
+    { record: 'lottie', scene: 'h13', expect: { kind: 'stated', claim: 'lottie-age', since: [] } },
+    {
+      record: 'lottie',
+      scene: 'h14',
+      expect: { kind: 'stated', claim: 'lottie-age-again', since: [] }
     }
   ],
   contradictions: [
@@ -932,6 +1155,39 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       kind: 'claim',
       reason:
         "A scene left out of compile is never read: Ashby's engagement and Clara's marriage never happened."
+    },
+    {
+      scene: 'h06',
+      kind: 'knows',
+      reason: 'A dream: nobody learns anything from it.'
+    },
+    {
+      scene: 'h07',
+      kind: 'knows',
+      reason:
+        'Town talk and a hypothetical ("If Mr. Ashby came back tomorrow"): no counted knows line.'
+    },
+    {
+      scene: 'h14',
+      kind: 'knows',
+      record: 'harrow-mr',
+      secret: 'secret-debts',
+      reason:
+        'Mr. Harrow is at the table and notices nothing: no knows line for him, and no line says he does not know.'
+    },
+    {
+      scene: 'h14',
+      kind: 'knows',
+      secret: 'secret-debts',
+      reason: 'The cards and the lost estate are town talk: no counted knows line comes from them.'
+    },
+    {
+      scene: 'h14',
+      kind: 'state',
+      record: 'captain',
+      slot: 'detail:wealth',
+      reason:
+        "Mrs. Harrow's mistaken belief that he has a large fortune sets nothing about the Captain."
     }
   ]
 }
