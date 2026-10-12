@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { sql } from 'drizzle-orm'
-import { PLANNED_COST_NOTES } from '@shared/aiCostNotes'
+import { PLANNED_COST_NOTES, SHIPPED_PLAN_ROWS } from '@shared/aiCostNotes'
 import type { SwitchoverPlan } from '@shared/memory/switchover'
 import { getStoryMemory } from '../../project/settingsStore'
 import { buildFixtureV1, type FixtureV1 } from './fixtureV1'
@@ -13,7 +13,8 @@ import {
   planSwitchover,
   REBUILD_FAST_CHECKS,
   REBUILD_PAGE_TOKENS,
-  REBUILD_STRONG_CHECKS
+  REBUILD_STRONG_CHECKS,
+  plannedRow
 } from './plan'
 
 let tmp: string
@@ -168,10 +169,14 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
     expect(plan.rebuild.minutes).toBe(1)
     expect(plan.rebuild.priced).toBe(true)
     expect(plan.rebuild.costUsd).toBeGreaterThan(0)
-    const row = (id: string) => PLANNED_COST_NOTES.find((note) => note.id === id)
-    const reader = row('reader.v1:first')
-    const verify = row('verify.v1')
-    if (reader === undefined || verify === undefined) throw new Error('planned rows are missing')
+    // F-16.17: the reader and verify rows shipped; the rebuild still prices from their sizes.
+    const shipped = (id: string) => SHIPPED_PLAN_ROWS.find((note) => note.id === id)
+    expect(PLANNED_COST_NOTES.some((note) => note.id === 'reader.v1:first')).toBe(false)
+    const reader = shipped('reader.v1:first')
+    const verify = shipped('verify.v1')
+    if (reader === undefined || verify === undefined) throw new Error('shipped rows are missing')
+    expect(plannedRow('reader.v1:first')).toBe(reader)
+    expect(() => plannedRow('nothing.v1')).toThrow('No planned cost row nothing.v1')
     const one = estimateRebuild([1_000], { ...CONTEXT, source: 'local' })
     expect(one.costUsd).toBe(0)
     expect(one.requests).toBe(2 + REBUILD_FAST_CHECKS + REBUILD_STRONG_CHECKS)

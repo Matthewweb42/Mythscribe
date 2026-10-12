@@ -8,7 +8,10 @@ import {
   USE_AI_LABEL,
   USE_AI_MEANING,
   dataSharingLabel,
-  dataSharingSends
+  dataSharingSends,
+  featureToggleItems,
+  groupEnabled,
+  withGroup
 } from '@shared/aiSettings'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { providerOf, useAiStore } from './aiStore'
@@ -77,20 +80,29 @@ export function AiDialSection(): React.JSX.Element | null {
 
       <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
         <legend className="float-left p-0 text-xs text-fg-muted">Features</legend>
-        {AI_FEATURES_BY_LEVEL.map((id) => {
-          const { minDial } = AI_DATA_SHARING[id]
-          const label = dataSharingLabel(id, memory)
+        {/* F-16.17 (P2a-D24): only this memory's features; the reader and its check are one switch. */}
+        {featureToggleItems(memory).map((item) => {
+          const ids = item.kind === 'group' ? item.group.features : [item.id]
+          const minDial = Math.max(...ids.map((id) => AI_DATA_SHARING[id].minDial))
+          const label =
+            item.kind === 'group' ? item.group.label : dataSharingLabel(item.id, memory)
           const locked = dial < minDial
           return (
             <label
-              key={id}
+              key={item.kind === 'group' ? item.group.id : item.id}
               className={`flex items-center gap-2 ${locked ? 'text-fg-muted opacity-60' : ''}`}
             >
               <input
                 type="checkbox"
-                checked={features[id]}
+                checked={
+                  item.kind === 'group' ? groupEnabled(features, item.group) : features[item.id]
+                }
                 disabled={locked}
-                onChange={(event) => toggle(id, event.target.checked)}
+                onChange={(event) =>
+                  item.kind === 'group'
+                    ? update({ features: withGroup(features, item.group, event.target.checked) })
+                    : toggle(item.id, event.target.checked)
+                }
               />
               <span>{nameAssistant(label, assistantName)}</span>
             </label>

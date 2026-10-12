@@ -41,6 +41,11 @@ import { caretToEnd, clickIntoEditor } from './support'
  * Research upload is filed into Pinned through the estimate and the deck, the line carries its
  * "Filed from" mark, and editing the source sentence raises a Needs a look conflict.
  *
+ * P2a (F-16.16, F-16.17), still with the own key at the fake: a paragraph typed in Scene 1 sends
+ * nothing; *Read now* sends one reader request (the whole scene, its first read) and one check;
+ * the scene's memory holds Mara's eyes proved in code and where she walked proved by the checker
+ * (the pronoun), with ⓘ's reading; a second *Read now* sends nothing.
+ *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
  * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
@@ -87,14 +92,108 @@ const FILING_ANSWER = JSON.stringify({
   images: []
 })
 
+/** F-16.17: the openings of `reader.v1` and `verify.v1`, which the fake answers. */
+const READER_SENTINEL = 'You are the story-memory reader inside a novel-writing app.'
+const VERIFY_SENTINEL = 'You are the fact checker inside a novel-writing app.'
+/** The paragraph slice P2a types; the fake reads Mara's eyes and where she walked from it. */
+const READ_PARAGRAPH = "Mara's eyes were grey. She walked to the quay."
+
+/**
+ * The fake reader (F-16.17): in the numbered paragraphs it finds `Mara's eyes were <colour>.` and
+ * `She walked to <place>.`, and answers those two facts about Mara Vell (by her roster id) with
+ * their paragraph numbers, and, when the card is due, a card whose place is the quay with Mara on
+ * the page.
+ */
+function readerAnswer(messages: { content: string }[]): string {
+  const system = messages[0]?.content ?? ''
+  const user = messages.at(-1)?.content ?? ''
+  const mara = /^(r\d+) Mara Vell /m.exec(system)?.[1] ?? null
+  const claims: Record<string, unknown>[] = []
+  let place: [string, number, string] | null = null
+  for (const line of user.split('\n')) {
+    const paragraph = /^¶(\d+) (.*)$/.exec(line)
+    if (paragraph === null) continue
+    const p = Number(paragraph[1])
+    const text = paragraph[2] ?? ''
+    // The editor types a curly apostrophe; a quote with a straight one still matches.
+    const eyes = /Mara[’']s eyes were (\w+)\./.exec(text)
+    if (eyes !== null) {
+      claims.push({
+        p,
+        r: mara,
+        s: 'eyes',
+        v: eyes[1],
+        q: `Mara's eyes were ${eyes[1]}`,
+        voice: 'narration',
+        sp: null,
+        mode: 'now',
+        o: null,
+        chg: false
+      })
+    }
+    const walked = /She walked to (the \w+)\./.exec(text)
+    if (walked !== null) {
+      const q = `She walked to ${walked[1]}`
+      claims.push({
+        p,
+        r: mara,
+        s: 'location',
+        v: walked[1],
+        q,
+        voice: 'narration',
+        sp: null,
+        mode: 'now',
+        o: null,
+        chg: false
+      })
+      place = [walked[1] ?? '', p, q]
+    }
+  }
+  const eyesItem = claims.find((claim) => claim.s === 'eyes')
+  const card = user.endsWith('Card: yes')
+    ? {
+        card: {
+          line: 'Mara walks to the quay.',
+          gist: 'Mara walks to the quay.',
+          where: place,
+          when: null,
+          year: null,
+          elapsed: null,
+          pov: null,
+          flash: null,
+          present: eyesItem === undefined ? [] : [[mara, eyesItem.p, eyesItem.q]],
+          mood: 'quiet',
+          theme: 'waiting'
+        }
+      }
+    : {}
+  return JSON.stringify({ c: claims, n: [], same: [], drop: [], ...card })
+}
+
+/** The fake checker: every item supported, about its first candidate, as narration now. */
+function verifyAnswer(messages: { content: string }[]): string {
+  const user = messages.at(-1)?.content ?? ''
+  const items = [...user.matchAll(/^(\d+)\. Who: (r\d+)?/gm)]
+  return JSON.stringify({
+    v: items.map((item) => ({
+      i: Number(item[1]),
+      ok: true,
+      r: item[2] ?? null,
+      voice: 'narration',
+      mode: 'now'
+    }))
+  })
+}
+
 /** Every chat request the fake provider saw: JSON mode or not, and its messages. */
 const providerBodies: { json: boolean; messages: { role: string; content: string }[] }[] = []
 let provider: http.Server
 
 /**
  * A fake OpenAI-compatible provider on loopback: a filing request (its sentinel) gets
- * `FILING_ANSWER`, any other JSON request an empty object, a plain one `GHOST_ANSWER` (streamed
- * when asked); `GET /models/<id>` echoes the id.
+ * `FILING_ANSWER`, a reader or checker request (F-16.17) the fake reader's or checker's answer, any
+ * other JSON request an empty object, a plain one `GHOST_ANSWER` (streamed when asked);
+ * `GET /models/<id>` echoes the id.
  */
 function startFakeProvider(): Promise<string> {
   provider = http.createServer((req, res) => {
@@ -118,8 +217,16 @@ function startFakeProvider(): Promise<string> {
       }
       const json = request.response_format?.type === 'json_object'
       providerBodies.push({ json, messages: request.messages })
-      const filing = request.messages[0]?.content.startsWith(FILING_SENTINEL) === true
-      const content = filing ? FILING_ANSWER : json ? '{}' : GHOST_ANSWER
+      const system = request.messages[0]?.content ?? ''
+      const content = system.startsWith(FILING_SENTINEL)
+        ? FILING_ANSWER
+        : system.startsWith(READER_SENTINEL)
+          ? readerAnswer(request.messages)
+          : system.startsWith(VERIFY_SENTINEL)
+            ? verifyAnswer(request.messages)
+            : json
+              ? '{}'
+              : GHOST_ANSWER
       const usage = { prompt_tokens: 400, completion_tokens: 40, total_tokens: 440 }
       const base = { id: 'chatcmpl-fake', created: 0, model: request.model }
       if (request.stream === true) {
@@ -871,6 +978,77 @@ test('story memory v2: the Story notes block and filing into Pinned (P1 slice 5)
   await expect
     .poll(async () => pageText((await invoke<StoredRecord>('record:get', { id: maraId })).pinned))
     .toBe(`Eyes: grey as the harbour.\n${FILED_LINE}`)
+})
+
+test('story memory v2: the evidence reader (P2a)', async () => {
+  // Continues with Use AI on and an own key at the fake (slice 5); the reading switch is on.
+  const isReader = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(READER_SENTINEL) === true
+  const isVerify = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(VERIFY_SENTINEL) === true
+  const first = (await invoke<TreeNode[]>('tree:list', undefined)).find(
+    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
+  )
+  if (!first) throw new Error('no scene in the seed')
+  await showSection('Manuscript')
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByRole('treeitem', { name: first.title })
+    .first()
+    .click()
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await caretToEnd(editor)
+  await page.keyboard.press('Enter')
+  await page.keyboard.type(READ_PARAGRAPH)
+  await expect
+    .poll(async () => (await storedText(first.id)).replace(/’/g, "'"), { timeout: 15_000 })
+    .toContain(READ_PARAGRAPH)
+  // Nothing reaches the reader while the author types.
+  expect(providerBodies.some(isReader)).toBe(false)
+
+  // Read now: the whole scene on its first read, then the check of what code could not prove.
+  const read = await invoke<{ ok: boolean; read?: boolean }>('memory:readNow', {
+    nodeId: first.id,
+    requestId: 'e2e-read-now'
+  })
+  expect(read).toMatchObject({ ok: true, read: true })
+  const reader = providerBodies.filter(isReader)
+  expect(reader).toHaveLength(1)
+  expect(reader[0]?.json).toBe(true)
+  expect(reader[0]?.messages[0]?.content).toMatch(/^r\d+ Mara Vell \(Mara/m)
+  expect(reader[0]?.messages.at(-1)?.content.replace(/’/g, "'")).toContain(READ_PARAGRAPH)
+  expect(providerBodies.filter(isVerify)).toHaveLength(1)
+
+  // The eyes are proved in code; where she walked, through the checker (the pronoun).
+  interface MemoryClaim {
+    id: string
+    slot: string
+    value: string
+    proof: string
+    state: string
+  }
+  const memory = await invoke<{ claims: MemoryClaim[]; card: { line: string } | null }>(
+    'memory:scene',
+    { nodeId: first.id }
+  )
+  const facts = memory.claims.map((claim) => [claim.slot, claim.value, claim.proof, claim.state])
+  expect(facts).toContainEqual(['eyes', 'grey', 'literal', 'live'])
+  expect(facts).toContainEqual(['location', 'the quay', 'verified', 'live'])
+  expect(memory.card?.line).toBe('Mara walks to the quay.')
+  const location = memory.claims.find((claim) => claim.slot === 'location')
+  const info = await invoke<{
+    claim: { quote: string }
+    reading: { promptVersion: string } | null
+  }>('memory:claim', { claimId: location?.id ?? '' })
+  expect(info.claim.quote).toBe('She walked to the quay')
+  expect(info.reading?.promptVersion).toBe('reader.v1')
+
+  // Nothing changed since: a second Read now sends nothing.
+  const before = providerBodies.length
+  expect(
+    await invoke('memory:readNow', { nodeId: first.id, requestId: 'e2e-read-now-2' })
+  ).toMatchObject({ ok: true, read: false, reason: 'upToDate' })
+  expect(providerBodies).toHaveLength(before)
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

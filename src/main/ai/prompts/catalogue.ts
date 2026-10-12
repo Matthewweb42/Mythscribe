@@ -93,6 +93,8 @@ import { CONTEXT_IMPORT_PROMPT_V3_VERSION } from './contextImport.v3'
 import { REVIEW_CHAT_PROMPT_V3_VERSION } from './reviewChat.v3'
 import { ROUTE_PROMPT_V2_VERSION } from './route.v2'
 import { IMPORT_STRUCTURE_PROMPT_V2_VERSION } from './importStructure.v2'
+import { READER_PROMPT_VERSION } from './reader.v1'
+import { VERIFY_PROMPT_VERSION } from './verify.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -206,7 +208,10 @@ export const PROMPT_VERSIONS = [
   CONTEXT_IMPORT_PROMPT_V3_VERSION,
   REVIEW_CHAT_PROMPT_V3_VERSION,
   // F-16.15 (story memory v2 only): the import's structure pass without the tag bank.
-  IMPORT_STRUCTURE_PROMPT_V2_VERSION
+  IMPORT_STRUCTURE_PROMPT_V2_VERSION,
+  // F-16.17 (story memory v2 only): the evidence reader and its fact checker.
+  READER_PROMPT_VERSION,
+  VERIFY_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -650,7 +655,9 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-16.15'
-  }
+  },
+  [READER_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
+  [VERIFY_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

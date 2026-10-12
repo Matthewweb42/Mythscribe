@@ -371,6 +371,10 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'research:filedConflicts': 'read',
   'research:keepFiledLine': 'write',
   'research:updateFiledLine': 'write',
+  // F-16.17: Read now runs the reader; the scene's memory and ⓘ only read.
+  'memory:readNow': 'ai',
+  'memory:scene': 'read',
+  'memory:claim': 'read',
   'switchover:available': 'read',
   'switchover:trialCopy': 'write',
   'switchover:plan': 'read',
@@ -745,6 +749,9 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'research:filedConflicts': 'v2',
   'research:keepFiledLine': 'v2',
   'research:updateFiledLine': 'v2',
+  'memory:readNow': 'v2',
+  'memory:scene': 'v2',
+  'memory:claim': 'v2',
   // F-16.15: the switch-over runs on a v1 project (a second run is refused in v2).
   'switchover:available': 'any',
   'switchover:trialCopy': 'v1',

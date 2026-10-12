@@ -463,6 +463,8 @@ import {
   staleNameScans
 } from '../memory/nameIndexer'
 import { runAnchors } from '../memory/reading/anchors'
+import { createReaderService } from '../memory/reading/readerService'
+import { claimInfo, sceneMemory } from '../memory/reading/views'
 import {
   dropOwner,
   indexNodePassages,
@@ -471,7 +473,7 @@ import {
   searchMemoryPassages,
   stalePassageOwners
 } from '../memory/passageIndexer'
-import { answerQuestion, listNameQuestions, resetNameQuestionCache } from '../memory/questions'
+import { answerNameQuestion, listNameQuestions, resetNameQuestionCache } from '../memory/questions'
 import { applyRename, clearRenameUndo, previewRename, undoRename } from '../memory/renameStore'
 import { convertSwitchover, prepareSwitchover } from '../memory/switchover/convert'
 import { inlineTagReplacements, planSwitchover } from '../memory/switchover/plan'
@@ -4736,9 +4738,16 @@ export function registerHandlers({
 
   register('names:answer', ({ answer }) => {
     const db = manager.require().connection.orm
-    const result = answerQuestion(db, answer, new Date())
+    // F-16.17: the reader's facts waiting on the name attach on a Yes and go on a No.
+    const { result, settled } = answerNameQuestion(db, answer, new Date())
     if (result.kind === 'record') rosterChanged(db, [result.record.id])
     else publishQuestions()
+    if (settled !== null && settled.nodeIds.length > 0) {
+      emit(windows(), 'memory:changed', {
+        nodeIds: settled.nodeIds,
+        recordIds: result.kind === 'record' ? [result.record.id] : []
+      })
+    }
     return result
   })
 
@@ -4855,6 +4864,21 @@ export function registerHandlers({
     if (failure !== '') throw new AppError('IO', failure)
     return null
   })
+
+  // F-16.16, F-16.17: the reader service owns the reading pipeline; the handlers only reach it.
+  const reader = createReaderService({
+    db: () => manager.require().connection.orm,
+    settings: (db) => getAiSettings(db),
+    requestDeps: (db) => requestDeps(db),
+    changed: (payload) => emit(windows(), 'memory:changed', payload),
+    questions: () => publishQuestions()
+  })
+
+  register('memory:readNow', ({ nodeId, requestId }) => reader.readNow(nodeId, requestId))
+
+  register('memory:scene', ({ nodeId }) => sceneMemory(manager.require().connection.orm, nodeId))
+
+  register('memory:claim', ({ claimId }) => claimInfo(manager.require().connection.orm, claimId))
 
   // F-16.14: the Story notes block as the v2 prose prompts send it (the 400-token budget).
   register('storyNotes:get', ({ nodeId }) => ({

@@ -1,4 +1,4 @@
-import { PLANNED_COST_NOTES, type PlannedCostNote } from '@shared/aiCostNotes'
+import { PLANNED_COST_NOTES, SHIPPED_PLAN_ROWS, type PlannedCostNote } from '@shared/aiCostNotes'
 import type { AiSource } from '@shared/aiSettings'
 import type { PricingResult } from '@shared/cloudApi'
 import { CONVERSION_SECONDS_PER_SCENE } from '@shared/knowledge'
@@ -28,9 +28,12 @@ export interface RebuildContext {
   pricing: PricingResult | null
 }
 
-/** The planned row with this id (`planSwitchover.test.ts` fails when one of them moves or goes). */
-function plannedRow(id: string): PlannedCostNote {
-  const row = PLANNED_COST_NOTES.find((note) => note.id === id)
+/**
+ * The planned row with this id, planned or shipped (F-16.17 moved the reader and verify rows to
+ * `SHIPPED_PLAN_ROWS`); `planSwitchover.test.ts` fails when one of them goes.
+ */
+export function plannedRow(id: string): PlannedCostNote {
+  const row = [...PLANNED_COST_NOTES, ...SHIPPED_PLAN_ROWS].find((note) => note.id === id)
   if (row === undefined) throw new Error(`No planned cost row ${id}`)
   return row
 }

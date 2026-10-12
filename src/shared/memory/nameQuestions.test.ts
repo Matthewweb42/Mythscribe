@@ -71,6 +71,22 @@ describe('nameQuestions (F-16.4)', () => {
     ).toEqual([])
   })
 
+  it('F-16.17: asks about a name seen once when the reader proposed it with a proved fact', () => {
+    const once = 'The rain fell. Hesk took the oars.'
+    expect(nameQuestions(docs(once), ROSTER, NONE)).toEqual([])
+    expect(
+      nameQuestions(docs(once), ROSTER, NONE, { proved: new Set(['hesk']) }).map((q) => [
+        q.kind,
+        q.name,
+        q.count
+      ])
+    ).toEqual([['newName', 'Hesk', 1]])
+    // Still never one the author dismissed.
+    expect(
+      nameQuestions(docs(once), ROSTER, { ...NONE, names: ['Hesk'] }, { proved: new Set(['hesk']) })
+    ).toEqual([])
+  })
+
   it('asks about an ordinary word only when it is capitalised mid-sentence often', () => {
     expect(nameQuestions(docs('the trial; at the Trial, the Trial.'), ROSTER, NONE)).toEqual([])
     expect(

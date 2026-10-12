@@ -121,7 +121,8 @@ export function countNameSpans(text: string): Map<string, WordCount> {
 /**
  * The questions to ask, most named first, at most `NAME_QUESTIONS_MAX`. A name qualifies when it
  * stands capitalised mid-sentence at least `NAME_QUESTION_MIN_MID` times (words the manuscript
- * also writes in lower case, `PROPOSED_ORDINARY_MIN_MENTIONS` times, as F-4.12b counts them) and
+ * also writes in lower case, `PROPOSED_ORDINARY_MIN_MENTIONS` times, as F-4.12b counts them), or
+ * once anywhere when the reader proposed it with a proved fact (`proved`, F-16.17), and
  * the scan would not already find it: it is no record's name, nor one with its "the" ("the
  * Wanderer"), nor its plural ("the Harrows"). A name of a record used alone ("Rynna" for Rynna
  * Falsire) is asked about as a nickname, since the scan matches whole names only.
@@ -129,7 +130,14 @@ export function countNameSpans(text: string): Map<string, WordCount> {
 export function nameQuestions(
   perDocument: readonly DocumentWordCounts[],
   roster: readonly TwinRosterRecord[],
-  dismissed: NameQuestionDismissals
+  dismissed: NameQuestionDismissals,
+  options: {
+    /**
+     * F-16.17 (P2a-D7): norms of names the reader proposed with a proved fact (facts waiting on
+     * the name): such a name is asked about once it is seen once, anywhere in a sentence.
+     */
+    proved?: ReadonlySet<string>
+  } = {}
 ): NameQuestion[] {
   const known = new Set(roster.flatMap((record) => record.names.map(normName)))
   const scanned = (key: string): boolean =>
@@ -162,7 +170,8 @@ export function nameQuestions(
   const questions: NameQuestion[] = []
   for (const [key, entry] of totals) {
     const needed = entry.lower > 0 ? PROPOSED_ORDINARY_MIN_MENTIONS : NAME_QUESTION_MIN_MID
-    if (entry.mid < needed || scanned(key)) continue
+    const seen = options.proved?.has(key) === true ? entry.mid + entry.start >= 1 : entry.mid >= needed
+    if (!seen || scanned(key)) continue
     const words = gateWords(entry.display)
     // Dismissed first: a Not a name stays silent even once a record near it exists.
     if (notNames.has(words.join(' '))) continue

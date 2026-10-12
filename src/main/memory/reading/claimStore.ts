@@ -285,13 +285,56 @@ export function attachClaims(
   db: TreeDb,
   ids: readonly string[],
   recordId: string,
-  now: Date
+  now: Date,
+  state: 'live' | 'stale' = 'live'
 ): void {
   if (ids.length === 0) return
   db.update(claim)
-    .set({ recordId, pending: null, state: 'live', proved: now.toISOString() })
+    .set({
+      recordId,
+      pending: null,
+      state,
+      ...(state === 'live' ? { proved: now.toISOString() } : {})
+    })
     .where(inArray(claim.id, [...ids]))
     .run()
+}
+
+/** Every claim, in any draft, waiting on the new name `norm` (F-16.17, P2a-D7). */
+export function claimsWaitingOnName(db: TreeDb, norm: string): Claim[] {
+  return toClaims(
+    db
+      .select()
+      .from(claim)
+      .where(
+        and(
+          eq(claim.state, 'waiting'),
+          sql`json_extract(${claim.pending}, '$.kind') = 'name'`,
+          sql`json_extract(${claim.pending}, '$.norm') = ${norm}`
+        )
+      )
+      .orderBy(asc(claim.created), sql`rowid`)
+      .all()
+  )
+}
+
+/** The new names the active draft's claims wait on (their norms): each is asked about once seen. */
+export function waitingNameNorms(db: TreeDb, draftId: string): Set<string> {
+  return new Set(
+    db
+      .select({ norm: sql<string>`json_extract(${claim.pending}, '$.norm')` })
+      .from(claim)
+      .where(
+        and(
+          eq(claim.draftId, draftId),
+          eq(claim.state, 'waiting'),
+          sql`json_extract(${claim.pending}, '$.kind') = 'name'`
+        )
+      )
+      .all()
+      .map((row) => row.norm)
+      .filter((norm): norm is string => typeof norm === 'string')
+  )
 }
 
 /** Writes a claim row as it is (Rename in book's rewrite, and its undo). */

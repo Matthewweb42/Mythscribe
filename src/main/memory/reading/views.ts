@@ -33,7 +33,7 @@ import { sceneStatuses } from '../passageIndexer'
 import { listRecords } from '../recordStore'
 import { storedSceneDetails } from '../sceneDetailStore'
 import { getCard } from './cardStore'
-import { draftClaims, getClaim, recordClaims } from './claimStore'
+import { draftClaims, getClaim, recordClaims, sceneClaims } from './claimStore'
 import { getReading, lastReading } from './readingStore'
 import { getSceneRead } from './sceneReadStore'
 
@@ -266,7 +266,11 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
         ? null
         : { readingId: last.id, at: last.created, model: last.model, costUsd: last.costUsd },
     unread: unreadCount(db, nodeId, draftId),
-    paused: null
+    paused: null,
+    claims:
+      draftId === null
+        ? []
+        : sceneClaims(db, nodeId, draftId).map((each) => claimView(each, reading))
   }
 }
 

@@ -1,0 +1,87 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`reader.v1 prompt (F-16.17) > matches the golden messages for a first read and a window read 1`] = `
+[
+  {
+    "content": "You are the story-memory reader inside a novel-writing app. Read the numbered paragraphs of one scene and list what the prose itself states about the records on the roster below: each fact once, with a quote copied word for word.
+Rules:
+- Only what the words say: no inference, no outside knowledge, no guesses. A negation states nothing ("her eyes were not blue" is no fact). Skip anything not said plainly.
+- "q": 3 to 25 consecutive words copied exactly from paragraph "p", the fewest that state the fact; never join words from two places.
+- "r": the roster id of whom the fact is about, as the text makes clear. A name that is not on the roster goes in "n" with its own facts; never put its facts on a look-alike record.
+- "s", one slot. Fixed: eyes, born, species, kinship ("o": the relative's id). Lasting: hair, alive, role, age (an age the text states), scars. Transient: location, injuries, clothing, objects (held or carried). Accumulating: traits, history (a past event), relation ("o": the other's id). Or detail:<label>, the label one of height, build, skin, handedness, birthplace, accent, mark, home, occupation, rank, title, faith, allegiance, income, wealth, language, weapon, companion, illness. No other slot.
+- "v": the value in the quote's own words, short ("grey", "the quay", "dead").
+- "voice": narration (the narrator states it), dialogue (a character says it; "sp": the speaker's id), thought ("sp": the thinker's id), rumour (hearsay, gossip, a report).
+- "mode": now (true at this point of the story), memory (recalled from before), hypothetical (if, would, a wish, a fear, a plan), dream.
+- "chg": true when the sentence states a change ("she cut her hair").
+- "same": ids of listed facts the paragraphs still state unchanged. "drop": ids of listed facts marked re-checking that the paragraphs no longer state.
+- With "Card: yes", add "card": "line" (what happens, one sentence, at most 30 words), "gist" (60 to 80 words), "where", "when", "year" and "elapsed" (time since the scene before) each [value, p, quote] or null, "pov" [roster id, p, quote] of the point-of-view character or null, "flash" [true or false, p, quote] or null, "present" [[id, p, quote]] for those on the page (not only named), "mood" and "theme" a few words each. With "Card: no", leave "card" out.
+Reply with JSON only: {"c":[{"p":3,"r":"r12","s":"eyes","v":"grey","q":"…","voice":"narration","sp":null,"mode":"now","o":null,"chg":false}],"n":[{"n":"Hesk","p":4,"q":"…","c":[…]}],"same":["c7"],"drop":["c9"],"card":{…}}
+
+Roster (id name (nicknames) · kind):
+r1 Mara Vell (Mara; Captain Vell) · character
+r2 Tomas Harrow (Tomas) · character
+r3 the Quay · place
+r1 +Ry",
+    "role": "system",
+  },
+  {
+    "content": "Scene 1.1 “The Quay”, the whole scene
+Typed: POV r1 · place r3 · year 1811
+
+Paragraphs:
+¶0 Mara's eyes were grey. She walked to the quay.
+¶1 Tomas was already there, coiling rope.
+¶2 "You are late," he said.
+
+Card: yes",
+    "role": "user",
+  },
+]
+`;
+
+exports[`reader.v1 prompt (F-16.17) > matches the golden messages for a first read and a window read 2`] = `
+[
+  {
+    "content": "You are the story-memory reader inside a novel-writing app. Read the numbered paragraphs of one scene and list what the prose itself states about the records on the roster below: each fact once, with a quote copied word for word.
+Rules:
+- Only what the words say: no inference, no outside knowledge, no guesses. A negation states nothing ("her eyes were not blue" is no fact). Skip anything not said plainly.
+- "q": 3 to 25 consecutive words copied exactly from paragraph "p", the fewest that state the fact; never join words from two places.
+- "r": the roster id of whom the fact is about, as the text makes clear. A name that is not on the roster goes in "n" with its own facts; never put its facts on a look-alike record.
+- "s", one slot. Fixed: eyes, born, species, kinship ("o": the relative's id). Lasting: hair, alive, role, age (an age the text states), scars. Transient: location, injuries, clothing, objects (held or carried). Accumulating: traits, history (a past event), relation ("o": the other's id). Or detail:<label>, the label one of height, build, skin, handedness, birthplace, accent, mark, home, occupation, rank, title, faith, allegiance, income, wealth, language, weapon, companion, illness. No other slot.
+- "v": the value in the quote's own words, short ("grey", "the quay", "dead").
+- "voice": narration (the narrator states it), dialogue (a character says it; "sp": the speaker's id), thought ("sp": the thinker's id), rumour (hearsay, gossip, a report).
+- "mode": now (true at this point of the story), memory (recalled from before), hypothetical (if, would, a wish, a fear, a plan), dream.
+- "chg": true when the sentence states a change ("she cut her hair").
+- "same": ids of listed facts the paragraphs still state unchanged. "drop": ids of listed facts marked re-checking that the paragraphs no longer state.
+- With "Card: yes", add "card": "line" (what happens, one sentence, at most 30 words), "gist" (60 to 80 words), "where", "when", "year" and "elapsed" (time since the scene before) each [value, p, quote] or null, "pov" [roster id, p, quote] of the point-of-view character or null, "flash" [true or false, p, quote] or null, "present" [[id, p, quote]] for those on the page (not only named), "mood" and "theme" a few words each. With "Card: no", leave "card" out.
+Reply with JSON only: {"c":[{"p":3,"r":"r12","s":"eyes","v":"grey","q":"…","voice":"narration","sp":null,"mode":"now","o":null,"chg":false}],"n":[{"n":"Hesk","p":4,"q":"…","c":[…]}],"same":["c7"],"drop":["c9"],"card":{…}}
+
+Roster (id name (nicknames) · kind):
+r1 Mara Vell (Mara; Captain Vell) · character
+r2 Tomas Harrow (Tomas) · character
+r3 the Quay · place
+r1 +Ry",
+    "role": "system",
+  },
+  {
+    "content": "Scene 1.1 “The Quay”, the changed paragraphs
+Typed: POV r1 · place r3 · year 1811
+Card now: Mara meets Tomas on the quay at dawn. · where the quay · POV r1
+
+Known about the records named here:
+r1 eyes “grey” · hair “red”
+r2 role “harbourmaster”
+
+Facts listed from these paragraphs:
+c1 r1 eyes “grey” ¶0
+c2 r1 location “the quay” ¶0, re-checking
+
+Paragraphs:
+¶0 Mara's eyes were grey. She walked to the quay.
+¶1 Tomas was already there, coiling rope.
+
+Card: no",
+    "role": "user",
+  },
+]
+`;

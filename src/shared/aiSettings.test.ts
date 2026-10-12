@@ -23,7 +23,12 @@ import {
   isFeatureAllowed,
   STORY_BIBLE_SENDS,
   StoredAiSettings,
-  unknownFeatureToggles
+  unknownFeatureToggles,
+  FEATURE_GROUPS,
+  MEMORY_ONLY_FEATURES,
+  featureToggleItems,
+  groupEnabled,
+  withGroup
 } from './aiSettings'
 import { DEFAULT_HONESTY } from './critique'
 import { contract } from './ipc/contract'
@@ -88,8 +93,8 @@ describe('defaultAiSettings (F-14.4)', () => {
 
   it('names the toggles a stored row has for ids this build does not know, booleans only', () => {
     expect(
-      unknownFeatureToggles({ features: { reader: false, chat: false, odd: 'x', verify: true } })
-    ).toEqual({ reader: false, verify: true })
+      unknownFeatureToggles({ features: { judge: false, chat: false, odd: 'x', cite: true } })
+    ).toEqual({ judge: false, cite: true })
     expect(unknownFeatureToggles(null)).toEqual({})
     expect(unknownFeatureToggles({ features: 'all' })).toEqual({})
   })
@@ -317,6 +322,62 @@ describe('AI_DATA_SHARING', () => {
     expect([...AI_FEATURES_BY_LEVEL].sort()).toEqual([...AI_FEATURE_IDS].sort())
     const levels = AI_FEATURES_BY_LEVEL.map((id) => AI_DATA_SHARING[id].minDial)
     expect(levels).toEqual([...levels].sort((a, b) => a - b))
+  })
+})
+
+describe('the toggle list per story memory (F-16.17, P2a-D24)', () => {
+  const idsOf = (memory: 'v1' | 'v2'): string[] =>
+    featureToggleItems(memory).flatMap((item) =>
+      item.kind === 'group' ? item.group.features : [item.id]
+    )
+
+  it('hides the other memory’s features and shows every other id once', () => {
+    const v1 = idsOf('v1')
+    const v2 = idsOf('v2')
+    expect(v1).not.toContain('reader')
+    expect(v1).not.toContain('verify')
+    for (const id of MEMORY_ONLY_FEATURES.v1) {
+      expect(v1).toContain(id)
+      expect(v2).not.toContain(id)
+    }
+    expect(new Set(v1).size).toBe(v1.length)
+    expect(new Set(v2).size).toBe(v2.length)
+    const both = AI_FEATURE_IDS.filter(
+      (id) => !MEMORY_ONLY_FEATURES.v1.includes(id) && !MEMORY_ONLY_FEATURES.v2.includes(id)
+    )
+    expect([...v1].sort()).toEqual([...both, ...MEMORY_ONLY_FEATURES.v1].sort())
+    expect([...v2].sort()).toEqual([...both, ...MEMORY_ONLY_FEATURES.v2].sort())
+  })
+
+  it('shows the reader and its check as one Story memory reading switch in v2', () => {
+    const groups = featureToggleItems('v2').filter((item) => item.kind === 'group')
+    expect(groups).toEqual([{ kind: 'group', group: FEATURE_GROUPS[0] }])
+    expect(FEATURE_GROUPS[0]).toEqual({
+      id: 'storyMemoryReading',
+      label: 'Story memory reading',
+      features: ['reader', 'verify']
+    })
+  })
+
+  it('writes both ids and reads on only when both are on', () => {
+    const group = FEATURE_GROUPS[0]
+    if (group === undefined) throw new Error('no group')
+    const features = defaultAiSettings().features
+    expect(groupEnabled(features, group)).toBe(true)
+    const off = withGroup(features, group, false)
+    expect(off.reader).toBe(false)
+    expect(off.verify).toBe(false)
+    expect(off.ghostText).toBe(true)
+    expect(groupEnabled(off, group)).toBe(false)
+    expect(groupEnabled({ ...features, verify: false }, group)).toBe(false)
+    expect(withGroup(off, group, true)).toEqual(features)
+  })
+
+  it('describes what reading and checking send, never notes or Research', () => {
+    expect(AI_DATA_SHARING.reader.label).toBe('Story memory reading')
+    expect(AI_DATA_SHARING.verify.label).toBe('Story memory check')
+    expect(AI_DATA_SHARING.reader.sends).toContain('Never notes, Research, Pinned, Ideas')
+    expect(AI_DATA_SHARING.verify.sends).toContain('one either side')
   })
 })
 

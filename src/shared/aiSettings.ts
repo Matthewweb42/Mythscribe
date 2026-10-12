@@ -669,6 +669,31 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends: "The active scene's text, referenced notes, the scene brief, and your instruction.",
     sendsV2: `The active scene's text, the scene brief, ${STORY_NOTES_SENDS}, and your instruction.`,
     minDial: 1
+  },
+  reader: {
+    label: 'Story memory reading',
+    sends:
+      'Story memory v2 only, and only when a finished sentence of a scene changed: the ' +
+      'paragraphs you changed, numbered, with two either side and back to the last one that ' +
+      'names a record (the whole scene, in pages, on its first read, after half of it changed, or ' +
+      "after five such reads); the scene's place in the book; its typed POV, place, time and " +
+      "year; its current card (the AI's one-line map of the scene with where, when and whose " +
+      'point of view); one line per record (its name, nicknames and kind); and the facts already ' +
+      'read about the records those paragraphs name and from the paragraphs themselves. Sent when ' +
+      'you leave a scene, pause for the minutes you set, press Read now, or rebuild the memory. ' +
+      'Never notes, Research, Pinned, Ideas, chats, other drafts, Idea scenes or scenes left out ' +
+      'of compile.',
+    minDial: 1
+  },
+  verify: {
+    label: 'Story memory check',
+    sends:
+      'Story memory v2 only: for each fact a reading proposed that code could not prove, the ' +
+      'fact, the records it might be about (name, nicknames and kind), and its sentence with ' +
+      "one either side (and the sentences back to the one that names whoever a 'she' or 'he' " +
+      "points to); the scene card's point of view, year and flashback, and who is on the page, " +
+      'each with its sentence; for spot checks, a fact with three sentences either side.',
+    minDial: 1
   }
 }
 
@@ -691,6 +716,77 @@ export function dataSharingLabel(feature: AiFeatureId, memory: StoryMemoryVersio
 export const AI_FEATURES_BY_LEVEL: readonly AiFeatureId[] = [...AI_FEATURE_IDS].sort(
   (a, b) => AI_DATA_SHARING[a].minDial - AI_DATA_SHARING[b].minDial
 )
+
+/**
+ * F-16.17 (P2a-D24): the features only one story memory runs. A v2 project's toggle list hides the
+ * v1-only ones (tags, summaries, the consistency check, Organise, To do, sheet sync), and a v1
+ * project's hides the reader and its checker; the data-sharing table keeps one row per id.
+ */
+export const MEMORY_ONLY_FEATURES: Readonly<Record<StoryMemoryVersion, readonly AiFeatureId[]>> = {
+  v1: ['tags', 'summary', 'continuity', 'organise', 'todo', 'sheetSync'],
+  v2: ['reader', 'verify']
+}
+
+/** Several features behind one switch in Settings, which writes them all (P2a-D24). */
+export interface FeatureGroup {
+  id: string
+  label: string
+  features: readonly AiFeatureId[]
+}
+
+/**
+ * F-16.17: the reader and its checker run together (a reading without its check stores only what
+ * code proves, and the check alone has nothing to check), so Settings shows one **Story memory
+ * reading** switch for both.
+ */
+export const FEATURE_GROUPS: readonly FeatureGroup[] = [
+  { id: 'storyMemoryReading', label: 'Story memory reading', features: ['reader', 'verify'] }
+]
+
+/** One row of a project's feature toggles: a feature, or a group in its first member's place. */
+export type FeatureToggleItem =
+  | { kind: 'feature'; id: AiFeatureId }
+  | { kind: 'group'; group: FeatureGroup }
+
+/**
+ * The toggles a project with story memory `memory` shows, in display order (`AI_FEATURES_BY_LEVEL`):
+ * the other memory's features left out, a group in place of its members.
+ */
+export function featureToggleItems(memory: StoryMemoryVersion): FeatureToggleItem[] {
+  const other: StoryMemoryVersion = memory === 'v1' ? 'v2' : 'v1'
+  const hidden = new Set<AiFeatureId>(MEMORY_ONLY_FEATURES[other])
+  const items: FeatureToggleItem[] = []
+  const placed = new Set<string>()
+  for (const id of AI_FEATURES_BY_LEVEL) {
+    if (hidden.has(id)) continue
+    const group = FEATURE_GROUPS.find((candidate) => candidate.features.includes(id))
+    if (group === undefined) {
+      items.push({ kind: 'feature', id })
+      continue
+    }
+    if (placed.has(group.id)) continue
+    placed.add(group.id)
+    items.push({ kind: 'group', group })
+  }
+  return items
+}
+
+/** Whether a group's switch shows on: every one of its features is on. */
+export function groupEnabled(
+  features: Readonly<Record<AiFeatureId, boolean>>,
+  group: FeatureGroup
+): boolean {
+  return group.features.every((id) => features[id])
+}
+
+/** The toggles with every feature of `group` switched to `on` (the one switch writes them all). */
+export function withGroup(
+  features: Readonly<Record<AiFeatureId, boolean>>,
+  group: FeatureGroup,
+  on: boolean
+): Record<AiFeatureId, boolean> {
+  return { ...features, ...Object.fromEntries(group.features.map((id) => [id, on])) }
+}
 
 /** True only when the dial is high enough for `feature` and its own toggle is on. */
 export function isFeatureAllowed(settings: AiSettings, feature: AiFeatureId): boolean {

@@ -65,6 +65,7 @@ import {
   VOICE_NOTES_SAMPLE_CHARS
 } from '@shared/voice'
 import { voiceBlock } from '../../voice/voiceBlock'
+import { MEMORY_EVAL_CASES } from './memoryFixtures'
 import type { AiMessage } from '../providers/types'
 import type { PromptVersion } from '../prompts/catalogue'
 import { buildBriefPrompt, BRIEF_PROMPT_VERSION } from '../prompts/brief.v1'
@@ -858,6 +859,27 @@ export interface EvalCase {
      * least one edit or addition, and every edit must name a field that was sent.
      */
     | { kind: 'sheetRefile'; fields: string[] }
+    /**
+     * The story-memory reader (F-16.17): the answer must parse (`parseReaderAnswer`), every quote
+     * must sit once in the paragraph it names among those sent, and no fact the test book's labels
+     * reject (a negation, the pronoun trap, a shared surname) may be offered as narration in `now`
+     * mode; the report counts, per slot, the labelled facts it proposed (`expected`, recall).
+     */
+    | {
+        kind: 'reader'
+        paragraphs: { p: number; text: string }[]
+        expected: ReaderEvalLabel[]
+        rejected: ReaderEvalLabel[]
+      }
+    /** The story-memory checker (F-16.17): each item's `ok` must match the label's `expect`. */
+    | { kind: 'verify'; expected: boolean[] }
+}
+
+/** A test-book label as a reader case scores against it. */
+export interface ReaderEvalLabel {
+  slot: string
+  quote: string
+  p: number
 }
 
 const general = builtinParams('general')
@@ -6320,5 +6342,7 @@ export const EVAL_CASES: EvalCase[] = [
     'maxed',
     `story memory v2: a chunk at the ${IMPORT_CHUNK_WORDS}-word cap: the most one chunk of an import can cost`,
     maxedChunk()
-  )
+  ),
+  // F-16.17: the story-memory reader and checker, from the test book.
+  ...MEMORY_EVAL_CASES
 ]

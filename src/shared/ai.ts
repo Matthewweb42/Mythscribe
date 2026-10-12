@@ -340,7 +340,13 @@ export const AI_FEATURE_IDS = [
   'todo',
   // F-9.18: a story-bible sheet's two views kept true: the page written up from the fields, and
   // the page's edits filed back into the fields, in the background after the sheet is left alone.
-  'sheetSync'
+  'sheetSync',
+  // F-16.17 (story memory v2): the evidence reader, which reads the changed paragraphs of a scene
+  // and lists what the prose states, each fact with its quote.
+  'reader',
+  // F-16.17 (story memory v2): the fact checker, which confirms the facts the reader proposed
+  // that code could not prove, from their sentences alone.
+  'verify'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -440,7 +446,12 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   todo: 1_200,
   // F-9.18: a write-up asks `WRITE_UP_MAX_TOKENS` by length (400 / 700 / 1,200, the JSON
   // wrapping included); a filing asks `REFILE_MAX_TOKENS` (900) of compact edits.
-  sheetSync: 1_200
+  sheetSync: 1_200,
+  // F-16.17: a first or full-read page asks 720 (600 for the claims, 120 for the card); a window
+  // min(600, 120 + 0.3 × its prose tokens), plus 120 when a card is due (`outputCap`).
+  reader: 720,
+  // F-16.17: one batch per page, min(400, 20 + 15 × items); a strong spot check asks 40.
+  verify: 400
 }
 
 /**
@@ -520,7 +531,13 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-9.18: the rules, the sheet's name and category, the style line, and its fields (long values
   // head-cut to fit for a write-up); a filing adds the page edits, at most `REFILE_CHUNK_CHARS`
   // of added text per request.
-  sheetSync: 6_000
+  sheetSync: 6_000,
+  // F-16.17: the cached rules (≤ 900) and roster (≤ 1,600), the scene's head and the claims near
+  // the window (≤ 850), and the window or page (≤ 2,500 prose tokens).
+  reader: 6_000,
+  // F-16.17: the rules and the numbered items, each its candidates, fact and sentences ±1 (and the
+  // antecedent span of a pronoun); a batch over 2,500 tokens of items is split.
+  verify: 3_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

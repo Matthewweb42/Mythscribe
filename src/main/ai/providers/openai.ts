@@ -57,6 +57,19 @@ type CreateParams = OpenAI.ChatCompletionCreateParamsNonStreaming & {
   usage?: { include: true }
 }
 
+/**
+ * F-16.17 (P2a-D15): the lowest `reasoning_effort` a direct OpenAI model takes, or null for a
+ * model that takes none (a non-reasoning model would refuse the field): `minimal` for the gpt-5
+ * family, `none` for gpt-5.1 and later, `low` for the o-series.
+ */
+export function lowestReasoningEffort(model: string): 'minimal' | 'none' | 'low' | null {
+  const id = model.toLowerCase()
+  if (/^o\d/.test(id)) return 'low'
+  const gpt5 = /^gpt-5(?:\.(\d+))?(?:-|$)/.exec(id)
+  if (gpt5 === null || id.startsWith('gpt-5-chat')) return null
+  return gpt5[1] === undefined ? 'minimal' : 'none'
+}
+
 /** OpenRouter's optional attribution headers: the app's site and name on its dashboard. */
 const OPENROUTER_HEADERS = { 'HTTP-Referer': 'https://mythscribe.app', 'X-Title': 'MythScribe' }
 
@@ -149,8 +162,14 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
       options.openRouter && request.reasoning !== undefined
         ? reasoningParam(request.reasoning)
         : undefined
+    // F-16.17: a story-memory request on a direct OpenAI key asks for the model's lowest effort.
+    const effort =
+      !compatible && options.openRouter !== true && request.lowestEffort === true
+        ? lowestReasoningEffort(base.model)
+        : null
     return {
       ...base,
+      ...(effort === null ? {} : { reasoning_effort: effort }),
       ...(reasoning === undefined ? {} : { reasoning }),
       // F-16.1: OpenRouter's usage accounting, so the ledger records the cost it charged.
       ...(options.openRouter ? { usage: { include: true as const } } : {})

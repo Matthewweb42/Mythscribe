@@ -1,0 +1,55 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`verify.v1 prompt (F-16.17) > a strong spot check is one claim at 40 tokens out 1`] = `
+[
+  {
+    "content": "You are the fact checker inside a novel-writing app. Each numbered item gives a fact and the sentences it came from. Decide from those sentences alone whether they state the fact about that record, as written.
+- "ok": true only when the sentences say it plainly of that record. A negation never supports. A wish, fear, dream, memory, lie or rumour supports a fact only with that voice and mode.
+- "r": the id from "Who" the fact is about. When the subject is a pronoun ("she", "he", "they", "I"), pick the one record it means; null when none fits or more than one could.
+- "voice": narration, dialogue, thought or rumour, as the sentences give it. "mode": now, memory, hypothetical or dream.
+- A card or on-page item needs only "i" and "ok".
+Reply with JSON only: {"v":[{"i":1,"ok":true,"r":"r12","voice":"narration","mode":"now"}]}",
+    "role": "system",
+  },
+  {
+    "content": "Items:
+1. Who: r1 Mara Vell (Mara) · character
+Fact: location: the quay (narration, now)
+Text: Mara's eyes were grey. She walked to the quay. Tomas was already there, coiling rope.",
+    "role": "user",
+  },
+]
+`;
+
+exports[`verify.v1 prompt (F-16.17) > matches the golden messages for a typical batch 1`] = `
+[
+  {
+    "content": "You are the fact checker inside a novel-writing app. Each numbered item gives a fact and the sentences it came from. Decide from those sentences alone whether they state the fact about that record, as written.
+- "ok": true only when the sentences say it plainly of that record. A negation never supports. A wish, fear, dream, memory, lie or rumour supports a fact only with that voice and mode.
+- "r": the id from "Who" the fact is about. When the subject is a pronoun ("she", "he", "they", "I"), pick the one record it means; null when none fits or more than one could.
+- "voice": narration, dialogue, thought or rumour, as the sentences give it. "mode": now, memory, hypothetical or dream.
+- A card or on-page item needs only "i" and "ok".
+Reply with JSON only: {"v":[{"i":1,"ok":true,"r":"r12","voice":"narration","mode":"now"}]}",
+    "role": "system",
+  },
+  {
+    "content": "Items:
+1. Who: r1 Mara Vell (Mara) · character
+Fact: location: the quay (narration, now)
+Text: Mara's eyes were grey. She walked to the quay. Tomas was already there, coiling rope.
+
+2. Who: r1 Mara Vell (Mara) · character | r4 Lise Harrow · character
+Fact: eyes: green (narration, now)
+Text: Mara and Lise sat by the fire. She had green eyes, and in that light they looked gold.
+
+3. Who: r1 Mara Vell (Mara) · character
+Card POV: the scene is told from r1's point of view
+Text: Mara's eyes were grey. She walked to the quay.
+
+4. Who: r2 Tomas Harrow (Tomas) · character
+On the page: r2 is on the page in this scene (present, not only named or remembered)
+Text: Tomas was already there, coiling rope.",
+    "role": "user",
+  },
+]
+`;

@@ -895,6 +895,26 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     expect(seen.at(-1)).not.toHaveProperty('reasoning')
   })
 
+  it('F-16.17: reads and checks with reasoning off and the lowest effort; no other request asks for it', async () => {
+    const f = fakes()
+    const seen: CompletionRequest[] = []
+    f.complete.mockImplementation((request) => {
+      seen.push(request)
+      return Promise.resolve({ text: '{}', model: 'm', usage: { inputTokens: 1, outputTokens: 1 } })
+    })
+    const routing = { ...defaultAiRouting(), reasoning: { fast: 'low' as const } }
+    f.deps.routing = () => ({ routing, table: autoTable(null) })
+    await runAiRequest(f.deps, { ...input, feature: 'reader', json: true, contextHash: 'rd' })
+    expect(seen.at(-1)).toMatchObject({ reasoning: 'off', lowestEffort: true })
+    await runAiRequest(f.deps, { ...input, feature: 'verify', json: true, contextHash: 'vf' })
+    expect(seen.at(-1)).toMatchObject({ reasoning: 'off', lowestEffort: true })
+    await runAiRequest(f.deps, { ...input, feature: 'summary', contextHash: 'sm' })
+    expect(seen.at(-1)?.reasoning).toBe('off')
+    expect(seen.at(-1)).not.toHaveProperty('lowestEffort')
+    await runAiRequest(f.deps, { ...input, feature: 'tags', contextHash: 'tg' })
+    expect(seen.at(-1)).not.toHaveProperty('lowestEffort')
+  })
+
   it('F-16.9: sends contextImport.v3 and reviewChat.v3 with reasoning off, and leaves reviewChat.v2 as it was', async () => {
     const f = fakes()
     const seen: CompletionRequest[] = []
@@ -946,11 +966,13 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     expect(seen.at(-1)).not.toHaveProperty('reasoning')
   })
 
-  // F-16.2: `summary` stands in for the story-memory reader until P2a adds `reader`, `verify` and
-  // `judge` to this table.
+  // F-16.2: `summary` stood in for the story-memory reader until P2a added `reader` and `verify`
+  // (F-16.17); P4 adds `judge`.
   it.each([
     ['summary', 'off'],
     ['ghostText', 'off'],
+    ['reader', 'off'],
+    ['verify', 'off'],
     ['tags', undefined],
     ['agent', undefined]
   ] as const)(

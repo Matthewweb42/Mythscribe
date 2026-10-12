@@ -55,6 +55,11 @@ export interface CompletionRequest {
    * as OpenRouter's `reasoning` parameter; every other adapter ignores it. Absent is `default`.
    */
   reasoning?: ReasoningMode
+  /**
+   * F-16.17 (P2a-D15): ask for the model's lowest reasoning effort. Only the OpenAI adapter on a
+   * direct OpenAI key reads it (`lowestReasoningEffort`); every other route ignores it.
+   */
+  lowestEffort?: boolean
 }
 
 /** `usage` is on every result so the ledger (F-5.14) can price it. */

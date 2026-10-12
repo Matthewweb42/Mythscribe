@@ -223,6 +223,22 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     callsPerUse: 1,
     typicalOutTokens: 300,
     ideas: 'Send a compact review summary instead of every record.'
+  },
+  reader: {
+    trigger: 'background',
+    when: 'Story memory v2 (F-16.17): reader.v1, fast tier, reasoning off. Only when a finished sentence of a scene changed (a local gate decides, nothing is sent while typing): the changed paragraphs ±2 when the author leaves the scene or pauses (from P2a slice 3; Read now meanwhile), the whole scene in pages of 2,500 prose tokens on a first read, after half of it changed, or after five window reads. One request per window piece or page; a reply cut off at its cap is read again once from the last paragraph it quoted. The rules and the roster are a stable prefix (provider caching), the roster rebuilt only on a removal, rename, merge or split. Design figures: about 4,000 tokens in and 300 out for a window, 3,800 / 520 for a first-read page.',
+    callsPerUse: 1,
+    typicalOutTokens: 300,
+    ideas:
+      'Skip the card when it is not due (already: +120 output only then); a smaller window when the edit is one sentence; batch Rebuild memory through the provider batch API; measure the cut-off rate in the ledger and trim the claim list before raising the cap.'
+  },
+  verify: {
+    trigger: 'background',
+    when: 'Story memory v2 (F-16.17): verify.v1, fast tier, reasoning off. One batch per reading page, only for the facts code could not prove (each with its sentences ±1, and the sentence a she or he points back to), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 15 × items). From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). Design figures: about 1,300 tokens in and 110 out per batch.',
+    callsPerUse: 1,
+    typicalOutTokens: 110,
+    ideas:
+      'Prove more in code (literal patterns per slot) so fewer items are sent; fold presence checks into the reader once the live run shows they agree; the strong spot check only while the proof agreement is new.'
   }
 }
 
@@ -254,84 +270,6 @@ export interface PlannedCostNote {
 
 export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
   {
-    id: 'reader.v1:first',
-    prompt: 'reader.v1',
-    feature: 'reader',
-    existing: false,
-    phase: 'P2a',
-    tier: 'fast',
-    trigger: 'background',
-    when: 'A scene read whole: its first read, after >50 % of it changed, or after five partial reads; pages of 2,500 prose tokens.',
-    typicalInTokens: 3_800,
-    typicalOutTokens: 520,
-    callsPerUse: 1
-  },
-  {
-    id: 'reader.v1:window',
-    prompt: 'reader.v1',
-    feature: 'reader',
-    existing: false,
-    phase: 'P2a',
-    tier: 'fast',
-    trigger: 'background',
-    when: 'A window read: the changed paragraphs ±2 when the author leaves a scene or pauses.',
-    typicalInTokens: 4_000,
-    typicalOutTokens: 300,
-    callsPerUse: 1
-  },
-  {
-    id: 'verify.v1',
-    prompt: 'verify.v1',
-    feature: 'verify',
-    existing: false,
-    phase: 'P2a',
-    tier: 'fast',
-    trigger: 'background',
-    when: 'One batch per reading: the claims code could not prove, with their sentences ±1.',
-    typicalInTokens: 1_300,
-    typicalOutTokens: 110,
-    callsPerUse: 1
-  },
-  {
-    id: 'verify.v1:pro',
-    prompt: 'verify.v1',
-    feature: 'verify',
-    existing: false,
-    phase: 'P2a',
-    tier: 'strong',
-    trigger: 'background',
-    when: 'Spot checks: 20 verified claims per rebuild on the strong model, with more surrounding text.',
-    typicalInTokens: 700,
-    typicalOutTokens: 40,
-    callsPerUse: 1
-  },
-  {
-    id: 'verify.v1:spot',
-    prompt: 'verify.v1',
-    feature: 'verify',
-    existing: false,
-    phase: 'P2a',
-    tier: 'fast',
-    trigger: 'background',
-    when: 'Spot checks: 50 literal claims per rebuild re-checked on the fast model (sized from design Part 5’s index total).',
-    typicalInTokens: 260,
-    typicalOutTokens: 15,
-    callsPerUse: 1
-  },
-  {
-    id: 'reader.v1:card',
-    prompt: 'reader.v1',
-    feature: 'reader',
-    existing: false,
-    phase: 'P2a',
-    tier: 'fast',
-    trigger: 'background',
-    when: 'An instant card that is out of date: one window read for its scene (about one card in five; the rest are local and free).',
-    typicalInTokens: 4_000,
-    typicalOutTokens: 300,
-    callsPerUse: 1
-  },
-  {
     id: 'synopsis.v2',
     prompt: 'synopsis.v2',
     feature: 'synopsis',
@@ -361,7 +299,7 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     id: 'reader.v2:first',
     prompt: 'reader.v2',
     feature: 'reader',
-    existing: false,
+    existing: true,
     phase: 'P2b',
     tier: 'fast',
     trigger: 'background',
@@ -374,7 +312,7 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     id: 'reader.v2:window',
     prompt: 'reader.v2',
     feature: 'reader',
-    existing: false,
+    existing: true,
     phase: 'P2b',
     tier: 'fast',
     trigger: 'background',
@@ -387,7 +325,7 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     id: 'verify.v2',
     prompt: 'verify.v2',
     feature: 'verify',
-    existing: false,
+    existing: true,
     phase: 'P2b',
     tier: 'fast',
     trigger: 'background',
@@ -529,10 +467,11 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
 ]
 
 /**
- * The story-memory rows that have shipped (F-16.9, P1 slice 5): their features' notes are in
- * `AI_COST_NOTES` now (the registry's per-feature table shows them), and these rows keep the
- * design's sizes so the planned tasks that run them ("File a 20,000-word upload, once") stay
- * priced from the same figures.
+ * The story-memory rows that have shipped (F-16.9, P1 slice 5; F-16.17, P2a slice 2: the reader
+ * and verify rows): their features' notes are in `AI_COST_NOTES` now (the registry's per-feature
+ * table shows them), and these rows keep the design's sizes so the planned tasks that run them
+ * ("File a 20,000-word upload, once", "Index the book once") and the switch-over's rebuild price
+ * (`plannedRow` in `switchover/plan.ts`) stay priced from the same figures.
  */
 export const SHIPPED_PLAN_ROWS: readonly PlannedCostNote[] = [
   {
@@ -558,6 +497,84 @@ export const SHIPPED_PLAN_ROWS: readonly PlannedCostNote[] = [
     trigger: 'on request',
     when: 'A message on the upload review that changes what is filed into Pinned; priced like reviewChat.v2.',
     typicalInTokens: 676,
+    typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v1:first',
+    prompt: 'reader.v1',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'A scene read whole: its first read, after >50 % of it changed, or after five partial reads; pages of 2,500 prose tokens.',
+    typicalInTokens: 3_800,
+    typicalOutTokens: 520,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v1:window',
+    prompt: 'reader.v1',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'A window read: the changed paragraphs ±2 when the author leaves a scene or pauses.',
+    typicalInTokens: 4_000,
+    typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
+    id: 'verify.v1',
+    prompt: 'verify.v1',
+    feature: 'verify',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'One batch per reading: the claims code could not prove, with their sentences ±1.',
+    typicalInTokens: 1_300,
+    typicalOutTokens: 110,
+    callsPerUse: 1
+  },
+  {
+    id: 'verify.v1:pro',
+    prompt: 'verify.v1',
+    feature: 'verify',
+    existing: true,
+    phase: 'P2a',
+    tier: 'strong',
+    trigger: 'background',
+    when: 'Spot checks: 20 verified claims per rebuild on the strong model, with more surrounding text.',
+    typicalInTokens: 700,
+    typicalOutTokens: 40,
+    callsPerUse: 1
+  },
+  {
+    id: 'verify.v1:spot',
+    prompt: 'verify.v1',
+    feature: 'verify',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'Spot checks: 50 literal claims per rebuild re-checked on the fast model (sized from design Part 5’s index total).',
+    typicalInTokens: 260,
+    typicalOutTokens: 15,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v1:card',
+    prompt: 'reader.v1',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'An instant card that is out of date: one window read for its scene (about one card in five; the rest are local and free).',
+    typicalInTokens: 4_000,
     typicalOutTokens: 300,
     callsPerUse: 1
   }

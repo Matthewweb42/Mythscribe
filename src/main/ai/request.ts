@@ -64,8 +64,20 @@ const NO_REASONING_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
   // F-9.16: the To do check and its suggestions are short JSON lists under small caps.
   'todo',
   // F-9.18: a sheet's write-up and filing are short JSON under small caps, in the background.
-  'sheetSync'
+  'sheetSync',
+  // F-16.17: story memory's reader and its checker are short JSON under small caps, read in the
+  // background; reasoning off on every route (design §2.3 "Reasoning").
+  'reader',
+  'verify'
 ])
+
+/**
+ * F-16.17 (P2a-D15): the story-memory requests that also ask a direct OpenAI key for its lowest
+ * `reasoning_effort` (the adapter knows which effort each model takes), so a v1 request leaves
+ * exactly as before. P2a slice 5 adds `planLinks.v2`; F-16.31 widens it to every request that
+ * asks for no reasoning.
+ */
+const LOWEST_EFFORT_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>(['reader', 'verify'])
 
 /**
  * F-16.9: prompt versions that always ask for no reasoning, whatever their feature does. Filing
@@ -425,6 +437,7 @@ function completionRequest(
     json: input.json,
     ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
     ...(prepared.reasoning === 'default' ? {} : { reasoning: prepared.reasoning }),
+    ...(LOWEST_EFFORT_FEATURES.has(input.feature) ? { lowestEffort: true } : {}),
     ...(signal === undefined ? {} : { signal })
   }
 }

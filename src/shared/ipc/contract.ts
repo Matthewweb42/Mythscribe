@@ -256,6 +256,7 @@ import {
   FilingUndoResult
 } from '../filing'
 import { TwinGateBlocked, TwinGateVerdict } from '../memory/twinGate'
+import { ClaimInfo, ReadNowResult, SceneMemory } from '../memory/views'
 import { Label, LabelColour, LabelKind, LabelLink, LabelName } from '../storyLabels'
 
 /**
@@ -3362,6 +3363,20 @@ export const contract = {
   /** F-16.9: *Keep line*: the conflict is a `notProblem` dismissal until the page changes again. */
   'research:keepFiledLine': { input: z.object({ conflict: FiledConflict }), output: Dismissed },
   /** F-16.9: *Update line*: the author's own words for a filed line (its `aiFiled` mark goes). */
+  /**
+   * F-16.16, F-16.17: *Read now*: reads the scene's changed paragraphs (or the whole scene on its
+   * first read) through `reader.v1` and `verify.v1` when the reading gate finds a finished sentence
+   * changed; nothing is sent otherwise. The renderer flushes pending saves first. AI failures (Use
+   * AI or Story memory reading off, no key, the daily cap) answer as data.
+   */
+  'memory:readNow': {
+    input: z.object({ nodeId: z.string(), requestId: z.string() }),
+    output: ReadNowResult
+  },
+  /** F-16.18: what the reading shows for one scene (Here, Mentioned, True now, its claims). */
+  'memory:scene': { input: z.object({ nodeId: z.string() }), output: SceneMemory },
+  /** F-16.18: ⓘ on an AI line: its quote, scene, proof and reading; null once it is gone. */
+  'memory:claim': { input: z.object({ claimId: z.string() }), output: ClaimInfo.nullable() },
   'research:updateFiledLine': {
     input: z.object({
       recordId: z.string(),
@@ -3519,7 +3534,12 @@ export const events = {
   /** F-16.5 (v2): the recorded mentions of these scenes changed (a scan wrote rows). */
   'names:changed': z.object({ nodeIds: z.array(z.string()) }),
   /** F-16.4 (v2): the name questions changed (a scan, a record, an answer); the whole list. Only a real change is pushed. */
-  'questions:changed': z.array(NameQuestion)
+  'questions:changed': z.array(NameQuestion),
+  /**
+   * F-16.17 (v2): a reading (or an answer settling facts waiting on a name) changed what the memory
+   * holds for these scenes and records; the renderer reads them again.
+   */
+  'memory:changed': z.object({ nodeIds: z.array(z.string()), recordIds: z.array(z.string()) })
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

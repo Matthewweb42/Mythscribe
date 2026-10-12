@@ -16,7 +16,8 @@ describe('the reading views (F-16.18)', () => {
         typed: { pov: none, place: none, time: none, year: none },
         lastRead: null,
         unread: 3,
-        paused: null
+        paused: null,
+        claims: []
       }).success
     ).toBe(true)
     expect(

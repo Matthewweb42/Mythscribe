@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AiErrorCode } from '../ai'
 import {
   CardFields,
   CLAIM_PROOFS,
@@ -120,9 +121,35 @@ export const SceneMemory = z.object({
   /** Finished sentences not read yet. */
   unread: z.number().int().nonnegative(),
   /** Why reading is paused, when it is (slice 3). */
-  paused: z.string().nullable()
+  paused: z.string().nullable(),
+  /**
+   * F-16.17: what the active draft read from this scene, in text order (live, stale and waiting),
+   * each with its quote and proof: what ⓘ and the panel's lines (slice 4) start from.
+   */
+  claims: z.array(ClaimView)
 })
 export type SceneMemory = z.infer<typeof SceneMemory>
+
+/** Why *Read now* read nothing (F-16.16): up to date, cosmetic edits only, nothing finished, a scene never read, or reading paused. */
+export const READ_NOW_SKIPS = ['upToDate', 'cosmetic', 'empty', 'notReadable', 'paused'] as const
+export const ReadNowSkip = z.enum(READ_NOW_SKIPS)
+export type ReadNowSkip = z.infer<typeof ReadNowSkip>
+
+/**
+ * What `memory:readNow` answers: whether the scene was read (and the reading's id and cost), or
+ * why not; an AI failure (no key, Use AI or the reading switch off, the daily cap) as data.
+ */
+export const ReadNowResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    read: z.boolean(),
+    reason: ReadNowSkip.nullable(),
+    readingId: z.string().nullable(),
+    costUsd: z.number().nonnegative()
+  }),
+  z.object({ ok: z.literal(false), code: AiErrorCode, message: z.string(), nextStep: z.string() })
+])
+export type ReadNowResult = z.infer<typeof ReadNowResult>
 
 /** ⓘ on an AI line: the quote, where it is, how it was proved, and what the reading cost. */
 export const ClaimInfo = z.object({

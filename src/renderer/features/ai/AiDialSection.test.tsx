@@ -10,8 +10,10 @@ import {
 import {
   AI_DATA_SHARING,
   AiSettings,
+  MEMORY_ONLY_FEATURES,
   dataSharingSends,
-  defaultAiSettings
+  defaultAiSettings,
+  featureToggleItems
 } from '@shared/aiSettings'
 import { DEFAULT_ASSISTANT_NAME, nameAssistant } from '@shared/assistantName'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
@@ -128,18 +130,59 @@ describe('AiDialSection (F-14.4, F-5.21)', () => {
 
   it('disables every toggle while AI is off and enables them all once it is on', async () => {
     await open()
-    for (const id of AI_FEATURE_IDS) {
+    const shown = AI_FEATURE_IDS.filter((id) => !MEMORY_ONLY_FEATURES.v2.includes(id))
+    for (const id of shown) {
       expect(
         checkbox(nameAssistant(AI_DATA_SHARING[id].label, DEFAULT_ASSISTANT_NAME))
       ).toBeDisabled()
     }
     expect(checkbox('Ghost text')).toBeChecked()
     await userEvent.click(useAi())
-    for (const id of AI_FEATURE_IDS) {
+    for (const id of shown) {
       expect(
         checkbox(nameAssistant(AI_DATA_SHARING[id].label, DEFAULT_ASSISTANT_NAME))
       ).toBeEnabled()
     }
+  })
+
+  it('F-16.17: a v1 project lists no reading switch; a v2 project one for both, and no v1-only toggle', async () => {
+    await open({ ...defaultAiSettings(), dial: 1 })
+    expect(screen.queryByRole('checkbox', { name: 'Story memory reading' })).toBeNull()
+    expect(screen.queryByRole('checkbox', { name: 'Story memory check' })).toBeNull()
+    expect(screen.getAllByRole('checkbox')).toHaveLength(featureToggleItems('v1').length)
+
+    useProjectStore.setState({
+      current: {
+        id: 'p-2',
+        name: 'Memory',
+        format: 'novel',
+        path: '/books/Memory.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 34,
+        storyMemory: 'v2'
+      }
+    })
+    const reading = await screen.findByRole('checkbox', { name: 'Story memory reading' })
+    expect(screen.queryByRole('checkbox', { name: 'Story memory check' })).toBeNull()
+    for (const id of MEMORY_ONLY_FEATURES.v1) {
+      const label = nameAssistant(AI_DATA_SHARING[id].label, DEFAULT_ASSISTANT_NAME)
+      expect(screen.queryByRole('checkbox', { name: label }), id).toBeNull()
+    }
+    expect(reading).toBeChecked()
+    // The one switch writes both ids.
+    await userEvent.click(reading)
+    expect(reading).not.toBeChecked()
+    await waitFor(() => expect(sets()).toHaveLength(1))
+    expect(sets()[0]?.features).toMatchObject({ reader: false, verify: false, ghostText: true })
+    await userEvent.click(reading)
+    await waitFor(() => expect(sets()).toHaveLength(2))
+    expect(sets()[1]?.features).toMatchObject({ reader: true, verify: true })
+    // The data-sharing table keeps one row per id.
+    const table = screen.getByRole('table', { name: 'What each AI feature sends' })
+    expect(within(table).getAllByRole('row').slice(1)).toHaveLength(AI_FEATURE_IDS.length)
+    expect(within(table).getByRole('row', { name: /^Story memory check / })).toBeInTheDocument()
   })
 
   it('unchecks and rechecks a toggle through the store, replacing the toggles wholesale', async () => {

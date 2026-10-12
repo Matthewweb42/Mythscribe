@@ -190,7 +190,7 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
     }
     // The planned new ids are new: none collides with a feature id this build has.
     const fresh = [...new Set(PLANNED_COST_NOTES.filter((r) => !r.existing).map((r) => r.feature))]
-    expect(fresh.sort()).toEqual(['cite', 'judge', 'navigator', 'reader', 'verify'])
+    expect(fresh.sort()).toEqual(['cite', 'judge', 'navigator'])
     expect(fresh.some((feature) => known.includes(feature))).toBe(false)
   })
 
@@ -202,8 +202,17 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
     }
   })
 
-  it('F-16.9: the shipped filing rows left the planned table and their prompts are catalogued', () => {
-    expect(SHIPPED_PLAN_ROWS.map((row) => row.id)).toEqual(['contextImport.v3', 'reviewChat.v3'])
+  it('F-16.9, F-16.17: the shipped rows left the planned table and their prompts are catalogued', () => {
+    expect(SHIPPED_PLAN_ROWS.map((row) => row.id)).toEqual([
+      'contextImport.v3',
+      'reviewChat.v3',
+      'reader.v1:first',
+      'reader.v1:window',
+      'verify.v1',
+      'verify.v1:pro',
+      'verify.v1:spot',
+      'reader.v1:card'
+    ])
     for (const row of SHIPPED_PLAN_ROWS) {
       expect(PLANNED_COST_NOTES.some((planned) => planned.id === row.id)).toBe(false)
       expect(isPromptVersion(row.prompt), row.prompt).toBe(true)

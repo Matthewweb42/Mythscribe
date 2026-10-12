@@ -7,6 +7,8 @@ import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote, normalizeForMatch } from '@shared/critique'
 import type { EditPassType } from '@shared/editPass'
 import { parseFilingAnswer, quoteParagraph } from '@shared/filing'
+import { locateQuote } from '@shared/memory/quote'
+import { parseReaderAnswer, parseVerifyAnswer } from '@shared/memory/readerAnswer'
 import { STORY_NOTES_CONTINUITY_HEADING, STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
 import { SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
 import { SceneSummary } from '@shared/summary'
@@ -781,6 +783,69 @@ function scoreSummaryFacts(sceneText: string, answer: string): LiveResult['verdi
       }
 }
 
+/** Whether two quotes overlap: one holds the other once normalised. */
+function sameQuote(a: string, b: string): boolean {
+  const x = normalizeForMatch(a)
+  const y = normalizeForMatch(b)
+  return x.includes(y) || y.includes(x)
+}
+
+/**
+ * The story-memory reader (F-16.17) scores on what the ladder keeps: the answer must parse, every
+ * quote must sit once in the paragraph it names among those sent (`locateQuote`), and no fact the
+ * test book rejects may be offered as narration in `now` mode. Recall per slot is reported.
+ */
+function scoreReader(
+  scoring: Extract<EvalCase['scoring'], { kind: 'reader' }>,
+  answer: string
+): LiveResult['verdict'] {
+  const parsed = parseReaderAnswer(answer)
+  if (parsed === null) return { kind: 'json', ok: false, problem: 'not the reader JSON' }
+  const texts: string[] = []
+  for (const paragraph of scoring.paragraphs) texts[paragraph.p] = paragraph.text
+  const sent = Array.from({ length: texts.length }, (_, p) => texts[p] ?? '')
+  const items = [...parsed.claims, ...parsed.names.flatMap((name) => name.c)]
+  const missing = items.filter((item) => !locateQuote(sent, item.p, item.q).ok).length
+  const offered = items.filter(
+    (item) =>
+      item.voice === 'narration' &&
+      item.mode === 'now' &&
+      scoring.rejected.some((label) => label.slot === item.s && sameQuote(item.q, label.quote))
+  ).length
+  const bySlot = new Map<string, { found: number; total: number }>()
+  for (const label of scoring.expected) {
+    const entry = bySlot.get(label.slot) ?? { found: 0, total: 0 }
+    entry.total += 1
+    if (items.some((item) => item.s === label.slot && sameQuote(item.q, label.quote))) {
+      entry.found += 1
+    }
+    bySlot.set(label.slot, entry)
+  }
+  const recall = [...bySlot]
+    .map(([slot, entry]) => `${slot} ${entry.found}/${entry.total}`)
+    .join(', ')
+  const problems = [
+    `quotes ${items.length - missing}/${items.length}`,
+    ...(recall === '' ? [] : [`recall ${recall}`]),
+    ...(offered > 0 ? [`${offered} rejected facts offered as narration, now`] : [])
+  ]
+  return { kind: 'json', ok: missing === 0 && offered === 0, problem: problems.join('; ') }
+}
+
+/** The story-memory checker (F-16.17): each verdict's `ok` against the label's `expect`. */
+function scoreVerify(expected: readonly boolean[], answer: string): LiveResult['verdict'] {
+  const verdicts = parseVerifyAnswer(answer)
+  if (verdicts.size === 0) return { kind: 'json', ok: false, problem: 'not { v: [...] }' }
+  const wrong = expected.flatMap((want, i) =>
+    (verdicts.get(i + 1)?.ok ?? false) === want
+      ? []
+      : [`${i + 1}: expected ${want ? 'ok' : 'not ok'}`]
+  )
+  return wrong.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: wrong.join(', ') }
+}
+
 describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
   it('sends every case once, scores the answers, and writes the fidelity report', async () => {
     const key = process.env.OPENAI_API_KEY
@@ -991,6 +1056,18 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreReviewChat(c.scoring.expected, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'reader') {
+        results.push({ ...base, answer: reply.text, verdict: scoreReader(c.scoring, reply.text) })
+        continue
+      }
+      if (c.scoring.kind === 'verify') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreVerify(c.scoring.expected, reply.text)
         })
         continue
       }

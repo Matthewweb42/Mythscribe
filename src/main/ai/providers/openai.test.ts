@@ -1,7 +1,13 @@
 import { APIUserAbortError } from 'openai'
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, OPENROUTER_BASE_URL, type Tier } from '@shared/ai'
-import { buildOpenAiProvider, mapOpenAiError, usageOf, type FetchLike } from './openai'
+import {
+  buildOpenAiProvider,
+  lowestReasoningEffort,
+  mapOpenAiError,
+  usageOf,
+  type FetchLike
+} from './openai'
 import { AiProviderError, type CompletionRequest, type StreamChunk } from './types'
 
 interface Call {
@@ -605,5 +611,55 @@ describe('usageOf', () => {
     // Never read without `reportsCost`, and a bad cost is no cost.
     expect(usageOf({ ...usage, cost: 0.002 })).not.toHaveProperty('reportedCostUsd')
     expect(usageOf({ ...usage, cost: -1 }, true)).not.toHaveProperty('reportedCostUsd')
+  })
+})
+
+describe('the lowest reasoning effort for story-memory requests (F-16.17, P2a-D15)', () => {
+  it('names each model family’s lowest effort, and none for a model that takes none', () => {
+    expect(lowestReasoningEffort('gpt-5')).toBe('minimal')
+    expect(lowestReasoningEffort('gpt-5-mini')).toBe('minimal')
+    expect(lowestReasoningEffort('gpt-5-nano-2025-08-07')).toBe('minimal')
+    expect(lowestReasoningEffort('gpt-5.1')).toBe('none')
+    expect(lowestReasoningEffort('gpt-5.4-mini')).toBe('none')
+    expect(lowestReasoningEffort('gpt-5.4-nano')).toBe('none')
+    expect(lowestReasoningEffort('o3')).toBe('low')
+    expect(lowestReasoningEffort('o4-mini')).toBe('low')
+    expect(lowestReasoningEffort('gpt-5-chat-latest')).toBeNull()
+    expect(lowestReasoningEffort('gpt-4.1-mini')).toBeNull()
+    expect(lowestReasoningEffort('gpt-50')).toBeNull()
+  })
+
+  it('sends it only on a direct OpenAI key and only when the request asks for it', async () => {
+    const direct = answering(() => json(200, completion))
+    const provider = buildOpenAiProvider(KEY, { fetch: direct.fetch })
+    await provider.complete({ ...request, lowestEffort: true })
+    await provider.complete(request)
+    expect(bodyOf(direct.calls[0]).reasoning_effort).toBe('none')
+    expect(bodyOf(direct.calls[1])).not.toHaveProperty('reasoning_effort')
+    // A model that takes no effort is never sent the field.
+    const older = answering(() => json(200, completion))
+    await buildOpenAiProvider(KEY, {
+      fetch: older.fetch,
+      resolveModel: () => 'gpt-4.1-mini'
+    }).complete({ ...request, lowestEffort: true })
+    expect(bodyOf(older.calls[0])).not.toHaveProperty('reasoning_effort')
+    // OpenRouter (its own reasoning parameter) and a local server never get it.
+    const routed = answering(() => json(200, completion))
+    await buildOpenAiProvider(KEY, {
+      fetch: routed.fetch,
+      baseURL: OPENROUTER_BASE_URL,
+      openRouter: true,
+      resolveModel: () => 'openai/gpt-5.4-mini'
+    }).complete({ ...request, lowestEffort: true, reasoning: 'off' })
+    expect(bodyOf(routed.calls[0])).not.toHaveProperty('reasoning_effort')
+    expect(bodyOf(routed.calls[0]).reasoning).toEqual({ enabled: false })
+    const local = answering(() => json(200, completion))
+    await buildOpenAiProvider('local', {
+      fetch: local.fetch,
+      baseURL: 'http://localhost:11434/v1',
+      id: 'local',
+      resolveModel: () => 'gpt-5.4-mini'
+    }).complete({ ...request, lowestEffort: true })
+    expect(bodyOf(local.calls[0])).not.toHaveProperty('reasoning_effort')
   })
 })

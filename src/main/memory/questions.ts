@@ -7,9 +7,13 @@ import {
   type NameAnswerResult,
   type NameQuestion
 } from '@shared/memory/nameQuestions'
+import { normName } from '@shared/memory/names'
+import { currentDraftId } from '../draft/draftStore'
 import type { TreeDb } from '../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../voice/profile'
 import { dismiss, dismissedKeys } from './dismissedStore'
+import { waitingNameNorms } from './reading/claimStore'
+import { settleWaitingName, type SettledName } from './reading/waiting'
 import { addAlias, createRecord, requireRecord, rosterOf } from './recordStore'
 
 /**
@@ -38,10 +42,14 @@ export function listNameQuestions(db: TreeDb): NameQuestion[] {
     perDocument.push({ nodeId: row.id, counts: counted.counts })
   }
   memo = next
-  return nameQuestions(perDocument, rosterOf(db), {
-    names: [...dismissedKeys(db, 'name')],
-    aliasKeys: dismissedKeys(db, 'alias')
-  })
+  // F-16.17: a name the reader proposed with a proved fact is asked about once it is seen once.
+  const draftId = currentDraftId(db)
+  return nameQuestions(
+    perDocument,
+    rosterOf(db),
+    { names: [...dismissedKeys(db, 'name')], aliasKeys: dismissedKeys(db, 'alias') },
+    { proved: draftId === null ? new Set() : waitingNameNorms(db, draftId) }
+  )
 }
 
 /**
@@ -98,6 +106,27 @@ export function answerQuestion(db: TreeDb, answer: NameAnswer, now: Date): NameA
       }
     }
   }
+}
+
+/**
+ * Answers a question and settles the reader's facts waiting on the name (F-16.17, P2a-D7): a Yes
+ * (*Add as*, a nickname's *Yes*) attaches them after an anchor check, a No (*Not a name*, a
+ * nickname's *No*) deletes them. A gate warning (no record made) leaves them waiting.
+ */
+export function answerNameQuestion(
+  db: TreeDb,
+  answer: NameAnswer,
+  now: Date
+): { result: NameAnswerResult; settled: SettledName | null } {
+  const result = answerQuestion(db, answer, now)
+  const norm = normName(answer.name)
+  const settled =
+    result.kind === 'gate'
+      ? null
+      : result.kind === 'record'
+        ? settleWaitingName(db, norm, result.record.id, now)
+        : settleWaitingName(db, norm, null, now)
+  return { result, settled }
 }
 
 /** Forgets the memoised counts (a project change, or one test's manuscript before the next). */
