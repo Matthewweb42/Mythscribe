@@ -257,6 +257,41 @@ describe('replaceInDoc: identity', () => {
   })
 })
 
+describe('replaceInDoc: page marks (F-16.6)', () => {
+  const FILED = { doc: 'n-1', para: 0, quote: 'The lantern hung low.' }
+  const WRITTEN = { turn: 't-1', date: '2026-10-11' }
+  const marked = (value: string, attrs: Record<string, unknown>): TiptapNodeT => ({
+    ...paragraph(value),
+    attrs: { origin: null, notCanon: false, aiFiled: null, aiWritten: null, ...attrs }
+  })
+
+  it('clears aiFiled and aiWritten on a block whose words changed, keeping its other attributes', () => {
+    const source = doc(
+      marked('The lantern hung low.', { aiFiled: FILED, notCanon: true }),
+      marked('A lantern too.', { aiWritten: WRITTEN })
+    )
+    const result = replaceInDoc(source, options('lantern', 'lamp'))
+    expect(result.doc.content?.map((block) => block.attrs)).toEqual([
+      { origin: null, notCanon: true, aiFiled: null, aiWritten: null },
+      { origin: null, notCanon: false, aiFiled: null, aiWritten: null }
+    ])
+  })
+
+  it('leaves the marks of a block whose words did not change, and a block inside a changed one', () => {
+    const untouched = marked('Nothing here.', { aiFiled: FILED })
+    const inner = marked('Quiet.', { aiWritten: WRITTEN })
+    const quote: TiptapNodeT = { type: 'blockquote', content: [inner, paragraph('a lantern')] }
+    const result = replaceInDoc(doc(untouched, quote), options('lantern', 'lamp'))
+    expect(result.doc.content?.[0]).toBe(untouched)
+    expect(result.doc.content?.[1]?.content?.[0]).toBe(inner)
+  })
+
+  it('adds no attributes to a manuscript block', () => {
+    const result = replaceInDoc(doc(paragraph('a lantern')), options('lantern', 'lamp'))
+    expect(result.doc.content?.[0]).toEqual(paragraph('a lamp'))
+  })
+})
+
 describe('countInDoc / samplesInDoc', () => {
   const source = doc(
     paragraph('The lantern swung.'),

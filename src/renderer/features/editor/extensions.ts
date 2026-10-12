@@ -16,7 +16,7 @@ import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
 import { NameCheck } from './nameCheck'
 import { OriginParagraph } from './originParagraph'
-import { PageParagraph } from './pageParagraph'
+import { PageHeadingMarks, PageParagraph } from './pageParagraph'
 import { RewriteTarget } from './rewriteTarget'
 import { SmartTypography } from './smartTypography'
 import { TagRange } from './TagRange'
@@ -312,7 +312,7 @@ export interface PageSchemaOptions {
  * document ever gains the page's attributes.
  */
 export function buildPageExtensions({ sceneBreak, onSave }: PageSchemaOptions): Extensions {
-  return coreExtensions(PageParagraph, sceneBreak, onSave)
+  return [...coreExtensions(PageParagraph, sceneBreak, onSave), PageHeadingMarks]
 }
 
 /**

@@ -35,6 +35,28 @@ export type AiWritten = z.infer<typeof AiWritten>
 /** Every attribute the page paragraph adds to the manuscript paragraph, by stored name. */
 export const PAGE_ATTRS = [NOT_CANON_ATTR, AI_FILED_ATTR, AI_WRITTEN_ATTR] as const
 
+/**
+ * The marks that say an AI wrote a block. The rule (F-16.6): once the author changes a block's
+ * words they are hers, and these marks go. The page editor applies it to typing
+ * (`clearAiMarks`); main's own author writes to stored pages (Replace in project) apply it with
+ * `withoutAiMarks`.
+ */
+export const AI_MARK_ATTRS = [AI_FILED_ATTR, AI_WRITTEN_ATTR] as const
+
+/**
+ * `node` with its AI marks cleared (null, as the editor stores a cleared mark), for a block whose
+ * words the author changed. The very same object when it carries none, so a manuscript block,
+ * which never has these attributes, is never touched.
+ */
+export function withoutAiMarks(node: TiptapNodeT): TiptapNodeT {
+  const attrs = node.attrs
+  if (attrs === undefined) return node
+  if (AI_MARK_ATTRS.every((attr) => attrs[attr] === null || attrs[attr] === undefined)) return node
+  const cleared: Record<string, unknown> = { ...attrs }
+  for (const attr of AI_MARK_ATTRS) if (attr in cleared) cleared[attr] = null
+  return { ...node, attrs: cleared }
+}
+
 /** The `aiFiled` mark of a stored block, or null when it has none (or an unreadable one). */
 export function aiFiledOf(node: TiptapNodeT): AiFiled | null {
   const parsed = AiFiled.safeParse(node.attrs?.[AI_FILED_ATTR])

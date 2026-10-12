@@ -2,7 +2,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { PlanRef } from '@shared/planLinks'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { getPlanLinks } from '../ai/planLinks'
 import { summarySource, staleSummaryNodeIds } from '../ai/summarize'
 import type { NodeRow } from '../db/schema'
 import { compileManuscript, compileSource } from '../document/compileStore'
@@ -11,6 +13,7 @@ import { wordCountReport } from '../document/wordCountReport'
 import { listDrafts } from '../draft/draftStore'
 import { goalsStatus, manuscriptWordCount } from '../goals/goalsStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
+import { setPlanLinkState } from '../project/settingsStore'
 import { ensureResearchRoot } from '../project/seed'
 import { createSeededProject } from '../project/testProject'
 import { replaceNodePassages, prunePassages, searchPassages } from '../search/passageIndex'
@@ -26,8 +29,8 @@ import { createResearchNote } from './researchStore'
  * F-16.8 (plan P1 §2.1, decision P1-D9): the Research section is never part of the book. Each
  * exclusion is asserted here against a project holding one manuscript scene and one Research
  * page that share nothing but a word: compile, statistics and the word-count report, goals,
- * drafts, snapshots, the voice profile, summaries and the v1 passage index leave the page out;
- * word search (as a source document) and Replace in project take it in.
+ * drafts, snapshots, plan links, the voice profile, summaries and the v1 passage index leave the
+ * page out; word search (as a source document) and Replace in project take it in.
  */
 
 let tmp: string
@@ -79,6 +82,10 @@ describe('the Research section is left out of the book (F-16.8)', () => {
     expect(manuscriptWordCount(db, page.id)).toBeNull()
     const stats = statsDashboard(db)
     expect(JSON.stringify(stats)).not.toContain(page.id)
+    // Every total is the manuscript's: the page's words are in none of them.
+    expect(stats.scenes.count).toBe(manuscriptDocuments(db).length)
+    expect(stats.scenes.longest?.id).toBe(scene.id)
+    expect(stats.pov.reduce((sum, row) => sum + row.words, 0)).toBe(sceneWords)
     expect(wordCountReport(db, null).manuscript.words).toBe(sceneWords)
   })
 
@@ -101,6 +108,25 @@ describe('the Research section is left out of the book (F-16.8)', () => {
         milestone: false
       })
     ).toThrow('Research documents are not part of snapshots')
+  })
+
+  it('is never a plan or a written scene for plan links', () => {
+    const [, planned] = manuscriptDocuments(db)
+    if (planned === undefined) throw new Error('no planned scene')
+    expect(planned.wordCount).toBe(0)
+    const emptyNote = createResearchNote(db, 'novel', { title: 'Empty' })
+    const plan = (nodeId: string): PlanRef => ({ kind: 'scene', nodeId })
+    setPlanLinkState(db, {
+      suggestions: [
+        // The written page is not a written scene, and the empty note is not an open plan.
+        { plan: plan(planned.id), sceneId: page.id, reason: 'page as the scene' },
+        { plan: plan(emptyNote.id), sceneId: scene.id, reason: 'note as the plan' },
+        { plan: plan(planned.id), sceneId: scene.id, reason: 'the book' }
+      ],
+      dismissed: [],
+      aiApplied: []
+    })
+    expect(getPlanLinks(db).suggestions.map((link) => link.reason)).toEqual(['the book'])
   })
 
   it('never teaches the voice profile, is never summarised, and is never in the v1 passage index', () => {

@@ -16,7 +16,7 @@ import {
   type ContextSkipped
 } from '@shared/contextLibrary'
 import type * as schema from '../db/schema'
-import { contextFile, type ContextFileRow } from '../db/schema'
+import { contextFile, researchDoc, type ContextFileRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { ASSETS_DIR } from '../project/projectStore'
 import { countTextWords, extractContextText } from './extract'
@@ -66,13 +66,29 @@ export function toContextFile(row: ContextFileRow): ContextFile {
   }
 }
 
-/** Every file, newest first (ties by name). */
+/**
+ * The rows a Research document was made from (F-16.8, story memory v2): Research's own
+ * originals, kept in the same folder. The Library never lists, matches, updates or replaces
+ * them, so a page's Open original always opens the file that page was made from. Empty in a
+ * project with no Research.
+ */
+export function researchOriginalIds(db: LibraryDb): Set<string> {
+  const ids = new Set<string>()
+  for (const row of db.select({ id: researchDoc.contextFileId }).from(researchDoc).all()) {
+    if (row.id !== null) ids.add(row.id)
+  }
+  return ids
+}
+
+/** Every Library file, newest first (ties by name); Research's originals are not the Library's. */
 export function listContextFiles(db: LibraryDb): ContextFile[] {
+  const research = researchOriginalIds(db)
   return db
     .select()
     .from(contextFile)
     .orderBy(desc(contextFile.created), contextFile.name)
     .all()
+    .filter((row) => !research.has(row.id))
     .map(toContextFile)
 }
 
@@ -130,9 +146,10 @@ export interface ContextFileOutcome {
 
 /**
  * How a file whose name matches a stored one is taken: `update` (the Library's rule, F-9.8: it
- * is a newer version of that file and replaces its original) or `separate` (F-16.8, Research:
- * only an identical file is the same one; a different file of the same name gets a row of its
- * own, so an original a Research document was made from is never swapped under it).
+ * is a newer version of that file and replaces its original; Research's originals,
+ * `researchOriginalIds`, are never matched) or `separate` (F-16.8, Research: only an identical
+ * file is the same one; a different file of the same name gets a row of its own, so an original
+ * a Research document was made from is never swapped under it).
  */
 export type SameNameRule = 'update' | 'separate'
 
@@ -154,10 +171,12 @@ const skippedOutcome = (
  * Adds files to the library, one outcome per file in the order given. Each one is checked (a
  * type the library takes, at most `CONTEXT_FILE_MAX_BYTES`, readable), its text extracted, and
  * its original copied in under a minted name. Under the `update` rule a file whose name matches
- * a stored one (any case), or the row `replaceId` names, is an update: an identical file changes
- * nothing, a different one replaces the stored original and keeps what was last sorted. Under
- * `separate` only a stored file of the same name and the same bytes is the same file. A refused
- * file is skipped with the reason, never the whole batch.
+ * a stored Library file (any case), or the row `replaceId` names, is an update: an identical file
+ * changes nothing, a different one replaces the stored original and keeps what was last sorted.
+ * A Research original is never updated (VALIDATION for a `replaceId` naming one), so a Library
+ * file of the same name gets a row of its own. Under `separate` only a stored file of the same
+ * name and the same bytes is the same file. A refused file is skipped with the reason, never the
+ * whole batch.
  */
 export async function addContextFileOutcomes(
   db: LibraryDb,
@@ -167,8 +186,14 @@ export async function addContextFileOutcomes(
 ): Promise<ContextFileOutcome[]> {
   const outcomes: ContextFileOutcome[] = []
   const sameName = options.sameName ?? 'update'
+  const research = researchOriginalIds(db)
   const replacing =
     options.replaceId === undefined ? undefined : requireContextFileRow(db, options.replaceId)
+  if (replacing !== undefined && research.has(replacing.id)) {
+    throw new AppError('VALIDATION', 'That file belongs to a Research document', {
+      id: replacing.id
+    })
+  }
   for (const source of sources) {
     const name = path.basename(source.name)
     const type = contextFileTypeOf(name)
@@ -203,7 +228,11 @@ export async function addContextFileOutcomes(
     const target =
       replacing ??
       (sameName === 'update'
-        ? db.select().from(contextFile).all().find(sameNamed)
+        ? db
+            .select()
+            .from(contextFile)
+            .all()
+            .find((row) => sameNamed(row) && !research.has(row.id))
         : db
             .select()
             .from(contextFile)

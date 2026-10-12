@@ -46,6 +46,7 @@ import { listEntities } from '../entity/entityStore'
 import { allFactsForEntities, factsForEntities, listFactsForEntity } from '../entity/factStore'
 import { sceneCardFor } from '../knowledge/sceneCard'
 import { searchPassages } from '../search/passageIndex'
+import { researchSubtree } from '../research/researchTree'
 import { nodesInTreeOrder } from '../search/searchStore'
 import { listMentionsForTag, mentionParagraphsForTag } from '../tag/mentionStore'
 import { findTagByNameOrAlias, getTag, listTags } from '../tag/tagStore'
@@ -83,10 +84,16 @@ export interface AgentProject {
 /**
  * Loads the project for one run. `activeId` is the node the author has selected: it puts now at
  * that scene (F-5.23), or, outside the manuscript, at the latest written scene.
+ *
+ * The Research section (F-16.8, story memory v2) is not in the run at all: no ref, no outline
+ * line, nothing a tool can read, merge, move or write into, and a Research page that is open is
+ * not the run's focus. Ms Scribe reads Research from P3, through its own labelled tools, and never
+ * a Not canon page or paragraph as true (design §2.2). A v1 project has no Research.
  */
 export function loadAgentProject(db: TreeDb, activeId: string | null = null): AgentProject {
   const all = listNodes(db)
-  const rows = nodesInTreeOrder(all)
+  const research = researchSubtree(all)
+  const rows = nodesInTreeOrder(all).filter((row) => !research.has(row.id))
   const refOf = new Map<string, string>()
   const byRef = new Map<string, NodeRow>()
   rows.forEach((row, index) => {

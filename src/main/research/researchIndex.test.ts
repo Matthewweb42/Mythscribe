@@ -91,6 +91,29 @@ describe('the passage index covers Research (F-16.8)', () => {
     expect(stalePassageOwners(db).filter((owner) => owner.kind === 'research')).toEqual([])
   })
 
+  it('reads a heading marked Not canon as notCanon, and the canon text under it as canon', () => {
+    const note = createResearchNote(db, 'novel', {})
+    saveDocument(db, note.id, {
+      type: 'doc',
+      content: [
+        {
+          type: 'heading',
+          attrs: { level: 2, notCanon: true },
+          content: [{ type: 'text', text: 'Possible ending: the harbour floods' }]
+        },
+        { type: 'paragraph', content: [{ type: 'text', text: 'The harbour wall is old.' }] }
+      ]
+    })
+    indexOwner(db, 'research', note.id, at)
+    expect(hits('harbour').map((hit) => [hit[2], hit[3]])).toEqual(
+      expect.arrayContaining([
+        ['notCanon', 'notCanon'],
+        ['canon', 'note']
+      ])
+    )
+    expect(hits('floods').map((hit) => hit[2])).toEqual(['notCanon'])
+  })
+
   it('reads every paragraph of a page switched Not canon as notCanon', () => {
     const note = createResearchNote(db, 'novel', {})
     saveDocument(db, note.id, page('Whales sing at dusk.', 'Whales sleep upright.'))

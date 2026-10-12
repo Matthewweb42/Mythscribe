@@ -141,7 +141,7 @@ select {
   pointer-events: none;
 }
 
-.ms-editor.ms-page p[data-not-canon] {
+.ms-editor.ms-page :is(p, h1, h2, h3)[data-not-canon] {
   position: relative;
   color: var(--color-fg-muted);
   background-image: repeating-linear-gradient(
@@ -151,7 +151,7 @@ select {
   );
 }
 
-.ms-editor.ms-page p[data-not-canon]::after {
+.ms-editor.ms-page :is(p, h1, h2, h3)[data-not-canon]::after {
   content: 'Not canon';
   position: absolute;
   top: 0.25em;

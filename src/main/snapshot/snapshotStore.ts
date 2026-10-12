@@ -18,8 +18,9 @@ import { node, snapshot, snapshotText, type NodeRow, type SnapshotRow } from '..
 import { requireDocument, writeDocumentText, type StoredText } from '../document/documentStore'
 import { activeDraftName, diffDocument } from '../draft/draftStore'
 import { AppError } from '../ipc/errors'
+import { isUnderResearch } from '../research/researchTree'
 import { listNodes, type TreeDb } from '../tree/treeStore'
-import { projectDocuments, researchSubtree } from '../voice/profile'
+import { projectDocuments } from '../voice/profile'
 
 /**
  * Snapshots (F-8.6): frozen copies of document text, of one document or of every document in
@@ -155,7 +156,7 @@ export function takeSnapshot(db: TreeDb, input: TakeSnapshot): SnapshotList {
     const kind = input.milestone ? 'milestone' : 'manual'
     if (input.scope === 'document') {
       const doc = requireDocument(tx, input.nodeId)
-      if (researchSubtree(listNodes(tx)).has(doc.id)) {
+      if (isUnderResearch(tx, doc)) {
         throw new AppError('VALIDATION', 'Research documents are not part of snapshots', {
           nodeId: doc.id
         })

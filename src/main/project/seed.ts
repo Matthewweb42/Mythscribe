@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq, isNull, max } from 'drizzle-orm'
+import { isNull, max } from 'drizzle-orm'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { EDITOR_SETTINGS_KEY, defaultEditorSettings } from '@shared/editorSettings'
 import { levelLabel, type SectionType } from '@shared/labels'
 import { node, type NodeInsert } from '../db/schema'
+import { researchRootId } from '../research/researchTree'
 import type { TreeDb } from '../tree/treeStore'
 
 /**
@@ -80,12 +81,8 @@ export function seedSettings(format: NovelFormat): { key: string; value: string 
  */
 export function ensureResearchRoot(db: TreeDb, now: Date = new Date()): string {
   return db.transaction((tx) => {
-    const existing = tx
-      .select({ id: node.id })
-      .from(node)
-      .where(and(isNull(node.parentId), eq(node.sectionType, 'research')))
-      .get()
-    if (existing !== undefined) return existing.id
+    const existing = researchRootId(tx)
+    if (existing !== null) return existing
     const last = tx
       .select({ position: max(node.position) })
       .from(node)

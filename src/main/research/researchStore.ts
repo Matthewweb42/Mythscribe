@@ -1,4 +1,4 @@
-import { asc, eq, isNull, and } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { contextFileTypeOf, type ContextFileType } from '@shared/contextLibrary'
 import type { NovelFormat } from '@shared/ipc/contract'
 import {
@@ -9,7 +9,7 @@ import {
   type ResearchDoc
 } from '@shared/research'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
-import { contextFile, node, researchDoc, type NodeRow, type ResearchDocRow } from '../db/schema'
+import { contextFile, researchDoc, type NodeRow, type ResearchDocRow } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
 import { readDocx } from '../import/docx'
 import type { ImportBlock } from '../import/blocks'
@@ -22,6 +22,13 @@ import {
   type ContextSource
 } from '../library/libraryStore'
 import { createNode, getNode, listNodes, type TreeDb } from '../tree/treeStore'
+import {
+  isResearchRoot,
+  isUnderResearch,
+  researchDocumentIds,
+  researchRootId,
+  subtreeInOrder
+} from './researchTree'
 
 /**
  * The Research section (F-16.8, story memory v2; plan P1 §2.2): the one writer of
@@ -35,40 +42,12 @@ import { createNode, getNode, listNodes, type TreeDb } from '../tree/treeStore'
  * file opens with Open original. Nothing here is AI and nothing leaves the machine.
  */
 
-/** The Research root's id, or null: a v1 project, or a v2 one not opened yet. */
-export function researchRootId(db: TreeDb): string | null {
-  return (
-    db
-      .select({ id: node.id })
-      .from(node)
-      .where(and(isNull(node.parentId), eq(node.sectionType, 'research')))
-      .get()?.id ?? null
-  )
-}
-
-/** Whether `row` sits under the Research root (the root itself is not "in" it). */
-function underResearch(db: TreeDb, row: NodeRow): boolean {
-  for (let parentId = row.parentId; parentId !== null;) {
-    const parent = getNode(db, parentId)
-    if (parent === undefined) return false
-    if (parent.parentId === null) return parent.sectionType === 'research'
-    parentId = parent.parentId
-  }
-  return false
-}
-
-/** Whether node `id` is a document or folder under the Research root. */
-export function isResearchNode(db: TreeDb, id: string): boolean {
-  const row = getNode(db, id)
-  return row !== undefined && underResearch(db, row)
-}
-
 /** The Research document behind `nodeId`: NOT_FOUND when it is gone, VALIDATION when it is something else. */
 function requireResearchDocument(db: TreeDb, nodeId: string): NodeRow {
   const row = getNode(db, nodeId)
   if (row === undefined)
     throw new AppError('NOT_FOUND', 'That document no longer exists', { nodeId })
-  if (row.kind !== 'document' || !underResearch(db, row)) {
+  if (row.kind !== 'document' || !isUnderResearch(db, row)) {
     throw new AppError('VALIDATION', 'Not a Research document', { nodeId })
   }
   return row
@@ -80,8 +59,7 @@ function requireResearchFolder(db: TreeDb, parentId: string | undefined): NodeRo
   if (id === null) throw new AppError('VALIDATION', 'This project has no Research section')
   const row = getNode(db, id)
   if (row === undefined) throw new AppError('NOT_FOUND', 'That folder no longer exists', { id })
-  const isRoot = row.parentId === null && row.sectionType === 'research'
-  if (row.kind !== 'folder' || (!isRoot && !underResearch(db, row))) {
+  if (row.kind !== 'folder' || (!isResearchRoot(row) && !isUnderResearch(db, row))) {
     throw new AppError('VALIDATION', 'Not a Research folder', { id })
   }
   return row
@@ -124,43 +102,9 @@ export function researchDocOf(db: TreeDb, nodeId: string): ResearchDoc {
   return toResearchDoc(nodeId, found?.row, found?.fileName ?? null)
 }
 
-/** The ids of every document under the Research root, in the order the tree shows them. */
-export function researchDocumentIds(
-  db: TreeDb,
-  rows: readonly NodeRow[] = listNodes(db)
-): string[] {
-  const root = rows.find((row) => row.parentId === null && row.sectionType === 'research')
-  if (root === undefined) return []
-  const children = childrenByParent(rows)
-  const ids: string[] = []
-  const walk = (parentId: string): void => {
-    for (const row of children.get(parentId) ?? []) {
-      if (row.kind === 'document') ids.push(row.id)
-      walk(row.id)
-    }
-  }
-  walk(root.id)
-  return ids
-}
-
-/** Child rows per parent in position order (`listNodes` already sorts by parent and position). */
-function childrenByParent(rows: readonly NodeRow[]): Map<string, NodeRow[]> {
-  const children = new Map<string, NodeRow[]>()
-  for (const row of rows) {
-    if (row.parentId === null) continue
-    const list = children.get(row.parentId)
-    if (list) list.push(row)
-    else children.set(row.parentId, [row])
-  }
-  for (const list of children.values()) {
-    list.sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
-  }
-  return children
-}
-
 /** Every Research document's meta, in tree order. */
 export function listResearchDocs(db: TreeDb): ResearchDoc[] {
-  const ids = researchDocumentIds(db)
+  const ids = researchDocumentIds(listNodes(db))
   const rows = new Map(
     db
       .select({ row: researchDoc, fileName: contextFile.name })
@@ -289,7 +233,7 @@ function documentOfFile(db: TreeDb, contextFileId: string): NodeRow | undefined 
     .all()
   for (const { nodeId } of rows) {
     const row = getNode(db, nodeId)
-    if (row !== undefined && underResearch(db, row)) return row
+    if (row !== undefined && isUnderResearch(db, row)) return row
   }
   return undefined
 }
@@ -302,7 +246,9 @@ export const RESEARCH_TYPES_MESSAGE = 'Research takes Word, Markdown, text, PDF,
  * (`addContextFileOutcomes`, the `separate` rule: only the same bytes under the same name are
  * the same file), then becomes a document under `parentId` (default the root), in the order
  * given. A file already in Research is skipped with the document's title; a file the library
- * already held without a document gets one. A refused file is skipped with the reason.
+ * already held without a document gets one, and from then on the row is Research's
+ * (`researchOriginalIds`: the Library no longer lists or updates it). A refused file is skipped
+ * with the reason.
  */
 export async function addResearchFiles(
   db: TreeDb,
@@ -385,16 +331,9 @@ export function copyResearchMeta(
   copies: readonly NodeRow[],
   now: Date = new Date()
 ): void {
-  const rows = listNodes(db)
-  const source = rows.find((row) => row.id === sourceId)
-  if (source === undefined || !underResearch(db, source)) return
-  const children = childrenByParent(rows)
-  const order: NodeRow[] = []
-  const walk = (row: NodeRow): void => {
-    order.push(row)
-    for (const child of children.get(row.id) ?? []) walk(child)
-  }
-  walk(source)
+  const source = getNode(db, sourceId)
+  if (source === undefined || !isUnderResearch(db, source)) return
+  const order = subtreeInOrder(listNodes(db), sourceId)
   db.transaction((tx) => {
     order.forEach((original, at) => {
       const copy = copies[at]

@@ -1020,10 +1020,13 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
   const layout = useLayoutStore((s) => s.layout)
   const focus = useFocusStore((s) => s.active)
   const nodeId = useMainNodeId()
-  // Every non-root node carries tags; a section root is never selectable, but the guard keeps a
-  // stray id from asking main for links it refuses.
+  // Every non-root node of the book carries tags; a section root is never selectable, but the
+  // guard keeps a stray id from asking main for links it refuses. F-16.8: a Research page has no
+  // tags (story memory v2 has none to give it).
   const taggable = useTreeStore((s) =>
-    nodeId === null ? false : (s.byId[nodeId]?.parentId ?? null) !== null
+    nodeId === null
+      ? false
+      : (s.byId[nodeId]?.parentId ?? null) !== null && s.sectionOf[nodeId] !== 'research'
   )
   const render = (id: DockPanelId): React.ReactNode => {
     switch (id) {

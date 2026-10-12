@@ -29,7 +29,10 @@ interface ResearchState {
   clear: () => void
 }
 
-/** Bumped by load and clear, so an answer for a project that closed is dropped. */
+/**
+ * The open project's turn: bumped by `clear` only, so an answer for a project that closed is
+ * dropped. A `load` in flight never voids an upload's or a note's answer.
+ */
 let generation = 0
 
 const merge = (
@@ -46,10 +49,13 @@ export const useResearchStore = create<ResearchState>((set, get) => ({
   loaded: false,
 
   async load() {
-    const mine = ++generation
-    const docs = await ipc().invoke('research:list', undefined)
+    const mine = generation
+    const listed = await ipc().invoke('research:list', undefined)
     if (mine !== generation) return
-    set({ docs: merge({}, docs), loaded: true })
+    // What the store holds is at least as new as the list: every change it makes is merged as
+    // main answers it, and the list may have been read before that answer. So the list only adds.
+    const held = get().docs
+    set({ docs: merge(merge({}, listed), Object.values(held)), loaded: true })
   },
 
   async add(parentId) {

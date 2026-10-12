@@ -6,7 +6,7 @@ import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
 import { EMPTY_SCENE_META } from '@shared/sceneMeta'
 import { UNAVAILABLE_SUMMARY } from '@shared/summary'
 import type { TiptapNodeT } from '@shared/tiptap'
-import { treeFixture } from '@renderer/features/manuscript/treeFixture'
+import { researchTreeFixture, treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { resetSessionStore } from '@renderer/features/project/sessionStore'
@@ -269,6 +269,18 @@ describe('NotesPanel (F-3.7)', () => {
     await userEvent.selectOptions(picker, 'canon')
     expect(picker).toHaveValue('canon')
     expect(useSceneMetaStore.getState().docs['sc-1']?.content?.notesStatus).toBe('canon')
+  })
+
+  it('has no notes pad and no pin for a Research page, which is its own note (F-16.8)', () => {
+    useTreeStore.setState({ ...buildIndex(researchTreeFixture), loaded: true })
+    openNotes()
+    render(<Host id="r-note" />)
+    expect(screen.getByTestId('notes-research')).toHaveTextContent(
+      'A Research page is its own note: write on the page.'
+    )
+    expect(screen.queryByRole('button', { name: 'Pin notes' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Notes status' })).not.toBeInTheDocument()
+    expect(gets).toEqual([])
   })
 
   it('has notes only, no synopsis or details, for a node without a hierarchy level', () => {

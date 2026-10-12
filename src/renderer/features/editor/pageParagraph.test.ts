@@ -92,6 +92,46 @@ describe('the page paragraph (F-16.6, F-16.8)', () => {
     expect(attrsOf(ed, 1)).toMatchObject({ aiWritten: null })
   })
 
+  it('keeps the mark of a paragraph whose words stay: Enter at its end or start, Backspace below it', () => {
+    const ed = open(
+      paragraph('Filed.', { [AI_FILED_ATTR]: FILED }),
+      paragraph('Next.', { [AI_WRITTEN_ATTR]: WRITTEN })
+    )
+    const marks = (): [string, unknown, unknown][] =>
+      (TiptapNode.parse(ed.getJSON()).content ?? []).map((block) => [
+        (block.content ?? []).map((child) => child.text ?? '').join(''),
+        block.attrs?.[AI_FILED_ATTR] ?? null,
+        block.attrs?.[AI_WRITTEN_ATTR] ?? null
+      ])
+    // Enter at the end: a new line of her own, the filed line untouched.
+    ed.chain()
+      .setTextSelection(startOf(ed, 0) + 'Filed.'.length)
+      .splitBlock()
+      .run()
+    expect(marks()).toEqual([
+      ['Filed.', FILED, null],
+      ['', null, null],
+      ['Next.', null, WRITTEN]
+    ])
+    // Backspace on that empty line takes it away and leaves the filed line as it was.
+    ed.chain().setTextSelection(startOf(ed, 1)).joinBackward().run()
+    expect(marks()).toEqual([
+      ['Filed.', FILED, null],
+      ['Next.', null, WRITTEN]
+    ])
+    // Enter at the start: the mark stays with the words, never on the empty line above them.
+    ed.chain().setTextSelection(startOf(ed, 1)).splitBlock().run()
+    expect(marks()).toEqual([
+      ['Filed.', FILED, null],
+      ['', null, null],
+      ['Next.', null, WRITTEN]
+    ])
+    // Joining the next paragraph into the filed one changes its words: the marks go.
+    ed.chain().setTextSelection(startOf(ed, 1)).joinBackward().run()
+    ed.chain().setTextSelection(startOf(ed, 1)).joinBackward().run()
+    expect(marks()).toEqual([['Filed.Next.', null, null]])
+  })
+
   it('keeps the marks through the app’s own writes, formatting, and the Not canon switch', () => {
     const ed = open(paragraph('Filed text.', { [AI_FILED_ATTR]: FILED }))
     const tr = ed.state.tr.insertText(' More.', ed.state.doc.content.size - 1)
@@ -139,6 +179,28 @@ describe('the page paragraph (F-16.6, F-16.8)', () => {
     expect([0, 1].map((i) => attrsOf(ed, i)[AI_FILED_ATTR])).toEqual([null, null])
   })
 
+  it('marks a heading Not canon too, and main reads it so', () => {
+    const ed = open(paragraph('Intro.'))
+    ed.commands.setContent({
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Possible ending' }] },
+        paragraph('Mara dies.')
+      ]
+    })
+    ed.chain().setTextSelection(2).toggleNotCanon().run()
+    const json = ed.getJSON()
+    expect(json.content?.[0]?.attrs).toMatchObject({ level: 2, notCanon: true })
+    expect(json.content?.[1]?.attrs).toMatchObject({ notCanon: false })
+    expect(ed.getHTML()).toContain('<h2 data-not-canon="">')
+    expect(markedParagraphs(json).map((p) => [p.text, p.notCanon])).toEqual([
+      ['Possible ending', true],
+      ['Mara dies.', false]
+    ])
+    ed.chain().setTextSelection(2).toggleNotCanon().run()
+    expect(ed.getJSON().content?.[0]?.attrs).toMatchObject({ notCanon: false })
+  })
+
   it('leaves the manuscript schema as it was: no page attribute on its paragraph', () => {
     const manuscript = manuscriptSchema('* * *').nodes.paragraph?.spec.attrs ?? {}
     expect(Object.keys(manuscript).sort()).toEqual(['origin', 'textAlign'])
@@ -148,6 +210,15 @@ describe('the page paragraph (F-16.6, F-16.8)', () => {
       'aiWritten',
       'notCanon',
       'origin',
+      'textAlign'
+    ])
+    expect(Object.keys(manuscriptSchema('* * *').nodes.heading?.spec.attrs ?? {}).sort()).toEqual([
+      'level',
+      'textAlign'
+    ])
+    expect(Object.keys(pageSchema('* * *').nodes.heading?.spec.attrs ?? {}).sort()).toEqual([
+      'level',
+      'notCanon',
       'textAlign'
     ])
     // Nothing of the manuscript's own tools is in the page schema.

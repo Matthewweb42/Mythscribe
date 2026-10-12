@@ -20,7 +20,7 @@ import { parseStoredTiptap } from '../document/documentStore'
 import { listCategories } from '../entity/categoryStore'
 import { listEntities } from '../entity/entityStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
-import { researchSubtree } from '../voice/profile'
+import { researchSubtree } from '../research/researchTree'
 
 /**
  * Global search (F-10.1): one scan of the stored text per query, no index table. A novel is a

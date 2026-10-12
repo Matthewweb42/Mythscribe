@@ -16,9 +16,9 @@ import { sha256 } from '../ai/request'
 import { memoryScan, record, researchDoc, type NodeRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
 import { getCompileState } from '../project/settingsStore'
-import { researchDocumentIds } from '../research/researchStore'
+import { isUnderResearch, researchDocumentIds } from '../research/researchTree'
 import { ftsQuery } from '../search/passageIndex'
-import { listNodes, type TreeDb } from '../tree/treeStore'
+import { getNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { deleteScanRow, getScanHashes, scanHashesOf, setScanHash } from './scanStore'
 
@@ -205,14 +205,14 @@ export function indexOwner(db: TreeDb, kind: MemoryOwnerKind, id: string, now: D
     if (rows === null) throw new AppError('NOT_FOUND', 'That record no longer exists', { id })
     return writeOwner(db, 'record', id, rows, now)
   }
-  const nodes = listNodes(db)
   if (kind === 'research') {
-    const row = researchDocumentIds(db, nodes).includes(id)
-      ? nodes.find((each) => each.id === id)
-      : undefined
-    if (row === undefined) throw new AppError('NOT_FOUND', 'Not a Research document', { id })
+    const row = getNode(db, id)
+    if (row?.kind !== 'document' || !isUnderResearch(db, row)) {
+      throw new AppError('NOT_FOUND', 'Not a Research document', { id })
+    }
     return writeOwner(db, 'research', id, researchRows(db, row), now)
   }
+  const nodes = listNodes(db)
   const row = manuscriptDocuments(db, nodes).find((document) => document.id === id)
   if (row === undefined) throw new AppError('NOT_FOUND', 'Not a manuscript document', { id })
   if (kind === 'sceneNote') return writeOwner(db, 'sceneNote', id, noteRows(row), now)
@@ -231,7 +231,10 @@ export function indexScene(db: TreeDb, nodeId: string, now: Date): boolean {
  * Research document, else the scene and its notes (NOT_FOUND for anything else).
  */
 export function indexNodePassages(db: TreeDb, nodeId: string, now: Date): boolean {
-  if (researchDocumentIds(db).includes(nodeId)) return indexOwner(db, 'research', nodeId, now)
+  const row = getNode(db, nodeId)
+  if (row?.kind === 'document' && isUnderResearch(db, row)) {
+    return indexOwner(db, 'research', nodeId, now)
+  }
   return indexScene(db, nodeId, now)
 }
 
@@ -273,7 +276,7 @@ export function stalePassageOwners(db: TreeDb): StaleOwner[] {
   }
   const research = scanHashesOf(db, 'research')
   const byId = new Map(nodes.map((row) => [row.id, row]))
-  for (const id of researchDocumentIds(db, nodes)) {
+  for (const id of researchDocumentIds(nodes)) {
     const row = byId.get(id)
     if (row !== undefined && research.get(id)?.passagesHash !== rowsHash(researchRows(db, row))) {
       stale.push({ kind: 'research', id })
@@ -310,7 +313,7 @@ function liveOwners(db: TreeDb): LiveOwners {
   const nodes = listNodes(db)
   return {
     scenes: new Set(manuscriptDocuments(db, nodes).map((row) => row.id)),
-    research: new Set(researchDocumentIds(db, nodes)),
+    research: new Set(researchDocumentIds(nodes)),
     records: new Set(
       db
         .select({ id: record.id })

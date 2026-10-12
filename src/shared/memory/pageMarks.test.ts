@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   AI_FILED_ATTR,
+  AI_MARK_ATTRS,
   AI_WRITTEN_ATTR,
   NOT_CANON_ATTR,
   PAGE_ATTRS,
   aiFiledOf,
   aiWrittenOf,
   isNotCanon,
-  markedParagraphs
+  markedParagraphs,
+  withoutAiMarks
 } from './pageMarks'
 
 describe('page marks in stored JSON (F-16.6, F-16.8)', () => {
@@ -55,5 +57,26 @@ describe('page marks in stored JSON (F-16.6, F-16.8)', () => {
       { index: 1, text: 'Maybe.', notCanon: true },
       { index: 2, text: 'Quoted maybe.', notCanon: true }
     ])
+  })
+
+  it('clears the AI marks of a block, and returns a block without any as it is', () => {
+    expect(AI_MARK_ATTRS).toEqual(['aiFiled', 'aiWritten'])
+    const filed = {
+      type: 'paragraph',
+      attrs: {
+        [NOT_CANON_ATTR]: true,
+        [AI_FILED_ATTR]: { doc: 'n-1', para: 0, quote: 'q' },
+        [AI_WRITTEN_ATTR]: null
+      }
+    }
+    expect(withoutAiMarks(filed)).toEqual({
+      type: 'paragraph',
+      attrs: { [NOT_CANON_ATTR]: true, [AI_FILED_ATTR]: null, [AI_WRITTEN_ATTR]: null }
+    })
+    expect(filed.attrs[AI_FILED_ATTR]).not.toBeNull()
+    const plain = { type: 'paragraph', attrs: { origin: null } }
+    expect(withoutAiMarks(plain)).toBe(plain)
+    const bare = { type: 'paragraph' }
+    expect(withoutAiMarks(bare)).toBe(bare)
   })
 })

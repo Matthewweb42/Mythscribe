@@ -217,6 +217,59 @@ describe('the Research meta store (F-16.8)', () => {
   })
 })
 
+describe('the Research meta store under overlapping answers (F-16.8)', () => {
+  /** A channel whose answer waits until `release` is called. */
+  const held = <T,>(value: T): { handler: Handler; release: () => void } => {
+    let release = (): void => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    return { handler: () => gate.then(() => value), release }
+  }
+
+  it('keeps an upload answered while a list read was in flight, and the newer Not canon switch', async () => {
+    const listing = held([UPLOAD, NOTE])
+    const made = treeNode({ id: 'r-new', parentId: 'research', title: 'Tides', position: 2 })
+    install({
+      'research:list': listing.handler,
+      'research:add': () => ({
+        nodes: [made],
+        docs: [{ ...NOTE, nodeId: 'r-new', origin: 'upload', fileType: 'md' }],
+        skipped: []
+      }),
+      'research:setNotCanon': () => ({ ...NOTE, notCanon: true })
+    })
+    const loading = useResearchStore.getState().load()
+    await useResearchStore.getState().add()
+    await useResearchStore.getState().setNotCanon('r-note', true)
+    listing.release()
+    await loading
+    const { docs, loaded } = useResearchStore.getState()
+    expect(loaded).toBe(true)
+    expect(docs['r-new']?.fileType).toBe('md')
+    expect(docs['r-note']?.notCanon).toBe(true)
+    expect(docs['r-upload']).toEqual(UPLOAD)
+    expect(useTreeStore.getState().selectedId).toBe('r-new')
+  })
+
+  it('drops every answer for a project that closed', async () => {
+    const listing = held([UPLOAD])
+    const creating = held({
+      node: treeNode({ id: 'r-late', parentId: 'research', title: 'Late' }),
+      doc: { ...NOTE, nodeId: 'r-late' }
+    })
+    install({ 'research:list': listing.handler, 'research:create': creating.handler })
+    const loading = useResearchStore.getState().load()
+    const making = useResearchStore.getState().create()
+    resetResearchStore()
+    listing.release()
+    creating.release()
+    await Promise.all([loading, making])
+    expect(useResearchStore.getState()).toMatchObject({ docs: {}, loaded: false })
+    expect(useTreeStore.getState().byId['r-late']).toBeUndefined()
+  })
+})
+
 describe('the Manuscript tree and the Research tab (F-16.8)', () => {
   it('leaves the Research root out of the Manuscript tree', () => {
     render(<ManuscriptTree format="novel" />)

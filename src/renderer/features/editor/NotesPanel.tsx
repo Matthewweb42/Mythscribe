@@ -65,13 +65,21 @@ export function NotesColumn({ id }: { id: string | null }): React.JSX.Element {
   return <NotesContent id={id} detailsOpen={detailsOpen} onDetailsOpen={setDetailsOpen} />
 }
 
+/**
+ * Whether `id` is a Research page (F-16.8, story memory v2): it has no notes pad, since the page
+ * is the note, and nothing would read a second text beside it.
+ */
+const useIsResearchPage = (id: string | null): boolean =>
+  useTreeStore((s) => id !== null && s.sectionOf[id] === 'research')
+
 /** The panel's heading: the dock grip and menu, the title, and Suggest and the pin button while a node is shown. */
 function NotesHeading({ id }: { id: string | null }): React.JSX.Element {
+  const research = useIsResearchPage(id)
   return (
     <div className={PANEL_TITLE}>
       <DockPanelControls id="notes" />
       <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">Notes</h2>
-      {id === null ? null : <PinNotesButton id={id} />}
+      {id === null || research ? null : <PinNotesButton id={id} />}
     </div>
   )
 }
@@ -79,7 +87,7 @@ function NotesHeading({ id }: { id: string | null }): React.JSX.Element {
 /**
  * The synopsis, the notes, and the scene details of one node, under the column's heading; a
  * hint while no node is selected. A node without a hierarchy level (front or end matter) has
- * notes only.
+ * notes only; a Research page (F-16.8) has none.
  */
 function NotesContent({
   id,
@@ -93,9 +101,16 @@ function NotesContent({
   const withMetadata = useTreeStore((s) =>
     id === null ? false : (s.byId[id]?.hierarchyLevel ?? null) !== null
   )
+  const research = useIsResearchPage(id)
   if (id === null)
     return (
       <p className="m-0 px-4 pt-2 text-sm text-fg-muted">Select a document to see its notes.</p>
+    )
+  if (research)
+    return (
+      <p data-testid="notes-research" className="m-0 px-4 pt-2 text-sm text-fg-muted">
+        A Research page is its own note: write on the page.
+      </p>
     )
   return (
     <>

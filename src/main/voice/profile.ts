@@ -6,6 +6,7 @@ import { TiptapNode, type TiptapNodeT } from '@shared/tiptap'
 import { voiceConfidence } from '@shared/voice'
 import type { NodeRow } from '../db/schema'
 import { getAuthorRules, getVoiceNotes } from '../project/settingsStore'
+import { researchSubtree } from '../research/researchTree'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { listExemplars } from './exemplarStore'
 import { currentVoiceVersion } from './versionCache'
@@ -103,27 +104,6 @@ export function manuscriptDocuments(db: TreeDb, rows: NodeRow[] = listNodes(db))
 export function projectDocuments(db: TreeDb, rows: NodeRow[] = listNodes(db)): NodeRow[] {
   const research = researchSubtree(rows)
   return documentsInTreeOrder(rows, (row) => !research.has(row.id))
-}
-
-/** The ids of the Research root (F-16.8) and every node under it; empty when there is none. */
-export function researchSubtree(rows: readonly NodeRow[]): Set<string> {
-  const root = rows.find((row) => row.parentId === null && row.sectionType === 'research')
-  const ids = new Set<string>()
-  if (!root) return ids
-  ids.add(root.id)
-  const children = new Map<string, NodeRow[]>()
-  for (const row of rows) {
-    if (row.parentId === null) continue
-    const list = children.get(row.parentId)
-    if (list) list.push(row)
-    else children.set(row.parentId, [row])
-  }
-  const stack = [...(children.get(root.id) ?? [])]
-  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
-    ids.add(next.id)
-    stack.push(...(children.get(next.id) ?? []))
-  }
-  return ids
 }
 
 /** The document rows `keep` accepts, sorted by each row's chain of positions from its root. */

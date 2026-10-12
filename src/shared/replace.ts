@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { straightenQuotes } from './critique'
+import { withoutAiMarks } from './memory/pageMarks'
 import { SEARCH_QUERY_MAX, SearchRange, buildSnippet, foldCase } from './search'
 import type { TiptapNodeT } from './tiptap'
 
@@ -282,7 +283,8 @@ function replaceInRun(
  * The document with every occurrence replaced, and how many there were. Never mutates its
  * input: a changed node is a new object and everything untouched is shared, so a document with
  * no match comes back as the very same object. The replacement is literal and is never scanned
- * again (replacing `a` with `aa` terminates).
+ * again (replacing `a` with `aa` terminates). A page block (F-16.6) whose words changed loses its
+ * `aiFiled`/`aiWritten` marks (`withoutAiMarks`), as typing in the page editor does.
  */
 export function replaceInDoc(
   doc: TiptapNodeT,
@@ -295,6 +297,8 @@ export function replaceInDoc(
     const runs = runsOf(content)
     const out: TiptapNodeT[] = []
     let changed = false
+    // Whether this block's own words changed (not only a block inside it).
+    let words = false
     let next = 0
     for (let index = 0; index < content.length; index++) {
       const child = content[index]
@@ -309,6 +313,7 @@ export function replaceInDoc(
         } else {
           count += matches.length
           changed = true
+          words = true
           out.push(...replaceInRun(nodes, matches, options.replacement))
         }
         index = run[1] - 1
@@ -319,9 +324,11 @@ export function replaceInDoc(
       out.push(rewritten)
     }
     if (!changed) return node
-    if (out.length > 0) return { ...node, content: out }
+    // F-16.6: a page block whose words the author replaced is hers now; its AI marks go.
+    const block = words ? withoutAiMarks(node) : node
+    if (out.length > 0) return { ...block, content: out }
     // A block emptied by the replacement is stored the way the editor stores an empty block.
-    const emptied = { ...node }
+    const emptied = { ...block }
     delete emptied.content
     return emptied
   }

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import type { Editor } from '@tiptap/core'
 import { NOT_CANON_ATTR } from '@shared/memory/pageMarks'
 import { writtenResearchDoc, type ResearchDoc } from '@shared/research'
+import { NOT_CANON_BLOCKS } from '@renderer/features/editor/pageParagraph'
 import { resolveGenericTarget } from '@renderer/features/manuscript/placement'
 import type { TreeIndex } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -13,13 +14,16 @@ import { useResearchStore } from './researchStore'
  * off the stores, kept apart from the components.
  */
 
-/** Whether every paragraph the selection touches is marked Not canon (the toggle's pressed state). */
+/**
+ * Whether every paragraph and heading the selection touches is marked Not canon (the toggle's
+ * pressed state).
+ */
 export function selectionNotCanon(editor: Editor): boolean {
   const { from, to } = editor.state.selection
   let any = false
   let every = true
   editor.state.doc.nodesBetween(from, to, (node) => {
-    if (node.type.name !== 'paragraph') return true
+    if (!NOT_CANON_BLOCKS.has(node.type.name)) return true
     any = true
     if (node.attrs[NOT_CANON_ATTR] !== true) every = false
     return false

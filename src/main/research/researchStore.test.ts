@@ -6,10 +6,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { IMPORTED_ORIGIN, PARAGRAPH_ORIGIN_ATTR } from '@shared/provenance'
 import { alreadyInResearch, researchSourceLine } from '@shared/research'
 import { EMPTY_DOC, TiptapNode, type TiptapNodeT } from '@shared/tiptap'
-import { contextFile, node } from '../db/schema'
+import { contextFile, node, type NodeRow } from '../db/schema'
 import { getDocumentContent } from '../document/documentStore'
 import { AppError } from '../ipc/errors'
-import type { ContextSource } from '../library/libraryStore'
+import {
+  addContextFiles,
+  listContextFiles,
+  type ContextSource
+} from '../library/libraryStore'
 import { textPdf } from '../library/pdfFixture'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { ensureResearchRoot } from '../project/seed'
@@ -21,18 +25,23 @@ import {
   listNodes,
   type TreeDb
 } from '../tree/treeStore'
+import { manuscriptDocuments } from '../voice/profile'
 import {
   RESEARCH_TYPES_MESSAGE,
   addResearchFiles,
   copyResearchMeta,
   createResearchNote,
-  isResearchNode,
   listResearchDocs,
   researchDocOf,
   researchOriginalPath,
-  researchRootId,
   setResearchNotCanon
 } from './researchStore'
+import {
+  isUnderResearch,
+  researchDocumentIds,
+  researchRootId,
+  researchSubtree
+} from './researchTree'
 
 let tmp: string
 let session: ProjectSession
@@ -91,8 +100,20 @@ describe('ensureResearchRoot (F-16.8)', () => {
       hierarchyLevel: null,
       title: 'Maps'
     })
-    expect(isResearchNode(db, folder.id)).toBe(true)
-    expect(isResearchNode(db, root)).toBe(false)
+    const page = createResearchNote(db, 'novel', { parentId: folder.id, title: 'Coast' })
+    const at = (id: string): NodeRow => {
+      const row = getNode(db, id)
+      if (row === undefined) throw new Error(`no node ${id}`)
+      return row
+    }
+    expect(isUnderResearch(db, at(folder.id))).toBe(true)
+    expect(isUnderResearch(db, at(page.id))).toBe(true)
+    expect(isUnderResearch(db, at(root))).toBe(false)
+    const [scene] = manuscriptDocuments(db)
+    expect(scene !== undefined && isUnderResearch(db, scene)).toBe(false)
+    // The one owner of "under Research": the subtree in tree order, and its documents.
+    expect([...researchSubtree(listNodes(db))]).toEqual([root, folder.id, page.id])
+    expect(researchDocumentIds(listNodes(db))).toEqual([page.id])
     expect(() =>
       createNode(db, 'novel', { parentId: root, kind: 'document', hierarchyLevel: 'scene' })
     ).toThrow(AppError)
@@ -201,6 +222,34 @@ describe('research uploads become pages (F-16.8)', () => {
     // Once the document is deleted, the same file makes a document again.
     deleteNode(db, first.created[0] ?? '')
     expect((await add(source('Tides.md', 'High water at six.'))).created).toHaveLength(1)
+  })
+
+  it("keeps a page's original out of the Library: never listed, matched, updated or replaced", async () => {
+    // A file the Library held first becomes Research's once a page is made from it.
+    const held = await addContextFiles(db, session.folder, [source('Reef.md', 'Coral.')])
+    expect(held.files.map((file) => file.name)).toEqual(['Reef.md'])
+    const id = await onlyCreated(source('notes.md', 'Original research text.'))
+    const reef = await onlyCreated(source('Reef.md', 'Coral.'))
+    const originalOf = (nodeId: string): string =>
+      researchOriginalPath(db, session.folder, nodeId)
+    const before = [originalOf(id), originalOf(reef)]
+    expect(listContextFiles(db)).toEqual([])
+    // A Library add (the dialog or a drop) of a same-named file is a Library file of its own.
+    const library = await addContextFiles(db, session.folder, [
+      source('Notes.md', 'A different library file.'),
+      source('reef.md', 'Coral again.')
+    ])
+    expect(library.changed).toHaveLength(2)
+    expect(library.files.map((file) => file.name).sort()).toEqual(['Notes.md', 'reef.md'])
+    expect([originalOf(id), originalOf(reef)]).toEqual(before)
+    expect(fs.readFileSync(originalOf(id), 'utf8')).toBe('Original research text.')
+    expect(fs.readFileSync(originalOf(reef), 'utf8')).toBe('Coral.')
+    // Update on a page's original is refused, and changes nothing.
+    const fileId = researchDocOf(db, id).contextFileId ?? ''
+    await expect(
+      addContextFiles(db, session.folder, [source('notes.md', 'Swapped.')], fileId)
+    ).rejects.toThrow('That file belongs to a Research document')
+    expect(fs.readFileSync(originalOf(id), 'utf8')).toBe('Original research text.')
   })
 
   it('refuses a parent outside Research', async () => {
