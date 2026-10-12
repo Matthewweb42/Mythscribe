@@ -12,6 +12,23 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-12 · F-16.16–16.21 · P2a plan: the calls the design left open
+- Question: Planning P2a, the evidence reader (`docs/research/story-memory-2026-10-11/plans/P2a.md`, five slices, nothing built yet), needed calls the design did not make. Details are in the plan's §7 (P2a-D1 to P2a-D25).
+- Chosen (decided by Claude, unconfirmed):
+  1. **Closing the project never waits for the AI.** A scene you leave unread at close is read the next time you open the project (up to 5 scenes at once; more asks with the price first).
+  2. **The pause before a read** (2 to 5 minutes, 3 by default) is a per-project setting beside VibeWrite's pause, counted from the last save of the open scene. The paragraph you are typing in is skipped only on that pause, not when you leave the scene or press Read now.
+  3. **"Fixing a misspelt word" doesn't trigger a read** when the old word appears nowhere else in your book and isn't a name or a dictionary word you added (the app has no spelling list of its own to ask).
+  4. **No sheet is made silently in P2a.** A new name the reader finds becomes a "new name?" question, and what it read about that name waits until you answer. (Secrets and threads, made silently, come with P2b.)
+  5. **Cloud cap:** your monthly cap ($1 by default) limits only reading you didn't ask for. Read now, Rebuild memory, and anything you approved with a price are spent because you asked (the daily cap still applies). Past the cap you get one notice a month: *Allow another $1 this month* or *Change the cap*. The month's figure is checked against your Cloud account so another computer's reading counts too.
+  6. **Spot checks:** when the stronger model disagrees with a fact the fast check passed, the fact goes; when the fast check disagrees with a fact code proved, it is only counted in "proof agreement".
+  7. **Story notes for prose** gain each present character's current facts, this scene's states and its mood, inside the existing prompt versions rather than 11 new ones.
+  8. **Plan links in the new memory cover planned scenes only.** Story-structure beats (from a template) stay yours to place. The AI's links are kept apart from your own, with *Keep* and *Unlink*.
+  9. **Typed POV, place or time against the text:** the "Update my detail · Keep mine" question comes with P2a, not P4, since that is where both values first show.
+  10. **The beta reader** in the new memory sees earlier scenes only as short maps and quotes the scene you are on, so it needs its own regenerate version too: P2a ships 7 prompt versions, not 6.
+  11. **The live planted-error run** (the merge condition) can't run here without a key. It is built for you to run once (about 5¢): `MYTHSCRIBE_EVAL_LIVE=1 OPENAI_API_KEY=sk-or-… OPENAI_BASE_URL=https://openrouter.ai/api/v1 npm run eval:ai -- memory`, before the switch-over. P2a's features are ticked after its final checks with that run named as owed, as P1's were.
+- Alternatives: read at close and make closing wait; a word list for the typo rule; let the reader make sheets for new names; count asked reading against the cap; 11 new prose versions; AI links for template beats too; leave the typed-detail question to P4.
+- To change it: `plans/P2a.md` §7, before the slice that builds it.
+
 ## 2026-10-12 · F-16.4–16.15 · P1 ticked before your checks in the app
 - Question: The slices said each P1 feature stays unticked until you check it. P1's final verification passed (full gates; `e2e/memory.spec.ts` covers the v2 path with Use AI off, the Story notes block and filing at the fake provider, and the switch-over on a copy, beside the v1 smoke). Tick now, or wait for your checks?
 - Chosen (decided by Claude, unconfirmed): ticked F-16.4 to F-16.15 on 2026-10-12, as P0 was, with each entry naming the check still owed. v2 is not in installed builds, so the checks run in a development build: `MYTHSCRIBE_STORY_MEMORY=v2 npm run dev` with a new project or a copy (the override makes every project it opens run v2, your real one included), and for F-16.15 Help › Try the story-memory switch-over on a copy… on a copy of your real project with no override. Live fidelity is unrun for the 14 new prompt versions (`MYTHSCRIBE_EVAL_LIVE=1`).
