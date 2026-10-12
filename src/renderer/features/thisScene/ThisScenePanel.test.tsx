@@ -1,11 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AiUsageSummary } from '@shared/ai'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import type { AuthorTodo } from '@shared/memory/authorTodo'
 import type { Dismissed } from '@shared/memory/dismissed'
 import type { FiledConflict } from '@shared/filing'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
+import type { MemoryNotice, SceneMemory } from '@shared/memory/views'
 import type { NamedInRow, NameMentionView } from '@shared/memory/nameScan'
 import { emptySceneDetails } from '@shared/memory/sceneDetails'
 import { resetAiStore } from '@renderer/features/ai/aiStore'
@@ -18,6 +18,8 @@ import {
   resetNameMentionStore,
   useNameMentionStore
 } from '@renderer/features/records/nameMentionStore'
+import { memoryStatusFixture, sceneMemoryFixture } from '@renderer/features/memory/memoryFixture'
+import { resetMemoryStore, useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { recordFixture } from '@renderer/features/records/recordFixture'
 import { resetRecordStore, useRecordStore } from '@renderer/features/records/recordStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -134,15 +136,6 @@ const tombstone = (id: string, label: string): Dismissed => ({
   created: '2026-10-12T10:00:00.000Z'
 })
 
-const USAGE: AiUsageSummary = {
-  today: { requests: 2, tokens: 900, costUsd: 0.03 },
-  session: { requests: 2, tokens: 900, costUsd: 0.03 },
-  total: { requests: 2, tokens: 900, costUsd: 0.03 },
-  byFeature: [],
-  recent: [],
-  dailyCapUsd: 5
-}
-
 let mentions: NameMentionView[]
 let todos: AuthorTodo[]
 /** What main's Dismissed list holds. */
@@ -168,8 +161,6 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
           return mentions as Output<C>
         case 'sceneDetail:get':
           return { ...emptySceneDetails(), povRecordId: 'r-mara', gone: [] } as Output<C>
-        case 'ai:usageSummary':
-          return USAGE as Output<C>
         case 'names:questions':
           return [] as Output<C>
         case 'dismissed:list':
@@ -178,6 +169,9 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
           return todos as Output<C>
         case 'layout:set':
           return input as Output<C>
+        // F-16.18: a scene nothing has read yet (the AI-off form of the panel).
+        case 'memory:scene':
+          return sceneMemoryFixture((input as Input<'memory:scene'>).nodeId) as Output<C>
         default:
           throw new Error(`unexpected ${channel}`)
       }
@@ -222,6 +216,7 @@ function resetAll(): void {
   resetCategoryStore()
   resetLayoutStore()
   resetDocumentStore()
+  resetMemoryStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   useTreeStore.getState().clear()
 }
@@ -292,7 +287,8 @@ describe('the This scene panel’s rules (F-16.12)', () => {
 })
 
 describe('ThisScenePanel (F-16.12)', () => {
-  it('shows Here, the named chips with why, a dimmed ambiguous span, and today’s spend', async () => {
+  it('shows Here, the named chips with why, a dimmed ambiguous span, and today’s reading spend', async () => {
+    useMemoryStore.setState({ status: memoryStatusFixture({ todayUsd: 0.003 }) })
     await open()
     const here = screen.getByRole('region', { name: 'Here' })
     expect(within(here).getByLabelText('POV')).toHaveValue('r-mara')
@@ -304,7 +300,9 @@ describe('ThisScenePanel (F-16.12)', () => {
     fireEvent.click(mara)
     const card = screen.getByRole('group', { name: 'Why Mara Vell is here' })
     expect(within(card).getAllByRole('button', { name: 'Go there' })).toHaveLength(2)
-    expect(await screen.findByTestId('this-scene-spend')).toHaveTextContent('Today $0.03')
+    expect(await screen.findByTestId('this-scene-spend')).toHaveTextContent('today 0.3¢')
+    // No card yet: the AI-off form's heading (P2a-D21).
+    expect(screen.getByRole('heading', { name: 'Named in this scene' })).toBeInTheDocument()
   })
 
   it('Not a mention removes the chip and lands on Dismissed, whose Undo brings it back', async () => {
@@ -608,5 +606,203 @@ describe('What the AI is told (F-16.14)', () => {
       'Here: Mara Vell (POV)'
     )
     expect(sent('storyNotes:get')[0]).toEqual({ nodeId: 'sc-1' })
+  })
+})
+
+describe('the reading in the panel (F-16.18, F-16.16, F-16.19)', () => {
+  const READ_AT = new Date(Date.now() - 3 * 60_000).toISOString()
+  const PLACE_CONFLICT: MemoryNotice = {
+    id: 'detail:sc-1:place',
+    kind: 'detailConflict',
+    nodeId: 'sc-1',
+    ref: '1.1',
+    field: 'place',
+    typed: 'the harbour',
+    text: 'the quay',
+    textRecordId: null,
+    quote: 'She walked to the quay'
+  }
+  const read = (): SceneMemory =>
+    sceneMemoryFixture('sc-1', {
+      card: {
+        line: 'Mara walks to the quay.',
+        gist: 'Mara walks to the quay.',
+        fields: {
+          where: { value: 'the quay', quote: 'She walked to the quay', p: 1, verified: true },
+          when: null,
+          pov: { value: 'r-mara', quote: 'Mara looked out', p: 0, verified: true },
+          year: null,
+          flashback: null,
+          elapsed: null
+        },
+        mood: null,
+        theme: null,
+        readingId: 'rd-1',
+        created: READ_AT
+      },
+      here: [
+        { recordId: 'r-mara', why: 'pov', quote: 'Mara looked out', p: 0, typedPov: 'r-tomas' },
+        { recordId: 'r-ella', why: 'onPage', quote: 'Ella set down the lamp', p: 1, typedPov: null }
+      ],
+      mentioned: [{ recordId: 'r-quay', count: 1 }],
+      trueNow: [
+        {
+          recordId: 'r-mara',
+          slot: 'location',
+          label: 'Last seen at',
+          objectId: null,
+          value: 'the quay',
+          claimId: 'c-where',
+          kind: 'lastStated',
+          ref: '1.1',
+          nodeId: 'sc-1',
+          stale: false
+        },
+        {
+          recordId: 'r-mara',
+          slot: 'hair',
+          label: 'Hair',
+          objectId: null,
+          value: 'red',
+          claimId: 'c-hair',
+          kind: 'since',
+          ref: '1.1',
+          nodeId: 'sc-1',
+          stale: true
+        }
+      ],
+      lastRead: { readingId: 'rd-1', at: READ_AT, model: 'm', costUsd: 0.0009 }
+    })
+
+  it('shows Here from the text with the typed POV dimmed, Mentioned without them, and True now', async () => {
+    install({ 'memory:scene': () => read() })
+    await open()
+    const here = await screen.findByRole('region', { name: 'Here' })
+    expect(await within(here).findByTestId('here-pov')).toHaveTextContent('Mara Vell')
+    expect(within(here).getByTestId('typed-pov')).toHaveTextContent('you typed: Tomas Harrow')
+    expect(within(within(here).getByTestId('on-page')).getByText('Ella Harrow')).toHaveAttribute(
+      'title',
+      'on the page: ¶2 “Ella set down the lamp”'
+    )
+    // Mentioned: named, not here (Mara is the POV).
+    const mentioned = screen.getByRole('region', { name: 'Mentioned' })
+    expect(within(mentioned).queryByRole('button', { name: /^Mara Vell/ })).toBeNull()
+    expect(within(mentioned).getByRole('button', { name: /^North Quay/ })).toBeInTheDocument()
+    // True now: the transient line last stated, the stale one dimmed and re-checking.
+    const mara = screen.getByRole('group', { name: 'True now: Mara Vell' })
+    const [where, hair] = within(mara).getAllByTestId('claim-line')
+    expect(where).toHaveTextContent('Last seen at the quay')
+    expect(where).toHaveTextContent('last stated in 1.1')
+    expect(hair).toHaveTextContent('Hair: red')
+    expect(hair).toHaveTextContent('since 1.1')
+    expect(hair).toHaveTextContent('re-checking after you pause')
+    expect(hair).toHaveAttribute('data-stale', 'true')
+    // Reading paused (AI off): the stale line says so instead.
+    act(() => useMemoryStore.setState({ status: memoryStatusFixture({ paused: 'off' }) }))
+    expect(within(mara).getAllByTestId('claim-line')[1]).toHaveTextContent('reading paused')
+    expect(screen.getByTestId('last-read')).toHaveTextContent('Read 3 min ago')
+  })
+
+  it('reads a scene again when main says a reading changed it', async () => {
+    let memory = sceneMemoryFixture('sc-1')
+    install({ 'memory:scene': () => memory })
+    await open()
+    expect(screen.queryByRole('region', { name: 'True now' })).toBeNull()
+    memory = read()
+    await act(async () => {
+      useMemoryStore.getState().subscribe()
+      for (const listener of listeners['memory:changed'] ?? []) {
+        listener({ nodeIds: ['sc-1'], recordIds: [] })
+      }
+      await Promise.resolve()
+    })
+    expect(await screen.findByRole('region', { name: 'True now' })).toBeInTheDocument()
+  })
+
+  it('Read now flushes and reads, and says when there was nothing new', async () => {
+    install({
+      'memory:readNow': () => ({
+        ok: true,
+        read: false,
+        reason: 'upToDate',
+        readingId: null,
+        costUsd: 0
+      })
+    })
+    useMemoryStore.setState({
+      status: memoryStatusFixture({ cloud: { spentUsd: 0.12, capUsd: 1 } })
+    })
+    await open()
+    expect(screen.getByTestId('cloud-spend')).toHaveTextContent('Cloud 12¢ of $1')
+    expect(screen.getByTestId('last-read')).toHaveTextContent('Not read yet')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Read now' }))
+    })
+    expect(sent('memory:readNow')).toEqual([
+      { nodeId: 'sc-1', requestId: expect.any(String) as string }
+    ])
+    expect(useDialogStore.getState().toasts.map((t) => t.message)).toContain(
+      'Nothing new to read in this scene.'
+    )
+  })
+
+  it('shows the reading notices with their buttons', async () => {
+    const backlog: MemoryNotice = { id: 'backlog', kind: 'backlog', scenes: 7, priceUsd: 0.03 }
+    const health: MemoryNotice = {
+      id: 'health:m-1',
+      kind: 'health',
+      model: 'm-1',
+      quotes: 0.8,
+      verified: 0.9,
+      switchable: true
+    }
+    install({ 'memory:answerNotice': () => [health] })
+    useMemoryStore.setState({ notices: [backlog, health] })
+    await open()
+    const notices = screen.getByRole('group', { name: 'Notices' })
+    expect(within(notices).getByText('Read 7 changed scenes: about 3¢')).toBeInTheDocument()
+    expect(
+      within(notices).getByRole('button', { name: 'Switch to DeepSeek V4 Flash' })
+    ).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(within(notices).getByRole('button', { name: 'Read them' }))
+    })
+    expect(sent('memory:answerNotice')).toEqual([{ id: 'backlog', action: 'read' }])
+    expect(useMemoryStore.getState().notices).toEqual([health])
+    // The badge counts conflicts only.
+    expect(screen.queryByTestId('needs-a-look-badge')).toBeNull()
+  })
+
+  it('asks about a typed detail the text disagrees with: Update my detail, Keep mine', async () => {
+    install({
+      'memory:answerNotice': () => [],
+      'sceneDetail:get': () => ({
+        ...emptySceneDetails(),
+        place: { recordId: null, text: 'the harbour' },
+        gone: []
+      }),
+      'sceneDetail:set': (input) => ({ ...(input as Input<'sceneDetail:set'>).details, gone: [] })
+    })
+    useMemoryStore.setState({ notices: [PLACE_CONFLICT] })
+    await open()
+    expect(screen.getByTestId('needs-a-look-badge')).toHaveTextContent('1')
+    const conflicts = screen.getByRole('group', { name: 'Conflicts' })
+    expect(
+      within(conflicts).getByText('1.1: the text says the quay; you typed the harbour')
+    ).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(within(conflicts).getByRole('button', { name: 'Update my detail' }))
+    })
+    expect(sent('sceneDetail:set')).toEqual([
+      {
+        nodeId: 'sc-1',
+        details: { ...emptySceneDetails(), place: { recordId: null, text: 'the quay' } }
+      }
+    ])
+    await act(async () => {
+      fireEvent.click(within(conflicts).getByRole('button', { name: 'Keep mine' }))
+    })
+    expect(sent('memory:answerNotice')).toEqual([{ id: 'detail:sc-1:place', action: 'keepMine' }])
+    expect(screen.queryByRole('group', { name: 'Conflicts' })).toBeNull()
   })
 })

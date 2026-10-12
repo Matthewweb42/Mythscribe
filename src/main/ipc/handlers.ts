@@ -468,7 +468,8 @@ import {
 import { runAnchors } from '../memory/reading/anchors'
 import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
 import { settleOwnedNames } from '../memory/reading/waiting'
-import { claimInfo, sceneMemory } from '../memory/reading/views'
+import { claimInfo, sceneMemory, sheetMemory } from '../memory/reading/views'
+import { restoreNotRight } from '../memory/reading/notRight'
 import {
   dropOwner,
   indexNodePassages,
@@ -991,8 +992,7 @@ export function registerHandlers({
     pricing: () => appState.get().cloudPricing?.pricing ?? null,
     cloud: {
       get: () => appState.get().memoryCloud,
-      update: (fn) =>
-        appState.update((s) => ({ ...s, memoryCloud: fn(s.memoryCloud) })).memoryCloud
+      update: (fn) => appState.update((s) => ({ ...s, memoryCloud: fn(s.memoryCloud) })).memoryCloud
     },
     credits: () => account.credits(),
     // The health notice's *Switch to DeepSeek V4 Flash*: the fast tier of the provider in use.
@@ -4811,6 +4811,17 @@ export function registerHandlers({
     const undone = undoDismissed(db, id)
     // What it kept quiet may come back: a mention (every scan's hash holds the list), a question.
     if (undone.kind === 'notMention') queueMemoryIndex(db)
+    // F-16.18: *Undo* on *Not right › Wrong value* brings its lines back as they were; the anchors
+    // job then checks them against the text as it is now. A typed-detail *Keep mine* undone may
+    // be asked again.
+    if (undone.kind === 'notRight') {
+      const restored = restoreNotRight(db, undone.id)
+      if (restored.nodeIds.length > 0) {
+        mentionQueue.indexAll('anchors', restored.nodeIds)
+        emit(windows(), 'memory:changed', restored)
+      }
+    }
+    if (undone.kind === 'notProblem') reader.detailsChanged()
     publishQuestions()
     return undone
   })
@@ -4837,6 +4848,12 @@ export function registerHandlers({
     // The typed POV settles shared aliases, so the scene's names are read again.
     if (manuscriptDocuments(db).some((row) => row.id === nodeId)) {
       mentionQueue.touch('names', nodeId)
+    }
+    // F-16.18 (decision 4): Here and the typed-detail conflicts compare the typed details with
+    // the scene's card, so they are looked at again.
+    if (memory() === 'v2') {
+      emit(windows(), 'memory:changed', { nodeIds: [nodeId], recordIds: [] })
+      reader.detailsChanged()
     }
     return stored
   })
@@ -5018,6 +5035,14 @@ export function registerHandlers({
   register('memory:scene', ({ nodeId }) => sceneMemory(manager.require().connection.orm, nodeId))
 
   register('memory:claim', ({ claimId }) => claimInfo(manager.require().connection.orm, claimId))
+
+  register('memory:sheet', ({ recordId, asOf }) =>
+    sheetMemory(manager.require().connection.orm, recordId, asOf)
+  )
+
+  register('memory:notRight', ({ claimId, choice, requestId }) =>
+    reader.notRight(claimId, choice, requestId)
+  )
 
   // F-16.14: the Story notes block as the v2 prose prompts send it (the 400-token budget).
   register('storyNotes:get', ({ nodeId }) => ({

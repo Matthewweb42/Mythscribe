@@ -264,12 +264,15 @@ import {
   MemoryNotice,
   MemoryNoticeAction,
   MemoryStatus,
+  NotRightChoice,
+  NotRightResult,
   ReadNowResult,
   RebuildAction,
   RebuildStartResult,
   RebuildSummary,
   SceneMemory,
-  SettleResult
+  SettleResult,
+  SheetMemory
 } from '../memory/views'
 import { Label, LabelColour, LabelKind, LabelLink, LabelName } from '../storyLabels'
 
@@ -3406,6 +3409,24 @@ export const contract = {
   'memory:scene': { input: z.object({ nodeId: z.string() }), output: SceneMemory },
   /** F-16.18: ⓘ on an AI line: its quote, scene, proof and reading; null once it is gone. */
   'memory:claim': { input: z.object({ claimId: z.string() }), output: ClaimInfo.nullable() },
+  /**
+   * F-16.18: a record's sheet "From the book, as of [scene]": what the active draft's prose states
+   * about it up to and including the scene (`asOf` null: the end of the book), by slot group, the
+   * other voices apart, and how many lines come later.
+   */
+  'memory:sheet': {
+    input: z.object({ recordId: z.string(), asOf: z.string().nullable() }),
+    output: SheetMemory
+  },
+  /**
+   * F-16.18: *Not right* on an AI line. *Wrong value* writes a `notRight` Dismissed row and the
+   * line goes (Undo in Dismissed brings it back); *Not about* re-checks it for the picked record
+   * with one `verify.v1` call (supported: it moves; else it is dismissed). AI failures as data.
+   */
+  'memory:notRight': {
+    input: z.object({ claimId: z.string(), choice: NotRightChoice, requestId: z.string() }),
+    output: NotRightResult
+  },
   /**
    * F-16.16: the renderer's leave and idle triggers (`readerTriggers.ts`, v2 only): the scene was
    * left for another manuscript scene, or its last save is `idleMinutes` old (with the caret's

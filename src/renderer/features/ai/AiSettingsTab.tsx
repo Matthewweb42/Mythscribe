@@ -44,6 +44,8 @@ import {
 import { CLOUD_AI_AVAILABLE, type PricingResult } from '@shared/cloudApi'
 import { bundledPricing, hostedModel, hostedModelFor, multiplierLabel } from '@shared/hostedPricing'
 import { useAccountStore } from '@renderer/features/account/accountStore'
+import { MemorySettings } from '@renderer/features/memory/MemorySettings'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { AiDialSection } from './AiDialSection'
@@ -114,7 +116,8 @@ const atDefaults = (models: AiModelMap, provider: AiProviderId): boolean => {
 /**
  * The AI tab of the Settings dialog (F-5.1): the project's AI dial, toggles, and data-sharing
  * table first (F-14.4, loaded with the project by `App.tsx`), the writing presets (F-5.2,
- * loaded the same way), "Summarize all scenes" (F-5.13), the voice profile (F-14.1), the author rules (F-14.2), the provenance ledger (F-14.6), then the
+ * loaded the same way), "Summarize all scenes" (F-5.13; in story memory v2 the reading's own
+ * settings instead, `MemorySettings`, F-16.16), the voice profile (F-14.1), the author rules (F-14.2), the provenance ledger (F-14.6), then the
  * provider, the key field with Save and Clear, the masked hint once a key is saved, the model
  * per tier with "Reset to defaults" (F-5.11) and, on MythScribe Cloud, its rate (F-15.11), the
  * local server's address and quality warning when the source is a local model (F-5.15),
@@ -162,6 +165,7 @@ export function AiSettingsTab({
   const loadChoice = useAiStore((s) => s.loadChoice)
   const choice = useAiStore((s) => s.choice)
   const signedIn = account?.state === 'signedIn'
+  const memory = useStoryMemory()
 
   useEffect(() => {
     load().catch(report)
@@ -207,21 +211,26 @@ export function AiSettingsTab({
 
       <AiDialSection />
 
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-fg-muted">
-          Summarise every scene that has no summary yet or whose summary is out of date. They are
-          indexed in the background, one at a time; the header shows the progress.
-        </span>
-        <button
-          type="button"
-          data-testid="summarize-all"
-          disabled={!summariesAllowed || busy}
-          onClick={() => void indexAll()}
-          className={BUTTON}
-        >
-          Summarize all scenes
-        </button>
-      </div>
+      {/* F-16.16, F-16.19 (story memory v2): the reading's settings; v2 has no summaries. */}
+      {memory === 'v2' ? (
+        <MemorySettings />
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-fg-muted">
+            Summarise every scene that has no summary yet or whose summary is out of date. They are
+            indexed in the background, one at a time; the header shows the progress.
+          </span>
+          <button
+            type="button"
+            data-testid="summarize-all"
+            disabled={!summariesAllowed || busy}
+            onClick={() => void indexAll()}
+            className={BUTTON}
+          >
+            Summarize all scenes
+          </button>
+        </div>
+      )}
 
       <WritingPresetsSection />
 

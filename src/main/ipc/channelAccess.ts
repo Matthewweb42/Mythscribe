@@ -375,6 +375,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'memory:readNow': 'ai',
   'memory:scene': 'read',
   'memory:claim': 'read',
+  'memory:sheet': 'read',
+  'memory:notRight': 'ai',
   // F-16.16, F-16.19: settling a scene queues a reading (sent by the queue, gated there); the
   // notices' buttons may queue reading too; Rebuild memory sends. The rest only read, and the
   // rebuild summary's bulk actions write Dismissed rows as P1's Dismissed writes do.
@@ -767,6 +769,8 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'memory:readNow': 'v2',
   'memory:scene': 'v2',
   'memory:claim': 'v2',
+  'memory:sheet': 'v2',
+  'memory:notRight': 'v2',
   'memory:settle': 'v2',
   'memory:status': 'v2',
   'memory:notices': 'v2',

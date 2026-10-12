@@ -85,6 +85,18 @@ export function dismissedKeys(db: TreeDb, kind: DismissedKind): Set<string> {
   )
 }
 
+/** Every row id of one kind (what may still be undone). */
+export function dismissedIds(db: TreeDb, kind: DismissedKind): Set<string> {
+  return new Set(
+    db
+      .select({ id: dismissed.id })
+      .from(dismissed)
+      .where(eq(dismissed.kind, kind))
+      .all()
+      .map((row) => row.id)
+  )
+}
+
 /** The list as the author sees it: newest first, with the count. */
 export function listDismissed(db: TreeDb): DismissedList {
   const items = db

@@ -10,6 +10,7 @@ import {
   SpotTier,
   SpotVerdict
 } from './claims'
+import { Dismissed } from './dismissed'
 import { SlotSchema } from './slots'
 import { RebuildEstimate } from './switchover'
 import { TYPED_FIELDS } from './typedVsText'
@@ -231,14 +232,28 @@ export const MEMORY_PAUSES = [
 export const MemoryPause = z.enum(MEMORY_PAUSES)
 export type MemoryPause = z.infer<typeof MemoryPause>
 
-/** The footer: "Read 3 min ago · today 0.3¢ · Cloud 12¢ of $1". */
+/** *Rebuild memory* in progress or done (the `memoryRebuild` settings row). */
+export const RebuildProgress = z.object({
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  draftId: z.string(),
+  total: z.number().int().nonnegative(),
+  done: z.number().int().nonnegative()
+})
+export type RebuildProgress = z.infer<typeof RebuildProgress>
+
+/**
+ * The footer: "Read 3 min ago · today 0.3¢ · Cloud 12¢ of $1"; and the last *Rebuild memory*
+ * (its progress for the activity bar while it runs, F-16.19), null before any.
+ */
 export const MemoryStatus = z.object({
   lastRead: z.object({ nodeId: z.string(), at: z.string() }).nullable(),
   paused: MemoryPause.nullable(),
   todayUsd: z.number().nonnegative(),
   cloud: z
     .object({ spentUsd: z.number().nonnegative(), capUsd: z.number().nonnegative() })
-    .nullable()
+    .nullable(),
+  rebuild: RebuildProgress.nullable()
 })
 export type MemoryStatus = z.infer<typeof MemoryStatus>
 
@@ -281,24 +296,36 @@ export const MemoryNotice = z.discriminatedUnion('kind', [
     capUsd: z.number().nonnegative()
   }),
   z.object({ id: z.string(), kind: z.literal('localCutoff'), model: z.string() }),
+  /**
+   * Decision 4 (F-16.18, P2a-D13): the text's quoted value disagrees with a typed POV, place, time
+   * or year; asked once (*Update my detail* writes the text's value through `sceneDetail:set`;
+   * *Keep mine* is a `notProblem` Dismissed row). Its id is `detail:<nodeId>:<field>`.
+   */
   z.object({
     id: z.string(),
     kind: z.literal('detailConflict'),
     nodeId: z.string(),
+    /** The scene's reference ("14.2"). */
+    ref: z.string(),
     field: z.enum(TYPED_FIELDS),
     typed: z.string(),
     text: z.string(),
+    /** The record the text's value names (the card's POV; a place record the place names), or null. */
+    textRecordId: z.string().nullable(),
     quote: z.string()
   })
 ])
 export type MemoryNotice = z.infer<typeof MemoryNotice>
+/** Decision 4's typed-detail conflict (F-16.18), one of the notices. */
+export type DetailConflictNotice = Extract<MemoryNotice, { kind: 'detailConflict' }>
 
 /**
  * What a notice's buttons do (`memory:answerNotice`, F-16.16, F-16.19): *Read them* / *Read*
  * (`read`: the work is queued as asked, spent on the author's say-so), *Later* / *Not now*
  * (`later`), *Keep reading anyway* (`keepReading`, remembered per model; also lifts a local
  * cut-off pause), *Switch to DeepSeek V4 Flash* (`switchModel`), *Allow another $1 this month*
- * (`allowMore`), and closing it (`dismiss`: the pause, if any, stays).
+ * (`allowMore`), *Keep mine* on a typed-detail conflict (`keepMine`, F-16.18: a `notProblem`
+ * Dismissed row), and closing it (`dismiss`: the pause, if any, stays).
  */
 export const MEMORY_NOTICE_ACTIONS = [
   'read',
@@ -306,6 +333,7 @@ export const MEMORY_NOTICE_ACTIONS = [
   'keepReading',
   'switchModel',
   'allowMore',
+  'keepMine',
   'dismiss'
 ] as const
 export const MemoryNoticeAction = z.enum(MEMORY_NOTICE_ACTIONS)
@@ -357,16 +385,6 @@ export const MemoryHealthReport = z.object({
 })
 export type MemoryHealthReport = z.infer<typeof MemoryHealthReport>
 
-/** *Rebuild memory* in progress or done (the `memoryRebuild` settings row). */
-export const RebuildProgress = z.object({
-  startedAt: z.string(),
-  finishedAt: z.string().nullable(),
-  draftId: z.string(),
-  total: z.number().int().nonnegative(),
-  done: z.number().int().nonnegative()
-})
-export type RebuildProgress = z.infer<typeof RebuildProgress>
-
 /**
  * What a rebuild changed, grouped by sheet (`memory:rebuildSummary`): the new live lines per
  * record (each can go at once with *Not right*), and the names whose lines wait on a question
@@ -390,7 +408,11 @@ export type RebuildSummary = z.infer<typeof RebuildSummary>
 
 /** What `memory:rebuild` answers: the scenes queued with the price shown, or an AI failure. */
 export const RebuildStartResult = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), queued: z.number().int().nonnegative(), estimate: RebuildEstimate }),
+  z.object({
+    ok: z.literal(true),
+    queued: z.number().int().nonnegative(),
+    estimate: RebuildEstimate
+  }),
   z.object({ ok: z.literal(false), code: AiErrorCode, message: z.string(), nextStep: z.string() })
 ])
 export type RebuildStartResult = z.infer<typeof RebuildStartResult>
@@ -401,3 +423,30 @@ export const RebuildAction = z.discriminatedUnion('action', [
   z.object({ action: z.literal('notNames') })
 ])
 export type RebuildAction = z.infer<typeof RebuildAction>
+
+/**
+ * *Not right* on an AI line (F-16.18, design §2.7): *Wrong value* (a `notRight` Dismissed row; the
+ * line goes, and *Undo* in Dismissed brings it back), or *Not about Mara* with the record the
+ * author picks (one `verify.v1` call: supported, the line moves to that record; not, it is
+ * dismissed as a wrong value).
+ */
+export const NotRightChoice = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('wrongValue') }),
+  z.object({ kind: z.literal('notAbout'), recordId: z.string() })
+])
+export type NotRightChoice = z.infer<typeof NotRightChoice>
+
+/**
+ * What `memory:notRight` answers: the line `moved` to the picked record, or `dismissed` (with the
+ * Dismissed row it wrote, when the quote could still be found to key it), or `gone` (it had gone
+ * already); an AI failure of the *Not about* check as data.
+ */
+export const NotRightResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    outcome: z.enum(['moved', 'dismissed', 'gone']),
+    dismissed: Dismissed.nullable()
+  }),
+  z.object({ ok: z.literal(false), code: AiErrorCode, message: z.string(), nextStep: z.string() })
+])
+export type NotRightResult = z.infer<typeof NotRightResult>

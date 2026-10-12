@@ -153,7 +153,7 @@ export function claimView(each: Claim, reading: ReadingOrder): ClaimView {
 }
 
 /** The names `compareTyped` reads, from the roster. */
-function typedNames(db: TreeDb): TypedNames {
+export function typedNames(db: TreeDb): TypedNames {
   const records = new Map(listRecords(db).map((each) => [each.id, each]))
   return {
     nameOf: (id) => records.get(id)?.name ?? null,

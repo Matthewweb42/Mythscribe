@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { emptyCardFields, type CardFields } from './claims'
 import { emptySceneDetails, type SceneDetails } from './sceneDetails'
-import { compareTyped, effectiveSceneLine, foldDetail, type TypedNames } from './typedVsText'
+import {
+  compareTyped,
+  detailFromText,
+  effectiveSceneLine,
+  foldDetail,
+  type TypedNames
+} from './typedVsText'
 
 const NAMES: TypedNames = {
   nameOf: (id) => ({ mara: 'Mara Vell', tomas: 'Tomas', quay: 'Gull Quay' })[id] ?? null,
@@ -162,5 +168,34 @@ describe('compareTyped (decision 4, F-16.18)', () => {
       fromText: ['pov', 'place']
     })
     expect(foldDetail('  The   Old-Quay! ')).toBe('old quay')
+  })
+
+  it("Update my detail writes the text's value into the one field (decision 4)", () => {
+    const typed = details({
+      povRecordId: 'tomas',
+      place: { recordId: 'harbour', text: 'by the steps' },
+      time: { text: 'December' },
+      storyYear: 1812,
+      alsoHere: ['ella']
+    })
+    expect(
+      detailFromText(typed, { field: 'pov', text: 'Mara Vell', textRecordId: 'mara' })
+    ).toEqual({ ...typed, povRecordId: 'mara' })
+    expect(
+      detailFromText(typed, { field: 'pov', text: 'Mara Vell', textRecordId: null })
+    ).toBeNull()
+    expect(
+      detailFromText(typed, { field: 'place', text: 'the quay', textRecordId: 'quay' })?.place
+    ).toEqual({ recordId: 'quay', text: '' })
+    expect(
+      detailFromText(typed, { field: 'place', text: ' the quay ', textRecordId: null })?.place
+    ).toEqual({ recordId: null, text: 'the quay' })
+    expect(detailFromText(typed, { field: 'time', text: 'May', textRecordId: null })?.time).toEqual(
+      { text: 'May' }
+    )
+    expect(
+      detailFromText(typed, { field: 'year', text: '1814', textRecordId: null })?.storyYear
+    ).toBe(1814)
+    expect(detailFromText(typed, { field: 'year', text: 'spring', textRecordId: null })).toBeNull()
   })
 })

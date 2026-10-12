@@ -44,9 +44,11 @@ describe('the reading views (F-16.18)', () => {
         id: 'd',
         kind: 'detailConflict',
         nodeId: 'n1',
+        ref: '14.2',
         field: 'place',
         typed: 'the harbour',
         text: 'the quay',
+        textRecordId: null,
         quote: 'She walked to the quay'
       }).success
     ).toBe(true)

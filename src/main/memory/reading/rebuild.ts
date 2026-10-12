@@ -1,19 +1,14 @@
 import { and, eq, gte } from 'drizzle-orm'
 import type { Claim } from '@shared/memory/claims'
-import { dismissedKey } from '@shared/memory/dismissed'
-import { gateText } from '@shared/memory/gate'
-import { locateQuote } from '@shared/memory/quote'
-import { slotLabel } from '@shared/memory/slots'
 import type { RebuildAction, RebuildProgress, RebuildSummary } from '@shared/memory/views'
 import { reading } from '../../db/schema'
 import { activeDraftId } from '../../draft/draftStore'
 import type { TreeDb } from '../../tree/treeStore'
-import { dismiss } from '../dismissedStore'
 import { answerNameQuestion } from '../questions'
 import { getRecord } from '../recordStore'
 import { readableScenes } from './backlog'
-import { deleteClaims, draftClaims } from './claimStore'
-import { loadReadingScene, readBook, type Book, type ReadingScene } from './readerContext'
+import { draftClaims } from './claimStore'
+import { dismissClaimsNotRight } from './notRight'
 import { getRebuild, setRebuild } from './readerRows'
 import { markRosterForRebuild } from './roster'
 
@@ -28,7 +23,10 @@ import { markRosterForRebuild } from './roster'
  */
 
 /** Starts a rebuild: its progress row, the roster built afresh; answers the scenes to read. */
-export function startRebuild(db: TreeDb, now: Date): { nodeIds: string[]; progress: RebuildProgress } {
+export function startRebuild(
+  db: TreeDb,
+  now: Date
+): { nodeIds: string[]; progress: RebuildProgress } {
   const nodeIds = readableScenes(db).map((scene) => scene.nodeId)
   const progress: RebuildProgress = {
     startedAt: now.toISOString(),
@@ -103,59 +101,6 @@ export function rebuildSummary(db: TreeDb): RebuildSummary | null {
   }
 }
 
-/** The gate texts of a claim's quote sentences (what a `notRight` dismissal keys on), or null. */
-function statingOf(scene: ReadingScene, claim: Claim): string[] | null {
-  const only = scene.texts.map((text, i) => (i === claim.para ? text : ''))
-  const location = locateQuote(only, claim.para, claim.quote)
-  if (!location.ok) return null
-  return location.sentences.map((i) =>
-    gateText(scene.spans[claim.para]?.[i]?.text ?? '', scene.shared.index)
-  )
-}
-
-/**
- * *Not right* for these claims (F-16.18's *Wrong value*, in bulk): a `notRight` Dismissed row for
- * each (by record, slot, value and its sentences), and the claim goes. Answers how many went.
- */
-export function dismissClaimsNotRight(db: TreeDb, claims: readonly Claim[], now: Date): number {
-  const scenes = new Map<string, ReadingScene | null>()
-  const gone: string[] = []
-  let book: Book | null = null
-  for (const claim of claims) {
-    if (claim.recordId === null) continue
-    if (!scenes.has(claim.nodeId)) {
-      book ??= readBook(db)
-      scenes.set(claim.nodeId, loadReadingScene(db, claim.nodeId, book))
-    }
-    const scene = scenes.get(claim.nodeId) ?? null
-    const stating = scene === null ? null : statingOf(scene, claim)
-    if (stating !== null) {
-      const name = getRecord(db, claim.recordId)?.name ?? ''
-      dismiss(
-        db,
-        {
-          kind: 'notRight',
-          key: dismissedKey({
-            kind: 'notRight',
-            recordId: claim.recordId,
-            slot: claim.slot,
-            value: claim.value,
-            stating
-          }),
-          recordId: claim.recordId,
-          nodeId: claim.nodeId,
-          label: `${name}: ${slotLabel(claim.slot)} ${claim.value}`,
-          quote: claim.quote
-        },
-        now
-      )
-    }
-    gone.push(claim.id)
-  }
-  deleteClaims(db, gone)
-  return gone.length
-}
-
 /** The summary's bulk actions; answers how many lines or names they took away. */
 export function applyRebuildAction(
   db: TreeDb,
@@ -169,7 +114,8 @@ export function applyRebuildAction(
     const lines = claims.filter(
       (claim) => claim.state === 'live' && claim.recordId === action.recordId
     )
-    const changed = db.transaction((tx) => dismissClaimsNotRight(tx, lines, now))
+    db.transaction((tx) => dismissClaimsNotRight(tx, lines, now))
+    const changed = lines.length
     return {
       changed,
       nodeIds: [...new Set(lines.map((claim) => claim.nodeId))],
@@ -201,4 +147,3 @@ export function stopRebuild(db: TreeDb, now: Date): boolean {
   setRebuild(db, { ...progress, finishedAt: now.toISOString() })
   return true
 }
-

@@ -13,7 +13,7 @@ import {
 import { STRUCTURE_TEMPLATES, isTemplateBeat, type StructureTemplateId } from '@shared/structure'
 import type { TagCategory } from '@shared/tags'
 import { eventForText, eventText } from '@shared/timeline'
-import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { isManuscriptDocument, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { StatusSelect } from '@renderer/features/outline/status'
 import { useStructureStore } from '@renderer/features/outline/structureStore'
@@ -25,6 +25,7 @@ import { SceneDetailsFields } from './SceneDetailsFields'
 import { useSceneMetaStore } from './sceneMetaStore'
 import { BriefDraftButton, SuggestButton, SynopsisSuggestion } from './SceneSuggestions'
 import { SuggestInput } from './SuggestInput'
+import { CardBlock } from './CardBlock'
 import { SummaryBlock } from './SummaryBlock'
 
 const BUTTON =
@@ -60,7 +61,8 @@ function useTagNames(category: TagCategory): string[] {
  * structure template (F-11.1b) and the node is in the manuscript, a Beat picker after Status
  * sets the beat the node sits on in that template (stored per template in `meta.beats`).
  * F-16.11: in story memory v2 Location, POV and Timeline give way to the typed details that point
- * at records, with the node's labels (`SceneDetailsFields`); the rest is unchanged.
+ * at records, with the node's labels (`SceneDetailsFields`); the rest is unchanged. F-16.18: in
+ * v2 the summary block gives way to the reading's card (`CardBlock`, manuscript scenes only).
  */
 export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const meta = useSceneMetaStore((s) => s.docs[id]?.content ?? null)
@@ -75,6 +77,7 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
   const events = useTimelineStore((s) => s.events)
   const eventTexts = useMemo(() => events.map(eventText), [events])
   const inManuscript = useTreeStore((s) => s.sectionOf[id] === 'manuscript')
+  const inManuscriptDocument = useTreeStore((s) => isManuscriptDocument(s, id))
   const memory = useStoryMemory()
 
   useEffect(() => {
@@ -188,7 +191,14 @@ export function MetadataPane({ id }: { id: string }): React.JSX.Element {
           ))}
         </div>
       ) : null}
-      <SummaryBlock id={id} />
+      {/* F-16.18: in story memory v2 the reading's card takes the summary's place. */}
+      {memory === 'v2' ? (
+        inManuscriptDocument ? (
+          <CardBlock id={id} />
+        ) : null
+      ) : (
+        <SummaryBlock id={id} />
+      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import type { DismissedKind } from '@shared/memory/dismissed'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
 import type { NameMentionView } from '@shared/memory/nameScan'
 import type { StoryRecordSummary } from '@shared/memory/records'
+import type { DetailConflictNotice, MemoryNotice } from '@shared/memory/views'
 
 /**
  * The pure rules of the This scene panel (F-16.12; story memory v2): how a scene's mentions
@@ -97,7 +98,12 @@ export const INLINE_TAGS_NOTICE = 'Inline tags show as plain text until you swit
 
 /** One group of Needs a look, as drawn. */
 export type NeedsALookGroup =
-  | { id: 'conflicts'; conflicts: FiledConflict[] }
+  | {
+      id: 'conflicts'
+      conflicts: FiledConflict[]
+      /** Decision 4 (F-16.18): typed details the text disagrees with, asked once each. */
+      details: DetailConflictNotice[]
+    }
   | {
       id: 'todos'
       /** The open to-dos, in her order. */
@@ -106,7 +112,12 @@ export type NeedsALookGroup =
       done: AuthorTodo[]
     }
   | { id: 'questions'; questions: NameQuestion[] }
-  | { id: 'notices'; notices: string[] }
+  | {
+      id: 'notices'
+      notices: string[]
+      /** The reading's notices (F-16.16, F-16.19), each with its buttons. */
+      memory: MemoryNotice[]
+    }
 
 export const NEEDS_A_LOOK_HEADING: Record<NeedsALookGroup['id'], string> = {
   conflicts: 'Conflicts',
@@ -117,20 +128,27 @@ export const NEEDS_A_LOOK_HEADING: Record<NeedsALookGroup['id'], string> = {
 
 /**
  * The groups of Needs a look in their order (the Conflicts first, F-16.9's filed lines whose
- * source changed, then My to-dos, the name Questions and Notices); a group with nothing in it is
- * not drawn. Ticked to-dos sit apart from the open ones (`done`). `todosOpen` keeps the to-do
- * group drawn while the author is adding the first one.
+ * source changed and decision 4's typed details the text disagrees with, then My to-dos, the name
+ * Questions and Notices, the reading's among them); a group with nothing in it is not drawn.
+ * Ticked to-dos sit apart from the open ones (`done`). `todosOpen` keeps the to-do group drawn
+ * while the author is adding the first one. `memory` is every reading notice; the typed-detail
+ * conflicts among them go under Conflicts.
  */
 export function needsALookGroups(input: {
   conflicts?: readonly FiledConflict[]
   todos: readonly AuthorTodo[]
   questions: readonly NameQuestion[]
   notices: readonly string[]
+  memory?: readonly MemoryNotice[]
   todosOpen?: boolean
 }): NeedsALookGroup[] {
   const groups: NeedsALookGroup[] = []
   const conflicts = input.conflicts ?? []
-  if (conflicts.length > 0) groups.push({ id: 'conflicts', conflicts: [...conflicts] })
+  const details = detailConflictsOf(input.memory ?? [])
+  const reading = (input.memory ?? []).filter((notice) => notice.kind !== 'detailConflict')
+  if (conflicts.length > 0 || details.length > 0) {
+    groups.push({ id: 'conflicts', conflicts: [...conflicts], details })
+  }
   if (input.todos.length > 0 || input.todosOpen === true) {
     groups.push({
       id: 'todos',
@@ -139,14 +157,24 @@ export function needsALookGroups(input: {
     })
   }
   if (input.questions.length > 0) groups.push({ id: 'questions', questions: [...input.questions] })
-  if (input.notices.length > 0) groups.push({ id: 'notices', notices: [...input.notices] })
+  if (input.notices.length > 0 || reading.length > 0) {
+    groups.push({ id: 'notices', notices: [...input.notices], memory: reading })
+  }
   return groups
+}
+
+/** The typed-detail conflicts among the reading's notices. */
+export function detailConflictsOf(notices: readonly MemoryNotice[]): DetailConflictNotice[] {
+  return notices.filter(
+    (notice): notice is DetailConflictNotice => notice.kind === 'detailConflict'
+  )
 }
 
 /**
  * The Needs a look badge (design §2.7): it counts conflicts only, never questions, to-dos or
- * notices, and shows nothing at zero. In P1 the conflicts are the filed lines whose source changed
- * (F-16.9); P4 adds contradictions.
+ * notices, and shows nothing at zero. The conflicts are the filed lines whose source changed
+ * (F-16.9) and the typed details the text disagrees with (decision 4, F-16.18); P4 adds
+ * contradictions.
  */
 export function needsALookBadge(conflicts: number): string | null {
   return conflicts > 0 ? String(conflicts) : null

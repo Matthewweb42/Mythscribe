@@ -21,6 +21,21 @@ export const featureLabel = (
 export const formatUsd = (usd: number): string =>
   usd > 0 && usd < 0.005 ? '<$0.01' : `$${usd.toFixed(2)}`
 
+/**
+ * A small sum the way story memory's footer and prices say it (F-16.16, F-16.19): cents under a
+ * dollar ("0.09¢", "0.3¢", "12¢"), a floor so a fraction never reads as free ("<0.01¢"), and
+ * dollars from one ("$1", "$1.25").
+ */
+export const formatCents = (usd: number): string => {
+  if (usd <= 0) return '0¢'
+  if (usd >= 1) return Number.isInteger(usd) ? `$${usd}` : `$${usd.toFixed(2)}`
+  const cents = usd * 100
+  if (cents < 0.01) return '<0.01¢'
+  if (cents < 0.1) return `${Number(cents.toFixed(2))}¢`
+  if (cents < 10) return `${Number(cents.toFixed(1))}¢`
+  return `${Math.round(cents)}¢`
+}
+
 /** One request's cost (F-4.7's note): four decimals, since a single fast-tier call is well under a cent. */
 export const formatRequestCost = (usd: number): string =>
   usd > 0 && usd < 0.00005 ? '<$0.0001' : `$${usd.toFixed(4)}`

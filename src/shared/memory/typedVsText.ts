@@ -1,7 +1,8 @@
 import { straightenQuotes } from '../critique'
 import type { CardField, CardFields } from './claims'
 import { cutValue } from './literal'
-import type { SceneDetails } from './sceneDetails'
+import { SCENE_META_FIELD_MAX, SCENE_META_TIMELINE_MAX } from '../sceneMeta'
+import { parseStoryYear, type SceneDetails } from './sceneDetails'
 
 /**
  * Decision 4 (F-16.18): the manuscript is canon, so where the text's quoted value disagrees with a
@@ -181,5 +182,37 @@ export function effectiveSceneLine(
     time: pick('time'),
     year: pick('year'),
     fromText
+  }
+}
+
+/**
+ * *Update my detail* (decision 4, F-16.18): the scene's typed details with one field set to the
+ * text's value. POV: the card's record. Place: the place record the text names (`textRecordId`),
+ * else the text's words with no record. Time: the text's words. Year: the text's year; a value
+ * that is not a year leaves the details as they are (answers null, nothing to write).
+ */
+export function detailFromText(
+  details: SceneDetails,
+  conflict: { field: TypedField; text: string; textRecordId: string | null }
+): SceneDetails | null {
+  switch (conflict.field) {
+    case 'pov':
+      return conflict.textRecordId === null
+        ? null
+        : { ...details, povRecordId: conflict.textRecordId }
+    case 'place':
+      return {
+        ...details,
+        place:
+          conflict.textRecordId === null
+            ? { recordId: null, text: conflict.text.trim().slice(0, SCENE_META_FIELD_MAX) }
+            : { recordId: conflict.textRecordId, text: '' }
+      }
+    case 'time':
+      return { ...details, time: { text: conflict.text.trim().slice(0, SCENE_META_TIMELINE_MAX) } }
+    case 'year': {
+      const year = parseStoryYear(conflict.text)
+      return year === undefined || year === null ? null : { ...details, storyYear: year }
+    }
   }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  formatCents,
   describeRequest,
   describeTotals,
   formatCount,
@@ -62,5 +63,19 @@ describe('usageFormat (F-5.14)', () => {
     expect(describeRequest({ model: 'gpt-5.4', costUsd: 0.0123, usage: null, cached: false })).toBe(
       'gpt-5.4 · $0.0123'
     )
+  })
+})
+
+describe('formatCents (F-16.16, F-16.19)', () => {
+  it('says small sums in cents and a dollar or more in dollars', () => {
+    expect(formatCents(0)).toBe('0¢')
+    expect(formatCents(0.0000001)).toBe('<0.01¢')
+    expect(formatCents(0.003)).toBe('0.3¢')
+    expect(formatCents(0.0011)).toBe('0.1¢')
+    expect(formatCents(0.0009)).toBe('0.09¢')
+    expect(formatCents(0.05)).toBe('5¢')
+    expect(formatCents(0.12)).toBe('12¢')
+    expect(formatCents(1)).toBe('$1')
+    expect(formatCents(1.25)).toBe('$1.25')
   })
 })

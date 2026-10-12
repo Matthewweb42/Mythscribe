@@ -4,6 +4,7 @@ import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { useConversionStore } from '@renderer/features/knowledge/conversionStore'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
+import { useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { showSideWork } from '@renderer/features/sideWork/sideWork'
@@ -45,6 +46,10 @@ export async function openNote(note: ActivityNote): Promise<void> {
       return
     case 'conversion':
       return
+    case 'rebuild':
+      // F-16.19: what the rebuild changed, grouped by sheet.
+      useMemoryStore.getState().setRebuildOpen('summary')
+      return
   }
 }
 
@@ -72,6 +77,8 @@ export async function retryNote(note: ActivityNote): Promise<void> {
       return
     case 'conversion':
       await useConversionStore.getState().retryReread()
+      return
+    case 'rebuild':
       return
   }
 }

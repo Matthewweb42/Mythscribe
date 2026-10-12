@@ -40,6 +40,8 @@ import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetStructureStore, useStructureStore } from '@renderer/features/outline/structureStore'
 import { resetLayoutStore } from '@renderer/features/shell/layoutStore'
 import { resetTimelineStore, useTimelineStore } from '@renderer/features/timeline/timelineStore'
+import { sceneMemoryFixture } from '@renderer/features/memory/memoryFixture'
+import { resetMemoryStore } from '@renderer/features/memory/memoryStore'
 import { tagFixture } from '@renderer/features/tags/tagFixture'
 import { orderedIds, resetTagStore, useTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -821,6 +823,7 @@ describe('MetadataPane in story memory v2 (F-16.11, F-16.7)', () => {
     resetRecordStore()
     resetLabelStore()
     resetSceneDetailStore()
+    resetMemoryStore()
     useProjectStore.setState({
       current: {
         id: 'p-2',
@@ -839,6 +842,7 @@ describe('MetadataPane in story memory v2 (F-16.11, F-16.7)', () => {
     resetRecordStore()
     resetLabelStore()
     resetSceneDetailStore()
+    resetMemoryStore()
     useProjectStore.setState({ current: null })
   })
 
@@ -851,6 +855,8 @@ describe('MetadataPane in story memory v2 (F-16.11, F-16.7)', () => {
       'label:links': () => [],
       'label:assign': () => [WRY],
       'sceneDetail:get': () => ({ ...emptySceneDetails(), gone: [] }),
+      // F-16.18: the card block reads the scene's memory (none read yet here).
+      'memory:scene': (input) => sceneMemoryFixture((input as Input<'memory:scene'>).nodeId),
       'sceneDetail:set': (input) => {
         const sent = input as Input<'sceneDetail:set'>
         details.push(sent)
@@ -936,6 +942,8 @@ describe('MetadataPane in story memory v2 (F-16.11, F-16.7)', () => {
       'label:list': () => [WRY],
       'label:links': () => [],
       'sceneDetail:get': () => ({ ...emptySceneDetails(), gone: [] }),
+      // F-16.18: the card block reads the scene's memory (none read yet here).
+      'memory:scene': (input) => sceneMemoryFixture((input as Input<'memory:scene'>).nodeId),
       'sceneDetail:set': (input) => {
         const sent = input as Input<'sceneDetail:set'>
         details.push(sent)

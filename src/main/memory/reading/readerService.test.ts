@@ -29,7 +29,12 @@ import {
 import { gateScene } from './pipeline'
 import { getRebuild, getSpotState, setSpotState } from './readerRows'
 import { createReaderService, type ReaderService, type ReaderServiceDeps } from './readerService'
-import { emptyYields } from '@shared/memory/claims'
+import { emptyCardFields, emptyYields, type Claim } from '@shared/memory/claims'
+import { emptySceneDetails } from '@shared/memory/sceneDetails'
+import { listDismissed, undoDismissed } from '../dismissedStore'
+import { setSceneDetails } from '../sceneDetailStore'
+import { upsertCard } from './cardStore'
+import { restoreNotRight } from './notRight'
 
 let tmp: string
 let session: ProjectSession
@@ -95,7 +100,9 @@ async function until(ready: () => boolean, what = 'the condition'): Promise<void
     if (ready()) return
     await new Promise((resolve) => setTimeout(resolve, 2))
   }
-  throw new Error(`Timed out waiting for ${what}: ${JSON.stringify(services.map((each) => each.queueStatus()))} ${JSON.stringify(listJobs(db))}`)
+  throw new Error(
+    `Timed out waiting for ${what}: ${JSON.stringify(services.map((each) => each.queueStatus()))} ${JSON.stringify(listJobs(db))}`
+  )
 }
 
 /** Waits for the queue to finish everything it can run. */
@@ -608,7 +615,9 @@ describe('the health gate (F-16.17, design §2.3)', () => {
     const scenes = Array.from({ length: 10 }, (_, i) =>
       addScene(`Scene ${i + 2}`, `Mara's eyes were green ${i}.`)
     )
-    const answers = scenes.map((id) => reader.settle({ nodeId: id, reason: 'leave', caretPara: null }))
+    const answers = scenes.map((id) =>
+      reader.settle({ nodeId: id, reason: 'leave', caretPara: null })
+    )
     expect(answers.slice(0, 9).every((answer) => answer.reason === 'paused')).toBe(true)
     expect(answers[9]).toEqual({ queued: true, reason: null })
     await until(() => readerRequests(ai).length === 1, 'the probe')
@@ -715,7 +724,8 @@ describe('the Cloud monthly cap (F-16.19, P2a §3.6)', () => {
   })
 
   it('counts what a reading spent even when it fails part-way', async () => {
-    const long = (n: number): string => `${'The boats went out at dawn and came back late. '.repeat(220)}${n}.`
+    const long = (n: number): string =>
+      `${'The boats went out at dawn and came back late. '.repeat(220)}${n}.`
     saveDocument(db, scene, doc(long(1), long(2), long(3)))
     let readers = 0
     const ai = fakeAi(
@@ -729,7 +739,10 @@ describe('the Cloud monthly cap (F-16.19, P2a §3.6)', () => {
       { providerId: 'cloud', now: NOW }
     )
     const reader = service(ai)
-    expect(await reader.readNow(scene, 'read-part')).toMatchObject({ ok: false, code: 'RATE_LIMIT' })
+    expect(await reader.readNow(scene, 'read-part')).toMatchObject({
+      ok: false,
+      code: 'RATE_LIMIT'
+    })
     expect(readers).toBe(2)
     expect(cloud.askedUsd).toBeGreaterThan(0)
   })
@@ -775,9 +788,7 @@ describe('Rebuild memory (F-16.19, P2a §3.6)', () => {
       sceneClaims(db, second, activeDraftId(db)).every((claim) => claim.spot === 'agree')
     ).toBe(true)
     const summary = second2.rebuildSummary()
-    expect(summary?.sheets).toEqual([
-      expect.objectContaining({ name: 'Mara Vell', lines: 2 })
-    ])
+    expect(summary?.sheets).toEqual([expect.objectContaining({ name: 'Mara Vell', lines: 2 })])
     // Not right for the sheet's new lines: both go, and stay gone.
     const recordId = summary?.sheets[0]?.recordId ?? ''
     expect(second2.rebuildAction({ action: 'notRightAll', recordId })).toEqual({ changed: 2 })
@@ -806,5 +817,193 @@ describe('spot checks after a reading (F-16.17, P2a-D8)', () => {
     await until(() => getSpotState(db).strongDue.length === 0, 'the strong batch')
     await drained(reader)
     expect(listJobs(db)).toEqual([])
+  })
+})
+
+describe('Not right (F-16.18)', () => {
+  const readScene = async (ai: FakeAi): Promise<ReaderService> => {
+    const reader = service(ai)
+    expect(await reader.readNow(scene, 'read-1')).toMatchObject({ ok: true, read: true })
+    return reader
+  }
+  const eyes = (): Claim | undefined =>
+    sceneClaims(db, scene, activeDraftId(db)).find((claim) => claim.slot === 'eyes')
+
+  it('Wrong value dismisses the line, and Undo brings it back as it was', async () => {
+    const reader = await readScene(reading())
+    const before = eyes()
+    expect(before).toMatchObject({ value: 'grey', state: 'live' })
+    changed = []
+    const result = await reader.notRight(before?.id ?? '', { kind: 'wrongValue' }, 'nr-1')
+    expect(result).toMatchObject({ ok: true, outcome: 'dismissed' })
+    const row = result.ok ? result.dismissed : null
+    expect(row).toMatchObject({ kind: 'notRight', nodeId: scene, label: 'Mara Vell: Eyes grey' })
+    expect(eyes()).toBeUndefined()
+    expect(changed).toEqual([{ nodeIds: [scene], recordIds: [before?.recordId] }])
+    // Undo: the tombstone goes, then the line comes back as it was.
+    undoDismissed(db, row?.id ?? '')
+    expect(restoreNotRight(db, row?.id ?? '')).toEqual({
+      nodeIds: [scene],
+      recordIds: [before?.recordId]
+    })
+    expect(eyes()).toEqual(before)
+    // Restored once: a second undo has nothing left to bring back.
+    expect(restoreNotRight(db, row?.id ?? '')).toEqual({ nodeIds: [], recordIds: [] })
+  })
+
+  it('Not about moves a line the checker supports for the picked record', async () => {
+    const made = createRecord(db, { name: 'Ella Harrow', categoryId: 'character' }, NOW)
+    if (!('record' in made)) throw new Error('blocked')
+    const ella = made.record.id
+    const ai = fakeAi(
+      (request) => {
+        if (requestKind(request) !== 'verify') return answerReading(request)
+        // The re-check names Ella only: it is supported for her.
+        const checks = sentChecks(request)
+        return {
+          text: JSON.stringify({
+            v: checks.map((check) => ({
+              i: check.i,
+              ok: true,
+              r: check.who[0] ?? null,
+              voice: 'narration',
+              mode: 'now'
+            }))
+          })
+        }
+      },
+      { providerId: 'openai', now: NOW }
+    )
+    const reader = await readScene(ai)
+    const mara = eyes()?.recordId
+    const sent = ai.requests.length
+    const result = await reader.notRight(
+      eyes()?.id ?? '',
+      { kind: 'notAbout', recordId: ella },
+      'nr-2'
+    )
+    expect(result).toMatchObject({ ok: true, outcome: 'moved' })
+    expect(ai.requests).toHaveLength(sent + 1)
+    expect(requestKind(ai.requests.at(-1)!)).toBe('verify')
+    expect(eyes()).toMatchObject({ recordId: ella, proof: 'verified', value: 'grey' })
+    // Mara keeps a tombstone for it, so a later reading does not hand the line back to her.
+    expect(result.ok ? result.dismissed : null).toMatchObject({ kind: 'notRight', recordId: mara })
+  })
+
+  it('Not about dismisses a line the checker does not support for the picked record', async () => {
+    const made = createRecord(db, { name: 'Ella Harrow', categoryId: 'character' }, NOW)
+    if (!('record' in made)) throw new Error('blocked')
+    let rechecking = false
+    const ai = fakeAi(
+      (request) => {
+        if (requestKind(request) !== 'verify' || !rechecking) return answerReading(request)
+        return { text: JSON.stringify({ v: [{ i: 1, ok: false, r: null }] }) }
+      },
+      { providerId: 'openai', now: NOW }
+    )
+    const reader = await readScene(ai)
+    rechecking = true
+    const result = await reader.notRight(
+      eyes()?.id ?? '',
+      { kind: 'notAbout', recordId: made.record.id },
+      'nr-3'
+    )
+    expect(result).toMatchObject({ ok: true, outcome: 'dismissed' })
+    expect(eyes()).toBeUndefined()
+  })
+
+  it('answers the AI failure when reading is off, and a gone line as gone', async () => {
+    const reader = await readScene(reading())
+    expect(await reader.notRight('no-such-claim', { kind: 'wrongValue' }, 'nr-4')).toEqual({
+      ok: true,
+      outcome: 'gone',
+      dismissed: null
+    })
+    settings = { ...settings, dial: 0 }
+    const made = createRecord(db, { name: 'Ella Harrow', categoryId: 'character' }, NOW)
+    if (!('record' in made)) throw new Error('blocked')
+    const result = await reader.notRight(
+      eyes()?.id ?? '',
+      { kind: 'notAbout', recordId: made.record.id },
+      'nr-5'
+    )
+    expect(result).toMatchObject({ ok: false, code: 'DISABLED' })
+    expect(eyes()).toMatchObject({ value: 'grey' })
+  })
+})
+
+describe('typed details against the text (decision 4, F-16.18)', () => {
+  const card = (where: string, quote: string): Parameters<typeof upsertCard>[1] => ({
+    nodeId: scene,
+    draftId: activeDraftId(db),
+    readingId: null,
+    line: 'Mara waits.',
+    gist: 'Mara waits.',
+    fields: { ...emptyCardFields(), where: { value: where, quote, p: 1, verified: true } },
+    present: [],
+    mood: null,
+    theme: null,
+    anchor: [],
+    seen: []
+  })
+
+  it('asks once where the text disagrees, and Keep mine never asks again', () => {
+    upsertCard(db, card('the quay', 'At dawn the boats went out from the quay'), NOW)
+    setSceneDetails(
+      db,
+      scene,
+      { ...emptySceneDetails(), place: { recordId: null, text: 'the harbour' } },
+      NOW
+    )
+    const reader = service(reading())
+    const conflict = reader.notices().find((notice) => notice.kind === 'detailConflict')
+    expect(conflict).toEqual({
+      id: `detail:${scene}:place`,
+      kind: 'detailConflict',
+      nodeId: scene,
+      ref: '1.1',
+      field: 'place',
+      typed: 'the harbour',
+      text: 'the quay',
+      textRecordId: null,
+      quote: 'At dawn the boats went out from the quay'
+    })
+    const after = reader.answerNotice(conflict?.id ?? '', 'keepMine')
+    expect(after.some((notice) => notice.kind === 'detailConflict')).toBe(false)
+    expect(listDismissed(db).items[0]).toMatchObject({
+      kind: 'notProblem',
+      nodeId: scene,
+      label: '1.1: kept your place “the harbour” over the text’s “the quay”'
+    })
+    // A new value in the text is asked about again.
+    upsertCard(db, card('the steps', 'At dawn the boats went out from the steps'), NOW)
+    expect(reader.notices().find((notice) => notice.kind === 'detailConflict')).toMatchObject({
+      text: 'the steps'
+    })
+  })
+
+  it('names the place record the text names, and pushes the notices when details change', () => {
+    const quay = createRecord(db, { name: 'North Quay', categoryId: 'setting' }, NOW)
+    if (!('record' in quay)) throw new Error('blocked')
+    upsertCard(db, card('the north quay', 'the boats went out from the north quay'), NOW)
+    const reader = service(reading())
+    noticeLists = []
+    setSceneDetails(
+      db,
+      scene,
+      { ...emptySceneDetails(), place: { recordId: null, text: 'the harbour' } },
+      NOW
+    )
+    reader.detailsChanged()
+    expect(noticeLists.at(-1)?.find((notice) => notice.kind === 'detailConflict')).toMatchObject({
+      textRecordId: quay.record.id
+    })
+  })
+
+  it('carries the last rebuild in the status', () => {
+    const reader = service(reading())
+    expect(reader.status().rebuild).toBeNull()
+    reader.rebuild()
+    expect(reader.status().rebuild).toMatchObject({ total: 1, done: 0, finishedAt: null })
   })
 })

@@ -106,6 +106,8 @@ import { ResearchPage } from '@renderer/features/research/ResearchPage'
 import { useResearchStore } from '@renderer/features/research/researchStore'
 import { useFilingStore } from '@renderer/features/research/filingStore'
 import { useFiledConflictStore } from '@renderer/features/thisScene/filedConflictStore'
+import { useMemoryStore } from '@renderer/features/memory/memoryStore'
+import { RebuildDialog } from '@renderer/features/memory/RebuildMemory'
 import { startReaderTriggers, stopReaderTriggers } from '@renderer/features/memory/readerTriggers'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { EditPassReport } from '@renderer/features/editPass/EditPassReport'
@@ -357,8 +359,10 @@ export function App(): React.JSX.Element {
       // F-16.9: and a filing under way and the filed-line conflicts.
       useFilingStore.getState().clear()
       useFiledConflictStore.getState().clear()
-      // F-16.16: the leave and idle triggers belong to the project that closed.
+      // F-16.16: the leave and idle triggers belong to the project that closed, and so does what
+      // the reader shows (F-16.18).
       stopReaderTriggers()
+      useMemoryStore.getState().clear()
       useFactStore.getState().clear()
       // F-9.13: the Changes log belongs to the project that closed.
       useChangesStore.getState().clear()
@@ -461,8 +465,11 @@ export function App(): React.JSX.Element {
       useDismissedStore.getState().load().catch(failed)
       // F-16.9: the filed lines whose Research source changed.
       useFiledConflictStore.getState().load().catch(failed)
-      // F-16.16: a scene is read when it is left or the author pauses.
+      // F-16.16: a scene is read when it is left or the author pauses; F-16.18: what the reading
+      // shows, its status and notices, pushed by main.
       startReaderTriggers()
+      useMemoryStore.getState().subscribe()
+      useMemoryStore.getState().load().catch(failed)
     }
     useEditorSettingsStore
       .getState()
@@ -1153,6 +1160,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       {v2 ? null : <ConversionDialog />}
       {/* F-16.10: the one Dismissed list, opened from the This scene panel's footer (v2). */}
       {v2 ? <DismissedDialog /> : null}
+      {/* F-16.19: Rebuild memory's price, progress and summary (v2). */}
+      {v2 ? <RebuildDialog /> : null}
       {/* F-7.12: the long jobs' finished / failed drops, and Open's big review dialog. */}
       <ActivityWatch />
       <ActivityDrops />

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EditPassSummary } from '@shared/editPass'
 import { IDLE_INDEX_QUEUE } from '@shared/jobs'
+import type { RebuildProgress } from '@shared/memory/views'
 import { contextReviewFixture } from '@renderer/features/library/libraryFixture'
 import { checkOutcome } from '@renderer/features/todo/todoStore'
 import {
@@ -58,6 +59,7 @@ function snapshot(over: Partial<ActivitySnapshot> = {}): ActivitySnapshot {
     continuity: { running: null, outcome: null, error: null, viewOpen: false },
     conversion: { rereading: false },
     queue: IDLE_INDEX_QUEUE,
+    memory: { rebuild: null, dialogOpen: false },
     ...over
   }
 }
@@ -336,5 +338,66 @@ describe('noteStale (F-7.12)', () => {
     const open = snapshot({ continuity: { ...snapshot().continuity, viewOpen: true } })
     expect(noteStale(note({ kind: 'continuity' }), open)).toBe(true)
     expect(noteStale(note({ kind: 'continuity' }), snapshot())).toBe(false)
+  })
+})
+
+describe('Rebuild memory as a job (F-16.19)', () => {
+  const progress = (over: Partial<RebuildProgress> = {}): RebuildProgress => ({
+    startedAt: '2026-10-12T10:00:00.000Z',
+    finishedAt: null,
+    draftId: 'd1',
+    total: 12,
+    done: 3,
+    ...over
+  })
+
+  it('runs with its scenes as steps, and says it finished with Open', () => {
+    const running = snapshot({ memory: { rebuild: progress(), dialogOpen: false } })
+    const [job] = readJobs(running)
+    expect(job).toEqual({
+      key: 'rebuild:2026-10-12T10:00:00.000Z',
+      kind: 'rebuild',
+      name: 'Rebuild memory',
+      steps: { done: 3, total: 12 },
+      ref: null
+    })
+    const done = snapshot({
+      memory: {
+        rebuild: progress({ done: 12, finishedAt: '2026-10-12T10:05:00.000Z' }),
+        dialogOpen: false
+      }
+    })
+    expect(readJobs(done)).toEqual([])
+    expect(outcomeOf(job!, done)).toMatchObject({
+      status: 'done',
+      title: 'Rebuild memory finished',
+      detail: 'Read 12 of 12 scenes.',
+      canOpen: true
+    })
+    expect(outcomeOf(job!, running)).toBeNull()
+  })
+
+  it('drops its note once the summary shows or another rebuild runs', () => {
+    const note: ActivityNote = {
+      id: 'n',
+      kind: 'rebuild',
+      status: 'done',
+      title: 'Rebuild memory finished',
+      detail: null,
+      ref: null,
+      canOpen: true,
+      canRetry: false,
+      parked: false
+    }
+    const finished = progress({ finishedAt: '2026-10-12T10:05:00.000Z' })
+    expect(noteStale(note, snapshot({ memory: { rebuild: finished, dialogOpen: false } }))).toBe(
+      false
+    )
+    expect(noteStale(note, snapshot({ memory: { rebuild: finished, dialogOpen: true } }))).toBe(
+      true
+    )
+    expect(noteStale(note, snapshot({ memory: { rebuild: progress(), dialogOpen: false } }))).toBe(
+      true
+    )
   })
 })

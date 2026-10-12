@@ -1,7 +1,15 @@
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
+import {
+  CLAIM_MODES,
+  CLAIM_PROOFS,
+  CLAIM_STATES,
+  CLAIM_VOICES,
+  SPOT_TIERS,
+  SPOT_VERDICTS
+} from '@shared/memory/claims'
 import { RebuildProgress } from '@shared/memory/views'
-import { settings } from '../../db/schema'
+import { settings, type ClaimRow } from '../../db/schema'
 import type { TreeDb } from '../../tree/treeStore'
 
 /**
@@ -17,12 +25,15 @@ import type { TreeDb } from '../../tree/treeStore'
  *   P2a-D16), per project.
  * - `memoryAsked`: the queued reads the author asked for or confirmed with a price (a priced
  *   backlog, a draft never read), spent as asked and never held back by the Cloud cap (P2a-D9).
+ * - `memoryNotRight`: the claims each *Not right › Wrong value* took away, by the Dismissed row's
+ *   id, so *Undo* in Dismissed brings the lines back as they were (F-16.18).
  */
 
 export const MEMORY_REBUILD_KEY = 'memoryRebuild'
 export const MEMORY_SPOT_KEY = 'memorySpot'
 export const MEMORY_HEALTH_KEY = 'memoryHealth'
 export const MEMORY_ASKED_KEY = 'memoryAsked'
+export const MEMORY_NOT_RIGHT_KEY = 'memoryNotRight'
 
 export const SpotState = z.object({
   rebuiltAt: z.string().nullable().default(null),
@@ -91,4 +102,47 @@ export function getAsked(db: TreeDb): Set<string> {
 
 export function setAsked(db: TreeDb, nodeIds: ReadonlySet<string>): void {
   writeRow(db, MEMORY_ASKED_KEY, [...nodeIds].sort())
+}
+
+/** A claim row as a *Not right* keeps it (the `claim` table's columns). */
+const StashedClaim = z.object({
+  id: z.string(),
+  nodeId: z.string(),
+  draftId: z.string(),
+  readingId: z.string().nullable(),
+  recordId: z.string().nullable(),
+  pending: z.string().nullable(),
+  subjectText: z.string().nullable(),
+  slot: z.string(),
+  value: z.string(),
+  valueKey: z.string(),
+  objectId: z.string().nullable(),
+  how: z.string().nullable(),
+  fromId: z.string().nullable(),
+  voice: z.enum(CLAIM_VOICES),
+  speakerId: z.string().nullable(),
+  mode: z.enum(CLAIM_MODES),
+  quote: z.string(),
+  para: z.number().int(),
+  anchor: z.string(),
+  proof: z.enum(CLAIM_PROOFS),
+  change: z.boolean(),
+  state: z.enum(CLAIM_STATES),
+  spot: z.enum(SPOT_VERDICTS).nullable(),
+  spotTier: z.enum(SPOT_TIERS).nullable(),
+  spotAt: z.string().nullable(),
+  created: z.string(),
+  proved: z.string()
+}) satisfies z.ZodType<ClaimRow>
+
+/** The claim rows a *Not right* took away, as stored, by the Dismissed row's id. */
+const NotRightStash = z.record(z.string(), z.array(StashedClaim))
+export type NotRightStash = Record<string, ClaimRow[]>
+
+export function getNotRightStash(db: TreeDb): NotRightStash {
+  return readRow(db, MEMORY_NOT_RIGHT_KEY, NotRightStash, {})
+}
+
+export function setNotRightStash(db: TreeDb, stash: NotRightStash): void {
+  writeRow(db, MEMORY_NOT_RIGHT_KEY, stash)
 }

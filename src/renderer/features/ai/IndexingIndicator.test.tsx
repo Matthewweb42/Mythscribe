@@ -5,6 +5,7 @@ import { IDLE_INDEX_QUEUE, type IndexQueueStatus } from '@shared/jobs'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { IndexingIndicator } from './IndexingIndicator'
+import { indicatorText } from './indexingText'
 import { resetIndexingStore, useIndexingStore } from './indexingStore'
 
 let calls: Channel[]
@@ -100,5 +101,31 @@ describe('IndexingIndicator (F-5.13)', () => {
     render(<IndexingIndicator />)
     await userEvent.click(screen.getByTestId('indexing-cancel'))
     expect(calls).toEqual(['jobs:cancel'])
+  })
+})
+
+describe('indicatorText in story memory v2 (F-16.16)', () => {
+  it('says reading where v1 says indexing', () => {
+    const running = {
+      ...IDLE_INDEX_QUEUE,
+      queued: 9,
+      done: 2,
+      running: { nodeId: 'a', kind: 'read' as const }
+    }
+    expect(indicatorText(running, 'reading')).toBe('Reading 3 of 12 scenes')
+    expect(indicatorText(running, 'indexing')).toBe('Indexing 3 of 12 scenes')
+    expect(indicatorText({ ...IDLE_INDEX_QUEUE, failed: 2 }, 'reading')).toBe(
+      '2 scenes could not be read'
+    )
+    expect(
+      indicatorText(
+        {
+          ...IDLE_INDEX_QUEUE,
+          queued: 1,
+          paused: { code: 'NO_KEY', message: 'No key.', nextStep: '' }
+        },
+        'reading'
+      )
+    ).toBe('Reading paused · No key.')
   })
 })

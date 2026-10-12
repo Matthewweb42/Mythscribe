@@ -50,6 +50,14 @@ import { caretToEnd, clickIntoEditor } from './support'
  * project over 6 scenes nobody read raises the backlog notice with a price and sends nothing;
  * `memory:rebuildEstimate` prices a rebuild; no request ever carried `summary.v5`'s opening.
  *
+ * P2a slice 4 (F-16.18, F-16.16, F-16.19), the UI over the same project: the panel shows Mara Here
+ * and True now's "Last seen at the quay, last stated in 1.1"; *Read now* after an edit sends one
+ * reader request and then says nothing is new; Mara's sheet shows "Eyes: brown" under From the
+ * book with ⓘ ("quote checked in code"); *Not right › Wrong value* sends it to Dismissed and its
+ * *Undo* brings it back; a typed place shows dimmed beside the card's place in scene details and
+ * Needs a look asks once (*Keep mine* clears it); Settings › AI shows the reading switch and the
+ * idle minutes; *Rebuild memory* goes from its price to the summary grouped by sheet.
+ *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
  * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
@@ -1090,10 +1098,13 @@ test('story memory v2: the evidence reader (P2a)', async () => {
     "Mara's eyes were brown."
   )
   await expect
-    .poll(async () => {
-      const eyes = await eyesOf()
-      return [eyes?.value, eyes?.state]
-    }, { timeout: 15_000 })
+    .poll(
+      async () => {
+        const eyes = await eyesOf()
+        return [eyes?.value, eyes?.state]
+      },
+      { timeout: 15_000 }
+    )
     .toEqual(['brown', 'live'])
 
   // A Replace in project across 6 scenes nobody has read yet: more than 5 to read, so main asks
@@ -1160,6 +1171,156 @@ test('story memory v2: the evidence reader (P2a)', async () => {
   expect(
     providerBodies.some((body) => body.messages[0]?.content.startsWith(SUMMARY_SENTINEL) === true)
   ).toBe(false)
+})
+
+test('story memory v2: Here, True now, sheets, cards and Rebuild memory (P2a slice 4)', async () => {
+  // Continues with Use AI on, the own key at the fake, and Scene 1 read by the P2a test.
+  const isReader = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(READER_SENTINEL) === true
+  const scenes = (await invoke<TreeNode[]>('tree:list', undefined)).filter(
+    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
+  )
+  const first = scenes[0]
+  const harbour = scenes.find((n) => n.title === 'Harbour 1')
+  if (!first || !harbour) throw new Error('the P2a test’s scenes are missing')
+  const maraId =
+    (await invoke<StoredRecord[]>('record:list', undefined)).find((r) => r.name === 'Mara Vell')
+      ?.id ?? ''
+  await showSection('Manuscript')
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  await bookTree.getByRole('treeitem', { name: first.title }).first().click()
+  const panel = page.getByTestId('this-scene-panel')
+  if ((await panel.count()) === 0) {
+    await page.getByRole('button', { name: 'This scene', exact: true }).click()
+  }
+  await panel.getByRole('tab', { name: 'This scene' }).click()
+
+  // F-16.18: Scene 1 has a card, so Here and Mentioned (P2a-D21); Mara is Here (her typed POV)
+  // and True now says where she was last seen.
+  await expect(panel.getByRole('region', { name: 'Here' }).getByLabel('POV')).toHaveValue(maraId)
+  await expect(panel.getByRole('region', { name: 'Mentioned' })).toBeVisible({ timeout: 15_000 })
+  const trueNow = panel.getByRole('group', { name: 'True now: Mara Vell' })
+  await expect(trueNow).toContainText('Last seen at the quay', { timeout: 15_000 })
+  await expect(trueNow).toContainText('last stated in 1.1')
+  await expect(panel.getByTestId('last-read')).toHaveText(/^Read (just now|\d+ min ago)$/)
+
+  // F-16.16: Read now after an edit reads it (one reader request); again, nothing new.
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await caretToEnd(editor)
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('The tide turned at noon.')
+  await expect
+    .poll(() => storedText(first.id), { timeout: 15_000 })
+    .toContain('The tide turned at noon.')
+  const readNow = panel.getByRole('button', { name: 'Read now' })
+  const readsBefore = providerBodies.filter(isReader).length
+  await readNow.click()
+  await expect
+    .poll(() => providerBodies.filter(isReader).length, { timeout: 15_000 })
+    .toBe(readsBefore + 1)
+  await expect(readNow).toBeEnabled({ timeout: 15_000 })
+  await readNow.click()
+  await expect(page.getByText('Nothing new to read in this scene.')).toBeVisible()
+  expect(providerBodies.filter(isReader)).toHaveLength(readsBefore + 1)
+
+  // Mara's sheet: From the book as of the open scene, with ⓘ; Not right › Wrong value sends the
+  // line to Dismissed, whose Undo brings it back.
+  await panel.getByRole('tab', { name: 'Book' }).click()
+  await panel.getByRole('button', { name: /^Mara Vell/ }).click()
+  const sheet = page.getByTestId('record-sheet')
+  const fixed = sheet.getByRole('region', { name: 'From the book' }).getByRole('group', {
+    name: 'Fixed'
+  })
+  const eyes = fixed.getByTestId('claim-line').filter({ hasText: 'Eyes: brown' })
+  await expect(eyes).toBeVisible({ timeout: 15_000 })
+  await eyes.getByRole('button', { name: 'Where this comes from: Eyes: brown' }).click()
+  await expect(eyes.getByTestId('claim-info')).toContainText('quote checked in code')
+  await expect(eyes.getByTestId('claim-info')).toContainText("Mara's eyes were brown")
+  const dismissedBefore = (await invoke<{ count: number }>('dismissed:list', undefined)).count
+  await eyes.getByRole('button', { name: 'Not right' }).click()
+  await eyes.getByRole('button', { name: 'Wrong value' }).click()
+  await expect(eyes).toHaveCount(0)
+  const dismissedButton = panel.getByRole('button', { name: `Dismissed (${dismissedBefore + 1})` })
+  await expect(dismissedButton).toBeVisible()
+  await dismissedButton.click()
+  const dismissedDialog = page.getByRole('dialog', { name: /^Dismissed \(/ })
+  await dismissedDialog.getByRole('button', { name: 'Undo: Mara Vell: Eyes brown' }).click()
+  await expect(dismissedDialog.getByRole('heading')).toHaveText(`Dismissed (${dismissedBefore})`)
+  await dismissedDialog.getByRole('button', { name: 'Close' }).click()
+  await expect(eyes).toBeVisible({ timeout: 15_000 })
+
+  // Decision 4: a typed place the text disagrees with shows dimmed beside the card's place, and
+  // Needs a look asks once; Keep mine clears it. (The Cast opened Mara in the Characters section.)
+  await showSection('Manuscript')
+  await bookTree.getByRole('treeitem', { name: first.title }).first().click()
+  await expect(sheet).toHaveCount(0)
+  const notesColumn = page.getByTestId('notes-panel')
+  if ((await notesColumn.count()) === 0) {
+    await page.getByRole('button', { name: 'Notes', exact: true }).click()
+  }
+  const detailsToggle = notesColumn.getByRole('button', { name: 'Scene details' })
+  if ((await detailsToggle.getAttribute('aria-expanded')) !== 'true') await detailsToggle.click()
+  const metadata = notesColumn.getByRole('group', { name: 'Scene metadata' })
+  const placeText = metadata.getByRole('textbox', { name: 'Place, in your words' })
+  await placeText.fill('the harbour')
+  await placeText.press('Enter')
+  await metadata.getByRole('button', { name: 'Card' }).click()
+  const where = metadata.getByTestId('card-Where')
+  await expect(where).toContainText('the quay')
+  await expect(where.getByTestId('typed-dimmed')).toHaveText('you typed: the harbour', {
+    timeout: 15_000
+  })
+  await panel.getByRole('tab', { name: 'This scene' }).click()
+  const conflict = panel
+    .getByTestId('detail-conflict')
+    .filter({ hasText: '1.1: the text says the quay; you typed the harbour' })
+  await expect(conflict).toBeVisible({ timeout: 15_000 })
+  await expect(panel.getByTestId('needs-a-look-badge')).toBeVisible()
+  await conflict.getByRole('button', { name: 'Keep mine' }).click()
+  await expect(conflict).toHaveCount(0)
+  await expect(
+    panel.getByRole('button', { name: `Dismissed (${dismissedBefore + 1})` })
+  ).toBeVisible()
+
+  // Settings › AI in v2: the one reading switch, the idle minutes, no Summarize all scenes.
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' })
+  await page.keyboard.press('Control+,')
+  await expect(settingsDialog).toBeVisible()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await expect(settingsDialog.getByRole('checkbox', { name: 'Story memory reading' })).toBeChecked()
+  await expect(settingsDialog.getByLabel('Read after a pause of (minutes)')).toHaveValue('3')
+  await expect(settingsDialog.getByTestId('memory-health')).toBeVisible()
+  await expect(settingsDialog.getByTestId('summarize-all')).toHaveCount(0)
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
+  // F-16.19: Rebuild memory from the Book tab: the price first, then the run, then the summary
+  // grouped by sheet (Harbour 1 now states Mara's eyes: one new line for her).
+  await invoke('document:save', {
+    id: harbour.id,
+    content: {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: "Mara's eyes were brown. The lamp 1 swung." }]
+        }
+      ]
+    }
+  })
+  await panel.getByRole('tab', { name: 'Book' }).click()
+  const readsBeforeRebuild = providerBodies.filter(isReader).length
+  await panel.getByRole('button', { name: 'Rebuild memory…' }).click()
+  const rebuild = page.getByRole('dialog', { name: 'Rebuild memory' })
+  await expect(rebuild.getByTestId('rebuild-estimate')).toContainText(/^About .+ for \d+ scenes/)
+  expect(providerBodies.filter(isReader)).toHaveLength(readsBeforeRebuild)
+  await rebuild.getByRole('button', { name: 'Rebuild', exact: true }).click()
+  const summary = rebuild.getByTestId('rebuild-summary')
+  await expect(summary).toBeVisible({ timeout: 90_000 })
+  await expect(summary).toContainText('Mara Vell: 1 new line')
+  expect(providerBodies.filter(isReader).length).toBeGreaterThan(readsBeforeRebuild)
+  await rebuild.getByRole('button', { name: 'Close' }).click()
+  await expect(rebuild).toHaveCount(0)
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

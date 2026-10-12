@@ -1,6 +1,7 @@
 import { EDIT_PASS_LABEL, type EditPassSummary } from '@shared/editPass'
 import type { IndexQueueStatus } from '@shared/jobs'
 import { CONVERSION_SECONDS_PER_SCENE } from '@shared/knowledge'
+import type { RebuildProgress } from '@shared/memory/views'
 import type { OrganiseRequest } from '@shared/organise'
 import type { ContinuityCheck, ContinuityOutcome } from '@renderer/features/ai/continuityStore'
 import type { EditPassView } from '@renderer/features/editPass/editPassViewStore'
@@ -18,7 +19,7 @@ import type { TodoCheckOutcome } from '@renderer/features/todo/todoStore'
  */
 
 export type ActivityKind =
-  'organise' | 'upload' | 'editPass' | 'todoCheck' | 'continuity' | 'conversion'
+  'organise' | 'upload' | 'editPass' | 'todoCheck' | 'continuity' | 'conversion' | 'rebuild'
 
 /** One long job running now. */
 export interface ActivityJob {
@@ -56,6 +57,8 @@ export interface ActivitySnapshot {
   }
   conversion: { rereading: boolean }
   queue: IndexQueueStatus
+  /** F-16.19: story memory v2's last *Rebuild memory*, and whether its dialog is open. */
+  memory: { rebuild: RebuildProgress | null; dialogOpen: boolean }
 }
 
 /** A finished or failed job's notification (the drop from the top centre). */
@@ -81,7 +84,7 @@ const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? '' 
 /** Every long job running now, in a fixed order (the hover lists them so). */
 export function readJobs(snap: ActivitySnapshot): ActivityJob[] {
   const jobs: ActivityJob[] = []
-  const { organise, upload, editPasses, todo, continuity, conversion, queue } = snap
+  const { organise, upload, editPasses, todo, continuity, conversion, queue, memory } = snap
   if (organise.phase === 'running' && organise.requestId !== null) {
     jobs.push({
       key: `organise:${organise.requestId}`,
@@ -134,6 +137,15 @@ export function readJobs(snap: ActivitySnapshot): ActivityJob[] {
       ref: null
     })
   }
+  if (memory.rebuild !== null && memory.rebuild.finishedAt === null) {
+    jobs.push({
+      key: `rebuild:${memory.rebuild.startedAt}`,
+      kind: 'rebuild',
+      name: 'Rebuild memory',
+      steps: { done: memory.rebuild.done, total: memory.rebuild.total },
+      ref: null
+    })
+  }
   return jobs
 }
 
@@ -150,7 +162,8 @@ export const CRAWL_MS: Record<ActivityKind, number> = {
   editPass: 15_000,
   todoCheck: 30_000,
   continuity: 15_000,
-  conversion: CONVERSION_SECONDS_PER_SCENE * 1000
+  conversion: CONVERSION_SECONDS_PER_SCENE * 1000,
+  rebuild: 20_000
 }
 
 /** The estimated share of a step done after `elapsedMs`: creeps toward `CRAWL_CAP`, never past. */
@@ -344,6 +357,18 @@ export function outcomeOf(job: ActivityJob, snap: ActivitySnapshot): ActivityNot
         canRetry: false
       }
     }
+    case 'rebuild': {
+      const { rebuild } = snap.memory
+      if (typeof rebuild?.finishedAt !== 'string') return null
+      return {
+        ...base,
+        status: 'done',
+        title: 'Rebuild memory finished',
+        detail: `Read ${rebuild.done} of ${plural(rebuild.total, 'scene')}.`,
+        canOpen: true,
+        canRetry: false
+      }
+    }
   }
 }
 
@@ -380,5 +405,7 @@ export function noteStale(note: ActivityNote, snap: ActivitySnapshot): boolean {
       )
     case 'conversion':
       return snap.conversion.rereading
+    case 'rebuild':
+      return snap.memory.dialogOpen || snap.memory.rebuild?.finishedAt === null
   }
 }

@@ -64,6 +64,11 @@ export function getCard(db: TreeDb, nodeId: string, draftId: string): Card | nul
   return row === undefined ? null : toCard(row)
 }
 
+/** Every card of one draft (the typed-detail conflicts read them all). */
+export function draftCards(db: TreeDb, draftId: string): Card[] {
+  return db.select().from(card).where(eq(card.draftId, draftId)).all().map(toCard)
+}
+
 /** The raw row (Rename in book's undo keeps it). */
 export function getCardRow(db: TreeDb, nodeId: string, draftId: string): CardRow | null {
   return (

@@ -6,8 +6,9 @@ import { countInlineTags } from '@shared/inlineTags'
 import type { NameMentionView } from '@shared/memory/nameScan'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
 import { AUTHOR_TODO_TEXT_MAX, type AuthorTodo } from '@shared/memory/authorTodo'
-import { formatUsd } from '@renderer/features/ai/usageFormat'
-import { useAiStore } from '@renderer/features/ai/aiStore'
+import { detailFromText } from '@shared/memory/typedVsText'
+import type { DetailConflictNotice, HereChip, MemoryNotice } from '@shared/memory/views'
+import { formatCents } from '@renderer/features/ai/usageFormat'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { openNameMention } from '@renderer/features/editor/openPassage'
 import { useSceneDetailStore } from '@renderer/features/editor/sceneDetailStore'
@@ -16,6 +17,23 @@ import { useSceneDetailsEditor } from '@renderer/features/editor/sceneDetailsEdi
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { useLabelStore } from '@renderer/features/labels/labelStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import {
+  useMemoryStore,
+  useSceneMemory,
+  type SceneEntry
+} from '@renderer/features/memory/memoryStore'
+import {
+  cloudLine,
+  noticeButtons,
+  noticeLine,
+  readAgo,
+  readNowMessage,
+  typedNote
+} from '@renderer/features/memory/memoryView'
+import { RebuildMemory } from '@renderer/features/memory/RebuildMemory'
+import { useNow } from '@renderer/features/memory/useNow'
+import { openPassage } from '@renderer/features/editor/openPassage'
+import { locateText } from '@renderer/features/editor/locateText'
 import { sceneCounts, useNameMentionStore } from '@renderer/features/records/nameMentionStore'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 import { namedInLabel } from '@renderer/features/records/recordView'
@@ -23,17 +41,20 @@ import { RenameInBook } from '@renderer/features/records/RenameInBook'
 import { DockPanelControls, PANEL_TITLE } from '@renderer/features/shell/Dock'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useAuthorTodoStore } from './authorTodoStore'
 import { useFiledConflictStore } from './filedConflictStore'
 import { useDismissedStore } from './dismissedStore'
 import { useQuestionStore } from './questionStore'
+import { TrueNow } from './TrueNow'
 import {
   ambiguousLabel,
   ambiguousWhy,
   castOf,
   conflictLine,
+  detailConflictsOf,
   INLINE_TAGS_NOTICE,
   namedChips,
   namedWhy,
@@ -77,12 +98,16 @@ export function ThisSceneToggleButton(): React.JSX.Element {
 }
 
 /**
- * The This scene | Book panel (F-16.12, answers 4 and 19; story memory v2), docked in the tags
- * panel's slot (its id stays `tags`, so a stored layout opens it where the tags were). Everything
- * in it works with Use AI off. **This scene**: *Here* (the POV and *+ also here*), *Named in this
- * scene* (the local name scan's chips, each saying why it is there, with *Go there* and *Not a
- * mention*; an ambiguous span dimmed) and **Needs a look**. **Book**: the Cast. The footer: today's
- * AI spend and **Dismissed (n)**. `id` is the open manuscript scene, or null.
+ * The This scene | Book panel (F-16.12, F-16.18, answers 4 and 19; story memory v2), docked in
+ * the tags panel's slot (its id stays `tags`, so a stored layout opens it where the tags were).
+ * Everything in it works with Use AI off. **This scene**: *Here* (the POV, with the text's POV
+ * over a typed one that differs and "you typed: Tomas" dimmed; characters on the page, each saying
+ * where; *+ also here*), *Mentioned* (the local name scan's chips, each saying why it is there,
+ * with *Go there* and *Not a mention*; an ambiguous span dimmed; headed *Named in this scene*
+ * until the scene has a card, P2a-D21), **True now** and **Needs a look** (its reading notices and
+ * the typed-detail conflicts among them). **Book**: the Cast and *Rebuild memory*. The footer:
+ * "Read 3 min ago · Read now · today 0.3¢ · Cloud 12¢ of $1 · Dismissed (n)". `id` is the open
+ * manuscript scene, or null.
  */
 export function ThisSceneColumn({ id }: { id: string | null }): React.JSX.Element | null {
   const open = useLayoutStore((s) => s.layout.tags.open)
@@ -134,20 +159,29 @@ export function ThisScenePanel({ sceneId }: { sceneId: string | null }): React.J
       >
         {tab === 'scene' ? <SceneTab sceneId={sceneId} /> : <BookTab />}
       </div>
-      <PanelFooter />
+      <PanelFooter sceneId={sceneId} />
     </>
   )
 }
 
 function SceneTab({ sceneId }: { sceneId: string | null }): React.JSX.Element {
+  const memory = useSceneMemory(sceneId)
+  // P2a-D21: Here and Mentioned once the scene has a card; until then the AI-off form.
+  const read = memory?.card !== null && memory?.card !== undefined
   return (
     <>
       {sceneId === null ? (
         <p className="m-0 mt-3 text-sm text-fg-muted">Open a scene to see who is in it.</p>
       ) : (
         <>
-          <Here key={`here:${sceneId}`} sceneId={sceneId} />
-          <NamedInScene key={`named:${sceneId}`} sceneId={sceneId} />
+          <Here key={`here:${sceneId}`} sceneId={sceneId} memory={read ? memory : undefined} />
+          <NamedInScene
+            key={`named:${sceneId}`}
+            sceneId={sceneId}
+            hereIds={read ? memory.here.map((chip) => chip.recordId) : []}
+            heading={read ? 'Mentioned' : 'Named in this scene'}
+          />
+          {memory === undefined ? null : <TrueNow entry={memory} />}
         </>
       )}
       <NeedsALook sceneId={sceneId} />
@@ -156,21 +190,63 @@ function SceneTab({ sceneId }: { sceneId: string | null }): React.JSX.Element {
   )
 }
 
-/** *Here*: the scene's POV and the records present without being named (F-16.11's details). */
-function Here({ sceneId }: { sceneId: string }): React.JSX.Element {
+/** Where a Here chip comes from, as its hover says it. */
+function hereWhy(chip: HereChip): string {
+  const where = chip.p === null ? '' : `¶${chip.p + 1} `
+  if (chip.quote === null) return chip.why === 'alsoHere' ? 'you added: also here' : 'you typed'
+  return chip.why === 'pov'
+    ? `the POV: ${where}“${chip.quote}”`
+    : `on the page: ${where}“${chip.quote}”`
+}
+
+/**
+ * *Here*: the scene's POV and the records present without being named (F-16.11's details); once
+ * the scene has a card (F-16.18), the text's POV where it quotes one (decision 4: a typed POV that
+ * differs shows dimmed, "you typed: Tomas") and the characters on the page, each saying where.
+ */
+function Here({ sceneId, memory }: { sceneId: string; memory?: SceneEntry }): React.JSX.Element {
   const editor = useSceneDetailsEditor(sceneId)
+  const byId = useRecordStore((s) => s.byId)
   const povId = useId()
+  const textPov = memory?.here.find((chip) => chip.why === 'pov' && chip.quote !== null)
+  const onPage = memory?.here.filter((chip) => chip.why === 'onPage') ?? []
   return (
     <section aria-labelledby={`${povId}-heading`}>
       <h3 id={`${povId}-heading`} className={HEADING}>
         Here
       </h3>
       <div className="flex min-w-0 items-center gap-2">
-        <label htmlFor={povId} className="w-10 shrink-0 text-xs text-fg-muted">
-          POV
-        </label>
-        <PovField editor={editor} inputId={povId} />
+        {textPov === undefined ? (
+          <>
+            <label htmlFor={povId} className="w-10 shrink-0 text-xs text-fg-muted">
+              POV
+            </label>
+            <PovField editor={editor} inputId={povId} />
+          </>
+        ) : (
+          <>
+            <span className="w-10 shrink-0 text-xs text-fg-muted">POV</span>
+            <span className={CHIP} title={hereWhy(textPov)} data-testid="here-pov">
+              {byId[textPov.recordId]?.name ?? 'Gone'}
+            </span>
+            {textPov.typedPov === null ? null : (
+              <span className="text-xs text-fg-subtle opacity-70" data-testid="typed-pov">
+                {typedNote(byId[textPov.typedPov]?.name ?? 'a record that is gone')}
+              </span>
+            )}
+          </>
+        )}
       </div>
+      {onPage.length === 0 ? null : (
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1" data-testid="on-page">
+          <span className="w-10 shrink-0 text-xs text-fg-muted">On page</span>
+          {onPage.map((chip) => (
+            <span key={chip.recordId} className={CHIP} title={hereWhy(chip)}>
+              {byId[chip.recordId]?.name ?? 'Gone'}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
         <AlsoHereField editor={editor} />
       </div>
@@ -178,8 +254,19 @@ function Here({ sceneId }: { sceneId: string }): React.JSX.Element {
   )
 }
 
-/** *Named in this scene*: the chips of the scan's mentions, with why each is there. */
-function NamedInScene({ sceneId }: { sceneId: string }): React.JSX.Element {
+/**
+ * *Mentioned* (*Named in this scene* until the scene has a card, P2a-D21): the chips of the
+ * scan's mentions, with why each is there; the records Here are not repeated.
+ */
+function NamedInScene({
+  sceneId,
+  hereIds,
+  heading
+}: {
+  sceneId: string
+  hereIds: readonly string[]
+  heading: string
+}): React.JSX.Element {
   const headingId = useId()
   const mentions = useNameMentionStore((s) => s.byNode[sceneId])
   const byId = useRecordStore((s) => s.byId)
@@ -192,7 +279,9 @@ function NamedInScene({ sceneId }: { sceneId: string }): React.JSX.Element {
       .catch((err: unknown) => toast.error(describeError(err)))
   }, [sceneId])
 
-  const { named, ambiguous } = namedChips(mentions ?? [], byId)
+  const all = namedChips(mentions ?? [], byId)
+  const named = all.named.filter((chip) => !hereIds.includes(chip.recordId))
+  const { ambiguous } = all
   const openNamed = named.find((chip) => chip.recordId === openKey)
   const openAmbiguous = ambiguous.find((chip) => chip.spanKey === openKey)
   const toggle = (key: string): void => setOpenKey((current) => (current === key ? null : key))
@@ -200,11 +289,15 @@ function NamedInScene({ sceneId }: { sceneId: string }): React.JSX.Element {
   return (
     <section aria-labelledby={headingId}>
       <h3 id={headingId} className={HEADING}>
-        Named in this scene
+        {heading}
       </h3>
       {named.length === 0 && ambiguous.length === 0 ? (
         <p className="m-0 text-xs text-fg-muted">
-          {mentions === undefined ? 'Reading…' : 'No record is named here yet.'}
+          {mentions === undefined
+            ? 'Reading…'
+            : all.named.length > 0
+              ? 'Nobody else is named here.'
+              : 'No record is named here yet.'}
         </p>
       ) : (
         <div className="flex flex-wrap gap-1" data-testid="named-chips">
@@ -357,16 +450,19 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
       : Object.keys(countInlineTags(content)).length
   })
   const conflicts = useFiledConflictStore((s) => s.conflicts)
+  const notices = useMemoryStore((s) => s.notices)
   const [adding, setAdding] = useState(false)
   const groups = needsALookGroups({
     conflicts,
     todos,
     questions,
     notices: inlineTags > 0 ? [INLINE_TAGS_NOTICE] : [],
+    memory: notices,
     todosOpen: adding
   })
-  // F-16.9: the filed lines whose Research source changed are P1's conflicts.
-  const badge = needsALookBadge(conflicts.length)
+  // F-16.9: the filed lines whose Research source changed; F-16.18: the typed details the text
+  // disagrees with (decision 4).
+  const badge = needsALookBadge(conflicts.length + detailConflictsOf(notices).length)
   return (
     <section aria-labelledby={headingId}>
       <div className="mt-3 mb-1 flex items-center gap-2">
@@ -405,7 +501,10 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
         >
           <h4 className="m-0 mb-1 text-xs text-fg-muted">{NEEDS_A_LOOK_HEADING[group.id]}</h4>
           {group.id === 'conflicts' ? (
-            <ConflictList conflicts={group.conflicts} />
+            <>
+              {group.details.length === 0 ? null : <DetailConflictList conflicts={group.details} />}
+              {group.conflicts.length === 0 ? null : <ConflictList conflicts={group.conflicts} />}
+            </>
           ) : group.id === 'todos' ? (
             <TodoList
               todos={group.todos}
@@ -417,7 +516,10 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
           ) : group.id === 'questions' ? (
             <QuestionList questions={group.questions} />
           ) : (
-            <ul className="m-0 list-none p-0 text-xs">
+            <ul className="m-0 list-none space-y-1 p-0 text-xs" data-testid="notices">
+              {group.memory.map((notice) => (
+                <ReadingNotice key={notice.id} notice={notice} />
+              ))}
               {group.notices.map((notice) => (
                 <li key={notice}>{notice}</li>
               ))}
@@ -683,7 +785,7 @@ function QuestionList({ questions }: { questions: NameQuestion[] }): React.JSX.E
   )
 }
 
-/** The Book tab: the Cast, a view of the Characters category, most-named first. */
+/** The Book tab: the Cast, a view of the Characters category, most-named first; *Rebuild memory*. */
 function BookTab(): React.JSX.Element {
   const headingId = useId()
   const records = useRecordStore(useShallow((s) => s.ids.flatMap((id) => s.byId[id] ?? [])))
@@ -696,50 +798,86 @@ function BookTab(): React.JSX.Element {
     if (!layout.layout.sidebar.open) layout.toggle('sidebar')
   }
   return (
-    <section aria-labelledby={headingId}>
-      <h3 id={headingId} className={HEADING}>
-        Cast
-      </h3>
-      {cast.length === 0 ? (
-        <p className="m-0 text-xs text-fg-muted">No characters yet.</p>
-      ) : (
-        <ul className="m-0 list-none p-0">
-          {cast.map((record) => (
-            <li key={record.id}>
-              <button
-                type="button"
-                onClick={() => open(record.id, record.categoryId)}
-                className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1 py-0.5 text-left text-sm hover:bg-surface-raised"
-              >
-                <span className="min-w-0 flex-1 truncate">{record.name}</span>
-                <span className="shrink-0 text-[11px] text-fg-subtle">
-                  {namedInLabel(scenes[record.id] ?? 0)}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    <>
+      <section aria-labelledby={headingId}>
+        <h3 id={headingId} className={HEADING}>
+          Cast
+        </h3>
+        {cast.length === 0 ? (
+          <p className="m-0 text-xs text-fg-muted">No characters yet.</p>
+        ) : (
+          <ul className="m-0 list-none p-0">
+            {cast.map((record) => (
+              <li key={record.id}>
+                <button
+                  type="button"
+                  onClick={() => open(record.id, record.categoryId)}
+                  className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1 py-0.5 text-left text-sm hover:bg-surface-raised"
+                >
+                  <span className="min-w-0 flex-1 truncate">{record.name}</span>
+                  <span className="shrink-0 text-[11px] text-fg-subtle">
+                    {namedInLabel(scenes[record.id] ?? 0)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <RebuildMemory />
+    </>
   )
 }
 
-/** Today's AI spend and **Dismissed (n)**. *Read now* and the last-read time arrive with P2a's reader. */
-function PanelFooter(): React.JSX.Element {
-  const today = useAiStore((s) => s.usage?.today.costUsd ?? null)
+/**
+ * The footer (F-16.16, F-16.19; design §2.7): "Read 3 min ago" (the open scene's last reading),
+ * *Read now* (pending saves flushed, then the scene read ahead of the queue; "Nothing new to read
+ * in this scene" when the gate finds nothing), what story memory reading cost today, on Cloud
+ * what background reading spent of the month's cap, and **Dismissed (n)**.
+ */
+function PanelFooter({ sceneId }: { sceneId: string | null }): React.JSX.Element {
+  const memory = useSceneMemory(sceneId)
+  const status = useMemoryStore((s) => s.status)
   const count = useDismissedStore((s) => s.items.length)
-  useEffect(() => {
-    // The figure is a courtesy: when the ledger cannot be read it shows a dash, never an error.
-    useAiStore
-      .getState()
-      .loadUsage()
-      .catch(() => undefined)
-  }, [])
+  const now = useNow()
+  const [busy, setBusy] = useState(false)
+  const readNow = async (): Promise<void> => {
+    if (sceneId === null || busy) return
+    setBusy(true)
+    const result = await useMemoryStore.getState().readNow(sceneId)
+    setBusy(false)
+    if (result === null) return
+    if (!result.ok) {
+      toast.error(`${result.message} ${result.nextStep}`.trim())
+      return
+    }
+    const message = readNowMessage(result)
+    if (message !== null) toast.info(message)
+  }
   return (
-    <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-1 text-xs text-fg-muted">
-      <span data-testid="this-scene-spend" title="What AI cost today">
-        {today === null ? 'Today —' : `Today ${formatUsd(today)}`}
+    <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-line px-3 py-1 text-xs text-fg-muted">
+      {sceneId === null ? null : (
+        <span data-testid="last-read">{readAgo(memory?.lastRead?.at ?? null, now)}</span>
+      )}
+      {sceneId === null ? null : (
+        <button
+          type="button"
+          className={SMALL}
+          disabled={busy}
+          onClick={() => void readNow()}
+          title="Read what changed in this scene now"
+        >
+          {busy ? 'Reading…' : 'Read now'}
+        </button>
+      )}
+      <span data-testid="this-scene-spend" title="What story memory reading cost today">
+        today {formatCents(status?.todayUsd ?? 0)}
       </span>
+      {status?.cloud === null || status?.cloud === undefined ? null : (
+        <span data-testid="cloud-spend" title="Background reading this month, of your Cloud cap">
+          {cloudLine(status.cloud)}
+        </span>
+      )}
       <button
         type="button"
         className={`${SMALL} ml-auto`}
@@ -748,6 +886,139 @@ function PanelFooter(): React.JSX.Element {
         Dismissed ({count})
       </button>
     </div>
+  )
+}
+
+/** One reading notice (F-16.16, F-16.19): its line and its buttons. */
+function ReadingNotice({ notice }: { notice: MemoryNotice }): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const run = async (action: () => Promise<unknown>): Promise<void> => {
+    setBusy(true)
+    await action()
+    setBusy(false)
+  }
+  return (
+    <li
+      className="rounded-md border border-line bg-surface px-2 py-1.5"
+      data-testid="reading-notice"
+    >
+      <p className="m-0">{noticeLine(notice)}</p>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {noticeButtons(notice).map((button) => (
+          <button
+            key={button.label}
+            type="button"
+            className={SMALL}
+            disabled={busy}
+            onClick={() => {
+              if (button.kind === 'settings') {
+                useShellDialogStore.getState().show('settings', 'ai')
+                return
+              }
+              if (button.kind === 'answer') {
+                void run(() => useMemoryStore.getState().answerNotice(notice.id, button.action))
+              }
+            }}
+          >
+            {button.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          aria-label={`Close: ${noticeLine(notice)}`}
+          className={SMALL}
+          disabled={busy}
+          onClick={() =>
+            void run(() => useMemoryStore.getState().answerNotice(notice.id, 'dismiss'))
+          }
+        >
+          <X size={12} aria-hidden="true" />
+        </button>
+      </div>
+    </li>
+  )
+}
+
+/**
+ * Decision 4's conflicts (F-16.18, P2a-D13): "14.2: the text says the quay; you typed the
+ * harbour", with *Go there* (the quote), *Update my detail* (the text's value written into the
+ * typed detail through `sceneDetail:set`) and *Keep mine* (never asked again).
+ */
+function DetailConflictList({
+  conflicts
+}: {
+  conflicts: readonly DetailConflictNotice[]
+}): React.JSX.Element {
+  return (
+    <ul className="m-0 mb-2 list-none space-y-2 p-0 text-xs" data-testid="detail-conflicts">
+      {conflicts.map((conflict) => (
+        <DetailConflictRow key={conflict.id} conflict={conflict} />
+      ))}
+    </ul>
+  )
+}
+
+function DetailConflictRow({ conflict }: { conflict: DetailConflictNotice }): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const goThere = (): void => {
+    openPassage(conflict.nodeId, (doc) => locateText(doc, conflict.quote)).catch((err: unknown) =>
+      toast.error(describeError(err))
+    )
+  }
+  const update = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const store = useSceneDetailStore.getState()
+      if (store.docs[conflict.nodeId] === undefined) await store.load(conflict.nodeId)
+      const current = useSceneDetailStore.getState().docs[conflict.nodeId]
+      const next = current === undefined ? null : detailFromText(current, conflict)
+      if (next === null) {
+        toast.error('That value cannot be written into your detail; change it in scene details.')
+        return
+      }
+      await store.save(conflict.nodeId, {
+        povRecordId: next.povRecordId,
+        place: next.place,
+        time: next.time,
+        storyYear: next.storyYear,
+        alsoHere: next.alsoHere
+      })
+    } catch (err) {
+      toast.error(describeError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const keep = async (): Promise<void> => {
+    setBusy(true)
+    await useMemoryStore.getState().answerNotice(conflict.id, 'keepMine')
+    setBusy(false)
+  }
+  return (
+    <li
+      className="rounded-md border border-line bg-surface px-2 py-1.5"
+      data-testid="detail-conflict"
+    >
+      <p className="m-0">{noticeLine(conflict)}</p>
+      {conflict.quote === '' ? null : (
+        <p className="m-0 mt-0.5 text-fg-muted">
+          <q>{conflict.quote}</q>
+        </p>
+      )}
+      <div className="mt-1 flex flex-wrap gap-1">
+        {conflict.quote === '' ? null : (
+          <button type="button" className={SMALL} onClick={goThere}>
+            Go there
+          </button>
+        )}
+        <button type="button" className={SMALL} disabled={busy} onClick={() => void update()}>
+          Update my detail
+        </button>
+        <button type="button" className={SMALL} disabled={busy} onClick={() => void keep()}>
+          Keep mine
+        </button>
+      </div>
+    </li>
   )
 }
 

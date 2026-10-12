@@ -21,6 +21,7 @@ import { useAssistantName } from '@renderer/features/shell/viewStore'
 import { describeError } from '@renderer/lib/errors'
 import { namedInOf, useNameMentionStore } from './nameMentionStore'
 import { useRecordStore, type AliasesInput } from './recordStore'
+import { FromTheBook } from './FromTheBook'
 import { RenameInBook } from './RenameInBook'
 import {
   aliasesInputOf,
@@ -48,7 +49,8 @@ const HEADING = 'm-0 text-xs font-semibold tracking-wide text-fg-muted uppercase
  * **Ideas** (read by the assistant, never treated as true) as pages, and *Named in* (the scenes
  * that name it, from the local name scan; a click selects the first mention). *Rename in book…*
  * (F-16.13) renames one of its names everywhere the manuscript writes it, with one Undo.
- * Knows, Relationships, Threads, Age and "From the book, as of …" arrive with their phases.
+ * **From the book, as of [scene]** (F-16.18) shows what the prose states, each line with ⓘ and
+ * *Not right*. Knows, Relationships, Threads and Age arrive with their phases.
  */
 export function RecordSheet({ id }: { id: string }): React.JSX.Element | null {
   const record = useRecordStore((s) => s.byId[id])
@@ -184,6 +186,9 @@ function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
             />
           </div>
         </section>
+
+        {/* F-16.18: what the prose states, as of a scene. */}
+        <FromTheBook recordId={record.id} />
 
         <NamedIn record={record} />
       </div>

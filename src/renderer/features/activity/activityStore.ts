@@ -6,6 +6,7 @@ import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewSt
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { useConversionStore } from '@renderer/features/knowledge/conversionStore'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
+import { useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { useTodoStore } from '@renderer/features/todo/todoStore'
 import {
@@ -21,7 +22,7 @@ import {
 /**
  * The background activity in the renderer (F-7.12). The job stores own every fact (Organise's
  * phase, the upload's flow and progress, the edit passes, the To do check, the consistency check,
- * the conversion's re-read); `startActivityWatch` derives the running jobs from them on every
+ * the conversion's re-read, story memory's *Rebuild memory*); `startActivityWatch` derives the running jobs from them on every
  * change (`readJobs`) and keeps here only what none of them holds: when each job was first seen
  * and last moved (for the crawl), the jobs that just ended (the bar fills and fades), and the
  * drop notifications with their focus-mode parking. `jobs` is the watch's last reading, written
@@ -106,7 +107,11 @@ export function readSnapshot(): ActivitySnapshot {
       viewOpen: continuity.viewOpen
     },
     conversion: { rereading: useConversionStore.getState().rereading },
-    queue: useIndexingStore.getState().status
+    queue: useIndexingStore.getState().status,
+    memory: {
+      rebuild: useMemoryStore.getState().status?.rebuild ?? null,
+      dialogOpen: useMemoryStore.getState().rebuildOpen !== null
+    }
   }
 }
 
@@ -219,6 +224,7 @@ export function startActivityWatch(): () => void {
     useContinuityStore.subscribe(sync),
     useConversionStore.subscribe(sync),
     useIndexingStore.subscribe(sync),
+    useMemoryStore.subscribe(sync),
     useFocusStore.subscribe((state, prev) => {
       if (state.active !== prev.active) onFocusChange(state.active)
     })

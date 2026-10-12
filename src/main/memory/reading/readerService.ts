@@ -18,6 +18,8 @@ import type {
   MemoryNoticeAction,
   MemoryPause,
   MemoryStatus,
+  NotRightChoice,
+  NotRightResult,
   ReadNowResult,
   RebuildAction,
   RebuildStartResult,
@@ -84,6 +86,8 @@ import {
   stopRebuild
 } from './rebuild'
 import { markRebuilt, pickStrongDue, runSpotChecks } from './spotChecks'
+import { detailConflicts, keepMine } from './detailConflicts'
+import { notAbout, wrongValue } from './notRight'
 import type { RebuildContext } from '../switchover/plan'
 
 /**
@@ -182,6 +186,10 @@ export interface ReaderService {
   rebuild(): RebuildStartResult
   rebuildSummary(): RebuildSummary | null
   rebuildAction(action: RebuildAction): { changed: number }
+  /** *Not right* on an AI line (F-16.18): *Wrong value*, or *Not about* with one check. */
+  notRight(claimId: string, choice: NotRightChoice, requestId: string): Promise<NotRightResult>
+  /** Typed details were saved: the typed-detail conflicts are looked at again. */
+  detailsChanged(): void
   cloudCap(): CloudCapState
   setCloudCap(capUsd: number): CloudCapState
   /** `/credits` answered: the tally is raised to the server's reading spend. */
@@ -223,7 +231,13 @@ export const BACKLOG_DELAY_MS = 2_000
 /** How often, at most, the Cloud tally asks `/credits`. */
 export const RECONCILE_EVERY_MS = 60 * 60 * 1000
 
-const NO_STATUS: MemoryStatus = { lastRead: null, paused: null, todayUsd: 0, cloud: null }
+const NO_STATUS: MemoryStatus = {
+  lastRead: null,
+  paused: null,
+  todayUsd: 0,
+  cloud: null,
+  rebuild: null
+}
 
 /** The start of the local day of `now`, as an ISO string (the footer's "today"). */
 function startOfDay(now: Date): string {
@@ -396,7 +410,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
               spentUsd: cloudCapState(cloud, month()).backgroundUsd,
               capUsd: cloudLimit(cloud, month())
             }
-          : null
+          : null,
+      rebuild: getRebuild(db)
     }
   }
 
@@ -434,6 +449,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
         })
       }
     }
+    // Decision 4: the cards already read disagree with typed details (local; AI off too).
+    list.push(...detailConflicts(db))
     return list
   }
 
@@ -669,7 +686,11 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
   /** Each request's cost into the Cloud tally as it returns (a run that fails part-way counts). */
   const spender = (db: TreeDb, asked: boolean) => (usd: number) => tally(db, usd, asked)
 
-  async function runRead(db: TreeDb, nodeId: string, requestId: string): Promise<JobRun<ReaderValue>> {
+  async function runRead(
+    db: TreeDb,
+    nodeId: string,
+    requestId: string
+  ): Promise<JobRun<ReaderValue>> {
     const clicked = askedNow.has(nodeId)
     const listed = getAsked(db).has(nodeId)
     const confirmed = !clicked && listed
@@ -954,6 +975,13 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
           if (provider !== null) deps.useFlash?.(provider.id)
         }
         if (action === 'dismiss') closedHealth.add(health)
+      } else if (id.startsWith('detail:')) {
+        // Decision 4: *Keep mine* (and closing it) leaves the typed value and never asks again;
+        // *Update my detail* is the renderer's write through `sceneDetail:set`.
+        const conflict = detailConflicts(db).find((each) => each.id === id)
+        if (conflict !== undefined && (action === 'keepMine' || action === 'dismiss')) {
+          keepMine(db, conflict, now())
+        }
       } else if (id.startsWith('cloudCap:')) {
         if (action === 'allowMore') {
           deps.cloud.update((state) => markCapNotice(allowMore(state, month()), month()))
@@ -972,7 +1000,12 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
           } else if (held) {
             // Nothing is queued; the notice stays.
           } else if (notice.kind === 'backlog') {
-            if (action === 'read') queueAsked(db, offered.map((scene) => scene.nodeId))
+            if (action === 'read') {
+              queueAsked(
+                db,
+                offered.map((scene) => scene.nodeId)
+              )
+            }
             stored.delete(id)
             offered = []
           } else if (notice.kind === 'draftUnread') {
@@ -1088,6 +1121,36 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     rebuildSummary() {
       return rebuildSummary(requireDb())
     },
+
+    async notRight(claimId, choice, requestId) {
+      const db = requireDb()
+      if (choice.kind === 'wrongValue') {
+        const outcome = wrongValue(db, claimId, now())
+        if (outcome.outcome !== 'gone') {
+          deps.changed({ nodeIds: outcome.nodeIds, recordIds: outcome.recordIds })
+        }
+        return { ok: true, outcome: outcome.outcome, dismissed: outcome.dismissed }
+      }
+      try {
+        // Asked: gated by Use AI and the reading switch only, and spent as asked (P2a-D9).
+        gate(db, 'switch', false)
+        const outcome = await notAbout(
+          db,
+          { ai: deps.requestDeps(db) },
+          { claimId, recordId: choice.recordId, requestId, onSpend: spender(db, true) }
+        )
+        if (outcome.outcome !== 'gone') {
+          deps.changed({ nodeIds: outcome.nodeIds, recordIds: outcome.recordIds })
+        }
+        publish()
+        return { ok: true, outcome: outcome.outcome, dismissed: outcome.dismissed }
+      } catch (err) {
+        if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
+        throw err
+      }
+    },
+
+    detailsChanged: () => publish(),
 
     rebuildAction(action) {
       const db = requireDb()
