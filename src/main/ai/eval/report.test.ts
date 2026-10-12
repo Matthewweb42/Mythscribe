@@ -202,7 +202,7 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
     }
   })
 
-  it('F-16.9, F-16.17, F-16.20, F-16.21: the shipped rows left the planned table and their prompts are catalogued', () => {
+  it('F-16.9, F-16.17, F-16.20, F-16.21, F-16.22: the shipped rows left the planned table and their prompts are catalogued', () => {
     expect(SHIPPED_PLAN_ROWS.map((row) => row.id)).toEqual([
       'contextImport.v3',
       'reviewChat.v3',
@@ -214,7 +214,13 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
       'reader.v1:card',
       'synopsis.v2',
       'notesSuggest.v4',
-      'planLinks.v2'
+      'planLinks.v2',
+      'reader.v2:first',
+      'reader.v2:window',
+      'reader.v2:card',
+      'verify.v2',
+      'verify.v2:pro',
+      'verify.v2:spot'
     ])
     for (const row of SHIPPED_PLAN_ROWS) {
       expect(PLANNED_COST_NOTES.some((planned) => planned.id === row.id)).toBe(false)
@@ -226,8 +232,16 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
     const cost = plannedTaskCost(upload, 'ownKey')
     expect(cost).toBeGreaterThan(0.15 * 0.7)
     expect(cost).toBeLessThan(0.15 * 1.3)
-    // P2a is shipped: none of its rows is planned any more.
-    expect(PLANNED_COST_NOTES.filter((row) => row.phase === 'P2a')).toEqual([])
+    // P2a and P2b are shipped: none of their rows is planned any more.
+    expect(PLANNED_COST_NOTES.filter((row) => row.phase === 'P2a' || row.phase === 'P2b')).toEqual(
+      []
+    )
+    // The tasks read the reader's and checker's v2 rows (P2b slice 2).
+    const rows = PLANNED_TASK_COSTS.flatMap((task) => task.calls.map((call) => call.row))
+    expect(rows.filter((row) => /^(reader|verify)\.v1/.test(row))).toEqual([])
+    expect(rows).toEqual(
+      expect.arrayContaining(['reader.v2:first', 'reader.v2:window', 'verify.v2'])
+    )
   })
 
   it('renders both planned tables into the registry', () => {

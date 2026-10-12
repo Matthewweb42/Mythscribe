@@ -148,6 +148,8 @@ export function claimView(each: Claim, reading: ReadingOrder): ClaimView {
     mode: each.mode,
     speakerId: each.speakerId,
     objectId: each.objectId,
+    how: each.how,
+    fromId: each.fromId,
     state: each.state,
     proof: each.proof,
     nodeId: each.nodeId,

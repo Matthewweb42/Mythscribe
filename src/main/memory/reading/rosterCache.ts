@@ -14,11 +14,8 @@ import {
 } from '@shared/memory/topics'
 import { settings } from '../../db/schema'
 import type { TreeDb } from '../../tree/treeStore'
-import {
-  READER_PROMPT_VERSION,
-  readerRosterAddition,
-  readerRosterLine
-} from '../../ai/prompts/reader.v1'
+import { readerRosterAddition, readerRosterLine } from '../../ai/prompts/reader.v1'
+import { READER_V2_PROMPT_VERSION } from '../../ai/prompts/reader.v2'
 import { currentDraftId } from '../../draft/draftStore'
 import { namedInCounts } from '../nameIndexer'
 import { listRecords } from '../recordStore'
@@ -26,7 +23,8 @@ import { topicsInDraft } from './recordEvidence'
 import { MEMORY_ROSTER_KEY } from './roster'
 
 /**
- * The reader's roster cache (F-16.17; plan P2a §2.5): the roster block of `reader.v1` is kept in a
+ * The reader's roster cache (F-16.17; plan P2a §2.5): the roster block of the reader (`reader.v2`
+ * since P2b slice 2; the row names the version, so a new one rebuilds it once) is kept in a
  * settings row (`memoryRoster`) byte for byte across calls and sessions, so the provider's prompt
  * cache holds the rules and the roster as one stable prefix. A new record or nickname is appended
  * (`r12 +Ry`); a removal, rename, re-categorising, merge, split, *Rebuild memory* or a new reader
@@ -41,7 +39,7 @@ import { MEMORY_ROSTER_KEY } from './roster'
  * secret`, `t2 Ashby's return · thread`), rendered after the record lines, so a topic made,
  * renamed, merged, split or pruned rebuilds only that part and never moves the record prefix. It
  * never drops a topic: past `TOPIC_ROSTER_TOKENS`, every label shortens to 4 words, and what is
- * still over is the prompt's to count (slice 2).
+ * still over comes out of the near lines' budget (`buildReaderV2Prompt`'s `trimmed.rosterOver`).
  */
 
 /** The records' share of the roster's 1,600 tokens (P2b's secrets and threads hold the other 400). */
@@ -212,7 +210,7 @@ function build(
   }
   const listed = ordered.filter((record) => kept.has(record.id))
   return {
-    readerVersion: READER_PROMPT_VERSION,
+    readerVersion: READER_V2_PROMPT_VERSION,
     ids: Object.fromEntries(listed.map((record, i) => [record.id, `r${i + 1}`])),
     next: listed.length + 1,
     base: listed.map((record, i) => rosterLine(`r${i + 1}`, record)),
@@ -316,7 +314,7 @@ export function readerRoster(db: TreeDb): ReaderRoster {
   )
   const stored = readRow(db)
   const current =
-    stored !== null && stored.readerVersion === READER_PROMPT_VERSION
+    stored !== null && stored.readerVersion === READER_V2_PROMPT_VERSION
       ? appended(stored, records)
       : null
   const base = current ?? build(records, namedTotals(db))

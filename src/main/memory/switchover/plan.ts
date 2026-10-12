@@ -15,7 +15,7 @@ import { buildSwitchoverModel } from './model'
 /**
  * The switch-over's dry run (F-16.15, plan P1 §6.1 step 2) and consent rows (step 3). Both read
  * only: the model (`buildSwitchoverModel`) is reported by name, and the rebuild that follows the
- * switch (P2a's *Rebuild memory*) is priced from the planned `reader.v1` and `verify.v1` rows over
+ * switch (P2a's *Rebuild memory*) is priced from the shipped `reader.v2` and `verify.v2` rows over
  * this book's own scene sizes, on the models the author has set up.
  */
 
@@ -39,25 +39,25 @@ export function plannedRow(id: string): PlannedCostNote {
   return row
 }
 
-/** The prose tokens a `reader.v1` first read takes per page (its `when`: pages of 2,500). */
+/** The prose tokens a first read takes per page (`reader.v2:first`'s `when`: pages of 2,500). */
 export const REBUILD_PAGE_TOKENS = 2_500
-/** Spot checks per rebuild (the `verify.v1:pro` and `verify.v1:spot` rows' `when`). */
+/** Spot checks per rebuild (the `verify.v2:pro` and `verify.v2:spot` rows' `when`). */
 export { REBUILD_FAST_CHECKS, REBUILD_STRONG_CHECKS }
 
 /**
- * The rebuild's price and time: each scene read whole once (`reader.v1:first`, one request per
+ * The rebuild's price and time: each scene read whole once (`reader.v2:first`, one request per
  * page of `REBUILD_PAGE_TOKENS` prose tokens, the row's other input on each page) and its claims
- * verified once per page (`verify.v1`), then the spot checks; priced on the configured fast and
+ * verified once per page (`verify.v2`), then the spot checks; priced on the configured fast and
  * strong models (`estimateCost`), minutes from `CONVERSION_SECONDS_PER_SCENE`.
  */
 export function estimateRebuild(
   scenes: readonly number[],
   context: RebuildContext
 ): RebuildEstimate {
-  const reader = plannedRow('reader.v1:first')
-  const verify = plannedRow('verify.v1')
-  const strong = plannedRow('verify.v1:pro')
-  const spot = plannedRow('verify.v1:spot')
+  const reader = plannedRow('reader.v2:first')
+  const verify = plannedRow('verify.v2')
+  const strong = plannedRow('verify.v2:pro')
+  const spot = plannedRow('verify.v2:spot')
   const overhead = reader.typicalInTokens - REBUILD_PAGE_TOKENS
   let pages = 0
   let fastIn = 0

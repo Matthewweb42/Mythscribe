@@ -19,6 +19,7 @@ import {
   type ReadingYields,
   type SpotVerdict
 } from '@shared/memory/claims'
+import { dismissedKey } from '@shared/memory/dismissed'
 import {
   gateSentences,
   gateText,
@@ -30,6 +31,7 @@ import {
   type ReadDecision,
   type ReadSentence
 } from '@shared/memory/gate'
+import { KNOWER_KINDS, keepsFrom, parseHow } from '@shared/memory/knows'
 import {
   ANTECEDENT_SENTENCES,
   nameInSentence,
@@ -52,25 +54,44 @@ import {
   type VerifyVerdict
 } from '@shared/memory/readerAnswer'
 import { reconcile, type FreshClaim } from '@shared/memory/reconcile'
-import { OBJECT_SLOTS, parseSlot, readerAccepts, type Slot } from '@shared/memory/slots'
+import { OBJECT_SLOTS, parseSlot, slotGroup, type Slot } from '@shared/memory/slots'
 import { readerMayRead } from '@shared/memory/sources'
 import { spotPicked } from '@shared/memory/spot'
+import {
+  TOPIC_CAPS,
+  parseStep,
+  sameAsCandidates,
+  topicLabel,
+  type TopicFacet,
+  type TopicKind
+} from '@shared/memory/topics'
 import { cardDue, outputCap, planPages, planWindows, type ReadPiece } from '@shared/memory/windows'
 import { activeDraftId, currentDraftId } from '../../draft/draftStore'
-import { READER_PROMPT_VERSION, buildReaderPrompt } from '../../ai/prompts/reader.v1'
 import {
-  VERIFY_PROMPT_VERSION,
+  READER_V2_PROMPT_VERSION,
+  STEP_VALUE_MAX_WORDS,
+  buildReaderV2Prompt
+} from '../../ai/prompts/reader.v2'
+import {
   VERIFY_UNNAMED_MARK,
-  buildVerifyPrompt,
-  verifyBatches,
-  type VerifyPromptItem
-} from '../../ai/prompts/verify.v1'
+  VERIFY_V2_PROMPT_VERSION,
+  buildVerifyV2Prompt,
+  verifyV2Batches,
+  type VerifyV2Item
+} from '../../ai/prompts/verify.v2'
 import { cancelInflight } from '../../ai/inflight'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from '../../ai/request'
 import { AiCancelledError, type AiMessage } from '../../ai/providers/types'
 import type { TreeDb } from '../../tree/treeStore'
 import { dismissedKeys } from '../dismissedStore'
-import { dismissedNames, rosterOf, topicLabels } from '../recordStore'
+import {
+  dismissedNames,
+  getRecord,
+  listRecords,
+  pruneTopics,
+  rosterOf,
+  topicLabels
+} from '../recordStore'
 import { paragraphsOf, runAnchors } from './anchors'
 import { getCard, upsertCard } from './cardStore'
 import {
@@ -91,6 +112,7 @@ import {
   nearLines,
   positionLine,
   readBook,
+  revealLine,
   typedLine,
   type Book,
   type ReadingScene
@@ -98,8 +120,17 @@ import {
 import { notAboutMovedTo } from './readerRows'
 import { insertReading } from './readingStore'
 import { readerRoster, type ReaderRoster } from './rosterCache'
-import { getSceneRead, writeSceneRead } from './sceneReadStore'
-import { readingOrder } from './views'
+import { getSceneRead, setSceneSettled, writeSceneRead } from './sceneReadStore'
+import { topicContext, type TopicContext } from './topicContext'
+import {
+  createTopic,
+  deleteTopicQuotes,
+  mergeInto,
+  reviveTopicQuote,
+  sceneTopicQuotes,
+  type NewTopicQuote
+} from './topicStore'
+import { heldCard, hereChips, readingOrder } from './views'
 
 /**
  * The reading pipeline (F-16.17, F-16.16's gate; design §2.3, plan P2a §2.4): `runReading` reads
@@ -109,9 +140,9 @@ import { readingOrder } from './views'
  * 1. **Gate** (`readDecision`): nothing unread, or only cosmetic edits → nothing is sent.
  * 2. **Plan**: the window (changed paragraphs ±2, back to a naming paragraph) or the whole scene
  *    in pages; whether the card is due.
- * 3. **Prompt** (`reader.v1`): the cached roster, the scene's head, the facts known near the
- *    window and anchored in it, the numbered paragraphs; the context hash covers every message,
- *    so an identical request answers from the local cache (token rule 4).
+ * 3. **Prompt** (`reader.v2`; `reader.v1` before P2b): the cached rosters, the scene's head, the
+ *    facts known near the window and anchored in it, the numbered paragraphs; the context hash
+ *    covers every message, so an identical request answers from the local cache (token rule 4).
  * 4. **Request** through `runAiRequest` (feature `reader`, fast, JSON, reasoning off): the daily
  *    cap, the budgets and the ledger are the request path's. A reply cut off at its cap is read
  *    to its last complete item and the paragraphs after the last one it quoted are read once more
@@ -120,7 +151,7 @@ import { readingOrder } from './views'
  * 5. **Ladder**, per item: presence (the quote once in the window, in its paragraph), subject
  *    (`resolveSubject`: a name pins it, a pronoun goes to the checker with every character named
  *    in reach, first person only to the speaker or the typed POV), literal proof in code, then
- *    `verify.v1` (batches per page, each sized so its verdicts fit; a batch cut off at its cap has
+ *    `verify.v2` (batches per page, each sized so its verdicts fit; a batch cut off at its cap has
  *    its unanswered items asked once more) for the rest, the card's POV, year and flashback, and
  *    who is on the page. Only what is proved is kept; every rejection is counted by reason in the
  *    reading's yields, and a fact the checker never answered leaves its paragraph unread.
@@ -135,6 +166,24 @@ import { readingOrder } from './views'
  *
  * Nothing is read from a scene the reader may not read (an Idea, one left out of compile, outside
  * the manuscript), nor from another draft. Provider failures propagate and nothing is written.
+ *
+ * **P2b** (F-16.22, F-16.23; plan P2b §2.4): `reader.v2` and `verify.v2`. The reader also sees the
+ * topics roster (secrets and threads) and the topic lines of the listed ones the window touches;
+ * it answers knows facts, thread steps and new secrets and threads. Before the checker: a new
+ * topic's revealing sentence must stand in the window (`topic`), one the author dismissed drops
+ * silently with its facts, past the page's caps (3 secrets, 2 threads) the rest drop
+ * (`topicCap`), and two new ones of one reading with the same label fold into one. A knows fact's
+ * learner goes through the subject rules (a group only when its sentence names it, `group`;
+ * never waiting), and must be Here or the POV: in code from the typed details, the held card and
+ * this reading's verified card, else one on-page check in the same batch (`notHere` when it
+ * fails). The checker's batch adds knows items (learner, how, source), step items, a Reveals item
+ * per new topic or restated reveal, and up to 3 Same items per new topic (`sameAsCandidates`).
+ * After the verdicts a new topic whose reveal holds is created silently (a verified reveal is
+ * itself the proved claim that backs it, P2b-D3) or merged into the first open topic judged the
+ * same (a `merged` reveal, its facts tagged, P2b-D4); a restated reveal revives its re-checking
+ * one; re-checking reveals the reading read and did not revive go; then AI topics nothing backs
+ * are pruned. The scene's read flags say a topic reader read it, and whether nothing finished is
+ * left unread (P2b-D9). Knows lines and steps never take literal proof.
  */
 
 export interface ReadingDeps {
@@ -213,6 +262,11 @@ export type ReadingOutcome =
        * scene's first card): only then may plan links ask `planLinks.v2`.
        */
       lineMoved: boolean
+      /**
+       * P2b: the secrets and threads this reading made, merged a reveal into, revived, lost a
+       * reveal of, or pruned (`record:changed`, so the sidebar's lists update).
+       */
+      topicIds: string[]
     }
 
 /** A reading's running totals over its requests. */
@@ -247,7 +301,7 @@ async function send(
     messages: AiMessage[]
     maxTokens: number
     childId: string
-    promptVersion: typeof READER_PROMPT_VERSION | typeof VERIFY_PROMPT_VERSION
+    promptVersion: typeof READER_V2_PROMPT_VERSION | typeof VERIFY_V2_PROMPT_VERSION
   }
 ): Promise<AiRequestResult> {
   stopIfCancelled(input.signal)
@@ -285,11 +339,18 @@ async function send(
   }
 }
 
+/** P2b: a knows line's secret or a thread step's thread: a listed one, or one new in this reading. */
+type TopicRef = { kind: 'listed'; recordId: string } | { kind: 'new'; key: string }
+
+/** What a proposed item is: a fact (P2a), a knows line or a thread step (P2b). */
+type ItemKind = 'fact' | 'knows' | 'step'
+
 /** The ladder's work on one proposed fact. */
 interface Item {
   /** Where it came from: the piece and the paragraph texts sent with it. */
   piece: number
   claim: ReaderClaim
+  kind: ItemKind
   slot: Slot
   /** The record it is about (null for a fact about a new name). */
   recordId: string | null
@@ -297,9 +358,16 @@ interface Item {
   name: { norm: string; text: string } | null
   objectId: string | null
   speakerId: string | null
+  /** P2b: a knows line's secret or a step's thread. */
+  topic: TopicRef | null
+  /** P2b: the reader's how (a knows how, a thread step). */
+  how: string | null
+  /** P2b: the reader's source of a told, overheard or read line. */
+  fromId: string | null
   location: QuoteLocation
   quote: LadderSentence[]
-  subject: SubjectResult | { kind: 'newName'; text: string }
+  /** A step's subject is its thread (`topic`): no name needed. */
+  subject: SubjectResult | { kind: 'newName'; text: string } | { kind: 'topic' }
   proof: 'literal' | null
   /** A literal claim picked for a fast spot check: its check's index. */
   spotCheck: number | null
@@ -308,16 +376,80 @@ interface Item {
   check: number | null
 }
 
+/** P2b: a secret or thread the reader proposed as new, followed through the checker. */
+interface NewTopic {
+  /** `<piece>:<the reader's id>`: the reader's ids are its own per reply. */
+  key: string
+  piece: number
+  id: string
+  kind: TopicKind
+  label: string
+  p: number
+  q: string
+  /** Where its revealing sentence stands (null when it does not, `topic`). */
+  location: QuoteLocation | null
+  /** The gate texts of its sentences: its Dismissed key's input, kept on its reveal. */
+  stating: string[]
+  /** Folded into another new topic of this reading with the same label (its key). */
+  into: string | null
+  dropped: 'topic' | 'topicCap' | 'dismissed' | 'unanswered' | null
+  /** Its Reveals check. */
+  reveal: number | null
+  /** Its Same checks, highest overlap first. */
+  same: { recordId: string; check: number }[]
+  /** The open topic it merges into once the checker judged them the same (P2b-D4). */
+  mergeInto: string | null
+}
+
+/** P2b: a listed topic's re-checking reveal the reader stated again. */
+interface Restated {
+  recordId: string
+  kind: TopicKind
+  piece: number
+  p: number
+  q: string
+  location: QuoteLocation
+  stating: string[]
+  /** The re-checking reveal it would revive. */
+  quoteId: string
+  check: number | null
+}
+
+/** The gate texts of a located quote's sentences (a reveal's `stating`, a Dismissed key's input). */
+function statingOf(
+  scene: ReadingScene,
+  p: number,
+  location: QuoteLocation,
+  names: ReadingScene['shared']['index']
+): string[] {
+  return location.sentences.map((i) => gateText(scene.spans[p]?.[i]?.text ?? '', names))
+}
+
 /** A verify item, with what it checks. */
-interface Check extends VerifyPromptItem {
+interface Check extends VerifyV2Item {
   piece: number
   /** The item, card field or present entry it checks. */
   target:
-    | { kind: 'item'; index: number; expect: string | null; candidates: string[] }
+    | {
+        kind: 'item'
+        index: number
+        expect: string | null
+        candidates: string[]
+        /** A knows item's source candidates (record ids). */
+        from: string[]
+      }
     | { kind: 'card'; field: 'pov' | 'year' | 'flashback' }
     | { kind: 'present'; index: number }
     /** A literal claim's fast spot check (P2a-D8): counted, never refusing the claim. */
     | { kind: 'spot'; index: number; expect: string }
+    /** P2b-D8: a knows line's learner shown on the page (one check per learner and page). */
+    | { kind: 'here'; recordId: string }
+    /** P2b-D3: a new topic's revealing sentence. */
+    | { kind: 'reveal'; key: string }
+    /** A listed topic's re-checking reveal, stated again. */
+    | { kind: 'restated'; index: number }
+    /** P2b-D4: a new topic against an open one it may repeat. */
+    | { kind: 'same'; key: string; recordId: string }
   /** Short ids the checker may answer for a pronoun or a new name, to the record (or name) each means. */
   ids: Map<string, string>
 }
@@ -393,55 +525,173 @@ function contextText(
   return out.join(' ')
 }
 
-/** The fact as the checker reads it ("location: the quay (narration, now)"). */
-function factText(item: Item, roster: ReaderRoster): string {
-  const object = item.objectId === null ? '' : ` (of ${roster.shortOf(item.objectId)})`
-  const by =
-    item.speakerId !== null && (item.claim.voice === 'dialogue' || item.claim.voice === 'thought')
-      ? ` by ${roster.shortOf(item.speakerId)}`
-      : ''
-  return `${item.slot}: ${item.claim.v}${object} (${item.claim.voice}${by}, ${item.claim.mode})`
+/** "by r7" for a dialogue or thought line's speaker, else nothing. */
+function byText(speakerId: string | null, voice: ClaimVoice, roster: ReaderRoster): string {
+  return speakerId !== null && (voice === 'dialogue' || voice === 'thought')
+    ? ` by ${roster.shortOf(speakerId)}`
+    : ''
 }
 
-/** A stored claim as a spot check sends it: the checker's item, and the record it must answer. */
-export interface ClaimCheck extends VerifyPromptItem {
-  expect: string
+/**
+ * A line as the checker reads it: a fact ("location: the quay (narration, now)"), a knows line
+ * ("knows, overheard from r2 (narration, now)") or a thread step ("advances: she writes to him
+ * (narration, now)").
+ */
+function lineText(
+  line: {
+    kind: ItemKind
+    slot: string
+    value: string
+    objectId: string | null
+    how: string | null
+    fromId: string | null
+    speakerId: string | null
+    voice: ClaimVoice
+    mode: ClaimMode
+  },
+  roster: ReaderRoster
+): string {
+  const voice = `(${line.voice}${byText(line.speakerId, line.voice, roster)}, ${line.mode})`
+  if (line.kind === 'knows') {
+    const from = line.fromId === null ? '' : ` from ${roster.shortOf(line.fromId)}`
+    return `knows, ${line.how ?? line.value}${from} ${voice}`
+  }
+  if (line.kind === 'step') return `${line.how ?? ''}: ${line.value} ${voice}`
+  const object = line.objectId === null ? '' : ` (of ${roster.shortOf(line.objectId)})`
+  return `${line.slot}: ${line.value}${object} ${voice}`
+}
+
+/** What a stored claim is, by its slot. */
+const claimKind = (claim: Pick<Claim, 'slot'>): ItemKind =>
+  claim.slot === 'knows' ? 'knows' : claim.slot === 'thread' ? 'step' : 'fact'
+
+/** The fact as the checker reads it, for a proposed item. */
+function factText(item: Item, roster: ReaderRoster): string {
+  return lineText(
+    {
+      kind: item.kind,
+      slot: item.slot,
+      value: item.value,
+      objectId: item.objectId,
+      how: item.how,
+      fromId: item.fromId,
+      speakerId: item.speakerId,
+      voice: item.claim.voice,
+      mode: item.claim.mode
+    },
+    roster
+  )
+}
+
+/** How a checker item names the topic a stored knows line or step is about (`topicItemLines`). */
+export interface TopicItemLines {
+  itemLine(recordId: string): string
+}
+
+/** A stored claim as a spot check sends it: the checker's item, and what it must answer. */
+export interface ClaimCheck extends VerifyV2Item {
+  /** The short id the checker must answer as `r`; null for a thread step (its thread is fixed). */
+  expect: string | null
+  /** A knows line's how or a step, which the checker must answer too; null for a fact. */
+  how: string | null
+}
+
+/** A stored claim's sentences, located again in its paragraph; null when its quote is gone. */
+function claimSentences(
+  scene: ReadingScene,
+  claim: Claim
+): { first: number; last: number; positions: number[] } | null {
+  const only = scene.texts.map((text, i) => (i === claim.para ? text : ''))
+  const location = locateQuote(only, claim.para, claim.quote)
+  if (!location.ok) return null
+  const positions = location.sentences.map((i) => scene.position(claim.para, i))
+  return { first: Math.min(...positions), last: Math.max(...positions), positions }
+}
+
+/** A stored knows line's source candidates: its source, the speaker, everyone named ±1. */
+function storedFromCandidates(
+  scene: ReadingScene,
+  claim: Claim,
+  first: number,
+  last: number
+): string[] {
+  const out: string[] = []
+  const add = (id: string | null): void => {
+    if (id === null || id === claim.recordId || out.includes(id)) return
+    const kind = scene.kindOf(id)
+    if (kind !== undefined && KNOWER_KINDS.includes(kind)) out.push(id)
+  }
+  add(claim.fromId)
+  add(claim.speakerId)
+  for (let position = Math.max(0, first - 1); position <= last + 1; position += 1) {
+    for (const name of scene.ladderSentence(position).names) if (!name.ambiguous) add(name.recordId)
+  }
+  return out
 }
 
 /**
  * A stored claim as the checker reads it (the spot checks, F-16.17): its record's roster line,
  * the fact, and its quote's sentences ±`around`; null when its quote is no longer in its
- * paragraph (its anchor will say so) or it has no record yet.
+ * paragraph (its anchor will say so) or it has no record yet. P2b: a knows line goes as a knows
+ * item (its source candidates and its secret, `topics`), a thread step as a step item.
  */
 export function claimCheck(
   scene: ReadingScene,
   claim: Claim,
   roster: ReaderRoster,
-  around: number
+  around: number,
+  topics?: TopicItemLines
 ): ClaimCheck | null {
   if (claim.recordId === null) return null
-  const only = scene.texts.map((text, i) => (i === claim.para ? text : ''))
-  const location = locateQuote(only, claim.para, claim.quote)
-  if (!location.ok) return null
-  const quoted = location.sentences.map((i) => scene.position(claim.para, i))
-  const object = claim.objectId === null ? '' : ` (of ${roster.shortOf(claim.objectId)})`
-  const by =
-    claim.speakerId !== null && (claim.voice === 'dialogue' || claim.voice === 'thought')
-      ? ` by ${roster.shortOf(claim.speakerId)}`
-      : ''
+  const found = claimSentences(scene, claim)
+  if (found === null) return null
+  const kind = claimKind(claim)
+  const text = contextText(scene, found.first, found.last, undefined, around)
+  const fact = lineText({ ...claim, kind }, roster)
+  if (kind === 'step') {
+    return {
+      kind: 'step',
+      who: [],
+      topic: topics?.itemLine(claim.recordId) ?? roster.topicShortOf(claim.recordId) ?? '?',
+      fact,
+      text,
+      expect: null,
+      how: claim.how
+    }
+  }
+  if (kind === 'knows') {
+    return {
+      kind: 'knows',
+      who: [roster.whoLine(claim.recordId)],
+      from: storedFromCandidates(scene, claim, found.first, found.last).map((id) =>
+        roster.whoLine(id)
+      ),
+      topic:
+        claim.objectId === null
+          ? '?'
+          : (topics?.itemLine(claim.objectId) ?? roster.topicShortOf(claim.objectId) ?? '?'),
+      fact,
+      text,
+      expect: roster.shortOf(claim.recordId),
+      how: claim.how
+    }
+  }
   return {
     kind: 'claim',
     who: [roster.whoLine(claim.recordId)],
-    fact: `${claim.slot}: ${claim.value}${object} (${claim.voice}${by}, ${claim.mode})`,
-    text: contextText(scene, Math.min(...quoted), Math.max(...quoted), undefined, around),
-    expect: roster.shortOf(claim.recordId)
+    fact,
+    text,
+    expect: roster.shortOf(claim.recordId),
+    how: null
   }
 }
 
 /** *Not about*'s check: the checker's item, the short id it must answer, and every candidate's. */
 export interface NotAboutCheck {
-  item: VerifyPromptItem
+  item: VerifyV2Item
   expect: string
+  /** A knows line's how, which the checker must answer too; null for a fact. */
+  how: string | null
 }
 
 /**
@@ -451,21 +701,23 @@ export interface NotAboutCheck {
  * picked record and the line's own) is a candidate, so the checker sees each rival a pronoun could
  * mean; the picked record joins them marked "not named here" when nothing in reach names it. The
  * text runs from the earliest naming sentence to `around` sentences after the quote. Null when the
- * quote is no longer in its paragraph (the line is stale: nothing can be checked).
+ * quote is no longer in its paragraph (the line is stale: nothing can be checked), and for a
+ * thread step (its subject is its thread, P2b). A knows line is re-checked as a knows item, its
+ * secret named (`topics`).
  */
 export function notAboutCheck(
   scene: ReadingScene,
   claim: Claim,
   pickedId: string,
   roster: ReaderRoster,
-  around: number
+  around: number,
+  topics?: TopicItemLines
 ): NotAboutCheck | null {
-  const only = scene.texts.map((text, i) => (i === claim.para ? text : ''))
-  const location = locateQuote(only, claim.para, claim.quote)
-  if (!location.ok) return null
-  const quoted = location.sentences.map((i) => scene.position(claim.para, i))
-  const first = Math.min(...quoted)
-  const last = Math.max(...quoted)
+  const kind = claimKind(claim)
+  if (kind === 'step') return null
+  const found = claimSentences(scene, claim)
+  if (found === null) return null
+  const { first, last } = found
   const counts = (recordId: string): boolean =>
     recordId === pickedId || recordId === claim.recordId || scene.kindOf(recordId) === 'character'
   const named: string[] = []
@@ -477,7 +729,7 @@ export function notAboutCheck(
       if (position < first) naming = Math.min(naming ?? position, position)
     }
   }
-  for (const position of quoted) read(position)
+  for (const position of found.positions) read(position)
   for (
     let position = first - 1;
     position >= Math.max(0, first - ANTECEDENT_SENTENCES);
@@ -487,44 +739,81 @@ export function notAboutCheck(
   }
   const unnamed = !named.includes(pickedId)
   const candidates = unnamed ? [...named, pickedId] : named
-  const object = claim.objectId === null ? '' : ` (of ${roster.shortOf(claim.objectId)})`
-  const by =
-    claim.speakerId !== null && (claim.voice === 'dialogue' || claim.voice === 'thought')
-      ? ` by ${roster.shortOf(claim.speakerId)}`
-      : ''
-  return {
-    item: {
-      kind: 'claim',
-      who: candidates.map((id) =>
-        unnamed && id === pickedId
-          ? `${roster.whoLine(id)}${VERIFY_UNNAMED_MARK}`
-          : roster.whoLine(id)
-      ),
-      fact: `${claim.slot}: ${claim.value}${object} (${claim.voice}${by}, ${claim.mode})`,
-      text: contextText(scene, first, last, naming, around)
-    },
-    expect: roster.shortOf(pickedId)
+  const who = candidates.map((id) =>
+    unnamed && id === pickedId ? `${roster.whoLine(id)}${VERIFY_UNNAMED_MARK}` : roster.whoLine(id)
+  )
+  const text = contextText(scene, first, last, naming, around)
+  const fact = lineText({ ...claim, kind }, roster)
+  if (kind === 'knows') {
+    return {
+      item: {
+        kind: 'knows',
+        who,
+        from: storedFromCandidates(scene, { ...claim, recordId: pickedId }, first, last).map((id) =>
+          roster.whoLine(id)
+        ),
+        topic:
+          claim.objectId === null
+            ? '?'
+            : (topics?.itemLine(claim.objectId) ?? roster.topicShortOf(claim.objectId) ?? '?'),
+        fact,
+        text
+      },
+      expect: roster.shortOf(pickedId),
+      how: claim.how
+    }
   }
+  return { item: { kind: 'claim', who, fact, text }, expect: roster.shortOf(pickedId), how: null }
 }
 
-/** Whether a verdict agrees with a fact as stated: supported, about that record, voice and mode. */
+/**
+ * Whether a verdict agrees with a line as stated: supported, about that record (any, for a thread
+ * step: `expect` null), with its voice and mode, and, for a knows line or a step, its how.
+ */
 export function agrees(
   verdict: VerifyVerdict,
-  fact: { expect: string; voice: ClaimVoice; mode: ClaimMode }
+  fact: { expect: string | null; voice: ClaimVoice; mode: ClaimMode; how?: string | null }
 ): boolean {
+  const how = fact.how ?? null
+  const howAgrees =
+    how === null ||
+    (parseHow(how) !== null
+      ? parseHow(verdict.how) === parseHow(how)
+      : parseStep(verdict.how) !== null && parseStep(verdict.how) === parseStep(how))
   return (
     verdict.ok &&
-    verdict.r === fact.expect &&
+    (fact.expect === null || verdict.r === fact.expect) &&
     verdict.voice === fact.voice &&
-    verdict.mode === fact.mode
+    verdict.mode === fact.mode &&
+    howAgrees
   )
 }
 
-/** Merges two answers of one piece (a cut-off reply and its retry). */
+/**
+ * Merges two answers of one piece (a cut-off reply and its retry). The retry's new secrets and
+ * threads are renamed (`x1` → `x1'`), with the facts that use them, so the two replies' own ids
+ * never collide.
+ */
 function mergeAnswers(a: ReaderAnswer, b: ReaderAnswer): ReaderAnswer {
+  const fresh = new Set(b.topics.filter((topic) => topic.label !== null).map((topic) => topic.id))
+  const renamed = (id: string | null): string | null =>
+    id !== null && fresh.has(id) ? `${id}'` : id
   return {
-    claims: [...a.claims, ...b.claims],
+    claims: [
+      ...a.claims,
+      ...b.claims.map((claim) =>
+        claim.s === 'knows'
+          ? { ...claim, o: renamed(claim.o) }
+          : claim.s === 'thread'
+            ? { ...claim, r: renamed(claim.r) }
+            : claim
+      )
+    ],
     names: [...a.names, ...b.names],
+    topics: [
+      ...a.topics,
+      ...b.topics.map((topic) => ({ ...topic, id: renamed(topic.id) ?? topic.id }))
+    ],
     same: [...a.same, ...b.same],
     drop: [...a.drop, ...b.drop],
     card: a.card ?? b.card,
@@ -539,7 +828,8 @@ function lastQuoted(answer: ReaderAnswer | null): number {
   return Math.max(
     -1,
     ...answer.claims.map((claim) => claim.p),
-    ...answer.names.flatMap((name) => [name.p, ...name.c.map((claim) => claim.p)])
+    ...answer.names.flatMap((name) => [name.p, ...name.c.map((claim) => claim.p)]),
+    ...answer.topics.map((topic) => topic.p)
   )
 }
 
@@ -583,7 +873,9 @@ export interface SceneGate {
 /**
  * The reading gate over one scene (design §2.3 "When"): the pipeline's first step, and what the
  * reader service asks before it queues a reading (leave, idle, the backlog). Local. Null when the
- * reader may not read the scene (an Idea, left out of compile, not in the manuscript).
+ * reader may not read the scene (an Idea, left out of compile, not in the manuscript). When it
+ * finds nothing finished unread (or only a cosmetic edit) in a scene read before, it marks the
+ * scene settled (P2b-D9), the one write it makes.
  */
 export function gateScene(
   db: TreeDb,
@@ -604,14 +896,23 @@ export function gateScene(
   const present = new Set(scene.hashes)
   // The known words cost a pass over the manuscript: read only when an edit could be cosmetic.
   const unread = readSet === null ? [] : unreadSentences(current, readSet)
+  // A re-checking reveal (P2b) is read again like a re-checking fact.
+  const staleReveals = sceneTopicQuotes(db, nodeId, draftId).filter((q) => q.state === 'stale')
   const decision = readDecision({
     sentences: current,
     read: readSet,
     partials: previous?.partials ?? 0,
-    staleParas: new Set(stored.filter((claim) => claim.state === 'stale').map((c) => c.para)),
+    staleParas: new Set([
+      ...stored.filter((claim) => claim.state === 'stale').map((c) => c.para),
+      ...staleReveals.map((quote) => quote.para)
+    ]),
     cardStale: card?.anchor.some((hash) => !present.has(hash)) === true,
     knownWords: unread.length > 0 ? book.knownWords(nodeId) : new Set<string>()
   })
+  // P2b-D9: nothing finished is unread (or only cosmetically changed): the scene is settled.
+  if (decision.read === 'nothing' && decision.reason !== 'empty' && previous !== null) {
+    setSceneSettled(db, nodeId, draftId, true)
+  }
   return { scene, draftId, current, readSet, stored, card, decision }
 }
 
@@ -664,10 +965,32 @@ export async function runReading(
   const draft = draftClaims(db, draftId).filter(
     (claim) => (order.at.get(claim.nodeId) ?? Number.MAX_SAFE_INTEGER) <= at
   )
+  // P2b: the records once, the secrets and threads as of the scene, and who is Here before the
+  // reading (the typed details and the held card; this reading's verified card joins them later).
+  const records = listRecords(db)
+  const recordsById = new Map(records.map((record) => [record.id, record]))
+  const topics: TopicContext = topicContext(db, {
+    roster,
+    records,
+    draftId,
+    order,
+    nodeId: input.nodeId,
+    claims: draft
+  })
+  const hereBefore = new Set(
+    hereChips(scene.details, card === null ? null : heldCard(db, card, true), recordsById).map(
+      (chip) => chip.recordId
+    )
+  )
+  const storedReveals = sceneTopicQuotes(db, input.nodeId, draftId)
   const yields = emptyYields()
   const reject = (reason: LadderReject | 'unparsed'): void => {
     yields.rejected += 1
     yields.rejections[reason] = (yields.rejections[reason] ?? 0) + 1
+  }
+  /** A count kept beside the rejections (P2b: topics made and merged), not a rejection. */
+  const count = (key: string): void => {
+    yields.rejections[key] = (yields.rejections[key] ?? 0) + 1
   }
   const spend: Spend = {
     model: '',
@@ -700,8 +1023,16 @@ export async function runReading(
       for (const claim of stored) {
         if (!paras.has(claim.para) || claim.recordId === null || claim.state === 'waiting') continue
         const short = `c${claimIds.size + 1}`
+        const line = anchoredLine(short, claim, roster)
+        if (line === null) continue
         claimIds.set(short, claim.id)
-        anchored.push(anchoredLine(short, claim, roster))
+        anchored.push(line)
+      }
+      // P2b: the re-checking reveals here, so the reader may state them again.
+      for (const reveal of storedReveals) {
+        const short = roster.topicShortOf(reveal.recordId)
+        if (reveal.state !== 'stale' || !paras.has(reveal.para) || short === null) continue
+        anchored.push(revealLine(short, reveal))
       }
       const named = [
         ...new Set(
@@ -711,8 +1042,11 @@ export async function runReading(
         )
       ]
       const withCard = due && (full || index === 0)
+      const windowText = piece.paragraphs.map((part) => texts[part.p] ?? '').join('\n')
       const base = {
         roster: roster.lines,
+        topics: roster.topicLines,
+        topicLines: topics.lines(windowText, hereBefore),
         position: positionLine(order.refs.get(input.nodeId) ?? null, scene.title, {
           page: index + 1,
           pages: pieces.length,
@@ -732,17 +1066,19 @@ export async function runReading(
       const ask = async (
         parts: ReadPiece['paragraphs']
       ): Promise<{ answer: ReaderAnswer | null; cut: boolean }> => {
-        const prompt = buildReaderPrompt({
+        const prompt = buildReaderV2Prompt({
           ...base,
           paragraphs: parts.map((part) => ({ p: part.p, text: texts[part.p] ?? '' }))
         })
+        // P2b-D10: a topics roster past its 400 tokens is counted (it took the near lines' room).
+        if (prompt.trimmed.rosterOver > 0) count('topicRosterOver')
         requests += 1
         const result = await send(deps, input, spend, inFlight, {
           feature: 'reader',
           messages: prompt.messages,
           maxTokens: prompt.maxTokens,
           childId: `${input.requestId}:r${requests}`,
-          promptVersion: READER_PROMPT_VERSION
+          promptVersion: READER_V2_PROMPT_VERSION
         })
         return { answer: parseReaderAnswer(result.text), cut: result.finishReason === 'length' }
       }
@@ -796,6 +1132,7 @@ export async function runReading(
     const waitingNames = new Set<string>()
     const texts = pieces.map((piece) => sentTexts(scene, piece))
     const positions = pieces.map((piece) => sentPositions(scene, piece))
+    const notRightKeys = dismissedKeys(db, 'notRight')
 
     /** Tells the observer how a proposed fact ended. */
     const tell = (
@@ -823,6 +1160,128 @@ export async function runReading(
       tell(claim, about, reason)
     }
 
+    // P2b: the secrets and threads the reader proposed, before any fact that uses them.
+    const newTopics = new Map<string, NewTopic>()
+    const restated: Restated[] = []
+    for (const { piece, answer } of answers) {
+      const caps: Record<TopicKind, number> = { secret: 0, thread: 0 }
+      const sent = new Set((pieces[piece]?.paragraphs ?? []).map((part) => part.p))
+      for (const topic of answer.topics) {
+        const listed = roster.topicOf(topic.id)
+        if (listed !== null) {
+          // A listed one's reveal stated again: kept only for a re-checking reveal in the window.
+          const stale = storedReveals.find(
+            (reveal) =>
+              reveal.recordId === listed &&
+              reveal.state === 'stale' &&
+              sent.has(reveal.para) &&
+              !restated.some((each) => each.quoteId === reveal.id)
+          )
+          if (topics.kindOf(listed) !== topic.kind || stale === undefined) continue
+          yields.items += 1
+          const location = locate(scene, texts[piece] ?? [], topic.p, topic.q)
+          if (typeof location === 'string') {
+            reject(location)
+            continue
+          }
+          yields.quotesFound += 1
+          restated.push({
+            recordId: listed,
+            kind: topic.kind,
+            piece,
+            p: topic.p,
+            q: topic.q,
+            location,
+            stating: statingOf(scene, topic.p, location, names),
+            quoteId: stale.id,
+            check: null
+          })
+          continue
+        }
+        yields.items += 1
+        const key = `${piece}:${topic.id}`
+        const label = topicLabel(topic.label ?? '')
+        if (label === '' || newTopics.has(key)) {
+          reject('shape')
+          continue
+        }
+        const entry: NewTopic = {
+          key,
+          piece,
+          id: topic.id,
+          kind: topic.kind,
+          label,
+          p: topic.p,
+          q: topic.q,
+          location: null,
+          stating: [],
+          into: null,
+          dropped: null,
+          reveal: null,
+          same: [],
+          mergeInto: null
+        }
+        newTopics.set(key, entry)
+        // P2b-D3: its revealing sentence must stand in the window, in its paragraph, once.
+        const location = locate(scene, texts[piece] ?? [], topic.p, topic.q)
+        if (typeof location === 'string') {
+          entry.dropped = 'topic'
+          reject('topic')
+          continue
+        }
+        yields.quotesFound += 1
+        entry.location = location
+        entry.stating = statingOf(scene, topic.p, location, names)
+        // P2b-D13: a reveal the author said is no secret (or thread) drops silently.
+        if (
+          notRightKeys.has(
+            dismissedKey({ kind: 'notRight', topic: { kind: topic.kind, stating: entry.stating } })
+          )
+        ) {
+          entry.dropped = 'dismissed'
+          continue
+        }
+        // Two new ones of one reading with the same label are one.
+        const twin = [...newTopics.values()].find(
+          (other) =>
+            other !== entry &&
+            other.into === null &&
+            other.dropped === null &&
+            other.kind === entry.kind &&
+            normName(other.label) === normName(label)
+        )
+        if (twin !== undefined) {
+          entry.into = twin.key
+          continue
+        }
+        // P2b-D11: at most 3 new secrets and 2 new threads a page.
+        if (caps[topic.kind] >= TOPIC_CAPS[topic.kind]) {
+          entry.dropped = 'topicCap'
+          reject('topicCap')
+          continue
+        }
+        caps[topic.kind] += 1
+      }
+    }
+    /** A new topic, followed through a fold to the one it became. */
+    const newTopic = (key: string): NewTopic | null => {
+      let found = newTopics.get(key) ?? null
+      for (let hops = 0; found?.into != null && hops < newTopics.size; hops += 1) {
+        found = newTopics.get(found.into) ?? null
+      }
+      return found
+    }
+    /** A knows line's secret or a step's thread: listed with that kind, or new in this piece. */
+    const topicRef = (piece: number, id: string | null, kind: TopicKind): TopicRef | null => {
+      if (id === null) return null
+      const listed = roster.topicOf(id)
+      if (listed !== null) {
+        return topics.kindOf(listed) === kind ? { kind: 'listed', recordId: listed } : null
+      }
+      const fresh = newTopic(`${piece}:${id.trim()}`)
+      return fresh !== null && fresh.kind === kind ? { kind: 'new', key: fresh.key } : null
+    }
+
     const ladder = (
       piece: number,
       claim: ReaderClaim,
@@ -831,14 +1290,34 @@ export async function runReading(
         | { name: { norm: string; text: string } }
         /** A name two or more records share: its sentence must name one, or wait on them all. */
         | { owners: string[]; text: string }
+        /** P2b: a thread step, whose subject is its thread. */
+        | { thread: TopicRef },
+      line:
+        | { kind: 'fact' }
+        | { kind: 'knows' | 'step'; topic: TopicRef; how: string; fromId: string | null } = {
+        kind: 'fact'
+      }
     ): void => {
       yields.items += 1
       const who = {
-        recordId: 'recordId' in about ? about.recordId : null,
+        recordId:
+          'recordId' in about
+            ? about.recordId
+            : 'thread' in about && about.thread.kind === 'listed'
+              ? about.thread.recordId
+              : null,
         name: 'name' in about ? about.name.text : 'owners' in about ? about.text : null
       }
-      const slot = parseSlot(claim.s)
-      if (slot === null || !readerAccepts(slot)) return refuse('slot', claim, who)
+      const parsed =
+        line.kind === 'fact' ? parseSlot(claim.s) : line.kind === 'knows' ? 'knows' : 'thread'
+      // A fact never takes the knows or thread slot: those come as knows lines and steps.
+      if (
+        parsed === null ||
+        (line.kind === 'fact' && (slotGroup(parsed) === 'knows' || slotGroup(parsed) === 'thread'))
+      ) {
+        return refuse('slot', claim, who)
+      }
+      const slot: Slot = parsed
       const location = locate(scene, texts[piece] ?? [], claim.p, claim.q)
       if (typeof location === 'string') return refuse(location, claim, who)
       yields.quotesFound += 1
@@ -854,21 +1333,36 @@ export async function runReading(
           ? roster.recordOf(claim.sp)
           : null
       const objectId =
-        OBJECT_SLOTS.includes(slot) && claim.o !== null ? roster.recordOf(claim.o) : null
+        line.kind === 'knows'
+          ? line.topic.kind === 'listed'
+            ? line.topic.recordId
+            : null
+          : line.kind === 'fact' && OBJECT_SLOTS.includes(slot) && claim.o !== null
+            ? roster.recordOf(claim.o)
+            : null
       const item: Item = {
         piece,
         claim,
+        kind: line.kind,
         slot,
-        recordId: 'recordId' in about ? about.recordId : null,
+        recordId: who.recordId,
         name: 'name' in about ? about.name : null,
         objectId,
         speakerId,
+        topic: line.kind === 'fact' ? null : line.topic,
+        how: line.kind === 'fact' ? null : line.how,
+        fromId: line.kind === 'knows' ? line.fromId : null,
         location,
         quote,
         subject: { kind: 'none' },
         proof: null,
         spotCheck: null,
-        value: claim.v.trim(),
+        value:
+          line.kind === 'knows'
+            ? line.how
+            : line.kind === 'step'
+              ? capWords(claim.v.trim() === '' ? line.how : claim.v, STEP_VALUE_MAX_WORDS)
+              : claim.v.trim(),
         check: null
       }
       let literalNames: (sentence: LadderSentence) => readonly LiteralName[] = (s) => s.names
@@ -882,8 +1376,17 @@ export async function runReading(
           typedPov: scene.details.povRecordId,
           isCharacter
         })
-      if ('recordId' in about) {
+      if ('thread' in about) {
+        item.subject = { kind: 'topic' }
+      } else if ('recordId' in about) {
         item.subject = resolve(about.recordId)
+        if (line.kind === 'knows') {
+          // P2b-D8: a group knows only where its sentence names it; a knows line never waits.
+          if (scene.kindOf(about.recordId) === 'group' && item.subject.kind !== 'named') {
+            return refuse('group', claim, who)
+          }
+          if (item.subject.kind === 'shared') return refuse('subject', claim, who)
+        }
       } else if ('owners' in about) {
         // The scan settles a shared name in the sentence, or the fact waits on its owners there.
         const tried = about.owners.map((id) => ({ id, subject: resolve(id) }))
@@ -918,7 +1421,9 @@ export async function runReading(
       if (item.subject.kind === 'none') return refuse('subject', claim, who)
       const single = quote.length === 1 ? quote[0] : undefined
       const span = scene.spans[claim.p]?.[location.sentences[0] ?? -1]
+      // Knows lines and steps never take literal proof (P2b): the checker confirms them.
       if (
+        line.kind === 'fact' &&
         single !== undefined &&
         span !== undefined &&
         (item.subject.kind === 'named' || item.subject.kind === 'newName')
@@ -945,8 +1450,52 @@ export async function runReading(
       items.push(item)
     }
 
+    /**
+     * P2b: a knows line or a thread step, its topic and how read before the ladder. A fact that
+     * came with a dropped new topic goes with it (silently for one the author dismissed).
+     */
+    const topicLine = (piece: number, claim: ReaderClaim): void => {
+      const knows = claim.s === 'knows'
+      const ref = topicRef(piece, knows ? claim.o : claim.r, knows ? 'secret' : 'thread')
+      const nobody = { recordId: null, name: null }
+      if (ref === null) {
+        yields.items += 1
+        return refuse('record', claim, nobody)
+      }
+      if (ref.kind === 'new') {
+        const dropped = newTopics.get(ref.key)?.dropped ?? null
+        if (dropped === 'dismissed') return
+        if (dropped !== null) {
+          yields.items += 1
+          return refuse(dropped === 'unanswered' ? 'topic' : dropped, claim, nobody)
+        }
+      }
+      if (!knows) {
+        const step = parseStep(claim.how)
+        if (step === null) {
+          yields.items += 1
+          return refuse('slot', claim, nobody)
+        }
+        ladder(piece, claim, { thread: ref }, { kind: 'step', topic: ref, how: step, fromId: null })
+        return
+      }
+      const how = parseHow(claim.how)
+      const learner = claim.r === null ? null : roster.recordOf(claim.r)
+      const kind = learner === null ? undefined : scene.kindOf(learner)
+      if (how === null || learner === null || kind === undefined || !KNOWER_KINDS.includes(kind)) {
+        yields.items += 1
+        return refuse(how === null ? 'slot' : 'record', claim, { recordId: learner, name: null })
+      }
+      const fromId = claim.fr === null ? null : roster.recordOf(claim.fr)
+      ladder(piece, claim, { recordId: learner }, { kind: 'knows', topic: ref, how, fromId })
+    }
+
     for (const { piece, answer } of answers) {
       for (const claim of answer.claims) {
+        if (claim.s === 'knows' || claim.s === 'thread') {
+          topicLine(piece, claim)
+          continue
+        }
         const recordId = claim.r === null ? null : roster.recordOf(claim.r)
         if (recordId === null) {
           yields.items += 1
@@ -956,6 +1505,12 @@ export async function runReading(
         ladder(piece, claim, { recordId })
       }
       for (const named of answer.names) {
+        // P2b-D8: a learner is a record Here; a new name's facts never hold knows lines or steps.
+        const plain = named.c.filter((claim) => claim.s !== 'knows' && claim.s !== 'thread')
+        for (const claim of named.c.filter((each) => !plain.includes(each))) {
+          yields.items += 1
+          refuse('name', claim, { recordId: null, name: named.n })
+        }
         const norm = normName(named.n)
         const owners = twinRoster.filter((record) =>
           record.names.some((text) => normName(text) === norm)
@@ -964,7 +1519,7 @@ export async function runReading(
         if (owner !== undefined) {
           // A name the roster has after all: its facts are that record's, or, when records share
           // it, the one the sentence settles (else they wait on all of them, P2a-D22).
-          for (const claim of named.c) {
+          for (const claim of plain) {
             if (others.length === 0) ladder(piece, claim, { recordId: owner.id })
             else ladder(piece, claim, { owners: owners.map((each) => each.id), text: named.n })
           }
@@ -977,13 +1532,13 @@ export async function runReading(
         )
         const refused = !midSentence || askAbout(named.n) === null
         if (refused) {
-          for (const claim of named.c) {
+          for (const claim of plain) {
             yields.items += 1
             refuse('name', claim, { recordId: null, name: named.n })
           }
           continue
         }
-        for (const claim of named.c) ladder(piece, claim, { name: { norm, text: named.n } })
+        for (const claim of plain) ladder(piece, claim, { name: { norm, text: named.n } })
       }
     }
 
@@ -1047,6 +1602,35 @@ export async function runReading(
       const quoted = location.sentences.map((i) => scene.position(p, i))
       return contextText(scene, Math.min(...quoted), Math.max(...quoted), naming)
     }
+    /** How a checker item names a knows line's secret or a step's thread. */
+    const topicText = (ref: TopicRef): string => {
+      if (ref.kind === 'listed') return topics.itemLine(ref.recordId)
+      const fresh = newTopic(ref.key)
+      return fresh === null ? '?' : `${fresh.id} ${fresh.label}: “${fresh.q}”`
+    }
+    /**
+     * A knows line's source candidates (P2b §2.3): the reader's source, the quote's speaker, and
+     * every character or group named in the quote's sentences ±1; never the learner.
+     */
+    const fromCandidates = (item: Item): string[] => {
+      const out: string[] = []
+      const add = (id: string | null): void => {
+        if (id === null || id === item.recordId || out.includes(id)) return
+        const kind = scene.kindOf(id)
+        if (kind !== undefined && KNOWER_KINDS.includes(kind)) out.push(id)
+      }
+      add(item.fromId)
+      add(item.speakerId)
+      const quoted = item.quote.map((sentence) => sentence.position)
+      const first = Math.min(...quoted)
+      const last = Math.max(...quoted)
+      for (let position = Math.max(0, first - 1); position <= last + 1; position += 1) {
+        for (const name of scene.ladderSentence(position).names) {
+          if (!name.ambiguous) add(name.recordId)
+        }
+      }
+      return out
+    }
     const spotEvery = input.spotEvery ?? null
     for (const [index, item] of items.entries()) {
       if (item.proof === 'literal') {
@@ -1066,6 +1650,21 @@ export async function runReading(
         continue
       }
       const subject = item.subject
+      if (subject.kind === 'topic') {
+        // A thread step: its thread is fixed, the checker confirms the step (P2b).
+        item.check = checks.length
+        checks.push({
+          kind: 'step',
+          who: [],
+          topic: item.topic === null ? '?' : topicText(item.topic),
+          fact: factText(item, roster),
+          text: around(item.location, item.claim.p),
+          piece: item.piece,
+          target: { kind: 'item', index, expect: null, candidates: [], from: [] },
+          ids: new Map()
+        })
+        continue
+      }
       let candidates: string[] = []
       let naming: number | undefined
       if (subject.kind === 'named' || subject.kind === 'firstPerson') {
@@ -1086,10 +1685,18 @@ export async function runReading(
                 : roster.whoLine(id)
             })
       if (subject.kind === 'newName') ids.set('n1', `name:${item.name?.norm ?? ''}`)
+      const from = item.kind === 'knows' ? fromCandidates(item) : []
+      for (const id of from) ids.set(roster.shortOf(id), id)
       item.check = checks.length
       checks.push({
-        kind: 'claim',
+        kind: item.kind === 'knows' ? 'knows' : 'claim',
         who,
+        ...(item.kind === 'knows'
+          ? {
+              from: from.map((id) => roster.whoLine(id)),
+              topic: item.topic === null ? '?' : topicText(item.topic)
+            }
+          : {}),
         fact: factText(item, roster),
         text: around(item.location, item.claim.p, naming),
         piece: item.piece,
@@ -1102,7 +1709,8 @@ export async function runReading(
               : item.recordId === null
                 ? null
                 : roster.shortOf(item.recordId),
-          candidates
+          candidates,
+          from
         },
         ids
       })
@@ -1130,14 +1738,112 @@ export async function runReading(
     cardCheck('pov', fields.pov)
     cardCheck('year', fields.year)
     cardCheck('flashback', fields.flashback)
+    const onPage = (recordId: string): string =>
+      `${roster.shortOf(recordId)} is on the page in this scene (present, not only named or remembered)`
     for (const [index, entry] of presentEntries.entries()) {
       checks.push({
         kind: 'present',
         who: [roster.whoLine(entry.recordId)],
-        fact: `${roster.shortOf(entry.recordId)} is on the page in this scene (present, not only named or remembered)`,
+        fact: onPage(entry.recordId),
         text: around(entry.placed.location, entry.placed.field.p),
         piece: entry.placed.piece,
         target: { kind: 'present', index },
+        ids: new Map()
+      })
+    }
+    // P2b-D8: a named character learner not Here in code, nor on this reading's card, gets one
+    // on-page check per page, on the sentences of its first knows line there.
+    const proposedHere = new Set([
+      ...(povRecord === null ? [] : [povRecord]),
+      ...presentEntries.map((entry) => entry.recordId)
+    ])
+    const hereChecks = new Set<string>()
+    for (const item of items) {
+      const learner = item.recordId
+      if (item.kind !== 'knows' || learner === null || !isCharacter(learner)) continue
+      if (item.subject.kind !== 'named' && item.subject.kind !== 'firstPerson') continue
+      if (hereBefore.has(learner) || proposedHere.has(learner)) continue
+      const key = `${item.piece}:${learner}`
+      if (hereChecks.has(key)) continue
+      hereChecks.add(key)
+      checks.push({
+        kind: 'present',
+        who: [roster.whoLine(learner)],
+        fact: onPage(learner),
+        text: around(item.location, item.claim.p),
+        piece: item.piece,
+        target: { kind: 'here', recordId: learner },
+        ids: new Map()
+      })
+    }
+    // P2b-D3, D4: each new topic's reveal, and the open topics it may repeat (at most 3).
+    const kept = [...newTopics.values()].filter(
+      (topic): topic is NewTopic & { location: QuoteLocation } =>
+        topic.into === null && topic.dropped === null && topic.location !== null
+    )
+    const open = new Map<TopicKind, TopicFacet[]>()
+    const openOf = (kind: TopicKind): TopicFacet[] => {
+      const known = open.get(kind)
+      if (known !== undefined) return known
+      const found = topics.open(kind)
+      open.set(kind, found)
+      return found
+    }
+    for (const topic of kept) {
+      topic.reveal = checks.length
+      checks.push({
+        kind: 'reveals',
+        who: [],
+        topic: `${topic.id} ${topic.label} · new ${topic.kind}`,
+        fact: '',
+        text: around(topic.location, topic.p),
+        piece: topic.piece,
+        target: { kind: 'reveal', key: topic.key },
+        ids: new Map()
+      })
+      const holders = items.flatMap((item) =>
+        item.kind === 'knows' &&
+        item.recordId !== null &&
+        item.topic?.kind === 'new' &&
+        newTopic(item.topic.key) === topic
+          ? [item.recordId]
+          : []
+      )
+      const fresh: TopicFacet = {
+        id: topic.key,
+        kind: topic.kind,
+        terms: topics.termsOf(topic.label, topic.q),
+        holders
+      }
+      const ref = order.refs.get(input.nodeId) ?? '?'
+      for (const candidate of sameAsCandidates(fresh, openOf(topic.kind), { max: 3 })) {
+        const reveal = topics.revealOf(candidate.id)
+        const listed = `${roster.topicShortOf(candidate.id) ?? '?'} ${topics.labelOf(candidate.id)}`
+        topic.same.push({ recordId: candidate.id, check: checks.length })
+        checks.push({
+          kind: 'same',
+          who: [],
+          topic:
+            `${topic.id} ${topic.label}: “${topic.q}” (${ref}) | ` +
+            (reveal === null ? listed : `${listed}: “${reveal.quote}” (${reveal.ref})`),
+          fact: '',
+          text: '',
+          piece: topic.piece,
+          target: { kind: 'same', key: topic.key, recordId: candidate.id },
+          ids: new Map()
+        })
+      }
+    }
+    for (const [index, entry] of restated.entries()) {
+      entry.check = checks.length
+      checks.push({
+        kind: 'reveals',
+        who: [],
+        topic: `${roster.topicShortOf(entry.recordId) ?? '?'} ${topics.labelOf(entry.recordId)} · ${entry.kind}`,
+        fact: '',
+        text: around(entry.location, entry.p),
+        piece: entry.piece,
+        target: { kind: 'restated', index },
         ids: new Map()
       })
     }
@@ -1147,13 +1853,13 @@ export async function runReading(
     /** Sends one batch and keeps its verdicts; true when the reply was cut off at its cap. */
     const runBatch = async (batch: readonly (Check & { at: number })[]): Promise<boolean> => {
       batchNo += 1
-      const prompt = buildVerifyPrompt({ items: batch })
+      const prompt = buildVerifyV2Prompt({ items: batch })
       const result = await send(deps, input, spend, inFlight, {
         feature: 'verify',
         messages: prompt.messages,
         maxTokens: prompt.maxTokens,
         childId: `${input.requestId}:v${batchNo}`,
-        promptVersion: VERIFY_PROMPT_VERSION
+        promptVersion: VERIFY_V2_PROMPT_VERSION
       })
       const answered = parseVerifyAnswer(result.text)
       for (const [i, entry] of batch.entries()) {
@@ -1166,12 +1872,12 @@ export async function runReading(
       const own = checks
         .map((check, index) => ({ ...check, at: index }))
         .filter((entry) => entry.piece === piece)
-      for (const batch of verifyBatches(own)) {
+      for (const batch of verifyV2Batches(own)) {
         if (!(await runBatch(batch))) continue
         yields.cut += 1
         // The items a cut-off reply did not reach are asked once more.
         const missing = batch.filter((entry) => !verdicts.has(entry.at))
-        for (const again of verifyBatches(missing)) {
+        for (const again of verifyV2Batches(missing)) {
           if (await runBatch(again)) yields.cut += 1
         }
       }
@@ -1225,8 +1931,62 @@ export async function runReading(
           ? card.fields.pov.value
           : null
 
+    // P2b-D8: who is Here for a knows line: the typed details and the held card, this reading's
+    // verified POV and on-page entries, and the learners an on-page check showed on the page.
+    const hereNow = new Set(hereBefore)
+    if (cardFields.pov?.verified === true) hereNow.add(cardFields.pov.value)
+    for (const entry of cardPresent) if (entry.verified) hereNow.add(entry.recordId)
+    const shownHere = new Set<string>()
+    for (const [index, check] of checks.entries()) {
+      if (check.target.kind === 'here' && verdicts.get(index)?.ok === true) {
+        shownHere.add(check.target.recordId)
+      }
+    }
+
+    // P2b-D3, D4: each new topic's reveal, then the first open topic judged the same.
+    for (const topic of kept) {
+      const verdict = topic.reveal === null ? undefined : verdicts.get(topic.reveal)
+      if (verdict === undefined) {
+        topic.dropped = 'unanswered'
+        reject('unanswered')
+        unread.add(topic.p)
+        continue
+      }
+      yields.verifySent += 1
+      if (!verdict.ok) {
+        topic.dropped = 'topic'
+        reject('topic')
+        continue
+      }
+      yields.verified += 1
+      const same = topic.same.find((each) => verdicts.get(each.check)?.ok === true)
+      // A topic gone since (deleted while the requests were out) is no merge target.
+      topic.mergeInto =
+        same !== undefined && getRecord(db, same.recordId) !== null ? same.recordId : null
+      count(topic.mergeInto === null ? 'topicsCreated' : 'topicsMerged')
+    }
+    /** The restated reveals the checker passed, to revive; unanswered ones leave their paragraph unread. */
+    const revived: Restated[] = []
+    for (const entry of restated) {
+      const verdict = entry.check === null ? undefined : verdicts.get(entry.check)
+      if (verdict === undefined) {
+        reject('unanswered')
+        unread.add(entry.p)
+        continue
+      }
+      yields.verifySent += 1
+      if (!verdict.ok) {
+        reject('topic')
+        continue
+      }
+      yields.verified += 1
+      revived.push(entry)
+    }
+
     // The claims' verdicts.
     const fresh: FreshClaim[] = []
+    /** P2b: a knows line or step about a topic new in this reading: its key, to point it there. */
+    const freshTopic = new Map<FreshClaim, string>()
     /** The fast spot checks' verdicts on literal claims, set on the rows once they are stored. */
     const spotOf = new Map<FreshClaim, SpotVerdict>()
     /** The facts the checker refused, as proposed: a stored claim stating the same is rejected. */
@@ -1248,21 +2008,25 @@ export async function runReading(
         mode: ClaimMode
         proof: 'literal' | 'verified'
         naming?: number
+        /** P2b: the checker's how and source of a knows line, its step of a thread step. */
+        how?: string | null
+        fromId?: string | null
       }
     ): FreshClaim => {
       const anchor = [...anchorFor(scene.sentences, item.location, at.naming)]
       const speakerId = at.voice === 'dialogue' || at.voice === 'thought' ? item.speakerId : null
-      return {
+      const how = at.how ?? null
+      const fact: FreshClaim = {
         recordId: at.recordId,
         pending: at.pending,
         subjectText: at.subjectText,
         slot: item.slot,
-        value: item.value,
-        valueKey: valueKey(item.value),
+        // A knows line's value is its how (P2b-D6), as the checker read it.
+        value: item.kind === 'knows' && how !== null ? how : item.value,
+        valueKey: valueKey(item.kind === 'knows' && how !== null ? how : item.value),
         objectId: item.objectId,
-        // P2b: knows and thread claims come with `reader.v2` (slice 2).
-        how: null,
-        fromId: null,
+        how,
+        fromId: at.fromId ?? null,
         topicQuoteId: null,
         voice: at.voice,
         speakerId,
@@ -1274,6 +2038,8 @@ export async function runReading(
         proof: at.proof,
         change: item.claim.chg
       }
+      if (item.topic?.kind === 'new') freshTopic.set(fact, item.topic.key)
+      return fact
     }
     for (const item of items) {
       const subject = item.subject
@@ -1329,6 +2095,12 @@ export async function runReading(
         unread.add(item.claim.p)
         continue
       }
+      // A knows line or step whose new topic the checker did not find revealed goes with it.
+      const topic = item.topic?.kind === 'new' ? newTopic(item.topic.key) : null
+      if (topic !== null && topic.dropped !== null) {
+        refuse('topic', item.claim, who)
+        continue
+      }
       yields.verifySent += 1
       if (!verdict.ok) {
         refuse('unsupported', item.claim, who)
@@ -1349,6 +2121,45 @@ export async function runReading(
       const target = check.target.kind === 'item' ? check.target : null
       const answered = verdict.r === null ? null : (check.ids.get(verdict.r) ?? '')
       const base = { voice: verdict.voice, mode: verdict.mode, proof: 'verified' as const }
+      if (item.kind === 'step') {
+        // The checker's step wins (P2b): one it does not name is no verdict on it.
+        const step = parseStep(verdict.how)
+        if (step === null) {
+          refuse('unconfirmed', item.claim, who)
+          continue
+        }
+        keep(
+          proved(item, {
+            ...base,
+            recordId: item.recordId,
+            pending: null,
+            subjectText: null,
+            how: step
+          })
+        )
+        continue
+      }
+      // A knows line (P2b): the checker's how and source win; its learner is settled or refused.
+      const how = item.kind === 'knows' ? parseHow(verdict.how) : null
+      if (item.kind === 'knows' && how === null) {
+        refuse('unconfirmed', item.claim, who)
+        continue
+      }
+      const learnerLine = (
+        learner: string
+      ): { how: string | null; fromId: string | null } | null => {
+        if (how === null) return { how: null, fromId: null }
+        // P2b-D8: a character learner is Here or the POV, or shown on the page.
+        if (isCharacter(learner) && !hereNow.has(learner) && !shownHere.has(learner)) return null
+        const source = verdict.fr === null ? null : (check.ids.get(verdict.fr) ?? null)
+        return {
+          how,
+          fromId:
+            keepsFrom(how) && source !== null && (target?.from ?? []).includes(source)
+              ? source
+              : null
+        }
+      }
       if (subject.kind === 'shared') {
         // A shared alias waits for the name scan (P2a-D22), whoever the checker picked.
         keep(
@@ -1367,9 +2178,14 @@ export async function runReading(
           continue
         }
         // Null with one candidate: none fits. With more, more than one does: it waits, and the
-        // next full read drops it (P2a-D23).
-        if (answered === null && subject.candidates.length < 2) {
+        // next full read drops it (P2a-D23). A knows line never waits (P2b).
+        if (answered === null && (subject.candidates.length < 2 || item.kind === 'knows')) {
           refuse('unconfirmed', item.claim, who)
+          continue
+        }
+        const known = answered === null ? { how: null, fromId: null } : learnerLine(answered)
+        if (known === null) {
+          refuse('notHere', item.claim, { ...who, recordId: answered })
           continue
         }
         // The anchor keeps the sentence that names the one picked (else the nearest naming one).
@@ -1377,6 +2193,7 @@ export async function runReading(
         keep(
           proved(item, {
             ...base,
+            ...known,
             recordId: answered,
             pending: answered === null ? { kind: 'subject', candidates: subject.candidates } : null,
             subjectText: null,
@@ -1408,7 +2225,33 @@ export async function runReading(
         refuse('subject', item.claim, who)
         continue
       }
-      keep(proved(item, { ...base, recordId: item.recordId, pending: namePending, subjectText }))
+      const known =
+        item.recordId === null ? { how: null, fromId: null } : learnerLine(item.recordId)
+      if (known === null) {
+        refuse('notHere', item.claim, who)
+        continue
+      }
+      keep(
+        proved(item, {
+          ...base,
+          ...known,
+          recordId: item.recordId,
+          pending: namePending,
+          subjectText
+        })
+      )
+    }
+    // A learner an on-page check showed joins the card's on-page list when the card is written,
+    // its line's sentences joining the card's anchor.
+    const shownAnchor: string[] = []
+    if (merged !== null) {
+      for (const fact of fresh) {
+        const learner = fact.recordId
+        if (fact.slot !== 'knows' || learner === null || !shownHere.has(learner)) continue
+        if (cardPresent.some((entry) => entry.recordId === learner)) continue
+        cardPresent.push({ recordId: learner, quote: fact.quote, p: fact.para, verified: true })
+        shownAnchor.push(...fact.anchor)
+      }
     }
 
     // 6. Reconcile and write, in one transaction.
@@ -1442,8 +2285,13 @@ export async function runReading(
     const at0 = now()
     let readingId = ''
     const touched = new Set<string>()
+    /** P2b: the secrets and threads made, merged into, revived, given up or pruned. */
+    const topicIds = new Set<string>()
     const inserted: { id: string; proof: ClaimProof }[] = []
     let lineMoved = false
+    // P2b-D9: whether the reading leaves nothing finished unread (the entries it will write).
+    const readEntries = nextReadSet(readSet, current, wholeRead ? 'all' : readParas)
+    const settled = unreadSentences(current, readSetOf(readEntries, names)).length === 0
     db.transaction((tx) => {
       readingId = insertReading(
         tx,
@@ -1453,8 +2301,8 @@ export async function runReading(
           purpose,
           pages: requests,
           paras: ranges([...readParas]),
-          promptVersion: READER_PROMPT_VERSION,
-          verifyVersion: spend.verifySent ? VERIFY_PROMPT_VERSION : null,
+          promptVersion: READER_V2_PROMPT_VERSION,
+          verifyVersion: spend.verifySent ? VERIFY_V2_PROMPT_VERSION : null,
           model: spend.model,
           tokensIn: spend.tokensIn,
           tokensOut: spend.tokensOut,
@@ -1483,6 +2331,50 @@ export async function runReading(
           hashesNow.length !== scene.hashes.length ||
           hashesNow.some((hash, i) => hash !== scene.hashes[i]))
 
+      // P2b-D3, D4: the new topics, made silently or merged, before the facts that point at them.
+      const made = new Map<string, { recordId: string; topicQuoteId: string | null }>()
+      for (const topic of kept) {
+        if (topic.dropped !== null) continue
+        const quote: NewTopicQuote = {
+          nodeId: input.nodeId,
+          draftId,
+          para: topic.p,
+          quote: topic.q,
+          label: topic.label,
+          anchor: [...anchorFor(scene.sentences, topic.location)],
+          stating: topic.stating,
+          readingId
+        }
+        if (topic.mergeInto !== null) {
+          const topicQuoteId = mergeInto(tx, topic.mergeInto, quote, [], at0)
+          made.set(topic.key, { recordId: topic.mergeInto, topicQuoteId })
+          topicIds.add(topic.mergeInto)
+          continue
+        }
+        const created = createTopic(
+          tx,
+          {
+            kind: topic.kind,
+            label: topic.label,
+            quote,
+            ref: () => order.refs.get(input.nodeId) ?? null
+          },
+          at0
+        )
+        made.set(topic.key, { recordId: created.recordId, topicQuoteId: null })
+        topicIds.add(created.recordId)
+      }
+      // A knows line's secret is its object, a step's thread its record; one that came with a
+      // merged reveal is tagged with it, so *Split* moves exactly those (P2b-D5).
+      const pointed = fresh.map((fact) => {
+        const key = freshTopic.get(fact)
+        const target = key === undefined ? undefined : made.get(key)
+        if (target === undefined) return fact
+        return fact.slot === 'knows'
+          ? { ...fact, objectId: target.recordId, topicQuoteId: target.topicQuoteId }
+          : { ...fact, recordId: target.recordId, topicQuoteId: target.topicQuoteId }
+      })
+
       const stillStored = sceneClaims(tx, input.nodeId, draftId)
       const result = reconcile({
         stored: stillStored,
@@ -1491,7 +2383,12 @@ export async function runReading(
         same: mapIds(answers.flatMap(({ answer }) => answer.same)),
         drop: mapIds(answers.flatMap(({ answer }) => answer.drop)),
         rejected,
-        fresh,
+        // A knows line or step is stored only with its topic (one whose topic was not made is not).
+        fresh: pointed.filter(
+          (fact) =>
+            !(fact.slot === 'knows' && fact.objectId === null) &&
+            !(fact.slot === 'thread' && fact.recordId === null)
+        ),
         dismissed: dismissedKeys(tx, 'notRight'),
         movedTo: notAboutMovedTo(tx)
       })
@@ -1532,7 +2429,10 @@ export async function runReading(
         const verdict = spotOf.get(fact)
         if (verdict !== undefined) setClaimSpot(tx, id, verdict, 'fast', at0)
       }
-      for (const claim of inserts) if (claim.recordId !== null) touched.add(claim.recordId)
+      for (const claim of inserts) {
+        if (claim.recordId !== null) touched.add(claim.recordId)
+        if (claim.slot === 'knows' && claim.objectId !== null) touched.add(claim.objectId)
+      }
       const byId = new Map(stillStored.map((claim) => [claim.id, claim]))
       for (const revival of result.revivals) {
         reviveClaim(tx, revival.id, { ...revival, readingId }, at0)
@@ -1544,6 +2444,36 @@ export async function runReading(
         if (recordId !== null && recordId !== undefined) touched.add(recordId)
       }
       deleteClaims(tx, result.deletes)
+      // P2b: a restated reveal the checker passed revives its re-checking one; a re-checking
+      // reveal in what was read and not revived goes (as a re-checking fact does, P2a-D23).
+      const revivedIds = new Set<string>()
+      for (const entry of revived) {
+        reviveTopicQuote(
+          tx,
+          entry.quoteId,
+          {
+            para: entry.p,
+            quote: entry.q,
+            anchor: [...anchorFor(scene.sentences, entry.location)],
+            stating: entry.stating,
+            readingId
+          },
+          at0
+        )
+        revivedIds.add(entry.quoteId)
+        topicIds.add(entry.recordId)
+      }
+      const gone = sceneTopicQuotes(tx, input.nodeId, draftId).filter(
+        (quote) =>
+          quote.state === 'stale' &&
+          !revivedIds.has(quote.id) &&
+          (wholeRead || readParas.has(quote.para))
+      )
+      deleteTopicQuotes(
+        tx,
+        gone.map((quote) => quote.id)
+      )
+      for (const quote of gone) topicIds.add(quote.recordId)
       if (merged !== null) {
         const located = [
           ...Object.values(fields).flatMap((placed) => (placed === null ? [] : [placed])),
@@ -1558,6 +2488,7 @@ export async function runReading(
             )
           )
         ].filter((hash) => hash !== '')
+        for (const hash of shownAnchor) if (!anchor.includes(hash)) anchor.push(hash)
         const before = getCard(tx, input.nodeId, draftId)?.lineHash ?? null
         const line = capWords(merged.line, CARD_LINE_MAX_WORDS)
         lineMoved = before !== sha256(line)
@@ -1583,14 +2514,17 @@ export async function runReading(
         )
         for (const entry of cardPresent) touched.add(entry.recordId)
       }
+      // P2b-D9: a topic reader read it (whole, for `topics_read`), and whether it is settled.
       writeSceneRead(
         tx,
         {
           nodeId: input.nodeId,
           draftId,
-          entries: nextReadSet(readSet, current, wholeRead ? 'all' : readParas),
+          entries: readEntries,
           full: wholeRead,
-          readingId
+          readingId,
+          topics: true,
+          settled
         },
         at0
       )
@@ -1603,6 +2537,8 @@ export async function runReading(
           if (changed.has(claim.id) && claim.recordId !== null) touched.add(claim.recordId)
         }
       }
+      // P2b-D12: an AI-made topic nothing backs any more goes.
+      for (const id of pruneTopics(tx)) topicIds.add(id)
     })
     return {
       read: true,
@@ -1616,7 +2552,8 @@ export async function runReading(
       names: [...waitingNames].sort(),
       inserted,
       model: spend.model,
-      lineMoved
+      lineMoved,
+      topicIds: [...topicIds].sort()
     }
   } catch (err) {
     if (err instanceof LocalCutoff) {

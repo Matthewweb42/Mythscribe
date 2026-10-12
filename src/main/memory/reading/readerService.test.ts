@@ -234,6 +234,28 @@ describe('Read now (F-16.16, F-16.17)', () => {
     expect(reader.status().lastRead?.nodeId).toBe(scene)
   })
 
+  it('F-16.22: pushes record:changed for a secret a reading made, without a roster change', async () => {
+    saveDocument(db, scene, doc("Mara's eyes were grey.", 'Mara sold the map at dawn.'))
+    const pushed: string[][] = []
+    const ai = fakeAi(
+      (request: CompletionRequest) => {
+        if (requestKind(request) === 'verify') return answerReading(request)
+        return {
+          text: JSON.stringify({
+            c: [],
+            n: [{ n: 'the sold map', kind: 'secret', id: 'x1', p: 1, q: 'Mara sold the map' }]
+          })
+        }
+      },
+      { providerId: 'openai', now: NOW }
+    )
+    const reader = service(ai, { recordsChanged: (ids) => void pushed.push(ids) })
+    expect(await reader.readNow(scene, 'read-topic')).toMatchObject({ ok: true, read: true })
+    const secret = listRecords(db).find((each) => each.kind === 'secret')
+    expect(secret?.name).toBe('the sold map')
+    expect(pushed).toEqual([[secret?.id]])
+  })
+
   it('F-16.21: links an open plan after a reading that wrote a card, and says so', async () => {
     const plan = createNode(db, 'novel', {
       parentId: chapter,

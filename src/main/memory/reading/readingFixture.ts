@@ -1,7 +1,7 @@
 import { priceFor, type AiProviderId } from '@shared/ai'
 import { defaultAiRouting, autoTable } from '@shared/aiRouting'
-import { READER_SENTINEL } from '../../ai/prompts/reader.v1'
-import { VERIFY_SENTINEL, VERIFY_UNNAMED_MARK } from '../../ai/prompts/verify.v1'
+import { READER_SENTINEL } from '../../ai/prompts/reader.v2'
+import { VERIFY_SENTINEL, VERIFY_UNNAMED_MARK } from '../../ai/prompts/verify.v2'
 import type { CachedResponse } from '../../ai/cacheStore'
 import { dayOf, defaultAiUsageState } from '../../ai/dailyCap'
 import type { AiRequestDeps } from '../../ai/request'
@@ -64,58 +64,130 @@ export function rosterIds(request: Pick<CompletionRequest, 'messages'>): Map<str
 /** One item of a checker request: its number, the short ids of "Who", its fact and its text. */
 export interface SentCheck {
   i: number
+  /**
+   * What it checks (`verify.v2`'s kinds): a fact (`claim`), a knows line, a thread step, a new
+   * topic's reveal, a same-as pair, a presence or a card field (`card`).
+   */
+  kind: 'claim' | 'knows' | 'step' | 'reveals' | 'same' | 'present' | 'card'
   who: string[]
   /** The ids of "Who" marked as named nowhere in reach (`VERIFY_UNNAMED_MARK`). */
   unnamed: string[]
   /** The names of "Who", in the same order. */
   names: string[]
+  /** A knows item's source candidates (short ids). */
+  from: string[]
+  /** A knows item's secret, a step's thread, a reveals or same item's topics, as sent. */
+  topic: string
+  /** The fact line's label ("Fact", "On the page", "Card POV"), or "Reveals" / "Same". */
   label: string
   fact: string
   text: string
 }
 
-/** The items of a checker request. */
+/** The entries of a "Who" or "From" line: each one's short id and name. */
+function entriesOf(line: string): { id: string; name: string }[] {
+  return line
+    .split(' | ')
+    .map((entry) =>
+      /^([rn]\d+) (.+?)(?: \(.*\))? · [a-z ]+?(?: · not named here)?$|^([rn]\d+) (.+)$/.exec(entry)
+    )
+    .flatMap((match) =>
+      match === null ? [] : [{ id: match[1] ?? match[3] ?? '', name: match[2] ?? match[4] ?? '' }]
+    )
+}
+
+/** The items of a checker request (`verify.v1` or `verify.v2`). */
 export function sentChecks(request: Pick<CompletionRequest, 'messages'>): SentCheck[] {
   const user = request.messages.at(-1)?.content ?? ''
   return user
     .split('\n\n')
     .map((block) => block.replace(/^Items:\n/, ''))
-    .flatMap((block) => {
+    .flatMap((block): SentCheck[] => {
       const lines = block.split('\n')
-      const head = /^(\d+)\. Who: (.*)$/.exec(lines[0] ?? '')
-      const fact = /^([^:]+): (.*)$/.exec(lines[1] ?? '')
-      const text = /^Text: (.*)$/.exec(lines[2] ?? '')
-      if (head === null || fact === null || text === null) return []
-      const entries = (head[2] ?? '')
-        .split(' | ')
-        .map((entry) =>
-          /^([rn]\d+) (.+?)(?: \(.*\))? · [a-z ]+?(?: · not named here)?$|^([rn]\d+) (.+)$/.exec(
-            entry
-          )
-        )
-        .flatMap((match) =>
-          match === null
-            ? []
-            : [{ id: match[1] ?? match[3] ?? '', name: match[2] ?? match[4] ?? '' }]
-        )
-      const who = entries.map((entry) => entry.id)
-      const names = entries.map((entry) => entry.name)
-      const unnamed = (head[2] ?? '')
+      const head = /^(\d+)\. (Who|Thread|Reveals|Same): (.*)$/.exec(lines[0] ?? '')
+      if (head === null) return []
+      const i = Number(head[1])
+      const rest = new Map<string, string>()
+      let label = ''
+      for (const line of lines.slice(1)) {
+        const field = /^([^:]+): (.*)$/.exec(line)
+        if (field === null) continue
+        const key = field[1] ?? ''
+        rest.set(key, field[2] ?? '')
+        if (key !== 'From' && key !== 'Secret' && key !== 'Text') label = key
+      }
+      const text = rest.get('Text') ?? ''
+      const head2 = head[3] ?? ''
+      if (head[2] === 'Reveals' || head[2] === 'Same') {
+        return [
+          {
+            i,
+            kind: head[2] === 'Reveals' ? 'reveals' : 'same',
+            who: [],
+            unnamed: [],
+            names: [],
+            from: [],
+            topic: head2,
+            label: head[2],
+            fact: '',
+            text
+          }
+        ]
+      }
+      if (head[2] === 'Thread') {
+        return [
+          {
+            i,
+            kind: 'step',
+            who: [],
+            unnamed: [],
+            names: [],
+            from: [],
+            topic: head2,
+            label,
+            fact: rest.get(label) ?? '',
+            text
+          }
+        ]
+      }
+      const entries = entriesOf(head2)
+      const unnamed = head2
         .split(' | ')
         .filter((entry) => entry.endsWith(VERIFY_UNNAMED_MARK))
         .map((entry) => entry.split(' ')[0] ?? '')
+      const kind = rest.has('Secret')
+        ? 'knows'
+        : label === 'Fact'
+          ? 'claim'
+          : label === 'On the page'
+            ? 'present'
+            : 'card'
       return [
         {
-          i: Number(head[1]),
-          who,
+          i,
+          kind,
+          who: entries.map((entry) => entry.id),
           unnamed,
-          names,
-          label: fact[1] ?? '',
-          fact: fact[2] ?? '',
-          text: text[1] ?? ''
+          names: entries.map((entry) => entry.name),
+          from: entriesOf(rest.get('From') ?? '').map((entry) => entry.id),
+          topic: rest.get('Secret') ?? '',
+          label,
+          fact: rest.get(label) ?? '',
+          text
         }
       ]
     })
+}
+
+/** The topics roster of a reader request (`s3 the sold map · secret`): label → short id. */
+export function topicIds(request: Pick<CompletionRequest, 'messages'>): Map<string, string> {
+  const system = request.messages[0]?.content ?? ''
+  const ids = new Map<string, string>()
+  for (const line of system.split('\n')) {
+    const match = /^([st]\d+) (.+) · (?:secret|thread)$/.exec(line)
+    if (match?.[1] !== undefined && match[2] !== undefined) ids.set(match[2], match[1])
+  }
+  return ids
 }
 
 /**

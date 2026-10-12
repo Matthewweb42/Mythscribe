@@ -65,7 +65,7 @@ import {
   VOICE_NOTES_SAMPLE_CHARS
 } from '@shared/voice'
 import { voiceBlock } from '../../voice/voiceBlock'
-import { MEMORY_EVAL_CASES } from './memoryFixtures'
+import { MEMORY_EVAL_CASES, MEMORY_V2_EVAL_CASES } from './memoryFixtures'
 import { CARD_GIST_MAX_WORDS, CARD_LINE_MAX_WORDS } from '@shared/memory/claims'
 import type { PromptCard } from '@shared/memory/cardText'
 import {
@@ -893,8 +893,19 @@ export interface EvalCase {
         paragraphs: { p: number; text: string }[]
         expected: ReaderEvalLabel[]
         rejected: ReaderEvalLabel[]
+        /**
+         * F-16.22, F-16.23 (`reader.v2`): the knows lines and thread steps a correct read
+         * proposes (scored on learner, secret, how and source; on thread and step), and the
+         * learners no knows line may name here (a rumour, a dream, Mr. Harrow at the table).
+         */
+        knows?: ReaderKnowsLabel[]
+        steps?: ReaderStepLabel[]
+        notKnowing?: string[]
       }
-    /** The story-memory checker (F-16.17): each item's `ok` must match the label's `expect`. */
+    /**
+     * The story-memory checker (F-16.17; F-16.22): each item's `ok` must match the label's
+     * `expect` (a knows, step, reveals or same item's too).
+     */
     | { kind: 'verify'; expected: boolean[] }
 }
 
@@ -903,6 +914,26 @@ export interface ReaderEvalLabel {
   slot: string
   quote: string
   p: number
+}
+
+/** A test-book knows line as a `reader.v2` case scores against it (roster short ids). */
+export interface ReaderKnowsLabel {
+  learner: string
+  /** The listed secret's id ("s1"), or null when the case lists it not (a new one is right). */
+  secret: string | null
+  how: string
+  from: string | null
+  p: number
+  quote: string
+}
+
+/** A test-book thread step as a `reader.v2` case scores against it. */
+export interface ReaderStepLabel {
+  /** The listed thread's id ("t1"), or null when the case lists it not. */
+  thread: string | null
+  how: string
+  p: number
+  quote: string
 }
 
 const general = builtinParams('general')
@@ -6646,5 +6677,7 @@ export const EVAL_CASES: EvalCase[] = [
   // F-16.17: the story-memory reader and checker, from the test book.
   ...MEMORY_EVAL_CASES,
   // F-16.20, F-16.21: the summary readers re-pointed to the v2 card, and the plan-link pick.
-  ...CARD_READER_CASES
+  ...CARD_READER_CASES,
+  // F-16.22, F-16.23: reader.v2 and verify.v2, after P2a's last catalogued versions.
+  ...MEMORY_V2_EVAL_CASES
 ]

@@ -38,6 +38,9 @@ export const ClaimView = z.object({
   mode: ClaimMode,
   speakerId: z.string().nullable(),
   objectId: z.string().nullable(),
+  /** P2b: a knows line's how and source, a thread step's step (null for every other line). */
+  how: z.string().nullable(),
+  fromId: z.string().nullable(),
   state: ClaimState,
   proof: z.enum(CLAIM_PROOFS),
   nodeId: z.string(),

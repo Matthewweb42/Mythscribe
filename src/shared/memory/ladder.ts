@@ -29,7 +29,7 @@ import type { QuoteMissReason } from './quote'
 /** Why the ladder refused an item (`reading.rejections`, counted by reason). */
 export type LadderReject =
   | QuoteMissReason
-  /** Not a slot of the closed list, or one P2a's reader may not propose (knows, thread). */
+  /** Not a slot of the closed list, or a knows line or thread step with no how the rules know. */
   | 'slot'
   /** The fact's record is not on the roster, or not a record at all. */
   | 'record'
@@ -49,6 +49,17 @@ export type LadderReject =
   | 'name'
   /** An item of the reply that did not parse. */
   | 'shape'
+  /** P2b-D8: a knows line whose learner is not here or the point of view, nor shown on the page. */
+  | 'notHere'
+  /** P2b-D8: a group learner its sentence does not name. */
+  | 'group'
+  /**
+   * P2b-D3: a new secret or thread whose revealing sentence is not in the window or the checker did
+   * not find revealing it, and every fact that came with it.
+   */
+  | 'topic'
+  /** P2b-D11: a new secret or thread past the page's caps, and its facts. */
+  | 'topicCap'
 
 /** One sentence of the scene as the ladder reads it. */
 export interface LadderSentence {

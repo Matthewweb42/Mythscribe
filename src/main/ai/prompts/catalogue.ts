@@ -100,6 +100,8 @@ import { BETA_READER_REGEN_PROMPT_V2_VERSION } from './betaReaderRegen.v2'
 import { SYNOPSIS_PROMPT_V2_VERSION } from './synopsis.v2'
 import { NOTES_SUGGEST_PROMPT_V4_VERSION } from './notesSuggest.v4'
 import { PLAN_LINKS_PROMPT_V2_VERSION } from './planLinks.v2'
+import { READER_V2_PROMPT_VERSION } from './reader.v2'
+import { VERIFY_V2_PROMPT_VERSION } from './verify.v2'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -221,7 +223,10 @@ export const PROMPT_VERSIONS = [
   BETA_READER_REGEN_PROMPT_V2_VERSION,
   SYNOPSIS_PROMPT_V2_VERSION,
   NOTES_SUGGEST_PROMPT_V4_VERSION,
-  PLAN_LINKS_PROMPT_V2_VERSION
+  PLAN_LINKS_PROMPT_V2_VERSION,
+  // F-16.22, F-16.23 (story memory v2 only): who knows what and plot threads; v1 stays for its rows.
+  READER_V2_PROMPT_VERSION,
+  VERIFY_V2_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -697,7 +702,9 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-16.21'
-  }
+  },
+  [READER_V2_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.22' },
+  [VERIFY_V2_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.22' }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

@@ -9,6 +9,8 @@ import type { EditPassType } from '@shared/editPass'
 import { parseFilingAnswer, quoteParagraph } from '@shared/filing'
 import { locateQuote } from '@shared/memory/quote'
 import { parseReaderAnswer, parseVerifyAnswer } from '@shared/memory/readerAnswer'
+import { parseHow } from '@shared/memory/knows'
+import { parseStep } from '@shared/memory/topics'
 import { STORY_NOTES_CONTINUITY_HEADING, STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
 import { SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
 import { SceneSummary } from '@shared/summary'
@@ -848,12 +850,56 @@ function scoreReader(
   const recall = [...bySlot]
     .map(([slot, entry]) => `${slot} ${entry.found}/${entry.total}`)
     .join(', ')
+  // P2b (`reader.v2`): knows lines on learner, secret, how and source; steps on thread and step.
+  const knowsItems = parsed.claims.filter((item) => item.s === 'knows')
+  const fresh = new Set(parsed.topics.filter((topic) => topic.label !== null).map((t) => t.id))
+  const secretMatches = (want: string | null, got: string | null): boolean =>
+    want === null ? got !== null && fresh.has(got) : got === want
+  let knowsFound = 0
+  let howRight = 0
+  let fromRight = 0
+  let fromAsked = 0
+  for (const label of scoring.knows ?? []) {
+    const hit = knowsItems.find(
+      (item) => item.r === label.learner && sameQuote(item.q, label.quote)
+    )
+    if (hit === undefined) continue
+    if (secretMatches(label.secret, hit.o)) knowsFound += 1
+    if (parseHow(hit.how) === parseHow(label.how)) howRight += 1
+    if (label.from !== null) {
+      fromAsked += 1
+      if (hit.fr === label.from) fromRight += 1
+    }
+  }
+  const stepItems = parsed.claims.filter((item) => item.s === 'thread')
+  const stepsFound = (scoring.steps ?? []).filter((label) =>
+    stepItems.some(
+      (item) =>
+        sameQuote(item.q, label.quote) &&
+        parseStep(item.how) === parseStep(label.how) &&
+        (label.thread === null ? item.r !== null && fresh.has(item.r) : item.r === label.thread)
+    )
+  ).length
+  const wrongKnowers = knowsItems.filter(
+    (item) => item.r !== null && (scoring.notKnowing ?? []).includes(item.r)
+  ).length
+  const knowsTotal = scoring.knows?.length ?? 0
+  const stepsTotal = scoring.steps?.length ?? 0
   const problems = [
     `quotes ${items.length - missing}/${items.length}`,
     ...(recall === '' ? [] : [`recall ${recall}`]),
-    ...(offered > 0 ? [`${offered} rejected facts offered as narration, now`] : [])
+    ...(knowsTotal === 0
+      ? []
+      : [`knows ${knowsFound}/${knowsTotal} (how ${howRight}, from ${fromRight}/${fromAsked})`]),
+    ...(stepsTotal === 0 ? [] : [`steps ${stepsFound}/${stepsTotal}`]),
+    ...(offered > 0 ? [`${offered} rejected facts offered as narration, now`] : []),
+    ...(wrongKnowers > 0 ? [`${wrongKnowers} knows lines for someone who never learns it`] : [])
   ]
-  return { kind: 'json', ok: missing === 0 && offered === 0, problem: problems.join('; ') }
+  return {
+    kind: 'json',
+    ok: missing === 0 && offered === 0 && wrongKnowers === 0,
+    problem: problems.join('; ')
+  }
 }
 
 /** The story-memory checker (F-16.17): each verdict's `ok` against the label's `expect`. */

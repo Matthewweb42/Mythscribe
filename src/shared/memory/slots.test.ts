@@ -5,7 +5,6 @@ import {
   DETAIL_LABEL_NAMES,
   SlotSchema,
   parseSlot,
-  readerAccepts,
   slotGroup,
   slotLabel
 } from './slots'
@@ -46,10 +45,9 @@ describe('the closed slot list (F-16.17, design §2.2)', () => {
     expect(slotGroup('detail:income')).toBe('lasting')
   })
 
-  it('refuses knows and thread to the P2a reader, and names every slot for display', () => {
-    expect(readerAccepts('knows')).toBe(false)
-    expect(readerAccepts('thread')).toBe(false)
-    expect(readerAccepts('eyes')).toBe(true)
+  it('groups knows and thread on their own, and names every slot for display', () => {
+    expect(slotGroup('knows')).toBe('knows')
+    expect(slotGroup('thread')).toBe('thread')
     expect(slotLabel('location')).toBe('Last seen at')
     expect(slotLabel('detail:income')).toBe('Income')
     for (const slot of ALL_SLOTS) expect(slotLabel(slot)).not.toBe('')

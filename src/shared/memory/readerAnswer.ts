@@ -1,12 +1,20 @@
 import { z } from 'zod'
 import { ClaimMode, ClaimVoice } from './claims'
+import type { TopicKind } from './topics'
 
 /**
  * Reading the answers of story memory's reader and checker (F-16.17; plan P2a §2.2, §2.3): the
- * short-key JSON of `reader.v1` and `verify.v1`, read leniently. An item that does not parse is
- * dropped and counted, never thrown on; a reply cut off at its output cap is read up to its last
- * complete item (`salvageJsonItems`), so a long scene's claims are not all lost to one cut. Pure:
- * the pipeline (`reading/pipeline.ts`) maps the short ids and runs every item through the ladder.
+ * short-key JSON of `reader.v1`/`reader.v2` and `verify.v1`/`verify.v2`, read leniently. An item
+ * that does not parse is dropped and counted, never thrown on; a reply cut off at its output cap is
+ * read up to its last complete item (`salvageJsonItems`), so a long scene's claims are not all lost
+ * to one cut. Pure: the pipeline (`reading/pipeline.ts`) maps the short ids and runs every item
+ * through the ladder.
+ *
+ * P2b (`reader.v2`, plan P2b §2.4 step 1): a `c` item of slot `knows` carries its secret's id in
+ * `o`, its `how` and its source in `fr` (its value defaults to the how); a `thread` item's `r` is
+ * the thread's id and `how` its step. An `n` item with a `kind` of secret or thread is a topic
+ * (`ReaderTopic`): a new one (`x1`, with its label) or a listed one whose reveal is restated. The
+ * checker's `how` and `fr` are read as written: an unknown how is no verdict on it.
  */
 
 /** One fact as the reader proposes it, ids still the prompt's short ones ("r12", "c7"). */
@@ -24,6 +32,24 @@ export interface ReaderClaim {
   /** The other record of a kinship or relation fact. */
   o: string | null
   chg: boolean
+  /** P2b: a knows line's how, a thread step's step, as written (the pipeline reads them). */
+  how: string | null
+  /** P2b: a told, overheard or read line's source (a roster id). */
+  fr: string | null
+}
+
+/**
+ * P2b: a secret or thread in `n` (`reader.v2`): a new one (`id` the reader's own, `x1`, and its
+ * label), or a listed one whose re-checking reveal the paragraphs still state (`id` its roster id,
+ * no label).
+ */
+export interface ReaderTopic {
+  id: string
+  kind: TopicKind
+  /** The new topic's label as written; null for a listed one's restated reveal. */
+  label: string | null
+  p: number
+  q: string
 }
 
 /** A name not on the roster, where the reader saw it, and its facts. */
@@ -60,6 +86,8 @@ export interface ReaderCard {
 export interface ReaderAnswer {
   claims: ReaderClaim[]
   names: ReaderName[]
+  /** P2b: the secrets and threads in `n`. */
+  topics: ReaderTopic[]
   same: string[]
   drop: string[]
   card: ReaderCard | null
@@ -74,11 +102,22 @@ const Id = z.string().trim().min(1)
 /** An id that may be left out or null, read as null. */
 const OptionalId = Id.nullish().transform((value) => value ?? null)
 
+/** A free text that may be left out, null or empty, read as null. */
+const OptionalText = z
+  .string()
+  .nullish()
+  .catch(null)
+  .transform((value) => {
+    const trimmed = value?.trim() ?? ''
+    return trimmed === '' ? null : trimmed
+  })
+
 const RawClaim = z.object({
   p: z.number().int().nonnegative(),
   r: OptionalId,
   s: Text,
-  v: Text,
+  // A knows line's value is its how (P2b-D6): it may be left out.
+  v: OptionalText,
   q: Text,
   // A missing voice or mode reads as narration, now: literal proof still checks the sentence for
   // quotation marks and markers, and the checker confirms both for everything else.
@@ -89,17 +128,38 @@ const RawClaim = z.object({
   chg: z
     .boolean()
     .nullish()
-    .transform((value) => value === true)
+    .transform((value) => value === true),
+  how: OptionalText,
+  fr: OptionalId.catch(null)
 })
 
-/** Reads one claim item; null when it does not parse. */
+/** Reads one claim item; null when it does not parse (a value is needed, but for a knows line). */
 function claimOf(raw: unknown): ReaderClaim | null {
   const parsed = RawClaim.safeParse(raw)
-  return parsed.success ? parsed.data : null
+  if (!parsed.success) return null
+  const { v, ...rest } = parsed.data
+  const value = v ?? (rest.s === 'knows' ? rest.how : null)
+  return value === null ? null : { ...rest, v: value }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** The topic kind an `n` item names, read leniently; null for a name. */
+function topicKindOf(raw: Record<string, unknown>): TopicKind | null {
+  const kind = typeof raw.kind === 'string' ? raw.kind.trim().toLowerCase() : ''
+  return kind === 'secret' || kind === 'thread' ? kind : null
+}
+
+/** Reads one secret or thread item (`reader.v2`); null when it does not parse. */
+function topicOf(raw: Record<string, unknown>, kind: TopicKind): ReaderTopic | null {
+  const id = Text.safeParse(raw.id)
+  const p = z.number().int().nonnegative().safeParse(raw.p)
+  const q = Text.safeParse(raw.q)
+  if (!id.success || !p.success || !q.success) return null
+  const label = Text.safeParse(raw.n)
+  return { id: id.data, kind, label: label.success ? label.data : null, p: p.data, q: q.data }
+}
 
 /** Reads one new-name item and its claims (each claim's own failures counted in `dropped`). */
 function nameOf(raw: unknown): { name: ReaderName | null; dropped: number } {
@@ -338,7 +398,15 @@ export function parseReaderAnswer(text: string): ReaderAnswer | null {
     else claims.push(claim)
   }
   const names: ReaderName[] = []
+  const topics: ReaderTopic[] = []
   for (const item of Array.isArray(root.n) ? root.n : []) {
+    const kind = isRecord(item) ? topicKindOf(item) : null
+    if (isRecord(item) && kind !== null) {
+      const topic = topicOf(item, kind)
+      if (topic === null) dropped += 1
+      else topics.push(topic)
+      continue
+    }
     const read = nameOf(item)
     dropped += read.dropped
     if (read.name !== null) names.push(read.name)
@@ -348,6 +416,7 @@ export function parseReaderAnswer(text: string): ReaderAnswer | null {
   return {
     claims,
     names,
+    topics,
     same: ids(root.same),
     drop: ids(root.drop),
     card: card.card,
@@ -363,18 +432,24 @@ export interface VerifyVerdict {
   r: string | null
   voice: ClaimVoice | null
   mode: ClaimMode | null
+  /** P2b (`verify.v2`): a knows item's how or a thread item's step, as written. */
+  how: string | null
+  /** P2b: a knows item's source, an id from its "From". */
+  fr: string | null
 }
 
 const RawVerdict = z.object({
   i: z.number().int().positive(),
   ok: z.boolean(),
-  r: OptionalId,
+  r: OptionalId.catch(null),
   voice: ClaimVoice.nullish()
     .catch(null)
     .transform((value) => value ?? null),
   mode: ClaimMode.nullish()
     .catch(null)
-    .transform((value) => value ?? null)
+    .transform((value) => value ?? null),
+  how: OptionalText,
+  fr: OptionalId.catch(null)
 })
 
 /**

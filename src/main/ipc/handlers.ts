@@ -1026,6 +1026,8 @@ export function registerHandlers({
       }),
     cancelRequest: (requestId) => void cancelInflight(requestId),
     changed: (payload) => emit(windows(), 'memory:changed', payload),
+    // P2b: secrets and threads a reading made or merged into; not names, so the roster stays.
+    recordsChanged: (recordIds) => emit(windows(), 'record:changed', { recordIds, roster: false }),
     questions: () => publishQuestions(),
     // F-16.21: links applied after a reading live in `plan_link` (no scene metadata moved).
     planLinksChanged: () => emit(windows(), 'planLinks:changed', { changedNodeIds: [] }),

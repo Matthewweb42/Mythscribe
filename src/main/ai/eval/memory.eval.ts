@@ -13,7 +13,7 @@ import { dismissedNames, rosterOf } from '../../memory/recordStore'
 import { twinGate } from '@shared/memory/twinGate'
 import type { CachedResponse } from '../cacheStore'
 import { dayOf, defaultAiUsageState } from '../dailyCap'
-import { buildVerifyPrompt, type VerifyPromptItem } from '../prompts/verify.v1'
+import { buildVerifyV2Prompt, type VerifyV2Item } from '../prompts/verify.v2'
 import { buildOpenAiProvider } from '../providers/openai'
 import type { CompletionRequest } from '../providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from '../request'
@@ -581,7 +581,7 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
       // verified ones on the strong tier, one per call with three sentences either side.
       const claims = liveClaims(book)
       const roster = readerRoster(book.db)
-      const item = (claim: Claim, around: number): VerifyPromptItem => {
+      const item = (claim: Claim, around: number): VerifyV2Item => {
         const texts = sceneTexts(book.db, claim.nodeId)
         const sentences = sceneSentences(texts)
         const at = sentences.findIndex(
@@ -609,11 +609,11 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
           .filter((claim) => claim.proof === 'literal')
           .slice(0, 50)
           .map((claim) => item(claim, 1))
-        const batches: VerifyPromptItem[][] = []
+        const batches: VerifyV2Item[][] = []
         for (let i = 0; i < literal.length; i += 10) batches.push(literal.slice(i, i + 10))
         for (const batch of batches) {
           if (over()) break
-          const prompt = buildVerifyPrompt({ items: batch })
+          const prompt = buildVerifyV2Prompt({ items: batch })
           const result = await runAiRequest(ai, {
             feature: 'verify',
             tier: 'fast',
@@ -629,7 +629,7 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
         }
         for (const claim of claims.filter((each) => each.proof === 'verified').slice(0, 20)) {
           if (over()) break
-          const prompt = buildVerifyPrompt({ items: [item(claim, 3)], strong: true })
+          const prompt = buildVerifyV2Prompt({ items: [item(claim, 3)], strong: true })
           const result = await runAiRequest(ai, {
             feature: 'verify',
             tier: 'strong',

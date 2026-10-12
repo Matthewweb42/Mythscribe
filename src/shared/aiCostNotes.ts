@@ -226,17 +226,17 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   reader: {
     trigger: 'background',
-    when: 'Story memory v2 (F-16.17): reader.v1, fast tier, reasoning off. Only when a finished sentence of a scene changed (a local gate decides, nothing is sent while typing): the changed paragraphs ±2 when the author leaves the scene or pauses (from P2a slice 3; Read now meanwhile), the whole scene in pages of 2,500 prose tokens on a first read, after half of it changed, or after five window reads. One request per window piece or page; a reply cut off at its cap is read again once from the last paragraph it quoted. The rules and the roster are a stable prefix (provider caching), the roster rebuilt only on a removal, rename, merge or split. Design figures: about 4,000 tokens in and 300 out for a window, 3,800 / 520 for a first-read page.',
+    when: 'Story memory v2 (F-16.17; F-16.22, F-16.23): reader.v2 (reader.v1 until P2b), fast tier, reasoning off. Only when a finished sentence of a scene changed (a local gate decides, nothing is sent while typing): the changed paragraphs ±2 when the author leaves the scene or pauses (from P2a slice 3; Read now meanwhile), the whole scene in pages of 2,500 prose tokens on a first read, after half of it changed, or after five window reads. One request per window piece or page; a reply cut off at its cap is read again once from the last paragraph it quoted. The rules, the record roster and the topics roster (the secrets and threads found, a short label each, never dropped) are a stable prefix (provider caching), the record roster rebuilt only on a removal, rename, merge or split. reader.v2 also reads who learns or holds which secret (how, and from whom: the learner must be on the page or the point of view), thread steps (opens, advances, resolves) and new secrets and threads, and its tail carries, for the secrets the changed paragraphs touch, who is known to know them (never who does not). Figures (plan P2b §6): about 4,370 tokens in and 320 out for a window, 4,170 / 560 for a first-read page.',
     callsPerUse: 1,
-    typicalOutTokens: 300,
+    typicalOutTokens: 320,
     ideas:
       'Skip the card when it is not due (already: +120 output only then); a smaller window when the edit is one sentence; batch Rebuild memory through the provider batch API; measure the cut-off rate in the ledger and trim the claim list before raising the cap.'
   },
   verify: {
     trigger: 'background',
-    when: 'Story memory v2 (F-16.17): verify.v1, fast tier, reasoning off. Batches per reading page (at most 13 facts each, so every verdict fits), only for the facts code could not prove (each with its sentences ±1, and for a she or he up to eight sentences back to those naming whoever it could mean), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 28 per fact + 12 per card or on-page check); a batch cut off at its cap asks its unanswered items once more. From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). On request (F-16.18): Not right › Not about is one fast call per use, one fact with the picked record and every record named in the eight sentences before it, its sentences ±3 (about 400 tokens in, about 40 out); nothing is sent for Wrong value or a line whose sentence changed. Design figures: about 1,300 tokens in and 110 out per batch.',
+    when: 'Story memory v2 (F-16.17; F-16.22, F-16.23): verify.v2 (verify.v1 until P2b), fast tier, reasoning off. Batches per reading page (at most 13 facts each, so every verdict fits), only for the facts code could not prove (each with its sentences ±1, and for a she or he up to eight sentences back to those naming whoever it could mean), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 28 per fact or thread step + 36 per knows item + 12 per card, on-page, reveals or same check); a batch cut off at its cap asks its unanswered items once more. From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). On request (F-16.18): Not right › Not about is one fast call per use, one fact with the picked record and every record named in the eight sentences before it, its sentences ±3 (about 400 tokens in, about 40 out); nothing is sent for Wrong value or a line whose sentence changed. verify.v2 adds knows items (the learner, how and from whom, with the people named around the line; 36 tokens a verdict), thread steps, a reveals item per new secret or thread, and up to 3 same-as items each (the two revealing sentences, about 80 in and 12 out), plus an on-page check for a learner not shown here. Figures (plan P2b §6): about 1,500 tokens in and 140 out per batch.',
     callsPerUse: 1,
-    typicalOutTokens: 110,
+    typicalOutTokens: 140,
     ideas:
       'Prove more in code (literal patterns per slot) so fewer items are sent; fold presence checks into the reader once the live run shows they agree; the strong spot check only while the proof agreement is new.'
   }
@@ -269,45 +269,6 @@ export interface PlannedCostNote {
 }
 
 export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
-  {
-    id: 'reader.v2:first',
-    prompt: 'reader.v2',
-    feature: 'reader',
-    existing: true,
-    phase: 'P2b',
-    tier: 'fast',
-    trigger: 'background',
-    when: 'reader.v1:first with knows and thread claims added; replaces it from P2b; priced like it until measured.',
-    typicalInTokens: 3_800,
-    typicalOutTokens: 520,
-    callsPerUse: 1
-  },
-  {
-    id: 'reader.v2:window',
-    prompt: 'reader.v2',
-    feature: 'reader',
-    existing: true,
-    phase: 'P2b',
-    tier: 'fast',
-    trigger: 'background',
-    when: 'reader.v1:window with knows and thread claims added; replaces it from P2b; priced like it until measured.',
-    typicalInTokens: 4_000,
-    typicalOutTokens: 300,
-    callsPerUse: 1
-  },
-  {
-    id: 'verify.v2',
-    prompt: 'verify.v2',
-    feature: 'verify',
-    existing: true,
-    phase: 'P2b',
-    tier: 'fast',
-    trigger: 'background',
-    when: 'verify.v1 with knows and thread claims; replaces it from P2b; priced like it until measured.',
-    typicalInTokens: 1_300,
-    typicalOutTokens: 110,
-    callsPerUse: 1
-  },
   {
     id: 'navigator.v1',
     prompt: 'navigator.v1',
@@ -429,7 +390,8 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
 
 /**
  * The story-memory rows that have shipped (F-16.9, P1 slice 5; F-16.17, P2a slice 2: the reader
- * and verify rows; F-16.20, F-16.21, P2a slice 5: `synopsis.v2`, `notesSuggest.v4` and
+ * and verify rows; F-16.22, F-16.23, P2b slice 2: their v2 rows, which the tasks read now, the v1
+ * rows kept for the ledger's older readings; F-16.20, F-16.21, P2a slice 5: `synopsis.v2`, `notesSuggest.v4` and
  * `planLinks.v2`): their features' notes are in `AI_COST_NOTES` now (the registry's per-feature
  * table shows them), and these rows keep the design's sizes so the planned tasks that run them
  * ("File a 20,000-word upload, once", "Index the book once") and the switch-over's rebuild price
@@ -578,6 +540,84 @@ export const SHIPPED_PLAN_ROWS: readonly PlannedCostNote[] = [
     typicalInTokens: 1_500,
     typicalOutTokens: 100,
     callsPerUse: 1
+  },
+  {
+    id: 'reader.v2:first',
+    prompt: 'reader.v2',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'A scene read whole with who knows what and plot threads (F-16.22, F-16.23): the rules +220, the topics roster (≤ 400, cached) and about 40 more tokens out than reader.v1:first (plan P2b §6).',
+    typicalInTokens: 4_170,
+    typicalOutTokens: 560,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v2:window',
+    prompt: 'reader.v2',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'A window read with who knows what and plot threads: reader.v1:window plus the rules, the topics roster and the topic lines (≤ 150 of the tail) (plan P2b §6).',
+    typicalInTokens: 4_370,
+    typicalOutTokens: 320,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v2:card',
+    prompt: 'reader.v2',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'An instant card that is out of date: one reader.v2 window read for its scene (about one card in five).',
+    typicalInTokens: 4_370,
+    typicalOutTokens: 320,
+    callsPerUse: 1
+  },
+  {
+    id: 'verify.v2',
+    prompt: 'verify.v2',
+    feature: 'verify',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'One batch per reading page: verify.v1 plus knows items (36 tokens a verdict), thread steps, a Reveals item per new secret or thread and up to 3 same-as items each (plan P2b §6).',
+    typicalInTokens: 1_500,
+    typicalOutTokens: 140,
+    callsPerUse: 1
+  },
+  {
+    id: 'verify.v2:pro',
+    prompt: 'verify.v2',
+    feature: 'verify',
+    existing: true,
+    phase: 'P2b',
+    tier: 'strong',
+    trigger: 'background',
+    when: 'Spot checks: 20 verified claims per rebuild on the strong model, knows lines among them (48 tokens out for one); priced like verify.v1:pro.',
+    typicalInTokens: 700,
+    typicalOutTokens: 40,
+    callsPerUse: 1
+  },
+  {
+    id: 'verify.v2:spot',
+    prompt: 'verify.v2',
+    feature: 'verify',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'Spot checks: 50 literal claims per rebuild re-checked on the fast model (knows lines are never literal); priced like verify.v1:spot.',
+    typicalInTokens: 260,
+    typicalOutTokens: 15,
+    callsPerUse: 1
   }
 ]
 
@@ -597,20 +637,20 @@ export const PLANNED_TASK_COSTS: readonly PlannedTask[] = [
     id: 'index',
     label: 'Index the book once (= Rebuild memory; 90 scenes)',
     calls: [
-      { row: 'reader.v1:first', calls: 90 },
-      { row: 'verify.v1', calls: 90 },
+      { row: 'reader.v2:first', calls: 90 },
+      { row: 'verify.v2', calls: 90 },
       { row: 'judge.v1', calls: 12 },
-      { row: 'verify.v1:spot', calls: 50 },
-      { row: 'verify.v1:pro', calls: 20 }
+      { row: 'verify.v2:spot', calls: 50 },
+      { row: 'verify.v2:pro', calls: 20 }
     ]
   },
   {
     id: 'session',
     label: 'A 2-hour writing session (3 card refreshes, about one needing a read)',
     calls: [
-      { row: 'reader.v1:window', calls: 12 },
-      { row: 'reader.v1:card', calls: 1 },
-      { row: 'verify.v1', calls: 12 },
+      { row: 'reader.v2:window', calls: 12 },
+      { row: 'reader.v2:card', calls: 1 },
+      { row: 'verify.v2', calls: 12 },
       { row: 'judge.v1', calls: 4 },
       { row: 'planLinks.v2', calls: 2 }
     ]
@@ -668,9 +708,9 @@ export const PLANNED_TASK_COSTS: readonly PlannedTask[] = [
     label:
       'A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions with 10 widened, 2 checks, 1 what-if)',
     calls: [
-      { row: 'reader.v1:window', calls: 12 * 20 },
-      { row: 'reader.v1:card', calls: 20 + 6 },
-      { row: 'verify.v1', calls: 12 * 20 },
+      { row: 'reader.v2:window', calls: 12 * 20 },
+      { row: 'reader.v2:card', calls: 20 + 6 },
+      { row: 'verify.v2', calls: 12 * 20 },
       { row: 'judge.v1', calls: 4 * 20 + 20 * 2 },
       { row: 'planLinks.v2', calls: 2 * 20 },
       { row: 'agent.v9:lookup', calls: 20 },

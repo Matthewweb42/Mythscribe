@@ -43,8 +43,8 @@ git history of this file is the log of each feature's cost over time (author req
 | `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00865 · $0.0319 | $0.0108 | $0.0244 | 4 | $0.0346 |
 | `todo` | To do list: gaps and suggestions | on request | todo.v1 | fast | 415 / 9965 | 600 / 1200 | $0.000226 · $0.00173 | $0.000283 | $0.00301 | 1 | $0.000226 |
 | `sheetSync` | Sheet write-ups: Structured and Blank page kept in step | background | sheetWriteUp.v1 | fast | 308 / 4743 | 350 / 1200 | $0.000141 · $0.00100 | $0.000176 | $0.00181 | 1 | $0.000141 |
-| `reader` | Story memory reading | background | reader.v1 | fast | 1356 / 5415 | 300 / 720 | $0.000274 · $0.000960 | $0.000342 | $0.00237 | 1 | $0.000274 |
-| `verify` | Story memory check | background | verify.v1 | fast | 1119 / 1890 | 110 / 400 | $0.000187 · $0.000377 | $0.000234 | $0.00133 | 1 | $0.000187 |
+| `reader` | Story memory reading | background | reader.v2 | fast | 1626 / 5848 | 320 / 720 | $0.000317 · $0.00102 | $0.000397 | $0.00266 | 1 | $0.000317 |
+| `verify` | Story memory check | background | verify.v2 | fast | 1055 / 1735 | 140 / 400 | $0.000187 · $0.000355 | $0.000234 | $0.00142 | 1 | $0.000187 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -185,12 +185,12 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `reader` — Story memory reading
 
-- **When:** Story memory v2 (F-16.17): reader.v1, fast tier, reasoning off. Only when a finished sentence of a scene changed (a local gate decides, nothing is sent while typing): the changed paragraphs ±2 when the author leaves the scene or pauses (from P2a slice 3; Read now meanwhile), the whole scene in pages of 2,500 prose tokens on a first read, after half of it changed, or after five window reads. One request per window piece or page; a reply cut off at its cap is read again once from the last paragraph it quoted. The rules and the roster are a stable prefix (provider caching), the roster rebuilt only on a removal, rename, merge or split. Design figures: about 4,000 tokens in and 300 out for a window, 3,800 / 520 for a first-read page.
+- **When:** Story memory v2 (F-16.17; F-16.22, F-16.23): reader.v2 (reader.v1 until P2b), fast tier, reasoning off. Only when a finished sentence of a scene changed (a local gate decides, nothing is sent while typing): the changed paragraphs ±2 when the author leaves the scene or pauses (from P2a slice 3; Read now meanwhile), the whole scene in pages of 2,500 prose tokens on a first read, after half of it changed, or after five window reads. One request per window piece or page; a reply cut off at its cap is read again once from the last paragraph it quoted. The rules, the record roster and the topics roster (the secrets and threads found, a short label each, never dropped) are a stable prefix (provider caching), the record roster rebuilt only on a removal, rename, merge or split. reader.v2 also reads who learns or holds which secret (how, and from whom: the learner must be on the page or the point of view), thread steps (opens, advances, resolves) and new secrets and threads, and its tail carries, for the secrets the changed paragraphs touch, who is known to know them (never who does not). Figures (plan P2b §6): about 4,370 tokens in and 320 out for a window, 4,170 / 560 for a first-read page.
 - **Ideas:** Skip the card when it is not due (already: +120 output only then); a smaller window when the edit is one sentence; batch Rebuild memory through the provider batch API; measure the cut-off rate in the ledger and trim the claim list before raising the cap.
 
 ### `verify` — Story memory check
 
-- **When:** Story memory v2 (F-16.17): verify.v1, fast tier, reasoning off. Batches per reading page (at most 13 facts each, so every verdict fits), only for the facts code could not prove (each with its sentences ±1, and for a she or he up to eight sentences back to those naming whoever it could mean), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 28 per fact + 12 per card or on-page check); a batch cut off at its cap asks its unanswered items once more. From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). On request (F-16.18): Not right › Not about is one fast call per use, one fact with the picked record and every record named in the eight sentences before it, its sentences ±3 (about 400 tokens in, about 40 out); nothing is sent for Wrong value or a line whose sentence changed. Design figures: about 1,300 tokens in and 110 out per batch.
+- **When:** Story memory v2 (F-16.17; F-16.22, F-16.23): verify.v2 (verify.v1 until P2b), fast tier, reasoning off. Batches per reading page (at most 13 facts each, so every verdict fits), only for the facts code could not prove (each with its sentences ±1, and for a she or he up to eight sentences back to those naming whoever it could mean), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 28 per fact or thread step + 36 per knows item + 12 per card, on-page, reveals or same check); a batch cut off at its cap asks its unanswered items once more. From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). On request (F-16.18): Not right › Not about is one fast call per use, one fact with the picked record and every record named in the eight sentences before it, its sentences ±3 (about 400 tokens in, about 40 out); nothing is sent for Wrong value or a line whose sentence changed. verify.v2 adds knows items (the learner, how and from whom, with the people named around the line; 36 tokens a verdict), thread steps, a reveals item per new secret or thread, and up to 3 same-as items each (the two revealing sentences, about 80 in and 12 out), plus an on-page check for a learner not shown here. Figures (plan P2b §6): about 1,500 tokens in and 140 out per batch.
 - **Ideas:** Prove more in code (literal patterns per slot) so fewer items are sent; fold presence checks into the reader once the live run shows they agree; the strong spot check only while the proof agreement is new.
 
 ## Planned: story memory (F-16)
@@ -203,9 +203,6 @@ table above when its feature ships. Cached input is not discounted; task totals 
 
 | Request | Feature | Phase | Tier | Trigger | In / out | Own key (OpenRouter) | Hosted | OpenAI key | When |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `reader.v2:first` | `reader` (existing) | P2b | fast | background | 3800 / 520 | $0.000678 | $0.000847 | $0.00519 | reader.v1:first with knows and thread claims added; replaces it from P2b; priced like it until measured. |
-| `reader.v2:window` | `reader` (existing) | P2b | fast | background | 4000 / 300 | $0.000644 | $0.000805 | $0.00435 | reader.v1:window with knows and thread claims added; replaces it from P2b; priced like it until measured. |
-| `verify.v2` | `verify` (existing) | P2b | fast | background | 1300 / 110 | $0.000213 | $0.000266 | $0.00147 | verify.v1 with knows and thread claims; replaces it from P2b; priced like it until measured. |
 | `navigator.v1` | `navigator` | P3 | fast | every chat message | 6000 / 150 | $0.000882 | $0.00110 | $0.00517 | An open question: up to two steps choosing which passages Ms Scribe reads. |
 | `agent.v9:open` | `agent` (existing) | P3 | strong | every chat message | 6500 / 350 | $0.0125 | $0.0157 | $0.0215 | Ms Scribe answers an open question from the passages the navigator found. |
 | `agent.v9:widened` | `agent` (existing) | P3 | strong | every chat message | 13000 / 400 | $0.0240 | $0.0300 | $0.0385 | An open question the first passages could not answer, widened to more passages (about one question in five). |
@@ -220,12 +217,12 @@ table above when its feature ships. Cached input is not discounted; task totals 
 
 | Task | Requests | Own key (OpenRouter) | Hosted | OpenAI key |
 | --- | --- | --- | --- | --- |
-| Index the book once (= Rebuild memory; 90 scenes) | 262 | $0.118 | $0.148 | $0.724 |
-| A 2-hour writing session (3 card refreshes, about one needing a read) | 31 | $0.0132 | $0.0165 | $0.0916 |
+| Index the book once (= Rebuild memory; 90 scenes) | 262 | $0.128 | $0.160 | $0.794 |
+| A 2-hour writing session (3 card refreshes, about one needing a read) | 31 | $0.0144 | $0.0181 | $0.100 |
 | A lookup through Ms Scribe | 2 | $0.00882 | $0.0110 | $0.0148 |
 | An open question | 4 | $0.0152 | $0.0190 | $0.0345 |
 | An open question, widened (about one in five) | 5 | $0.0282 | $0.0352 | $0.0578 |
 | Check the book | 40 | $0.0347 | $0.0433 | $0.112 |
 | File a 20,000-word upload, once | 14 | $0.159 | $0.198 | $0.448 |
 | A what-if (P5): 5 Try turns and 1 Version | 16 | $0.104 | $0.130 | $0.243 |
-| A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions with 10 widened, 2 checks, 1 what-if) | 972 | $1.51 | $1.88 | $4.58 |
+| A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions with 10 widened, 2 checks, 1 what-if) | 972 | $1.53 | $1.91 | $4.75 |

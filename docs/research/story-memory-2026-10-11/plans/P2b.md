@@ -1,6 +1,6 @@
 # P2b Who knows what, threads and time: implementation plan
 
-**Features:** F-16.22 and F-16.23 (`FEATURES.md` §2.16). Phase P2b of the story memory redesign, approved by the author on 2026-10-11 (`../design.md` §2.1–2.3, §2.5, §2.6 (the prose block and data sharing), §2.7 (Book view, sheets, "Years and ages"), Part 4, Part 5; `../author-answers.md` answers 1, 8, 12, 19, 20, 21, 22; decision 5). **Size:** M, about 1.5 weeks, in five slices. **Status:** planned 2026-10-12; nothing built.
+**Features:** F-16.22 and F-16.23 (`FEATURES.md` §2.16). Phase P2b of the story memory redesign, approved by the author on 2026-10-11 (`../design.md` §2.1–2.3, §2.5, §2.6 (the prose block and data sharing), §2.7 (Book view, sheets, "Years and ages"), Part 4, Part 5; `../author-answers.md` answers 1, 8, 12, 19, 20, 21, 22; decision 5). **Size:** M, about 1.5 weeks, in five slices. **Status:** planned 2026-10-12; slices 1 and 2 built 2026-10-12.
 
 **Goal:** the reader learns who knows what and where the plot threads stand, and code turns that into time. `reader.v2` adds knows claims (who learned which secret, how, and from whom; the learner must be Here or the POV) and thread claims (opens, advances, resolves). A secret or thread is created silently whenever a proved claim backs one, with a defining quote; a likely duplicate is judged in the same `verify.v2` batch ("same as s3?") on both defining quotes and merged on its own, with *Split* to undo it. Code computes "readers have known since", the who-knows-what grid, thread status, the story year of each scene (decision 5) and ages. Absence is only ever shown as a scoped, muted line ("No scene shows Mara learning this (checked up to 14.2)") and never reaches a prompt. The This scene panel shows the secrets touched in the scene and tension lines; the Book tab gains the grid, Threads and the Timeline with ages; sheets gain Knows, Threads and Age.
 
@@ -194,6 +194,16 @@ The fake reader (§ the sentinel switch, extended): it reads the topics roster f
 Steps: create Mara Vell, Orrin and Tomas; Scene 1 "Tomas sold the map. Orrin overheard Tomas. Mara swore to find the heir." → *Read now* → `memory:scene`'s claims hold Tomas knewBefore, Orrin overheard from Tomas, a thread step `opens`; `record:list` has one secret "the sold map" and one thread "the missing heir", both origin `ai`, in no `names:byRecord` list; Scene 2 "The map had been sold by Tomas. Mara found the heir." → read → the checker request carries a Same item; still one secret (merged), the thread's step `resolves`; the reader request of Scene 2 carries "Secrets and threads" with both topics; no request carries "No scene shows".
 
 **Ticks:** none; F-16.22 and F-16.23 note the prompts and the pipeline, and that the live run is owed.
+
+**Slice 2 notes (built 2026-10-12; calls in `QUESTIONS.md`, P2b slice 2):**
+- A thread step's verdict carries its voice and mode as well as the step (28 tokens, not 12), so a supposed opening is stored as hypothetical and never opens a thread.
+- Knows lines never wait (a shared surname → `subject`, a pronoun the checker leaves open → `unconfirmed`); a pronoun learner gets no on-page check (Here before, or on this reading's verified card, or `notHere`); a new name's knows lines and steps are refused (`name`).
+- The Same pool (`topicContext.open`) includes the author's topics with or without a reveal; a Dismissed reveal drops its topic and facts silently (not counted); each new topic and restated reveal counts as one item for the health gate (Same and on-page checks do not); `topicsCreated`, `topicsMerged` and `topicRosterOver` are counts in the rejections JSON beside the reasons.
+- A rebuild's `replace` keeps a live reveal whose anchor holds (no `same` for reveals); stale reveals in what was read and not revived are deleted for every purpose (P2a-D23's rule), then `pruneTopics`.
+- Extra cost rows `reader.v2:card`, `verify.v2:pro`, `verify.v2:spot` so every task, the rebuild and backlog prices read v2; index ≈ 12.8¢, session ≈ 1.44¢ (report.test within ±30 %).
+- `ClaimView` gains `how` and `fromId` (the e2e reads them; slice 4's lines need them).
+- h13's group sentence ("the whole regiment knew") does not name "the regiment" word for word: slice 3's replay must give the record the nickname "regiment" or loosen the group rule (QUESTIONS item 12).
+- Owed: live fidelity for `reader.v2`/`verify.v2` (cases built; `MYTHSCRIBE_EVAL_LIVE=1`), the one-key live paths (slice 3), the knows replays and live run (slice 3).
 
 ---
 

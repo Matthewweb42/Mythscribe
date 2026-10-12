@@ -12,6 +12,24 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-12 · F-16.22, F-16.23 · P2b slice 2 (reader.v2, verify.v2 and the reading of secrets and threads; nothing to see yet): calls made while building it
+- Question: Teaching the reader and its checker who knows what and plot threads needed calls the plan did not spell out. Nothing changes in v1, and nothing shows in the panel yet (slices 4 and 5).
+- Chosen (decided by Claude, unconfirmed):
+  1. **The checker confirms a thread step's voice and mode too**, not only the step, so a supposed or rumoured "he will come back" is stored as such and never opens a thread; its verdict is budgeted like a fact's (28 tokens), not the plan's 12.
+  2. **A knows line never waits.** A shared surname that fits two people, or a "she" the checker cannot pin to one person, drops the line (P2a's facts wait in both cases); the next reading tries again.
+  3. **A "she" or "he" who learns something gets no on-page check of their own**: they count only when they are already here (the typed POV, *+ also here*, the card) or on the card this reading writes. A named learner who is not gets one on-page check per page; if it passes they are here for the reading and join the card's on-page list.
+  4. **A new name cannot learn a secret or move a thread** until it is a record (its knows lines and steps are dropped with the reason "name"); its other facts still wait on your answer.
+  5. **The "same as …?" check also compares a new secret or thread with the ones you made yourself**, even when no scene reveals yours yet, so the AI does not make a second "Ashby's return" beside yours.
+  6. **A reveal you said is not a secret drops silently**, with everything that came with it, and is not counted against the model.
+  7. **The health gate counts each new secret or thread as one item** (its sentence found or not, its reveal checked or not); same-as and on-page checks are not counted, so a model is never paused for saying two secrets differ. Topics made and merged are counted beside the rejections (`topicsCreated`, `topicsMerged`).
+  8. **A re-checking reveal goes once its paragraph is read and nothing restates it** (as a re-checking fact does); a secret or thread left with nothing behind it is then removed. *Rebuild memory* keeps a reveal whose sentences still stand (there is no "unchanged" answer for reveals).
+  9. **The reader's tail lists who is known to know a listed secret** (each person's earliest line, at most four, "r7 overheard 9.3 (from r2)") or "revealed 1.1" when nobody is shown knowing it yet, never who does not; open threads show "open since 2.1, last 7.3".
+  10. **A source ("from") is kept only when the checker names one of the people offered** (the reader's own pick, the speaker, everyone named a sentence either side), and only for told, overheard and read.
+  11. **The cost registry gains three more shipped rows than the plan named** (`reader.v2:card`, `verify.v2:pro`, `verify.v2:spot`, sized like their v1 rows) so every task, the rebuild price and the backlog price read v2 throughout. Index ≈ 12.8¢ and a session ≈ 1.44¢ on an own key, both within 30 % of the design.
+  12. **Test book note for slice 3:** h13's group learner ("By Sunday the whole regiment knew") does not name "the regiment" word for word, so the rule "a group must be named in its sentence" refuses it. Slice 3's replay will either give the record the nickname "regiment" or the rule will need to accept the group's head noun; your call if you prefer the looser rule now.
+- Alternatives: steps judged on their step alone at 12 tokens; knows lines waiting like facts; an on-page check for every possible "she"; new names learning secrets while they wait; comparing new topics only with ones the book reveals; counting dismissed reveals as refusals; leaving topic checks out of the health gate; keeping re-checking reveals until a full read; listing the plan's three cost rows only.
+- To change it: `src/main/ai/prompts/verify.v2.ts` `verifyV2ItemOutput` (1), `src/main/memory/reading/pipeline.ts` (`ladder`, `topicLine`, the here checks, the verdict loop, the transaction's reveal clean-up; 2–4, 6–8, 10), `src/main/memory/reading/topicContext.ts` `open`, `lines` (5, 9), `src/shared/aiCostNotes.ts` (11), `src/main/memory/testBook/labels.ts` or `ladder` in `pipeline.ts` (12).
+
 ## 2026-10-12 · F-16.22, F-16.23 · P2b slice 1 (who-knows-what data, threads, years and ages; no AI, nothing to see yet): calls made while building it
 - Question: Building the data layer and the pure rules of P2b needed calls the plan did not spell out. Nothing changes in v1.
 - Chosen (decided by Claude, unconfirmed):

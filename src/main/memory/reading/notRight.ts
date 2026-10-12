@@ -2,13 +2,14 @@ import { eq, inArray } from 'drizzle-orm'
 import type { Claim } from '@shared/memory/claims'
 import { cardEntryIsRecord, dismissedKey, type Dismissed } from '@shared/memory/dismissed'
 import { gateText } from '@shared/memory/gate'
+import { HOW_LABEL, parseHow } from '@shared/memory/knows'
 import { locateQuote } from '@shared/memory/quote'
 import { parseVerifyAnswer } from '@shared/memory/readerAnswer'
 import { notRightLine } from '@shared/memory/reconcile'
 import { slotLabel } from '@shared/memory/slots'
 import { SPOT_STRONG_AROUND } from '@shared/memory/spot'
 import type { CardNotRight } from '@shared/memory/views'
-import { VERIFY_PROMPT_VERSION, buildVerifyPrompt } from '../../ai/prompts/verify.v1'
+import { VERIFY_V2_PROMPT_VERSION, buildVerifyV2Prompt } from '../../ai/prompts/verify.v2'
 import { runAiRequest, sha256, type AiRequestDeps } from '../../ai/request'
 import {
   claim as claimTable,
@@ -37,6 +38,7 @@ import {
   type NotRightStash
 } from './readerRows'
 import { readerRoster } from './rosterCache'
+import { topicItemLines } from './topicContext'
 import { readingOrder } from './views'
 
 /**
@@ -48,7 +50,7 @@ import { readingOrder } from './views'
  *   its stored anchor instead (nothing new can match it, but the row is there to undo). The claim
  *   row is kept beside the tombstone (the settings row `memoryNotRight`), so *Undo* in Dismissed
  *   always brings the line back as it was; the anchors job then re-checks it against the text.
- * - **Not about Mara** (the author picks the record): one `verify.v1` call, the fast tier, with
+ * - **Not about Mara** (the author picks the record): one `verify.v2` call, the fast tier, with
  *   the reading's subject safeguards (`notAboutCheck`: every record named in reach is a candidate,
  *   the picked one marked "not named here" when nothing names it), the quote's sentences ±3.
  *   Supported for the picked record with the line's voice and mode: the line moves to that record
@@ -58,6 +60,11 @@ import { readingOrder } from './views'
  *   sentence changed since it was read): `unchecked`, nothing changes. No `reading` row is
  *   written: the request is in the ledger, and the health gate stays about readings (decided by
  *   Claude, unconfirmed).
+ *
+ * P2b: a knows line's tombstone keys by its secret and how (`notRightLine`) and reads "Orrin: knows
+ * the sold map (overheard)"; *Not about* re-checks it as a knows item for the picked learner (the
+ * checker must also give its how). A thread step is about its thread: *Not about* does not apply
+ * (`unchecked`).
  */
 
 /** The gate texts of a claim's quote sentences (what a `notRight` dismissal keys on), or null. */
@@ -85,6 +92,14 @@ function writeNotRight(
   const name = getRecord(db, recordId)?.name ?? ''
   // P2b-D6: a knows line keys by its secret and how (`notRightLine`), so a merge re-keys it.
   const about = { recordId, ...notRightLine({ ...claim, recordId }) }
+  const topic = (id: string | null): string => (id === null ? '' : (getRecord(db, id)?.name ?? ''))
+  const how = parseHow(claim.how)
+  const said =
+    claim.slot === 'knows'
+      ? `knows ${topic(claim.objectId)} (${how === null ? (claim.how ?? claim.value) : HOW_LABEL[how]})`
+      : claim.slot === 'thread'
+        ? `${claim.how ?? ''} ${claim.value}`.trim()
+        : `${slotLabel(claim.slot)} ${claim.value}`
   return dismiss(
     db,
     {
@@ -96,7 +111,7 @@ function writeNotRight(
       ),
       recordId,
       nodeId: claim.nodeId,
-      label: `${name}: ${slotLabel(claim.slot)} ${claim.value}`,
+      label: `${name}: ${said}`,
       quote: claim.quote
     },
     now
@@ -263,7 +278,7 @@ export function wrongValue(db: TreeDb, claimId: string, now: Date): NotRightOutc
 
 /**
  * *Not right › Not about Mara*: the line re-checked for the record the author picks (one
- * `verify.v1` call). Supported: it moves there; refused: it is dismissed as a wrong value. A line
+ * `verify.v2` call). Supported: it moves there; refused: it is dismissed as a wrong value. A line
  * whose quote is no longer in its scene cannot be checked, and a reply with no verdict for it
  * says nothing: both answer `unchecked`, and the line stays as it is.
  */
@@ -289,12 +304,20 @@ export async function notAbout(
     recordIds: []
   }
   const scene = loadReadingScene(db, claim.nodeId, readBook(db))
+  const roster = readerRoster(db)
   const check =
     scene === null
       ? null
-      : notAboutCheck(scene, claim, input.recordId, readerRoster(db), SPOT_STRONG_AROUND)
+      : notAboutCheck(
+          scene,
+          claim,
+          input.recordId,
+          roster,
+          SPOT_STRONG_AROUND,
+          topicItemLines(db, roster, claim.draftId)
+        )
   if (check === null) return unchecked
-  const prompt = buildVerifyPrompt({ items: [check.item] })
+  const prompt = buildVerifyV2Prompt({ items: [check.item] })
   const result = await runAiRequest(deps.ai, {
     feature: 'verify',
     tier: 'fast',
@@ -302,14 +325,19 @@ export async function notAbout(
     maxTokens: prompt.maxTokens,
     json: true,
     contextHash: sha256(JSON.stringify(prompt.messages)),
-    promptVersion: VERIFY_PROMPT_VERSION,
+    promptVersion: VERIFY_V2_PROMPT_VERSION,
     requestId: input.requestId,
     cacheIf: (text) => parseVerifyAnswer(text).size > 0
   })
   input.onSpend?.(result.costUsd)
   const verdict = parseVerifyAnswer(result.text).get(1)
   if (verdict === undefined) return unchecked
-  const supported = agrees(verdict, { expect: check.expect, voice: claim.voice, mode: claim.mode })
+  const supported = agrees(verdict, {
+    expect: check.expect,
+    voice: claim.voice,
+    mode: claim.mode,
+    how: check.how
+  })
   // The text may have changed while the check was out: the line is read again from the store.
   const current = getClaim(db, claim.id)
   if (current === null) return goneOutcome()

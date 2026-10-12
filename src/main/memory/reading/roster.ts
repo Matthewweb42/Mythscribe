@@ -4,7 +4,7 @@ import type { TreeDb } from '../../tree/treeStore'
 
 /**
  * The reader's roster cache (F-16.17; plan P2a §2.5): a settings row (`memoryRoster`) keeps the
- * roster prefix of `reader.v1` byte for byte across calls, so the provider's prompt cache holds.
+ * roster prefix of the reader (`reader.v2`) byte for byte across calls, so the provider's prompt cache holds.
  * `rosterCache.ts` builds and appends to it; a removal, rename, merge, split, *Rebuild memory* or a
  * new reader version rebuilds it, which here means dropping the row so the next reading builds it
  * afresh.

@@ -235,8 +235,8 @@ describe('runReading (F-16.17)', () => {
     expect(reading).toMatchObject({
       purpose: 'first',
       pages: 1,
-      promptVersion: 'reader.v1',
-      verifyVersion: 'verify.v1',
+      promptVersion: 'reader.v2',
+      verifyVersion: 'verify.v2',
       model: 'gpt-5.4-mini',
       tokensIn: 2_000,
       tokensOut: 200,
@@ -392,7 +392,7 @@ describe('runReading (F-16.17)', () => {
       { p: 2, r: 'Mara Vell', s: 'location', v: 'the quay', q: 'She walked to the quay' },
       { p: 1, r: 'Mara Vell', s: 'eyes', v: 'grey', q: "Mara's eyes were grey" },
       { p: 1, r: 'Mara Vell', s: 'eyes', v: 'grey', q: 'grey' },
-      { p: 2, r: 'Tomas', s: 'knows', v: 'the secret', q: 'Tomas wore a blue coat' },
+      { p: 2, r: 'Tomas', s: 'mood', v: 'the secret', q: 'Tomas wore a blue coat' },
       { p: 1, r: 'Nobody', s: 'eyes', v: 'grey', q: "Mara's eyes were grey" },
       { p: 0, r: 'Mara Vell', s: 'traits', v: 'cold', q: 'The ridge was cold' },
       { p: 2, r: 'Tomas', s: 'traits', v: 'dashing', q: 'Tomas wore a blue coat' }

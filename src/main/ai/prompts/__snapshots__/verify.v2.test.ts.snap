@@ -1,0 +1,72 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`verify.v2 prompt (F-16.22, F-16.23) > a strong spot check is one item at 40 tokens out, 48 for a knows line 1`] = `
+[
+  {
+    "content": "You are the fact checker inside a novel-writing app. Each numbered item gives a fact and the sentences it came from. Decide from those sentences alone whether they state the fact, as written.
+- "ok": true only when the sentences say it plainly of that record. A negation never supports. A wish, fear, dream, memory, lie or rumour supports a fact only with that voice and mode.
+- "r": the id from "Who" the fact is about. When the subject is a pronoun ("she", "he", "they", "I") or a description, pick the one record it means; null when none fits or more than one could. A record marked "not named here" is the one only when the sentences point to it by a role ("his wife").
+- "voice": narration, dialogue, thought or rumour, as the sentences give it. "mode": now, memory, hypothetical or dream.
+- A knows item: ok only when the sentences show that record learning or holding that secret; "r" the learner from "Who"; "how" the way the text shows it, one of saw, told, overheard, read, deduced, suspects, believesFalse, knewBefore, tells, refers; "fr" the id from "From" they had it from, or null.
+- A thread item: ok when the sentences open, advance or resolve that thread; "how": opens, advances or resolves.
+- A reveals item: ok when the sentences reveal that secret or set up that thread.
+- A same item: ok only when both are the same hidden fact or open question, not merely related ones.
+- A card, on-page, reveals or same item needs only "i" and "ok".
+Reply with JSON only: {"v":[{"i":1,"ok":true,"r":"r12","voice":"narration","mode":"now"},{"i":2,"ok":true,"r":"r7","how":"overheard","fr":"r2","voice":"narration","mode":"now"}]}",
+    "role": "system",
+  },
+  {
+    "content": "Items:
+1. Who: r3 Orrin · character
+From: r2 Tomas Harrow (Tomas) · character
+Secret: s1 the sold map: “Tomas sold the map on the quay”
+Fact: knows, overheard from r2 (narration, now)
+Text: Tomas sold the map on the quay. Orrin overheard Tomas from behind the nets.",
+    "role": "user",
+  },
+]
+`;
+
+exports[`verify.v2 prompt (F-16.22, F-16.23) > matches the golden messages for a batch with knows, step, reveals and same items 1`] = `
+[
+  {
+    "content": "You are the fact checker inside a novel-writing app. Each numbered item gives a fact and the sentences it came from. Decide from those sentences alone whether they state the fact, as written.
+- "ok": true only when the sentences say it plainly of that record. A negation never supports. A wish, fear, dream, memory, lie or rumour supports a fact only with that voice and mode.
+- "r": the id from "Who" the fact is about. When the subject is a pronoun ("she", "he", "they", "I") or a description, pick the one record it means; null when none fits or more than one could. A record marked "not named here" is the one only when the sentences point to it by a role ("his wife").
+- "voice": narration, dialogue, thought or rumour, as the sentences give it. "mode": now, memory, hypothetical or dream.
+- A knows item: ok only when the sentences show that record learning or holding that secret; "r" the learner from "Who"; "how" the way the text shows it, one of saw, told, overheard, read, deduced, suspects, believesFalse, knewBefore, tells, refers; "fr" the id from "From" they had it from, or null.
+- A thread item: ok when the sentences open, advance or resolve that thread; "how": opens, advances or resolves.
+- A reveals item: ok when the sentences reveal that secret or set up that thread.
+- A same item: ok only when both are the same hidden fact or open question, not merely related ones.
+- A card, on-page, reveals or same item needs only "i" and "ok".
+Reply with JSON only: {"v":[{"i":1,"ok":true,"r":"r12","voice":"narration","mode":"now"},{"i":2,"ok":true,"r":"r7","how":"overheard","fr":"r2","voice":"narration","mode":"now"}]}",
+    "role": "system",
+  },
+  {
+    "content": "Items:
+1. Who: r1 Mara Vell (Mara) · character
+Fact: location: the quay (narration, now)
+Text: Mara walked to the quay. Tomas was already there.
+
+2. Who: r3 Orrin · character
+From: r2 Tomas Harrow (Tomas) · character
+Secret: s1 the sold map: “Tomas sold the map on the quay”
+Fact: knows, overheard from r2 (narration, now)
+Text: Tomas sold the map on the quay. Orrin overheard Tomas from behind the nets.
+
+3. Thread: t1 the missing heir: “Mara swore to find the heir”
+Fact: resolves: Mara finds the heir (narration, now)
+Text: Mara found the heir in the boathouse.
+
+4. Reveals: x1 the map sale · new secret
+Text: The map had been sold by Tomas.
+
+5. Same: x1 the map sale: “The map had been sold by Tomas” (1.2) | s1 the sold map: “Tomas sold the map on the quay” (1.1)
+
+6. Who: r3 Orrin · character
+On the page: r3 is on the page in this scene (present, not only named or remembered)
+Text: Orrin overheard Tomas from behind the nets.",
+    "role": "user",
+  },
+]
+`;

@@ -88,17 +88,17 @@ export function rebuildEstimate(db: TreeDb, context: RebuildContext): RebuildEst
 }
 
 /**
- * What reading these scenes would cost now: a window read as `reader.v1:window` and one check
- * batch (`verify.v1`), a full read as `reader.v1:first` per page of 2,500 prose tokens and a
+ * What reading these scenes would cost now: a window read as `reader.v2:window` and one check
+ * batch (`verify.v2`), a full read as `reader.v2:first` per page of 2,500 prose tokens and a
  * check batch per page; on the fast model, at the hosted quote on Cloud, free on a local model.
  */
 export function priceReads(
   scenes: readonly Pick<DueScene, 'read' | 'proseTokens'>[],
   context: RebuildContext
 ): { costUsd: number; priced: boolean } {
-  const first = plannedRow('reader.v1:first')
-  const window = plannedRow('reader.v1:window')
-  const verify = plannedRow('verify.v1')
+  const first = plannedRow('reader.v2:first')
+  const window = plannedRow('reader.v2:window')
+  const verify = plannedRow('verify.v2')
   const pageOverhead = first.typicalInTokens - PAGE_TOKENS
   let tokensIn = 0
   let tokensOut = 0

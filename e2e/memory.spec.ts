@@ -68,6 +68,13 @@ import { caretToEnd, clickIntoEditor } from './support'
  * and no stored summary; the beta reader sends the earlier scenes as card gists under its map
  * heading.
  *
+ * P2b slice 2 (F-16.22, F-16.23), invoke level: `reader.v2` and `verify.v2` read who knows what
+ * and threads. Scene "Bram sold the map. Orrin overheard Bram. Mara swore to find the heir." makes
+ * a secret and a thread silently (AI-made, never names), with Bram knowing it before and Orrin
+ * overhearing it from Bram; a second scene's planted duplicate ("The map had been sold by Bram.")
+ * is judged the same by the checker's same-as item and merged, and the thread resolves; the
+ * reader request lists both topics after the record roster, and no request carries an absence.
+ *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
  * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
@@ -139,18 +146,102 @@ const READ_PARAGRAPH = "Mara's eyes were grey. She walked to the quay."
  * `She walked to <place>.`, and answers those two facts about Mara Vell (by her roster id) with
  * their paragraph numbers, and, when the card is due, a card whose place is the quay with Mara on
  * the page. Its line is "Mara walks to the quay." unless a paragraph has Mara waiting somewhere.
+ *
+ * P2b (F-16.22, F-16.23, `reader.v2`): it reads the topics roster from the system message, and in
+ * a paragraph `<A> sold the <thing>.` proposes a new secret "the sold <thing>" (or uses its listed
+ * id) with A knowing it before; `<B> overheard <A>.` has B overhear the latest secret from A;
+ * `<A> swore to find the heir.` opens a new thread "the missing heir"; `<A> found the heir.`
+ * resolves the listed one; `The <thing> had been sold by <A>.` proposes a new secret "the <thing>
+ * sale" (a planted duplicate of the sold one). Every roster character such a paragraph names is on
+ * the card's page.
  */
 function readerAnswer(messages: { content: string }[]): string {
   const system = messages[0]?.content ?? ''
   const user = messages.at(-1)?.content ?? ''
   const mara = /^(r\d+) Mara Vell /m.exec(system)?.[1] ?? null
   const claims: Record<string, unknown>[] = []
+  const topics: Record<string, unknown>[] = []
+  const present: [string, number, string][] = []
   let place: [string, number, string] | null = null
+  // P2b: the roster's names (every name and nickname, to its id) and the listed topics.
+  const people = new Map<string, string>()
+  for (const match of system.matchAll(/^(r\d+) (.+?)(?: \((.*)\))? · character$/gm)) {
+    const id = match[1] ?? ''
+    for (const name of [match[2] ?? '', ...(match[3] ?? '').split('; ')]) {
+      if (name !== '') people.set(name, id)
+    }
+  }
+  const listed = new Map<string, string>()
+  for (const match of system.matchAll(/^([st]\d+) (.+) · (?:secret|thread)$/gm)) {
+    listed.set(match[2] ?? '', match[1] ?? '')
+  }
+  let latestSecret = [...listed].filter(([, id]) => id.startsWith('s')).at(-1)?.[1] ?? null
   for (const line of user.split('\n')) {
     const paragraph = /^¶(\d+) (.*)$/.exec(line)
     if (paragraph === null) continue
     const p = Number(paragraph[1])
     const text = paragraph[2] ?? ''
+    const fact = (extra: Record<string, unknown>): void => {
+      claims.push({ p, voice: 'narration', sp: null, mode: 'now', chg: false, ...extra })
+    }
+    let p2b = false
+    const sold = /(\w+) sold the (\w+)\./.exec(text)
+    if (sold !== null) {
+      p2b = true
+      const label = `the sold ${sold[2] ?? ''}`
+      const q = `${sold[1] ?? ''} sold the ${sold[2] ?? ''}`
+      const id = listed.get(label) ?? 'x1'
+      if (!listed.has(label)) topics.push({ n: label, kind: 'secret', id, p, q })
+      latestSecret = id
+      fact({ r: people.get(sold[1] ?? ''), s: 'knows', o: id, how: 'knewBefore', q })
+    }
+    const overheard = /(\w+) overheard (\w+)\./.exec(text)
+    if (overheard !== null && latestSecret !== null) {
+      p2b = true
+      fact({
+        r: people.get(overheard[1] ?? ''),
+        s: 'knows',
+        o: latestSecret,
+        how: 'overheard',
+        fr: people.get(overheard[2] ?? ''),
+        q: `${overheard[1] ?? ''} overheard ${overheard[2] ?? ''}`
+      })
+    }
+    const swore = /(\w+) swore to find the heir\./.exec(text)
+    if (swore !== null) {
+      p2b = true
+      const q = `${swore[1] ?? ''} swore to find the heir`
+      const id = listed.get('the missing heir') ?? 'x2'
+      if (!listed.has('the missing heir')) {
+        topics.push({ n: 'the missing heir', kind: 'thread', id, p, q })
+      }
+      fact({ r: id, s: 'thread', how: 'opens', v: 'swears to find the heir', q })
+    }
+    const found = /(\w+) found the heir\./.exec(text)
+    const thread = listed.get('the missing heir')
+    if (found !== null && thread !== undefined) {
+      p2b = true
+      const q = `${found[1] ?? ''} found the heir`
+      fact({ r: thread, s: 'thread', how: 'resolves', v: 'finds the heir', q })
+    }
+    const sale = /The (\w+) had been sold by (\w+)\./.exec(text)
+    if (sale !== null) {
+      p2b = true
+      const q = `The ${sale[1] ?? ''} had been sold by ${sale[2] ?? ''}`
+      topics.push({ n: `the ${sale[1] ?? ''} sale`, kind: 'secret', id: 'x3', p, q })
+    }
+    if (p2b) {
+      for (const sentence of text.split(/(?<=\.) /)) {
+        for (const [name, id] of people) {
+          if (
+            new RegExp(`\\b${name}\\b`).test(sentence) &&
+            !present.some((each) => each[0] === id)
+          ) {
+            present.push([id, p, sentence.replace(/\.$/, '')])
+          }
+        }
+      }
+    }
     // The editor types a curly apostrophe; a quote with a straight one still matches.
     const eyes = /Mara[’']s eyes were (\w+)\./.exec(text)
     if (eyes !== null) {
@@ -200,28 +291,61 @@ function readerAnswer(messages: { content: string }[]): string {
           elapsed: null,
           pov: null,
           flash: null,
-          present: eyesItem === undefined ? [] : [[mara, eyesItem.p, eyesItem.q]],
+          present:
+            present.length > 0
+              ? present
+              : eyesItem === undefined
+                ? []
+                : [[mara, eyesItem.p, eyesItem.q]],
           mood: 'quiet',
           theme: 'waiting'
         }
       }
     : {}
-  return JSON.stringify({ c: claims, n: [], same: [], drop: [], ...card })
+  return JSON.stringify({ c: claims, n: topics, same: [], drop: [], ...card })
 }
 
-/** The fake checker: every item supported, about its first candidate, as narration now. */
+/**
+ * The fake checker: every item supported, about its first candidate, as narration now. P2b
+ * (`verify.v2`): a knows item echoes the how and the source its Fact line gives, a thread item its
+ * step; a same-as item is the same only when both labels share a word (the planted duplicate,
+ * "the map sale", shares "map" with "the sold map").
+ */
 function verifyAnswer(messages: { content: string }[]): string {
-  const user = messages.at(-1)?.content ?? ''
-  const items = [...user.matchAll(/^(\d+)\. Who: (r\d+)?/gm)]
-  return JSON.stringify({
-    v: items.map((item) => ({
-      i: Number(item[1]),
-      ok: true,
-      r: item[2] ?? null,
-      voice: 'narration',
-      mode: 'now'
-    }))
+  const user = (messages.at(-1)?.content ?? '').replace(/^Items:\n/, '')
+  const words = (label: string): string[] =>
+    label
+      .toLowerCase()
+      .split(/\W+/)
+      .filter((word) => word !== '' && word !== 'the')
+  const verdicts = user.split('\n\n').flatMap((block) => {
+    const head = /^(\d+)\. (Who|Thread|Reveals|Same): (.*)$/m.exec(block)
+    if (head === null) return []
+    const i = Number(head[1])
+    const fact = /^Fact: (.*)$/m.exec(block)?.[1] ?? ''
+    if (head[2] === 'Same') {
+      const [a, b] = (head[3] ?? '')
+        .split(' | ')
+        .map((side) => /^\S+ ([^:]+)/.exec(side)?.[1] ?? '')
+      const shared = words(a ?? '').some((word) => words(b ?? '').includes(word))
+      return [{ i, ok: shared }]
+    }
+    if (head[2] === 'Reveals') return [{ i, ok: true }]
+    const step = /^(opens|advances|resolves):/.exec(fact)?.[1]
+    if (head[2] === 'Thread') return [{ i, ok: true, how: step, voice: 'narration', mode: 'now' }]
+    const knows = /^knows, (\w+)(?: from (r\d+))?/.exec(fact)
+    return [
+      {
+        i,
+        ok: true,
+        r: /^(r\d+)/.exec(head[3] ?? '')?.[1] ?? null,
+        voice: 'narration',
+        mode: 'now',
+        ...(knows === null ? {} : { how: knows[1], fr: knows[2] ?? null })
+      }
+    ]
   })
+  return JSON.stringify({ v: verdicts })
 }
 
 /** Every chat request the fake provider saw: JSON mode or not, and its messages. */
@@ -1093,7 +1217,8 @@ test('story memory v2: the evidence reader (P2a)', async () => {
     reading: { promptVersion: string } | null
   }>('memory:claim', { claimId: location?.id ?? '' })
   expect(info.claim.quote).toBe('She walked to the quay')
-  expect(info.reading?.promptVersion).toBe('reader.v1')
+  // P2b slice 2: the reading is `reader.v2`'s (the same sentinel and the same facts here).
+  expect(info.reading?.promptVersion).toBe('reader.v2')
 
   // Nothing changed since: a second Read now sends nothing.
   const before = providerBodies.length
@@ -1557,6 +1682,125 @@ test('story memory v2: card lines, plan links, synopsis and beta reader on cards
   expect((await invoke<{ aiLinks: AiLink[] }>('planLinks:get', undefined)).aiLinks).toEqual([])
   const kept = await invoke<{ meta: { fulfilledBy?: string } }>('sceneMeta:get', { id: plan.id })
   expect(kept.meta.fulfilledBy).toBe(dusk.id)
+})
+
+test('story memory v2: who knows what and threads are read (P2b slice 2)', async () => {
+  // Continues with Use AI on and the own key at the fake. Two characters of their own (so no
+  // earlier record's name or nickname is near them), two new scenes, each read with Read now.
+  const isReader = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(READER_SENTINEL) === true
+  const isVerify = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(VERIFY_SENTINEL) === true
+  const made: Record<string, string> = {}
+  for (const name of ['Orrin', 'Bram']) {
+    const result = await invoke<{ record?: { id: string } }>('record:create', {
+      name,
+      categoryId: 'character',
+      aliases: [],
+      force: true
+    })
+    made[name] = result.record?.id ?? ''
+  }
+  const mara = (await invoke<{ id: string; name: string }[]>('record:list', undefined)).find(
+    (each) => each.name === 'Mara Vell'
+  )?.id
+  const first = (await invoke<TreeNode[]>('tree:list', undefined)).find(
+    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
+  )
+  if (!first || mara === undefined) throw new Error('no scene or no Mara in the project')
+  const scene = async (title: string, text: string): Promise<string> => {
+    const node = await invoke<TreeNode>('tree:create', {
+      parentId: first.parentId,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title
+    })
+    await invoke('document:save', {
+      id: node.id,
+      content: {
+        type: 'doc',
+        content: text
+          .split('\n')
+          .map((line) => ({ type: 'paragraph', content: [{ type: 'text', text: line }] }))
+      }
+    })
+    return node.id
+  }
+  interface SceneClaim {
+    slot: string
+    recordId: string | null
+    objectId: string | null
+    how: string | null
+    fromId: string | null
+  }
+  interface Rec {
+    id: string
+    name: string
+    kind: string
+    origin: string
+  }
+  const topicsNow = async (): Promise<Rec[]> =>
+    (await invoke<Rec[]>('record:list', undefined)).filter(
+      (each) => each.kind === 'secret' || each.kind === 'thread'
+    )
+
+  // Scene 1: a secret sold, overheard, and a thread sworn.
+  const one = await scene(
+    'Secrets 1',
+    'Bram sold the map.\nOrrin overheard Bram.\nMara swore to find the heir.'
+  )
+  const before = providerBodies.length
+  expect(await invoke('memory:readNow', { nodeId: one, requestId: 'e2e-p2b-1' })).toMatchObject({
+    ok: true,
+    read: true
+  })
+  const firstReader = providerBodies.slice(before).find(isReader)
+  expect(firstReader?.messages[0]?.content).toContain('Secrets and threads (id label · kind):')
+  const claims = (await invoke<{ claims: SceneClaim[] }>('memory:scene', { nodeId: one })).claims
+  const topics = await topicsNow()
+  const map = topics.find((each) => each.name === 'the sold map')
+  const heir = topics.find((each) => each.name === 'the missing heir')
+  expect(topics.map((each) => [each.name, each.kind, each.origin]).sort()).toEqual([
+    ['the missing heir', 'thread', 'ai'],
+    ['the sold map', 'secret', 'ai']
+  ])
+  const knows = claims
+    .filter((claim) => claim.slot === 'knows')
+    .map((claim) => [claim.recordId, claim.objectId, claim.how, claim.fromId])
+  expect(knows).toContainEqual([made.Bram, map?.id, 'knewBefore', null])
+  expect(knows).toContainEqual([made.Orrin, map?.id, 'overheard', made.Bram])
+  expect(
+    claims.filter((claim) => claim.slot === 'thread').map((claim) => [claim.recordId, claim.how])
+  ).toEqual([[heir?.id, 'opens']])
+  // Secrets and threads are not names: no mention of either anywhere.
+  const named = await invoke<{ recordId: string }[]>('names:byRecord', undefined)
+  expect(named.some((row) => row.recordId === map?.id || row.recordId === heir?.id)).toBe(false)
+
+  // Scene 2: the planted duplicate is judged the same and merged; the thread resolves.
+  const two = await scene('Secrets 2', 'The map had been sold by Bram.\nMara found the heir.')
+  const beforeTwo = providerBodies.length
+  expect(await invoke('memory:readNow', { nodeId: two, requestId: 'e2e-p2b-2' })).toMatchObject({
+    ok: true,
+    read: true
+  })
+  const secondReader = providerBodies.slice(beforeTwo).find(isReader)
+  const system = secondReader?.messages[0]?.content ?? ''
+  expect(system).toMatch(/^s\d+ the sold map · secret$/m)
+  expect(system).toMatch(/^t\d+ the missing heir · thread$/m)
+  const check = providerBodies.slice(beforeTwo).find(isVerify)
+  expect(check?.messages.at(-1)?.content).toMatch(/^\d+\. Same: x3 the map sale: /m)
+  expect((await topicsNow()).filter((each) => each.kind === 'secret')).toHaveLength(1)
+  const steps = (await invoke<{ claims: SceneClaim[] }>('memory:scene', { nodeId: two })).claims
+    .filter((claim) => claim.slot === 'thread')
+    .map((claim) => [claim.recordId, claim.how])
+  expect(steps).toEqual([[heir?.id, 'resolves']])
+
+  // Absence is never sent: no request ever carried a scoped "no scene shows" line.
+  expect(
+    providerBodies.some((body) =>
+      body.messages.some((message) => message.content.includes('No scene shows'))
+    )
+  ).toBe(false)
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

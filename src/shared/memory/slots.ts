@@ -11,7 +11,8 @@ import { z } from 'zod'
  * - **transient**: shown only as "last stated in 13.4" (location, injuries, clothing, objects);
  * - **accumulating**: values add up (traits, history, relation to another record);
  * - **knows** and **thread**: P2b's who-knows-what and plot threads; listed so the vocabulary is
- *   one list, refused by the P2a reader (`readerAccepts`).
+ *   one list. `reader.v2` proposes them as knows lines and thread steps, never as a fact's slot
+ *   (the pipeline refuses that).
  *
  * Pure and relative-imported: `schema.ts` (loaded by drizzle-kit without path aliases) does not
  * import it, but `claims.ts`, which it does import, does.
@@ -135,12 +136,6 @@ export function slotGroup(slot: Slot): SlotGroup {
 
 /** The slots whose claims name a second record (`claim.object_id`): kinship and relation targets. */
 export const OBJECT_SLOTS: readonly Slot[] = ['kinship', 'relation']
-
-/** Whether the P2a reader may propose `slot` (knows and thread wait for `reader.v2`, P2b). */
-export function readerAccepts(slot: Slot): boolean {
-  const group = slotGroup(slot)
-  return group !== 'knows' && group !== 'thread'
-}
 
 /** How a sheet and the panel name a base slot. */
 export const SLOT_LABEL: Readonly<Record<BaseSlot, string>> = {

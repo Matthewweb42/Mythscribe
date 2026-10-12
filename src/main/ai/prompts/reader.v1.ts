@@ -125,7 +125,7 @@ export interface BuiltReaderPrompt {
 }
 
 /** The longest run of `lines` from the start that fits `budget` tokens joined by new lines. */
-function fitLines(lines: readonly string[], budget: number): string[] {
+export function fitLines(lines: readonly string[], budget: number): string[] {
   const kept: string[] = []
   let used = 0
   for (const line of lines) {
@@ -138,7 +138,7 @@ function fitLines(lines: readonly string[], budget: number): string[] {
 }
 
 /** `text` cut to about `budget` tokens at a word boundary, with an ellipsis when cut. */
-function fitText(text: string, budget: number): string {
+export function fitText(text: string, budget: number): string {
   const chars = budget * 4
   if (text.length <= chars) return text
   const cut = text.slice(0, chars - 1)

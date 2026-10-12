@@ -942,6 +942,41 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     expect(seen.at(-1)?.reasoning).not.toBe('off')
   })
 
+  it('F-16.22, F-16.23: reader.v2 and verify.v2 leave Cloud and OpenRouter with reasoning off, and the lowest effort', async () => {
+    for (const id of ['cloud', 'openrouter', 'openai'] as const) {
+      const f = fakes()
+      const seen: CompletionRequest[] = []
+      f.complete.mockImplementation((request) => {
+        seen.push(request)
+        return Promise.resolve({
+          text: '{}',
+          model: 'm',
+          usage: { inputTokens: 1, outputTokens: 1 }
+        })
+      })
+      if (f.provider === null) throw new Error('no provider')
+      f.provider = { ...f.provider, id }
+      // Thinking on for the fast tier in Settings: never for the reader or its checker.
+      const routing = { ...defaultAiRouting(), reasoning: { fast: 'low' as const } }
+      f.deps.routing = () => ({ routing, table: autoTable(null) })
+      for (const [feature, version] of [
+        ['reader', 'reader.v2'],
+        ['verify', 'verify.v2']
+      ] as const) {
+        await runAiRequest(f.deps, {
+          ...input,
+          feature,
+          json: true,
+          promptVersion: version,
+          contextHash: `${id}-${version}`
+        })
+        expect(seen.at(-1)?.reasoning, `${id} ${version}`).toBe('off')
+        // The provider sends its lowest effort only on a direct OpenAI key (openai.test.ts).
+        if (id !== 'cloud') expect(seen.at(-1)?.lowestEffort, `${id} ${version}`).toBe(true)
+      }
+    }
+  })
+
   it('F-16.9: sends contextImport.v3 and reviewChat.v3 with reasoning off, and leaves reviewChat.v2 as it was', async () => {
     const f = fakes()
     const seen: CompletionRequest[] = []

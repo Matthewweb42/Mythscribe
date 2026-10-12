@@ -24,7 +24,7 @@ import type { ReaderRoster } from './rosterCache'
 /**
  * What a reading reads (F-16.17; plan P2a §2.4): one scene of the active draft as the reader and
  * the ladder see it (paragraphs in `passageParagraphs` numbering, sentences, the name scan's
- * mentions, the typed details), and the lines of `reader.v1`'s user turn (the scene's position,
+ * mentions, the typed details), and the lines of the reader's user turn (the scene's position,
  * typed details and current card, the facts known near the window, the facts anchored in it).
  * Local: nothing here is sent; the pipeline sends what these lines say.
  */
@@ -76,9 +76,16 @@ export function readBook(db: TreeDb): Book {
   const byId = new Map(rows.map((row) => [row.id, row]))
   const shared = nameScanShared(db)
   // Built on the first question only: most walks never need it (nothing unread, P2a-D3).
-  let words: { own: Map<string, Set<string>>; count: Map<string, number>; extra: Set<string> } | null =
-    null
-  const index = (): { own: Map<string, Set<string>>; count: Map<string, number>; extra: Set<string> } => {
+  let words: {
+    own: Map<string, Set<string>>
+    count: Map<string, number>
+    extra: Set<string>
+  } | null = null
+  const index = (): {
+    own: Map<string, Set<string>>
+    count: Map<string, number>
+    extra: Set<string>
+  } => {
     if (words !== null) return words
     const own = new Map<string, Set<string>>()
     const count = new Map<string, number>()
@@ -246,9 +253,30 @@ export function nearLines(
   return lines
 }
 
-/** A fact anchored in the window, with its short id ("c7 r12 location “at the quay” ¶3"). */
-export function anchoredLine(short: string, claim: Claim, roster: ReaderRoster): string {
-  const subject = claim.recordId === null ? '?' : roster.shortOf(claim.recordId)
+/**
+ * A fact anchored in the window, with its short id ("c7 r12 location “at the quay” ¶3"). P2b: a
+ * knows line names its secret, how and source ("c7 r7 knows s3 overheard from r2 ¶3"), a thread
+ * step its thread and step ("c8 t2 thread advances “she writes to him” ¶4"). Null for a knows
+ * line or step whose topic the topics roster does not list (it cannot be named to the reader).
+ */
+export function anchoredLine(short: string, claim: Claim, roster: ReaderRoster): string | null {
   const stale = claim.state === 'stale' ? ', re-checking' : ''
+  if (claim.slot === 'thread') {
+    const thread = claim.recordId === null ? null : roster.topicShortOf(claim.recordId)
+    if (thread === null) return null
+    return `${short} ${thread} thread ${claim.how ?? ''} “${claim.value}” ¶${claim.para}${stale}`
+  }
+  const subject = claim.recordId === null ? '?' : roster.shortOf(claim.recordId)
+  if (claim.slot === 'knows') {
+    const secret = claim.objectId === null ? null : roster.topicShortOf(claim.objectId)
+    if (secret === null) return null
+    const from = claim.fromId === null ? '' : ` from ${roster.shortOf(claim.fromId)}`
+    return `${short} ${subject} knows ${secret} ${claim.how ?? claim.value}${from} ¶${claim.para}${stale}`
+  }
   return `${short} ${subject} ${claim.slot} “${claim.value}” ¶${claim.para}${stale}`
+}
+
+/** A re-checking reveal in the window (P2b): `s3 revealed “Tomas sold the map” ¶2, re-checking`. */
+export function revealLine(topicShort: string, quote: { quote: string; para: number }): string {
+  return `${topicShort} revealed “${quote.quote}” ¶${quote.para}, re-checking`
 }

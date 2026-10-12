@@ -114,7 +114,8 @@ import type { RebuildContext } from '../switchover/plan'
  * - **Spend**: every Cloud request's reported cost goes into the app-wide monthly tally as it
  *   returns, as background or asked (P2a-D9), so a run that fails part-way still counts;
  *   `/credits` raises it, never lowers it (P2a-D10).
- * - **Pushes**: `memory:changed` after a reading, `memory:statusChanged` and
+ * - **Pushes**: `memory:changed` after a reading (and `record:changed` for the secrets and
+ *   threads it made, merged into or pruned, P2b), `memory:statusChanged` and
  *   `memory:noticesChanged` when they move, `jobs:changed` for the indicator.
  */
 
@@ -148,6 +149,11 @@ export interface ReaderServiceDeps {
   now?: () => Date
   /** `memory:changed` for these scenes and records. */
   changed: (payload: { nodeIds: string[]; recordIds: string[] }) => void
+  /**
+   * P2b: `record:changed` for the secrets and threads a reading made, merged a reveal into,
+   * revived or pruned, so the sidebar's lists update (no roster change: topics are not names).
+   */
+  recordsChanged?: (recordIds: string[]) => void
   /** The name questions may have moved (facts waiting on a new name). */
   questions: () => void
   /** F-16.21: the automatic plan links moved after a reading (`planLinks:changed`). */
@@ -652,6 +658,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       return
     }
     deps.changed({ nodeIds: [nodeId], recordIds: outcome.recordIds })
+    if (outcome.topicIds.length > 0) deps.recordsChanged?.(outcome.topicIds)
     if (outcome.names.length > 0) deps.questions()
     const at = root(db)
     if (pickStrongDue(db, outcome.inserted) && at !== null) queue.indexAll('spotCheck', [at])

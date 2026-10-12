@@ -110,14 +110,27 @@ export function verifyItemText(item: VerifyPromptItem, n: number): string {
  * more verdicts than the output budget holds (so a reply is not cut off at its cap).
  */
 export function verifyBatches<T extends VerifyPromptItem>(items: readonly T[]): T[][] {
+  return splitVerifyBatches(items, verifyItemText, verifyItemOutput)
+}
+
+/**
+ * The batching rule shared by every `verify` version: in order, at most `VERIFY_BATCH_TOKENS`
+ * tokens of item text (`textOf`, numbered from 1 within the batch) and no more verdicts than the
+ * output budget holds (`outputOf`).
+ */
+export function splitVerifyBatches<T>(
+  items: readonly T[],
+  textOf: (item: T, n: number) => string,
+  outputOf: (item: T) => number
+): T[][] {
   const batches: T[][] = []
   const most = outputBudget('verify')
   let current: T[] = []
   let used = 0
   let out = VERIFY_BASE_TOKENS
   for (const item of items) {
-    const cost = estimateTokens(verifyItemText(item, current.length + 1))
-    const answer = verifyItemOutput(item)
+    const cost = estimateTokens(textOf(item, current.length + 1))
+    const answer = outputOf(item)
     if (current.length > 0 && (used + cost > VERIFY_BATCH_TOKENS || out + answer > most)) {
       batches.push(current)
       current = []

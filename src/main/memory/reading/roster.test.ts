@@ -137,6 +137,32 @@ describe('the reader’s roster cache (F-16.17, plan P2a §2.5)', () => {
     expect(roster.shortOf(named)).not.toBe(extra)
   })
 
+  it('P2b: rebuilds a reader.v1 row once for reader.v2, and appends topics after the record lines', () => {
+    record('Mara Vell', ['Mara'])
+    readerRoster(db)
+    const row = JSON.parse(stored() ?? '{}') as Record<string, unknown>
+    expect(row.readerVersion).toBe('reader.v2')
+    db.update(settings)
+      .set({
+        value: JSON.stringify({
+          ...row,
+          readerVersion: 'reader.v1',
+          base: ['r1 Stale · character']
+        })
+      })
+      .where(eq(settings.key, MEMORY_ROSTER_KEY))
+      .run()
+    expect(readerRoster(db).lines).toEqual(['r1 Mara Vell (Mara) · character'])
+    const before = JSON.parse(stored() ?? '{}') as { base: string[]; readerVersion: string }
+    expect(before.readerVersion).toBe('reader.v2')
+    // An author's secret is listed after the records; the record lines do not move.
+    record('the sold map', [], later(1), 'secret')
+    const roster = readerRoster(db)
+    expect(roster.lines).toEqual(['r1 Mara Vell (Mara) · character'])
+    expect(roster.topicLines).toEqual(['s1 the sold map · secret'])
+    expect((JSON.parse(stored() ?? '{}') as { base: string[] }).base).toEqual(before.base)
+  })
+
   it('formats a line from a record', () => {
     const id = record('Lise', ['Liesel'])
     expect(rosterLine('r7', requireRecord(db, id))).toBe('r7 Lise (Liesel) · character')

@@ -43,6 +43,8 @@ export function claimViewFixture(id: string, over: Partial<ClaimView> = {}): Cla
     mode: 'now',
     speakerId: null,
     objectId: null,
+    how: null,
+    fromId: null,
     state: 'live',
     proof: 'literal',
     nodeId: 'sc-1',

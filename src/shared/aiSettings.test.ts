@@ -378,6 +378,15 @@ describe('the toggle list per story memory (F-16.17, P2a-D24)', () => {
     expect(AI_DATA_SHARING.verify.label).toBe('Story memory check')
     expect(AI_DATA_SHARING.reader.sends).toContain('Never notes, Research, Pinned, Ideas')
     expect(AI_DATA_SHARING.verify.sends).toContain('one either side')
+    // F-16.22, F-16.23 (P2b): the secrets and threads, who is known to know them, and reveals.
+    expect(AI_DATA_SHARING.reader.sends).toContain(
+      'the secrets and plot threads already found (a short label each)'
+    )
+    expect(AI_DATA_SHARING.reader.sends).toContain('who is known to know them')
+    expect(AI_DATA_SHARING.verify.sends).toContain('the people who might have told them')
+    expect(AI_DATA_SHARING.verify.sends).toContain("that one's revealing sentence")
+    // Never who does not know.
+    expect(AI_DATA_SHARING.reader.sends).not.toMatch(/does not know|doesn't know/)
   })
 })
 

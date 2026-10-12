@@ -12,7 +12,7 @@ import {
 import { sentenceHash } from '@shared/memory/anchor'
 import { activeDraftId } from '../../draft/draftStore'
 import { cancelInflight } from '../../ai/inflight'
-import { VERIFY_PROMPT_VERSION, buildVerifyPrompt } from '../../ai/prompts/verify.v1'
+import { VERIFY_V2_PROMPT_VERSION, buildVerifyV2Prompt } from '../../ai/prompts/verify.v2'
 import { AiCancelledError } from '../../ai/providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from '../../ai/request'
 import type { TreeDb } from '../../tree/treeStore'
@@ -21,12 +21,14 @@ import { agrees, claimCheck, type ClaimCheck } from './pipeline'
 import { loadReadingScene, readBook, type Book, type ReadingScene } from './readerContext'
 import { getSpotState, setSpotState, type SpotState } from './readerRows'
 import { readerRoster } from './rosterCache'
+import { topicItemLines } from './topicContext'
 
 /**
  * Spot checks (F-16.17; design §2.3 "Measuring accuracy without a gold set" 3, plan P2a §3.5,
  * P2a-D8). After a *Rebuild memory*, 50 live claims proved in code go back through the fast
  * checker (10 per call, each with its sentences ±1) and 20 live claims the checker passed go to the
- * strong model (one per call, three sentences either side, 40 tokens out). From then on, 1 new
+ * strong model (one per call, three sentences either side, 40 tokens out; 48 for a knows line,
+ * which goes as a knows item with its secret, and must keep its how too, P2b). From then on, 1 new
  * literal claim in 20 rides its reading's check batch (`pipeline.ts`, `spotEvery`), and 1 new
  * verified claim in 20 waits here for the next strong batch, sent once 5 wait. A strong rejection
  * deletes the claim (counted); a fast disagreement with code is only counted on the claim.
@@ -108,6 +110,7 @@ export async function runSpotChecks(
     recordIds: []
   }
   const roster = readerRoster(db)
+  const topics = topicItemLines(db, roster, activeDraftId(db))
   const scenes = new Map<string, ReadingScene | null>()
   let book: Book | null = null
   const sceneOf = (nodeId: string): ReadingScene | null => {
@@ -119,7 +122,7 @@ export async function runSpotChecks(
   }
   const checkOf = (claim: Claim, around: number): ClaimCheck | null => {
     const scene = sceneOf(claim.nodeId)
-    return scene === null ? null : claimCheck(scene, claim, roster, around)
+    return scene === null ? null : claimCheck(scene, claim, roster, around, topics)
   }
 
   let calls = 0
@@ -133,7 +136,7 @@ export async function runSpotChecks(
     strong: boolean
   ): Promise<ReturnType<typeof parseVerifyAnswer>> => {
     if (input.signal?.aborted === true) throw new AiCancelledError('The spot checks were stopped.')
-    const prompt = buildVerifyPrompt({ items, strong })
+    const prompt = buildVerifyV2Prompt({ items, strong })
     calls += 1
     inFlight = `${input.requestId}:s${calls}`
     try {
@@ -144,7 +147,7 @@ export async function runSpotChecks(
         maxTokens: prompt.maxTokens,
         json: true,
         contextHash: sha256(JSON.stringify(prompt.messages)),
-        promptVersion: VERIFY_PROMPT_VERSION,
+        promptVersion: VERIFY_V2_PROMPT_VERSION,
         requestId: inFlight,
         cacheIf: (text) => parseVerifyAnswer(text).size > 0
       })
@@ -177,7 +180,8 @@ export async function runSpotChecks(
           const agreed = agrees(verdict, {
             expect: entry.check.expect,
             voice: entry.claim.voice,
-            mode: entry.claim.mode
+            mode: entry.claim.mode,
+            how: entry.check.how
           })
           setClaimSpot(db, entry.claim.id, agreed ? 'agree' : 'disagree', 'fast', now())
           run.checked.fast += 1
@@ -206,7 +210,14 @@ export async function runSpotChecks(
       const verdict = (await ask([check], true)).get(1)
       if (verdict === undefined) continue
       run.checked.strong += 1
-      if (agrees(verdict, { expect: check.expect, voice: claim.voice, mode: claim.mode })) {
+      if (
+        agrees(verdict, {
+          expect: check.expect,
+          voice: claim.voice,
+          mode: claim.mode,
+          how: check.how
+        })
+      ) {
         setClaimSpot(db, claim.id, 'agree', 'strong', now())
         continue
       }
