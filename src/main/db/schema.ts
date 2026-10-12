@@ -1117,7 +1117,13 @@ export const researchDoc = sqliteTable('research_doc', {
   fileType: text('file_type', { enum: CONTEXT_FILE_TYPES }),
   converted: integer('converted', { mode: 'boolean' }).notNull().default(false),
   notCanon: integer('not_canon', { mode: 'boolean' }).notNull().default(false),
-  created: text('created').notNull()
+  created: text('created').notNull(),
+  /**
+   * F-16.9 (migration `0033_research_filed`): when the page was filed into Pinned, and the hash of
+   * its text then. Filing runs once per page; both stay null until it has.
+   */
+  filedAt: text('filed_at'),
+  filedHash: text('filed_hash')
 })
 export type ResearchDocRow = typeof researchDoc.$inferSelect
 export type ResearchDocInsert = typeof researchDoc.$inferInsert

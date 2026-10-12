@@ -82,8 +82,9 @@ function Manager(): React.JSX.Element {
           Labels
         </h2>
         <p className="m-0 mt-1 text-xs text-fg-muted">
-          Your own labels for scenes and Research documents, to filter by. Nothing about them is
-          sent to the AI.
+          Your own labels for scenes and Research documents, to filter by. A scene’s tone, content
+          and theme labels also steer the AI’s prose for it (they are in its Story notes); custom
+          labels are never sent.
         </p>
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
           {labels.length === 0 ? (

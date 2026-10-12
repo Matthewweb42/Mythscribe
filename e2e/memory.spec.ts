@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import {
@@ -14,10 +15,11 @@ import type { TiptapNodeT } from '../src/shared/tiptap'
 import { caretToEnd, clickIntoEditor } from './support'
 
 /**
- * Story memory v2 (FEATURES.md §2.16; plan P1), the AI-off path. The app is launched with
- * `MYTHSCRIBE_STORY_MEMORY=v2` (honoured only in unpackaged builds) and Use AI off, so nothing
- * here reaches a model: the provider and Cloud URLs point at a closed local port. The smoke test
- * (`smoke.spec.ts`) keeps covering v1 and is not edited for P1.
+ * Story memory v2 (FEATURES.md §2.16; plan P1). The app is launched with
+ * `MYTHSCRIBE_STORY_MEMORY=v2` (honoured only in unpackaged builds). Slices 2 to 4 run with Use AI
+ * off, and slice 5 checks that nothing reached a model before it: `OPENAI_BASE_URL` points at a
+ * fake provider on loopback that records every request, and the Cloud URL at a closed local port.
+ * The smoke test (`smoke.spec.ts`) keeps covering v1 and is not edited for P1.
  *
  * P1 slice 2 (F-16.8, the Not canon parts of F-16.6): the Research section is in the picker and
  * not in the Manuscript tree; a Markdown upload opens as an editable page; a paragraph is marked
@@ -30,12 +32,118 @@ import { caretToEnd, clickIntoEditor } from './support'
  * surname is shared by two records; a tone label is made, put on a scene and filtered by; Mara is
  * the scene's POV; a click in her *Named in* selects her name in the scene; `#` opens no
  * suggestion; a file dropped on the window becomes a Research page.
+ *
+ * P1 slice 4 (F-16.12, F-16.10, F-16.13, F-16.4): This scene, Needs a look, Dismissed, Rename in
+ * book.
+ *
+ * P1 slice 5 (F-16.14, F-16.9, F-16.7), Use AI on with an own OpenAI key at the fake: ghost text
+ * sends the Story notes block (and the panel's *What the AI is told* shows the same block); a
+ * Research upload is filed into Pinned through the estimate and the deck, the line carries its
+ * "Filed from" mark, and editing the source sentence raises a Needs a look conflict.
  */
 
 let app: ElectronApplication
 let page: Page
 let tmp: string
 let exited = false
+
+/** The key the fake provider is given (any well-formed key; the fake does not check it). */
+const OWN_KEY = 'sk-live-memory-5678'
+/** F-16.9: the opening of `contextImport.v3`'s rules; the fake files the bestiary for it. */
+const FILING_SENTINEL =
+  "You are the filing feature inside a novel-writing app, filing the author's research document " +
+  "into the pinned notes of their story's records."
+/** F-16.14: the Story notes block's first line (`STORY_NOTES_HEADING`). */
+const STORY_NOTES_HEADING = 'Story notes (the manuscript wins'
+/** What the fake answers a plain completion (ghost text) with. */
+const GHOST_ANSWER = 'The lamps along the quay were already lit.'
+/** The Research page slice 5 files: its last paragraph is the one the filed line quotes. */
+const BESTIARY =
+  '# Bestiary\n\nThe fen-wight is a pale thing that hunts the marsh at dusk.\n\n' +
+  'Mara Vell keeps a fen-wight skull above her door.\n'
+const FILED_LINE = 'Keeps a fen-wight skull above her door'
+/** The fake's filing answer: a line for Mara (an addition) and a new record, each quoted. */
+const FILING_ANSWER = JSON.stringify({
+  records: [
+    {
+      name: 'Mara Vell',
+      category: 'character',
+      aliases: [],
+      lines: [{ text: FILED_LINE, q: 'keeps a fen-wight skull above her door' }]
+    },
+    {
+      name: 'Fen-wight',
+      category: 'creature',
+      aliases: [],
+      lines: [{ text: 'Hunts the marsh at dusk', q: 'a pale thing that hunts the marsh at dusk' }]
+    }
+  ],
+  categories: [],
+  images: []
+})
+
+/** Every chat request the fake provider saw: JSON mode or not, and its messages. */
+const providerBodies: { json: boolean; messages: { role: string; content: string }[] }[] = []
+let provider: http.Server
+
+/**
+ * A fake OpenAI-compatible provider on loopback: a filing request (its sentinel) gets
+ * `FILING_ANSWER`, any other JSON request an empty object, a plain one `GHOST_ANSWER` (streamed
+ * when asked); `GET /models/<id>` echoes the id.
+ */
+function startFakeProvider(): Promise<string> {
+  provider = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json')
+    if (req.method !== 'POST' || !(req.url ?? '').endsWith('/chat/completions')) {
+      const id = (req.url ?? '').split('/').pop() ?? ''
+      res.end(JSON.stringify({ id, object: 'model', created: 0, owned_by: 'system' }))
+      return
+    }
+    let body = ''
+    req.setEncoding('utf8')
+    req.on('data', (chunk: string) => {
+      body += chunk
+    })
+    req.on('end', () => {
+      const request = JSON.parse(body) as {
+        model: string
+        stream?: boolean
+        response_format?: { type?: string }
+        messages: { role: string; content: string }[]
+      }
+      const json = request.response_format?.type === 'json_object'
+      providerBodies.push({ json, messages: request.messages })
+      const filing = request.messages[0]?.content.startsWith(FILING_SENTINEL) === true
+      const content = filing ? FILING_ANSWER : json ? '{}' : GHOST_ANSWER
+      const usage = { prompt_tokens: 400, completion_tokens: 40, total_tokens: 440 }
+      const base = { id: 'chatcmpl-fake', created: 0, model: request.model }
+      if (request.stream === true) {
+        res.setHeader('content-type', 'text/event-stream')
+        const chunk = (payload: object): string =>
+          `data: ${JSON.stringify({ ...base, object: 'chat.completion.chunk', ...payload })}\n\n`
+        res.write(chunk({ choices: [{ index: 0, delta: { content }, finish_reason: 'stop' }] }))
+        res.write(chunk({ choices: [], usage }))
+        res.end('data: [DONE]\n\n')
+        return
+      }
+      res.end(
+        JSON.stringify({
+          ...base,
+          object: 'chat.completion',
+          choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+          usage
+        })
+      )
+    })
+  })
+  return new Promise((resolve) => {
+    provider.listen(0, '127.0.0.1', () => {
+      const address = provider.address()
+      if (!address || typeof address === 'string') throw new Error('the fake provider has no port')
+      resolve(`http://127.0.0.1:${address.port}/v1`)
+    })
+  })
+}
 
 /** A word nothing else in the project holds, so search and compile can be asked about it. */
 const RESEARCH_WORD = 'Quillback'
@@ -44,6 +152,7 @@ const SECOND_PARAGRAPH = 'Maybe the lighthouse keeper lied about the wreck.'
 
 test.beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-e2e-memory-'))
+  const providerUrl = await startFakeProvider()
   const env = {
     ...Object.fromEntries(
       Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined)
@@ -52,8 +161,9 @@ test.beforeAll(async () => {
     MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData'),
     MYTHSCRIBE_STORY_MEMORY: 'v2',
     MYTHSCRIBE_E2E_PLAINTEXT_KEYS: '1',
-    // Nothing leaves the machine: a closed port answers any request at once.
-    OPENAI_BASE_URL: 'http://127.0.0.1:9/v1',
+    // Nothing leaves the machine: the own-key provider is the fake on loopback, and a closed
+    // port answers any Cloud request at once.
+    OPENAI_BASE_URL: providerUrl,
     MYTHSCRIBE_CLOUD_API_URL: 'http://127.0.0.1:9'
   }
   app = await electron.launch({ args: ['.'], env })
@@ -65,6 +175,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   if (!exited) await app?.close()
+  provider?.close()
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -614,4 +725,140 @@ test('story memory v2: This scene, Needs a look, Dismissed and Rename in book (P
   await expect.poll(() => storedText(first.id)).toBe('Mara walked in. They waited for Hesk.')
   await expect.poll(() => storedText(second.id)).toBe('The boat belonged to Hesk.')
   await expect.poll(async () => (await records()).map((r) => r.name)).toContain('Hesk')
+})
+
+test('story memory v2: the Story notes block and filing into Pinned (P1 slice 5)', async () => {
+  // Slices 2 to 4 ran with Use AI off: nothing reached the provider.
+  expect(providerBodies).toEqual([])
+  const records = (): Promise<StoredRecord[]> => invoke<StoredRecord[]>('record:list', undefined)
+  const maraId = (await records()).find((r) => r.name === 'Mara Vell')?.id ?? ''
+  expect(maraId).not.toBe('')
+
+  // Use AI on, with an own OpenAI key at the fake provider.
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' })
+  await page.keyboard.press('Control+,')
+  await expect(settingsDialog).toBeVisible()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog.getByRole('switch', { name: 'Use AI' }).check()
+  await settingsDialog
+    .getByRole('radiogroup', { name: 'Key provider' })
+    .getByTestId('own-key-provider-openai')
+    .click()
+  await expect(settingsDialog.getByRole('form', { name: 'OpenAI API key' })).toBeVisible()
+  await settingsDialog.getByLabel('API key', { exact: true }).fill(OWN_KEY)
+  await settingsDialog.getByRole('button', { name: 'Save' }).click()
+  await expect(settingsDialog.getByTestId('ai-key-hint')).toHaveText('Key saved: sk-…5678')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
+  // F-16.14: ghost text in the first scene (Mara's POV, her Pinned "Eyes: grey as the harbour.")
+  // sends the Story notes block in its system turn; her Ideas line is never in it.
+  const first = (await invoke<TreeNode[]>('tree:list', undefined)).find(
+    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
+  )
+  if (!first) throw new Error('no scene in the seed')
+  await showSection('Manuscript')
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  await bookTree.getByRole('treeitem', { name: first.title }).first().click()
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  const vibeWrite = page.getByRole('button', { name: 'VibeWrite' })
+  await expect(vibeWrite).toBeEnabled()
+  await vibeWrite.click()
+  await expect(vibeWrite).toHaveAttribute('aria-pressed', 'true')
+  await caretToEnd(editor)
+  await page.keyboard.type(' Mara Vell looked back at the quay.')
+  await expect(editor.locator('.ghost-text')).toHaveText(GHOST_ANSWER, { timeout: 15_000 })
+  const ghost = providerBodies.filter((body) => !body.json).at(-1)
+  const ghostSystem = ghost?.messages[0]
+  expect(ghostSystem?.role).toBe('system')
+  expect(ghostSystem?.content).toContain(STORY_NOTES_HEADING)
+  expect(ghostSystem?.content).toContain('Here: Mara Vell (POV)')
+  expect(ghostSystem?.content).toContain('Eyes: grey as the harbour.')
+  expect(ghostSystem?.content).not.toContain('smuggler')
+  await page.keyboard.press('Escape')
+  await expect(editor.locator('.ghost-text')).toHaveCount(0)
+  await vibeWrite.click()
+  await expect(vibeWrite).toHaveAttribute('aria-pressed', 'false')
+
+  // The panel's *What the AI is told* shows that block, read locally.
+  const panel = page.getByTestId('this-scene-panel')
+  if ((await panel.count()) === 0) {
+    await page.getByRole('button', { name: 'This scene', exact: true }).click()
+  }
+  const told = panel.getByTestId('what-the-ai-is-told')
+  await told.locator('summary').click()
+  const block = told.getByTestId('story-notes-block')
+  await expect(block).toContainText(STORY_NOTES_HEADING)
+  expect(ghostSystem?.content).toContain((await block.textContent()) ?? '')
+
+  // F-16.9: upload Bestiary.md into Research and file it into Pinned.
+  const bestiary = path.join(tmp, 'Bestiary.md')
+  fs.writeFileSync(bestiary, BESTIARY)
+  await app.evaluate(({ dialog }, chosen) => {
+    dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] })
+  }, bestiary)
+  await showSection('Research')
+  const researchTree = page.getByRole('tree', { name: 'Document tree' })
+  await page
+    .getByRole('toolbar', { name: 'Research' })
+    .getByRole('button', { name: 'Add files…' })
+    .click()
+  await expect(researchTree.getByRole('treeitem', { name: 'Bestiary' })).toBeVisible()
+  const researchPage = page.getByTestId('research-page')
+  await expect(researchPage.getByRole('heading', { name: 'Bestiary', level: 2 })).toBeVisible()
+  await researchPage.getByTestId('research-file').click()
+  const filing = page.getByTestId('filing-dialog')
+  await expect(filing.getByTestId('filing-estimate')).toContainText('1 request to gpt-5.4')
+  await filing.getByTestId('filing-confirm').click()
+  await expect(filing.getByTestId('filing-summary')).toHaveText(
+    'From “Bestiary”: 1 new record · 1 record added to'
+  )
+  const filingBody = providerBodies.at(-1)
+  expect(filingBody?.messages[0]?.content.startsWith(FILING_SENTINEL)).toBe(true)
+  expect(filingBody?.messages.at(-1)?.content).toContain('Mara Vell keeps a fen-wight skull')
+  // Everything starts accepted; Apply writes both cards.
+  await filing.getByTestId('review-apply').click()
+  await expect(filing).toHaveCount(0)
+  await expect(researchPage.getByTestId('research-filed')).toContainText('Filed on ')
+  await expect.poll(async () => (await records()).map((r) => r.name).sort()).toContain('Fen-wight')
+  await expect
+    .poll(async () => pageText((await invoke<StoredRecord>('record:get', { id: maraId })).pinned))
+    .toBe(`Eyes: grey as the harbour.\n${FILED_LINE}`)
+
+  // Mara's Pinned shows the filed line with its "Filed from" mark.
+  await showSection('Characters')
+  await page
+    .getByRole('list', { name: 'Characters' })
+    .getByRole('button', { name: /^Mara Vell/ })
+    .click()
+  const sheet = page.getByTestId('record-sheet')
+  const pinned = sheet.getByRole('textbox', { name: 'Pinned' })
+  await expect(pinned).toContainText(FILED_LINE)
+  await expect(sheet.getByTestId('filed-from')).toHaveText(/^Filed from “Bestiary” ¶\d+$/)
+
+  // Editing the quoted sentence in Research raises a Needs a look conflict.
+  await showSection('Research')
+  await researchTree.getByRole('treeitem', { name: 'Bestiary' }).click()
+  const researchEditor = page.getByRole('textbox', { name: 'Research page' })
+  await expect(researchEditor).toContainText('above her door.')
+  await caretToEnd(researchEditor)
+  for (const key of Array<string>('door.'.length).fill('Backspace')) await page.keyboard.press(key)
+  await page.keyboard.type('gate.')
+  await expect(researchEditor).toContainText('above her gate.')
+  if ((await panel.count()) === 0) {
+    await page.getByRole('button', { name: 'This scene', exact: true }).click()
+  }
+  const conflicts = panel
+    .getByRole('region', { name: 'Needs a look' })
+    .getByRole('group', { name: 'Conflicts' })
+  const conflict = conflicts.getByTestId('filed-conflict')
+  await expect(conflict).toContainText(`Mara Vell: “${FILED_LINE}”`, { timeout: 15_000 })
+  await expect(conflict).toContainText('Mara Vell keeps a fen-wight skull above her gate.')
+  await expect(panel.getByTestId('needs-a-look-badge')).toHaveText('1')
+  // Keep line: the line stays as it is, and the conflict goes quiet.
+  await conflict.getByRole('button', { name: 'Keep line' }).click()
+  await expect(conflicts).toHaveCount(0)
+  await expect
+    .poll(async () => pageText((await invoke<StoredRecord>('record:get', { id: maraId })).pinned))
+    .toBe(`Eyes: grey as the harbour.\n${FILED_LINE}`)
 })

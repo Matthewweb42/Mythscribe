@@ -69,6 +69,15 @@ function existingRecords(db: TreeDb, ids: readonly string[]): Set<string> {
   )
 }
 
+/**
+ * A node's stored details, empty when it has none or is no manuscript node (no target check):
+ * what the Story notes block and the v2 prompts' scene line read for any open document.
+ */
+export function storedSceneDetails(db: TreeDb, nodeId: string): SceneDetails {
+  const row = db.select().from(sceneDetail).where(eq(sceneDetail.nodeId, nodeId)).get()
+  return row === undefined ? emptySceneDetails() : toDetails(row)
+}
+
 /** A node's details (empty when it has none), with the "+ also here" ids whose record is gone. */
 export function getSceneDetails(db: TreeDb, nodeId: string): SceneDetailsView {
   requireTarget(db, nodeId)
@@ -110,6 +119,25 @@ export function setSceneDetails(
     .onConflictDoUpdate({ target: sceneDetail.nodeId, set: { ...row } })
     .run()
   return getSceneDetails(db, nodeId)
+}
+
+/** Whether any scene's details point at the record (as POV, place or "+ also here"). */
+export function recordInDetails(db: TreeDb, recordId: string): boolean {
+  return db
+    .select({
+      nodeId: sceneDetail.nodeId,
+      alsoHere: sceneDetail.alsoHere,
+      pov: sceneDetail.povRecordId,
+      place: sceneDetail.placeRecordId
+    })
+    .from(sceneDetail)
+    .all()
+    .some(
+      (row) =>
+        row.pov === recordId ||
+        row.place === recordId ||
+        parseAlsoHere(row.alsoHere).includes(recordId)
+    )
 }
 
 /** The typed POV of a node, for the name scan's shared-alias rule; null without one. */

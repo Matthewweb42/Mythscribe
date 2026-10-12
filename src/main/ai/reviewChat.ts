@@ -1,13 +1,26 @@
 import { z } from 'zod'
 import type { ContextReview } from '@shared/contextLibrary'
+import type { FilingReview } from '@shared/filing'
 import { REVIEW_CHAT_MAX_OPS, ReviewOp, type ReviewChatTurn } from '@shared/reviewChat'
 import type { LibraryDb } from '../library/libraryStore'
 import { getAiSettings } from '../project/settingsStore'
 import { assertFeatureAllowed } from './dial'
 import { cancelInflight } from './inflight'
-import { buildReviewChatPromptV2, REVIEW_CHAT_PROMPT_V2_VERSION } from './prompts/reviewChat.v2'
+import {
+  buildReviewChatPromptV2,
+  type REVIEW_CHAT_PROMPT_V2_VERSION
+} from './prompts/reviewChat.v2'
+import {
+  buildReviewChatPromptV3,
+  type REVIEW_CHAT_PROMPT_V3_VERSION
+} from './prompts/reviewChat.v3'
 import { createProposal } from './proposalStore'
-import { AiCancelledError, AiFallbackError, type CompletionUsage } from './providers/types'
+import {
+  AiCancelledError,
+  AiFallbackError,
+  type AiMessage,
+  type CompletionUsage
+} from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from './request'
 
 /**
@@ -79,6 +92,52 @@ export async function runReviewChat(
   deps: AiRequestDeps,
   input: ReviewChatInput
 ): Promise<ReviewChatAnswer> {
+  return askReviewChat(db, deps, input, (retry) =>
+    buildReviewChatPromptV2({
+      review: input.review,
+      history: input.history,
+      message: input.message,
+      retry
+    })
+  )
+}
+
+/** The filing review chat's input (F-16.9): the same as v1's over a filing review. */
+export interface FilingChatInput extends Omit<ReviewChatInput, 'review'> {
+  review: FilingReview
+}
+
+/**
+ * The review chat over a pending filing (F-16.9, story memory v2): `reviewChat.v3`, which the
+ * request path sends with reasoning off (`NO_REASONING_PROMPTS`); the same retry, proposal and
+ * failures as v1's. The renderer applies the operations (`applyFilingOps`).
+ */
+export async function runFilingChat(
+  db: LibraryDb,
+  deps: AiRequestDeps,
+  input: FilingChatInput
+): Promise<ReviewChatAnswer> {
+  return askReviewChat(db, deps, input, (retry) =>
+    buildReviewChatPromptV3({
+      review: input.review,
+      history: input.history,
+      message: input.message,
+      retry
+    })
+  )
+}
+
+/** One review-chat request and its one retry, for either review shape. */
+async function askReviewChat(
+  db: LibraryDb,
+  deps: AiRequestDeps,
+  input: Pick<ReviewChatInput, 'requestId' | 'signal'>,
+  build: (retry: boolean) => {
+    version: typeof REVIEW_CHAT_PROMPT_V2_VERSION | typeof REVIEW_CHAT_PROMPT_V3_VERSION
+    messages: AiMessage[]
+    maxTokens: number
+  }
+): Promise<ReviewChatAnswer> {
   assertFeatureAllowed(getAiSettings(db), 'reviewChat')
   const usage: CompletionUsage = { inputTokens: 0, outputTokens: 0 }
   let costUsd = 0
@@ -91,12 +150,7 @@ export async function runReviewChat(
 
   const send = async (retry: boolean): Promise<AiRequestResult> => {
     if (input.signal?.aborted === true) throw new AiCancelledError('The request was stopped.')
-    const prompt = buildReviewChatPromptV2({
-      review: input.review,
-      history: input.history,
-      message: input.message,
-      retry
-    })
+    const prompt = build(retry)
     current = `${input.requestId}:${retry ? 'b' : 'a'}`
     const reply = await runAiRequest(deps, {
       feature: 'reviewChat',
@@ -131,7 +185,7 @@ export async function runReviewChat(
     const proposal = createProposal(db, {
       feature: 'reviewChat',
       nodeId: null,
-      promptVersion: REVIEW_CHAT_PROMPT_V2_VERSION,
+      promptVersion: build(false).version,
       model: reply.model,
       promptTokens: usage.inputTokens,
       completionTokens: usage.outputTokens,

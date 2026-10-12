@@ -241,6 +241,14 @@ import {
   StoryRecordSummary
 } from '../memory/records'
 import { SceneDetails, SceneDetailsView } from '../memory/sceneDetails'
+import {
+  FILING_LINE_MAX,
+  FiledConflict,
+  FilingApplyResult,
+  FilingProcessResult,
+  FilingReview,
+  FilingUndoResult
+} from '../filing'
 import { TwinGateBlocked, TwinGateVerdict } from '../memory/twinGate'
 import { Label, LabelColour, LabelKind, LabelLink, LabelName } from '../storyLabels'
 
@@ -3296,7 +3304,63 @@ export const contract = {
    * F-16.8: opens an uploaded Research document's original in the OS's own app (the library's
    * path check applies). VALIDATION for a written document, NOT_FOUND when the original is gone.
    */
-  'research:openOriginal': { input: z.object({ nodeId: z.string() }), output: z.null() }
+  'research:openOriginal': { input: z.object({ nodeId: z.string() }), output: z.null() },
+  /**
+   * F-16.14: the Story notes block the v2 prose prompts carry for this document (at the 400-token
+   * budget), exactly as sent: what the This scene panel shows under "What the AI is told". Null
+   * when it would say nothing. Local; nothing is sent.
+   */
+  'storyNotes:get': {
+    input: z.object({ nodeId: z.string() }),
+    output: z.object({ text: z.string().nullable() })
+  },
+  /**
+   * F-16.9: what filing this Research page into Pinned would send and cost (the strong tier),
+   * shown before the author confirms. VALIDATION for a page filed already (filing runs once),
+   * marked Not canon, or with no canon text. Writes nothing.
+   */
+  'research:fileEstimate': { input: z.object({ nodeId: z.string() }), output: ContextEstimate },
+  /**
+   * F-16.9: files the page with the AI: each chunk is a `contextImport.v3` request on the strong
+   * tier with reasoning off (a ledger row and a pending proposal each, `library:progress` after
+   * each); the answer is the review. Expected AI failures are data. Writes nothing.
+   */
+  'research:file': {
+    input: z.object({ nodeId: z.string(), requestId: z.string() }),
+    output: FilingProcessResult
+  },
+  /** F-16.9: the review chat over a pending filing (`reviewChat.v3`); writes nothing. */
+  'research:reviewChat': {
+    input: z.object({
+      review: FilingReview,
+      message: z.string().trim().min(1).max(REVIEW_CHAT_MESSAGE_MAX),
+      history: z.array(ReviewChatTurn).max(40),
+      requestId: z.string()
+    }),
+    output: ReviewChatResult
+  },
+  /**
+   * F-16.9: writes the reviewed filing in one transaction (records, names, categories, pictures,
+   * Pinned paragraphs marked `aiFiled`) and marks the page filed. The renderer flushes pending
+   * saves first and reads the records' Pinned pages again after.
+   */
+  'research:applyFiling': { input: z.object({ review: FilingReview }), output: FilingApplyResult },
+  /** F-16.9: *Undo filing* for the session: takes back what is still as the filing wrote it. */
+  'research:undoFiling': { input: z.undefined(), output: FilingUndoResult },
+  /** F-16.9: the filed lines whose source changed (Needs a look conflicts). Local and free. */
+  'research:filedConflicts': { input: z.undefined(), output: z.array(FiledConflict) },
+  /** F-16.9: *Keep line*: the conflict is a `notProblem` dismissal until the page changes again. */
+  'research:keepFiledLine': { input: z.object({ conflict: FiledConflict }), output: Dismissed },
+  /** F-16.9: *Update line*: the author's own words for a filed line (its `aiFiled` mark goes). */
+  'research:updateFiledLine': {
+    input: z.object({
+      recordId: z.string(),
+      lineIndex: z.number().int().nonnegative(),
+      line: z.string(),
+      text: z.string().trim().min(1).max(FILING_LINE_MAX)
+    }),
+    output: StoryRecord
+  }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract

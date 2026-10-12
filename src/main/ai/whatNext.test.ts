@@ -77,7 +77,7 @@ function answers(...sets: unknown[][]): void {
 }
 
 const whatNext = (over: Partial<WhatNextInput> = {}): ReturnType<typeof runWhatNext> =>
-  runWhatNext(db, deps, { nodeId: scene, ...over })
+  runWhatNext(db, deps, { nodeId: scene, memory: 'v1', ...over })
 
 async function failure(
   over: Partial<WhatNextInput> = {}

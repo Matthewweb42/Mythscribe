@@ -40,7 +40,8 @@ const UPLOAD: ResearchDoc = {
   fileName: 'Coast survey.pdf',
   fileType: 'pdf',
   converted: true,
-  notCanon: false
+  notCanon: false,
+  filedAt: null
 }
 const NOTE: ResearchDoc = {
   nodeId: 'r-note',
@@ -49,7 +50,8 @@ const NOTE: ResearchDoc = {
   fileName: null,
   fileType: null,
   converted: false,
-  notCanon: false
+  notCanon: false,
+  filedAt: null
 }
 
 const page = (text: string): TiptapNodeT => ({

@@ -160,7 +160,10 @@ const categoriesOf = (review: ContextReview): readonly StoryCategory[] => review
  * The category id the model meant by `text`: an id, a name, or a singular of a library category,
  * the project's own, or one proposed in the review; null when none fits.
  */
-export function resolveKind(review: ContextReview, text: string): EntityKind | null {
+export function resolveKind(
+  review: Pick<ContextReview, 'categories'>,
+  text: string
+): EntityKind | null {
   const key = text.trim().toLowerCase()
   if (isKnownCategory(key, review.categories)) return key
   const all = [

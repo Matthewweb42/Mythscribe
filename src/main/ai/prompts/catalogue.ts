@@ -78,6 +78,19 @@ import { TODO_PROMPT_VERSION } from './todo.v1'
 import { TODO_SUGGEST_PROMPT_VERSION } from './todoSuggest.v1'
 import { SHEET_REFILE_PROMPT_VERSION } from './sheetRefile.v1'
 import { SHEET_WRITE_UP_PROMPT_VERSION } from './sheetWriteUp.v1'
+import { GHOST_PROMPT_V5_VERSION } from './ghostText.v5'
+import { GHOST_REGEN_PROMPT_V5_VERSION } from './ghostTextRegen.v5'
+import { REWRITE_PROMPT_V5_VERSION } from './rewrite.v5'
+import { REWRITE_REGEN_PROMPT_V5_VERSION } from './rewriteRegen.v5'
+import { CHAT_PROMPT_V6_VERSION } from './chat.v6'
+import { CHAT_REGEN_PROMPT_V6_VERSION } from './chatRegen.v6'
+import { CRITIQUE_PROMPT_V4_VERSION } from './critique.v4'
+import { CRITIQUE_REGEN_PROMPT_V4_VERSION } from './critiqueRegen.v4'
+import { EDIT_PASS_PROMPT_V3_VERSION } from './editPass.v3'
+import { WHAT_NEXT_PROMPT_V4_VERSION } from './whatNext.v4'
+import { NOTES_SUGGEST_PROMPT_V3_VERSION } from './notesSuggest.v3'
+import { CONTEXT_IMPORT_PROMPT_V3_VERSION } from './contextImport.v3'
+import { REVIEW_CHAT_PROMPT_V3_VERSION } from './reviewChat.v3'
 import { ROUTE_PROMPT_V2_VERSION } from './route.v2'
 
 /**
@@ -175,7 +188,22 @@ export const PROMPT_VERSIONS = [
   // The filing first, so the cost registry's row for `sheetSync` shows the write-up (its last version).
   SHEET_REFILE_PROMPT_VERSION,
   SHEET_WRITE_UP_PROMPT_VERSION,
-  ROUTE_PROMPT_V2_VERSION
+  ROUTE_PROMPT_V2_VERSION,
+  // F-16.14 (story memory v2 only): the Story notes block in the bible's slot; v1 keeps the old ones.
+  GHOST_PROMPT_V5_VERSION,
+  GHOST_REGEN_PROMPT_V5_VERSION,
+  REWRITE_PROMPT_V5_VERSION,
+  REWRITE_REGEN_PROMPT_V5_VERSION,
+  CHAT_PROMPT_V6_VERSION,
+  CHAT_REGEN_PROMPT_V6_VERSION,
+  CRITIQUE_PROMPT_V4_VERSION,
+  CRITIQUE_REGEN_PROMPT_V4_VERSION,
+  EDIT_PASS_PROMPT_V3_VERSION,
+  WHAT_NEXT_PROMPT_V4_VERSION,
+  NOTES_SUGGEST_PROMPT_V3_VERSION,
+  // F-16.9 (story memory v2 only): filing an upload into Pinned, and its review chat.
+  CONTEXT_IMPORT_PROMPT_V3_VERSION,
+  REVIEW_CHAT_PROMPT_V3_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -540,7 +568,80 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     output: 'json',
     since: 'F-9.18'
   },
-  [ROUTE_PROMPT_V2_VERSION]: { feature: 'route', tier: 'fast', output: 'json', since: 'F-5.26' }
+  [ROUTE_PROMPT_V2_VERSION]: { feature: 'route', tier: 'fast', output: 'json', since: 'F-5.26' },
+  [GHOST_PROMPT_V5_VERSION]: {
+    feature: 'ghostText',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-16.14'
+  },
+  [GHOST_REGEN_PROMPT_V5_VERSION]: {
+    feature: 'ghostText',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-16.14'
+  },
+  [REWRITE_PROMPT_V5_VERSION]: {
+    feature: 'rewrite',
+    tier: 'strong',
+    output: 'text',
+    since: 'F-16.14'
+  },
+  [REWRITE_REGEN_PROMPT_V5_VERSION]: {
+    feature: 'rewrite',
+    tier: 'strong',
+    output: 'text',
+    since: 'F-16.14'
+  },
+  [CHAT_PROMPT_V6_VERSION]: { feature: 'chat', tier: 'fast', output: 'text', since: 'F-16.14' },
+  [CHAT_REGEN_PROMPT_V6_VERSION]: {
+    feature: 'chat',
+    tier: 'fast',
+    output: 'text',
+    since: 'F-16.14'
+  },
+  [CRITIQUE_PROMPT_V4_VERSION]: {
+    feature: 'critique',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-16.14'
+  },
+  [CRITIQUE_REGEN_PROMPT_V4_VERSION]: {
+    feature: 'critique',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-16.14'
+  },
+  [EDIT_PASS_PROMPT_V3_VERSION]: {
+    feature: 'editPass',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-16.14'
+  },
+  [WHAT_NEXT_PROMPT_V4_VERSION]: {
+    feature: 'whatNext',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-16.14'
+  },
+  [NOTES_SUGGEST_PROMPT_V3_VERSION]: {
+    feature: 'notesSuggest',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-16.14'
+  },
+  [CONTEXT_IMPORT_PROMPT_V3_VERSION]: {
+    feature: 'contextImport',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-16.9'
+  },
+  [REVIEW_CHAT_PROMPT_V3_VERSION]: {
+    feature: 'reviewChat',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-16.9'
+  }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

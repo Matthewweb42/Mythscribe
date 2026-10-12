@@ -29,6 +29,8 @@ import {
   type Provider
 } from './providers/types'
 import type { PromptVersion } from './prompts/catalogue'
+import { CONTEXT_IMPORT_PROMPT_V3_VERSION } from './prompts/contextImport.v3'
+import { REVIEW_CHAT_PROMPT_V3_VERSION } from './prompts/reviewChat.v3'
 import type { SessionUsage } from './sessionUsage'
 import { insertUsage, type AiDb, type UsageEntry } from './usageStore'
 
@@ -64,6 +66,21 @@ const NO_REASONING_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
   // F-9.18: a sheet's write-up and filing are short JSON under small caps, in the background.
   'sheetSync'
 ])
+
+/**
+ * F-16.9: prompt versions that always ask for no reasoning, whatever their feature does. Filing
+ * an upload into Pinned and its review chat are strong-tier JSON under fixed caps; `reviewChat`
+ * as a feature keeps its reasoning, so `reviewChat.v2` (story memory v1) goes out as before.
+ */
+const NO_REASONING_PROMPTS: ReadonlySet<PromptVersion> = new Set<PromptVersion>([
+  CONTEXT_IMPORT_PROMPT_V3_VERSION,
+  REVIEW_CHAT_PROMPT_V3_VERSION
+])
+
+/** Whether a request asks the model for no reasoning: by its feature, or by its prompt version. */
+function reasoningOff(input: Pick<AiRequestInput, 'feature' | 'promptVersion'>): boolean {
+  return NO_REASONING_FEATURES.has(input.feature) || NO_REASONING_PROMPTS.has(input.promptVersion)
+}
 
 export interface AiRequestInput {
   feature: AiFeatureId
@@ -222,12 +239,12 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
   // Worker honours only a request that lowers its table's mode), and every other one asks nothing.
   const reasoning: ReasoningMode =
     provider.id === 'cloud'
-      ? NO_REASONING_FEATURES.has(input.feature)
+      ? reasoningOff(input)
         ? 'off'
         : 'default'
       : routed === null
         ? 'default'
-        : NO_REASONING_FEATURES.has(input.feature)
+        : reasoningOff(input)
           ? 'off'
           : resolveReasoning(routed.routing, tier, model)
   // Called through a closure rather than passed as a method reference: the provider owns it.

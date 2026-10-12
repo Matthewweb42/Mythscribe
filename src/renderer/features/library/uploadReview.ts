@@ -5,6 +5,7 @@ import {
   type ContextReviewEntity,
   type ExistingSheet
 } from '@shared/contextLibrary'
+import { decidedFiling, hasFilingConflict, type FilingReview } from '@shared/filing'
 import { REVIEW_NOTES_ID } from '@shared/reviewChat'
 import type {
   ReviewDecision,
@@ -107,4 +108,53 @@ export function decidedReview(
     },
     existing
   )
+}
+
+// ---------------------------------------------------------------------------------------------
+// Story memory v2 (F-16.9): filing a Research page into Pinned, on the same deck
+
+/** The filing deck's groups: what is new, what is added, where Pinned disagrees, new categories. */
+export type FilingGroup = 'new' | 'additions' | 'conflicts' | 'categories'
+
+export const FILING_GROUPS: ReviewDeckGroup[] = [
+  { id: 'new', label: 'New records', noun: 'New record' },
+  { id: 'additions', label: 'Additions', noun: 'Addition' },
+  { id: 'conflicts', label: 'Conflicts', noun: 'Conflict' },
+  { id: 'categories', label: 'New categories', noun: 'New category' }
+]
+
+/**
+ * The filing deck's cards (F-16.9): each proposed category a new record uses, then each record
+ * (new, an addition, or one whose lines disagree with Pinned), with the author's decision. Like the
+ * upload review, everything starts accepted and Skip leaves a card out.
+ */
+export function filingReviewItems(
+  review: FilingReview,
+  decisions: Readonly<Record<string, ReviewDecision>>
+): ReviewDeckItem[] {
+  const decision = (id: string): ReviewDecision => decisionOf(decisions, id)
+  const used = new Set(
+    review.items.filter((item) => item.recordId === null).map((item) => item.categoryId)
+  )
+  return [
+    ...review.categories
+      .filter((category) => category.proposed && used.has(category.id))
+      .map((category) => {
+        const id = categoryCardId(category.id)
+        return { id, group: 'categories', decision: decision(id) }
+      }),
+    ...review.items.map((item) => ({
+      id: item.id,
+      group: item.recordId === null ? 'new' : hasFilingConflict(item) ? 'conflicts' : 'additions',
+      decision: decision(item.id)
+    }))
+  ]
+}
+
+/** The filing as Apply writes it: accepted cards only; a declined category's records go to World. */
+export function decidedFilingReview(
+  review: FilingReview,
+  decisions: Readonly<Record<string, ReviewDecision>>
+): FilingReview {
+  return decidedFiling(review, (id) => decisionOf(decisions, id) === 'accepted', categoryCardId)
 }

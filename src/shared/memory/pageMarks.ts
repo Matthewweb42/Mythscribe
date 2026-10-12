@@ -85,13 +85,17 @@ export interface MarkedParagraph {
 /** Inline leaves that read as a line break; every other inline leaf reads as a space. */
 const LINE_BREAK = 'hardBreak'
 
+/** One paragraph of a stored page with the block itself (its attributes: `aiFiled`, …). */
+export interface PageTextBlock extends MarkedParagraph {
+  block: TiptapNodeT
+}
+
 /**
- * The page's paragraphs (a text block with text, numbered from 0 in document order, the same
- * blocks and text as `passageParagraphs`) with whether each is Not canon: marked itself, or
- * inside a marked block (a list item or quote). Pure; positions are not needed for pages.
+ * The page's text blocks in `markedParagraphs` order, each with its block, so a caller can read a
+ * block's marks (F-16.9: the filed lines of a Pinned page) by the same index.
  */
-export function markedParagraphs(doc: TiptapNodeT): MarkedParagraph[] {
-  const found: MarkedParagraph[] = []
+export function pageTextBlocks(doc: TiptapNodeT): PageTextBlock[] {
+  const found: PageTextBlock[] = []
   const visit = (node: TiptapNodeT, inherited: boolean): void => {
     if (typeof node.text === 'string') return
     const children = node.content ?? []
@@ -102,11 +106,22 @@ export function markedParagraphs(doc: TiptapNodeT): MarkedParagraph[] {
         if (typeof child.text === 'string') text += child.text
         else text += child.type === LINE_BREAK ? '\n' : ' '
       }
-      if (text.trim() !== '') found.push({ index: found.length, text, notCanon: marked })
+      if (text.trim() !== '') {
+        found.push({ index: found.length, text, notCanon: marked, block: node })
+      }
       return
     }
     for (const child of children) visit(child, marked)
   }
   for (const child of doc.content ?? []) visit(child, false)
   return found
+}
+
+/**
+ * The page's paragraphs (a text block with text, numbered from 0 in document order, the same
+ * blocks and text as `passageParagraphs`) with whether each is Not canon: marked itself, or
+ * inside a marked block (a list item or quote). Pure; positions are not needed for pages.
+ */
+export function markedParagraphs(doc: TiptapNodeT): MarkedParagraph[] {
+  return pageTextBlocks(doc).map(({ index, text, notCanon }) => ({ index, text, notCanon }))
 }

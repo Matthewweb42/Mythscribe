@@ -2,6 +2,7 @@ import type { RecoveryKind } from '@shared/recovery'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { useGoalsStore } from '@renderer/features/goals/goalsStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { refreshFiledConflictsSoon } from '@renderer/features/thisScene/filedConflictStore'
 import { ipc } from '@renderer/lib/ipc'
 import { createAutosaveStore, type LoadedRecord } from '@renderer/features/editor/autosaveStore'
 
@@ -75,6 +76,8 @@ const pageStore = createAutosaveStore<TiptapNodeT, PageSaved>({
   },
   onSaved: (key, saved) => {
     const owner = pageOwnerOf(key)
+    // F-16.9: a Research page or a Pinned page saved may raise or settle a filed-line conflict.
+    if (owner?.kind === 'research' || owner?.kind === 'pinned') refreshFiledConflictsSoon()
     if (owner?.kind !== 'research' || saved === null) return
     useTreeStore.getState().setWordCount(owner.id, saved.wordCount)
     useGoalsStore.getState().refreshSoon()

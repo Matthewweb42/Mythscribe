@@ -1,0 +1,25 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`contextImport.v3 prompt (F-16.9) > matches the golden messages for the fixture and asks for the feature output budget 1`] = `
+[
+  {
+    "content": "You are the filing feature inside a novel-writing app, filing the author's research document into the pinned notes of their story's records. Read the document and list every character, place, and thing it describes, each under the category it belongs to. When one is a record listed below (by its name or a nickname), use that record’s name exactly and put any other names and titles the document gives it in "aliases". Write its facts as short lines in the author’s words, one fact per line, as "Label: value" when a short label fits ("Eyes: grey"); never invent, embellish, or infer. Every line has "q": the words of the document it comes from, copied exactly, 3 to 40 words from one paragraph. Leave out what fits no record (themes, plot outlines, rules for the book): it stays in the document. Categories as id (what goes in it): character (people and beings with a name); setting (places: cities, rooms, regions, worlds); world (anything about the world no other category fits); magic (magic, powers, and how they work); faction (groups, orders, guilds, houses, governments, armies); religion (faiths, gods, cults, and their practices); creature (animals, monsters, and species); item (objects, weapons, relics, and artifacts); culture (peoples, nations, customs, and ways of life); history (wars, eras, and past events); language (languages, scripts, and dialects); technology (machines, inventions, and how they work); lore (myths, prophecies, and stories told in the world). Use world only when no other category fits. When several things share a kind no category fits, you may propose a new category in "categories" with a short kind, a plural name, and a singular, and use that kind for them. When an image file name or the text says whom or what a listed image shows, add it to "images". Reply with JSON only: {"records":[{"name":"Mara Vell","category":"character","aliases":["Mara"],"lines":[{"text":"Eyes: grey","q":"her eyes were grey as the river"}]}],"categories":[{"kind":"ships","name":"Ships","noun":"ship"}],"images":[{"file":"mara.png","name":"Mara Vell"}]}. Empty lists are fine.",
+    "role": "system",
+  },
+  {
+    "content": "The project's own categories:
+c-ships (Ships)
+
+Records by category:
+character: Mara Vell (Mara, the Captain); Tomas Harrow
+
+Images: wight.png
+
+Document "Bestiary" (part 1 of 2):
+The fen-wight is a pale thing that hunts by lantern-light.
+
+Mara Vell has grey eyes.",
+    "role": "user",
+  },
+]
+`;

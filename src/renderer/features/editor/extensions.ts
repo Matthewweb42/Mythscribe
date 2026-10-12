@@ -16,6 +16,7 @@ import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
 import { NameCheck } from './nameCheck'
 import { OriginParagraph } from './originParagraph'
+import { FiledFromMarks } from './filedFrom'
 import { PageHeadingMarks, PageParagraph } from './pageParagraph'
 import { RewriteTarget } from './rewriteTarget'
 import { SmartTypography } from './smartTypography'
@@ -308,6 +309,8 @@ export interface PageSchemaOptions {
   sceneBreak: string
   /** Runs on Ctrl/Cmd+S. */
   onSave: () => void
+  /** F-16.9: the title of a Research page, for a filed paragraph's "Filed from" label. */
+  filedTitle?: (docId: string) => string | null
 }
 
 /**
@@ -318,8 +321,14 @@ export interface PageSchemaOptions {
  * (tags, ghost text, rewrite, find, tracked changes). A separate builder, so no manuscript
  * document ever gains the page's attributes.
  */
-export function buildPageExtensions({ sceneBreak, onSave }: PageSchemaOptions): Extensions {
-  return [...coreExtensions(PageParagraph, sceneBreak, onSave), PageHeadingMarks]
+export function buildPageExtensions({
+  sceneBreak,
+  onSave,
+  filedTitle
+}: PageSchemaOptions): Extensions {
+  const extensions = [...coreExtensions(PageParagraph, sceneBreak, onSave), PageHeadingMarks]
+  if (filedTitle !== undefined) extensions.push(FiledFromMarks.configure({ titleOf: filedTitle }))
+  return extensions
 }
 
 /**

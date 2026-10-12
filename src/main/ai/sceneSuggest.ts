@@ -10,10 +10,12 @@ import {
   SCENE_SUGGEST_TEXT_MIN
 } from '@shared/sceneSuggest'
 import { STORY_BIBLE_PLANS_HEADING, STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { getDocumentContent } from '../document/documentStore'
 import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { getSummary } from '../document/summaryStore'
 import { AppError } from '../ipc/errors'
+import { buildStoryNotes } from '../memory/storyNotes'
 import { getAiSettings } from '../project/settingsStore'
 import { getNode, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -23,6 +25,7 @@ import { buildStoryBible } from './context/storyBible'
 import { fitSceneToBudget } from './critique'
 import { assertFeatureAllowed } from './dial'
 import { buildNotesSuggestPromptV2 } from './prompts/notesSuggest.v2'
+import { buildNotesSuggestPromptV3 } from './prompts/notesSuggest.v3'
 import { buildSynopsisPrompt } from './prompts/synopsis.v1'
 import { AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
@@ -57,6 +60,11 @@ export interface SuggestInput {
 export interface NotesSuggestInput extends SuggestInput {
   /** What the author asked to focus on (from the chat router's instruction), or null. */
   instruction?: string | null
+  /**
+   * F-16.4: the open project's story memory. v1 sends `notesSuggest.v2` (the story bible as notes
+   * and plans); v2 sends `notesSuggest.v3` (the Story notes block, F-16.14).
+   */
+  memory: StoryMemoryVersion
 }
 
 const BAD_FORMAT = 'The model did not answer in the expected format.'
@@ -157,22 +165,51 @@ export async function runSuggestNotes(
   )
   const notes = current || null
   const brief = sceneBriefBlock(db, input.nodeId)
-  // F-5.23: the bible as the author's notes and plans, not ground truth about events.
-  const bible = buildStoryBible(db, {
-    nodeId: input.nodeId,
-    maxTokens: STORY_BIBLE_TOKEN_BUDGET,
-    heading: STORY_BIBLE_PLANS_HEADING
-  })
   const focus = input.instruction?.trim() ?? ''
   const instruction = focus === '' ? null : focus
-  const context = { summary: scene.summary, brief, notes, bible, instruction }
+  const v2 = input.memory === 'v2'
+  // F-5.23: the bible as the author's notes and plans, not ground truth about events. F-16.14:
+  // v2 carries the Story notes block in its slot (`notesSuggest.v3`).
+  const bible = v2
+    ? null
+    : buildStoryBible(db, {
+        nodeId: input.nodeId,
+        maxTokens: STORY_BIBLE_TOKEN_BUDGET,
+        heading: STORY_BIBLE_PLANS_HEADING
+      })
+  const storyNotes = v2
+    ? buildStoryNotes(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+    : null
+  const context = v2
+    ? { summary: scene.summary, brief, notes, storyNotes, instruction }
+    : { summary: scene.summary, brief, notes, bible, instruction }
+  const build = (
+    sceneText: string
+  ): ReturnType<typeof buildNotesSuggestPromptV2> | ReturnType<typeof buildNotesSuggestPromptV3> =>
+    v2
+      ? buildNotesSuggestPromptV3({
+          summary: scene.summary,
+          brief,
+          notes,
+          storyNotes,
+          instruction,
+          sceneText
+        })
+      : buildNotesSuggestPromptV2({
+          summary: scene.summary,
+          brief,
+          notes,
+          bible,
+          instruction,
+          sceneText
+        })
   const { sceneText, truncated } = fitSceneToBudget(
     scene.text,
     inputBudget('notesSuggest'),
-    (cut) => buildNotesSuggestPromptV2({ ...context, sceneText: cut }).messages,
+    (cut) => build(cut).messages,
     SCENE_LIMITS
   )
-  const prompt = buildNotesSuggestPromptV2({ ...context, sceneText })
+  const prompt = build(sceneText)
   const result = await runAiRequest(deps, {
     feature: 'notesSuggest',
     tier: 'fast',

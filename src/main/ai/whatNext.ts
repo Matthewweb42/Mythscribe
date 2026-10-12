@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { estimateTokens, inputBudget } from '@shared/ai'
 import { docToText } from '@shared/docText'
 import { STORY_BIBLE_PLANS_HEADING, STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { STORY_MAP_SMALL_TOKEN_BUDGET } from '@shared/storyTime'
 import {
   WHAT_NEXT_CHAR_BUDGET,
@@ -14,6 +15,7 @@ import {
 import { getDocumentContent } from '../document/documentStore'
 import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { AppError } from '../ipc/errors'
+import { buildStoryNotes } from '../memory/storyNotes'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -22,6 +24,7 @@ import { buildStoryBible } from './context/storyBible'
 import { buildStoryMap, storyTime } from './context/storyTime'
 import { assertFeatureAllowed } from './dial'
 import { buildWhatNextPromptV3 } from './prompts/whatNext.v3'
+import { buildWhatNextPromptV4 } from './prompts/whatNext.v4'
 import { AiFallbackError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -35,6 +38,11 @@ export interface WhatNextInput {
   before?: string | null
   /** The caller's id for `ai:cancel` (F-5.10); optional so tests and the eval can run without one. */
   requestId?: string
+  /**
+   * F-16.4: the open project's story memory. v1 sends `whatNext.v3` (the story bible as notes and
+   * plans, and the steer); v2 sends `whatNext.v4` (the Story notes block, F-16.14).
+   */
+  memory: StoryMemoryVersion
 }
 
 export interface WhatNextResult {
@@ -97,18 +105,29 @@ export async function runWhatNext(
   }
 
   const brief = sceneBriefBlock(db, input.nodeId)
+  const v2 = input.memory === 'v2'
   // F-5.23: the bible as the author's notes and plans, and the story map with now at this scene.
-  const bible = buildStoryBible(db, {
-    nodeId: input.nodeId,
-    maxTokens: STORY_BIBLE_TOKEN_BUDGET,
-    heading: STORY_BIBLE_PLANS_HEADING
-  })
+  // F-16.14: v2 carries the Story notes block in its slot and no separate steer.
+  const storyNotes = v2
+    ? buildStoryNotes(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+    : null
+  const bible = v2
+    ? null
+    : buildStoryBible(db, {
+        nodeId: input.nodeId,
+        maxTokens: STORY_BIBLE_TOKEN_BUDGET,
+        heading: STORY_BIBLE_PLANS_HEADING
+      })
   const map = buildStoryMap(db, storyTime(db, input.nodeId), {
     maxTokens: STORY_MAP_SMALL_TOKEN_BUDGET
   })
-  const steer = buildSceneSteer(db, input.nodeId)
-  const build = (text: string): ReturnType<typeof buildWhatNextPromptV3> =>
-    buildWhatNextPromptV3({ text, brief, steer, bible, map })
+  const steer = v2 ? null : buildSceneSteer(db, input.nodeId)
+  const build = (
+    text: string
+  ): ReturnType<typeof buildWhatNextPromptV3> | ReturnType<typeof buildWhatNextPromptV4> =>
+    v2
+      ? buildWhatNextPromptV4({ text, brief, storyNotes, map })
+      : buildWhatNextPromptV3({ text, brief, steer, bible, map })
 
   const { text, truncated } = fitTailToBudget(
     fullText,
@@ -123,7 +142,9 @@ export async function runWhatNext(
     messages: prompt.messages,
     maxTokens: prompt.maxTokens,
     json: true,
-    contextHash: sha256(JSON.stringify({ text, brief, steer, bible, map })),
+    contextHash: sha256(
+      JSON.stringify(v2 ? { text, brief, storyNotes, map } : { text, brief, steer, bible, map })
+    ),
     promptVersion: prompt.version,
     ...(input.requestId === undefined ? {} : { requestId: input.requestId })
   })

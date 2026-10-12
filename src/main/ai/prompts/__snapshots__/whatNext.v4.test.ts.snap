@@ -1,0 +1,39 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`whatNext.v4 prompt (F-16.14) > matches the golden messages: the Story notes before the map, no steer 1`] = `
+[
+  {
+    "content": "You are the what-comes-next feature inside a novel-writing app. Read the text so far, the scene brief (the author's intent), and the story bible, and suggest 3 different directions the story could take right after the last line: each a plausible next beat that follows from what is on the page, serves the brief, and keeps to the characters, places, and rules the bible states. Do not write the prose itself and do not summarise what already happened. Each direction has a title of at most 80 characters and a text of one or two sentences, at most 300 characters. Reply with JSON only: {"directions":[{"title":"...","text":"..."}]}.
+
+Story time: this scene is the one marked "▶ NOW" in the story map; only what the scenes up to it show has happened. Later and planned scenes, and the story bible, are the author's notes and plans: a direction may move toward them but never treats them as already happened.
+
+Story notes (the manuscript wins: where the passage and these notes disagree, follow the passage):
+Here: Mara Vell (POV), Tomas Harrow
+Named: The Hollow Elm, Wren
+Mara Vell (Mara, the Captain): Eyes: grey. Lost her brother Daven to the river at twelve; will not cross water at night.
+Tomas Harrow (Tomas): Ferryman at the landing; owes the mill a debt he hides from Mara.
+The Hollow Elm (the elm): A split elm on the north bank where the two met as children.
+Tone (write in it): tense
+Content (keep to it): grief
+Themes (keep in view): debts come due
+
+Story map:
+▶ NOW Ch 1 · The ferry landing (drafted)",
+    "role": "system",
+  },
+  {
+    "content": "Scene brief (the author's intent):
+"""
+Goal: Mara reaches the ferry.
+"""
+
+Text so far:
+"""
+Mara set the lantern down. The river was rising.
+"""
+
+Suggest three directions for what comes next.",
+    "role": "user",
+  },
+]
+`;

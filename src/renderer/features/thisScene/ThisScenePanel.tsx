@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type FormEvent } from 'react'
 import { ArrowDown, ArrowUp, ScanEye, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
+import type { FiledConflict } from '@shared/filing'
 import { countInlineTags } from '@shared/inlineTags'
 import type { NameMentionView } from '@shared/memory/nameScan'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
@@ -9,9 +10,11 @@ import { formatUsd } from '@renderer/features/ai/usageFormat'
 import { useAiStore } from '@renderer/features/ai/aiStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { openNameMention } from '@renderer/features/editor/openPassage'
+import { useSceneDetailStore } from '@renderer/features/editor/sceneDetailStore'
 import { AlsoHereField, PovField } from '@renderer/features/editor/SceneDetailsFields'
 import { useSceneDetailsEditor } from '@renderer/features/editor/sceneDetailsEditor'
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
+import { useLabelStore } from '@renderer/features/labels/labelStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { sceneCounts, useNameMentionStore } from '@renderer/features/records/nameMentionStore'
 import { useRecordStore } from '@renderer/features/records/recordStore'
@@ -23,12 +26,14 @@ import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useAuthorTodoStore } from './authorTodoStore'
+import { useFiledConflictStore } from './filedConflictStore'
 import { useDismissedStore } from './dismissedStore'
 import { useQuestionStore } from './questionStore'
 import {
   ambiguousLabel,
   ambiguousWhy,
   castOf,
+  conflictLine,
   INLINE_TAGS_NOTICE,
   namedChips,
   namedWhy,
@@ -146,6 +151,7 @@ function SceneTab({ sceneId }: { sceneId: string | null }): React.JSX.Element {
         </>
       )}
       <NeedsALook sceneId={sceneId} />
+      {sceneId === null ? null : <WhatTheAiIsTold key={`told:${sceneId}`} sceneId={sceneId} />}
     </>
   )
 }
@@ -350,15 +356,17 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
       ? 0
       : Object.keys(countInlineTags(content)).length
   })
+  const conflicts = useFiledConflictStore((s) => s.conflicts)
   const [adding, setAdding] = useState(false)
   const groups = needsALookGroups({
+    conflicts,
     todos,
     questions,
     notices: inlineTags > 0 ? [INLINE_TAGS_NOTICE] : [],
     todosOpen: adding
   })
-  // P1 has no conflicts yet: slice 5's filed-line checks are the first.
-  const badge = needsALookBadge(0)
+  // F-16.9: the filed lines whose Research source changed are P1's conflicts.
+  const badge = needsALookBadge(conflicts.length)
   return (
     <section aria-labelledby={headingId}>
       <div className="mt-3 mb-1 flex items-center gap-2">
@@ -396,7 +404,9 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
           className="mt-2"
         >
           <h4 className="m-0 mb-1 text-xs text-fg-muted">{NEEDS_A_LOOK_HEADING[group.id]}</h4>
-          {group.id === 'todos' ? (
+          {group.id === 'conflicts' ? (
+            <ConflictList conflicts={group.conflicts} />
+          ) : group.id === 'todos' ? (
             <TodoList
               todos={group.todos}
               done={group.done}
@@ -738,5 +748,147 @@ function PanelFooter(): React.JSX.Element {
         Dismissed ({count})
       </button>
     </div>
+  )
+}
+
+/**
+ * F-16.9: the filed lines whose Research source changed. Each says where it was filed from and
+ * what the page reads now, with *Go there* (the page), *Update line* (the line beside the page's
+ * closest paragraph; nothing is written until Save) and *Keep line*.
+ */
+function ConflictList({ conflicts }: { conflicts: readonly FiledConflict[] }): React.JSX.Element {
+  return (
+    <ul className="m-0 list-none space-y-2 p-0 text-xs" data-testid="filed-conflicts">
+      {conflicts.map((conflict) => (
+        <ConflictRow key={conflict.key} conflict={conflict} />
+      ))}
+    </ul>
+  )
+}
+
+function ConflictRow({ conflict }: { conflict: FiledConflict }): React.JSX.Element {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(conflict.line)
+  const [busy, setBusy] = useState(false)
+  const goThere = (): void => {
+    useLayoutStore.getState().setSidebarTab('research')
+    useTreeStore.getState().select(conflict.docId)
+  }
+  const keep = async (): Promise<void> => {
+    setBusy(true)
+    await useFiledConflictStore.getState().keep(conflict)
+    setBusy(false)
+  }
+  const save = async (event: FormEvent): Promise<void> => {
+    event.preventDefault()
+    if (text.trim() === '') return
+    setBusy(true)
+    const done = await useFiledConflictStore.getState().update(conflict, text)
+    setBusy(false)
+    if (done) setEditing(false)
+  }
+  return (
+    <li
+      className="rounded-md border border-line bg-surface px-2 py-1.5"
+      data-testid="filed-conflict"
+    >
+      <p className="m-0 font-medium">
+        {conflict.recordName}: “{conflict.line}”
+      </p>
+      <p className="m-0 mt-0.5 text-fg-muted">{conflictLine(conflict)}</p>
+      {editing ? (
+        <form className="mt-1 flex flex-col gap-1" onSubmit={(event) => void save(event)}>
+          <label className="text-fg-muted" htmlFor={`line-${conflict.key}`}>
+            The line
+          </label>
+          <textarea
+            id={`line-${conflict.key}`}
+            value={text}
+            rows={2}
+            onChange={(event) => setText(event.target.value)}
+            className="rounded border border-line bg-surface-raised px-1.5 py-1 text-sm"
+          />
+          {conflict.nowReads === null ? null : (
+            <p className="m-0 text-fg-muted">
+              The page now reads: <span className="text-fg">“{conflict.nowReads}”</span>
+            </p>
+          )}
+          <div className="flex gap-1">
+            <button type="submit" className={SMALL} disabled={busy || text.trim() === ''}>
+              Save line
+            </button>
+            <button type="button" className={SMALL} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="mt-1 flex flex-wrap gap-1">
+          <button type="button" className={SMALL} onClick={goThere}>
+            Go there
+          </button>
+          <button type="button" className={SMALL} disabled={busy} onClick={() => setEditing(true)}>
+            Update line
+          </button>
+          <button type="button" className={SMALL} disabled={busy} onClick={() => void keep()}>
+            Keep line
+          </button>
+        </div>
+      )}
+    </li>
+  )
+}
+
+/**
+ * F-16.14: exactly the Story notes block the v2 prose prompts send for this scene (at the
+ * 400-token budget), read from main when the section opens and again when the scene's names,
+ * details, labels or records change while it is open. Local; nothing is sent.
+ */
+function WhatTheAiIsTold({ sceneId }: { sceneId: string }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState<string | null | undefined>(undefined)
+  const mentions = useNameMentionStore((s) => s.byNode[sceneId])
+  const records = useRecordStore((s) => s.byId)
+  const details = useSceneDetailStore((s) => s.docs[sceneId])
+  const labels = useLabelStore((s) => s.byNode[sceneId])
+  const labelKinds = useLabelStore((s) => s.labels)
+  useEffect(() => {
+    if (!open) return
+    let live = true
+    const read = async (): Promise<void> => {
+      const answer = await ipc().invoke('storyNotes:get', { nodeId: sceneId })
+      if (live) setText(answer.text)
+    }
+    read().catch((err: unknown) => {
+      if (live) toast.error(describeError(err))
+    })
+    return () => {
+      live = false
+    }
+  }, [open, sceneId, mentions, records, details, labels, labelKinds])
+  return (
+    <details
+      className="mt-3"
+      data-testid="what-the-ai-is-told"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="cursor-pointer text-xs font-medium tracking-wide text-fg-muted uppercase">
+        What the AI is told
+      </summary>
+      {text === undefined ? (
+        <p className="m-0 mt-1 text-xs text-fg-muted">Reading…</p>
+      ) : text === null ? (
+        <p className="m-0 mt-1 text-xs text-fg-muted">
+          Nothing yet: name a record, set the POV, or give the scene a tone, content or theme label.
+        </p>
+      ) : (
+        <pre
+          className="m-0 mt-1 text-xs whitespace-pre-wrap text-fg-muted"
+          data-testid="story-notes-block"
+        >
+          {text}
+        </pre>
+      )}
+    </details>
   )
 }

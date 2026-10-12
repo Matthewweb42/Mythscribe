@@ -88,6 +88,7 @@ const input = (over: Partial<ChatInput> = {}): ChatInput => ({
   paragraphs: 1,
   message: 'What is Mara afraid of?',
   history: [],
+  memory: 'v1',
   ...over
 })
 

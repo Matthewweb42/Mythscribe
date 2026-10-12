@@ -20,6 +20,7 @@ import {
   type EditPassType
 } from '@shared/editPass'
 import { JOB_BACKOFF_MS } from '@shared/jobs'
+import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
 import { getDocumentContent } from '../document/documentStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
 import {
@@ -34,6 +35,7 @@ import {
   type ChangeInput
 } from '../editPass/editPassStore'
 import { AppError } from '../ipc/errors'
+import { buildStoryNotes } from '../memory/storyNotes'
 import { getAiSettings } from '../project/settingsStore'
 import { projectNameWords, projectSpellingWords } from '../spellcheck/projectWords'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
@@ -53,6 +55,7 @@ import {
   EDIT_PASS_MOOD_TYPES,
   EDIT_PASS_PROMPT_V2_VERSION
 } from './prompts/editPass.v2'
+import { buildEditPassPromptV3, EDIT_PASS_PROMPT_V3_VERSION } from './prompts/editPass.v3'
 import { createProposal } from './proposalStore'
 import {
   AiCancelledError,
@@ -392,28 +395,49 @@ export async function editScene(
     ? keepList([...projectNameWords(db, input.memory), ...allKeep])
     : []
   const keep = new Set(allKeep.map((word) => word.toLocaleLowerCase()))
+  const v2 = input.memory === 'v2'
+  // F-16.14: in v2 a continuity pass is checked against the Story notes block (`editPass.v3`)
+  // in place of the v1 sheet and tag references.
   const references =
-    input.type === 'continuity'
+    input.type === 'continuity' && !v2
       ? continuityRefs(db, input.nodeId, sceneText).refs.map((ref, at) =>
           continuityRefLine(ref, at + 1)
         )
       : []
-  if (input.type === 'continuity' && references.length === 0) return empty
+  const storyNotes =
+    input.type === 'continuity' && v2
+      ? buildStoryNotes(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+      : null
+  if (input.type === 'continuity' && (v2 ? storyNotes === null : references.length === 0)) {
+    return empty
+  }
   // F-5.6: the scene's mood and theme from its last reading, for the passes that reshape prose.
   const mood = EDIT_PASS_MOOD_TYPES.includes(input.type) ? buildSceneMood(db, input.nodeId) : null
 
-  const build = (piece: string, part: { index: number; count: number }): AiMessage[] =>
-    buildEditPassPromptV2({
+  const prompted = (
+    piece: string,
+    part: { index: number; count: number }
+  ): {
+    version: typeof EDIT_PASS_PROMPT_V2_VERSION | typeof EDIT_PASS_PROMPT_V3_VERSION
+    messages: AiMessage[]
+    maxTokens: number
+  } => {
+    const common = {
       type: input.type,
       text: piece,
       title,
       part,
       voice,
       keepWords,
-      references,
       instruction: input.instruction,
       mood
-    }).messages
+    }
+    return v2
+      ? buildEditPassPromptV3({ ...common, storyNotes })
+      : buildEditPassPromptV2({ ...common, references })
+  }
+  const build = (piece: string, part: { index: number; count: number }): AiMessage[] =>
+    prompted(piece, part).messages
   const pieces = fitPieces(sentText, (piece) => build(piece, { index: 0, count: 2 }))
 
   const result: EditSceneResult = { ...empty, usage: { inputTokens: 0, outputTokens: 0 } }
@@ -423,17 +447,7 @@ export async function editScene(
   for (const [index, piece] of pieces.entries()) {
     stopIfCancelled(input.signal)
     const part = { index, count: pieces.length }
-    const prompt = buildEditPassPromptV2({
-      type: input.type,
-      text: piece,
-      title,
-      part,
-      voice,
-      keepWords,
-      references,
-      instruction: input.instruction,
-      mood
-    })
+    const prompt = prompted(piece, part)
     const answer = await requestWithRetry(
       deps,
       (attempt) => ({
@@ -451,6 +465,7 @@ export async function editScene(
             part,
             keepWords,
             references,
+            ...(v2 ? { storyNotes } : {}),
             mood,
             voiceVersion: voice === null ? null : voiceProfileVersion()
           })
@@ -503,7 +518,7 @@ export async function editScene(
       : createProposal(db, {
           feature: 'editPass',
           nodeId: input.nodeId,
-          promptVersion: EDIT_PASS_PROMPT_V2_VERSION,
+          promptVersion: v2 ? EDIT_PASS_PROMPT_V3_VERSION : EDIT_PASS_PROMPT_V2_VERSION,
           model: result.model,
           promptTokens: result.usage.inputTokens,
           completionTokens: result.usage.outputTokens,

@@ -11,7 +11,8 @@ describe('Research vocabulary (F-16.8)', () => {
       fileName: null,
       fileType: null,
       converted: false,
-      notCanon: false
+      notCanon: false,
+      filedAt: null
     })
     expect(researchSourceLine(doc)).toBeNull()
   })

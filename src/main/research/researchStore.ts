@@ -43,7 +43,7 @@ import {
  */
 
 /** The Research document behind `nodeId`: NOT_FOUND when it is gone, VALIDATION when it is something else. */
-function requireResearchDocument(db: TreeDb, nodeId: string): NodeRow {
+export function requireResearchDocument(db: TreeDb, nodeId: string): NodeRow {
   const row = getNode(db, nodeId)
   if (row === undefined)
     throw new AppError('NOT_FOUND', 'That document no longer exists', { nodeId })
@@ -78,7 +78,8 @@ function toResearchDoc(
     fileName,
     fileType: row.fileType,
     converted: row.converted,
-    notCanon: row.notCanon
+    notCanon: row.notCanon,
+    filedAt: row.filedAt
   }
 }
 
@@ -160,6 +161,36 @@ export function setResearchNotCanon(
       .run()
     return researchDocOf(tx, nodeId)
   })
+}
+
+/** A page's filing state (F-16.9): when it was filed and the hash of its text then; nulls until it is. */
+export function researchFiled(
+  db: TreeDb,
+  nodeId: string
+): { filedAt: string | null; filedHash: string | null } {
+  const row = db
+    .select({ filedAt: researchDoc.filedAt, filedHash: researchDoc.filedHash })
+    .from(researchDoc)
+    .where(eq(researchDoc.nodeId, nodeId))
+    .get()
+  return { filedAt: row?.filedAt ?? null, filedHash: row?.filedHash ?? null }
+}
+
+/**
+ * Records that a page was filed into Pinned (F-16.9), or clears it (*Undo filing*: both null). A
+ * written note with no row gets one, as the Not canon switch does.
+ */
+export function setResearchFiled(
+  db: TreeDb,
+  nodeId: string,
+  filed: { filedAt: string | null; filedHash: string | null },
+  now: Date = new Date()
+): void {
+  requireResearchDocument(db, nodeId)
+  db.insert(researchDoc)
+    .values({ nodeId, origin: 'written', created: now.toISOString(), ...filed })
+    .onConflictDoUpdate({ target: researchDoc.nodeId, set: filed })
+    .run()
 }
 
 /** The file name without its extension, as a document title. */

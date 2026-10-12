@@ -895,6 +895,57 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     expect(seen.at(-1)).not.toHaveProperty('reasoning')
   })
 
+  it('F-16.9: sends contextImport.v3 and reviewChat.v3 with reasoning off, and leaves reviewChat.v2 as it was', async () => {
+    const f = fakes()
+    const seen: CompletionRequest[] = []
+    f.complete.mockImplementation((request) => {
+      seen.push(request)
+      return Promise.resolve({ text: '{}', model: 'm', usage: { inputTokens: 1, outputTokens: 1 } })
+    })
+    // Thinking on for the strong tier: what the author's Settings may say.
+    const routing = { ...defaultAiRouting(), reasoning: { strong: 'low' as const } }
+    f.deps.routing = () => ({ routing, table: autoTable(null) })
+    const strong = { ...input, tier: 'strong' as const, json: true }
+    await runAiRequest(f.deps, {
+      ...strong,
+      feature: 'contextImport',
+      promptVersion: 'contextImport.v3',
+      contextHash: 'c3'
+    })
+    expect(seen.at(-1)?.reasoning).toBe('off')
+    await runAiRequest(f.deps, {
+      ...strong,
+      feature: 'reviewChat',
+      promptVersion: 'reviewChat.v3',
+      contextHash: 'r3'
+    })
+    expect(seen.at(-1)?.reasoning).toBe('off')
+    await runAiRequest(f.deps, {
+      ...strong,
+      feature: 'reviewChat',
+      promptVersion: 'reviewChat.v2',
+      contextHash: 'r2'
+    })
+    expect(seen.at(-1)?.reasoning).toBe('low')
+    // On Cloud, the v3 versions ask the Worker for off; v2 asks nothing, as before.
+    if (f.provider === null) throw new Error('no provider')
+    f.provider = { ...f.provider, id: 'cloud' }
+    await runAiRequest(f.deps, {
+      ...strong,
+      feature: 'reviewChat',
+      promptVersion: 'reviewChat.v3',
+      contextHash: 'r3c'
+    })
+    expect(seen.at(-1)?.reasoning).toBe('off')
+    await runAiRequest(f.deps, {
+      ...strong,
+      feature: 'reviewChat',
+      promptVersion: 'reviewChat.v2',
+      contextHash: 'r2c'
+    })
+    expect(seen.at(-1)).not.toHaveProperty('reasoning')
+  })
+
   // F-16.2: `summary` stands in for the story-memory reader until P2a adds `reader`, `verify` and
   // `judge` to this table.
   it.each([

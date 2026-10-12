@@ -1,3 +1,4 @@
+import type { FiledConflict } from '@shared/filing'
 import type { AuthorTodo } from '@shared/memory/authorTodo'
 import type { DismissedKind } from '@shared/memory/dismissed'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
@@ -96,6 +97,7 @@ export const INLINE_TAGS_NOTICE = 'Inline tags show as plain text until you swit
 
 /** One group of Needs a look, as drawn. */
 export type NeedsALookGroup =
+  | { id: 'conflicts'; conflicts: FiledConflict[] }
   | {
       id: 'todos'
       /** The open to-dos, in her order. */
@@ -107,23 +109,28 @@ export type NeedsALookGroup =
   | { id: 'notices'; notices: string[] }
 
 export const NEEDS_A_LOOK_HEADING: Record<NeedsALookGroup['id'], string> = {
+  conflicts: 'Conflicts',
   todos: 'My to-dos',
   questions: 'Questions',
   notices: 'Notices'
 }
 
 /**
- * The groups of Needs a look in their order (My to-dos on top, then the name Questions, then
- * Notices); a group with nothing in it is not drawn. Ticked to-dos sit apart from the open ones
- * (`done`). `todosOpen` keeps the to-do group drawn while the author is adding the first one.
+ * The groups of Needs a look in their order (the Conflicts first, F-16.9's filed lines whose
+ * source changed, then My to-dos, the name Questions and Notices); a group with nothing in it is
+ * not drawn. Ticked to-dos sit apart from the open ones (`done`). `todosOpen` keeps the to-do
+ * group drawn while the author is adding the first one.
  */
 export function needsALookGroups(input: {
+  conflicts?: readonly FiledConflict[]
   todos: readonly AuthorTodo[]
   questions: readonly NameQuestion[]
   notices: readonly string[]
   todosOpen?: boolean
 }): NeedsALookGroup[] {
   const groups: NeedsALookGroup[] = []
+  const conflicts = input.conflicts ?? []
+  if (conflicts.length > 0) groups.push({ id: 'conflicts', conflicts: [...conflicts] })
   if (input.todos.length > 0 || input.todosOpen === true) {
     groups.push({
       id: 'todos',
@@ -138,8 +145,8 @@ export function needsALookGroups(input: {
 
 /**
  * The Needs a look badge (design §2.7): it counts conflicts only, never questions, to-dos or
- * notices, and shows nothing at zero. P1 has no conflict yet (slice 5's filed-line checks are the
- * first), so the panel passes 0 until then.
+ * notices, and shows nothing at zero. In P1 the conflicts are the filed lines whose source changed
+ * (F-16.9); P4 adds contradictions.
  */
 export function needsALookBadge(conflicts: number): string | null {
   return conflicts > 0 ? String(conflicts) : null
@@ -174,4 +181,12 @@ export const DISMISSED_KIND_LABEL: Record<DismissedKind, string> = {
   unlink: 'Unlinked',
   notRight: 'Not right',
   notProblem: 'Not a problem'
+}
+
+/** A filed-line conflict's line: "Filed from “Bestiary” ¶4, which now reads “…”". */
+export function conflictLine(conflict: FiledConflict): string {
+  const where = `Filed from “${conflict.docTitle}” ${paragraphLabel(conflict.para)}`
+  return conflict.nowReads === null
+    ? `${where}, which now has no text there`
+    : `${where}, which now reads “${conflict.nowReads}”`
 }

@@ -1,6 +1,7 @@
 import { estimateTokens, inputBudget } from '@shared/ai'
 import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
 import type { ChatMode } from '@shared/chat'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { resolvePreset } from '@shared/presets'
 import { computeStylometrics, type Stylometrics } from '@shared/stylometry'
 import {
@@ -9,6 +10,8 @@ import {
   scoreDocumentDrift,
   type FidelityViolation
 } from '@shared/voiceFidelity'
+import { getSceneMeta } from '../document/sceneMetaStore'
+import { buildStoryNotes, typedSceneMeta } from '../memory/storyNotes'
 import { getAiSettings, getWritingPresets } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
@@ -23,6 +26,8 @@ import { regenRequestId } from './inflight'
 import type { ChatTurn } from './prompts/chat.v1'
 import { buildChatPromptV5, type BuildChatPromptV5Input } from './prompts/chat.v5'
 import { buildChatRegenPromptV5 } from './prompts/chatRegen.v5'
+import { buildChatPromptV6, type BuildChatPromptV6Input } from './prompts/chat.v6'
+import { buildChatRegenPromptV6 } from './prompts/chatRegen.v6'
 import { AiCancelledError, type CompletionUsage } from './providers/types'
 import {
   runAiRequest,
@@ -53,6 +58,12 @@ export interface ChatInput {
   sceneText?: string
   /** 2026-10-07: Agent mode streams its first draft to `onDelta` too (the regenerate does not). */
   streamDraft?: boolean
+  /**
+   * F-16.4: the open project's story memory. v1 sends `chat.v5`/`chatRegen.v5` (the story bible
+   * and, in Author mode, the steer); v2 sends `chat.v6`/`chatRegen.v6` (the Story notes block,
+   * F-16.14) with the scene line read from the typed details.
+   */
+  memory: StoryMemoryVersion
 }
 
 export interface ChatResult {
@@ -115,14 +126,29 @@ export async function runChat(
   const agent = input.mode === 'agent'
 
   const built = buildChatContext(db, { nodeId: input.nodeId, message: input.message })
-  const context = input.sceneText === undefined ? built : { ...built, sceneText: input.sceneText }
+  const v2 = input.memory === 'v2'
+  // F-16.14: in v2 the scene line reads the typed details (the v1 fields are not edited there).
+  const typed =
+    v2 && input.nodeId !== null
+      ? {
+          ...built,
+          sceneMeta: typedSceneMeta(db, input.nodeId, getSceneMeta(db, input.nodeId).meta)
+        }
+      : built
+  const context = input.sceneText === undefined ? typed : { ...typed, sceneText: input.sceneText }
   const preset = agent ? resolvePreset(getWritingPresets(db)) : null
-  const pov = context.sceneMeta?.pov.trim() ?? ''
+  const pov = built.sceneMeta?.pov.trim() ?? ''
   const profile = agent ? buildVoiceProfile(db, { pov: pov || undefined }) : null
   const voice = profile ? voiceBlock(profile, { text: context.sceneText, pov: pov || null }) : null
-  const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+  // F-16.14: v2 carries the Story notes block in the bible's slot and no separate steer.
+  const storyNotes = v2
+    ? buildStoryNotes(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+    : null
+  const bible = v2
+    ? null
+    : buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
   // The scene steer (F-14.13) steers prose, so only Author mode gathers it; Plan mode sends none.
-  const steer = agent ? buildSceneSteer(db, input.nodeId) : null
+  const steer = agent && !v2 ? buildSceneSteer(db, input.nodeId) : null
   // F-5.20: the author's side panel (synopsis and notes) rides along in both modes.
   const panel = buildScenePanel(db, input.nodeId)
 
@@ -140,11 +166,30 @@ export async function runChat(
     bible,
     preset
   }
+  const baseV6: Omit<BuildChatPromptV6Input, 'history'> = {
+    mode: input.mode,
+    paragraphs: input.paragraphs,
+    sceneText: context.sceneText,
+    sceneMeta: context.sceneMeta,
+    brief: context.brief,
+    panel,
+    refs: context.refs,
+    message: input.message,
+    voice,
+    storyNotes,
+    preset
+  }
+  const build = (
+    turns: ChatTurn[]
+  ): ReturnType<typeof buildChatPromptV5> | ReturnType<typeof buildChatPromptV6> =>
+    v2
+      ? buildChatPromptV6({ ...baseV6, history: turns })
+      : buildChatPromptV5({ ...base, history: turns })
   let history = input.history
-  let prompt = buildChatPromptV5({ ...base, history })
+  let prompt = build(history)
   while (history.length > 0 && estimate(prompt.messages) > inputBudget('chat')) {
     history = history.slice(1)
-    prompt = buildChatPromptV5({ ...base, history })
+    prompt = build(history)
   }
   const promptInput: BuildChatPromptV5Input = { ...base, history }
   const hashed = {
@@ -155,6 +200,7 @@ export async function runChat(
     panel,
     refs: context.refs,
     bible,
+    ...(v2 ? { storyNotes } : {}),
     history,
     message: input.message,
     mode: input.mode,
@@ -208,7 +254,9 @@ export async function runChat(
   const violation = checkChatFidelity(profile.stats, firstText, banned)[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
-  const regen = buildChatRegenPromptV5({ ...promptInput, violation: violation.message })
+  const regen = v2
+    ? buildChatRegenPromptV6({ ...baseV6, history, violation: violation.message })
+    : buildChatRegenPromptV5({ ...promptInput, violation: violation.message })
   const flaggedFirst: ChatResult = {
     ...shown(first, firstText, prompt.version),
     flagged: true,

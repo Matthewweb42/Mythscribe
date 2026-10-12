@@ -34,6 +34,8 @@ interface ResearchState {
   setNotCanon: (nodeId: string, notCanon: boolean) => Promise<void>
   /** Opens an upload's original in the OS's app. Errors propagate. */
   openOriginal: (nodeId: string) => Promise<void>
+  /** F-16.9: the page was filed into Pinned at `filedAt` (main's answer to Apply). */
+  setFiled: (nodeId: string, filedAt: string | null) => void
   clear: () => void
 }
 
@@ -108,6 +110,11 @@ export const useResearchStore = create<ResearchState>((set, get) => {
 
     async openOriginal(nodeId) {
       await ipc().invoke('research:openOriginal', { nodeId })
+    },
+
+    setFiled(nodeId, filedAt) {
+      const doc = get().docs[nodeId]
+      if (doc !== undefined) set({ docs: merge(get().docs, [{ ...doc, filedAt }]) })
     },
 
     clear() {

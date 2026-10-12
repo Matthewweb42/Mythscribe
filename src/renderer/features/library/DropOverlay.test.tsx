@@ -57,7 +57,8 @@ beforeEach(() => {
               fileName: 'people.md',
               fileType: 'md',
               converted: false,
-              notCanon: false
+              notCanon: false,
+              filedAt: null
             }
           ],
           skipped: []

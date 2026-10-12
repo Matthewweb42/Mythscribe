@@ -6,6 +6,8 @@ import { inputBudget, outputBudget, priceFor } from '@shared/ai'
 import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote, normalizeForMatch } from '@shared/critique'
 import type { EditPassType } from '@shared/editPass'
+import { parseFilingAnswer, quoteParagraph } from '@shared/filing'
+import { STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
 import { SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
 import { SceneSummary } from '@shared/summary'
 import { toTagName } from '@shared/tags'
@@ -28,7 +30,8 @@ import { parseVoiceNotesAnswer } from '../voiceNotes'
 import { parseRefileAnswer, parseWriteUpAnswer } from '../sheetSync'
 import { parseWhatNextAnswer } from '../whatNext'
 import { parseTodoAnswer, parseTodoSuggestAnswer } from '../todoPass'
-import { EVAL_CASES, FIXTURE_PROFILE, type EvalCase } from './fixtures'
+import { EVAL_CASES, FIXTURE_PROFILE, STORY_NOTES_GHOST_CASE, type EvalCase } from './fixtures'
+import { STORY_NOTES_IDEA_TEXT, STORY_NOTES_NOT_CANON_TEXT } from './storyNotesFixture'
 import { renderLiveReport, renderTokenReport, tokenRows, type LiveResult } from './report'
 
 /**
@@ -84,6 +87,40 @@ describe('prompt eval harness (F-5.12)', () => {
 
   it('the token report matches the committed baseline (accept a change with `npm run eval:ai -- -u`)', async () => {
     await expect(renderTokenReport(tokenRows(EVAL_CASES))).toMatchFileSnapshot(TOKEN_REPORT)
+  })
+
+  it('F-16.14: every Story notes version has a 150-budget case, and no case carries Ideas or Not canon text', () => {
+    const notesVersions = PROMPT_VERSIONS.filter((version) =>
+      EVAL_CASES.some(
+        (c) =>
+          c.version === version && c.messages.some((m) => m.content.includes(STORY_NOTES_HEADING))
+      )
+    )
+    expect(notesVersions).toEqual([
+      'ghostText.v5',
+      'ghostTextRegen.v5',
+      'rewrite.v5',
+      'rewriteRegen.v5',
+      'chat.v6',
+      'chatRegen.v6',
+      'critique.v4',
+      'critiqueRegen.v4',
+      'editPass.v3',
+      'whatNext.v4',
+      'notesSuggest.v3'
+    ])
+    const primary = notesVersions.filter((version) => !version.includes('Regen'))
+    for (const version of primary) {
+      expect(
+        EVAL_CASES.some((c) => c.version === version && c.name === STORY_NOTES_GHOST_CASE),
+        `${version} needs a case at the 150-token ghost budget`
+      ).toBe(true)
+    }
+    for (const c of EVAL_CASES) {
+      const text = c.messages.map((m) => m.content).join('\n')
+      expect(text, `${c.version} / ${c.name}`).not.toContain(STORY_NOTES_IDEA_TEXT)
+      expect(text, `${c.version} / ${c.name}`).not.toContain(STORY_NOTES_NOT_CANON_TEXT)
+    }
   })
 
   it('the AI cost registry matches the committed one (docs/AI-COST-REGISTRY.md; accept with `-u`)', async () => {
@@ -273,6 +310,32 @@ function scoreContextImport(expected: string[], answer: string): LiveResult['ver
   return missing.length === 0
     ? { kind: 'json', ok: true, problem: null }
     : { kind: 'json', ok: false, problem: `missing: ${missing.join(', ')}` }
+}
+
+/**
+ * A filing chunk (F-16.9) scores on what the planner keeps: the answer must parse
+ * (`parseFilingAnswer`), every expected name must be filed, and every line's quote must be in the
+ * document as sent, matched as `quoteParagraph` matches it.
+ */
+function scoreFiling(expected: string[], document: string, answer: string): LiveResult['verdict'] {
+  const parsed = parseFilingAnswer(answer)
+  if (parsed === null)
+    return { kind: 'json', ok: false, problem: 'not { records, categories, images }' }
+  const records = parsed.records ?? []
+  const names = new Set(records.map((record) => record.name.trim().toLowerCase()))
+  const missing = expected.filter((name) => !names.has(name.toLowerCase()))
+  if (missing.length > 0)
+    return { kind: 'json', ok: false, problem: `missing: ${missing.join(', ')}` }
+  const paragraphs = document.split('\n\n').map((text, index) => ({ index, text, notCanon: false }))
+  const lines = records.flatMap((record) => record.lines ?? [])
+  const unquoted = lines.filter((line) => quoteParagraph(line.q, paragraphs) === null).length
+  return unquoted === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : {
+        kind: 'json',
+        ok: false,
+        problem: `${unquoted} of ${lines.length} quotes not in the document`
+      }
 }
 
 /**
@@ -899,6 +962,14 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreContextImport(c.scoring.expected, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'filing') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreFiling(c.scoring.expected, c.scoring.document, reply.text)
         })
         continue
       }

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { AI_FEATURE_IDS, estimateTokens, inputBudget, outputBudget } from '@shared/ai'
-import { PLANNED_COST_NOTES, PLANNED_TASK_COSTS, type PlannedTask } from '@shared/aiCostNotes'
+import {
+  PLANNED_COST_NOTES,
+  PLANNED_TASK_COSTS,
+  SHIPPED_PLAN_ROWS,
+  type PlannedTask
+} from '@shared/aiCostNotes'
+import { isPromptVersion } from '../prompts/catalogue'
 import { plannedTaskCost, renderCostRegistry } from './costRegistry'
 import type { EvalCase } from './fixtures'
 import {
@@ -188,12 +194,27 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
     expect(fresh.some((feature) => known.includes(feature))).toBe(false)
   })
 
-  it('names only planned rows in the tasks, and every row once', () => {
-    const ids = PLANNED_COST_NOTES.map((row) => row.id)
+  it('names only planned or shipped rows in the tasks, and every row once', () => {
+    const ids = [...PLANNED_COST_NOTES, ...SHIPPED_PLAN_ROWS].map((row) => row.id)
     expect(new Set(ids).size).toBe(ids.length)
     for (const planned of PLANNED_TASK_COSTS) {
       for (const { row } of planned.calls) expect(ids).toContain(row)
     }
+  })
+
+  it('F-16.9: the shipped filing rows left the planned table and their prompts are catalogued', () => {
+    expect(SHIPPED_PLAN_ROWS.map((row) => row.id)).toEqual(['contextImport.v3', 'reviewChat.v3'])
+    for (const row of SHIPPED_PLAN_ROWS) {
+      expect(PLANNED_COST_NOTES.some((planned) => planned.id === row.id)).toBe(false)
+      expect(isPromptVersion(row.prompt), row.prompt).toBe(true)
+    }
+    // The upload task is still priced from the design's sizes: 14 chunks, about 15¢ on an own key.
+    const upload = PLANNED_TASK_COSTS.find((task) => task.id === 'upload')
+    if (upload === undefined) throw new Error('no upload task')
+    const cost = plannedTaskCost(upload, 'ownKey')
+    expect(cost).toBeGreaterThan(0.15 * 0.7)
+    expect(cost).toBeLessThan(0.15 * 1.3)
+    expect(PLANNED_COST_NOTES.some((row) => row.id === 'notesSuggest.v4')).toBe(true)
   })
 
   it('renders both planned tables into the registry', () => {

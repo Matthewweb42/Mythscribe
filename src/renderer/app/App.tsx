@@ -95,6 +95,7 @@ import { CategoryCreateDialog } from '@renderer/features/entities/CategoryCreate
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { EntityImportDialog } from '@renderer/features/entities/EntityImportDialog'
 import { ContextUploadDialog } from '@renderer/features/library/ContextUploadDialog'
+import { FilingDialog } from '@renderer/features/research/FilingDialog'
 import { SideWorkBar } from '@renderer/features/sideWork/SideWorkStatus'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { DropOverlay } from '@renderer/features/library/DropOverlay'
@@ -103,6 +104,8 @@ import { currentStoryMemory, useStoryMemory } from '@renderer/features/project/s
 import { usePageStore } from '@renderer/features/research/pageStore'
 import { ResearchPage } from '@renderer/features/research/ResearchPage'
 import { useResearchStore } from '@renderer/features/research/researchStore'
+import { useFilingStore } from '@renderer/features/research/filingStore'
+import { useFiledConflictStore } from '@renderer/features/thisScene/filedConflictStore'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { EditPassReport } from '@renderer/features/editPass/EditPassReport'
 import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
@@ -346,6 +349,9 @@ export function App(): React.JSX.Element {
       useAuthorTodoStore.getState().clear()
       useDismissedStore.getState().clear()
       useRenameStore.getState().clear()
+      // F-16.9: and a filing under way and the filed-line conflicts.
+      useFilingStore.getState().clear()
+      useFiledConflictStore.getState().clear()
       useFactStore.getState().clear()
       // F-9.13: the Changes log belongs to the project that closed.
       useChangesStore.getState().clear()
@@ -446,6 +452,8 @@ export function App(): React.JSX.Element {
       useAuthorTodoStore.getState().load().catch(failed)
       useDismissedStore.getState().subscribe()
       useDismissedStore.getState().load().catch(failed)
+      // F-16.9: the filed lines whose Research source changed.
+      useFiledConflictStore.getState().load().catch(failed)
     }
     useEditorSettingsStore
       .getState()
@@ -1120,6 +1128,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <EntityImportDialog />
       {/* F-9.8: the context library's estimate; the pass and its review are side work. */}
       <ContextUploadDialog />
+      {/* F-16.9: filing a Research page into Pinned (story memory v2; empty until one starts). */}
+      <FilingDialog />
       {/* F-9.8: files dropped anywhere on the window go to the Library (Research in v2, F-16.8). */}
       <DropOverlay />
       {/* F-10.1: the project search, open while the search store says so. */}

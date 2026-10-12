@@ -56,14 +56,28 @@ const STEER: readonly { kind: Exclude<LabelKind, 'custom'>; heading: string }[] 
   { kind: 'theme', heading: 'Themes (keep in view):' }
 ]
 
+/** One steering line before it is joined: its heading and the scene's label names of that kind. */
+export interface LabelSteerPart {
+  heading: string
+  names: string[]
+}
+
+/**
+ * The parts of `labelSteerLines`, for a caller that must cut a long line to a budget (the Story
+ * notes block): Tone, Content, Themes, each only when the scene has such a label.
+ */
+export function labelSteerParts(labels: readonly Pick<Label, 'name' | 'kind'>[]): LabelSteerPart[] {
+  return STEER.flatMap(({ kind, heading }) => {
+    const names = labels.filter((label) => label.kind === kind).map((label) => label.name)
+    return names.length === 0 ? [] : [{ heading, names }]
+  })
+}
+
 /**
  * The scene's steering lines for the Story notes block (P1 slice 5): `Tone (write in it): a, b`,
  * then Content, then Themes, each only when the scene has such a label, names in the order given.
  * Custom labels are left out (decision P1-D6).
  */
 export function labelSteerLines(labels: readonly Pick<Label, 'name' | 'kind'>[]): string[] {
-  return STEER.flatMap(({ kind, heading }) => {
-    const names = labels.filter((label) => label.kind === kind).map((label) => label.name)
-    return names.length === 0 ? [] : [`${heading} ${names.join(', ')}`]
-  })
+  return labelSteerParts(labels).map(({ heading, names }) => `${heading} ${names.join(', ')}`)
 }

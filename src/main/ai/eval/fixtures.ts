@@ -402,6 +402,63 @@ import { buildAgentPromptV2, type BuildAgentPromptV2Input } from '../prompts/age
 import { buildAgentPromptV3, type BuildAgentPromptV3Input } from '../prompts/agent.v3'
 import { buildContinuityPromptV2, continuityRefLineV2 } from '../prompts/continuity.v2'
 import { buildWhatNextPromptV3, type BuildWhatNextPromptV3Input } from '../prompts/whatNext.v3'
+import {
+  buildGhostTextPromptV5,
+  GHOST_PROMPT_V5_VERSION,
+  type BuildGhostTextPromptV5Input
+} from '../prompts/ghostText.v5'
+import {
+  buildGhostTextRegenPromptV5,
+  GHOST_REGEN_PROMPT_V5_VERSION
+} from '../prompts/ghostTextRegen.v5'
+import {
+  buildRewritePromptV5,
+  REWRITE_PROMPT_V5_VERSION,
+  type BuildRewritePromptV5Input
+} from '../prompts/rewrite.v5'
+import {
+  buildRewriteRegenPromptV5,
+  REWRITE_REGEN_PROMPT_V5_VERSION
+} from '../prompts/rewriteRegen.v5'
+import {
+  buildChatPromptV6,
+  CHAT_PROMPT_V6_VERSION,
+  type BuildChatPromptV6Input
+} from '../prompts/chat.v6'
+import { buildChatRegenPromptV6, CHAT_REGEN_PROMPT_V6_VERSION } from '../prompts/chatRegen.v6'
+import {
+  buildCritiquePromptV4,
+  CRITIQUE_PROMPT_V4_VERSION,
+  type BuildCritiquePromptV4Input
+} from '../prompts/critique.v4'
+import {
+  buildCritiqueRegenPromptV4,
+  CRITIQUE_REGEN_PROMPT_V4_VERSION
+} from '../prompts/critiqueRegen.v4'
+import {
+  buildEditPassPromptV3,
+  EDIT_PASS_PROMPT_V3_VERSION,
+  type BuildEditPassPromptV3Input
+} from '../prompts/editPass.v3'
+import { buildWhatNextPromptV4, type BuildWhatNextPromptV4Input } from '../prompts/whatNext.v4'
+import {
+  buildNotesSuggestPromptV3,
+  type BuildNotesSuggestPromptV3Input
+} from '../prompts/notesSuggest.v3'
+import {
+  buildContextImportPromptV3,
+  CONTEXT_IMPORT_PROMPT_V3_VERSION,
+  type BuildContextImportPromptV3Input
+} from '../prompts/contextImport.v3'
+import { buildReviewChatPromptV3, REVIEW_CHAT_PROMPT_V3_VERSION } from '../prompts/reviewChat.v3'
+import { filingChunks, planFiling, type FilingReview } from '@shared/filing'
+import {
+  FIXTURE_GHOST_STORY_NOTES,
+  FIXTURE_STORY_NOTES,
+  MAXED_GHOST_STORY_NOTES,
+  MAXED_STORY_NOTES,
+  STORY_NOTES_NOT_CANON_TEXT
+} from './storyNotesFixture'
 import { buildNotesSuggestPromptV2 } from '../prompts/notesSuggest.v2'
 import { buildPlanLinksPrompt, type BuildPlanLinksPromptInput } from '../prompts/planLinks.v1'
 import { fitAgentPrompt } from '../agent'
@@ -754,6 +811,11 @@ export interface EvalCase {
      * every entity must be of a known kind with a name, and every name in `expected` must be found.
      */
     | { kind: 'contextImport'; expected: string[] }
+    /**
+     * A filing chunk (F-16.9): the answer must parse (`parseFilingAnswer`), every name in
+     * `expected` must be filed, and every line's quote must be in the document as sent.
+     */
+    | { kind: 'filing'; expected: string[]; document: string }
     /**
      * A review chat message (F-9.9): the answer must parse through the feature's own parser with
      * no operation dropped, and hold an operation of each kind in `expected`.
@@ -3458,6 +3520,372 @@ function sheetRefileCase(name: string, note: string, input: BuildSheetRefileProm
 /** The open scene the route.v2 cases (F-5.26) run in. */
 const ROUTE_V2_SCENE = 'scene "The ferry landing"'
 
+// ---------------------------------------------------------------------------------------------
+// F-16.14 (story memory v2 only): the prose versions with the Story notes block in the bible's
+// slot and no separate steer. Every case is built from `storyNotesFixture.ts`, whose records carry
+// Ideas pages and Not canon paragraphs, so the harness can check neither ever reaches a prompt.
+
+/** A v4-shaped ghost input as `ghostText.v5` takes it: the notes in the bible's slot, no steer. */
+function ghostV5(
+  input: BuildGhostTextPromptV4Input,
+  storyNotes: string | null
+): BuildGhostTextPromptV5Input {
+  const { bible: _bible, steer: _steer, ...rest } = input
+  return { ...rest, storyNotes }
+}
+
+function ghostCaseV5(
+  name: string,
+  note: string,
+  input: BuildGhostTextPromptV5Input,
+  violation: string | null
+): EvalCase {
+  const built =
+    violation === null
+      ? buildGhostTextPromptV5(input)
+      : buildGhostTextRegenPromptV5({ ...input, violation })
+  return {
+    version: violation === null ? GHOST_PROMPT_V5_VERSION : GHOST_REGEN_PROMPT_V5_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    temperature: built.temperature,
+    scoring: {
+      kind: 'prose',
+      before: input.before,
+      after: input.after,
+      profile: input.voice === null ? null : FIXTURE_STATS
+    }
+  }
+}
+
+function rewriteV5(
+  input: BuildRewritePromptV3Input,
+  storyNotes: string | null,
+  mood: string | null
+): BuildRewritePromptV5Input {
+  const { bible: _bible, steer: _steer, ...rest } = input
+  return { ...rest, storyNotes, mood }
+}
+
+function rewriteCaseV5(
+  name: string,
+  note: string,
+  input: BuildRewritePromptV5Input,
+  regen: { note: string | null; violation: string | null } | null
+): EvalCase {
+  const built =
+    regen === null ? buildRewritePromptV5(input) : buildRewriteRegenPromptV5({ ...input, ...regen })
+  return {
+    version: regen === null ? REWRITE_PROMPT_V5_VERSION : REWRITE_REGEN_PROMPT_V5_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
+function chatV6(input: BuildChatPromptV5Input, storyNotes: string | null): BuildChatPromptV6Input {
+  const { bible: _bible, steer: _steer, ...rest } = input
+  return { ...rest, storyNotes }
+}
+
+function chatCaseV6(
+  name: string,
+  note: string,
+  given: BuildChatPromptV6Input,
+  violation: string | null
+): EvalCase {
+  // The oldest history turns are dropped until the first prompt fits, as `runChat` drops them.
+  const fits = (candidate: BuildChatPromptV6Input): boolean =>
+    estimateTokens(
+      buildChatPromptV6(candidate)
+        .messages.map((m) => m.content)
+        .join('\n')
+    ) <= inputBudget('chat')
+  let input = given
+  while (input.history.length > 0 && !fits(input)) {
+    input = { ...input, history: input.history.slice(1) }
+  }
+  const built =
+    violation === null ? buildChatPromptV6(input) : buildChatRegenPromptV6({ ...input, violation })
+  return {
+    version: violation === null ? CHAT_PROMPT_V6_VERSION : CHAT_REGEN_PROMPT_V6_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
+function critiqueV4(
+  input: BuildCritiquePromptV3Input,
+  storyNotes: string | null
+): BuildCritiquePromptV4Input {
+  const { bible: _bible, ...rest } = input
+  return { ...rest, storyNotes }
+}
+
+function critiqueCaseV4(
+  name: string,
+  note: string,
+  input: BuildCritiquePromptV4Input,
+  regenNote: string | null | undefined
+): EvalCase {
+  const built =
+    regenNote === undefined
+      ? buildCritiquePromptV4(input)
+      : buildCritiqueRegenPromptV4({ ...input, note: regenNote })
+  return {
+    version:
+      regenNote === undefined ? CRITIQUE_PROMPT_V4_VERSION : CRITIQUE_REGEN_PROMPT_V4_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'critique', sceneText: input.sceneText }
+  }
+}
+
+function editPassCaseV3(
+  name: string,
+  note: string,
+  input: Omit<BuildEditPassPromptV3Input, 'title' | 'part'>
+): EvalCase {
+  const built = buildEditPassPromptV3({
+    ...input,
+    title: 'The Crossing',
+    part: { index: 0, count: 1 }
+  })
+  return {
+    version: EDIT_PASS_PROMPT_V3_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'editPass', type: input.type, text: input.text }
+  }
+}
+
+function whatNextCaseV4(name: string, note: string, input: BuildWhatNextPromptV4Input): EvalCase {
+  const { text } = fitTailToBudget(
+    input.text,
+    inputBudget('whatNext'),
+    (cut) => buildWhatNextPromptV4({ ...input, text: cut }).messages
+  )
+  const built = buildWhatNextPromptV4({ ...input, text })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'whatNext' }
+  }
+}
+
+function notesSuggestCaseV3(
+  name: string,
+  note: string,
+  input: BuildNotesSuggestPromptV3Input
+): EvalCase {
+  const { sceneText } = fitSceneToBudget(
+    input.sceneText,
+    inputBudget('notesSuggest'),
+    (cut) => buildNotesSuggestPromptV3({ ...input, sceneText: cut }).messages,
+    { chars: SCENE_SUGGEST_CHAR_BUDGET, min: SCENE_SUGGEST_TEXT_MIN }
+  )
+  const built = buildNotesSuggestPromptV3({ ...input, sceneText })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'notesSuggest' }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// F-16.9 (story memory v2 only): filing a Research document into Pinned, and its review chat.
+
+/** A Research bestiary page as `markedParagraphs` reads it; one paragraph is marked Not canon. */
+const FILING_PARAGRAPHS = [
+  { index: 0, text: 'Bestiary of the Fens', notCanon: false },
+  {
+    index: 1,
+    text: 'The fen-wight is a pale thing, tall as a heron, that hunts by lantern-light along the dykes.',
+    notCanon: false
+  },
+  {
+    index: 2,
+    text: 'Mara Vell, the ferry captain, has grey eyes and a burn scar across her left hand from the mill fire.',
+    notCanon: false
+  },
+  { index: 3, text: STORY_NOTES_NOT_CANON_TEXT, notCanon: true },
+  {
+    index: 4,
+    text: 'Tomas Harrow keeps the ferry at Gullhaven and owes the mill for the new rope.',
+    notCanon: false
+  }
+]
+const FILING_DOCUMENT = filingChunks(FILING_PARAGRAPHS).join('\n\n')
+
+const FILING_INPUT: BuildContextImportPromptV3Input = {
+  categories: BUILTIN_CATEGORIES,
+  roster: [
+    {
+      category: categoryOf('character'),
+      records: [
+        { name: 'Mara Vell', aliases: ['Mara', 'the Captain'] },
+        { name: 'Tomas Harrow', aliases: ['Tomas'] }
+      ]
+    },
+    { category: categoryOf('setting'), records: [{ name: 'Gullhaven', aliases: [] }] }
+  ],
+  images: ['fen-wight.png'],
+  title: 'Bestiary',
+  part: 1,
+  parts: 1,
+  text: FILING_DOCUMENT
+}
+
+function contextImportCaseV3(
+  name: string,
+  note: string,
+  input: BuildContextImportPromptV3Input,
+  expected: string[]
+): EvalCase {
+  const built = buildContextImportPromptV3(input)
+  return {
+    version: CONTEXT_IMPORT_PROMPT_V3_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'filing', expected, document: input.text }
+  }
+}
+
+/** The filing review the fixture document makes, through the feature's own planner. */
+function filingReview(): FilingReview {
+  const plan = planFiling({
+    records: [
+      {
+        name: 'Fen-Wight',
+        categoryId: 'creature',
+        aliases: ['wight'],
+        lines: [
+          { text: 'Colour: pale', q: 'is a pale thing, tall as a heron' },
+          {
+            text: 'Hunts by lantern-light along the dykes',
+            q: 'hunts by lantern-light along the dykes'
+          }
+        ]
+      },
+      {
+        name: 'Fen Wights',
+        categoryId: 'creature',
+        aliases: [],
+        lines: [{ text: 'Height: tall as a heron', q: 'tall as a heron, that hunts' }]
+      },
+      {
+        name: 'Mara Vell',
+        categoryId: 'character',
+        aliases: ['the ferry captain'],
+        lines: [
+          { text: 'Eyes: grey', q: 'has grey eyes and a burn scar' },
+          { text: 'Scar: burn across her left hand', q: 'a burn scar across her left hand' }
+        ]
+      }
+    ],
+    paragraphs: FILING_PARAGRAPHS,
+    roster: [
+      {
+        id: 'r-mara',
+        name: 'Mara Vell',
+        categoryId: 'character',
+        names: [{ text: 'Mara Vell', shared: false }],
+        pinned: [{ index: 0, text: 'Eyes: green' }],
+        hasImage: false
+      }
+    ],
+    dismissedNames: [],
+    dismissedAliases: new Set(),
+    images: [{ nodeId: 'img-1', name: 'fen-wight.png' }],
+    imageHints: [{ file: 'fen-wight.png', name: 'Fen-Wight' }]
+  })
+  return {
+    docId: 'n-bestiary',
+    docTitle: 'Bestiary',
+    docHash: 'fixture',
+    items: plan.items,
+    categories: [],
+    dropped: plan.dropped,
+    proposalIds: ['p-1'],
+    chunks: 1,
+    usage: { inputTokens: 3200, outputTokens: 900 },
+    costUsd: 0.008,
+    model: 'deepseek/deepseek-v4-pro',
+    promptVersion: CONTEXT_IMPORT_PROMPT_V3_VERSION
+  }
+}
+
+/** The worst listing: as many records as the items budget shows, each with long lines. */
+function maxedFilingReview(): FilingReview {
+  const long = FIXTURE_PASSAGE.repeat(2)
+  const base = filingReview()
+  return {
+    ...base,
+    items: Array.from({ length: 150 }, (_, i) => ({
+      id: `f${i + 1}`,
+      recordId: i % 2 === 0 ? null : `r-${i}`,
+      name: `Record ${i}`,
+      categoryId: 'character',
+      known: [],
+      aliases: [`Alias ${i}`, `Other ${i}`],
+      lines: Array.from({ length: 5 }, (_, j) => ({
+        id: `l${i}-${j}`,
+        text: long.slice(j * 100, j * 100 + 200),
+        quote: long.slice(j * 100, j * 100 + 60),
+        para: 1,
+        kind: j === 0 ? ('conflict' as const) : ('add' as const),
+        replaces: j === 0 ? { index: 0, text: 'x' } : null,
+        use: j !== 0
+      })),
+      sameAs: i % 3 === 0 ? { given: `Rec ${i}`, rule: 'subset' as const } : null,
+      image: null,
+      include: true
+    }))
+  }
+}
+
+function reviewChatCaseV3(
+  name: string,
+  note: string,
+  review: FilingReview,
+  message: string,
+  expected: ReviewOp['op'][]
+): EvalCase {
+  const built = buildReviewChatPromptV3({ review, history: [], message })
+  return {
+    version: REVIEW_CHAT_PROMPT_V3_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'reviewChat', expected }
+  }
+}
+
+/** The case names the Story notes checks look for (`prompts.eval.ts`). */
+export const STORY_NOTES_CASE = 'notes'
+export const STORY_NOTES_GHOST_CASE = 'notes 150'
+
 export const EVAL_CASES: EvalCase[] = [
   ghostCase('fresh', 'no voice block, no notes or metadata, General preset', fresh, null),
   ghostCase(
@@ -5581,5 +6009,280 @@ export const EVAL_CASES: EvalCase[] = [
       selection: FIXTURE_PASSAGE.slice(0, ROUTE_SELECTION_PREVIEW_CHARS)
     },
     'chat'
+  ),
+  // F-16.14: the Story notes block (story memory v2). Per version: the block at 400 (Ideas and
+  // Not canon text in the source, left out), the block at the 150 ghost budget, and the worst.
+  ghostCaseV5(
+    'fresh',
+    'the v4 fresh case in a v2 project with nothing here, named, or labelled',
+    ghostV5(ghostFreshV4, null),
+    null
+  ),
+  ghostCaseV5(
+    STORY_NOTES_GHOST_CASE,
+    'the v4 full case with the Story notes at the 150-token ghost budget in place of the bible and steer (Ideas and Not canon text left out)',
+    ghostV5(ghostFullV4, FIXTURE_GHOST_STORY_NOTES),
+    null
+  ),
+  ghostCaseV5(
+    'maxed',
+    'every cap at its limit, the Story notes filling the ghost budget',
+    ghostV5(ghostMaxedV4, MAXED_GHOST_STORY_NOTES),
+    null
+  ),
+  ghostCaseV5(
+    STORY_NOTES_GHOST_CASE,
+    'the notes case regenerated after a tense violation',
+    ghostV5(ghostFullV4, FIXTURE_GHOST_STORY_NOTES),
+    VIOLATION
+  ),
+  ghostCaseV5(
+    'maxed',
+    'the maxed case regenerated after a tense violation',
+    ghostV5(ghostMaxedV4, MAXED_GHOST_STORY_NOTES),
+    VIOLATION
+  ),
+  rewriteCaseV5(
+    STORY_NOTES_CASE,
+    "the v4 full case with the Story notes at 400 in place of the bible and steer, and the scene's mood (Ideas and Not canon text left out)",
+    rewriteV5(rewriteFullV3, FIXTURE_STORY_NOTES, FIXTURE_MOOD),
+    null
+  ),
+  rewriteCaseV5(
+    STORY_NOTES_GHOST_CASE,
+    "the full case with a crowded scene's Story notes cut to the 150-token budget",
+    rewriteV5(rewriteFullV3, MAXED_GHOST_STORY_NOTES, FIXTURE_MOOD),
+    null
+  ),
+  rewriteCaseV5(
+    'maxed',
+    'every cap at its limit, the Story notes filling their budget',
+    rewriteV5(rewriteMaxedV3, MAXED_STORY_NOTES, MAXED_MOOD),
+    null
+  ),
+  rewriteCaseV5(
+    'maxed both',
+    'the maxed case regenerated with an author note and a tense violation',
+    rewriteV5(rewriteMaxedV3, MAXED_STORY_NOTES, MAXED_MOOD),
+    { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: VIOLATION }
+  ),
+  chatCaseV6(
+    'plan fresh',
+    'the v5 plan fresh case with no Story notes',
+    chatV6(planFreshV5, null),
+    null
+  ),
+  chatCaseV6(
+    STORY_NOTES_CASE,
+    'the v5 plan full case with the Story notes at 400 (Ideas and Not canon text left out)',
+    chatV6(planFullV5, FIXTURE_STORY_NOTES),
+    null
+  ),
+  chatCaseV6(
+    STORY_NOTES_GHOST_CASE,
+    "the v5 agent full case with a crowded scene's Story notes cut to the 150-token budget",
+    chatV6(agentFullV5, MAXED_GHOST_STORY_NOTES),
+    null
+  ),
+  chatCaseV6(
+    'agent maxed',
+    'every cap at its limit, the Story notes filling their budget, the oldest history turns dropped to fit',
+    chatV6(agentMaxedV5, MAXED_STORY_NOTES),
+    null
+  ),
+  chatCaseV6(
+    'agent notes',
+    'the agent case with the Story notes at 400, regenerated after a tense violation',
+    chatV6(agentFullV5, FIXTURE_STORY_NOTES),
+    VIOLATION
+  ),
+  chatCaseV6(
+    'agent maxed',
+    'the agent maxed case regenerated after a tense violation',
+    chatV6(agentMaxedV5, MAXED_STORY_NOTES),
+    VIOLATION
+  ),
+  critiqueCaseV4(
+    STORY_NOTES_CASE,
+    'the v3 full case with the Story notes at 400 in place of the bible (Ideas and Not canon text left out)',
+    critiqueV4(critiqueFullV3, FIXTURE_STORY_NOTES),
+    undefined
+  ),
+  critiqueCaseV4(
+    STORY_NOTES_GHOST_CASE,
+    "the full case with a crowded scene's Story notes cut to the 150-token budget",
+    critiqueV4(critiqueFullV3, MAXED_GHOST_STORY_NOTES),
+    undefined
+  ),
+  critiqueCaseV4(
+    'maxed',
+    'every cap at its limit, the Story notes filling their budget',
+    critiqueV4(critiqueMaxedV3, MAXED_STORY_NOTES),
+    undefined
+  ),
+  critiqueCaseV4(
+    'maxed note',
+    'the maxed case regenerated with an author note at the length limit',
+    critiqueV4(critiqueMaxedV3, MAXED_STORY_NOTES),
+    'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  editPassCaseV3(
+    STORY_NOTES_CASE,
+    'a continuity pass over the fixture scene checked against the Story notes at 400 (Ideas and Not canon text left out)',
+    {
+      type: 'continuity',
+      text: EDIT_PASS_PASSAGE,
+      voice: null,
+      keepWords: [],
+      instruction: null,
+      mood: null,
+      storyNotes: FIXTURE_STORY_NOTES
+    }
+  ),
+  editPassCaseV3(
+    STORY_NOTES_GHOST_CASE,
+    "the continuity pass with a crowded scene's Story notes cut to the 150-token budget",
+    {
+      type: 'continuity',
+      text: EDIT_PASS_PASSAGE,
+      voice: null,
+      keepWords: [],
+      instruction: null,
+      mood: null,
+      storyNotes: MAXED_GHOST_STORY_NOTES
+    }
+  ),
+  editPassCaseV3(
+    'continuity maxed',
+    'the worst continuity piece, the Story notes filling their budget',
+    {
+      type: 'continuity',
+      text: EDIT_PASS_MAXED_PIECE,
+      voice: null,
+      keepWords: [],
+      instruction: null,
+      mood: null,
+      storyNotes: MAXED_STORY_NOTES
+    }
+  ),
+  editPassCaseV3(
+    'copy maxed',
+    'the v2 worst copy edit, unchanged in v3 (only the continuity pass carries the notes)',
+    {
+      type: 'copy',
+      text: EDIT_PASS_MAXED_PIECE,
+      voice: voiceBlock(MAXED_PROFILE, { text: EDIT_PASS_PASSAGE, pov: 'Mara' }),
+      keepWords: PROOFREAD_MAXED_KEEP_WORDS,
+      instruction: null,
+      mood: MAXED_MOOD,
+      storyNotes: MAXED_STORY_NOTES
+    }
+  ),
+  whatNextCaseV4(
+    STORY_NOTES_CASE,
+    'the fixture scene with its brief, the Story notes at 400 in place of the bible and steer, and the story map (Ideas and Not canon text left out)',
+    {
+      text: FIXTURE_PASSAGE,
+      brief: BRIEF_BLOCK,
+      storyNotes: FIXTURE_STORY_NOTES,
+      map: STORY_MAP_SMALL
+    }
+  ),
+  whatNextCaseV4(
+    STORY_NOTES_GHOST_CASE,
+    "the same with a crowded scene's Story notes cut to the 150-token budget",
+    {
+      text: FIXTURE_PASSAGE,
+      brief: BRIEF_BLOCK,
+      storyNotes: MAXED_GHOST_STORY_NOTES,
+      map: STORY_MAP_SMALL
+    }
+  ),
+  whatNextCaseV4(
+    'maxed',
+    'the worst input as the fit leaves it: the tail, the brief, the Story notes and the story map at their caps',
+    {
+      text: FIXTURE_PASSAGE.repeat(20),
+      brief: MAXED_BRIEF_BLOCK,
+      storyNotes: MAXED_STORY_NOTES,
+      map: MAXED_STORY_MAP_SMALL
+    }
+  ),
+  notesSuggestCaseV3(
+    STORY_NOTES_CASE,
+    'the fixture scene with its summary, brief, notes, the Story notes at 400, and a focus (Ideas and Not canon text left out)',
+    {
+      sceneText: FIXTURE_PASSAGE,
+      summary: SUGGEST_SUMMARY,
+      brief: BRIEF_BLOCK,
+      notes: NOTES,
+      storyNotes: FIXTURE_STORY_NOTES,
+      instruction: 'What Tomas knows about the ledger.'
+    }
+  ),
+  notesSuggestCaseV3(
+    STORY_NOTES_GHOST_CASE,
+    "the same with a crowded scene's Story notes cut to the 150-token budget",
+    {
+      sceneText: FIXTURE_PASSAGE,
+      summary: SUGGEST_SUMMARY,
+      brief: BRIEF_BLOCK,
+      notes: NOTES,
+      storyNotes: MAXED_GHOST_STORY_NOTES,
+      instruction: 'What Tomas knows about the ledger.'
+    }
+  ),
+  notesSuggestCaseV3(
+    'maxed',
+    'the worst input as the fit leaves it: every block at its cap, the Story notes filling theirs',
+    {
+      sceneText: FIXTURE_PASSAGE.repeat(60),
+      summary: MAXED_SUGGEST_SUMMARY,
+      brief: MAXED_BRIEF_BLOCK,
+      notes: `${FIXTURE_PASSAGE.repeat(2).slice(0, NOTES_SUGGEST_CURRENT_CHARS)}…`,
+      storyNotes: MAXED_STORY_NOTES,
+      instruction: 'i'.repeat(NOTES_SUGGEST_INSTRUCTION_MAX)
+    }
+  ),
+  contextImportCaseV3(
+    'fixture',
+    'a bestiary page with a creature, two known records and a picture; its Not canon paragraph is never sent',
+    FILING_INPUT,
+    ['Fen-Wight', 'Mara Vell']
+  ),
+  contextImportCaseV3(
+    'maxed',
+    'a chunk at the character budget, the roster at its cap and the image names at theirs',
+    {
+      ...FILING_INPUT,
+      roster: [
+        {
+          category: categoryOf('character'),
+          records: Array.from({ length: 400 }, (_, i) => ({
+            name: `Character Number ${i}`,
+            aliases: [`Number ${i}`]
+          }))
+        }
+      ],
+      images: Array.from({ length: CONTEXT_IMAGE_NAMES_MAX + 5 }, (_, i) => `image-${i}.png`),
+      parts: 3,
+      part: 2,
+      text: FIXTURE_PASSAGE.repeat(20).slice(0, CONTEXT_CHUNK_CHARS)
+    },
+    []
+  ),
+  reviewChatCaseV3(
+    'merge',
+    'the fixture filing: merge the two wight items, which the twin gate could not tell apart',
+    filingReview(),
+    'The Fen-Wight and the Fen Wights are the same creature; merge them.',
+    ['merge']
+  ),
+  reviewChatCaseV3(
+    'maxed',
+    'the listing at its character budget, items cut with a count',
+    maxedFilingReview(),
+    'Tidy this up.',
+    []
   )
 ]

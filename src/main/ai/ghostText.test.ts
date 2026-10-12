@@ -40,6 +40,14 @@ import {
 import type { AiRequestDeps } from './request'
 import type { UsageEntry } from './usageStore'
 import { EMPTY_SCENE_BRIEF, emptySceneMeta } from '@shared/sceneMeta'
+import { STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
+import {
+  SEEDED_CANON_LINE,
+  SEEDED_IDEA_TEXT,
+  SEEDED_NOT_CANON_TEXT,
+  SEEDED_TONE,
+  seedStoryNotes
+} from '../memory/storyNotesFixture'
 
 const NOW = new Date(2026, 8, 13, 10, 0, 0)
 type Complete = (request: CompletionRequest) => Promise<CompletionResult>
@@ -68,7 +76,7 @@ function answer(text: string): void {
 }
 
 const ask = (before = BEFORE, after = ''): ReturnType<typeof generateGhostText> =>
-  generateGhostText(db, deps, { nodeId: scene, before, after })
+  generateGhostText(db, deps, { nodeId: scene, before, after, memory: 'v1' })
 
 async function failure(
   input: Parameters<typeof ask> = []
@@ -366,7 +374,7 @@ describe('generateGhostText (F-5.3)', () => {
     expect((await failure(['x'.repeat(GHOST_BEFORE_CHARS + 1)])).code).toBe('VALIDATION')
     expect((await failure([BEFORE, 'y'.repeat(GHOST_AFTER_CHARS + 1)])).code).toBe('VALIDATION')
     await expect(
-      generateGhostText(db, deps, { nodeId: 'nope', before: BEFORE, after: '' })
+      generateGhostText(db, deps, { nodeId: 'nope', before: BEFORE, after: '', memory: 'v1' })
     ).rejects.toMatchObject({ code: 'NOT_FOUND' })
     expect(complete).not.toHaveBeenCalled()
   })
@@ -376,7 +384,8 @@ describe('generateGhostText (F-5.3)', () => {
       nodeId: scene,
       before: BEFORE,
       after: '',
-      requestId: 'g-1'
+      requestId: 'g-1',
+      memory: 'v1'
     })
     expect(complete.mock.calls[0]![0].signal).toBeInstanceOf(AbortSignal)
     expect(inflightCount()).toBe(0)
@@ -390,7 +399,8 @@ describe('generateGhostText (F-5.3)', () => {
       nodeId: scene,
       before: BEFORE,
       after: '',
-      requestId: 'g-1'
+      requestId: 'g-1',
+      memory: 'v1'
     })
     await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1))
     expect(cancelInflight('g-1')).toBe(true)
@@ -506,7 +516,8 @@ describe('generateGhostText fidelity check (F-14.7)', () => {
       nodeId: scene,
       before: BEFORE,
       after: '',
-      requestId: 'g-1'
+      requestId: 'g-1',
+      memory: 'v1'
     })
     await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(2))
     expect(complete.mock.calls[1]![0].signal).toBeInstanceOf(AbortSignal)
@@ -666,5 +677,45 @@ describe('postProcessGhostText', () => {
     expect(postProcessGhostText('Rain followed.', 'It ended.', ' Then silence.')).toBe(
       ' Rain followed.'
     )
+  })
+})
+
+describe('generateGhostText in story memory v2 (F-16.14)', () => {
+  it('v1 sends ghostText.v4 with the bible; v2 sends ghostText.v5 with the Story notes, no bible or steer', async () => {
+    seedStoryNotes(db, scene, NOW)
+    const tag = createTag(db, { name: 'tense', category: 'tone', color: '#112233' })
+    addDocumentTag(db, scene, tag.id)
+
+    const v1 = await generateGhostText(db, deps, {
+      nodeId: scene,
+      before: BEFORE,
+      after: '',
+      memory: 'v1'
+    })
+    expect(v1.promptVersion).toBe('ghostText.v4')
+    const v1System = complete.mock.calls[0]![0].messages[0]?.content ?? ''
+    expect(v1System).toContain(STORY_BIBLE_HEADING)
+    expect(v1System).not.toContain(STORY_NOTES_HEADING)
+    expect(complete.mock.calls[0]![0].messages[1]?.content).toContain(SCENE_STEER_HEADING)
+
+    const v2 = await generateGhostText(db, deps, {
+      nodeId: scene,
+      before: BEFORE,
+      after: '',
+      memory: 'v2'
+    })
+    expect(v2.promptVersion).toBe('ghostText.v5')
+    const [system, user] = complete.mock.calls[1]![0].messages.map((m) => m.content)
+    expect(system).toContain(`${STORY_NOTES_HEADING}\nHere: Mara Vell (POV)`)
+    expect(system).toContain(`Mara Vell: ${SEEDED_CANON_LINE}.`)
+    expect(system).toContain(`Tone (write in it): ${SEEDED_TONE}`)
+    expect(system).not.toContain(STORY_BIBLE_HEADING)
+    expect(system).not.toContain(SEEDED_NOT_CANON_TEXT)
+    expect(system).not.toContain(SEEDED_IDEA_TEXT)
+    expect(user).not.toContain(SCENE_STEER_HEADING)
+    // The scene line reads the typed details in v2.
+    expect(user).toContain('Scene: location the quay, POV Mara Vell, timeline dusk.')
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['ghostText.v4', 'ghostText.v5'])
+    expect(ledger[0]!.contextHash).not.toBe(ledger[1]!.contextHash)
   })
 })

@@ -2,9 +2,11 @@ import { promptSceneMeta } from '@shared/sceneMeta'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '@shared/rewrite'
 import { normalizeProposalNote } from '@shared/proposal'
 import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { requireDocument } from '../document/documentStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
+import { buildStoryNotes, typedSceneMeta } from '../memory/storyNotes'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
@@ -17,6 +19,8 @@ import { buildSceneSteer } from './context/sceneSteer'
 import { buildStoryBible } from './context/storyBible'
 import { buildRewritePromptV4, type BuildRewritePromptV4Input } from './prompts/rewrite.v4'
 import { buildRewriteRegenPromptV4 } from './prompts/rewriteRegen.v4'
+import { buildRewritePromptV5, type BuildRewritePromptV5Input } from './prompts/rewrite.v5'
+import { buildRewriteRegenPromptV5 } from './prompts/rewriteRegen.v5'
 import { AiCancelledError } from './providers/types'
 import {
   runAiRequest,
@@ -45,6 +49,12 @@ export interface RewriteInput {
    * without one; then the request cannot be stopped.
    */
   requestId?: string
+  /**
+   * F-16.4: the open project's story memory. v1 sends `rewrite.v4`/`rewriteRegen.v4` (the story
+   * bible and the steer); v2 sends `rewrite.v5`/`rewriteRegen.v5` (the Story notes block, F-16.14)
+   * with the scene line read from the typed details.
+   */
+  memory: StoryMemoryVersion
 }
 
 /** The same shape a chat answer has, so the renderer's handling of the two is shared. */
@@ -99,12 +109,19 @@ export async function runRewrite(
   requireDocument(db, input.nodeId)
 
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
-  const meta = promptSceneMeta(sceneMeta)
+  const v2 = input.memory === 'v2'
+  const meta = v2 ? typedSceneMeta(db, input.nodeId, sceneMeta) : promptSceneMeta(sceneMeta)
   const pov = sceneMeta.pov.trim()
   const profile = buildVoiceProfile(db, { pov: pov || undefined })
   const voice = voiceBlock(profile, { text: input.text, pov: pov || null })
-  const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
-  const steer = buildSceneSteer(db, input.nodeId)
+  // F-16.14: v2 carries the Story notes block in the bible's slot and no separate steer.
+  const storyNotes = v2
+    ? buildStoryNotes(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+    : null
+  const bible = v2
+    ? null
+    : buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+  const steer = v2 ? null : buildSceneSteer(db, input.nodeId)
   // F-5.6: the scene's mood and theme from its last reading, so the rewrite stays in line with them.
   const mood = buildSceneMood(db, input.nodeId)
 
@@ -118,12 +135,25 @@ export async function runRewrite(
     steer,
     mood
   }
+  const baseV5: BuildRewritePromptV5Input = {
+    text: input.text,
+    before: input.before,
+    after: input.after,
+    meta,
+    voice,
+    storyNotes,
+    mood
+  }
   const note = normalizeProposalNote(input.note)
   const regeneratedFrom = input.regeneratedFrom ?? null
   const authorRegenerate = note !== null || regeneratedFrom !== null
-  const prompt = authorRegenerate
-    ? buildRewriteRegenPromptV4({ ...base, note, violation: null })
-    : buildRewritePromptV4(base)
+  const prompt = v2
+    ? authorRegenerate
+      ? buildRewriteRegenPromptV5({ ...baseV5, note, violation: null })
+      : buildRewritePromptV5(baseV5)
+    : authorRegenerate
+      ? buildRewriteRegenPromptV4({ ...base, note, violation: null })
+      : buildRewritePromptV4(base)
   const hashed = {
     text: input.text,
     before: input.before,
@@ -131,6 +161,7 @@ export async function runRewrite(
     meta,
     bible,
     steer,
+    ...(v2 ? { storyNotes } : {}),
     mood,
     note,
     regeneratedFrom: authorRegenerate ? regeneratedFrom : null,
@@ -164,7 +195,9 @@ export async function runRewrite(
   const violation = checkChatFidelity(profile.stats, firstText, banned)[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
-  const regen = buildRewriteRegenPromptV4({ ...base, note, violation: violation.message })
+  const regen = v2
+    ? buildRewriteRegenPromptV5({ ...baseV5, note, violation: violation.message })
+    : buildRewriteRegenPromptV4({ ...base, note, violation: violation.message })
   const flaggedFirst: RewriteResult = {
     ...shown(first, firstText, prompt.version),
     flagged: true,

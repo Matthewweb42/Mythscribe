@@ -27,7 +27,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     callsPerUse: 1,
     typicalOutTokens: 40,
     ideas:
-      'The most frequent call: keep the caret window small; stable prefix for provider caching; consider a smaller/faster model; skip when the author is deleting.'
+      'The most frequent call: keep the caret window small; stable prefix for provider caching; consider a smaller/faster model; skip when the author is deleting. Story memory v2 (F-16.14) sends ghostText.v5: the Story notes block in the bible’s slot within the same 150-token ghost budget and no separate scene steer (the labels are in the block), so a v2 request is a little smaller than v4 (fixtures: 960 vs 1,024 tokens typical, 1,963 vs 2,085 worst).'
   },
   tags: {
     trigger: 'on request',
@@ -46,14 +46,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   chat: {
     trigger: 'on request',
-    when: 'Plan-mode brainstorming and Author-mode drafting from the chat.',
+    when: 'Plan-mode brainstorming and Author-mode drafting from the chat. Story memory v2 (F-16.14) sends chat.v6: the Story notes block (400-token budget) in the bible’s slot, no separate steer; a little smaller than chat.v5 (fixtures: 708 vs 749 tokens for Plan, 1,264 vs 1,350 for Author), and the worst case fills the same 8,000-token budget.',
     callsPerUse: 1,
     typicalOutTokens: 400,
     ideas: 'Trim history turns sooner; keep the voice block only where prose is written.'
   },
   authorMode: {
     trigger: 'on request',
-    when: 'Author-mode placement (shares the chat prompt; no prompt of its own).',
+    when: 'Author-mode placement (shares the chat prompt: chat.v5, or chat.v6 with the Story notes block in story memory v2; no prompt of its own).',
     callsPerUse: 0,
     typicalOutTokens: 0,
     ideas: 'Folded into chat/agent drafting; candidate for removal from the feature list.'
@@ -68,7 +68,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   critique: {
     trigger: 'on request',
-    when: "Editor's notes on one scene.",
+    when: "Editor's notes on one scene. Story memory v2 (F-16.14) sends critique.v4: the Story notes block (400-token budget) in the bible's slot; about 40 tokens less than v3 (fixtures: 1,223 vs 1,264 typical, 7,001 vs 7,025 worst).",
     callsPerUse: 1,
     typicalOutTokens: 900,
     ideas: 'Long scenes are head-truncated; split very long scenes instead of truncating.'
@@ -86,7 +86,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     callsPerUse: 1,
     typicalOutTokens: 250,
     ideas:
-      'Strong tier since 2026-10-10 (author: voice matters more than cost here); on an OpenAI key that is about 3x the fast tier, on the OpenRouter defaults about the same. Answer length tracks the selection: set max_tokens from the selection size. rewrite.v4 adds the scene mood and theme (about 25 input tokens, from the stored reading, no extra call).'
+      'Strong tier since 2026-10-10 (author: voice matters more than cost here); on an OpenAI key that is about 3x the fast tier, on the OpenRouter defaults about the same. Answer length tracks the selection: set max_tokens from the selection size. rewrite.v4 adds the scene mood and theme (about 25 input tokens, from the stored reading, no extra call). Story memory v2 (F-16.14) sends rewrite.v5: the Story notes block (400-token budget) in the bible’s slot and no separate steer; about 100 tokens less than v4 (fixtures: 841 vs 936 typical, 2,659 vs 2,802 worst).'
   },
   brief: {
     trigger: 'on request',
@@ -127,7 +127,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   whatNext: {
     trigger: 'on request',
-    when: 'What should come next? Three directions for the scene.',
+    when: 'What should come next? Three directions for the scene. Story memory v2 (F-16.14) sends whatNext.v4: the Story notes block in the bible’s slot, no separate steer; about 100 tokens less than v3 (fixtures: 968 vs 1,079 typical, 2,885 vs 3,027 worst).',
     callsPerUse: 1,
     typicalOutTokens: 200,
     ideas: 'Cheap already; cache per caret context.'
@@ -149,7 +149,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   notesSuggest: {
     trigger: 'on request',
-    when: 'Suggest key points for a scene’s notes.',
+    when: 'Suggest key points for a scene’s notes. Story memory v2 (F-16.14) sends notesSuggest.v3: the Story notes block in the bible’s slot; about 60 tokens less than v2 (fixtures: 903 vs 961 typical, 4,774 vs 4,798 worst).',
     callsPerUse: 1,
     typicalOutTokens: 300,
     ideas: 'Share context building with synopsis; one call could answer both.'
@@ -167,7 +167,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     callsPerUse: 60,
     typicalOutTokens: 1500,
     ideas:
-      'The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading).'
+      'The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading). Story memory v2 (F-16.14) sends editPass.v3: a continuity piece is checked against the Story notes block (up to 400 tokens) instead of the sheet references (worst continuity piece 3,629 vs 4,692 tokens); every other pass type is v2’s messages, so its cost is unchanged.'
   },
   agent: {
     trigger: 'every chat message',
@@ -179,10 +179,11 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   contextImport: {
     trigger: 'on request',
-    when: 'Sorting uploaded worldbuilding files: one request per ~8,000-character piece.',
+    when: 'Sorting uploaded worldbuilding files: one request per ~8,000-character piece (contextImport.v2, story memory v1). Story memory v2 (F-16.9) files a Research page into Pinned instead (contextImport.v3): once per page, after the estimate, one request per ~8,000 characters of its canon text, strong tier with reasoning off; about 3,200 tokens in and 1,500 out per chunk, so a 20,000-word page is ~14 requests, about 15¢ on an own key.',
     callsPerUse: 10,
     typicalOutTokens: 1500,
-    ideas: 'Fast tier for simple lists; skip unchanged files (already); batch API.'
+    ideas:
+      'Fast tier for simple lists; skip unchanged files (already); batch API. Filing (v3): a smaller chunk for dense pages if the ledger shows cut-offs; skip paragraphs that only restate what Pinned says (a local pre-check).'
   },
   planLinks: {
     trigger: 'background',
@@ -218,7 +219,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   reviewChat: {
     trigger: 'on request',
-    when: 'A message on the upload review screen that changes the pending plan.',
+    when: 'A message on the upload review screen that changes the pending plan (reviewChat.v2, story memory v1). Story memory v2 (F-16.9): a message on the filing review (reviewChat.v3), strong tier with reasoning off; a little smaller than v2 (fixtures: 580 vs 670 tokens typical, 3,909 vs 5,618 worst).',
     callsPerUse: 1,
     typicalOutTokens: 300,
     ideas: 'Send a compact review summary instead of every record.'
@@ -344,14 +345,14 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     callsPerUse: 1
   },
   {
-    id: 'notesSuggest.v3',
-    prompt: 'notesSuggest.v3',
+    id: 'notesSuggest.v4',
+    prompt: 'notesSuggest.v4',
     feature: 'notesSuggest',
     existing: true,
     phase: 'P2a',
     tier: 'fast',
     trigger: 'on request',
-    when: 'Suggest key points for the notes, re-pointed to the scene card; priced like notesSuggest.v2.',
+    when: 'Suggest key points for the notes, re-pointed to the scene card (P1 shipped notesSuggest.v3, the Story notes heading; decision P1-D7); priced like notesSuggest.v2.',
     typicalInTokens: 961,
     typicalOutTokens: 300,
     callsPerUse: 1
@@ -406,32 +407,6 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     when: 'Plan links applied automatically after a scene settles (decision 2).',
     typicalInTokens: 1_500,
     typicalOutTokens: 100,
-    callsPerUse: 1
-  },
-  {
-    id: 'contextImport.v3',
-    prompt: 'contextImport.v3',
-    feature: 'contextImport',
-    existing: true,
-    phase: 'P1',
-    tier: 'strong',
-    trigger: 'on request',
-    when: 'Filing an upload into Pinned, once, one request per chunk, reasoning off (decision 6).',
-    typicalInTokens: 3_200,
-    typicalOutTokens: 1_500,
-    callsPerUse: 1
-  },
-  {
-    id: 'reviewChat.v3',
-    prompt: 'reviewChat.v3',
-    feature: 'reviewChat',
-    existing: true,
-    phase: 'P1',
-    tier: 'strong',
-    trigger: 'on request',
-    when: 'A message on the upload review that changes what is filed into Pinned; priced like reviewChat.v2.',
-    typicalInTokens: 676,
-    typicalOutTokens: 300,
     callsPerUse: 1
   },
   {
@@ -549,6 +524,41 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     when: 'A what-if written out as a scene Version (P5), never read into memory.',
     typicalInTokens: 7_000,
     typicalOutTokens: 1_500,
+    callsPerUse: 1
+  }
+]
+
+/**
+ * The story-memory rows that have shipped (F-16.9, P1 slice 5): their features' notes are in
+ * `AI_COST_NOTES` now (the registry's per-feature table shows them), and these rows keep the
+ * design's sizes so the planned tasks that run them ("File a 20,000-word upload, once") stay
+ * priced from the same figures.
+ */
+export const SHIPPED_PLAN_ROWS: readonly PlannedCostNote[] = [
+  {
+    id: 'contextImport.v3',
+    prompt: 'contextImport.v3',
+    feature: 'contextImport',
+    existing: true,
+    phase: 'P1',
+    tier: 'strong',
+    trigger: 'on request',
+    when: 'Filing an upload into Pinned, once, one request per chunk, reasoning off (decision 6).',
+    typicalInTokens: 3_200,
+    typicalOutTokens: 1_500,
+    callsPerUse: 1
+  },
+  {
+    id: 'reviewChat.v3',
+    prompt: 'reviewChat.v3',
+    feature: 'reviewChat',
+    existing: true,
+    phase: 'P1',
+    tier: 'strong',
+    trigger: 'on request',
+    when: 'A message on the upload review that changes what is filed into Pinned; priced like reviewChat.v2.',
+    typicalInTokens: 676,
+    typicalOutTokens: 300,
     callsPerUse: 1
   }
 ]

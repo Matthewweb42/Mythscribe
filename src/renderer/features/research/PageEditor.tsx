@@ -4,6 +4,7 @@ import { Placeholder } from '@tiptap/extensions'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { useCanWrite } from '@renderer/features/account/appAccessStore'
 import { buildPageExtensions, EDITOR_CORE_OPTIONS } from '@renderer/features/editor/extensions'
+import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { pageKey, usePageStore, type PageOwner } from './pageStore'
@@ -92,7 +93,9 @@ function PageInstance({
     () => [
       ...buildPageExtensions({
         sceneBreak: PAGE_SCENE_BREAK,
-        onSave: () => void usePageStore.getState().saveNow()
+        onSave: () => void usePageStore.getState().saveNow(),
+        // F-16.9: a filed Pinned line names the Research page it came from.
+        filedTitle: (docId) => useTreeStore.getState().byId[docId]?.title ?? null
       }),
       Placeholder.configure({ placeholder })
     ],

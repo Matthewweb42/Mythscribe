@@ -16,29 +16,29 @@ git history of this file is the log of each feature's cost over time (author req
 
 | Feature | What | Trigger | Prompt | Tier | In typical / worst | Out typical / cap | Own key (OpenRouter) typical · worst | Hosted typical | OpenAI typical | Calls per use | Typical per use (own key) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ghostText` | Ghost text | while typing | ghostText.v4 | fast | 1024 / 2085 | 40 / 60 | $0.000155 · $0.000309 | $0.000193 | $0.000948 | 1 | $0.000155 |
+| `ghostText` | Ghost text | while typing | ghostText.v5 | fast | 960 / 1963 | 40 / 60 | $0.000146 · $0.000292 | $0.000182 | $0.000900 | 1 | $0.000146 |
 | `tags` | Tag suggestions | on request | tags.v1 | fast | 1204 / 1913 | 80 / 200 | $0.000191 · $0.000324 | $0.000239 | $0.00126 | 1 | $0.000191 |
 | `summary` | Scene summaries, story bible, and tags | background | summary.v5 | fast | 1150 / 6512 | 600 / 1000 | $0.000329 · $0.00119 | $0.000411 | $0.00356 | 1 | $0.000329 |
-| `chat` | Assistant chat | on request | chat.v5 | fast | 1050 / 7782 | 400 / 1200 | $0.000259 · $0.00143 | $0.000324 | $0.00259 | 1 | $0.000259 |
+| `chat` | Assistant chat | on request | chat.v6 | fast | 986 / 7940 | 400 / 1200 | $0.000250 · $0.00145 | $0.000313 | $0.00254 | 1 | $0.000250 |
 | `authorMode` | Author mode | on request | — | — | 0 / 8000 | 0 / 150 | $0 · $0.00116 | $0 | $0 | 0 | $0 |
 | `query` | Story Intelligence | on request | query.v4 | strong | 1587 / 11711 | 300 / 600 | $0.00381 · $0.0225 | $0.00476 | $0.00847 | 1 | $0.00381 |
-| `critique` | Editor's notes | on request | critique.v3 | strong | 1264 / 7025 | 900 / 1500 | $0.00533 · $0.0174 | $0.00666 | $0.0167 | 1 | $0.00533 |
+| `critique` | Editor's notes | on request | critique.v4 | strong | 1231 / 7001 | 900 / 1500 | $0.00527 · $0.0174 | $0.00659 | $0.0166 | 1 | $0.00527 |
 | `embeddings` | Search indexing | background | — | — | 0 / 8000 | 0 / 150 | $0 · $0.00116 | $0 | $0 | 0 | $0 |
-| `rewrite` | Rewrite in my voice | on request | rewrite.v4 | strong | 936 / 2802 | 250 / 1500 | $0.00250 · $0.0101 | $0.00312 | $0.00609 | 1 | $0.00250 |
+| `rewrite` | Rewrite in my voice | on request | rewrite.v5 | strong | 849 / 2659 | 250 / 1500 | $0.00235 · $0.00985 | $0.00293 | $0.00587 | 1 | $0.00235 |
 | `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000448 · $0.000813 | $0.000560 | $0.00276 | 1 | $0.000448 |
 | `betaReader` | Beta reader | on request | betaReader.v1 | strong | 673 / 11599 | 700 / 1200 | $0.00361 · $0.0244 | $0.00451 | $0.0122 | 1 | $0.00361 |
 | `importStructure` | Import structure detection | on request | importStructure.v1 | fast | 2428 / 4178 | 150 / 400 | $0.000382 · $0.000697 | $0.000477 | $0.00250 | 40 | $0.0153 |
 | `continuity` | Consistency check | background | continuity.v2 | strong | 1334 / 5702 | 300 / 800 | $0.00337 · $0.0127 | $0.00421 | $0.00783 | 1 | $0.00337 |
 | `proofread` | Proofread | on request | proofread.v1 | fast | 1055 / 7578 | 600 / 2000 | $0.000316 · $0.00162 | $0.000395 | $0.00349 | 1 | $0.000316 |
-| `whatNext` | What comes next | on request | whatNext.v3 | fast | 1079 / 3027 | 200 / 300 | $0.000207 · $0.000508 | $0.000259 | $0.00171 | 1 | $0.000207 |
+| `whatNext` | What comes next | on request | whatNext.v4 | fast | 976 / 2885 | 200 / 300 | $0.000193 · $0.000488 | $0.000241 | $0.00163 | 1 | $0.000193 |
 | `route` | Assistant routing | every chat message | route.v2 | fast | 508 / 981 | 40 / 120 | $0.0000823 · $0.000171 | $0.000103 | $0.000561 | 1 | $0.0000823 |
 | `synopsis` | Synopsis suggestions | on request | synopsis.v1 | fast | 495 / 3400 | 120 / 350 | $0.000103 · $0.000574 | $0.000129 | $0.000911 | 1 | $0.000103 |
-| `notesSuggest` | Notes suggestions | on request | notesSuggest.v2 | fast | 961 / 4798 | 300 / 600 | $0.000219 · $0.000840 | $0.000273 | $0.00207 | 1 | $0.000219 |
+| `notesSuggest` | Notes suggestions | on request | notesSuggest.v3 | fast | 911 / 4774 | 300 / 600 | $0.000212 · $0.000836 | $0.000264 | $0.00203 | 1 | $0.000212 |
 | `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000237 · $0.000373 | $0.000296 | $0.00202 | 1 | $0.000237 |
-| `editPass` | Edit passes | on request | editPass.v2 | strong | 912 / 5161 | 1500 / 4000 | $0.00681 · $0.0229 | $0.00851 | $0.0248 | 60 | $0.408 |
+| `editPass` | Edit passes | on request | editPass.v3 | strong | 2186 / 5161 | 1500 / 4000 | $0.00902 · $0.0229 | $0.0113 | $0.0280 | 60 | $0.541 |
 | `agent` | Assistant lookups and edits | every chat message | agent.v8 | strong | 2487 / 10684 | 300 / 3000 | $0.00537 · $0.0290 | $0.00671 | $0.0107 | 3 | $0.0161 |
-| `contextImport` | Context library sorting | on request | contextImport.v2 | strong | 884 / 3490 | 1500 / 6000 | $0.00676 · $0.0270 | $0.00845 | $0.0247 | 10 | $0.0676 |
-| `reviewChat` | Upload review chat | on request | reviewChat.v2 | strong | 676 / 5618 | 300 / 3000 | $0.00222 · $0.0202 | $0.00278 | $0.00619 | 1 | $0.00222 |
+| `contextImport` | Context library sorting | on request | contextImport.v3 | strong | 2407 / 4176 | 1500 / 6000 | $0.00941 · $0.0281 | $0.0118 | $0.0285 | 10 | $0.0941 |
+| `reviewChat` | Upload review chat | on request | reviewChat.v3 | strong | 2245 / 3909 | 300 / 3000 | $0.00495 · $0.0172 | $0.00619 | $0.0101 | 1 | $0.00495 |
 | `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000474 · $0.000942 | $0.000593 | $0.00299 | 1 | $0.000474 |
 | `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00865 · $0.0319 | $0.0108 | $0.0244 | 4 | $0.0346 |
 | `todo` | To do list: gaps and suggestions | on request | todo.v1 | fast | 415 / 9965 | 600 / 1200 | $0.000226 · $0.00173 | $0.000283 | $0.00301 | 1 | $0.000226 |
@@ -49,7 +49,7 @@ git history of this file is the log of each feature's cost over time (author req
 ### `ghostText` — Ghost text
 
 - **When:** VibeWrite on: after a pause, at most once per 12 new characters (the first at a spot is free); capped per day.
-- **Ideas:** The most frequent call: keep the caret window small; stable prefix for provider caching; consider a smaller/faster model; skip when the author is deleting.
+- **Ideas:** The most frequent call: keep the caret window small; stable prefix for provider caching; consider a smaller/faster model; skip when the author is deleting. Story memory v2 (F-16.14) sends ghostText.v5: the Story notes block in the bible’s slot within the same 150-token ghost budget and no separate scene steer (the labels are in the block), so a v2 request is a little smaller than v4 (fixtures: 960 vs 1,024 tokens typical, 1,963 vs 2,085 worst).
 
 ### `tags` — Tag suggestions
 
@@ -63,12 +63,12 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `chat` — Assistant chat
 
-- **When:** Plan-mode brainstorming and Author-mode drafting from the chat.
+- **When:** Plan-mode brainstorming and Author-mode drafting from the chat. Story memory v2 (F-16.14) sends chat.v6: the Story notes block (400-token budget) in the bible’s slot, no separate steer; a little smaller than chat.v5 (fixtures: 708 vs 749 tokens for Plan, 1,264 vs 1,350 for Author), and the worst case fills the same 8,000-token budget.
 - **Ideas:** Trim history turns sooner; keep the voice block only where prose is written.
 
 ### `authorMode` — Author mode
 
-- **When:** Author-mode placement (shares the chat prompt; no prompt of its own).
+- **When:** Author-mode placement (shares the chat prompt: chat.v5, or chat.v6 with the Story notes block in story memory v2; no prompt of its own).
 - **Ideas:** Folded into chat/agent drafting; candidate for removal from the feature list.
 
 ### `query` — Story Intelligence
@@ -78,7 +78,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `critique` — Editor's notes
 
-- **When:** Editor's notes on one scene.
+- **When:** Editor's notes on one scene. Story memory v2 (F-16.14) sends critique.v4: the Story notes block (400-token budget) in the bible's slot; about 40 tokens less than v3 (fixtures: 1,223 vs 1,264 typical, 7,001 vs 7,025 worst).
 - **Ideas:** Long scenes are head-truncated; split very long scenes instead of truncating.
 
 ### `embeddings` — Search indexing
@@ -89,7 +89,7 @@ git history of this file is the log of each feature's cost over time (author req
 ### `rewrite` — Rewrite in my voice
 
 - **When:** Rewrite a selection (bubble, chat, or agent edit).
-- **Ideas:** Strong tier since 2026-10-10 (author: voice matters more than cost here); on an OpenAI key that is about 3x the fast tier, on the OpenRouter defaults about the same. Answer length tracks the selection: set max_tokens from the selection size. rewrite.v4 adds the scene mood and theme (about 25 input tokens, from the stored reading, no extra call).
+- **Ideas:** Strong tier since 2026-10-10 (author: voice matters more than cost here); on an OpenAI key that is about 3x the fast tier, on the OpenRouter defaults about the same. Answer length tracks the selection: set max_tokens from the selection size. rewrite.v4 adds the scene mood and theme (about 25 input tokens, from the stored reading, no extra call). Story memory v2 (F-16.14) sends rewrite.v5: the Story notes block (400-token budget) in the bible’s slot and no separate steer; about 100 tokens less than v4 (fixtures: 841 vs 936 typical, 2,659 vs 2,802 worst).
 
 ### `brief` — Scene brief drafts
 
@@ -118,7 +118,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `whatNext` — What comes next
 
-- **When:** What should come next? Three directions for the scene.
+- **When:** What should come next? Three directions for the scene. Story memory v2 (F-16.14) sends whatNext.v4: the Story notes block in the bible’s slot, no separate steer; about 100 tokens less than v3 (fixtures: 968 vs 1,079 typical, 2,885 vs 3,027 worst).
 - **Ideas:** Cheap already; cache per caret context.
 
 ### `route` — Assistant routing
@@ -133,7 +133,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `notesSuggest` — Notes suggestions
 
-- **When:** Suggest key points for a scene’s notes.
+- **When:** Suggest key points for a scene’s notes. Story memory v2 (F-16.14) sends notesSuggest.v3: the Story notes block in the bible’s slot; about 60 tokens less than v2 (fixtures: 903 vs 961 typical, 4,774 vs 4,798 worst).
 - **Ideas:** Share context building with synopsis; one call could answer both.
 
 ### `voiceNotes` — Learned style notes
@@ -144,7 +144,7 @@ git history of this file is the log of each feature's cost over time (author req
 ### `editPass` — Edit passes
 
 - **When:** An Editor-tab pass: one request per scene piece across the chosen scenes. Since F-5.26 also from the chat ("make this scene better", a quick pick, or a specific request), on the selection (one request), the open scene, or a chapter; the chat shows each choice’s estimate first.
-- **Ideas:** The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading).
+- **Ideas:** The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading). Story memory v2 (F-16.14) sends editPass.v3: a continuity piece is checked against the Story notes block (up to 400 tokens) instead of the sheet references (worst continuity piece 3,629 vs 4,692 tokens); every other pass type is v2’s messages, so its cost is unchanged.
 
 ### `agent` — Assistant lookups and edits
 
@@ -153,12 +153,12 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `contextImport` — Context library sorting
 
-- **When:** Sorting uploaded worldbuilding files: one request per ~8,000-character piece.
-- **Ideas:** Fast tier for simple lists; skip unchanged files (already); batch API.
+- **When:** Sorting uploaded worldbuilding files: one request per ~8,000-character piece (contextImport.v2, story memory v1). Story memory v2 (F-16.9) files a Research page into Pinned instead (contextImport.v3): once per page, after the estimate, one request per ~8,000 characters of its canon text, strong tier with reasoning off; about 3,200 tokens in and 1,500 out per chunk, so a 20,000-word page is ~14 requests, about 15¢ on an own key.
+- **Ideas:** Fast tier for simple lists; skip unchanged files (already); batch API. Filing (v3): a smaller chunk for dense pages if the ledger shows cut-offs; skip paragraphs that only restate what Pinned says (a local pre-check).
 
 ### `reviewChat` — Upload review chat
 
-- **When:** A message on the upload review screen that changes the pending plan.
+- **When:** A message on the upload review screen that changes the pending plan (reviewChat.v2, story memory v1). Story memory v2 (F-16.9): a message on the filing review (reviewChat.v3), strong tier with reasoning off; a little smaller than v2 (fixtures: 580 vs 670 tokens typical, 3,909 vs 5,618 worst).
 - **Ideas:** Send a compact review summary instead of every record.
 
 ### `planLinks` — Plan links
@@ -198,13 +198,11 @@ table above when its feature ships. Cached input is not discounted; task totals 
 | `verify.v1:spot` | `verify` | P2a | fast | background | 260 / 15 | $0.0000406 | $0.0000508 | $0.000262 | Spot checks: 50 literal claims per rebuild re-checked on the fast model (sized from design Part 5’s index total). |
 | `reader.v1:card` | `reader` | P2a | fast | background | 4000 / 300 | $0.000644 | $0.000805 | $0.00435 | An instant card that is out of date: one window read for its scene (about one card in five; the rest are local and free). |
 | `synopsis.v2` | `synopsis` (existing) | P2a | fast | on request | 495 / 120 | $0.000103 | $0.000129 | $0.000911 | Suggest a synopsis, re-pointed from the summary to the scene card; priced like synopsis.v1. |
-| `notesSuggest.v3` | `notesSuggest` (existing) | P2a | fast | on request | 961 / 300 | $0.000219 | $0.000273 | $0.00207 | Suggest key points for the notes, re-pointed to the scene card; priced like notesSuggest.v2. |
+| `notesSuggest.v4` | `notesSuggest` (existing) | P2a | fast | on request | 961 / 300 | $0.000219 | $0.000273 | $0.00207 | Suggest key points for the notes, re-pointed to the scene card (P1 shipped notesSuggest.v3, the Story notes heading; decision P1-D7); priced like notesSuggest.v2. |
 | `reader.v2:first` | `reader` | P2b | fast | background | 3800 / 520 | $0.000678 | $0.000847 | $0.00519 | reader.v1:first with knows and thread claims added; replaces it from P2b; priced like it until measured. |
 | `reader.v2:window` | `reader` | P2b | fast | background | 4000 / 300 | $0.000644 | $0.000805 | $0.00435 | reader.v1:window with knows and thread claims added; replaces it from P2b; priced like it until measured. |
 | `verify.v2` | `verify` | P2b | fast | background | 1300 / 110 | $0.000213 | $0.000266 | $0.00147 | verify.v1 with knows and thread claims; replaces it from P2b; priced like it until measured. |
 | `planLinks.v2` | `planLinks` (existing) | P2a | fast | background | 1500 / 100 | $0.000238 | $0.000298 | $0.00158 | Plan links applied automatically after a scene settles (decision 2). |
-| `contextImport.v3` | `contextImport` (existing) | P1 | strong | on request | 3200 / 1500 | $0.0108 | $0.0135 | $0.0305 | Filing an upload into Pinned, once, one request per chunk, reasoning off (decision 6). |
-| `reviewChat.v3` | `reviewChat` (existing) | P1 | strong | on request | 676 / 300 | $0.00222 | $0.00278 | $0.00619 | A message on the upload review that changes what is filed into Pinned; priced like reviewChat.v2. |
 | `navigator.v1` | `navigator` | P3 | fast | every chat message | 6000 / 150 | $0.000882 | $0.00110 | $0.00517 | An open question: up to two steps choosing which passages Ms Scribe reads. |
 | `agent.v9:open` | `agent` (existing) | P3 | strong | every chat message | 6500 / 350 | $0.0125 | $0.0157 | $0.0215 | Ms Scribe answers an open question from the passages the navigator found. |
 | `agent.v9:widened` | `agent` (existing) | P3 | strong | every chat message | 13000 / 400 | $0.0240 | $0.0300 | $0.0385 | An open question the first passages could not answer, widened to more passages (about one question in five). |

@@ -5,6 +5,7 @@ import { LabelPicker } from '@renderer/features/labels/LabelPicker'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
+import { useFilingStore } from './filingStore'
 import { PageEditor } from './PageEditor'
 import { useResearchStore } from './researchStore'
 import { useResearchDoc } from './researchView'
@@ -55,6 +56,7 @@ export function ResearchPage({ nodeId }: { nodeId: string }): React.JSX.Element 
             </button>
           </span>
         ) : null}
+        <FileIntoSheets nodeId={nodeId} />
         <label className="ml-auto flex items-center gap-2 text-xs text-fg-muted">
           <input
             type="checkbox"
@@ -82,5 +84,36 @@ export function ResearchPage({ nodeId }: { nodeId: string }): React.JSX.Element 
         placeholder={doc.fileType === 'image' ? 'Write a caption…' : 'Write research notes…'}
       />
     </section>
+  )
+}
+
+/**
+ * F-16.9: *File into sheets* (the AI files the page into records' Pinned notes, once); afterwards
+ * "Filed on <date>". Off for a page marked Not canon, an image's caption page, and while another
+ * filing is under way, and with AI off it says what to switch on (the store's toast).
+ */
+function FileIntoSheets({ nodeId }: { nodeId: string }): React.JSX.Element | null {
+  const doc = useResearchDoc(nodeId)
+  const writable = useCanWrite()
+  const busy = useFilingStore((s) => s.flow !== null)
+  if (doc.fileType === 'image') return null
+  if (doc.filedAt !== null) {
+    return (
+      <span className="text-xs text-fg-muted" data-testid="research-filed">
+        {`Filed on ${doc.filedAt.slice(0, 10)}`}
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      data-testid="research-file"
+      disabled={!writable || busy || doc.notCanon}
+      title={doc.notCanon ? 'A Not canon page is never filed as true' : undefined}
+      onClick={() => void useFilingStore.getState().start(nodeId)}
+      className="rounded-md border border-line px-2 py-0.5 text-xs hover:bg-surface-raised disabled:opacity-50"
+    >
+      File into sheets
+    </button>
   )
 }

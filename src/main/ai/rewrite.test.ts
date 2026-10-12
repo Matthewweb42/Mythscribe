@@ -94,6 +94,7 @@ const input = (over: Partial<RewriteInput> = {}): RewriteInput => ({
   text: PASSAGE,
   before: '',
   after: '',
+  memory: 'v1',
   ...over
 })
 

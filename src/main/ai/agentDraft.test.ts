@@ -63,6 +63,7 @@ const draft = (
       before: BEFORE,
       after: '',
       passage: null,
+      memory: 'v1',
       ...over
     },
     onDelta

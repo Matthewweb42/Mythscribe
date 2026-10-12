@@ -39,6 +39,8 @@ import type { Background } from '@shared/focus'
 import type { ContextProcessResult } from '@shared/contextLibrary'
 import type { OrganisePlanResult } from '@shared/organise'
 import type { ReviewChatResult } from '@shared/reviewChat'
+import type { FilingProcessResult } from '@shared/filing'
+import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
 import type { ImportDetectResult, PendingTagProposal } from '@shared/importStructure'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
 import { VOICE_JOB_DEBOUNCE_MS } from '@shared/voice'
@@ -126,7 +128,7 @@ import { generateGhostText } from '../ai/ghostText'
 import { detectImportStructure } from '../ai/importStructure'
 import { estimateContextImport, sortContextFiles } from '../ai/contextImport'
 import { runOrganise } from '../ai/organise'
-import { runReviewChat } from '../ai/reviewChat'
+import { runFilingChat, runReviewChat } from '../ai/reviewChat'
 import { cancelInflight, regenRequestId, registerInflight, releaseInflight } from '../ai/inflight'
 import type { AiKeyStore } from '../ai/keyStore'
 import type { AutoTagsChange } from '../ai/autoTags'
@@ -311,6 +313,15 @@ import {
   researchOriginalPath,
   setResearchNotCanon
 } from '../research/researchStore'
+import {
+  applyFiling,
+  clearFilingUndo,
+  estimateFiling,
+  fileResearch,
+  undoFiling
+} from '../research/filing'
+import { filedConflicts, keepFiledLine, updateFiledLine } from '../research/filedLines'
+import { buildStoryNotes } from '../memory/storyNotes'
 import { writeTextAtomic } from '../fs'
 import { renderDisclosure } from '../provenance/disclosure'
 import {
@@ -1309,8 +1320,11 @@ export function registerHandlers({
     id: string,
     page: RecordPage,
     doc: TiptapNodeT | null
-  ): StoryRecord => {
-    const saved = savePage(db, id, page, doc, new Date())
+  ): StoryRecord => saveRecordPageWith(db, (tx) => savePage(tx, id, page, doc, new Date()))
+
+  /** A record page written by `write`, then indexed like any page save (F-16.5). */
+  const saveRecordPageWith = (db: TreeDb, write: (db: TreeDb) => StoryRecord): StoryRecord => {
+    const saved = write(db)
     // F-16.5: Pinned and Ideas are passages; one root job indexes every page that changed.
     const root = manuscriptRootId(db)
     if (root !== null) mentionQueue.touch('passages', root)
@@ -3146,7 +3160,13 @@ export function registerHandlers({
       try {
         const db = manager.require().connection.orm
         const deps = requestDeps(db)
-        const result = await generateGhostText(db, deps, { nodeId, before, after, requestId })
+        const result = await generateGhostText(db, deps, {
+          nodeId,
+          before,
+          after,
+          requestId,
+          memory: memory()
+        })
         const { text, usage, costUsd, cached, model, flagged, violation } = result
         // Developer tools: an answer post-processing emptied is the silent "shows nothing" case.
         if (text === '') devtools.ghostEmpty(requestId)
@@ -3205,7 +3225,7 @@ export function registerHandlers({
         const result = await runChat(
           db,
           deps,
-          { nodeId, mode, paragraphs, message, history, requestId },
+          { nodeId, mode, paragraphs, message, history, requestId, memory: memory() },
           (delta) => emit(windows(), 'ai:chatDelta', { requestId, delta })
         )
         const { text, usage, costUsd, cached, model, flagged, violation } = result
@@ -3266,7 +3286,7 @@ export function registerHandlers({
         const result = await runRewrite(
           db,
           deps,
-          { nodeId, text, before, after, note, regeneratedFrom, requestId },
+          { nodeId, text, before, after, note, regeneratedFrom, requestId, memory: memory() },
           (delta) => emit(windows(), 'ai:rewriteDelta', { requestId, delta })
         )
         const { usage, costUsd, cached, model, flagged, violation } = result
@@ -3317,7 +3337,13 @@ export function registerHandlers({
       try {
         const db = manager.require().connection.orm
         const deps = requestDeps(db)
-        const result = await runCritique(db, deps, { nodeId, note, regeneratedFrom, requestId })
+        const result = await runCritique(db, deps, {
+          nodeId,
+          note,
+          regeneratedFrom,
+          requestId,
+          memory: memory()
+        })
         const { notes, usage, costUsd, cached, model } = result
         const flaggedNote = notes.find((entry) => entry.flagged)
         const proposal = createProposal(db, {
@@ -3520,7 +3546,12 @@ export function registerHandlers({
     try {
       const db = manager.require().connection.orm
       const deps = requestDeps(db)
-      const result = await runWhatNext(db, deps, { nodeId, before, requestId })
+      const result = await runWhatNext(db, deps, {
+        nodeId,
+        before,
+        requestId,
+        memory: memory()
+      })
       const { directions, dropped, usage, costUsd, cached, model } = result
       const proposal = createProposal(db, {
         feature: 'whatNext',
@@ -3642,7 +3673,8 @@ export function registerHandlers({
         const result = await runSuggestNotes(db, requestDeps(db), {
           nodeId,
           requestId,
-          instruction
+          instruction,
+          memory: memory()
         })
         const { points, dropped, truncated, usage, costUsd, cached, model } = result
         const proposal = createProposal(db, {
@@ -3854,7 +3886,7 @@ export function registerHandlers({
         const result = await draftForAgent(
           db,
           deps,
-          { nodeId, brief, words, before, after, passage, requestId },
+          { nodeId, brief, words, before, after, passage, requestId, memory: memory() },
           (delta) => emit(windows(), 'ai:agentDraftDelta', { requestId, delta })
         )
         const { text, usage, costUsd, cached, model, flagged, violation } = result
@@ -4772,6 +4804,103 @@ export function registerHandlers({
     return null
   })
 
+  // F-16.14: the Story notes block as the v2 prose prompts send it (the 400-token budget).
+  register('storyNotes:get', ({ nodeId }) => ({
+    text: buildStoryNotes(manager.require().connection.orm, {
+      nodeId,
+      maxTokens: STORY_BIBLE_TOKEN_BUDGET
+    })
+  }))
+
+  // F-16.9: filing a Research page into Pinned. The estimate, priced like the library's (the
+  // hosted quote on Cloud).
+  register('research:fileEstimate', ({ nodeId }) => {
+    const db = manager.require().connection.orm
+    const source = sourceOf(db)
+    const model = ai.get(source)?.resolveModel('strong') ?? ''
+    const estimate = estimateFiling(db, nodeId, model)
+    if (source !== 'cloud') return estimate
+    const pricing = appState.get().cloudPricing?.pricing ?? bundledPricing()
+    const quote = hostedQuote(pricing, model, estimate.tokensIn, estimate.tokensOut)
+    return { ...estimate, costUsd: quote.costUsd, priced: quote.priced }
+  })
+
+  // Like `library:process`: the parent `requestId` is registered so `ai:cancel` stops the pass;
+  // expected AI failures come back as data.
+  register('research:file', async ({ nodeId, requestId }): Promise<FilingProcessResult> => {
+    const db = manager.require().connection.orm
+    const controller = registerInflight(requestId)
+    try {
+      const review = await fileResearch(db, requestDeps(db), {
+        nodeId,
+        requestId,
+        signal: controller.signal,
+        onProgress: (progress) => emit(windows(), 'library:progress', progress)
+      })
+      return { ok: true, review }
+    } catch (err) {
+      if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
+      throw err
+    } finally {
+      releaseInflight(requestId)
+    }
+  })
+
+  register(
+    'research:reviewChat',
+    async ({ review, message, history, requestId }): Promise<ReviewChatResult> => {
+      const db = manager.require().connection.orm
+      const controller = registerInflight(requestId)
+      try {
+        const answer = await runFilingChat(db, requestDeps(db), {
+          review,
+          message,
+          history,
+          requestId,
+          signal: controller.signal
+        })
+        return { ok: true, ...answer, requestId }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      } finally {
+        releaseInflight(requestId)
+      }
+    }
+  )
+
+  // The roster moved (records made, names added): the scans, the questions and the spellchecker
+  // follow, as after any record write.
+  register('research:applyFiling', ({ review }) => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const result = applyFiling(db, session.folder, review, new Date())
+    rosterChanged(db, result.recordIds)
+    return result
+  })
+
+  register('research:undoFiling', () => {
+    const session = manager.require()
+    const db = session.connection.orm
+    const result = undoFiling(db, session.folder, new Date())
+    for (const id of result.deleted) dropOwner(db, 'record', id)
+    rosterChanged(db, [...result.recordIds, ...result.deleted])
+    return result
+  })
+
+  register('research:filedConflicts', () => filedConflicts(manager.require().connection.orm))
+
+  register('research:keepFiledLine', ({ conflict }) =>
+    keepFiledLine(manager.require().connection.orm, conflict, new Date())
+  )
+
+  register('research:updateFiledLine', ({ recordId, lineIndex, line, text }) =>
+    saveRecordPageWith(manager.require().connection.orm, (db) =>
+      updateFiledLine(db, { recordId, lineIndex, line, text }, new Date())
+    )
+  )
+
   manager.onChange((info) => {
     // Open, create, and close all land here: a profile built for one project never answers for another.
     resetVoiceProfileCache()
@@ -4811,6 +4940,8 @@ export function registerHandlers({
     clearReplaceUndo()
     // F-16.13: so does the last rename's.
     clearRenameUndo()
+    // F-16.9: and the last filing's.
+    clearFilingUndo()
     // F-10.3: the session's words and active time start again with every project.
     resetGoalsSession()
     // F-9.14: Later holds for one session of one project.

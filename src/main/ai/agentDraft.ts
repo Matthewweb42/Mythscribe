@@ -1,6 +1,7 @@
 import { AGENT_WORDS_DEFAULT, AGENT_WORDS_MAX, AGENT_WORDS_MIN } from '@shared/agent'
 import { CHAT_PARAGRAPHS_MAX, CHAT_PARAGRAPHS_MIN, CHAT_SCENE_CHAR_BUDGET } from '@shared/chat'
 import { PROPOSAL_NOTE_MAX } from '@shared/proposal'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { runChat, type ChatResult } from './chat'
@@ -30,6 +31,8 @@ export interface AgentDraftInput {
   /** The passage to rewrite; null for an insertion. */
   passage: string | null
   requestId?: string
+  /** F-16.4: the open project's story memory; v2 drafts with the Story notes block (F-16.14). */
+  memory: StoryMemoryVersion
 }
 
 /** The paragraphs an insertion of `words` words asks for (`CHAT_PARAGRAPHS_MIN`–`MAX`). */
@@ -53,7 +56,8 @@ export function draftMessage(brief: string, words: number): string {
  * `onDelta` so the editor (an insertion, as ghost text) or the change card (a rewrite) shows the
  * first words at once.
  *
- * An insertion reuses the assistant's drafting request (`runChat` in Agent mode, `chat.v5`):
+ * An insertion reuses the assistant's drafting request (`runChat` in Agent mode, `chat.v5`, or
+ * `chat.v6` with the Story notes block in a story memory v2 project):
  * the voice block (F-14.1), the preset (F-5.2), the scene brief, steer, panel, and story bible,
  * with the text before the insertion point as the scene it continues; the fidelity check (F-14.7)
  * regenerates an off-voice draft once and flags it when it stays off. A rewrite reuses the
@@ -85,6 +89,7 @@ export async function draftForAgent(
             history: [],
             sceneText: input.before.slice(-CHAT_SCENE_CHAR_BUDGET),
             streamDraft: true,
+            memory: input.memory,
             ...requestId
           },
           onDelta
@@ -98,6 +103,7 @@ export async function draftForAgent(
             before: input.before,
             after: input.after,
             note: input.brief.slice(0, PROPOSAL_NOTE_MAX),
+            memory: input.memory,
             ...requestId
           },
           onDelta

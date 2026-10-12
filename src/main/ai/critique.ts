@@ -16,11 +16,13 @@ import {
 import { docToText } from '@shared/docText'
 import { normalizeProposalNote } from '@shared/proposal'
 import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { getDocumentContent } from '../document/documentStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
 import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { AppError } from '../ipc/errors'
+import { buildStoryNotes, typedSceneMeta } from '../memory/storyNotes'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, voiceProfileVersion, type VoiceProfile } from '../voice/profile'
@@ -37,6 +39,11 @@ import {
   buildCritiqueRegenPromptV3,
   type BuiltCritiqueRegenPromptV3
 } from './prompts/critiqueRegen.v3'
+import { buildCritiquePromptV4, type BuiltCritiquePromptV4 } from './prompts/critique.v4'
+import {
+  buildCritiqueRegenPromptV4,
+  type BuiltCritiqueRegenPromptV4
+} from './prompts/critiqueRegen.v4'
 import { AiFallbackError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -55,6 +62,12 @@ export interface CritiqueInput {
    * one; then the request cannot be stopped.
    */
   requestId?: string
+  /**
+   * F-16.4: the open project's story memory. v1 sends `critique.v3`/`critiqueRegen.v3` (the story
+   * bible); v2 sends `critique.v4`/`critiqueRegen.v4` (the Story notes block, F-16.14) with the
+   * scene line read from the typed details.
+   */
+  memory: StoryMemoryVersion
 }
 
 export interface CritiqueResult {
@@ -132,7 +145,8 @@ export async function runCritique(
 
   const brief = sceneBriefBlock(db, input.nodeId)
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
-  const meta = promptSceneMeta(sceneMeta)
+  const v2 = input.memory === 'v2'
+  const meta = v2 ? typedSceneMeta(db, input.nodeId, sceneMeta) : promptSceneMeta(sceneMeta)
   const pov = sceneMeta.pov.trim()
   const honesty = settings.critique.honesty
 
@@ -144,12 +158,30 @@ export async function runCritique(
     pov: pov || null
   })
 
-  const bible = buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+  // F-16.14: v2 carries the Story notes block in the bible's slot.
+  const storyNotes = v2
+    ? buildStoryNotes(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+    : null
+  const bible = v2
+    ? null
+    : buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
 
   const note = normalizeProposalNote(input.note)
   const regeneratedFrom = input.regeneratedFrom ?? null
   const isRegenerate = note !== null || regeneratedFrom !== null
-  const build = (text: string): BuiltCritiquePromptV3 | BuiltCritiqueRegenPromptV3 => {
+  const build = (
+    text: string
+  ):
+    | BuiltCritiquePromptV3
+    | BuiltCritiqueRegenPromptV3
+    | BuiltCritiquePromptV4
+    | BuiltCritiqueRegenPromptV4 => {
+    if (v2) {
+      const baseV4 = { sceneText: text, brief, meta, voice, storyNotes, honesty }
+      return isRegenerate
+        ? buildCritiqueRegenPromptV4({ ...baseV4, note })
+        : buildCritiquePromptV4(baseV4)
+    }
     const base: BuildCritiquePromptV3Input = { sceneText: text, brief, meta, voice, bible, honesty }
     return isRegenerate
       ? buildCritiqueRegenPromptV3({ ...base, note })
@@ -176,6 +208,7 @@ export async function runCritique(
         brief,
         meta,
         bible,
+        ...(v2 ? { storyNotes } : {}),
         honesty,
         note,
         regeneratedFrom: isRegenerate ? regeneratedFrom : null,

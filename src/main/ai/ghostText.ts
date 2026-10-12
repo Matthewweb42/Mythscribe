@@ -3,11 +3,13 @@ import { GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS } from '@shared/ai'
 import { STORY_BIBLE_GHOST_TOKEN_BUDGET } from '@shared/storyBible'
 import { docToText } from '@shared/docText'
 import { resolvePreset } from '@shared/presets'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { getNotes } from '../document/notesStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
 import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { AppError } from '../ipc/errors'
+import { buildStoryNotes, typedSceneMeta } from '../memory/storyNotes'
 import { getAiSettings, getWritingPresets } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, voiceProfileVersion } from '../voice/profile'
@@ -18,6 +20,8 @@ import { buildSceneSteer } from './context/sceneSteer'
 import { buildStoryBible } from './context/storyBible'
 import { buildGhostTextPromptV4 } from './prompts/ghostText.v4'
 import { buildGhostTextRegenPromptV4 } from './prompts/ghostTextRegen.v4'
+import { buildGhostTextPromptV5 } from './prompts/ghostText.v5'
+import { buildGhostTextRegenPromptV5 } from './prompts/ghostTextRegen.v5'
 import { AiCancelledError, AiCutOffError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from './request'
 
@@ -33,6 +37,12 @@ export interface GhostTextInput {
    * use case can run without one (the eval harness); then it cannot be stopped.
    */
   requestId?: string
+  /**
+   * F-16.4: the open project's story memory. v1 sends `ghostText.v4` (the story bible and the
+   * scene steer); v2 sends `ghostText.v5` (the Story notes block, F-16.14) with the scene line
+   * read from the typed details.
+   */
+  memory: StoryMemoryVersion
 }
 
 export interface GhostTextResult {
@@ -99,17 +109,24 @@ export async function generateGhostText(
   const notesText = notesDoc ? docToText(notesDoc).trim() : ''
   const notes = notesText ? notesText : null
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
-  const meta = promptSceneMeta(sceneMeta)
+  const v2 = input.memory === 'v2'
+  const meta = v2 ? typedSceneMeta(db, input.nodeId, sceneMeta) : promptSceneMeta(sceneMeta)
   const brief = sceneBriefBlock(db, input.nodeId)
   const preset = resolvePreset(getWritingPresets(db))
   const pov = sceneMeta.pov.trim()
   const profile = buildVoiceProfile(db, { pov: pov || undefined })
   const voice = voiceBlock(profile, { text: input.before, pov: pov || null })
-  const bible = buildStoryBible(db, {
-    nodeId: input.nodeId,
-    maxTokens: STORY_BIBLE_GHOST_TOKEN_BUDGET
-  })
-  const steer = buildSceneSteer(db, input.nodeId)
+  // F-16.14: v2 carries the Story notes block in the bible's slot and no separate steer.
+  const storyNotes = v2
+    ? buildStoryNotes(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_GHOST_TOKEN_BUDGET })
+    : null
+  const bible = v2
+    ? null
+    : buildStoryBible(db, {
+        nodeId: input.nodeId,
+        maxTokens: STORY_BIBLE_GHOST_TOKEN_BUDGET
+      })
+  const steer = v2 ? null : buildSceneSteer(db, input.nodeId)
 
   const promptInput = {
     before: input.before,
@@ -122,7 +139,17 @@ export async function generateGhostText(
     bible,
     preset
   }
-  const prompt = buildGhostTextPromptV4(promptInput)
+  const v5Input = {
+    before: input.before,
+    after: input.after,
+    notes,
+    meta,
+    brief,
+    voice,
+    storyNotes,
+    preset
+  }
+  const prompt = v2 ? buildGhostTextPromptV5(v5Input) : buildGhostTextPromptV4(promptInput)
   const context = {
     before: input.before,
     after: input.after,
@@ -131,6 +158,7 @@ export async function generateGhostText(
     brief,
     steer,
     bible,
+    ...(v2 ? { storyNotes } : {}),
     preset,
     authorRules: profile.authorRules,
     voiceVersion: voiceProfileVersion()
@@ -169,7 +197,9 @@ export async function generateGhostText(
   const violation = checkGhostTextFidelity(profile.stats, firstText, banned).violations[0]
   if (violation === undefined) return shown(first, firstText, prompt.version)
 
-  const regen = buildGhostTextRegenPromptV4({ ...promptInput, violation: violation.message })
+  const regen = v2
+    ? buildGhostTextRegenPromptV5({ ...v5Input, violation: violation.message })
+    : buildGhostTextRegenPromptV4({ ...promptInput, violation: violation.message })
   const flaggedFirst: GhostTextResult = {
     ...shown(first, firstText, prompt.version),
     flagged: true,

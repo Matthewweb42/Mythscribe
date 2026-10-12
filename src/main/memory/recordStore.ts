@@ -465,6 +465,27 @@ export function addAlias(db: TreeDb, id: string, entry: NewAlias, now: Date): St
   return requireRecord(db, id)
 }
 
+/**
+ * *Undo filing* (F-16.9): takes back a nickname filing added (origin `filed`, never a record's own
+ * name), when the record still has it. Answers whether it was there.
+ */
+export function removeFiledAlias(db: TreeDb, recordId: string, norm: string, now: Date): boolean {
+  const removed = db
+    .delete(alias)
+    .where(
+      and(
+        eq(alias.recordId, recordId),
+        eq(alias.norm, norm),
+        eq(alias.origin, 'filed'),
+        eq(alias.isMain, false)
+      )
+    )
+    .run()
+  if (removed.changes === 0) return false
+  db.update(record).set({ modified: now.toISOString() }).where(eq(record.id, recordId)).run()
+  return true
+}
+
 /** One name as Rename in book (F-16.13) changes it and its undo puts it back. */
 export interface AliasText {
   text: string

@@ -180,8 +180,8 @@ export class SortCategories {
     return [...this.project, ...this.proposed]
   }
 
-  /** Takes in what one answer proposed. */
-  learn(answer: ModelAnswer): void {
+  /** Takes in what one answer proposed (a filing answer's categories too, F-16.9). */
+  learn(answer: Pick<ModelAnswer, 'categories'>): void {
     for (const given of answer.categories ?? []) {
       const token = given.kind.trim().toLowerCase()
       const name = given.name.trim().slice(0, CATEGORY_NAME_MAX).trim()

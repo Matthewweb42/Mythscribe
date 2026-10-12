@@ -13,6 +13,7 @@ import {
   PLANNED_COST_NOTES,
   PLANNED_RETRY_FACTOR,
   PLANNED_TASK_COSTS,
+  SHIPPED_PLAN_ROWS,
   type PlannedCostNote,
   type PlannedTask
 } from '@shared/aiCostNotes'
@@ -141,10 +142,14 @@ export function plannedRowCost(row: PlannedCostNote, source: PlannedSource): num
   return perCall(model, row.typicalInTokens, row.typicalOutTokens)
 }
 
-/** A planned task on a source, retries included; throws for a call naming no planned row. */
+/**
+ * A planned task on a source, retries included; throws for a call naming no planned row. A row
+ * that has shipped (`SHIPPED_PLAN_ROWS`) keeps pricing the tasks that run it.
+ */
 export function plannedTaskCost(task: PlannedTask, source: PlannedSource): number {
+  const rows = [...PLANNED_COST_NOTES, ...SHIPPED_PLAN_ROWS]
   const sum = task.calls.reduce((total, { row, calls }) => {
-    const note = PLANNED_COST_NOTES.find((candidate) => candidate.id === row)
+    const note = rows.find((candidate) => candidate.id === row)
     if (note === undefined) throw new Error(`No planned cost row ${row}`)
     return total + plannedRowCost(note, source) * calls
   }, 0)

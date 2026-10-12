@@ -33,7 +33,9 @@ export const ResearchDoc = z.object({
   /** A PDF's text read out of it: the page says "Converted from PDF". */
   converted: z.boolean(),
   /** The whole page is Not canon: ideas and maybes, never treated as true. */
-  notCanon: z.boolean()
+  notCanon: z.boolean(),
+  /** When the page was filed into Pinned (F-16.9, ISO); null until then. Filing runs once. */
+  filedAt: z.string().nullable()
 })
 export type ResearchDoc = z.infer<typeof ResearchDoc>
 
@@ -46,7 +48,8 @@ export function writtenResearchDoc(nodeId: string): ResearchDoc {
     fileName: null,
     fileType: null,
     converted: false,
-    notCanon: false
+    notCanon: false,
+    filedAt: null
   }
 }
 

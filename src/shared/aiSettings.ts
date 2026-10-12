@@ -321,6 +321,15 @@ export const STORY_MAP_SENDS =
   'drafted, or revised, the first sentence of each stored scene summary, and which scene you ' +
   'are at)'
 
+/**
+ * F-16.14: what the Story notes block (`renderStoryNotes`) carries in a story memory v2 project,
+ * phrased once for every feature whose v2 prompt includes it.
+ */
+export const STORY_NOTES_SENDS =
+  'the Story notes block (the records here in the scene and the ones it names, with their names ' +
+  'and nicknames and their Pinned lines, never a line marked Not canon and never Ideas, and the ' +
+  "scene's tone, content and theme labels)"
+
 export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   tags: {
     label: 'Tag suggestions',
@@ -352,6 +361,11 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "previous scene's reader-knows-after line and the next scene's goal, the voice profile " +
       '(stylometric rules, learned style notes, and up to 3 exemplar passages), your author rules and banned ' +
       `phrases, and ${STORY_BIBLE_SENDS}.`,
+    sendsV2:
+      "The scene's text (the first 20,000 characters), its place, POV and time, its brief plus the " +
+      "previous scene's reader-knows-after line and the next scene's goal, the voice profile " +
+      '(stylometric rules, learned style notes, and up to 3 exemplar passages), your author rules and banned ' +
+      `phrases, and ${STORY_NOTES_SENDS}.`,
     minDial: 1
   },
   continuity: {
@@ -389,6 +403,11 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "selected, its brief plus the previous scene's reader-knows-after line and the next " +
       `scene's goal, ${STORY_BIBLE_SENDS}, and ${STORY_MAP_SENDS}, only when you click What ` +
       'should come next?.',
+    sendsV2:
+      'The last 6,000 characters of the scene, or of the text up to the end of the passage you ' +
+      "selected, its brief plus the previous scene's reader-knows-after line and the next " +
+      `scene's goal, ${STORY_NOTES_SENDS}, and ${STORY_MAP_SENDS}, only when you click What ` +
+      'should come next?.',
     minDial: 1
   },
   route: {
@@ -413,6 +432,11 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "notes (the first 1,500 characters), its brief plus the previous scene's " +
       "reader-knows-after line and the next scene's goal, " +
       `${STORY_BIBLE_SENDS}, and what you asked to focus on, only when you ask for suggested notes.`,
+    sendsV2:
+      "The scene's text (the first 12,000 characters), its stored summary and key points, its " +
+      "notes (the first 1,500 characters), its brief plus the previous scene's " +
+      "reader-knows-after line and the next scene's goal, " +
+      `${STORY_NOTES_SENDS}, and what you asked to focus on, only when you ask for suggested notes.`,
     minDial: 1
   },
   voiceNotes: {
@@ -434,6 +458,15 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'copy edits and proofreads up to 200 words to leave alone (the names of your story-bible ' +
       'entries and tags and the project dictionary); for a continuity pass the sheets of the ' +
       'story-bible entries the scene names and what other scenes state about them; for ' +
+      "developmental, line, and custom passes the scene's mood and theme as the AI read them.",
+    sendsV2:
+      'Only when you start a pass, the text of each scene you picked (or, from the chat, only ' +
+      'the passage you selected), in pieces of up to 12,000 characters, with its title and ' +
+      'your instruction for a custom pass; for line, ' +
+      'copy, proofread, and custom passes the voice profile (stylometric rules, learned style ' +
+      'notes, and up to 3 exemplar passages) with your author rules and banned phrases; for ' +
+      'copy edits and proofreads up to 200 words to leave alone (the names and nicknames of ' +
+      `your records and the project dictionary); for a continuity pass ${STORY_NOTES_SENDS}; for ` +
       "developmental, line, and custom passes the scene's mood and theme as the AI read them.",
     minDial: 1
   },
@@ -463,6 +496,13 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "banned phrases, the scene metadata, and the scene brief (plus the previous scene's " +
       "reader-knows-after line and the next scene's goal) go too, and an off-voice answer is " +
       'sent back once with the rule it broke.',
+    sendsV2:
+      "The active scene's text (head-truncated), its synopsis and notes (the first 1,500 " +
+      `characters), ${STORY_NOTES_SENDS}, the recent turns of the conversation, and your ` +
+      'message. In Author mode, the voice profile, your author rules and ' +
+      "banned phrases, the scene's place, POV and time, and the scene brief (plus the previous " +
+      "scene's reader-knows-after line and the next scene's goal) go too, and an off-voice " +
+      'answer is sent back once with the rule it broke.',
     minDial: 1
   },
   embeddings: {
@@ -478,6 +518,13 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules, " +
       'learned style notes, and up to 3 exemplar passages), your author rules and banned phrases, and ' +
       `${STORY_BIBLE_SENDS}. An answer that breaks the voice profile or uses a banned phrase is ` +
+      'sent back once, with the same context plus the rule it broke, for a second try.',
+    sendsV2:
+      'Up to 500 characters of text before the cursor and 100 after it, plus the scene’s notes, ' +
+      "its place, POV and time, its brief plus the previous scene's " +
+      "reader-knows-after line and the next scene's goal, the voice profile (stylometric rules, " +
+      'learned style notes, and up to 3 exemplar passages), your author rules and banned phrases, and ' +
+      `${STORY_NOTES_SENDS}. An answer that breaks the voice profile or uses a banned phrase is ` +
       'sent back once, with the same context plus the rule it broke, for a second try.',
     minDial: 1
   },
@@ -495,6 +542,13 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'before and after it, the scene metadata (location, POV, timeline), the voice profile ' +
       '(stylometric rules, learned style notes, and up to 3 exemplar passages), your author rules and banned ' +
       `phrases, ${STORY_BIBLE_SENDS}, and the scene's mood and theme as the AI read them. An ` +
+      'off-voice rewrite is sent back once with the rule ' +
+      'it broke; a regenerate carries your note.',
+    sendsV2:
+      'The selected passage (up to 4,000 characters), up to 300 characters of manuscript text ' +
+      "before and after it, the scene's place, POV and time, the voice profile " +
+      '(stylometric rules, learned style notes, and up to 3 exemplar passages), your author rules and banned ' +
+      `phrases, ${STORY_NOTES_SENDS}, and the scene's mood and theme as the AI read them. An ` +
       'off-voice rewrite is sent back once with the rule ' +
       'it broke; a regenerate carries your note.',
     minDial: 1
@@ -525,7 +579,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'documents (each labelled canon, plan or idea), the outline of titles and word counts, ' +
       'up to 6,000 characters of a document per read, notes, and your to-dos. When it may ' +
       'edit, the voice profile (stylometric rules, learned style notes, and up to 3 exemplar ' +
-      'passages) and your author rules and banned phrases go too.',
+      'passages) and your author rules and banned phrases go too, and prose it drafts carries ' +
+      `${STORY_NOTES_SENDS}.`,
     minDial: 1
   },
   contextImport: {
@@ -535,6 +590,11 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'about 8,000 characters (only the new or changed passages of an updated file), the names ' +
       'of your existing story-bible sheets, and the file names of uploaded images (never the ' +
       'images themselves), only after you confirm the estimate.',
+    sendsV2:
+      'Only when you file a Research document into your records and confirm the estimate: its ' +
+      'text, never a paragraph marked Not canon, in chunks of about 8,000 characters, once; ' +
+      'the names and nicknames of your records by category; and the file names of the images ' +
+      'in Research (never the images themselves).',
     minDial: 1
   },
   planLinks: {
@@ -576,6 +636,10 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'of that conversation, and the pending review as a list (each sheet’s name, kind, other ' +
       'names, file names, field values, and the opening of its details, up to 14,000 ' +
       'characters) with the opening of each Project note (up to 3,000 characters).',
+    sendsV2:
+      'Only when you send a message on the review of a filing: your message, the last 4 turns ' +
+      'of that conversation, and the pending filing as a list (each record’s name, kind, new ' +
+      'nicknames, the first lines it would file, and its picture, up to 14,000 characters).',
     minDial: 1
   },
   organise: {
@@ -592,6 +656,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   authorMode: {
     label: 'Author mode',
     sends: "The active scene's text, referenced notes, the scene brief, and your instruction.",
+    sendsV2: `The active scene's text, the scene brief, ${STORY_NOTES_SENDS}, and your instruction.`,
     minDial: 1
   }
 }

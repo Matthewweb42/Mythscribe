@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(33)
+    expect(result.version).toBe(34)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1172,12 +1172,12 @@ describe('ai_usage.reported_cost_usd and reasoning_tokens (0028, F-16.1)', () =>
 })
 
 /**
- * Story memory v2 (F-16.4, F-16.5, F-16.8; plan P1 §0): migrations 0029–0032 are additive only. A
+ * Story memory v2 (F-16.4, F-16.5, F-16.8, F-16.9; plan P1 §0): migrations 0029–0033 are additive only. A
  * database as the build before them left it, holding a row in every table, comes out with every
  * one of those tables, their rows and every schema object byte for byte as they were; only new
  * objects are added, and they start empty (decision P1-D1: nothing is copied in a migration).
  */
-describe('story memory tables (0029–0032) leave every older table untouched', () => {
+describe('story memory tables (0029–0033) leave every older table untouched', () => {
   let db: Database.Database
   const BEFORE = 29
 
@@ -1264,7 +1264,8 @@ describe('story memory tables (0029–0032) leave every older table untouched', 
       '0029_story_records',
       '0030_name_index',
       '0031_memory_passage_fts',
-      '0032_research_doc'
+      '0032_research_doc',
+      '0033_research_filed'
     ])
 
     const objectsAfter = schema()
@@ -1297,6 +1298,31 @@ describe('story memory tables (0029–0032) leave every older table untouched', 
         table
       ).toBe(0)
     }
+  })
+
+  it('0033 adds the two nullable filing columns to research_doc and keeps its rows (F-16.9)', () => {
+    migrate(db, loadMigrations().slice(0, 33))
+    db.prepare(
+      `INSERT INTO research_doc (node_id, origin, context_file_id, file_type, converted, not_canon, created)
+       VALUES ('ms', 'upload', NULL, 'md', 0, 0, '2026-10-12')`
+    ).run()
+    const before = db.prepare('SELECT * FROM research_doc').all()
+    expect(migrate(db).applied).toEqual(['0033_research_filed'])
+    const columns = (
+      db.prepare('PRAGMA table_info(research_doc)').all() as { name: string; notnull: number }[]
+    ).map((column) => [column.name, column.notnull])
+    expect(columns.slice(-2)).toEqual([
+      ['filed_at', 0],
+      ['filed_hash', 0]
+    ])
+    const after = db.prepare('SELECT * FROM research_doc').all() as Record<string, unknown>[]
+    expect(after).toEqual(
+      (before as Record<string, unknown>[]).map((row) => ({
+        ...row,
+        filed_at: null,
+        filed_hash: null
+      }))
+    )
   })
 
   it('opens at 0031 with a passage table that stems, folds diacritics and filters by its labels', () => {

@@ -112,7 +112,7 @@ const issue = (over: ModelNote = {}): ModelNote => ({
 })
 
 const critique = (over: Partial<CritiqueInput> = {}): ReturnType<typeof runCritique> =>
-  runCritique(db, deps, { nodeId: scene, ...over })
+  runCritique(db, deps, { nodeId: scene, memory: 'v1', ...over })
 
 async function failure(
   over: Partial<CritiqueInput> = {}

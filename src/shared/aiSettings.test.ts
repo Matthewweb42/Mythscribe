@@ -3,6 +3,7 @@ import { AI_FEATURE_IDS } from './ai'
 import {
   AI_DATA_SHARING,
   dataSharingSends,
+  STORY_NOTES_SENDS,
   AI_SOURCE_LABEL,
   AI_SOURCE_MEANING,
   AiSource,
@@ -160,6 +161,41 @@ describe('dataSharingSends (F-16.4)', () => {
     expect(AI_DATA_SHARING.agent.sendsV2).toContain('your to-dos')
     expect(AI_DATA_SHARING.agent.sendsV2).not.toMatch(/tag names|story-bible sheets|To do list/)
     expect(AI_DATA_SHARING.proofread.sendsV2).toContain('names and nicknames of your records')
+  })
+
+  it('F-16.14, F-16.9: every v2 prose and filing row names what v2 sends, and never the story bible', () => {
+    const v2 = [
+      'ghostText',
+      'rewrite',
+      'chat',
+      'authorMode',
+      'critique',
+      'editPass',
+      'whatNext',
+      'notesSuggest',
+      'agent',
+      'contextImport',
+      'reviewChat',
+      'proofread'
+    ] as const
+    for (const id of v2) {
+      const text = AI_DATA_SHARING[id].sendsV2
+      expect(text, id).toBeDefined()
+      expect(text, id).not.toMatch(/story bible|story-bible|tag names/u)
+    }
+    for (const id of [
+      'ghostText',
+      'rewrite',
+      'chat',
+      'critique',
+      'editPass',
+      'whatNext',
+      'notesSuggest'
+    ] as const) {
+      expect(AI_DATA_SHARING[id].sendsV2, id).toContain(STORY_NOTES_SENDS)
+    }
+    expect(STORY_NOTES_SENDS).toContain('never a line marked Not canon and never Ideas')
+    expect(AI_DATA_SHARING.contextImport.sendsV2).toContain('never a paragraph marked Not canon')
   })
 })
 

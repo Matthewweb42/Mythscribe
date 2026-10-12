@@ -4,6 +4,7 @@ import type { AiUsageSummary } from '@shared/ai'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import type { AuthorTodo } from '@shared/memory/authorTodo'
 import type { Dismissed } from '@shared/memory/dismissed'
+import type { FiledConflict } from '@shared/filing'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
 import type { NamedInRow, NameMentionView } from '@shared/memory/nameScan'
 import { emptySceneDetails } from '@shared/memory/sceneDetails'
@@ -26,11 +27,13 @@ import { resetAuthorTodoStore, useAuthorTodoStore } from './authorTodoStore'
 import { DismissedDialog } from './DismissedDialog'
 import { resetDismissedStore, useDismissedStore } from './dismissedStore'
 import { resetQuestionStore, useQuestionStore } from './questionStore'
+import { resetFiledConflictStore, useFiledConflictStore } from './filedConflictStore'
 import { ThisScenePanel } from './ThisScenePanel'
 import {
   INLINE_TAGS_NOTICE,
   ambiguousLabel,
   castOf,
+  conflictLine,
   namedChips,
   namedWhy,
   needsALookBadge,
@@ -214,6 +217,7 @@ function resetAll(): void {
   resetQuestionStore()
   resetAuthorTodoStore()
   resetDismissedStore()
+  resetFiledConflictStore()
   resetAiStore()
   resetCategoryStore()
   resetLayoutStore()
@@ -499,5 +503,106 @@ describe('ThisScenePanel (F-16.12)', () => {
     await open(null)
     expect(screen.getByText('Open a scene to see who is in it.')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Needs a look' })).toBeInTheDocument()
+  })
+})
+
+const CONFLICT: FiledConflict = {
+  key: 'filed|r-mara|abc|def',
+  recordId: 'r-mara',
+  recordName: 'Mara Vell',
+  docId: 'r-bestiary',
+  docTitle: 'Bestiary',
+  para: 3,
+  line: 'Eyes: grey',
+  lineIndex: 0,
+  quote: 'Mara Vell has grey eyes',
+  nowReads: 'Mara Vell has brown eyes.'
+}
+
+describe('Needs a look’s filed-line conflicts (F-16.9)', () => {
+  it('puts the conflicts first and counts them in the badge', () => {
+    expect(
+      needsALookGroups({
+        conflicts: [CONFLICT],
+        todos: [todo('t1', 'Tide', 0)],
+        questions: [],
+        notices: []
+      }).map((group) => group.id)
+    ).toEqual(['conflicts', 'todos'])
+    expect(conflictLine(CONFLICT)).toBe(
+      'Filed from “Bestiary” ¶4, which now reads “Mara Vell has brown eyes.”'
+    )
+    expect(conflictLine({ ...CONFLICT, nowReads: null })).toBe(
+      'Filed from “Bestiary” ¶4, which now has no text there'
+    )
+  })
+
+  it('offers Go there, Update line (the page’s paragraph beside it) and Keep line', async () => {
+    install({
+      'research:filedConflicts': () => [CONFLICT],
+      'research:keepFiledLine': () => ({
+        ...tombstone('d-keep', 'Mara Vell: kept “Eyes: grey”'),
+        kind: 'notProblem'
+      }),
+      'research:updateFiledLine': () => ({ ...MARA, pinned: null, ideas: null })
+    })
+    await act(async () => {
+      await useFiledConflictStore.getState().load()
+    })
+    await open()
+    expect(screen.getByTestId('needs-a-look-badge')).toHaveTextContent('1')
+    const group = screen.getByRole('group', { name: 'Conflicts' })
+    expect(group).toHaveTextContent('Mara Vell: “Eyes: grey”')
+    expect(group).toHaveTextContent(conflictLine(CONFLICT))
+    fireEvent.click(within(group).getByRole('button', { name: 'Update line' }))
+    expect(within(group).getByText('“Mara Vell has brown eyes.”')).toBeInTheDocument()
+    fireEvent.change(within(group).getByLabelText('The line'), { target: { value: 'Eyes: brown' } })
+    await act(async () => {
+      fireEvent.click(within(group).getByRole('button', { name: 'Save line' }))
+    })
+    expect(sent('research:updateFiledLine')).toEqual([
+      { recordId: 'r-mara', lineIndex: 0, line: 'Eyes: grey', text: 'Eyes: brown' }
+    ])
+    await waitFor(() => expect(screen.queryByTestId('needs-a-look-badge')).toBeNull())
+  })
+
+  it('Keep line sends the conflict and moves it to Dismissed', async () => {
+    install({
+      'research:filedConflicts': () => [CONFLICT],
+      'research:keepFiledLine': () => ({
+        ...tombstone('d-keep', 'Mara Vell: kept “Eyes: grey”'),
+        kind: 'notProblem'
+      })
+    })
+    await act(async () => {
+      await useFiledConflictStore.getState().load()
+      await useDismissedStore.getState().load()
+    })
+    await open()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Keep line' }))
+    })
+    expect(sent('research:keepFiledLine')).toEqual([{ conflict: CONFLICT }])
+    expect(screen.queryByRole('group', { name: 'Conflicts' })).toBeNull()
+    expect(useDismissedStore.getState().items.map((row) => row.id)).toContain('d-keep')
+  })
+})
+
+describe('What the AI is told (F-16.14)', () => {
+  it('shows exactly the Story notes block main sends, read when the section opens', async () => {
+    const BLOCK =
+      'Story notes (the manuscript wins: where the passage and these notes disagree, follow the passage):\nHere: Mara Vell (POV)'
+    install({ 'storyNotes:get': () => ({ text: BLOCK }) })
+    await open()
+    expect(sent('storyNotes:get')).toEqual([])
+    const section = screen.getByTestId('what-the-ai-is-told')
+    await act(async () => {
+      section.setAttribute('open', '')
+      fireEvent(section, new Event('toggle'))
+    })
+    expect(await screen.findByTestId('story-notes-block')).toHaveTextContent(
+      'Here: Mara Vell (POV)'
+    )
+    expect(sent('storyNotes:get')[0]).toEqual({ nodeId: 'sc-1' })
   })
 })

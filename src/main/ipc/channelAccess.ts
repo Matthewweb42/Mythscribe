@@ -361,7 +361,16 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'research:addData': 'write',
   'research:create': 'write',
   'research:setNotCanon': 'write',
-  'research:openOriginal': 'read'
+  'research:openOriginal': 'read',
+  'storyNotes:get': 'read',
+  'research:fileEstimate': 'read',
+  'research:file': 'ai',
+  'research:reviewChat': 'ai',
+  'research:applyFiling': 'write',
+  'research:undoFiling': 'write',
+  'research:filedConflicts': 'read',
+  'research:keepFiledLine': 'write',
+  'research:updateFiledLine': 'write'
 }
 
 /** Whether a channel is refused while the app is read-only. */
@@ -721,7 +730,16 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'research:addData': 'v2',
   'research:create': 'v2',
   'research:setNotCanon': 'v2',
-  'research:openOriginal': 'v2'
+  'research:openOriginal': 'v2',
+  'storyNotes:get': 'v2',
+  'research:fileEstimate': 'v2',
+  'research:file': 'v2',
+  'research:reviewChat': 'v2',
+  'research:applyFiling': 'v2',
+  'research:undoFiling': 'v2',
+  'research:filedConflicts': 'v2',
+  'research:keepFiledLine': 'v2',
+  'research:updateFiledLine': 'v2'
 }
 
 /** The message a channel of the other memory is refused with. */
