@@ -1,8 +1,9 @@
 import { z } from 'zod'
 import { AiErrorCode, AiUsage } from './ai'
+import { StoryCategory } from './categories'
 import { chunkParagraphs, ContextReviewCategory, relateValues } from './contextLibrary'
 import { normalizeForMatch } from './critique'
-import { normName } from './memory/names'
+import { foldTitles, gateWords, isTitle, normName } from './memory/names'
 import { RECORD_ALIASES_MAX, RECORD_ALIAS_MAX, RECORD_NAME_MAX } from './memory/records'
 import { twinGate, TwinRule, type TwinRosterRecord } from './memory/twinGate'
 import { resolveKind, type ReviewChange, type ReviewOp } from './reviewChat'
@@ -50,6 +51,9 @@ export const FilingLine = z.object({
 })
 export type FilingLine = z.infer<typeof FilingLine>
 
+/** A Pinned canon paragraph: its index among the page's text blocks, and its text. */
+const PinnedParagraph = z.object({ index: z.number().int().nonnegative(), text: z.string() })
+
 /** One record of the review: a new one, or an existing one the filing adds to. */
 export const FilingItem = z.object({
   id: z.string(),
@@ -59,12 +63,18 @@ export const FilingItem = z.object({
   categoryId: z.string(),
   /** The record's names already (an existing record), so the chat's alias edits never repeat one. */
   known: z.array(z.string()),
+  /**
+   * The existing record's Pinned canon paragraphs as the plan read them (none for a new record),
+   * so a line the review chat merges in is checked against them as the plan's lines were.
+   */
+  pinned: z.array(PinnedParagraph),
   /** New names to add (origin `filed`). */
   aliases: z.array(z.string()),
   lines: z.array(FilingLine),
   /**
    * A name the model gave as new that the twin gate found close to an existing record ("same as
-   * Mara Vell?"): filed as an addition to that record, its name as a nickname, with this note.
+   * Tomas Harrow?"): its own card, which starts undecided. *Same as* files it into that record
+   * with the name as a nickname; *New record* (`filingAsNew`) makes it a record of its own.
    */
   sameAs: z.object({ given: z.string(), rule: TwinRule }).nullable(),
   /** A Research image page that shows the record, when the record has no picture yet. */
@@ -78,7 +88,10 @@ export const FilingDropped = z.object({
   quote: z.number().int().nonnegative(),
   duplicate: z.number().int().nonnegative(),
   dismissed: z.number().int().nonnegative(),
-  alias: z.number().int().nonnegative()
+  /** Nicknames left out: another record's, dismissed for the record, a title, or no room. */
+  alias: z.number().int().nonnegative(),
+  /** Lines filed under a name two records share: never guessed (identity rule 4). */
+  shared: z.number().int().nonnegative()
 })
 export type FilingDropped = z.infer<typeof FilingDropped>
 
@@ -90,6 +103,11 @@ export const FilingReview = z.object({
   /** The hash of the document's text as filed (`research_doc.filed_hash`). */
   docHash: z.string(),
   items: z.array(FilingItem),
+  /**
+   * The `normName` of every name the project's records hold, so the review chat never renames a
+   * new record, or gives an item a nickname, that is another record's.
+   */
+  taken: z.array(z.string()),
   /** The project's own categories and the AI's proposed ones (as the upload review keeps them). */
   categories: z.array(ContextReviewCategory),
   dropped: FilingDropped,
@@ -116,6 +134,10 @@ export const FilingApplyResult = z.object({
   lines: z.number().int().nonnegative(),
   /** Every record Apply wrote to, for the renderer's reload of their Pinned pages. */
   recordIds: z.array(z.string()),
+  /** Cards left out at Apply: a new record whose name another record took since the review. */
+  skipped: z.number().int().nonnegative(),
+  /** The project's categories after Apply (an accepted proposed one is among them now). */
+  categories: z.array(StoryCategory),
   /** When the document was filed (ISO). */
   filedAt: z.string()
 })
@@ -134,11 +156,11 @@ export type FilingUndoResult = z.infer<typeof FilingUndoResult>
 
 /**
  * A filed line whose source changed (F-16.9): a Pinned paragraph marked `aiFiled` whose quote is
- * no longer in its Research document. A Needs a look conflict: *Go there* · *Update line* ·
+ * no longer in a canon paragraph of its Research document (or the document is Not canon now). A Needs a look conflict: *Go there* · *Update line* ·
  * *Keep line* (a `notProblem` dismissal under `key`).
  */
 export const FiledConflict = z.object({
-  /** The dismissal reference: the record, the paragraph's hash and the source's hash. */
+  /** The dismissal reference: the record, the line and its quote, and what the source reads now. */
   key: z.string(),
   recordId: z.string(),
   recordName: z.string(),
@@ -151,7 +173,9 @@ export const FiledConflict = z.object({
   lineIndex: z.number().int().nonnegative(),
   quote: z.string(),
   /** The document's paragraph closest to the quote now, or null when the document has no text. */
-  nowReads: z.string().nullable()
+  nowReads: z.string().nullable(),
+  /** The whole document is marked Not canon now, so nothing filed from it is true any more. */
+  pageNotCanon: z.boolean()
 })
 export type FiledConflict = z.infer<typeof FiledConflict>
 
@@ -282,7 +306,7 @@ export function quoteParagraph(
 }
 
 /** How a line relates to a record's Pinned paragraphs: dropped, added, an update, or a conflict. */
-function relateLine(
+export function relateLine(
   text: string,
   pinned: FilingRosterRecord['pinned']
 ): { kind: FilingLine['kind']; replaces: FilingLine['replaces'] } | 'duplicate' {
@@ -305,31 +329,56 @@ function relateLine(
   return { kind: 'add', replaces: null }
 }
 
+/** A line as `relateLine` places it against `pinned`, or null when Pinned says it already. */
+function related(line: FilingLine, pinned: FilingRosterRecord['pinned']): FilingLine | null {
+  const relation = relateLine(line.text, pinned)
+  if (relation === 'duplicate') return null
+  return { ...line, ...relation, use: relation.kind !== 'conflict' }
+}
+
+/**
+ * Whether a proposed nickname is a bare title ("the Captain") or a title and one of the record's
+ * own name words ("Captain Vell" for Mara Vell): identity rule 2, the AI never proposes one. The
+ * author may still add one on the sheet or ask the review chat for it.
+ */
+export function isTitleAlias(alias: string, ownNames: readonly string[]): boolean {
+  const words = gateWords(alias)
+  if (!words.some(isTitle)) return false
+  const rest = foldTitles(words)
+  if (rest.length === 0) return true
+  if (rest.length > 1) return false
+  const own = new Set(ownNames.flatMap((name) => foldTitles(gateWords(name))))
+  return own.has(rest[0] ?? '')
+}
+
 /** The twin gate's roster: every record's names, the main one first. */
 function gateRoster(roster: readonly FilingRosterRecord[]): TwinRosterRecord[] {
   return roster.map((record) => ({ id: record.id, names: record.names.map((name) => name.text) }))
 }
 
 /**
- * The review's items from what every chunk filed (F-16.9). In order: a name equal to a record's
- * name or nickname files into that record; any other name goes through the twin gate (a blocked
- * name files into the record it matched, as a nickname with a "same as?" note; a dismissed name is
- * dropped with its lines); a new name filed twice becomes one item. Each line's quote must be in a
- * canon paragraph of the document (3–40 words, `normalizeForMatch`); a line Pinned already says
- * is dropped; a "Label: value" line whose label Pinned holds is an update (Pinned's is empty or
- * the line extends it) or a conflict (they differ; Pinned's is kept by default). A nickname
- * another record owns, or one dismissed for this record, is dropped. A record with nothing left to
- * add is left out. New records come first, then the additions, each in the order first filed.
+ * The review's items from what every chunk filed (F-16.9). In order: a name only one record holds
+ * files into that record; a name two records share is dropped with its lines, never guessed
+ * (identity rule 4); any other name goes through the twin gate (a blocked name gets its own card
+ * for the record it matched, undecided, its name a nickname on *Same as*; a dismissed name is
+ * dropped with its lines); a new name filed twice, or filed as another new record's nickname
+ * first, becomes one item. Each line's quote must be in a canon paragraph of the document (3–40
+ * words, `normalizeForMatch`); a line Pinned already says is dropped; a "Label: value" line whose
+ * label Pinned holds is an update (Pinned's is empty or the line extends it) or a conflict (they
+ * differ; Pinned's is kept by default). A nickname is dropped when another record or another item
+ * holds it, when it was dismissed for this record, when it is a title (identity rule 2), or when
+ * the record has no room; a new record's name wins over a nickname another item gave it. A record
+ * with nothing left to add is left out. New records come first, then the additions, each in the
+ * order first filed.
  */
 export function planFiling(input: PlanFilingInput): FilingPlan {
-  const dropped: FilingDropped = { quote: 0, duplicate: 0, dismissed: 0, alias: 0 }
-  const byNorm = new Map<string, FilingRosterRecord>()
-  const owners = new Map<string, { id: string; shared: boolean }[]>()
+  const dropped: FilingDropped = { quote: 0, duplicate: 0, dismissed: 0, alias: 0, shared: 0 }
+  const owners = new Map<string, FilingRosterRecord[]>()
   for (const record of input.roster) {
     for (const name of record.names) {
       const norm = normName(name.text)
-      if (!byNorm.has(norm)) byNorm.set(norm, record)
-      owners.set(norm, [...(owners.get(norm) ?? []), { id: record.id, shared: name.shared }])
+      const held = owners.get(norm) ?? []
+      if (!held.includes(record)) owners.set(norm, [...held, record])
     }
   }
   const roster = gateRoster(input.roster)
@@ -347,26 +396,40 @@ export function planFiling(input: PlanFilingInput): FilingPlan {
 
   for (const filed of input.records) {
     const name = flat(filed.name).slice(0, RECORD_NAME_MAX).trim()
-    if (name === '') continue
     const norm = normName(name)
-    let existing = byNorm.get(norm) ?? null
+    if (name === '' || norm === '') continue
+    const holders = owners.get(norm) ?? []
+    if (holders.length > 1) {
+      dropped.shared += filed.lines.length
+      continue
+    }
+    let record = holders[0] ?? null
     let sameAs: FilingItem['sameAs'] = null
-    if (existing === null) {
+    if (record === null) {
       const verdict = twinGate(name, roster, input.dismissedNames)
       if (verdict.outcome === 'blocked') {
         if (verdict.recordId === null) {
           dropped.dismissed += filed.lines.length
           continue
         }
-        existing = rosterById.get(verdict.recordId) ?? null
-        sameAs = existing === null ? null : { given: name, rule: verdict.rule }
+        record = rosterById.get(verdict.recordId) ?? null
+        sameAs = record === null ? null : { given: name, rule: verdict.rule }
       }
     }
+    const existing = record
+    const given = sameAs?.given ?? null
 
     let draft: Draft | undefined =
       existing === null
         ? draftFor((each) => each.item.recordId === null && each.norms.has(norm))
-        : draftFor((each) => each.item.recordId === existing.id)
+        : given === null
+          ? draftFor((each) => each.item.recordId === existing.id && each.item.sameAs === null)
+          : draftFor(
+              (each) =>
+                each.item.recordId === existing.id &&
+                each.item.sameAs !== null &&
+                normName(each.item.sameAs.given) === norm
+            )
     if (draft === undefined) {
       draft = {
         item: {
@@ -375,11 +438,12 @@ export function planFiling(input: PlanFilingInput): FilingPlan {
           name: existing?.name ?? name,
           categoryId: existing?.categoryId ?? filed.categoryId,
           known: existing?.names.map((each) => each.text) ?? [],
+          pinned: existing?.pinned.map((each) => ({ index: each.index, text: each.text })) ?? [],
           aliases: [],
           lines: [],
           sameAs,
           image: null,
-          include: true
+          include: sameAs === null
         },
         norms: new Set(
           existing === null ? [norm] : existing.names.map((each) => normName(each.text))
@@ -388,28 +452,37 @@ export function planFiling(input: PlanFilingInput): FilingPlan {
         pinned: existing?.pinned ?? []
       }
       drafts.push(draft)
-    } else if (draft.item.sameAs === null && sameAs !== null) {
-      draft.item.sameAs = sameAs
     }
     const item = draft.item
+    const self = draft
 
-    // Names: the given one (when the gate filed it under another record) and the model's others.
-    const candidates = [...(sameAs === null ? [] : [name]), ...filed.aliases]
+    // Names: the given one (when the gate matched it to another record) and the model's others.
+    const candidates = [...(given === null ? [] : [given]), ...filed.aliases]
     for (const raw of candidates) {
       const alias = flat(raw).slice(0, RECORD_ALIAS_MAX).trim()
       const aliasNorm = normName(alias)
-      if (alias === '' || draft.norms.has(aliasNorm)) continue
-      const taken = (owners.get(aliasNorm) ?? []).some(
-        (owner) => owner.id !== item.recordId && !owner.shared
-      )
+      if (aliasNorm === '' || self.norms.has(aliasNorm)) continue
+      const taken =
+        (owners.get(aliasNorm) ?? []).some((owner) => owner.id !== item.recordId) ||
+        drafts.some(
+          (other) =>
+            other !== self &&
+            (item.recordId === null || other.item.recordId !== item.recordId) &&
+            other.norms.has(aliasNorm)
+        )
       const dismissed =
         item.recordId !== null && input.dismissedAliases.has(`${item.recordId}|${aliasNorm}`)
       const others = Math.max(0, item.known.length - 1) + item.aliases.length
-      if (taken || dismissed || others >= RECORD_ALIASES_MAX) {
+      if (
+        taken ||
+        dismissed ||
+        isTitleAlias(alias, [item.name, ...item.known]) ||
+        others >= RECORD_ALIASES_MAX
+      ) {
         dropped.alias += 1
         continue
       }
-      draft.norms.add(aliasNorm)
+      self.norms.add(aliasNorm)
       item.aliases.push(alias)
     }
 
@@ -422,27 +495,40 @@ export function planFiling(input: PlanFilingInput): FilingPlan {
         continue
       }
       const key = normalizeForMatch(text).toLocaleLowerCase()
-      if (draft.lineKeys.has(key) || item.lines.length >= FILING_LINES_MAX) {
+      if (self.lineKeys.has(key) || item.lines.length >= FILING_LINES_MAX) {
         dropped.duplicate += 1
         continue
       }
-      const related = relateLine(text, draft.pinned)
-      if (related === 'duplicate') {
+      const relation = relateLine(text, self.pinned)
+      if (relation === 'duplicate') {
         dropped.duplicate += 1
         continue
       }
-      draft.lineKeys.add(key)
+      self.lineKeys.add(key)
       lineCounter += 1
       item.lines.push({
         id: `l${lineCounter}`,
         text,
         quote: flat(line.q),
         para,
-        kind: related.kind,
-        replaces: related.replaces,
-        use: related.kind !== 'conflict'
+        kind: relation.kind,
+        replaces: relation.replaces,
+        use: relation.kind !== 'conflict'
       })
     }
+  }
+
+  // A new record's name wins over a nickname another item gave first.
+  const newNames = new Set(
+    drafts.filter((draft) => draft.item.recordId === null).map((draft) => normName(draft.item.name))
+  )
+  for (const draft of drafts) {
+    const kept = draft.item.aliases.filter((alias) => !newNames.has(normName(alias)))
+    for (const alias of draft.item.aliases) {
+      if (!kept.includes(alias)) draft.norms.delete(normName(alias))
+    }
+    dropped.alias += draft.item.aliases.length - kept.length
+    draft.item.aliases = kept
   }
 
   // Pictures: a hinted image page goes to the record it names, when that record has none.
@@ -450,7 +536,9 @@ export function planFiling(input: PlanFilingInput): FilingPlan {
     const page = input.images.find((image) => image.name === hint.file)
     if (page === undefined) continue
     const norm = normName(hint.name)
-    const draft = drafts.find((each) => each.norms.has(norm))
+    const draft =
+      drafts.find((each) => each.item.sameAs === null && each.norms.has(norm)) ??
+      drafts.find((each) => each.norms.has(norm))
     if (draft?.item.image !== null) continue
     const record = draft.item.recordId === null ? null : rosterById.get(draft.item.recordId)
     if (record?.hasImage === true) continue
@@ -480,8 +568,9 @@ export function droppedLine(dropped: FilingDropped): string | null {
   if (dropped.quote > 0) parts.push(`${lines(dropped.quote)} dropped: quote not in the document`)
   if (dropped.duplicate > 0) parts.push(`${lines(dropped.duplicate)} Pinned already says`)
   if (dropped.dismissed > 0) parts.push(`${lines(dropped.dismissed)} about a name you dismissed`)
+  if (dropped.shared > 0) parts.push(`${lines(dropped.shared)} about a name two records share`)
   if (dropped.alias > 0) {
-    parts.push(`${dropped.alias} nickname${dropped.alias === 1 ? '' : 's'} another record has`)
+    parts.push(`${dropped.alias} nickname${dropped.alias === 1 ? '' : 's'} left out`)
   }
   return parts.length === 0 ? null : parts.join(' · ')
 }
@@ -527,10 +616,33 @@ export function decidedFiling(
 const SKIP_NOT_FILING = 'not available when filing: text that fits no record stays in the document'
 
 /**
+ * *New record* on a "same as?" card (F-16.9): the name the twin gate matched becomes a record of
+ * its own, under that record's category, with every line added (it has no Pinned yet). The author
+ * chose it, so the gate's warning is passed (decision P1-D4). Any other item is unchanged.
+ */
+export function filingAsNew(item: FilingItem): FilingItem {
+  if (item.sameAs === null || item.recordId === null) return item
+  const given = item.sameAs.given
+  const norm = normName(given)
+  return {
+    ...item,
+    recordId: null,
+    name: given,
+    known: [],
+    pinned: [],
+    aliases: item.aliases.filter((alias) => normName(alias) !== norm),
+    lines: item.lines.map((line) => ({ ...line, kind: 'add', replaces: null, use: true })),
+    sameAs: null
+  }
+}
+
+/**
  * The review chat's operations on a pending filing (`reviewChat.v3`), applied in the renderer as
- * v1's are: `merge` (new records into one, or new ones into an existing record; two existing
- * records are merged on their sheets with Same as), `kind` and `rename` (new records only),
- * `aliases` (the new names, minus the ones the record has), `include`. `split`, `toNotes` and
+ * v1's are: `merge` (new records into one, or new ones into an existing record, whose Pinned the
+ * merged lines are checked against again; two existing records are merged on their sheets with
+ * Same as), `kind` and `rename` (new records only), `aliases` (the new names, minus the ones the
+ * record has), `include`. A name another record or another item holds is never given (a rename
+ * or a nickname is refused with why), so Apply never meets a clash. `split`, `toNotes` and
  * `fromNotes` are skipped with why. Pure.
  */
 export function applyFilingOps(
@@ -541,6 +653,38 @@ export function applyFilingOps(
   const changes: ReviewChange[] = []
   const skip = (text: string): void => void changes.push({ text, itemIds: [], skipped: true })
   const find = (id: string): FilingItem | undefined => items.find((item) => item.id === id)
+  const roster = new Set(review.taken)
+  /**
+   * Whether `norm` is a name of a record other than `item`'s, or of an item in the review other
+   * than `item`, those of the same record, and `except` (items merging into it).
+   */
+  const heldElsewhere = (
+    norm: string,
+    item: FilingItem,
+    except: ReadonlySet<string> = new Set()
+  ): boolean => {
+    if ([item.name, ...item.known].some((name) => normName(name) === norm)) return false
+    if (roster.has(norm)) return true
+    return items.some(
+      (other) =>
+        other.id !== item.id &&
+        !except.has(other.id) &&
+        (item.recordId === null || other.recordId !== item.recordId) &&
+        [other.name, ...other.aliases].some((name) => normName(name) === norm)
+    )
+  }
+  /** A new record's name as the chat gave it, or why it cannot be one. */
+  const newName = (
+    raw: string,
+    item: FilingItem,
+    except?: ReadonlySet<string>
+  ): { name: string } | { refused: string } => {
+    const name = flat(raw).slice(0, RECORD_NAME_MAX).trim()
+    const norm = normName(name)
+    if (!/[\p{L}\p{N}]/u.test(name)) return { refused: `“${raw}” has no letters or digits` }
+    if (heldElsewhere(norm, item, except)) return { refused: `“${name}” is another record’s name` }
+    return { name }
+  }
 
   for (const op of ops) {
     switch (op.op) {
@@ -551,21 +695,29 @@ export function applyFilingOps(
           break
         }
         const existing = picked.filter((item) => item.recordId !== null)
-        if (existing.length > 1) {
+        if (new Set(existing.map((item) => item.recordId)).size > 1) {
           skip(
             `Merge: ${existing.map((i) => i.name).join(' and ')} are both records already; use Same as on a sheet`
           )
           break
         }
-        const target = existing[0] ?? picked[0]
+        const target = existing.find((item) => item.sameAs === null) ?? existing[0] ?? picked[0]
         if (target === undefined) break
+        const gone = new Set(picked.filter((item) => item !== target).map((item) => item.id))
+        let name = target.name
+        if (target.recordId === null && op.name !== undefined) {
+          const renamed = newName(op.name, target, gone)
+          if ('refused' in renamed) skip(`Merge: kept the name ${target.name}; ${renamed.refused}`)
+          else name = renamed.name
+        }
         const merged: FilingItem = {
           ...target,
-          name: target.recordId === null && op.name !== undefined ? op.name : target.name,
-          aliases: [...target.aliases],
+          name,
+          aliases: target.aliases.filter((alias) => normName(alias) !== normName(name)),
           lines: [...target.lines]
         }
         const names = new Set([merged.name, ...merged.known, ...merged.aliases].map(normName))
+        const keys = new Set(merged.lines.map((line) => normalizeForMatch(line.text)))
         for (const other of picked) {
           if (other === target) continue
           for (const alias of [other.name, ...other.aliases]) {
@@ -573,15 +725,17 @@ export function applyFilingOps(
             names.add(normName(alias))
             merged.aliases.push(alias)
           }
-          const keys = new Set(merged.lines.map((line) => normalizeForMatch(line.text)))
           for (const line of other.lines) {
-            if (keys.has(normalizeForMatch(line.text))) continue
-            keys.add(normalizeForMatch(line.text))
-            merged.lines.push(line)
+            const key = normalizeForMatch(line.text)
+            if (keys.has(key)) continue
+            // A line planned against another Pinned (none, for a new record) is placed again.
+            const placed = other.recordId === merged.recordId ? line : related(line, merged.pinned)
+            if (placed === null) continue
+            keys.add(key)
+            merged.lines.push(placed)
           }
           merged.image ??= other.image
         }
-        const gone = new Set(picked.filter((item) => item !== target).map((item) => item.id))
         items = items.flatMap((item) =>
           gone.has(item.id) ? [] : item.id === target.id ? [merged] : [item]
         )
@@ -617,9 +771,23 @@ export function applyFilingOps(
           skip(`Rename: only a new record can be renamed here (${op.item})`)
           break
         }
-        items = items.map((each) => (each.id === item.id ? { ...each, name: op.name } : each))
+        const renamed = newName(op.name, item)
+        if ('refused' in renamed) {
+          skip(`Rename: ${renamed.refused}`)
+          break
+        }
+        const norm = normName(renamed.name)
+        items = items.map((each) =>
+          each.id === item.id
+            ? {
+                ...each,
+                name: renamed.name,
+                aliases: each.aliases.filter((alias) => normName(alias) !== norm)
+              }
+            : each
+        )
         changes.push({
-          text: `Renamed ${item.name} to ${op.name}`,
+          text: `Renamed ${item.name} to ${renamed.name}`,
           itemIds: [item.id],
           skipped: false
         })
@@ -632,18 +800,28 @@ export function applyFilingOps(
           break
         }
         const own = new Set([item.name, ...item.known].map(normName))
+        const room = RECORD_ALIASES_MAX - Math.max(0, item.known.length - 1)
         const seen = new Set<string>()
+        const refused: string[] = []
         const aliases = op.aliases
           .map((alias) => flat(alias).slice(0, RECORD_ALIAS_MAX).trim())
           .filter((alias) => {
             const norm = normName(alias)
-            if (alias === '' || own.has(norm) || seen.has(norm)) return false
+            if (norm === '' || own.has(norm) || seen.has(norm)) return false
+            if (heldElsewhere(norm, item) || seen.size >= room) {
+              refused.push(alias)
+              return false
+            }
             seen.add(norm)
             return true
           })
         items = items.map((each) => (each.id === item.id ? { ...each, aliases } : each))
         changes.push({
-          text: `${item.name}: new nicknames ${aliases.length > 0 ? aliases.join(', ') : 'none'}`,
+          text:
+            `${item.name}: new nicknames ${aliases.length > 0 ? aliases.join(', ') : 'none'}` +
+            (refused.length > 0
+              ? ` (left out: ${refused.join(', ')}, another record’s or no room)`
+              : ''),
           itemIds: [item.id],
           skipped: false
         })

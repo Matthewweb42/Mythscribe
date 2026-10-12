@@ -89,18 +89,30 @@ export function ResearchPage({ nodeId }: { nodeId: string }): React.JSX.Element 
 
 /**
  * F-16.9: *File into sheets* (the AI files the page into records' Pinned notes, once); afterwards
- * "Filed on <date>". Off for a page marked Not canon, an image's caption page, and while another
+ * "Filed on <date>", with *Undo filing* while the session can still take that filing back. Off for a page marked Not canon, an image's caption page, and while another
  * filing is under way, and with AI off it says what to switch on (the store's toast).
  */
 function FileIntoSheets({ nodeId }: { nodeId: string }): React.JSX.Element | null {
   const doc = useResearchDoc(nodeId)
   const writable = useCanWrite()
   const busy = useFilingStore((s) => s.flow !== null)
+  const undoable = useFilingStore((s) => s.undoDocId === nodeId)
   if (doc.fileType === 'image') return null
   if (doc.filedAt !== null) {
     return (
-      <span className="text-xs text-fg-muted" data-testid="research-filed">
-        {`Filed on ${doc.filedAt.slice(0, 10)}`}
+      <span className="flex items-center gap-2 text-xs text-fg-muted">
+        <span data-testid="research-filed">{`Filed on ${doc.filedAt.slice(0, 10)}`}</span>
+        {undoable ? (
+          <button
+            type="button"
+            data-testid="research-undo-filing"
+            disabled={!writable}
+            onClick={() => void useFilingStore.getState().undo(nodeId)}
+            className="rounded-md border border-line px-2 py-0.5 text-xs hover:bg-surface-raised disabled:opacity-50"
+          >
+            Undo filing
+          </button>
+        ) : null}
       </span>
     )
   }

@@ -100,8 +100,8 @@ export const MAXED_NOTES_FACTS: StoryNotesFacts = {
   )
 }
 
-const rendered = (facts: StoryNotesFacts, budget: number): string => {
-  const block = renderStoryNotes(facts, budget)
+const rendered = (facts: StoryNotesFacts, budget: number, continuity = false): string => {
+  const block = renderStoryNotes(facts, budget, { continuity })
   if (block === null) throw new Error('the fixture block must render')
   return block
 }
@@ -113,3 +113,15 @@ export const FIXTURE_GHOST_STORY_NOTES = rendered(
 )
 export const MAXED_STORY_NOTES = rendered(MAXED_NOTES_FACTS, STORY_BIBLE_TOKEN_BUDGET)
 export const MAXED_GHOST_STORY_NOTES = rendered(MAXED_NOTES_FACTS, STORY_BIBLE_GHOST_TOKEN_BUDGET)
+/** The continuity pass's form of the blocks (`editPass.v3`). */
+export const FIXTURE_CONTINUITY_NOTES = rendered(
+  FIXTURE_NOTES_FACTS,
+  STORY_BIBLE_TOKEN_BUDGET,
+  true
+)
+export const MAXED_CONTINUITY_NOTES = rendered(MAXED_NOTES_FACTS, STORY_BIBLE_TOKEN_BUDGET, true)
+export const MAXED_GHOST_CONTINUITY_NOTES = rendered(
+  MAXED_NOTES_FACTS,
+  STORY_BIBLE_GHOST_TOKEN_BUDGET,
+  true
+)

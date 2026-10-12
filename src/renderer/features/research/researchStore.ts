@@ -5,6 +5,7 @@ import { readDropped } from '@renderer/features/library/droppedFiles'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { refreshFiledConflictsSoon } from '@renderer/features/thisScene/filedConflictStore'
 import { ipc } from '@renderer/lib/ipc'
 
 /**
@@ -106,6 +107,8 @@ export const useResearchStore = create<ResearchState>((set, get) => {
       const doc = await ipc().invoke('research:setNotCanon', { nodeId, notCanon })
       if (mine !== generation) return
       set({ docs: merge(get().docs, [doc]) })
+      // F-16.9: lines filed from a page that is Not canon now are Needs a look conflicts.
+      refreshFiledConflictsSoon()
     },
 
     async openOriginal(nodeId) {

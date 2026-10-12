@@ -23,6 +23,7 @@ import { takeSnapshot } from '../snapshot/snapshotStore'
 import { statsDashboard } from '../stats/dashboardStore'
 import { createNode, getNode, listNodes, type TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, manuscriptDocuments, projectDocuments } from '../voice/profile'
+import { resetVoiceProfileCache } from '../voice/versionCache'
 import { createResearchNote } from './researchStore'
 
 /**
@@ -47,6 +48,8 @@ const doc = (...paragraphs: string[]): TiptapNodeT => ({
 const RESEARCH_TEXT = `${RESEARCH_WORD} rockfish live forty fathoms down off the northern reefs and the tides there run hard`
 
 beforeEach(() => {
+  // The voice profile is cached per process; another file's project must not answer here.
+  resetVoiceProfileCache()
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-research-out-'))
   session = createSeededProject(projectFolderFor(tmp, 'Out'), 'Out', 'novel')
   db = session.connection.orm

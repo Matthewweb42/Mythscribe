@@ -10,10 +10,7 @@ import {
   buildReviewChatPromptV2,
   type REVIEW_CHAT_PROMPT_V2_VERSION
 } from './prompts/reviewChat.v2'
-import {
-  buildReviewChatPromptV3,
-  type REVIEW_CHAT_PROMPT_V3_VERSION
-} from './prompts/reviewChat.v3'
+import { buildReviewChatPromptV3, REVIEW_CHAT_PROMPT_V3_VERSION } from './prompts/reviewChat.v3'
 import { createProposal } from './proposalStore'
 import {
   AiCancelledError,
@@ -178,8 +175,11 @@ async function askReviewChat(
       parsed = reply.finishReason === 'length' ? null : parseReviewChatAnswer(reply.text)
     }
     if (parsed === null) {
+      // reviewChat.v3 is sent with reasoning off already, so Thinking is no next step there.
       throw new AiFallbackError(
-        'The answer was cut off or unreadable, even when asked again. Try a shorter instruction, or switch Thinking off for the strong model in Settings › AI.'
+        build(false).version === REVIEW_CHAT_PROMPT_V3_VERSION
+          ? 'The answer was cut off or unreadable, even when asked again. Try a shorter instruction.'
+          : 'The answer was cut off or unreadable, even when asked again. Try a shorter instruction, or switch Thinking off for the strong model in Settings › AI.'
       )
     }
     const proposal = createProposal(db, {

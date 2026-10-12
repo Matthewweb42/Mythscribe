@@ -27,6 +27,8 @@ export interface StoryNotesInput {
   nodeId: string | null
   /** `STORY_BIBLE_TOKEN_BUDGET`, or `STORY_BIBLE_GHOST_TOKEN_BUDGET` for ghost text. */
   maxTokens: number
+  /** The continuity pass's block (`StoryNotesOptions.continuity`). */
+  continuity?: boolean
 }
 
 const toNotesRecord = (record: StoryRecord): StoryNotesRecord => ({
@@ -80,7 +82,9 @@ export function storyNotesFacts(db: TreeDb, nodeId: string): StoryNotesFacts | n
 export function buildStoryNotes(db: TreeDb, input: StoryNotesInput): string | null {
   if (input.nodeId === null) return null
   const facts = storyNotesFacts(db, input.nodeId)
-  return facts === null ? null : renderStoryNotes(facts, input.maxTokens)
+  return facts === null
+    ? null
+    : renderStoryNotes(facts, input.maxTokens, { continuity: input.continuity === true })
 }
 
 /**

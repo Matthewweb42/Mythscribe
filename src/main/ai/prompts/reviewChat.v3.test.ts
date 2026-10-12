@@ -15,6 +15,7 @@ const review: FilingReview = {
       name: 'The Fen-Wight',
       categoryId: 'creature',
       known: [],
+      pinned: [],
       aliases: ['wight'],
       lines: [
         {
@@ -37,6 +38,7 @@ const review: FilingReview = {
       name: 'Mara Vell',
       categoryId: 'character',
       known: ['Mara Vell'],
+      pinned: [],
       aliases: ['Mara'],
       lines: [
         {
@@ -54,8 +56,9 @@ const review: FilingReview = {
       include: false
     }
   ],
+  taken: ['mara vell'],
   categories: [],
-  dropped: { quote: 0, duplicate: 0, dismissed: 0, alias: 0 },
+  dropped: { quote: 0, duplicate: 0, dismissed: 0, alias: 0, shared: 0 },
   proposalIds: [],
   chunks: 1,
   usage: { inputTokens: 0, outputTokens: 0 },

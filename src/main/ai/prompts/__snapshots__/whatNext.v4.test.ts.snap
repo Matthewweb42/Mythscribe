@@ -3,9 +3,9 @@
 exports[`whatNext.v4 prompt (F-16.14) > matches the golden messages: the Story notes before the map, no steer 1`] = `
 [
   {
-    "content": "You are the what-comes-next feature inside a novel-writing app. Read the text so far, the scene brief (the author's intent), and the story bible, and suggest 3 different directions the story could take right after the last line: each a plausible next beat that follows from what is on the page, serves the brief, and keeps to the characters, places, and rules the bible states. Do not write the prose itself and do not summarise what already happened. Each direction has a title of at most 80 characters and a text of one or two sentences, at most 300 characters. Reply with JSON only: {"directions":[{"title":"...","text":"..."}]}.
+    "content": "You are the what-comes-next feature inside a novel-writing app. Read the text so far, the scene brief (the author's intent), and the story notes, and suggest 3 different directions the story could take right after the last line: each a plausible next beat that follows from what is on the page, serves the brief, and keeps to the characters, places, and rules the story notes state. Do not write the prose itself and do not summarise what already happened. Each direction has a title of at most 80 characters and a text of one or two sentences, at most 300 characters. Reply with JSON only: {"directions":[{"title":"...","text":"..."}]}.
 
-Story time: this scene is the one marked "▶ NOW" in the story map; only what the scenes up to it show has happened. Later and planned scenes, and the story bible, are the author's notes and plans: a direction may move toward them but never treats them as already happened.
+Story time: this scene is the one marked "▶ NOW" in the story map; only what the scenes up to it show has happened. Later and planned scenes are the author's plans: a direction may move toward them but never treats them as already happened. The story notes are timeless facts about people, places and things; they never make a plot event happen.
 
 Story notes (the manuscript wins: where the passage and these notes disagree, follow the passage):
 Here: Mara Vell (POV), Tomas Harrow

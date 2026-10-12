@@ -17,15 +17,15 @@ import { createProject, projectFolderFor, type ProjectSession } from '../project
 import { ensureResearchRoot } from '../project/seed'
 import { setAiSettings } from '../project/settingsStore'
 import { listDismissed } from '../memory/dismissedStore'
-import { createRecord, getRecord, listRecords, savePage } from '../memory/recordStore'
+import { addAlias, createRecord, getRecord, listRecords, savePage } from '../memory/recordStore'
 import type { TreeDb } from '../tree/treeStore'
 import {
   applyFiling,
-  canUndoFiling,
   clearFilingUndo,
   estimateFiling,
   fileResearch,
   filingSource,
+  undoableFiling,
   undoFiling
 } from './filing'
 import { filedConflicts, keepFiledLine, updateFiledLine } from './filedLines'
@@ -207,7 +207,8 @@ describe('applyFiling and undoFiling (F-16.9)', () => {
       }))
     }
     const result = applyFiling(db, session.folder, decided, NOW)
-    expect(result).toMatchObject({ created: 1, updated: 1, lines: 4 })
+    expect(result).toMatchObject({ created: 1, updated: 1, lines: 4, skipped: 0 })
+    expect(result.categories.map((category) => category.id)).toContain('creature')
     const wight = listRecords(db).find((record) => record.name === 'Fen-Wight')
     expect(wight).toMatchObject({ origin: 'filed', categoryId: 'creature' })
     expect(wight?.aliases.map((alias) => [alias.text, alias.origin])).toEqual([
@@ -265,7 +266,7 @@ describe('applyFiling and undoFiling (F-16.9)', () => {
       },
       NOW
     )
-    expect(canUndoFiling()).toBe(true)
+    expect(undoableFiling()).toBe(page)
     // The author edits the scar line (her edit clears its mark), so it is hers now.
     const pinned = getRecord(db, mara)?.pinned ?? docOf()
     savePage(
@@ -282,7 +283,8 @@ describe('applyFiling and undoFiling (F-16.9)', () => {
       },
       NOW
     )
-    const undone = undoFiling(db, session.folder, new Date(NOW.getTime() + 1000))
+    expect(() => undoFiling(db, session.folder, 'another-page', NOW)).toThrow(/another page/u)
+    const undone = undoFiling(db, session.folder, page, new Date(NOW.getTime() + 1000))
     expect(undone.deleted).toHaveLength(1)
     expect(undone.kept).toBe(1)
     expect(listRecords(db).map((record) => record.name)).toEqual(['Mara Vell'])
@@ -294,8 +296,73 @@ describe('applyFiling and undoFiling (F-16.9)', () => {
     expect(getRecord(db, mara)?.aliases.map((alias) => alias.text)).toEqual(['Mara Vell'])
     expect(researchDocOf(db, page).filedAt).toBeNull()
     expect(result.recordIds).toContain(mara)
-    expect(canUndoFiling()).toBe(false)
-    expect(() => undoFiling(db, session.folder, NOW)).toThrow(/no filing to undo/u)
+    expect(undoableFiling()).toBeNull()
+    expect(() => undoFiling(db, session.folder, page, NOW)).toThrow(/no filing to undo/u)
+  })
+})
+
+describe('one name never sinks the whole Apply (F-16.9)', () => {
+  const answering = (answer: unknown): void => {
+    complete.mockImplementation(() =>
+      Promise.resolve({
+        text: JSON.stringify(answer),
+        model: 'deepseek-v4-pro',
+        usage: { inputTokens: 900, outputTokens: 300 }
+      })
+    )
+  }
+
+  it('files two new records when a later chunk gives one the other’s name as a nickname', async () => {
+    addAlias(db, mara, { text: 'the Skipper', shared: true }, NOW)
+    answering({
+      records: [
+        {
+          name: 'Old Jory',
+          category: 'character',
+          aliases: [],
+          lines: [{ text: 'Colour: pale', q: 'is a pale thing that hunts' }]
+        },
+        {
+          name: 'Hesk Orrin',
+          category: 'character',
+          // Another new record's name, and a name Mara holds shared: neither is filed.
+          aliases: ['Old Jory', 'the Skipper', 'Orrin'],
+          lines: [{ text: 'Hunts by lantern-light', q: 'hunts by lantern-light along the dykes' }]
+        }
+      ]
+    })
+    const review = await file()
+    expect(review.items.map((item) => [item.name, item.aliases])).toEqual([
+      ['Old Jory', []],
+      ['Hesk Orrin', ['Orrin']]
+    ])
+    expect(review.dropped.alias).toBe(2)
+    expect(review.taken).toEqual(expect.arrayContaining(['mara vell', 'the skipper']))
+    const result = applyFiling(db, session.folder, review, NOW)
+    expect(result).toMatchObject({ created: 2, skipped: 0 })
+    expect(listRecords(db).map((record) => record.name)).toEqual(
+      expect.arrayContaining(['Old Jory', 'Hesk Orrin', 'Mara Vell'])
+    )
+  })
+
+  it('skips a new record whose name was taken since, and leaves out a nickname another record holds', async () => {
+    const review = await file()
+    const [wight, maraItem] = review.items
+    if (wight === undefined || maraItem === undefined) throw new Error('expected two items')
+    const stale: FilingReview = {
+      ...review,
+      items: [
+        // A stale review: one name another record holds now, one nickname that is Mara's name.
+        { ...wight, aliases: ['Mara Vell', 'wight'] },
+        { ...wight, id: 'f9', name: 'Mara Vell', aliases: [] },
+        maraItem
+      ]
+    }
+    const result = applyFiling(db, session.folder, stale, NOW)
+    expect(result).toMatchObject({ created: 1, updated: 1, skipped: 1 })
+    const made = listRecords(db).find((record) => record.name === 'Fen-Wight')
+    expect(made?.aliases.map((alias) => alias.text)).toEqual(['Fen-Wight', 'wight'])
+    expect(researchDocOf(db, page).filedAt).toBe(NOW.toISOString())
   })
 })
 
@@ -357,5 +424,49 @@ describe('the filed-line check (F-16.9)', () => {
         NOW
       )
     ).toThrow(/changed since/u)
+  })
+})
+
+describe('the filed-line check keeps what the author kept (F-16.9)', () => {
+  const filedOnce = async (): Promise<void> => {
+    const review = await file()
+    applyFiling(db, session.folder, review, NOW)
+  }
+
+  it('Keep line stays kept through an edit elsewhere on the page, and asks again when its paragraph changes', async () => {
+    await filedOnce()
+    const moved = 'Mara Vell has grey eyes and a burn scar on her right hand.'
+    saveDocument(db, page, docOf(BESTIARY[0]!, BESTIARY[1]!, moved))
+    const [scar] = filedConflicts(db)
+    expect(scar).toMatchObject({ line: 'Scar: burn across her left hand', pageNotCanon: false })
+    keepFiledLine(db, scar!, NOW)
+    expect(filedConflicts(db)).toEqual([])
+    saveDocument(db, page, docOf('Bestiary of the Northern Fens', BESTIARY[1]!, moved))
+    expect(filedConflicts(db)).toEqual([])
+    saveDocument(
+      db,
+      page,
+      docOf(
+        'Bestiary of the Northern Fens',
+        BESTIARY[1]!,
+        'Mara Vell has a burn scar on her cheek.'
+      )
+    )
+    expect(filedConflicts(db).map((c) => c.line)).toEqual(['Scar: burn across her left hand'])
+  })
+
+  it('flags every line filed from a page switched to Not canon as a whole', async () => {
+    await filedOnce()
+    setResearchNotCanon(db, page, true)
+    const flagged = filedConflicts(db)
+    expect(flagged.map((c) => [c.line, c.pageNotCanon])).toEqual([
+      ['Colour: pale', true],
+      ['Hunts by lantern-light', true],
+      ['Scar: burn across her left hand', true]
+    ])
+    keepFiledLine(db, flagged[0]!, NOW)
+    expect(filedConflicts(db)).toHaveLength(2)
+    setResearchNotCanon(db, page, false)
+    expect(filedConflicts(db)).toEqual([])
   })
 })

@@ -15,18 +15,21 @@ import { AppError } from '../ipc/errors'
 import { dismiss, isDismissed } from '../memory/dismissedStore'
 import { getRecord, listRecords, requireRecord, savePage } from '../memory/recordStore'
 import { getNode, type TreeDb } from '../tree/treeStore'
-import { pageHash, pageParagraphs } from './filing'
+import { pageParagraphs } from './filing'
+import { researchDocOf } from './researchStore'
 import { isUnderResearch } from './researchTree'
 
 /**
  * The filed-line check (F-16.9): a Pinned paragraph filed from a Research page (`aiFiled`) whose
- * quote is no longer in a canon paragraph of that page is a Needs a look **conflict**: "Filed from
- * 'Bestiary' ¶4, which now reads '…'", with *Go there* · *Update line* (the author rewrites the
- * line beside the page's closest paragraph; nothing is written without her) · *Keep line* (a
- * `notProblem` dismissal keyed by the record, the paragraph and the page as it now reads, so a
- * later change to the page asks again). Local and free; run when a Research page or a Pinned page
- * is saved and when the panel opens. A paragraph the author edited lost its mark, so it is hers
- * and never checked; a page that is gone is not checked either.
+ * quote is no longer in a canon paragraph of that page, or whose page is marked Not canon as a
+ * whole now, is a Needs a look **conflict**: "Filed from 'Bestiary' ¶4, which now reads '…'" (or
+ * "which is now Not canon"), with *Go there* · *Update line* (the author rewrites the line beside
+ * the page's closest paragraph; nothing is written without her) · *Keep line* (a `notProblem`
+ * dismissal keyed by the record, the line and its quote, and the page's closest paragraph as it
+ * reads now, so only a later change to that paragraph asks again; an edit elsewhere on the page
+ * does not). Local and free; run when a Research page or a Pinned page is saved, when a page's
+ * Not canon switch moves, and when the panel opens. A paragraph the author edited lost its mark,
+ * so it is hers and never checked; a page that is gone is not checked either.
  */
 
 /** Characters of the page's closest paragraph the conflict shows. */
@@ -69,32 +72,42 @@ const clip = (text: string, max: number): string => {
   return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`
 }
 
-/** The *Keep line* reference: the record, the paragraph and its quote, and the page as it reads now. */
+/**
+ * The *Keep line* reference: the record, the line and its quote, and what the source says about it
+ * now (`nowReads`: the page's closest paragraph, whole; a Not canon page is its own state).
+ */
 export function filedConflictKey(
   recordId: string,
   line: string,
   quote: string,
-  sourceHash: string
+  nowReads: string
 ): string {
-  return `filed|${recordId}|${sha256(`${line}\u0000${quote}`).slice(0, 16)}|${sourceHash.slice(0, 16)}`
+  return `filed|${recordId}|${sha256(`${line}\u0000${quote}`).slice(0, 16)}|${sha256(nowReads).slice(0, 16)}`
+}
+
+/** What a Not canon page "reads" for the *Keep line* key: no paragraph's text can equal it. */
+const PAGE_NOT_CANON = '\u0000not canon'
+
+interface FiledSource {
+  title: string
+  paragraphs: MarkedParagraph[]
+  notCanon: boolean
 }
 
 /** Every filed line whose source changed, record by record (by name), each in page order. */
 export function filedConflicts(db: TreeDb): FiledConflict[] {
-  const pages = new Map<
-    string,
-    { title: string; paragraphs: MarkedParagraph[]; hash: string } | null
-  >()
-  const pageOf = (
-    docId: string
-  ): { title: string; paragraphs: MarkedParagraph[]; hash: string } | null => {
+  const pages = new Map<string, FiledSource | null>()
+  const pageOf = (docId: string): FiledSource | null => {
     if (!pages.has(docId)) {
       const row = getNode(db, docId)
       if (row?.kind !== 'document' || !isUnderResearch(db, row)) {
         pages.set(docId, null)
       } else {
-        const paragraphs = pageParagraphs(db, docId)
-        pages.set(docId, { title: row.title, paragraphs, hash: pageHash(paragraphs) })
+        pages.set(docId, {
+          title: row.title,
+          paragraphs: pageParagraphs(db, docId),
+          notCanon: researchDocOf(db, docId).notCanon
+        })
       }
     }
     return pages.get(docId) ?? null
@@ -109,15 +122,22 @@ export function filedConflicts(db: TreeDb): FiledConflict[] {
       const page = pageOf(filed.doc)
       if (page === null) continue
       const needle = normalizeForMatch(filed.quote).toLocaleLowerCase()
-      const still = page.paragraphs.some(
-        (paragraph) =>
-          !paragraph.notCanon &&
-          normalizeForMatch(paragraph.text).toLocaleLowerCase().includes(needle)
-      )
+      const still =
+        !page.notCanon &&
+        page.paragraphs.some(
+          (paragraph) =>
+            !paragraph.notCanon &&
+            normalizeForMatch(paragraph.text).toLocaleLowerCase().includes(needle)
+        )
       if (still) continue
-      const key = filedConflictKey(record.id, block.text, filed.quote, page.hash)
-      if (isDismissed(db, 'notProblem', dismissedKey({ kind: 'notProblem', ref: key }))) continue
       const closest = closestParagraph(filed.quote, filed.para, page.paragraphs)
+      const key = filedConflictKey(
+        record.id,
+        block.text,
+        filed.quote,
+        page.notCanon ? PAGE_NOT_CANON : (closest?.text ?? '')
+      )
+      if (isDismissed(db, 'notProblem', dismissedKey({ kind: 'notProblem', ref: key }))) continue
       found.push({
         key,
         recordId: record.id,
@@ -128,14 +148,15 @@ export function filedConflicts(db: TreeDb): FiledConflict[] {
         line: block.text,
         lineIndex: block.index,
         quote: filed.quote,
-        nowReads: closest === null ? null : clip(closest.text, FILED_NOW_READS_MAX)
+        nowReads: closest === null ? null : clip(closest.text, FILED_NOW_READS_MAX),
+        pageNotCanon: page.notCanon
       })
     }
   }
   return found
 }
 
-/** *Keep line*: the conflict stays quiet until the page changes again (`notProblem`). */
+/** *Keep line*: the conflict stays quiet until its paragraph changes again (`notProblem`). */
 export function keepFiledLine(db: TreeDb, conflict: FiledConflict, now: Date): Dismissed {
   return dismiss(
     db,

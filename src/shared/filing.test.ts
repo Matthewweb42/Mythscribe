@@ -5,7 +5,9 @@ import {
   decidedFiling,
   droppedLine,
   FILING_QUOTE_MAX_WORDS,
+  filingAsNew,
   hasFilingConflict,
+  isTitleAlias,
   planFiling,
   quoteParagraph,
   splitLabel,
@@ -143,7 +145,7 @@ describe('planFiling (F-16.9)', () => {
     expect(plan.dropped.duplicate).toBe(2)
   })
 
-  it('files a near name into the record the twin gate matched, as a nickname with a same-as note', () => {
+  it('gives a near name its own undecided card for the record the twin gate matched', () => {
     const plan = planFiling(
       input([
         {
@@ -161,9 +163,176 @@ describe('planFiling (F-16.9)', () => {
       name: 'Mara Vell',
       sameAs: { given: 'Mara', rule: 'subset' },
       // "the Captain" is hers already; "Tomas Harrow" is another record's.
-      aliases: ['Mara', 'Cap']
+      aliases: ['Mara', 'Cap'],
+      pinned: [
+        { index: 0, text: 'Eyes: green' },
+        { index: 1, text: 'Hand: TBD' }
+      ],
+      include: false
     })
     expect(plan.dropped.alias).toBe(1)
+  })
+
+  it('keeps a "same as?" filing apart from the lines filed under the record’s own name', () => {
+    const plan = planFiling(
+      input([
+        {
+          name: 'Mara Vell',
+          categoryId: 'character',
+          aliases: [],
+          lines: [{ text: 'Scar: left hand', q: 'a scar on her left hand' }]
+        },
+        {
+          name: 'Mara',
+          categoryId: 'character',
+          aliases: [],
+          lines: [{ text: 'Eyes: grey', q: 'Mara Vell has grey eyes' }]
+        },
+        {
+          name: 'mara',
+          categoryId: 'character',
+          aliases: [],
+          lines: [{ text: 'Has a scar', q: 'grey eyes and a scar' }]
+        }
+      ])
+    )
+    expect(
+      plan.items.map((item) => [
+        item.name,
+        item.sameAs?.given ?? null,
+        item.include,
+        item.lines.length
+      ])
+    ).toEqual([
+      ['Mara Vell', null, true, 1],
+      ['Mara Vell', 'Mara', false, 2]
+    ])
+    expect(plan.items[1]?.aliases).toEqual(['Mara'])
+    // New record: the given name, its lines all added (it has no Pinned yet).
+    const made = filingAsNew(plan.items[1]!)
+    expect(made).toMatchObject({
+      recordId: null,
+      name: 'Mara',
+      known: [],
+      pinned: [],
+      sameAs: null
+    })
+    expect(made.aliases).toEqual([])
+    expect(made.lines.map((line) => [line.kind, line.use, line.replaces])).toEqual([
+      ['add', true, null],
+      ['add', true, null]
+    ])
+    expect(filingAsNew(plan.items[0]!)).toBe(plan.items[0])
+  })
+
+  it('never lets two items, or an item and another record, hold one nickname', () => {
+    const shared: FilingRosterRecord[] = [
+      ...roster,
+      {
+        id: 'r-joss',
+        name: 'Joss Fen',
+        categoryId: 'character',
+        names: [
+          { text: 'Joss Fen', shared: false },
+          { text: 'the Skipper', shared: true }
+        ],
+        pinned: [],
+        hasImage: false
+      }
+    ]
+    const plan = planFiling(
+      input(
+        [
+          {
+            name: 'Old Jory',
+            categoryId: 'character',
+            aliases: ['the Skipper', 'the Ferryman'],
+            lines: [{ text: 'Hunts by lantern', q: 'hunts by lantern-light' }]
+          },
+          {
+            name: 'Hesk Orrin',
+            categoryId: 'character',
+            aliases: ['Old Jory', 'the Ferryman', 'Orrin'],
+            lines: [{ text: 'Eyes: brown', q: 'his eyes are brown' }]
+          },
+          {
+            name: 'Mara Vell',
+            categoryId: 'character',
+            aliases: ['Quill'],
+            lines: []
+          },
+          {
+            name: 'Quill',
+            categoryId: 'character',
+            aliases: [],
+            lines: [{ text: 'A pale thing', q: 'is a pale thing' }]
+          }
+        ],
+        { roster: shared }
+      )
+    )
+    expect(plan.items.map((item) => [item.name, item.aliases])).toEqual([
+      // "the Skipper" is Joss Fen's (shared there, but filing never files a shared name).
+      ['Old Jory', ['the Ferryman']],
+      // "Old Jory" is the other new record's name; "the Ferryman" its nickname.
+      ['Hesk Orrin', ['Orrin']],
+      ['Quill', []]
+    ])
+    // Mara keeps nothing: "Quill" is a new record's name, which wins over her nickname.
+    expect(plan.items.some((item) => item.recordId === 'r-mara')).toBe(false)
+    expect(plan.dropped.alias).toBe(4)
+  })
+
+  it('drops a title proposed as a nickname, and the lines filed under a name two records share', () => {
+    const shared: FilingRosterRecord[] = [
+      {
+        ...roster[0]!,
+        names: [
+          { text: 'Mara Vell', shared: false },
+          { text: 'the Skipper', shared: true }
+        ]
+      },
+      {
+        ...roster[1]!,
+        names: [
+          { text: 'Tomas Harrow', shared: false },
+          { text: 'the Skipper', shared: true }
+        ]
+      }
+    ]
+    const plan = planFiling(
+      input(
+        [
+          {
+            name: 'Mara Vell',
+            categoryId: 'character',
+            aliases: ['Captain', 'Captain Vell', 'the burned captain', 'Mrs Harrow'],
+            lines: [{ text: 'Scar: left hand', q: 'a scar on her left hand' }]
+          },
+          {
+            name: 'the Skipper',
+            categoryId: 'character',
+            aliases: [],
+            lines: [
+              { text: 'Eyes: brown', q: 'his eyes are brown' },
+              { text: 'Ferry', q: 'keeps the ferry at Gullhaven' }
+            ]
+          }
+        ],
+        { roster: shared }
+      )
+    )
+    expect(plan.items.map((item) => [item.name, item.aliases])).toEqual([
+      ['Mara Vell', ['the burned captain', 'Mrs Harrow']]
+    ])
+    expect(plan.dropped).toMatchObject({ alias: 2, shared: 2 })
+    expect(droppedLine(plan.dropped)).toBe(
+      '2 lines about a name two records share · 2 nicknames left out'
+    )
+    expect(isTitleAlias('the Captain', ['Mara Vell'])).toBe(true)
+    expect(isTitleAlias('Capt. Vell', ['Mara Vell'])).toBe(true)
+    expect(isTitleAlias('Captain Harrow', ['Mara Vell'])).toBe(false)
+    expect(isTitleAlias('Vell', ['Mara Vell'])).toBe(false)
   })
 
   it('drops a dismissed name with its lines, and a nickname dismissed for that record', () => {
@@ -241,7 +410,7 @@ describe('the filing helpers', () => {
     expect(splitLabel('She has grey eyes.')).toBeNull()
     expect(quoteParagraph('his eyes are brown', PARAGRAPHS)).toBe(4)
     expect(quoteParagraph('cannot swim at all', PARAGRAPHS)).toBeNull()
-    expect(droppedLine({ quote: 0, duplicate: 0, dismissed: 0, alias: 0 })).toBeNull()
+    expect(droppedLine({ quote: 0, duplicate: 0, dismissed: 0, alias: 0, shared: 0 })).toBeNull()
   })
 })
 
@@ -273,6 +442,7 @@ const review = (): FilingReview => {
     docTitle: 'Bestiary',
     docHash: 'h',
     items: plan.items,
+    taken: ['mara vell', 'the captain', 'tomas harrow', 'harrow'],
     categories: [
       {
         ...categoryFromInput(
@@ -333,5 +503,70 @@ describe('decidedFiling and the review chat (F-16.9)', () => {
       'toNotes: not available when filing: text that fits no record stays in the document',
       'Merge: fewer than two of f1, f9 are in the review'
     ])
+  })
+})
+
+describe('the review chat never makes a clash Apply would refuse (F-16.9)', () => {
+  it('refuses a rename or a nickname another record or another item holds', () => {
+    const { review: changed, changes } = applyFilingOps(review(), [
+      { op: 'rename', item: 'f1', name: 'Tomas Harrow' },
+      { op: 'rename', item: 'f2', name: 'the fen-wight' },
+      { op: 'rename', item: 'f1', name: '!!' },
+      { op: 'aliases', item: 'f2', aliases: ['the Captain', 'The Fen-Wight', 'Mother'] },
+      { op: 'merge', items: ['f2', 'f1'], name: 'Mara Vell' }
+    ])
+    expect(changes.map((change) => [change.text, change.skipped])).toEqual([
+      ['Rename: “Tomas Harrow” is another record’s name', true],
+      ['Rename: “the fen-wight” is another record’s name', true],
+      ['Rename: “!!” has no letters or digits', true],
+      [
+        'Wight Mother: new nicknames Mother (left out: the Captain, The Fen-Wight, another record’s or no room)',
+        false
+      ],
+      ['Merge: kept the name Wight Mother; “Mara Vell” is another record’s name', true],
+      ['Merged Wight Mother, The Fen-Wight into Wight Mother', false]
+    ])
+    expect(changed.items[0]).toMatchObject({
+      name: 'Wight Mother',
+      aliases: ['Mother', 'The Fen-Wight']
+    })
+  })
+
+  it('re-checks lines merged into an existing record against its Pinned', () => {
+    const plan = planFiling(
+      input([
+        {
+          name: 'Mara Vell',
+          categoryId: 'character',
+          aliases: [],
+          lines: [{ text: 'Scar: left hand', q: 'a scar on her left hand' }]
+        },
+        {
+          name: 'Brand',
+          categoryId: 'character',
+          aliases: [],
+          lines: [
+            { text: 'Eyes: grey', q: 'Mara Vell has grey eyes' },
+            { text: 'Eyes: green', q: 'grey eyes and a scar' },
+            { text: 'Keeps the ferry', q: 'keeps the ferry at Gullhaven' }
+          ]
+        }
+      ])
+    )
+    const base = review()
+    const { review: changed } = applyFilingOps({ ...base, items: plan.items }, [
+      { op: 'merge', items: ['f2', 'f1'] }
+    ])
+    expect(changed.items).toHaveLength(1)
+    expect(
+      changed.items[0]?.lines.map((line) => [line.text, line.kind, line.use, line.replaces?.index])
+    ).toEqual([
+      ['Scar: left hand', 'add', true, undefined],
+      // Pinned says "Eyes: green": a conflict, Pinned's kept unless the author picks this one.
+      ['Eyes: grey', 'conflict', false, 0],
+      // Pinned says "Eyes: green" already: left out.
+      ['Keeps the ferry', 'add', true, undefined]
+    ])
+    expect(changed.items[0]).toMatchObject({ recordId: 'r-mara', aliases: ['Brand'] })
   })
 })

@@ -453,8 +453,11 @@ import {
 import { buildReviewChatPromptV3, REVIEW_CHAT_PROMPT_V3_VERSION } from '../prompts/reviewChat.v3'
 import { filingChunks, planFiling, type FilingReview } from '@shared/filing'
 import {
+  FIXTURE_CONTINUITY_NOTES,
   FIXTURE_GHOST_STORY_NOTES,
   FIXTURE_STORY_NOTES,
+  MAXED_CONTINUITY_NOTES,
+  MAXED_GHOST_CONTINUITY_NOTES,
   MAXED_GHOST_STORY_NOTES,
   MAXED_STORY_NOTES,
   STORY_NOTES_NOT_CANON_TEXT
@@ -3824,6 +3827,7 @@ function filingReview(): FilingReview {
     docTitle: 'Bestiary',
     docHash: 'fixture',
     items: plan.items,
+    taken: ['mara vell'],
     categories: [],
     dropped: plan.dropped,
     proposalIds: ['p-1'],
@@ -3847,6 +3851,7 @@ function maxedFilingReview(): FilingReview {
       name: `Record ${i}`,
       categoryId: 'character',
       known: [],
+      pinned: [],
       aliases: [`Alias ${i}`, `Other ${i}`],
       lines: Array.from({ length: 5 }, (_, j) => ({
         id: `l${i}-${j}`,
@@ -6136,7 +6141,7 @@ export const EVAL_CASES: EvalCase[] = [
       keepWords: [],
       instruction: null,
       mood: null,
-      storyNotes: FIXTURE_STORY_NOTES
+      storyNotes: FIXTURE_CONTINUITY_NOTES
     }
   ),
   editPassCaseV3(
@@ -6149,7 +6154,7 @@ export const EVAL_CASES: EvalCase[] = [
       keepWords: [],
       instruction: null,
       mood: null,
-      storyNotes: MAXED_GHOST_STORY_NOTES
+      storyNotes: MAXED_GHOST_CONTINUITY_NOTES
     }
   ),
   editPassCaseV3(
@@ -6162,7 +6167,7 @@ export const EVAL_CASES: EvalCase[] = [
       keepWords: [],
       instruction: null,
       mood: null,
-      storyNotes: MAXED_STORY_NOTES
+      storyNotes: MAXED_CONTINUITY_NOTES
     }
   ),
   editPassCaseV3(

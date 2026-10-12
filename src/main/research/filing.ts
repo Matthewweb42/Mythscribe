@@ -10,6 +10,7 @@ import {
   filingChunks,
   parseFilingAnswer,
   planFiling,
+  relateLine,
   writtenLines,
   type FiledRecord,
   type FilingApplyResult,
@@ -351,6 +352,7 @@ export async function fileResearch(
     docTitle: source.title,
     docHash: source.hash,
     items: plan.items,
+    taken: [...new Set(records.flatMap((record) => record.aliases.map((alias) => alias.norm)))],
     categories: categories.forReview(),
     dropped: plan.dropped,
     proposalIds,
@@ -405,9 +407,9 @@ export function clearFilingUndo(): void {
   lastFiling = null
 }
 
-/** Whether a filing can still be undone. For tests. */
-export function canUndoFiling(): boolean {
-  return lastFiling !== null
+/** The page whose filing can still be undone this session, or null. */
+export function undoableFiling(): string | null {
+  return lastFiling?.docId ?? null
 }
 
 /**
@@ -448,13 +450,25 @@ function withLines(
   return { ...doc, content: top }
 }
 
+/** A Pinned page's canon paragraphs as the plan reads them. */
+function pinnedCanon(pinned: TiptapNodeT | null): FilingRosterRecord['pinned'] {
+  return pinned === null
+    ? []
+    : markedParagraphs(pinned)
+        .filter((paragraph) => !paragraph.notCanon)
+        .map((paragraph) => ({ index: paragraph.index, text: paragraph.text }))
+}
+
 /**
- * Writes the reviewed filing in one transaction (F-16.9): each included item's new record (origin
- * `filed`, its new names `filed`, the accepted proposed category created first), its new names on
- * an existing record (one another record took since is skipped), its lines into Pinned marked
- * `aiFiled`, and its picture when the record has none (copied before, removed again on failure);
- * then the page is marked filed (`filed_at`, `filed_hash`). VALIDATION when the page was filed
- * already. The undo is kept for the session.
+ * Writes the reviewed filing in one transaction (F-16.9): first each included new record with its
+ * name (origin `filed`; the accepted proposed category created first), so a new record's name wins
+ * over any nickname; then each item's new names (one another record holds, or no room, is left
+ * out), its lines into Pinned marked `aiFiled` (an added line Pinned says by now, as another card
+ * for the same record may have written it, is left out), and its picture when the record has none
+ * (copied before, removed again on failure); then the page is marked filed (`filed_at`,
+ * `filed_hash`). A new record whose name another record took since the review, or an existing one
+ * deleted since, is skipped and counted; one bad name never sinks the rest. VALIDATION when the
+ * page was filed already. The undo is kept for the session.
  */
 export function applyFiling(
   db: TreeDb,
@@ -499,6 +513,7 @@ export function applyFiling(
   let created = 0
   let updated = 0
   let lines = 0
+  let skipped = 0
   const touched: string[] = []
   try {
     db.transaction((tx) => {
@@ -521,23 +536,45 @@ export function applyFiling(
         )
         madeCategories.set(category.id, made.id)
       }
+      const recordOf = new Map<string, string | null>()
       for (const item of included) {
-        const recordId = writeItem(tx, item, madeCategories, now, undo)
-        if (recordId === null) continue
-        const written = writtenLines(item)
+        recordOf.set(
+          item.id,
+          item.recordId === null
+            ? createFiledRecord(tx, item, madeCategories, now, undo)
+            : getRecord(tx, item.recordId) === null
+              ? null
+              : item.recordId
+        )
+      }
+      for (const item of included) {
+        const recordId = recordOf.get(item.id) ?? null
+        if (recordId === null) {
+          skipped += 1
+          continue
+        }
+        for (const text of item.aliases) {
+          if (addFiledAlias(tx, recordId, text, now) && item.recordId !== null) {
+            undo.aliases.push({ recordId, norm: normName(text) })
+          }
+        }
+        const current = getRecord(tx, recordId)?.pinned ?? null
+        const canon = pinnedCanon(current)
+        const written = writtenLines(item).filter(
+          (line) => line.kind !== 'add' || relateLine(line.text, canon) !== 'duplicate'
+        )
         if (written.length > 0) {
-          const current = getRecord(tx, recordId)
           savePage(
             tx,
             recordId,
             'pinned',
-            withLines(current?.pinned ?? null, review.docId, written, recordId, undo.blocks),
+            withLines(current, review.docId, written, recordId, undo.blocks),
             now
           )
           lines += written.length
         }
         const copy = copies.get(item.id)
-        if (copy !== undefined) {
+        if (copy !== undefined && getRecord(tx, recordId)?.image == null) {
           updateRecord(tx, recordId, { image: copy }, now)
           undo.images.push({ recordId, file: copy })
         }
@@ -560,24 +597,34 @@ export function applyFiling(
     if (!used.has(copy)) removeImageAsset(folder, ENTITY_IMAGES_DIR, copy)
   }
   lastFiling = undo
-  return { created, updated, lines, recordIds: touched, filedAt: at }
+  return {
+    created,
+    updated,
+    lines,
+    recordIds: [...new Set(touched)],
+    skipped,
+    categories: listCategories(db),
+    filedAt: at
+  }
 }
 
-/** Writes one item's record (new) or names (existing); answers the record's id, or null when gone. */
-function writeItem(
+/**
+ * A new item's record, made with its main name only (its nicknames follow, one by one), or null
+ * when its name is another record's by now or its category is gone: that card is skipped.
+ */
+function createFiledRecord(
   db: TreeDb,
   item: FilingItem,
   madeCategories: ReadonlyMap<string, string>,
   now: Date,
   undo: FilingUndo
 ): string | null {
-  if (item.recordId === null) {
+  try {
     const made = createRecord(
       db,
       {
         name: item.name,
         categoryId: madeCategories.get(item.categoryId) ?? item.categoryId,
-        aliases: item.aliases.map((text) => ({ text, origin: 'filed' as const })),
         origin: 'filed',
         force: true
       },
@@ -586,18 +633,26 @@ function writeItem(
     if (!('record' in made)) return null
     undo.created.push({ id: made.record.id, modified: made.record.modified })
     return made.record.id
+  } catch (err) {
+    if (err instanceof AppError) return null
+    throw err
   }
-  if (getRecord(db, item.recordId) === null) return null
-  for (const text of item.aliases) {
-    try {
-      addAlias(db, item.recordId, { text, origin: 'filed' }, now)
-      undo.aliases.push({ recordId: item.recordId, norm: normName(text) })
-    } catch (err) {
-      // A name another record took since (or no room left) is left out; the rest files.
-      if (!(err instanceof AppError)) throw err
-    }
+}
+
+/**
+ * One filed nickname (origin `filed`); false when it is left out: another record holds it, the
+ * record has it already, or has no room.
+ */
+function addFiledAlias(db: TreeDb, recordId: string, text: string, now: Date): boolean {
+  const norm = normName(text)
+  if (getRecord(db, recordId)?.aliases.some((alias) => alias.norm === norm) !== false) return false
+  try {
+    addAlias(db, recordId, { text, origin: 'filed' }, now)
+    return true
+  } catch (err) {
+    if (!(err instanceof AppError)) throw err
+    return false
   }
-  return item.recordId
 }
 
 /** Whether a stored top-level block is the filed paragraph `written` wrote, still as written. */
@@ -613,15 +668,23 @@ function isWritten(block: TiptapNodeT, docId: string, written: WrittenBlock): bo
 }
 
 /**
- * *Undo filing* (F-16.9): takes back the last filing where it is still as Apply wrote it. A filed
+ * *Undo filing* (F-16.9): takes back the last filing, of page `docId` (VALIDATION when the last
+ * filing was another page's), where it is still as Apply wrote it. A filed
  * paragraph still marked `aiFiled` (the author's edit clears the mark) goes, or gives its place back
  * to the paragraph it replaced; a filed nickname goes; a picture still the record's goes; a record
  * Apply made goes when nothing changed it since and no scene's details name it; the page is no
  * longer filed. What the author changed stays and is counted. The undo is spent either way.
  */
-export function undoFiling(db: TreeDb, folder: string, now: Date): FilingUndoResult {
+export function undoFiling(db: TreeDb, folder: string, docId: string, now: Date): FilingUndoResult {
   const entry = lastFiling
   if (entry === null) throw new AppError('VALIDATION', 'There is no filing to undo')
+  if (entry.docId !== docId) {
+    throw new AppError(
+      'VALIDATION',
+      'Only the last filing of this session can be undone, and it was another page’s.',
+      { docId }
+    )
+  }
   lastFiling = null
   let kept = 0
   const touched = new Set<string>()

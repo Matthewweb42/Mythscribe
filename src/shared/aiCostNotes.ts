@@ -167,7 +167,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     callsPerUse: 60,
     typicalOutTokens: 1500,
     ideas:
-      'The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading). Story memory v2 (F-16.14) sends editPass.v3: a continuity piece is checked against the Story notes block (up to 400 tokens) instead of the sheet references (worst continuity piece 3,629 vs 4,692 tokens); every other pass type is v2’s messages, so its cost is unchanged.'
+      'The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading). Story memory v2 (F-16.14) sends editPass.v3: a continuity piece is checked against the Story notes block (up to 400 tokens, its continuity form with no label lines) instead of the sheet references (worst continuity piece 3,641 vs 4,692 tokens), and a scene with no Pinned line to check against sends nothing; every other pass type is v2’s messages, so its cost is unchanged.'
   },
   agent: {
     trigger: 'every chat message',

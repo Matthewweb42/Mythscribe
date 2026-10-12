@@ -7,6 +7,7 @@ import {
   GHOST_IDLE_MS_MIN,
   USE_AI_LABEL,
   USE_AI_MEANING,
+  dataSharingLabel,
   dataSharingSends
 } from '@shared/aiSettings'
 import { useAiSettingsStore } from './aiSettingsStore'
@@ -77,7 +78,8 @@ export function AiDialSection(): React.JSX.Element | null {
       <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
         <legend className="float-left p-0 text-xs text-fg-muted">Features</legend>
         {AI_FEATURES_BY_LEVEL.map((id) => {
-          const { label, minDial } = AI_DATA_SHARING[id]
+          const { minDial } = AI_DATA_SHARING[id]
+          const label = dataSharingLabel(id, memory)
           const locked = dial < minDial
           return (
             <label
@@ -117,7 +119,7 @@ export function AiDialSection(): React.JSX.Element | null {
         </thead>
         <tbody className="align-top">
           {AI_FEATURES_BY_LEVEL.map((id) => {
-            const { label } = AI_DATA_SHARING[id]
+            const label = dataSharingLabel(id, memory)
             const sends = dataSharingSends(id, memory)
             return (
               <tr key={id}>

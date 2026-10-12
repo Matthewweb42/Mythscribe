@@ -3,19 +3,16 @@
 exports[`editPass.v3 prompt (F-16.14) > checks a continuity pass against the Story notes in place of the numbered references 1`] = `
 [
   {
-    "content": "You are the edit-pass feature inside a novel-writing app. You edit one piece of a manuscript scene and return tracked changes the author reviews one by one. Each quote is copied word for word from the text, lies inside one paragraph, and occurs only once in the text: the shortest clause or sentence that changes, at most 600 characters. The replacement is that passage as edited, or an empty string to cut it; why is one short sentence. No two quotes overlap. Leave what already works alone. At most 40 changes, in text order. Reply with JSON only: {"changes":[{"quote":"...","replacement":"...","why":"..."}]}; with nothing to change, {"changes":[]}. Continuity pass: find statements that contradict the author's story notes below and change the fewest words that make the passage agree; why names the note it contradicts. Here the notes are what the passage is checked against, and every change is a proposal the author decides on. Anything the notes do not cover is not a contradiction.",
+    "content": "You are the edit-pass feature inside a novel-writing app. You edit one piece of a manuscript scene and return tracked changes the author reviews one by one. Each quote is copied word for word from the text, lies inside one paragraph, and occurs only once in the text: the shortest clause or sentence that changes, at most 600 characters. The replacement is that passage as edited, or an empty string to cut it; why is one short sentence. No two quotes overlap. Leave what already works alone. At most 40 changes, in text order. Reply with JSON only: {"changes":[{"quote":"...","replacement":"...","why":"..."}]}; with nothing to change, {"changes":[]}. Continuity pass: find statements that disagree with the author's story notes below. For each, change the fewest words that would make the passage agree, and in why name the note and say the note may be what needs updating instead; the author decides. Anything the notes do not cover is not a disagreement.",
     "role": "system",
   },
   {
-    "content": "Story notes (the manuscript wins: where the passage and these notes disagree, follow the passage):
+    "content": "Story notes (the author's notes the passage is checked against):
 Here: Mara Vell (POV), Tomas Harrow
 Named: The Hollow Elm, Wren
 Mara Vell (Mara, the Captain): Eyes: grey. Lost her brother Daven to the river at twelve; will not cross water at night.
 Tomas Harrow (Tomas): Ferryman at the landing; owes the mill a debt he hides from Mara.
 The Hollow Elm (the elm): A split elm on the north bank where the two met as children.
-Tone (write in it): tense
-Content (keep to it): grief
-Themes (keep in view): debts come due
 
 Scene: The ferry landing
 Text:

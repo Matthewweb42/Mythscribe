@@ -35,7 +35,7 @@ import {
   type ChangeInput
 } from '../editPass/editPassStore'
 import { AppError } from '../ipc/errors'
-import { buildStoryNotes } from '../memory/storyNotes'
+import { buildStoryNotes, typedSceneMeta } from '../memory/storyNotes'
 import { getAiSettings } from '../project/settingsStore'
 import { projectNameWords, projectSpellingWords } from '../spellcheck/projectWords'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
@@ -384,7 +384,10 @@ export async function editScene(
   const scene = normalizeForMatch(sceneText)
   const title = getNode(db, input.nodeId)?.title ?? 'Untitled'
 
-  const pov = getSceneMeta(db, input.nodeId).meta.pov.trim()
+  const v2 = input.memory === 'v2'
+  const sceneMeta = getSceneMeta(db, input.nodeId).meta
+  // F-16.11: in v2 the voice's POV is the typed POV record's name, as in the prose features.
+  const pov = v2 ? (typedSceneMeta(db, input.nodeId, sceneMeta)?.pov ?? '') : sceneMeta.pov.trim()
   const profile = SENDS_VOICE[input.type] ? buildVoiceProfile(db, { pov: pov || undefined }) : null
   const voice =
     profile === null
@@ -395,9 +398,9 @@ export async function editScene(
     ? keepList([...projectNameWords(db, input.memory), ...allKeep])
     : []
   const keep = new Set(allKeep.map((word) => word.toLocaleLowerCase()))
-  const v2 = input.memory === 'v2'
   // F-16.14: in v2 a continuity pass is checked against the Story notes block (`editPass.v3`)
-  // in place of the v1 sheet and tag references.
+  // in place of the v1 sheet and tag references: its continuity form, with no label lines and
+  // null (no pass, no cost) when no record has a Pinned line to check against.
   const references =
     input.type === 'continuity' && !v2
       ? continuityRefs(db, input.nodeId, sceneText).refs.map((ref, at) =>
@@ -406,7 +409,11 @@ export async function editScene(
       : []
   const storyNotes =
     input.type === 'continuity' && v2
-      ? buildStoryNotes(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+      ? buildStoryNotes(db, {
+          nodeId: input.nodeId,
+          maxTokens: STORY_BIBLE_TOKEN_BUDGET,
+          continuity: true
+        })
       : null
   if (input.type === 'continuity' && (v2 ? storyNotes === null : references.length === 0)) {
     return empty

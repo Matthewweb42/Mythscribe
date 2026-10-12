@@ -1,12 +1,13 @@
 import { create } from 'zustand'
-import { AI_DATA_SHARING, isFeatureAllowed, needsSwitchText } from '@shared/aiSettings'
+import { dataSharingLabel, isFeatureAllowed, needsSwitchText } from '@shared/aiSettings'
 import type { ContextEstimate, ContextProgress } from '@shared/contextLibrary'
-import { applyFilingOps, writtenLines, type FilingReview } from '@shared/filing'
+import { applyFilingOps, filingAsNew, writtenLines, type FilingReview } from '@shared/filing'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
+import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { type ReviewChatEntry, type ReviewChatState } from '@renderer/features/library/libraryStore'
-import { decidedFilingReview } from '@renderer/features/library/uploadReview'
+import { decidedFilingReview, filingStartDecisions } from '@renderer/features/library/uploadReview'
 import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
 import type { ReviewDecision } from '@renderer/features/review/reviewDeckModel'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -20,7 +21,8 @@ import { useResearchStore } from './researchStore'
  * Filing a Research page into Pinned (F-16.9, decision 6; story memory v2): the estimate, which
  * the author confirms (cost is visible before anything is sent), the AI pass with its progress
  * and Stop, the review on the deck with its chat, and Apply, after which one *Undo filing* stands
- * in the toast. The one owner of the filing under way; nothing reaches a record before `apply`.
+ * in the toast and in the page's header for the session (`undoDocId`, as main keeps it). The one
+ * owner of the filing under way; nothing reaches a record before `apply`.
  */
 export type FilingFlow =
   | { stage: 'estimating'; nodeId: string }
@@ -36,7 +38,10 @@ export type FilingFlow =
       stage: 'review'
       review: FilingReview
       busy: boolean
-      /** The author's decision per card; none means accepted (everything starts accepted). */
+      /**
+       * The author's decision per card; none means accepted (everything starts accepted but a
+       * "same as?" card, which starts undecided).
+       */
       decisions: Record<string, ReviewDecision>
     }
   | { stage: 'failed'; nodeId: string; message: string; nextStep: string }
@@ -51,6 +56,8 @@ const emptyChat = (): FilingChatState => ({ entries: [], requestId: null, change
 interface FilingState {
   flow: FilingFlow | null
   chat: FilingChatState
+  /** The page whose filing *Undo filing* can still take back this session, or null. */
+  undoDocId: string | null
   /** Starts filing a page: the estimate first. Refused with a toast while Use AI is off. */
   start: (nodeId: string) => Promise<void>
   /** The author accepted the estimate: the pass runs. */
@@ -61,10 +68,12 @@ interface FilingState {
   decide: (ids: readonly string[], decision: ReviewDecision) => void
   /** A conflict's pick: the upload's line (true) or Pinned's (false, the default). */
   pickLine: (itemId: string, lineId: string, use: boolean) => void
+  /** *New record* on a "same as?" card: the name becomes a record of its own, accepted. */
+  asNewRecord: (itemId: string) => void
   /** Writes what the author kept, in one transaction. */
   apply: () => Promise<void>
-  /** *Undo filing*: takes back the last filing where it is still as written. */
-  undo: () => Promise<void>
+  /** *Undo filing*: takes back page `docId`'s filing where it is still as written. */
+  undo: (docId: string) => Promise<void>
   sendChat: (message: string) => Promise<void>
   cancelChat: () => void
   undoChat: () => void
@@ -119,11 +128,12 @@ function appliedWhole(review: FilingReview): boolean {
 export const useFilingStore = create<FilingState>((set, get) => ({
   flow: null,
   chat: emptyChat(),
+  undoDocId: null,
 
   async start(nodeId) {
     if (get().flow !== null) return
     if (!(await aiAllowed())) {
-      toast.info(`${needsSwitchText(AI_DATA_SHARING.contextImport.label)} (Settings, AI tab).`)
+      toast.info(`${needsSwitchText(dataSharingLabel('contextImport', 'v2'))} (Settings, AI tab).`)
       return
     }
     const mine = generation
@@ -190,7 +200,12 @@ export const useFilingStore = create<FilingState>((set, get) => ({
       return
     }
     set({
-      flow: { stage: 'review', review: result.review, busy: false, decisions: {} },
+      flow: {
+        stage: 'review',
+        review: result.review,
+        busy: false,
+        decisions: filingStartDecisions(result.review)
+      },
       chat: emptyChat()
     })
   },
@@ -254,6 +269,26 @@ export const useFilingStore = create<FilingState>((set, get) => ({
     )
   },
 
+  asNewRecord(itemId) {
+    set((s) =>
+      s.flow?.stage === 'review' && !s.flow.busy
+        ? {
+            flow: {
+              ...s.flow,
+              review: {
+                ...s.flow.review,
+                items: s.flow.review.items.map((item) =>
+                  item.id === itemId ? filingAsNew(item) : item
+                )
+              },
+              decisions: { ...s.flow.decisions, [itemId]: 'accepted' }
+            },
+            chat: { ...s.chat, undo: null }
+          }
+        : {}
+    )
+  },
+
   async apply() {
     const flow = get().flow
     if (flow?.stage !== 'review' || flow.busy || get().chat.requestId !== null) return
@@ -266,14 +301,18 @@ export const useFilingStore = create<FilingState>((set, get) => ({
       const result = await ipc().invoke('research:applyFiling', { review })
       settle(review, appliedWhole(review) ? 'accepted' : 'acceptedPart')
       if (mine !== generation) return
-      set({ flow: null, chat: emptyChat() })
+      set({ flow: null, chat: emptyChat(), undoDocId: review.docId })
+      useCategoryStore.getState().replace(result.categories)
       useResearchStore.getState().setFiled(review.docId, result.filedAt)
       await reloadPinned(result.recordIds)
       void useFiledConflictStore.getState().load()
       toast.successWithAction(
         `Filed ${plural(result.lines, 'line')} from “${review.docTitle}”: ` +
-          `${plural(result.created, 'new record')}, ${plural(result.updated, 'record')} added to.`,
-        { label: 'Undo filing', run: () => void get().undo() }
+          `${plural(result.created, 'new record')}, ${plural(result.updated, 'record')} added to.` +
+          (result.skipped > 0
+            ? ` ${plural(result.skipped, 'card')} left out: its name is another record’s now.`
+            : ''),
+        { label: 'Undo filing', run: () => void get().undo(review.docId) }
       )
     } catch (err) {
       if (mine === generation) {
@@ -283,11 +322,13 @@ export const useFilingStore = create<FilingState>((set, get) => ({
     }
   },
 
-  async undo() {
+  async undo(docId) {
     const mine = generation
     try {
       await flushPendingSaves()
-      const result = await ipc().invoke('research:undoFiling', undefined)
+      // The undo is spent either way, as main's is.
+      set((s) => (s.undoDocId === docId ? { undoDocId: null } : {}))
+      const result = await ipc().invoke('research:undoFiling', { docId })
       if (mine !== generation) return
       await useResearchStore.getState().load()
       await reloadPinned(result.recordIds)
@@ -421,7 +462,7 @@ export const useFilingStore = create<FilingState>((set, get) => ({
     if (flow?.stage === 'running') void useAiActivityStore.getState().cancel(flow.requestId)
     const requestId = get().chat.requestId
     if (requestId !== null) void useAiActivityStore.getState().cancel(requestId)
-    set({ flow: null, chat: emptyChat() })
+    set({ flow: null, chat: emptyChat(), undoDocId: null })
   }
 }))
 

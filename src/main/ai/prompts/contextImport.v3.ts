@@ -26,8 +26,8 @@ export const FILING_SENTINEL =
 export const CONTEXT_IMPORT_RULES_V3 =
   `${FILING_SENTINEL} Read the document and list every character, place, and thing it ` +
   'describes, each under the category it belongs to. When one is a record listed below (by its ' +
-  'name or a nickname), use that record’s name exactly and put any other names and titles the ' +
-  'document gives it in "aliases". Write its facts as short lines in the author’s words, one ' +
+  'name or a nickname), use that record’s name exactly and put any other names the document ' +
+  'gives it in "aliases", never a title ("the Captain", "Captain Vell"). Write its facts as short lines in the author’s words, one ' +
   'fact per line, as "Label: value" when a short label fits ("Eyes: grey"); never invent, ' +
   'embellish, or infer. Every line has "q": the words of the document it comes from, copied ' +
   `exactly, ${FILING_QUOTE_MIN_WORDS} to ${FILING_QUOTE_MAX_WORDS} words from one paragraph. ` +

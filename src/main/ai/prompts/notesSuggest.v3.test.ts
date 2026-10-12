@@ -5,10 +5,11 @@ import {
   STORY_NOTES_IDEA_TEXT,
   STORY_NOTES_NOT_CANON_TEXT
 } from '../eval/storyNotesFixture'
-import { buildNotesSuggestPromptV2 } from './notesSuggest.v2'
+import { buildNotesSuggestPromptV2, NOTES_SUGGEST_TIME_RULE } from './notesSuggest.v2'
 import {
   buildNotesSuggestPromptV3,
   NOTES_SUGGEST_PROMPT_V3_VERSION,
+  NOTES_SUGGEST_TIME_RULE_V3,
   type BuildNotesSuggestPromptV3Input
 } from './notesSuggest.v3'
 
@@ -33,12 +34,17 @@ describe('notesSuggest.v3 prompt (F-16.14, decision P1-D7)', () => {
     expect(system).not.toContain(STORY_NOTES_NOT_CANON_TEXT)
   })
 
-  it("is version 2's messages with the notes in the bible's slot", () => {
+  it("is version 2's messages with the notes in the bible's slot and the v2 story-time rule", () => {
     const { storyNotes, ...rest } = input
     const v2 = buildNotesSuggestPromptV2({ ...rest, bible: storyNotes })
-    expect(buildNotesSuggestPromptV3(input)).toEqual({
-      ...v2,
-      version: NOTES_SUGGEST_PROMPT_V3_VERSION
-    })
+    const v3 = buildNotesSuggestPromptV3(input)
+    expect(v3.maxTokens).toBe(v2.maxTokens)
+    expect(v3.messages[1]).toEqual(v2.messages[1])
+    expect(v3.messages[0]?.content).toBe(
+      v2.messages[0]?.content.replace(NOTES_SUGGEST_TIME_RULE, NOTES_SUGGEST_TIME_RULE_V3)
+    )
+    // The rules name the block as it is headed; the Story notes never make an event happen.
+    expect(v3.messages[0]?.content).not.toContain('story bible')
+    expect(NOTES_SUGGEST_TIME_RULE_V3).toContain('never make a plot event happen')
   })
 })

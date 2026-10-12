@@ -7,10 +7,12 @@ import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ip
 import type { ResearchDoc } from '@shared/research'
 import { resetAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
+import { resetCategoryStore, useCategoryStore } from '@renderer/features/entities/categoryStore'
 import {
   categoryCardId,
   decidedFilingReview,
-  filingReviewItems
+  filingReviewItems,
+  filingStartDecisions
 } from '@renderer/features/library/uploadReview'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetFiledConflictStore } from '@renderer/features/thisScene/filedConflictStore'
@@ -38,6 +40,7 @@ const REVIEW: FilingReview = {
       name: 'Fen-Wight',
       categoryId: 'c-creatures',
       known: [],
+      pinned: [],
       aliases: ['wight'],
       lines: [
         {
@@ -60,6 +63,7 @@ const REVIEW: FilingReview = {
       name: 'Mara Vell',
       categoryId: 'character',
       known: ['Mara Vell'],
+      pinned: [],
       aliases: [],
       lines: [
         {
@@ -82,6 +86,7 @@ const REVIEW: FilingReview = {
       name: 'Tomas Harrow',
       categoryId: 'character',
       known: ['Tomas Harrow'],
+      pinned: [],
       aliases: ['Tom'],
       lines: [
         {
@@ -99,6 +104,7 @@ const REVIEW: FilingReview = {
       include: true
     }
   ],
+  taken: ['mara vell', 'tomas harrow'],
   categories: [
     {
       ...categoryFromInput(
@@ -109,7 +115,7 @@ const REVIEW: FilingReview = {
       proposed: true
     }
   ],
-  dropped: { quote: 2, duplicate: 0, dismissed: 0, alias: 0 },
+  dropped: { quote: 2, duplicate: 0, dismissed: 0, alias: 0, shared: 0 },
   proposalIds: ['p-1'],
   chunks: 1,
   usage: { inputTokens: 3200, outputTokens: 900 },
@@ -117,6 +123,13 @@ const REVIEW: FilingReview = {
   model: 'deepseek/deepseek-v4-pro',
   promptVersion: 'contextImport.v3'
 }
+
+/** The category Apply created from the accepted proposal, as main answers it. */
+const CREATURES = categoryFromInput(
+  'c-creatures',
+  { name: 'Creatures', noun: 'creature', fields: [] },
+  'ai'
+)
 
 const DOC: ResearchDoc = {
   nodeId: 'r-bestiary',
@@ -160,6 +173,8 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
             updated: 2,
             lines: 3,
             recordIds: ['r-new', 'r-mara', 'r-tomas'],
+            skipped: 0,
+            categories: [CREATURES],
             filedAt: '2026-10-12T12:00:00.000Z'
           } as Output<C>
         case 'research:undoFiling':
@@ -190,6 +205,7 @@ function resetAll(): void {
   resetFiledConflictStore()
   resetAiSettingsStore()
   resetProposalStore()
+  resetCategoryStore()
   useDialogStore.setState({ modals: [], toasts: [] })
 }
 
@@ -210,6 +226,8 @@ describe('the filing deck (F-16.9)', () => {
       { id: 'f2', group: 'conflicts', decision: 'accepted' },
       { id: 'f3', group: 'additions', decision: 'skipped' }
     ])
+    // A "same as?" card (f3: Tom, close to Tomas Harrow) waits for the author.
+    expect(filingStartDecisions(REVIEW)).toEqual({ f3: 'pending' })
     const decided = decidedFilingReview(REVIEW, {
       f3: 'skipped',
       [categoryCardId('c-creatures')]: 'skipped'
@@ -260,6 +278,9 @@ describe('filing a page (F-16.9)', () => {
     const flow = useFilingStore.getState().flow
     if (flow?.stage !== 'review') throw new Error('expected the review')
     expect(flow.review.items[1]?.lines[0]?.use).toBe(false)
+    // The "same as?" card starts undecided; the author says Same as.
+    expect(flow.decisions.f3).toBe('pending')
+    act(() => useFilingStore.getState().decide(['f3'], 'accepted'))
     act(() => useFilingStore.getState().pickLine('f2', 'l2', true))
     await act(async () => {
       await useFilingStore.getState().apply()
@@ -273,13 +294,44 @@ describe('filing a page (F-16.9)', () => {
     const toast = useDialogStore.getState().toasts.at(-1)
     expect(toast?.message).toBe('Filed 3 lines from “Bestiary”: 1 new record, 2 records added to.')
     expect(toast?.action?.label).toBe('Undo filing')
+    // The category Apply made is the renderer's now; the page's header offers the undo too.
+    expect(useCategoryStore.getState().categories.map((category) => category.id)).toContain(
+      'c-creatures'
+    )
+    expect(useFilingStore.getState().undoDocId).toBe('r-bestiary')
     await act(async () => {
       toast?.action?.run()
       await waitFor(() => expect(sent('research:undoFiling')).toHaveLength(1))
     })
+    expect(sent('research:undoFiling')).toEqual([{ docId: 'r-bestiary' }])
     await waitFor(() =>
       expect(useDialogStore.getState().toasts.at(-1)?.message).toBe('Filing undone.')
     )
+    expect(useFilingStore.getState().undoDocId).toBeNull()
+  })
+
+  it('New record on a "same as?" card makes the name a record of its own, accepted', async () => {
+    render(<FilingDialog />)
+    await act(async () => {
+      await useFilingStore.getState().start('r-bestiary')
+      await useFilingStore.getState().confirm()
+    })
+    expect(screen.getByTestId('filing-same-as')).toHaveTextContent(
+      'Filed as “Tom”, a name close to Tomas Harrow.'
+    )
+    act(() => useFilingStore.getState().asNewRecord('f3'))
+    const flow = useFilingStore.getState().flow
+    if (flow?.stage !== 'review') throw new Error('expected the review')
+    expect(flow.decisions.f3).toBe('accepted')
+    expect(flow.review.items[2]).toMatchObject({
+      id: 'f3',
+      recordId: null,
+      name: 'Tom',
+      known: [],
+      sameAs: null
+    })
+    expect(flow.review.items[2]?.aliases).not.toContain('Tom')
+    expect(flow.review.items[2]?.lines.every((line) => line.kind === 'add' && line.use)).toBe(true)
   })
 
   it('Cancel on the review settles its proposals rejected and writes nothing', async () => {

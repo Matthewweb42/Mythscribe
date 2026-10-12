@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { AI_FEATURE_IDS } from './ai'
 import {
   AI_DATA_SHARING,
+  dataSharingLabel,
   dataSharingSends,
   STORY_NOTES_SENDS,
   AI_SOURCE_LABEL,
@@ -145,6 +146,17 @@ describe('defaultAiSettings (F-14.4)', () => {
     expect(
       AiSettings.safeParse({ ...defaultAiSettings(), critique: { honesty: 'harsh' } }).success
     ).toBe(false)
+  })
+})
+
+describe('dataSharingLabel (F-16.9)', () => {
+  it('names filing as a v2 project knows it, and keeps every v1 label', () => {
+    for (const id of AI_FEATURE_IDS) {
+      expect(dataSharingLabel(id, 'v1')).toBe(AI_DATA_SHARING[id].label)
+    }
+    expect(dataSharingLabel('contextImport', 'v2')).toBe('Filing uploads into sheets')
+    expect(dataSharingLabel('reviewChat', 'v2')).toBe('Filing review chat')
+    expect(dataSharingLabel('chat', 'v2')).toBe(AI_DATA_SHARING.chat.label)
   })
 })
 

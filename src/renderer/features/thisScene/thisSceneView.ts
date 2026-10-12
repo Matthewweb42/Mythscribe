@@ -186,6 +186,7 @@ export const DISMISSED_KIND_LABEL: Record<DismissedKind, string> = {
 /** A filed-line conflict's line: "Filed from “Bestiary” ¶4, which now reads “…”". */
 export function conflictLine(conflict: FiledConflict): string {
   const where = `Filed from “${conflict.docTitle}” ${paragraphLabel(conflict.para)}`
+  if (conflict.pageNotCanon) return `${where}, which is now Not canon`
   return conflict.nowReads === null
     ? `${where}, which now has no text there`
     : `${where}, which now reads “${conflict.nowReads}”`

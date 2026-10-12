@@ -23,7 +23,8 @@ const PRIMARY =
 /**
  * Filing a Research page into Pinned (F-16.9): the estimate to confirm, the pass with Stop, and
  * the review on the deck (New records, Additions, Conflicts, New categories; everything starts
- * accepted, S skips a card) with the review chat under it. A conflict keeps Pinned's line unless
+ * accepted but a "same as?" card, which waits for *Same as* or *New record*; S skips a card) with
+ * the review chat under it. A conflict keeps Pinned's line unless
  * the author picks the upload's. Nothing is written until Apply. Escape stops the pass, or closes
  * what is open.
  */
@@ -252,6 +253,8 @@ function ItemCard({
   busy: boolean
 }): React.JSX.Element {
   const pick = useFilingStore((s) => s.pickLine)
+  const decide = useFilingStore((s) => s.decide)
+  const asNewRecord = useFilingStore((s) => s.asNewRecord)
   const changed = useFilingStore((s) => s.chat.changed.includes(item.id))
   return (
     <div className="text-sm" data-testid="filing-card">
@@ -263,9 +266,29 @@ function ItemCard({
         {item.recordId === null ? `New record · ${categoryName}` : `Adds to ${item.name}`}
       </p>
       {item.sameAs !== null ? (
-        <p className="mt-2 mb-0 text-xs text-warning" data-testid="filing-same-as">
-          {`Filed as “${item.sameAs.given}”: same as ${item.name}? Skip this card if not.`}
-        </p>
+        <div className="mt-2 text-xs" data-testid="filing-same-as">
+          <p className="m-0 text-warning">
+            {`Filed as “${item.sameAs.given}”, a name close to ${item.name}. Same person or thing, or a new record?`}
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={busy}
+              onClick={() => decide([item.id], 'accepted')}
+            >
+              {`Same as ${item.name}`}
+            </button>
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={busy}
+              onClick={() => asNewRecord(item.id)}
+            >
+              {`New record “${item.sameAs.given}”`}
+            </button>
+          </div>
+        </div>
       ) : null}
       {item.aliases.length > 0 ? (
         <p className="mt-2 mb-0 text-xs">

@@ -24,6 +24,14 @@ import { markedParagraphs } from './pageMarks'
 export const STORY_NOTES_HEADING =
   'Story notes (the manuscript wins: where the passage and these notes disagree, follow the passage):'
 
+/**
+ * The opening line of the block a continuity pass checks the passage against (`editPass.v3`):
+ * there a disagreement is what the pass reports, so the heading names the notes as the reference
+ * and leaves the verdict to the author (the task says the note may be the side to update).
+ */
+export const STORY_NOTES_CONTINUITY_HEADING =
+  "Story notes (the author's notes the passage is checked against):"
+
 /** Most other names a record's line lists in its brackets. */
 export const STORY_NOTES_ALIASES_MAX = 5
 
@@ -99,23 +107,62 @@ function unique(records: readonly StoryNotesRecord[]): StoryNotesRecord[] {
   })
 }
 
+/** `prefix` and as much of `text` as fits in `room` tokens, cut at a word with "…"; null when none does. */
+function cutToFit(prefix: string, text: string, room: number): string | null {
+  const whole = `${prefix}${text}`
+  if (estimateTokens(`${whole}\n`) <= room) return whole
+  let low = 0
+  let high = text.length
+  let best: string | null = null
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    const head = text.slice(0, mid)
+    const at = head.lastIndexOf(' ')
+    const cut = `${prefix}${(at > 0 ? head.slice(0, at) : head).trimEnd()}…`
+    if (estimateTokens(`${cut}\n`) <= room) {
+      if (mid > 0) best = cut
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+  }
+  return best
+}
+
+export interface StoryNotesOptions {
+  /**
+   * The continuity pass's block (`editPass.v3`): `STORY_NOTES_CONTINUITY_HEADING`, no label lines
+   * (tone and content are not facts to check against), and null when no record has a Pinned line.
+   */
+  continuity?: boolean
+}
+
 /**
  * Renders the block within `maxTokens` estimated tokens (`STORY_BIBLE_TOKEN_BUDGET`, or
  * `STORY_BIBLE_GHOST_TOKEN_BUDGET` for ghost text), or null when it would say nothing (nobody here
  * or named, and no steering label). The heading, Here, Named and label lines are kept (a list that
- * would not fit is cut to "… and N more"); the record lines are admitted in priority order (the
- * POV, the rest of Here, then Named, most named first), each with as many of its Pinned paragraphs
- * as fit, so a short budget trims the least named records' lines first and the Here records' text
- * last (CLAUDE.md, token efficiency rule 8).
+ * would not fit is cut to "… and N more"). The record lines are trimmed by priority (CLAUDE.md,
+ * token efficiency rule 8): each Here record's first Pinned paragraph is admitted first (the POV,
+ * then *also here*; one that does not fit whole is cut at a word, and then no Named line is
+ * admitted), then the rest of their paragraphs while they fit, then the Named records' lines in
+ * what room is left, most named first, each with as many paragraphs as fit. The first Named record
+ * that does not fit ends the Named lines, so a less named record never keeps a line a more named
+ * one lost.
  */
-export function renderStoryNotes(facts: StoryNotesFacts, maxTokens: number): string | null {
+export function renderStoryNotes(
+  facts: StoryNotesFacts,
+  maxTokens: number,
+  options: StoryNotesOptions = {}
+): string | null {
+  const continuity = options.continuity === true
   const here = unique([...(facts.pov === null ? [] : [facts.pov]), ...facts.alsoHere])
   const hereIds = new Set(here.map((record) => record.id))
   const named = unique(facts.named).filter((record) => !hereIds.has(record.id))
-  const steer = labelSteerParts(facts.labels)
+  const steer = continuity ? [] : labelSteerParts(facts.labels)
   if (here.length === 0 && named.length === 0 && steer.length === 0) return null
 
-  let used = estimateTokens(STORY_NOTES_HEADING)
+  const heading = continuity ? STORY_NOTES_CONTINUITY_HEADING : STORY_NOTES_HEADING
+  let used = estimateTokens(heading)
   const keep = (line: string | null): string | null => {
     if (line !== null) used += estimateTokens(`${line}\n`)
     return line
@@ -124,8 +171,8 @@ export function renderStoryNotes(facts: StoryNotesFacts, maxTokens: number): str
     index === 0 && facts.pov !== null ? `${record.name} (POV)` : record.name
   )
   const hereLine = here.length === 0 ? null : keep(fitList('Here:', hereNames, maxTokens - used))
-  const labelLines = steer.flatMap(({ heading, names }) => {
-    const line = keep(fitList(heading, names, maxTokens - used))
+  const labelLines = steer.flatMap(({ heading: prefix, names }) => {
+    const line = keep(fitList(prefix, names, maxTokens - used))
     return line === null ? [] : [line]
   })
   const namedLine =
@@ -139,21 +186,71 @@ export function renderStoryNotes(facts: StoryNotesFacts, maxTokens: number): str
           )
         )
 
-  const recordLines: string[] = []
-  for (const record of [...here, ...named]) {
+  /** Each record's line as admitted so far, by id. */
+  const lines = new Map<string, string>()
+  const lineOf = (record: StoryNotesRecord, paragraphs: readonly string[]): string =>
+    `${nameWithAliases(record)}: ${paragraphs.join(' ')}`
+  const cost = (line: string): number => estimateTokens(`${line}\n`)
+  const hereParagraphs = here.map((record) => ({ record, paragraphs: pinnedCanonLines(record) }))
+  // The Here records' first paragraphs, cut to fit when they must.
+  const whole = new Set<string>()
+  /** A Here record's first paragraph was cut or left out: no Named line may take room then. */
+  let squeezed = false
+  for (const { record, paragraphs } of hereParagraphs) {
+    const first = paragraphs[0]
+    if (first === undefined) continue
+    const full = lineOf(record, [first])
+    const line =
+      cost(full) <= maxTokens - used
+        ? full
+        : cutToFit(`${nameWithAliases(record)}: `, first, maxTokens - used)
+    if (line === null) {
+      squeezed = true
+      continue
+    }
+    if (line === full) whole.add(record.id)
+    else squeezed = true
+    lines.set(record.id, line)
+    used += cost(line)
+  }
+  // The rest of their paragraphs, in order, while they fit.
+  for (const { record, paragraphs } of hereParagraphs) {
+    const current = lines.get(record.id)
+    if (!whole.has(record.id) || current === undefined) continue
+    let count = 1
+    let line = current
+    while (count < paragraphs.length) {
+      const longer = lineOf(record, paragraphs.slice(0, count + 1))
+      if (cost(longer) - cost(line) > maxTokens - used) break
+      used += cost(longer) - cost(line)
+      line = longer
+      count += 1
+    }
+    lines.set(record.id, line)
+  }
+  // The Named records' lines, most named first; the first that does not fit ends them.
+  for (const record of squeezed ? [] : named) {
     const paragraphs = pinnedCanonLines(record)
     if (paragraphs.length === 0) continue
-    const label = nameWithAliases(record)
+    let line: string | null = null
     for (let count = paragraphs.length; count >= 1; count -= 1) {
-      const line = `${label}: ${paragraphs.slice(0, count).join(' ')}`
-      if (estimateTokens(`${line}\n`) > maxTokens - used) continue
-      recordLines.push(line)
-      used += estimateTokens(`${line}\n`)
-      break
+      const candidate = lineOf(record, paragraphs.slice(0, count))
+      if (cost(candidate) <= maxTokens - used) {
+        line = candidate
+        break
+      }
     }
+    if (line === null) break
+    lines.set(record.id, line)
+    used += cost(line)
   }
+  const recordLines = [...here, ...named].flatMap((record) => {
+    const line = lines.get(record.id)
+    return line === undefined ? [] : [line]
+  })
+  if (continuity && recordLines.length === 0) return null
 
-  return [STORY_NOTES_HEADING, hereLine, namedLine, ...recordLines, ...labelLines]
+  return [heading, hereLine, namedLine, ...recordLines, ...labelLines]
     .filter((line): line is string => line !== null)
     .join('\n')
 }

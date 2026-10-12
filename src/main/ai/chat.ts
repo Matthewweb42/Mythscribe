@@ -136,8 +136,10 @@ export async function runChat(
         }
       : built
   const context = input.sceneText === undefined ? typed : { ...typed, sceneText: input.sceneText }
+  // In v2 the voice's POV is the typed POV record's name too (the scene line's), so the per-POV
+  // narrowing and exemplars follow the POV the author set (F-16.11).
   const preset = agent ? resolvePreset(getWritingPresets(db)) : null
-  const pov = built.sceneMeta?.pov.trim() ?? ''
+  const pov = context.sceneMeta?.pov.trim() ?? ''
   const profile = agent ? buildVoiceProfile(db, { pov: pov || undefined }) : null
   const voice = profile ? voiceBlock(profile, { text: context.sceneText, pov: pov || null }) : null
   // F-16.14: v2 carries the Story notes block in the bible's slot and no separate steer.
@@ -151,6 +153,9 @@ export async function runChat(
   const steer = agent && !v2 ? buildSceneSteer(db, input.nodeId) : null
   // F-5.20: the author's side panel (synopsis and notes) rides along in both modes.
   const panel = buildScenePanel(db, input.nodeId)
+  // F-16.14: tags are frozen v1 data, so in v2 a #name sends no tagged documents' notes (the
+  // data-sharing panel's v2 row does not list them).
+  const refs = v2 ? [] : context.refs
 
   const base: Omit<BuildChatPromptV5Input, 'history'> = {
     mode: input.mode,
@@ -173,7 +178,7 @@ export async function runChat(
     sceneMeta: context.sceneMeta,
     brief: context.brief,
     panel,
-    refs: context.refs,
+    refs,
     message: input.message,
     voice,
     storyNotes,
@@ -198,7 +203,7 @@ export async function runChat(
     brief: context.brief,
     steer,
     panel,
-    refs: context.refs,
+    refs,
     bible,
     ...(v2 ? { storyNotes } : {}),
     history,

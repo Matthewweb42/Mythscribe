@@ -11,6 +11,7 @@ import {
   pinnedCanonLines,
   renderStoryNotes,
   STORY_NOTES_ALIASES_MAX,
+  STORY_NOTES_CONTINUITY_HEADING,
   STORY_NOTES_HEADING,
   type StoryNotesFacts,
   type StoryNotesRecord
@@ -186,6 +187,66 @@ describe('renderStoryNotes (F-16.14)', () => {
     expect(block).toMatch(/^Here: Person Number 0, .* … and \d+ more$/mu)
     // Here took the room first; Named keeps what fits after it, or nothing at all.
     expect(block).not.toContain('Person Number 59')
+  })
+})
+
+describe('renderStoryNotes trims by priority (F-16.14)', () => {
+  it('keeps an also-here record’s line before any Named record’s, cutting it rather than dropping it', () => {
+    const pov = record('r-pov', 'Mara Vell', {
+      pinned: page(
+        ...Array.from({ length: 6 }, (_, i) =>
+          paragraph(`Fact ${i}: ${'she keeps the lamps of the quay lit '.repeat(2)}`)
+        )
+      )
+    })
+    const also = record('r-also', 'Tomas Harrow', {
+      pinned: page(paragraph(`Keeps the ferry at Gullhaven ${'and the road north '.repeat(4)}`))
+    })
+    const wren = record('r-wren', 'Wren', { pinned: page(paragraph('Eyes: grey.')) })
+    const hesk = record('r-hesk', 'Hesk', { pinned: page(paragraph('A port town.')) })
+    const block =
+      renderStoryNotes(
+        { pov, alsoHere: [also], named: [wren, hesk], labels: [] },
+        STORY_BIBLE_GHOST_TOKEN_BUDGET
+      ) ?? ''
+    const lines = block.split('\n')
+    expect(lines.some((line) => line.startsWith('Tomas Harrow: Keeps the ferry'))).toBe(true)
+    expect(lines.some((line) => line.startsWith('Mara Vell: Fact 0'))).toBe(true)
+    expect(estimateTokens(block)).toBeLessThanOrEqual(STORY_BIBLE_GHOST_TOKEN_BUDGET)
+    // Mara's later paragraphs gave way to Tomas's first; Named lines only fill what is left.
+    expect(block).not.toContain('Fact 5')
+  })
+
+  it('never keeps a less named record’s line after a more named one did not fit', () => {
+    const pov = record('r-pov', 'Mara Vell', {
+      pinned: page(...Array.from({ length: 3 }, (_, i) => paragraph(`${i} ${'x'.repeat(116)}`)))
+    })
+    const most = record('r-most', 'Tomas Harrow', { pinned: page(paragraph('y'.repeat(115))) })
+    const least = record('r-least', 'Wren', { pinned: page(paragraph('A child.')) })
+    const block =
+      renderStoryNotes(
+        { pov, alsoHere: [], named: [most, least], labels: [] },
+        STORY_BIBLE_GHOST_TOKEN_BUDGET
+      ) ?? ''
+    expect(block).toContain('Named: Tomas Harrow, Wren')
+    expect(block).not.toContain('Tomas Harrow: ')
+    expect(block).not.toContain('Wren: A child.')
+  })
+
+  it('renders the continuity pass’s block: its own heading, no label lines, null with no Pinned line', () => {
+    const block = renderStoryNotes(facts(), STORY_BIBLE_TOKEN_BUDGET, { continuity: true }) ?? ''
+    expect(block.startsWith(`${STORY_NOTES_CONTINUITY_HEADING}\n`)).toBe(true)
+    expect(block).not.toContain(STORY_NOTES_HEADING)
+    expect(block).toContain('Mara Vell (Mara, the Captain): Eyes: grey.')
+    expect(block).not.toContain('Tone')
+    const bare = record('r-bare', 'Wren')
+    expect(
+      renderStoryNotes(
+        { pov: bare, alsoHere: [], named: [], labels: [{ name: 'tense', kind: 'tone' }] },
+        STORY_BIBLE_TOKEN_BUDGET,
+        { continuity: true }
+      )
+    ).toBeNull()
   })
 })
 

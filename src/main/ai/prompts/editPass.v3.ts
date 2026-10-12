@@ -4,7 +4,8 @@ import { EDIT_PASS_MOOD_TYPES } from './editPass.v2'
 
 /**
  * The edit-pass prompt (F-14.15), version 3 (F-16.14, story memory v2 only): in a continuity pass
- * the Story notes block (`renderStoryNotes` within `STORY_BIBLE_TOKEN_BUDGET`) takes the place of
+ * the Story notes block (`renderStoryNotes` within `STORY_BIBLE_TOKEN_BUDGET`, its continuity form:
+ * `STORY_NOTES_CONTINUITY_HEADING`, no label lines) takes the place of
  * version 2's numbered references, in the user turn after the mood (which the continuity pass
  * never carries), and the continuity task says so: the notes are what the passage is checked
  * against, and each disagreement is a change the author decides on (the manuscript is canon,
@@ -14,12 +15,17 @@ import { EDIT_PASS_MOOD_TYPES } from './editPass.v2'
  */
 export const EDIT_PASS_PROMPT_V3_VERSION = 'editPass.v3'
 
-/** The continuity task of version 3: checked against the Story notes, not numbered references. */
+/**
+ * The continuity task of version 3: checked against the Story notes (their continuity form, under
+ * `STORY_NOTES_CONTINUITY_HEADING`), not numbered references. The manuscript is canon (answer 1),
+ * so a disagreement is reported, never settled: each change is a proposal, and its why says the
+ * note may be the side to update.
+ */
 export const EDIT_PASS_V3_CONTINUITY_TASK =
-  "Continuity pass: find statements that contradict the author's story notes below and change " +
-  'the fewest words that make the passage agree; why names the note it contradicts. Here the ' +
-  'notes are what the passage is checked against, and every change is a proposal the author ' +
-  'decides on. Anything the notes do not cover is not a contradiction.'
+  "Continuity pass: find statements that disagree with the author's story notes below. For each, " +
+  'change the fewest words that would make the passage agree, and in why name the note and say ' +
+  'the note may be what needs updating instead; the author decides. Anything the notes do not ' +
+  'cover is not a disagreement.'
 
 export interface BuildEditPassPromptV3Input extends Omit<BuildEditPassPromptInput, 'references'> {
   /** The scene mood block (F-5.6), or null; developmental, line and custom passes only. */

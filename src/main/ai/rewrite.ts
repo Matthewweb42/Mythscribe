@@ -111,7 +111,8 @@ export async function runRewrite(
   const { meta: sceneMeta } = getSceneMeta(db, input.nodeId)
   const v2 = input.memory === 'v2'
   const meta = v2 ? typedSceneMeta(db, input.nodeId, sceneMeta) : promptSceneMeta(sceneMeta)
-  const pov = sceneMeta.pov.trim()
+  // F-16.11: in v2 the voice's POV is the typed POV record's (the scene line's), as in chat.
+  const pov = v2 ? (meta?.pov ?? '') : sceneMeta.pov.trim()
   const profile = buildVoiceProfile(db, { pov: pov || undefined })
   const voice = voiceBlock(profile, { text: input.text, pov: pov || null })
   // F-16.14: v2 carries the Story notes block in the bible's slot and no separate steer.

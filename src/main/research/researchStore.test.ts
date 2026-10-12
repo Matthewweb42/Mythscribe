@@ -9,11 +9,7 @@ import { EMPTY_DOC, TiptapNode, type TiptapNodeT } from '@shared/tiptap'
 import { contextFile, node, type NodeRow } from '../db/schema'
 import { getDocumentContent } from '../document/documentStore'
 import { AppError } from '../ipc/errors'
-import {
-  addContextFiles,
-  listContextFiles,
-  type ContextSource
-} from '../library/libraryStore'
+import { addContextFiles, listContextFiles, type ContextSource } from '../library/libraryStore'
 import { textPdf } from '../library/pdfFixture'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { ensureResearchRoot } from '../project/seed'
@@ -33,7 +29,9 @@ import {
   createResearchNote,
   listResearchDocs,
   researchDocOf,
+  researchFiled,
   researchOriginalPath,
+  setResearchFiled,
   setResearchNotCanon
 } from './researchStore'
 import {
@@ -230,8 +228,7 @@ describe('research uploads become pages (F-16.8)', () => {
     expect(held.files.map((file) => file.name)).toEqual(['Reef.md'])
     const id = await onlyCreated(source('notes.md', 'Original research text.'))
     const reef = await onlyCreated(source('Reef.md', 'Coral.'))
-    const originalOf = (nodeId: string): string =>
-      researchOriginalPath(db, session.folder, nodeId)
+    const originalOf = (nodeId: string): string => researchOriginalPath(db, session.folder, nodeId)
     const before = [originalOf(id), originalOf(reef)]
     expect(listContextFiles(db)).toEqual([])
     // A Library add (the dialog or a drop) of a same-named file is a Library file of its own.
@@ -325,6 +322,7 @@ describe('research notes, Not canon and Open original (F-16.8)', () => {
     )
     const upload = result.created[0] ?? ''
     setResearchNotCanon(db, upload, true)
+    setResearchFiled(db, upload, { filedAt: '2026-10-12T10:00:00.000Z', filedHash: 'h' })
     const copies = duplicateNode(db, folder.id)
     copyResearchMeta(db, folder.id, copies)
     const copied = copies.find((row) => row.kind === 'document')
@@ -332,8 +330,12 @@ describe('research notes, Not canon and Open original (F-16.8)', () => {
       origin: 'upload',
       fileType: 'md',
       notCanon: true,
-      contextFileId: researchDocOf(db, upload).contextFileId
+      contextFileId: researchDocOf(db, upload).contextFileId,
+      // F-16.9: a copy was never filed; the original still was.
+      filedAt: null
     })
+    expect(researchFiled(db, copied?.id ?? '')).toEqual({ filedAt: null, filedHash: null })
+    expect(researchFiled(db, upload).filedHash).toBe('h')
   })
 
   it('lists every Research document in tree order; deleting one drops its meta', async () => {

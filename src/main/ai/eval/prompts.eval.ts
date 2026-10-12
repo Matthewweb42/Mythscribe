@@ -7,7 +7,7 @@ import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote, normalizeForMatch } from '@shared/critique'
 import type { EditPassType } from '@shared/editPass'
 import { parseFilingAnswer, quoteParagraph } from '@shared/filing'
-import { STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
+import { STORY_NOTES_CONTINUITY_HEADING, STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
 import { SCENE_BRIEF_FIELD_MAX } from '@shared/sceneMeta'
 import { SceneSummary } from '@shared/summary'
 import { toTagName } from '@shared/tags'
@@ -93,7 +93,12 @@ describe('prompt eval harness (F-5.12)', () => {
     const notesVersions = PROMPT_VERSIONS.filter((version) =>
       EVAL_CASES.some(
         (c) =>
-          c.version === version && c.messages.some((m) => m.content.includes(STORY_NOTES_HEADING))
+          c.version === version &&
+          c.messages.some(
+            (m) =>
+              m.content.includes(STORY_NOTES_HEADING) ||
+              m.content.includes(STORY_NOTES_CONTINUITY_HEADING)
+          )
       )
     )
     expect(notesVersions).toEqual([

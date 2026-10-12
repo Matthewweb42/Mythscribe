@@ -3345,8 +3345,12 @@ export const contract = {
    * saves first and reads the records' Pinned pages again after.
    */
   'research:applyFiling': { input: z.object({ review: FilingReview }), output: FilingApplyResult },
-  /** F-16.9: *Undo filing* for the session: takes back what is still as the filing wrote it. */
-  'research:undoFiling': { input: z.undefined(), output: FilingUndoResult },
+  /**
+   * F-16.9: *Undo filing* for the session (the toast, and the page's header while it stands):
+   * takes back what is still as the filing of page `docId` wrote it; VALIDATION when the last
+   * filing was another page's.
+   */
+  'research:undoFiling': { input: z.object({ docId: z.string() }), output: FilingUndoResult },
   /** F-16.9: the filed lines whose source changed (Needs a look conflicts). Local and free. */
   'research:filedConflicts': { input: z.undefined(), output: z.array(FiledConflict) },
   /** F-16.9: *Keep line*: the conflict is a `notProblem` dismissal until the page changes again. */

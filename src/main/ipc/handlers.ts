@@ -4880,10 +4880,10 @@ export function registerHandlers({
     return result
   })
 
-  register('research:undoFiling', () => {
+  register('research:undoFiling', ({ docId }) => {
     const session = manager.require()
     const db = session.connection.orm
-    const result = undoFiling(db, session.folder, new Date())
+    const result = undoFiling(db, session.folder, docId, new Date())
     for (const id of result.deleted) dropOwner(db, 'record', id)
     rosterChanged(db, [...result.recordIds, ...result.deleted])
     return result

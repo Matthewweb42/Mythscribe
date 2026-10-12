@@ -4,20 +4,24 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { priceFor } from '@shared/ai'
 import { defaultAiSettings } from '@shared/aiSettings'
-import { STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
+import { STORY_NOTES_CONTINUITY_HEADING, STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { STORY_BIBLE_HEADING, STORY_BIBLE_PLANS_HEADING } from '@shared/storyBible'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
+import { saveNotes } from '../document/notesStore'
+import { listRecords, savePage } from '../memory/recordStore'
 import {
   SEEDED_CANON_LINE,
   SEEDED_IDEA_TEXT,
   SEEDED_NOT_CANON_TEXT,
+  SEEDED_TONE,
   seedStoryNotes
 } from '../memory/storyNotesFixture'
 import { setAiSettings } from '../project/settingsStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { createSeededProject } from '../project/testProject'
+import { addDocumentTag } from '../tag/documentTagStore'
 import { createTag } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
 import { resetVoiceProfileCache } from '../voice/versionCache'
@@ -52,6 +56,7 @@ let complete: ReturnType<typeof vi.fn<Complete>>
 let stream: ReturnType<typeof vi.fn<Stream>>
 let deps: AiRequestDeps
 let ledger: UsageEntry[]
+let maraTag: string
 
 const SCENE_TEXT =
   'The storm broke at dusk over the dark forest. Mara pulled her cloak tight and counted the ' +
@@ -89,7 +94,7 @@ beforeEach(() => {
   saveDocument(db, scene, doc(SCENE_TEXT))
   setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
   // v1's bible needs a fact to render: a character tag in the bank.
-  createTag(db, { name: 'mara', category: 'character', color: '#112233' })
+  maraTag = createTag(db, { name: 'mara', category: 'character', color: '#112233' }).id
   seedStoryNotes(db, scene, NOW)
   complete = vi.fn<Complete>((request) =>
     Promise.resolve({
@@ -120,6 +125,7 @@ beforeEach(() => {
   }
 })
 afterEach(() => {
+  resetVoiceProfileCache()
   session.close()
   fs.rmSync(tmp, { recursive: true, force: true })
 })
@@ -263,7 +269,11 @@ describe('the prose features by story memory (F-16.14)', () => {
     await pass('v2')
     expect(ledger.map((row) => row.promptVersion)).toEqual(['editPass.v3'])
     const text = sent()
-    expect(text).toContain(STORY_NOTES_HEADING)
+    // The continuity form: the notes are the reference, with no tone line to "check".
+    expect(text).toContain(STORY_NOTES_CONTINUITY_HEADING)
+    expect(text).toContain(`Mara Vell: ${SEEDED_CANON_LINE}.`)
+    expect(text).not.toContain(STORY_NOTES_HEADING)
+    expect(text).not.toContain(SEEDED_TONE)
     expect(text).not.toContain('References:')
     expect(text).not.toContain(SEEDED_NOT_CANON_TEXT)
     expect(text).not.toContain(SEEDED_IDEA_TEXT)
@@ -281,5 +291,43 @@ describe('the prose features by story memory (F-16.14)', () => {
     })
     expect(ledger.map((row) => row.promptVersion)).toEqual(['editPass.v3'])
     expect(sent()).not.toContain(STORY_NOTES_HEADING)
+    expect(sent()).not.toContain(STORY_NOTES_CONTINUITY_HEADING)
+    // With no Pinned line to check against (only Here and a tone label), nothing is sent.
+    const mara = listRecords(db).find((record) => record.name === 'Mara Vell')
+    savePage(db, mara?.id ?? '', 'pinned', null, NOW)
+    complete.mockClear()
+    ledger.length = 0
+    await pass('v2')
+    expect(complete).not.toHaveBeenCalled()
+    expect(ledger).toEqual([])
+  })
+
+  it('a #name in a v2 chat sends no tagged document’s notes (tags are frozen v1 data)', async () => {
+    // Another document of the book, tagged #mara, holds the note (the scene's own notes ride
+    // in its side panel either way).
+    const other = listNodes(db).find((r) => r.kind === 'document' && r.id !== scene)?.id ?? ''
+    addDocumentTag(db, other, maraTag)
+    saveNotes(db, other, doc('TAGGED-NOTE Mara fears the river.'))
+    const run = (memory: StoryMemoryVersion): Promise<unknown> =>
+      runChat(
+        db,
+        deps,
+        {
+          nodeId: scene,
+          mode: 'plan',
+          paragraphs: 1,
+          message: 'Tell me about #mara',
+          history: [],
+          memory
+        },
+        () => undefined
+      )
+    await run('v1')
+    expect(sent()).toContain('Referenced notes:\n#mara:\nTAGGED-NOTE')
+    stream.mockClear()
+    complete.mockClear()
+    await run('v2')
+    expect(sent()).not.toContain('Referenced notes')
+    expect(sent()).not.toContain('TAGGED-NOTE Mara fears')
   })
 })

@@ -19,25 +19,25 @@ git history of this file is the log of each feature's cost over time (author req
 | `ghostText` | Ghost text | while typing | ghostText.v5 | fast | 960 / 1963 | 40 / 60 | $0.000146 · $0.000292 | $0.000182 | $0.000900 | 1 | $0.000146 |
 | `tags` | Tag suggestions | on request | tags.v1 | fast | 1204 / 1913 | 80 / 200 | $0.000191 · $0.000324 | $0.000239 | $0.00126 | 1 | $0.000191 |
 | `summary` | Scene summaries, story bible, and tags | background | summary.v5 | fast | 1150 / 6512 | 600 / 1000 | $0.000329 · $0.00119 | $0.000411 | $0.00356 | 1 | $0.000329 |
-| `chat` | Assistant chat | on request | chat.v6 | fast | 986 / 7940 | 400 / 1200 | $0.000250 · $0.00145 | $0.000313 | $0.00254 | 1 | $0.000250 |
+| `chat` | Assistant chat | on request | chat.v6 | fast | 986 / 7957 | 400 / 1200 | $0.000250 · $0.00145 | $0.000313 | $0.00254 | 1 | $0.000250 |
 | `authorMode` | Author mode | on request | — | — | 0 / 8000 | 0 / 150 | $0 · $0.00116 | $0 | $0 | 0 | $0 |
 | `query` | Story Intelligence | on request | query.v4 | strong | 1587 / 11711 | 300 / 600 | $0.00381 · $0.0225 | $0.00476 | $0.00847 | 1 | $0.00381 |
-| `critique` | Editor's notes | on request | critique.v4 | strong | 1231 / 7001 | 900 / 1500 | $0.00527 · $0.0174 | $0.00659 | $0.0166 | 1 | $0.00527 |
+| `critique` | Editor's notes | on request | critique.v4 | strong | 1231 / 7018 | 900 / 1500 | $0.00527 · $0.0174 | $0.00659 | $0.0166 | 1 | $0.00527 |
 | `embeddings` | Search indexing | background | — | — | 0 / 8000 | 0 / 150 | $0 · $0.00116 | $0 | $0 | 0 | $0 |
-| `rewrite` | Rewrite in my voice | on request | rewrite.v5 | strong | 849 / 2659 | 250 / 1500 | $0.00235 · $0.00985 | $0.00293 | $0.00587 | 1 | $0.00235 |
+| `rewrite` | Rewrite in my voice | on request | rewrite.v5 | strong | 849 / 2676 | 250 / 1500 | $0.00235 · $0.00988 | $0.00293 | $0.00587 | 1 | $0.00235 |
 | `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000448 · $0.000813 | $0.000560 | $0.00276 | 1 | $0.000448 |
 | `betaReader` | Beta reader | on request | betaReader.v1 | strong | 673 / 11599 | 700 / 1200 | $0.00361 · $0.0244 | $0.00451 | $0.0122 | 1 | $0.00361 |
 | `importStructure` | Import structure detection | on request | importStructure.v1 | fast | 2428 / 4178 | 150 / 400 | $0.000382 · $0.000697 | $0.000477 | $0.00250 | 40 | $0.0153 |
 | `continuity` | Consistency check | background | continuity.v2 | strong | 1334 / 5702 | 300 / 800 | $0.00337 · $0.0127 | $0.00421 | $0.00783 | 1 | $0.00337 |
 | `proofread` | Proofread | on request | proofread.v1 | fast | 1055 / 7578 | 600 / 2000 | $0.000316 · $0.00162 | $0.000395 | $0.00349 | 1 | $0.000316 |
-| `whatNext` | What comes next | on request | whatNext.v4 | fast | 976 / 2885 | 200 / 300 | $0.000193 · $0.000488 | $0.000241 | $0.00163 | 1 | $0.000193 |
+| `whatNext` | What comes next | on request | whatNext.v4 | fast | 995 / 2921 | 200 / 300 | $0.000195 · $0.000493 | $0.000244 | $0.00165 | 1 | $0.000195 |
 | `route` | Assistant routing | every chat message | route.v2 | fast | 508 / 981 | 40 / 120 | $0.0000823 · $0.000171 | $0.000103 | $0.000561 | 1 | $0.0000823 |
 | `synopsis` | Synopsis suggestions | on request | synopsis.v1 | fast | 495 / 3400 | 120 / 350 | $0.000103 · $0.000574 | $0.000129 | $0.000911 | 1 | $0.000103 |
-| `notesSuggest` | Notes suggestions | on request | notesSuggest.v3 | fast | 911 / 4774 | 300 / 600 | $0.000212 · $0.000836 | $0.000264 | $0.00203 | 1 | $0.000212 |
+| `notesSuggest` | Notes suggestions | on request | notesSuggest.v3 | fast | 917 / 4797 | 300 / 600 | $0.000212 · $0.000840 | $0.000265 | $0.00204 | 1 | $0.000212 |
 | `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000237 · $0.000373 | $0.000296 | $0.00202 | 1 | $0.000237 |
 | `editPass` | Edit passes | on request | editPass.v3 | strong | 2186 / 5161 | 1500 / 4000 | $0.00902 · $0.0229 | $0.0113 | $0.0280 | 60 | $0.541 |
 | `agent` | Assistant lookups and edits | every chat message | agent.v8 | strong | 2487 / 10684 | 300 / 3000 | $0.00537 · $0.0290 | $0.00671 | $0.0107 | 3 | $0.0161 |
-| `contextImport` | Context library sorting | on request | contextImport.v3 | strong | 2407 / 4176 | 1500 / 6000 | $0.00941 · $0.0281 | $0.0118 | $0.0285 | 10 | $0.0941 |
+| `contextImport` | Context library sorting | on request | contextImport.v3 | strong | 2416 / 4185 | 1500 / 6000 | $0.00942 · $0.0282 | $0.0118 | $0.0285 | 10 | $0.0942 |
 | `reviewChat` | Upload review chat | on request | reviewChat.v3 | strong | 2245 / 3909 | 300 / 3000 | $0.00495 · $0.0172 | $0.00619 | $0.0101 | 1 | $0.00495 |
 | `planLinks` | Plan links | background | planLinks.v1 | fast | 3086 / 5928 | 150 / 400 | $0.000474 · $0.000942 | $0.000593 | $0.00299 | 1 | $0.000474 |
 | `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00865 · $0.0319 | $0.0108 | $0.0244 | 4 | $0.0346 |
@@ -144,7 +144,7 @@ git history of this file is the log of each feature's cost over time (author req
 ### `editPass` — Edit passes
 
 - **When:** An Editor-tab pass: one request per scene piece across the chosen scenes. Since F-5.26 also from the chat ("make this scene better", a quick pick, or a specific request), on the selection (one request), the open scene, or a chapter; the chat shows each choice’s estimate first.
-- **Ideas:** The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading). Story memory v2 (F-16.14) sends editPass.v3: a continuity piece is checked against the Story notes block (up to 400 tokens) instead of the sheet references (worst continuity piece 3,629 vs 4,692 tokens); every other pass type is v2’s messages, so its cost is unchanged.
+- **Ideas:** The largest single job: batch API, fast tier for copy/proofread passes (already), skip unchanged scenes on re-runs. editPass.v2 adds the scene mood and theme to developmental, line, and custom pieces only (about 25 input tokens each, from the stored reading). Story memory v2 (F-16.14) sends editPass.v3: a continuity piece is checked against the Story notes block (up to 400 tokens, its continuity form with no label lines) instead of the sheet references (worst continuity piece 3,641 vs 4,692 tokens), and a scene with no Pinned line to check against sends nothing; every other pass type is v2’s messages, so its cost is unchanged.
 
 ### `agent` — Assistant lookups and edits
 

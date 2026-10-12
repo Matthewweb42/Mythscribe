@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { EDIT_PASS_TYPES } from '@shared/editPass'
-import { STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
+import { STORY_NOTES_CONTINUITY_HEADING, STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
 import { renderSceneMood } from '@shared/sceneCard'
 import {
-  FIXTURE_STORY_NOTES,
+  FIXTURE_CONTINUITY_NOTES,
   STORY_NOTES_IDEA_TEXT,
   STORY_NOTES_NOT_CANON_TEXT
 } from '../eval/storyNotesFixture'
@@ -26,7 +26,7 @@ const base: BuildEditPassPromptV3Input = {
   keepWords: [],
   instruction: null,
   mood: MOOD,
-  storyNotes: FIXTURE_STORY_NOTES
+  storyNotes: FIXTURE_CONTINUITY_NOTES
 }
 
 describe('editPass.v3 prompt (F-16.14)', () => {
@@ -38,8 +38,13 @@ describe('editPass.v3 prompt (F-16.14)', () => {
     expect(system?.startsWith(EDIT_PASS_SENTINEL)).toBe(true)
     expect(system).toContain(EDIT_PASS_V3_CONTINUITY_TASK)
     expect(system).not.toContain(EDIT_PASS_TASKS.continuity)
-    // The continuity pass never carries the mood; the notes open the user turn.
-    expect(user?.startsWith(`${STORY_NOTES_HEADING}\n`)).toBe(true)
+    // The continuity pass never carries the mood; the notes open the user turn, under the
+    // heading that names them the reference (never "the manuscript wins", which would tell the
+    // model to report nothing), with no tone or content lines to "check" against.
+    expect(user?.startsWith(`${STORY_NOTES_CONTINUITY_HEADING}\n`)).toBe(true)
+    expect(user).not.toContain(STORY_NOTES_HEADING)
+    expect(user).not.toContain('Tone')
+    expect(system).toContain('the note may be what needs updating instead')
     expect(user).not.toContain('References:')
     expect(user).not.toContain(STORY_NOTES_IDEA_TEXT)
     expect(user).not.toContain(STORY_NOTES_NOT_CANON_TEXT)
@@ -51,7 +56,9 @@ describe('editPass.v3 prompt (F-16.14)', () => {
       const v2 = buildEditPassPromptV2({ ...input, references: [] })
       const v3 = buildEditPassPromptV3(input)
       expect(v3.messages, type).toEqual(v2.messages)
-      expect(v3.messages.map((m) => m.content).join('\n')).not.toContain(STORY_NOTES_HEADING)
+      expect(v3.messages.map((m) => m.content).join('\n')).not.toContain(
+        STORY_NOTES_CONTINUITY_HEADING
+      )
     }
   })
 })

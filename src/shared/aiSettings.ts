@@ -281,6 +281,11 @@ export function defaultAiSettings(): AiSettings {
 export interface AiDataSharing {
   /** How Settings names the feature, in the toggles, the data-sharing table, and the Usage block. */
   label: string
+  /**
+   * F-16.9: how a story memory v2 project names the feature, where that differs (filing into
+   * sheets in place of the context library); `dataSharingLabel`. Absent: the same as `label`.
+   */
+  labelV2?: string
   /** Exactly what leaves the machine when the feature runs; the rule "no text the panel does not list" refers to this. */
   sends: string
   /**
@@ -585,6 +590,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   },
   contextImport: {
     label: 'Context library sorting',
+    labelV2: 'Filing uploads into sheets',
     sends:
       'The documents you upload to the Library (Word, Markdown, text, PDF text), in chunks of ' +
       'about 8,000 characters (only the new or changed passages of an updated file), the names ' +
@@ -631,6 +637,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   },
   reviewChat: {
     label: 'Upload review chat',
+    labelV2: 'Filing review chat',
     sends:
       'Only when you send a message on the review of an upload: your message, the last 4 turns ' +
       'of that conversation, and the pending review as a list (each sheet’s name, kind, other ' +
@@ -668,6 +675,12 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
 export function dataSharingSends(feature: AiFeatureId, memory: StoryMemoryVersion): string {
   const row = AI_DATA_SHARING[feature]
   return memory === 'v2' ? (row.sendsV2 ?? row.sends) : row.sends
+}
+
+/** How Settings names a feature in a project with story memory `memory` (F-16.9): `labelV2` in v2. */
+export function dataSharingLabel(feature: AiFeatureId, memory: StoryMemoryVersion): string {
+  const row = AI_DATA_SHARING[feature]
+  return memory === 'v2' ? (row.labelV2 ?? row.label) : row.label
 }
 
 /** The features in display order: by the level they need, then as `AI_FEATURE_IDS` lists them. */

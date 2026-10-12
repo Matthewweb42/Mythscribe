@@ -516,7 +516,8 @@ const CONFLICT: FiledConflict = {
   line: 'Eyes: grey',
   lineIndex: 0,
   quote: 'Mara Vell has grey eyes',
-  nowReads: 'Mara Vell has brown eyes.'
+  nowReads: 'Mara Vell has brown eyes.',
+  pageNotCanon: false
 }
 
 describe('Needs a look’s filed-line conflicts (F-16.9)', () => {
@@ -534,6 +535,9 @@ describe('Needs a look’s filed-line conflicts (F-16.9)', () => {
     )
     expect(conflictLine({ ...CONFLICT, nowReads: null })).toBe(
       'Filed from “Bestiary” ¶4, which now has no text there'
+    )
+    expect(conflictLine({ ...CONFLICT, pageNotCanon: true })).toBe(
+      'Filed from “Bestiary” ¶4, which is now Not canon'
     )
   })
 

@@ -151,6 +151,15 @@ export function filingReviewItems(
   ]
 }
 
+/** The deck's first decisions: a "same as?" card starts undecided, every other card accepted. */
+export function filingStartDecisions(review: FilingReview): Record<string, ReviewDecision> {
+  return Object.fromEntries(
+    review.items
+      .filter((item) => item.sameAs !== null)
+      .map((item): [string, ReviewDecision] => [item.id, 'pending'])
+  )
+}
+
 /** The filing as Apply writes it: accepted cards only; a declined category's records go to World. */
 export function decidedFilingReview(
   review: FilingReview,

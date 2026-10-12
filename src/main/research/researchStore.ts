@@ -371,8 +371,15 @@ export function copyResearchMeta(
       if (copy === undefined || original.kind !== 'document') return
       const meta = metaRow(tx, original.id)?.row
       if (meta === undefined) return
+      // A copy was never filed (F-16.9): its filed lines point at the original.
       tx.insert(researchDoc)
-        .values({ ...meta, nodeId: copy.id, created: now.toISOString() })
+        .values({
+          ...meta,
+          nodeId: copy.id,
+          created: now.toISOString(),
+          filedAt: null,
+          filedHash: null
+        })
         .onConflictDoNothing()
         .run()
     })
