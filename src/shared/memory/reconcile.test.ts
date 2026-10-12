@@ -8,7 +8,7 @@ import {
   type StoredClaim
 } from './reconcile'
 
-const PRESENT = new Set(['h1', 'h2', 'h3', 'h4'])
+const HASHES = ['h1', 'h2', 'h3', 'h4']
 
 const stored = (over: Partial<StoredClaim> & { id: string }): StoredClaim => ({
   recordId: 'mara',
@@ -41,6 +41,7 @@ const fresh = (over: Partial<FreshClaim> = {}): FreshClaim => ({
   quote: "Mara's eyes were grey",
   para: 1,
   anchor: ['h1', 'h2'],
+  stating: ["⟨mara⟩'s eyes were grey."],
   proof: 'literal',
   change: false,
   ...over
@@ -49,7 +50,7 @@ const fresh = (over: Partial<FreshClaim> = {}): FreshClaim => ({
 const input = (over: Partial<ReconcileInput>): ReconcileInput => ({
   stored: [],
   window: { paras: new Set([0, 1, 2]), full: false },
-  present: PRESENT,
+  hashes: HASHES,
   same: [],
   drop: [],
   rejected: new Set(),
@@ -79,9 +80,11 @@ describe('reconcile (F-16.17, design §2.3 Reconciliation)', () => {
         stored: [
           stored({ id: 'c1' }),
           stored({ id: 'c2', anchor: ['h1', 'gone'] }),
-          stored({ id: 'c3', state: 'stale', para: 9 })
+          stored({ id: 'c3', state: 'stale', para: 9 }),
+          // Its sentences are all there, but no longer side by side.
+          stored({ id: 'c4', anchor: ['h1', 'h3'] })
         ],
-        same: ['c1', 'c2', 'c3']
+        same: ['c1', 'c2', 'c3', 'c4']
       })
     )
     expect(result.kept).toEqual(['c1'])
@@ -97,6 +100,57 @@ describe('reconcile (F-16.17, design §2.3 Reconciliation)', () => {
     expect(result.revivals).toEqual([
       { id: 'c1', quote: 'Her eyes were grey', para: 2, anchor: ['h3'], proof: 'verified' }
     ])
+    expect(result.inserts).toEqual([])
+    expect(result.deletes).toEqual([])
+  })
+
+  it('never revives a waiting claim, nor swallows a fresh item about other candidates', () => {
+    const wait = stored({
+      id: 'w1',
+      state: 'waiting',
+      recordId: null,
+      subjectText: null,
+      pending: { kind: 'subject', candidates: ['a', 'b'] },
+      quote: 'her eyes were grey',
+      para: 2
+    })
+    const other = fresh({
+      recordId: null,
+      subjectText: null,
+      pending: { kind: 'subject', candidates: ['c', 'd'] },
+      quote: 'her eyes were grey too',
+      para: 7,
+      anchor: ['h9']
+    })
+    const result = reconcile(input({ stored: [wait], fresh: [other] }))
+    expect(result.revivals).toEqual([])
+    expect(result.inserts).toEqual([other])
+    // A stale claim with no record is never brought back live either.
+    const orphan = stored({ id: 'o1', state: 'stale', recordId: null, pending: null, para: 9 })
+    const fromOrphan = reconcile(
+      input({ stored: [orphan], fresh: [fresh({ recordId: null, subjectText: null })] })
+    )
+    expect(fromOrphan.revivals).toEqual([])
+  })
+
+  it('keeps a waiting claim a fresh item states again word for word, without a second row', () => {
+    const wait = stored({
+      id: 'w1',
+      state: 'waiting',
+      recordId: null,
+      subjectText: null,
+      pending: { kind: 'subject', candidates: ['b', 'a'] },
+      quote: 'her eyes were grey'
+    })
+    const again = fresh({
+      recordId: null,
+      subjectText: null,
+      pending: { kind: 'subject', candidates: ['a', 'b'] },
+      quote: 'her eyes were grey'
+    })
+    const result = reconcile(
+      input({ stored: [wait], fresh: [again], window: { paras: new Set(), full: true } })
+    )
     expect(result.inserts).toEqual([])
     expect(result.deletes).toEqual([])
   })
@@ -150,11 +204,15 @@ describe('reconcile (F-16.17, design §2.3 Reconciliation)', () => {
       recordId: 'mara',
       slot: 'eyes',
       value: 'grey',
-      anchor: ['h1', 'h2']
+      stating: ["⟨mara⟩'s eyes were grey."]
     })
     const result = reconcile(
       input({
-        fresh: [fresh(), fresh({ anchor: ['h3'], quote: 'Her eyes were grey' })],
+        fresh: [
+          // The same sentence with new neighbours (a new anchor) is still the dismissed line.
+          fresh({ anchor: ['h2', 'h3'] }),
+          fresh({ anchor: ['h3'], quote: 'Her eyes were grey', stating: ['her eyes were grey.'] })
+        ],
         dismissed: new Set([key])
       })
     )

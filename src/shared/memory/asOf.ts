@@ -24,11 +24,24 @@ export type AsOfClaim = Pick<
   | 'nodeId'
   | 'para'
   | 'state'
->
+  | 'created'
+> & {
+  /**
+   * Where the quote starts in its paragraph (a character offset), so two claims of one paragraph
+   * keep the text's order ("her hair was brown … she dyed it red"); null when not known.
+   */
+  pos: number | null
+}
 
 /** The manuscript's reading order (active draft, readable scenes) and each scene's reference. */
 export interface ReadingOrder {
+  /** Each readable scene's place in reading order. */
   order: ReadonlyMap<string, number>
+  /**
+   * Each manuscript scene's place for "as of": a readable scene's own `order`; an Idea scene or
+   * one left out of compile reads as of the readable scene before it (-1 before the first).
+   */
+  at: ReadonlyMap<string, number>
   refs: ReadonlyMap<string, string>
 }
 
@@ -55,7 +68,16 @@ const slotRank = (slot: Slot): number => {
   return rank === -1 ? ALL_SLOTS.length : rank
 }
 
-/** Shown claims of the book in reading order (by scene, then paragraph), with their scene's place. */
+/** Two claims of one paragraph in the text's order: by quote position, then as stored. */
+function inParagraph(a: AsOfClaim, b: AsOfClaim): number {
+  if (a.pos !== null && b.pos !== null && a.pos !== b.pos) return a.pos - b.pos
+  return a.created.localeCompare(b.created) || a.id.localeCompare(b.id)
+}
+
+/**
+ * Shown claims of the book in reading order (by scene, then paragraph, then place in the
+ * paragraph), with their scene's place.
+ */
 function placed(claims: readonly AsOfClaim[], reading: ReadingOrder): Placed[] {
   return claims
     .flatMap((claim) => {
@@ -64,8 +86,7 @@ function placed(claims: readonly AsOfClaim[], reading: ReadingOrder): Placed[] {
       return [{ claim, order }]
     })
     .sort(
-      (a, b) =>
-        a.order - b.order || a.claim.para - b.claim.para || a.claim.id.localeCompare(b.claim.id)
+      (a, b) => a.order - b.order || a.claim.para - b.claim.para || inParagraph(a.claim, b.claim)
     )
 }
 
@@ -90,14 +111,15 @@ function lastRun(run: readonly Placed[]): { latest: Placed; start: Placed } | nu
 /**
  * The True now lines as of scene `atId`: for each record and lasting slot, the latest
  * narration-now value with the scene its run began in; for each transient slot, the latest value
- * with the scene it was last stated in. Empty when `atId` is not in the reading order.
+ * with the scene it was last stated in. An Idea scene or one left out of compile reads as of the
+ * readable scene before it; empty when `atId` is not a manuscript scene.
  */
 export function trueNow(
   claims: readonly AsOfClaim[],
   reading: ReadingOrder,
   atId: string
 ): TrueNowLine[] {
-  const at = reading.order.get(atId)
+  const at = reading.at.get(atId)
   if (at === undefined) return []
   const runs = new Map<string, Placed[]>()
   for (const entry of placed(claims, reading)) {
@@ -188,8 +210,10 @@ const sheetValue = (reading: ReadingOrder, entry: Placed): SheetValue => ({
 })
 
 /**
- * One record's sheet "From the book, as of" scene `atId` (null: the end of the book). `claims`
- * are that record's. Fixed: the latest value, with the others the book gives beside it.
+ * One record's sheet "From the book, as of" scene `atId` (null: the end of the book; an Idea scene
+ * or one left out of compile: the readable scene before it; a node that is not a manuscript scene:
+ * before the book, so every line counts as later, never silently the end). `claims` are that
+ * record's. Fixed: the latest value, with the others the book gives beside it.
  * Lasting: the latest value since its run began. Transient: the latest, last stated in.
  * Accumulating: every value once, in the order the book first gives it. Others: every claim in
  * another voice or mode, in reading order.
@@ -199,7 +223,7 @@ export function sheetAsOf(
   reading: ReadingOrder,
   atId: string | null
 ): SheetAsOf {
-  const at = atId === null ? Infinity : (reading.order.get(atId) ?? Infinity)
+  const at = atId === null ? Infinity : (reading.at.get(atId) ?? -1)
   const sheet: SheetAsOf = {
     fixed: [],
     lasting: [],

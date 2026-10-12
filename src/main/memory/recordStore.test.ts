@@ -493,8 +493,28 @@ describe('the reading’s evidence through merge, split and delete (F-16.17, pla
         ],
         mood: null,
         theme: null,
-        anchor: []
+        anchor: [],
+        seen: []
       },
+      NOW
+    )
+    const third = make('Tamsin')
+    const [waits] = seedClaims(
+      db,
+      scenes[0] ?? '',
+      [
+        {
+          recordId: null,
+          state: 'waiting',
+          subjectText: null,
+          pending: { kind: 'subject', candidates: [merge, third, keep] },
+          slot: 'traits',
+          value: 'smiling',
+          quote: 'She smiled at him',
+          para: 0,
+          proof: 'verified'
+        }
+      ],
       NOW
     )
     db.insert(memoryBackfill)
@@ -509,7 +529,7 @@ describe('the reading’s evidence through merge, split and delete (F-16.17, pla
       recordId: merge,
       slot: 'hair',
       value: 'red',
-      anchor: ['h']
+      stating: ['h']
     })
     dismiss(db, { kind: 'notRight', key, recordId: merge, label: 'Ry: hair red is not right' }, NOW)
     seedRoster()
@@ -544,10 +564,15 @@ describe('the reading’s evidence through merge, split and delete (F-16.17, pla
           recordId: keep,
           slot: 'hair',
           value: 'red',
-          anchor: ['h']
+          stating: ['h']
         })
       )
     ).toBe(true)
+    // A claim waiting among the merged record and others now waits on the kept one, once.
+    expect(getClaim(db, waits ?? '')?.pending).toEqual({
+      kind: 'subject',
+      candidates: [keep, third]
+    })
     expect(rosterMarked()).toBe(true)
     claimsClean()
   })
@@ -588,11 +613,35 @@ describe('the reading’s evidence through merge, split and delete (F-16.17, pla
       ],
       NOW
     )
+    upsertCard(
+      db,
+      {
+        nodeId: scenes[0] ?? '',
+        draftId: activeDraftId(db),
+        readingId: null,
+        line: 'Ry runs.',
+        gist: 'A gist.',
+        fields: { ...emptyCardFields(), pov: { value: id, quote: 'Ry ran', p: 0, verified: true } },
+        present: [
+          { recordId: id, quote: "Ry's eyes were grey", p: 0, verified: true },
+          { recordId: id, quote: 'Rynna told Ry', p: 0, verified: true }
+        ],
+        mood: null,
+        theme: null,
+        anchor: [],
+        seen: []
+      },
+      NOW
+    )
     seedRoster()
     const { into } = splitRecord(db, id, [ry], null, NOW)
     expect(getClaim(db, named ?? '')?.recordId).toBe(into.id)
     expect(getClaim(db, pronoun ?? '')?.recordId).toBe(id)
     expect(getClaim(db, own ?? '')?.recordId).toBe(id)
+    // The card's entries named only by the moved name move; one naming both stays.
+    const card = getCard(db, scenes[0] ?? '', activeDraftId(db))
+    expect(card?.fields.pov?.value).toBe(into.id)
+    expect(card?.present.map((each) => each.recordId)).toEqual([into.id, id])
     expect(rosterMarked()).toBe(true)
     claimsClean()
   })

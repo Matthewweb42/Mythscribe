@@ -463,11 +463,15 @@ export function undoRename(db: TreeDb, now: Date): RenameUndoResult {
       drafts.restored += 1
       draftsBack.add(`${text.draftId}|${text.nodeId}`)
     }
-    // F-16.17: the evidence goes back with its text; the open scene's with the renderer's undo.
+    // F-16.17: the evidence goes back with its own text: the active draft's with the scene (the
+    // open scene's with the renderer's undo), another draft's only with that draft's text.
     const docsBack = new Set(restored.map((each) => each.id))
+    const active = currentDraftId(tx)
     for (const each of entry.evidence) {
       const back =
-        each.open || docsBack.has(each.nodeId) || draftsBack.has(`${each.draftId}|${each.nodeId}`)
+        each.draftId === active
+          ? each.open || docsBack.has(each.nodeId)
+          : draftsBack.has(`${each.draftId}|${each.nodeId}`)
       if (back) restoreEvidence(tx, each.undo, now)
     }
     const nameRestored = restoreAliasText(

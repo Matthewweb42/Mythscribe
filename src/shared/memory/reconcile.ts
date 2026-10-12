@@ -1,4 +1,4 @@
-import { anchorHolds } from './anchor'
+import { anchorInPlace } from './anchor'
 import type { Claim, ClaimPending, ClaimProof } from './claims'
 import { dismissedKey } from './dismissed'
 
@@ -7,18 +7,24 @@ import { dismissedKey } from './dismissed'
  * the scene's stored ones. Pure: the pipeline (slice 2) applies the result in one transaction.
  *
  * - `same` (the reader's word that a stored claim is unchanged) counts only for a live claim whose
- *   anchor still holds.
- * - A stale claim comes back only through a fresh item with its own quote that passed the ladder:
- *   the item replaces its quote and anchor (a revival).
+ *   anchor still holds in place.
+ * - A stale claim with a record comes back only through a fresh item with its own quote that
+ *   passed the ladder, about the same record, slot, voice, mode and value: the item replaces its
+ *   quote and anchor (a revival). A waiting claim is never revived: a claim waiting on its subject
+ *   is told apart by its candidates and name span, and a claim with no record never comes back
+ *   live this way.
  * - `drop` counts only for a stale claim, or one whose current quote the verifier rejected.
  * - Values merge by containment within one reading only ("grey" and "grey-blue" keep the
  *   longer); across scenes they sit side by side (`asOf.ts`).
- * - A fresh item on the Dismissed list (`notRight`, by record, slot, value and anchor) is dropped
- *   before storing.
+ * - A fresh item on the Dismissed list (`notRight`, by record, slot, value and the quote's own
+ *   sentences) is dropped before storing.
+ * - A fresh item that states a stored live or waiting claim again, word for word, is not stored
+ *   twice: the stored claim stays as it is.
  * - P2a-D23: a stale claim whose paragraph lay inside the window read, and that no fresh item
- *   revived, is deleted; a full read deletes every stale and pronoun-waiting claim it did not
- *   revive. Claims waiting on a new name wait for the author, and claims waiting on a shared alias
- *   for the name scan (P2a-D22).
+ *   revived, is deleted (a claim waiting on its subject whose sentences changed is stale too); a
+ *   full read deletes every stale and pronoun-waiting claim it did not revive or restate. Claims
+ *   waiting on a new name wait for the author, and claims waiting on a shared alias for the name
+ *   scan (P2a-D22).
  */
 
 /** A stored claim as reconciliation reads it. */
@@ -55,6 +61,8 @@ export interface FreshClaim {
   quote: string
   para: number
   anchor: string[]
+  /** The gate texts (`gateText`) of the quote's own sentences: what a Not right dismissal keys on. */
+  stating: string[]
   proof: ClaimProof
   change: boolean
 }
@@ -63,8 +71,8 @@ export interface ReconcileInput {
   stored: readonly StoredClaim[]
   /** The paragraphs the reading sent, and whether it was a full read. */
   window: { paras: ReadonlySet<number>; full: boolean }
-  /** The scene's current sentence hashes. */
-  present: ReadonlySet<string>
+  /** The scene's current sentence hashes, in reading order (`sceneSentences`). */
+  hashes: readonly string[]
   same: readonly string[]
   drop: readonly string[]
   /** Stored claims whose current quote the verifier rejected in this reading. */
@@ -94,10 +102,23 @@ export interface ReconcileResult {
   dismissed: number
 }
 
+/** Who a claim is about: its record, the new name it waits on, or its candidates and name span. */
+function subjectOf(claim: {
+  recordId: string | null
+  pending: ClaimPending | null
+  subjectText: string | null
+}): string {
+  if (claim.recordId !== null) return claim.recordId
+  if (claim.pending?.kind === 'name') return `name:${claim.pending.norm}`
+  const candidates = claim.pending?.kind === 'subject' ? [...claim.pending.candidates].sort() : []
+  return `subject:${candidates.join(',')}:${claim.subjectText ?? ''}`
+}
+
 /** Who and what a claim is about, without its value: claims with one identity compare values. */
 const identity = (claim: {
   recordId: string | null
   pending: ClaimPending | null
+  subjectText: string | null
   slot: string
   voice: string
   mode: string
@@ -105,7 +126,7 @@ const identity = (claim: {
   objectId: string | null
 }): string =>
   [
-    claim.recordId ?? (claim.pending?.kind === 'name' ? `name:${claim.pending.norm}` : 'subject'),
+    subjectOf(claim),
     claim.slot,
     claim.voice,
     claim.mode,
@@ -166,7 +187,7 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
       recordId: item.recordId,
       slot: item.slot,
       value: item.value,
-      anchor: item.anchor
+      stating: item.stating
     })
     if (!input.dismissed.has(key)) return true
     result.dismissed += 1
@@ -176,26 +197,31 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
   result.merged = merged
 
   const byId = new Map(input.stored.map((claim) => [claim.id, claim]))
-  const holds = (claim: StoredClaim): boolean =>
-    claim.anchor.length > 0 && anchorHolds(claim.anchor, input.present)
+  const holds = (claim: StoredClaim): boolean => anchorInPlace(claim.anchor, input.hashes)
   const revived = new Set<string>()
+  /** Stored live or waiting claims a fresh item stated again word for word (kept as they are). */
+  const restated = new Set<string>()
   const deleted = new Set<string>()
 
   for (const item of fresh) {
     const key = identity(item)
-    const live = input.stored.find(
+    const already = input.stored.find(
       (claim) =>
-        claim.state === 'live' &&
+        (claim.state === 'live' || claim.state === 'waiting') &&
         identity(claim) === key &&
         claim.valueKey === item.valueKey &&
         claim.quote === item.quote
     )
-    if (live !== undefined) continue
+    if (already !== undefined) {
+      restated.add(already.id)
+      continue
+    }
     const stale = input.stored.find(
       (claim) =>
-        claim.state !== 'live' &&
+        claim.state === 'stale' &&
+        claim.recordId !== null &&
+        claim.pending === null &&
         !revived.has(claim.id) &&
-        claim.pending?.kind !== 'name' &&
         identity(claim) === key &&
         claim.valueKey === item.valueKey
     )
@@ -223,7 +249,7 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
     if (claim.state === 'stale' || input.rejected.has(id)) deleted.add(id)
   }
   for (const claim of input.stored) {
-    if (revived.has(claim.id)) continue
+    if (revived.has(claim.id) || restated.has(claim.id)) continue
     if (claim.state === 'stale' && (input.window.full || input.window.paras.has(claim.para))) {
       deleted.add(claim.id)
     }

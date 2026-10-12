@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { anchorFor, sceneSentences } from './anchor'
 import type { LiteralName } from './literal'
 import { locateQuote } from './quote'
-import { cardStale, checkAnchors, type ReproofClaim, type ReproofScene } from './reproof'
+import { cardParas, cardStale, checkAnchors, type ReproofClaim, type ReproofScene } from './reproof'
 import { splitSentences } from './sentences'
 
 const PEOPLE = ['Mara', 'Tomas']
@@ -43,8 +43,10 @@ function claimFrom(
     id: 'c1',
     proof: 'literal',
     state: 'live',
+    pending: null,
     anchor: [...anchorFor(sceneSentences(paragraphs), location)],
     recordId: 'mara',
+    objectId: null,
     slot: 'eyes',
     value: 'grey',
     voice: 'narration',
@@ -60,6 +62,60 @@ describe('checkAnchors (F-16.17, design §2.3 Invalidation)', () => {
     expect(checkAnchors([EYES], sceneOf([...BEFORE, 'A new paragraph.']))).toEqual([
       { id: 'c1', verdict: 'holds' }
     ])
+  })
+
+  it('follows the quote to its paragraph when paragraphs above it come or go', () => {
+    const verified = { ...EYES, proof: 'verified' as const }
+    expect(
+      checkAnchors([verified], sceneOf(['A new opening.', 'And another.', ...BEFORE]))
+    ).toEqual([{ id: 'c1', verdict: 'moved', para: 3 }])
+  })
+
+  it('reads the anchor in place: a sentence put beside the quote breaks it (design §2.3)', () => {
+    const scene = ['Mara was dead. The bells rang over the quay.']
+    const dead = claimFrom(scene, {
+      quote: 'Mara was dead',
+      para: 0,
+      slot: 'alive',
+      value: 'dead',
+      proof: 'verified'
+    })
+    const inserted = [
+      'Mara was dead. Then Tomas woke from the nightmare. The bells rang over the quay.'
+    ]
+    expect(checkAnchors([dead], sceneOf(inserted))).toEqual([{ id: 'c1', verdict: 'stale' }])
+    // The literal twin is not re-proved for free either: the new neighbour brings a dream.
+    expect(checkAnchors([{ ...dead, proof: 'literal' }], sceneOf(inserted))).toEqual([
+      { id: 'c1', verdict: 'stale' }
+    ])
+    // The paragraph moved next to another passage: its first sentence has a new neighbour.
+    const two = ['The ridge was cold.', "Mara's eyes were grey. She waited."]
+    const eyes = claimFrom(two, { quote: "Mara's eyes were grey", para: 1, proof: 'verified' })
+    expect(
+      checkAnchors([eyes], sceneOf(["Mara's eyes were grey. She waited.", 'The ridge was cold.']))
+    ).toEqual([{ id: 'c1', verdict: 'stale' }])
+  })
+
+  it('restores a stale claim whose sentences are back in place, and judges a subject wait', () => {
+    const stale = { ...EYES, state: 'stale' as const, proof: 'verified' as const }
+    expect(checkAnchors([stale], sceneOf(BEFORE))).toEqual([
+      { id: 'c1', verdict: 'restored', para: 1 }
+    ])
+    expect(checkAnchors([stale], sceneOf(['The ridge was warm.', ...BEFORE.slice(1)]))).toEqual([])
+    const wait = {
+      ...EYES,
+      id: 'w1',
+      state: 'waiting' as const,
+      recordId: null,
+      pending: { kind: 'subject' as const, candidates: ['mara', 'tomas'] }
+    }
+    expect(checkAnchors([wait], sceneOf(BEFORE))).toEqual([{ id: 'w1', verdict: 'holds' }])
+    expect(checkAnchors([wait], sceneOf(['The ridge was warm.', ...BEFORE.slice(1)]))).toEqual([
+      { id: 'w1', verdict: 'stale' }
+    ])
+    // A claim waiting on a new name waits for the author.
+    const named = { ...wait, pending: { kind: 'name' as const, norm: 'hesk', text: 'Hesk' } }
+    expect(checkAnchors([named], sceneOf(['The ridge was warm.', ...BEFORE.slice(1)]))).toEqual([])
   })
 
   it('re-proves a literal claim for free after an edit beside it: new paragraph, new anchor', () => {
@@ -119,6 +175,27 @@ describe('checkAnchors (F-16.17, design §2.3 Invalidation)', () => {
     expect(checkAnchors([{ ...EYES, proof: 'verified', anchor: [] }], sceneOf(BEFORE))).toEqual([
       { id: 'c1', verdict: 'stale' }
     ])
+  })
+})
+
+describe('cardParas', () => {
+  it('moves a card quote’s paragraph with its quote, and answers null when nothing moved', () => {
+    const card = {
+      fields: {
+        where: { value: 'the ridge', quote: 'The ridge was cold', p: 0, verified: false },
+        when: null,
+        pov: { value: 'mara', quote: "Mara's eyes were grey", p: 1, verified: true },
+        year: null,
+        flashback: null,
+        elapsed: null
+      },
+      present: [{ recordId: 'tomas', quote: 'Tomas came at dusk', p: 2, verified: true }]
+    }
+    expect(cardParas(card, BEFORE)).toBeNull()
+    const moved = cardParas(card, ['A new opening.', ...BEFORE])
+    expect(moved?.fields.where?.p).toBe(1)
+    expect(moved?.fields.pov?.p).toBe(2)
+    expect(moved?.present[0]?.p).toBe(3)
   })
 })
 

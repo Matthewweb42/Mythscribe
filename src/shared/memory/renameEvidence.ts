@@ -1,6 +1,6 @@
 import { normalizeForMatch } from '../critique'
 import type { Paragraph } from '../mentions'
-import { sceneSentences } from './anchor'
+import { NAMING_MARK, sceneSentences } from './anchor'
 import { locateInText } from './quote'
 import type { RenameEdit } from './rename'
 
@@ -118,11 +118,19 @@ export function sentencePairs(
   return { hashes, texts }
 }
 
-/** An anchor with each hash moved to its sentence's new one (a hash not in the scene stays). */
+/**
+ * An anchor with each hash moved to its sentence's new one (a hash not in the scene stays; a
+ * naming sentence keeps its mark).
+ */
 export function rewriteAnchor(
   anchor: readonly string[],
   pairs: { hashes: ReadonlyMap<string, string> } | null
 ): string[] {
   if (pairs === null) return [...anchor]
-  return anchor.map((hash) => pairs.hashes.get(hash) ?? hash)
+  return anchor.map((entry) => {
+    const naming = entry.startsWith(NAMING_MARK)
+    const hash = naming ? entry.slice(NAMING_MARK.length) : entry
+    const next = pairs.hashes.get(hash) ?? hash
+    return naming ? `${NAMING_MARK}${next}` : next
+  })
 }

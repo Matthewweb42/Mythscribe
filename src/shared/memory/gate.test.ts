@@ -141,6 +141,13 @@ describe('the cosmetic skip (F-16.16, P2a-D3)', () => {
     expect(isCosmetic('⟨mara⟩ ran.', '⟨tomas⟩ ran.', { knownWords: known })).toBe(false)
   })
 
+  it('never reads a changed number as a typo fix', () => {
+    expect(
+      isCosmetic('It was the spring of 1814.', 'It was the spring of 1815.', { knownWords: known })
+    ).toBe(false)
+    expect(isCosmetic('She was 19.', 'She was 29.', { knownWords: known })).toBe(false)
+  })
+
   it('counts a transposition as one edit', () => {
     expect(editDistance('teh', 'the')).toBe(1)
     expect(editDistance('abc', 'abc')).toBe(0)
@@ -153,7 +160,12 @@ describe('readDecision (F-16.16)', () => {
     paragraphs: readonly string[],
     caretPara: number | null = null
   ): GateSentence[] => gateSentences(paragraphs, { caretPara, names: NAMES })
-  const base = { partials: 0, staleParas: new Set<number>(), knownWords: new Set<string>() }
+  const base = {
+    partials: 0,
+    staleParas: new Set<number>(),
+    cardStale: false,
+    knownWords: new Set<string>()
+  }
   const LONG = ['One went.', 'Two went.', 'Three went.', 'Four went.', 'Five went.', 'Six went.']
   const readOf = (paragraphs: readonly string[]): ReturnType<typeof readSetOf> =>
     readSetOf(entries(sentences(paragraphs)), NAMES)
@@ -183,6 +195,10 @@ describe('readDecision (F-16.16)', () => {
       reason: 'cosmetic',
       unread: 1
     })
+    // A cosmetic edit under the card's quotes still reads: the card would quote words now gone.
+    expect(
+      readDecision({ ...base, cardStale: true, sentences: sentences(LONG), read: fixed })
+    ).toEqual({ read: 'window', reason: 'changed', paras: [5], unread: 1 })
   })
 
   it('reads a window of the changed paragraphs, cosmetic ones beside them included', () => {

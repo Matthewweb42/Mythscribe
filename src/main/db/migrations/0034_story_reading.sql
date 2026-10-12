@@ -9,6 +9,7 @@ CREATE TABLE `card` (
 	`mood` text,
 	`theme` text,
 	`anchor` text DEFAULT '[]' NOT NULL,
+	`seen` text DEFAULT '[]' NOT NULL,
 	`line_hash` text,
 	`created` text NOT NULL,
 	PRIMARY KEY(`node_id`, `draft_id`),

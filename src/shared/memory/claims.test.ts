@@ -66,6 +66,7 @@ describe('the schemas', () => {
         mood: null,
         theme: null,
         anchor: [],
+        seen: [],
         lineHash: null,
         created: 'x'
       }).success

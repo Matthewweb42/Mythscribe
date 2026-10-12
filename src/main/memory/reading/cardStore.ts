@@ -4,14 +4,26 @@ import { CardFields, CardPresent, emptyCardFields, type Card } from '@shared/mem
 import { sha256 } from '../../ai/request'
 import { card, type CardRow } from '../../db/schema'
 import { currentDraftId } from '../../draft/draftStore'
+import { AppError } from '../../ipc/errors'
 import type { TreeDb } from '../../tree/treeStore'
 import { indexOwner } from '../passageIndexer'
 
 /**
  * Cards of story memory v2 (F-16.18): the one writer of `card`, one per scene and draft, the AI's
  * map of the scene (findable, never citable). The active draft's card line and gist go into the
- * passage index as source `card` (`indexOwner(db, 'card', nodeId)`), labelled `notCanon`.
+ * passage index as source `card` (`indexOwner(db, 'card', nodeId)`), labelled `notCanon`, while
+ * the node is a manuscript scene; a card kept for a node moved out of the manuscript (Research,
+ * front or end matter) is stored but not indexed, and the passage job settles it if it comes back.
  */
+
+/** Indexes the active draft's card of `nodeId`, when the node is still a manuscript scene. */
+function indexCard(db: TreeDb, nodeId: string, now: Date): void {
+  try {
+    indexOwner(db, 'card', nodeId, now)
+  } catch (err) {
+    if (!(err instanceof AppError && err.code === 'NOT_FOUND')) throw err
+  }
+}
 
 const Hashes = z.array(z.string())
 const Present = z.array(CardPresent)
@@ -37,6 +49,7 @@ function toCard(row: CardRow): Card {
     mood: row.mood,
     theme: row.theme,
     anchor: parse(row.anchor, Hashes, []),
+    seen: parse(row.seen, Hashes, []),
     lineHash: row.lineHash,
     created: row.created
   }
@@ -80,6 +93,7 @@ export function upsertCard(db: TreeDb, next: NewCard, now: Date): void {
     mood: next.mood,
     theme: next.theme,
     anchor: JSON.stringify(next.anchor),
+    seen: JSON.stringify(next.seen),
     lineHash: sha256(next.line),
     created: now.toISOString()
   }
@@ -88,7 +102,7 @@ export function upsertCard(db: TreeDb, next: NewCard, now: Date): void {
       .values(row)
       .onConflictDoUpdate({ target: [card.nodeId, card.draftId], set: row })
       .run()
-    if (currentDraftId(tx) === next.draftId) indexOwner(tx, 'card', next.nodeId, now)
+    if (currentDraftId(tx) === next.draftId) indexCard(tx, next.nodeId, now)
   })
 }
 
@@ -98,5 +112,21 @@ export function writeCardRow(db: TreeDb, row: CardRow, now: Date): void {
     .values(row)
     .onConflictDoUpdate({ target: [card.nodeId, card.draftId], set: row })
     .run()
-  if (currentDraftId(db) === row.draftId) indexOwner(db, 'card', row.nodeId, now)
+  if (currentDraftId(db) === row.draftId) indexCard(db, row.nodeId, now)
+}
+
+/**
+ * A card's fields and on-page entries with their paragraphs moved (`cardParas`: paragraphs came or
+ * went above their quotes). Nothing indexed changes: the line and gist stay.
+ */
+export function moveCardParas(
+  db: TreeDb,
+  nodeId: string,
+  draftId: string,
+  next: { fields: CardFields; present: readonly CardPresent[] }
+): void {
+  db.update(card)
+    .set({ fields: JSON.stringify(next.fields), present: JSON.stringify(next.present) })
+    .where(and(eq(card.nodeId, nodeId), eq(card.draftId, draftId)))
+    .run()
 }

@@ -231,8 +231,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       quote: 'Mr. Ashby was good-looking and gentlemanlike',
       voice: 'narration',
       mode: 'now',
-      expect: 'literal',
-      reason: 'One name, narration, a plain trait pattern, and no marker word.'
+      expect: 'verified',
+      reason:
+        'One name, narration, no marker word; a trait has no cue word, so code cannot tell the slot is right and the verifier confirms it.'
     },
     {
       id: 'varrow-eyes-grey',
@@ -314,8 +315,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       quote: 'Mr. Dunmore was the son of the late steward at Greyhallow',
       voice: 'narration',
       mode: 'now',
-      expect: 'literal',
-      reason: 'A kinship cue with one name, in narration. The truth that h02 lies against.'
+      expect: 'verified',
+      reason:
+        "A kinship cue with one name, in narration, but its sentence goes on with markers ('though he seldom said so'), so the verifier confirms it. The truth that h02 lies against."
     },
     {
       id: 'green-eyes-trap',
@@ -341,8 +343,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       quote: 'Clara Pell was seven-and-twenty',
       voice: 'narration',
       mode: 'now',
-      expect: 'literal',
-      reason: 'A stated age with one name, in narration.'
+      expect: 'verified',
+      reason:
+        "A stated age with one name, in narration; a pluperfect in the sentence's next clause ('had long ago stopped') sends it to the verifier."
     },
     {
       id: 'mother-red-hair',
@@ -367,9 +370,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       quote: 'the Captain had a long white scar across his jaw',
       voice: 'narration',
       mode: 'now',
-      expect: 'literal',
+      expect: 'verified',
       reason:
-        "The author-confirmed title 'the Captain', matched with exact case, counts as his name."
+        "The author-confirmed title 'the Captain', matched with exact case, counts as his name; a pluperfect later in the sentence ('had come by it') sends it to the verifier."
     },
     {
       id: 'captain-not-blue',
@@ -462,8 +465,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       quote: 'Johanna Harrow was the gentlest of the four sisters',
       voice: 'narration',
       mode: 'now',
-      expect: 'literal',
-      reason: 'One name, narration, no marker (and the changed fact: four sisters).'
+      expect: 'verified',
+      reason:
+        'One name, narration, no marker (and the changed fact: four sisters); a trait goes to the verifier (no cue word).'
     },
     {
       id: 'varrow-duel',
@@ -488,8 +492,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       quote: 'Johanna was two-and-twenty that spring',
       voice: 'narration',
       mode: 'now',
-      expect: 'literal',
-      reason: 'A stated age with one name, in narration, in a scene typed 1812.'
+      expect: 'verified',
+      reason:
+        "A stated age with one name, in narration, in a scene typed 1812; the sentence's next clause has markers ('had learnt', 'without'), so the verifier confirms it."
     },
     {
       id: 'varrow-eyes-brown',
@@ -501,8 +506,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       quote: "Varrow's brown eyes followed her",
       voice: 'narration',
       mode: 'now',
-      expect: 'literal',
-      reason: 'Possessive name with the eye cue. Proved, and it disagrees with s03: the planted C1.'
+      expect: 'verified',
+      reason:
+        "Possessive name with the eye cue; a negation later in the sentence ('did not mind it') sends it to the verifier. Proved, and it disagrees with s03: the planted C1."
     },
     {
       id: 'lottie-age',

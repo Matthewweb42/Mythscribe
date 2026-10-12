@@ -10,6 +10,7 @@ import {
 } from '@shared/memory/claims'
 import { locateQuote } from '@shared/memory/quote'
 import type { RenameEdit } from '@shared/memory/rename'
+import { locateInScene } from '@shared/memory/reproof'
 import {
   rewriteAnchor,
   rewriteQuote,
@@ -58,6 +59,15 @@ interface Rewrite {
   pairs: ReturnType<typeof sentencePairs>
 }
 
+/**
+ * The paragraph a stored quote sits in before the rewrite: where it is found once in the scene
+ * (its stored paragraph first), else the stored one. A paragraph added or removed above it since
+ * the anchors job last ran must not send the rewrite to the wrong paragraph.
+ */
+function paraOf(rewrite: Rewrite, para: number, quote: string): number {
+  return locateInScene(rewrite.before, para, quote)?.p ?? para
+}
+
 /** A quote and its anchor after the rewrite (the anchor recomputed when sentences cannot pair). */
 function moved(
   rewrite: Rewrite,
@@ -74,11 +84,13 @@ function moved(
 }
 
 function rewriteClaim(row: ClaimRow, rewrite: Rewrite): ClaimRow {
-  const edits = rewrite.edits.get(row.para) ?? []
-  const next = moved(rewrite, row.para, row.quote, parse(row.anchor, Hashes, []))
+  const para = paraOf(rewrite, row.para, row.quote)
+  const edits = rewrite.edits.get(para) ?? []
+  const next = moved(rewrite, para, row.quote, parse(row.anchor, Hashes, []))
   const value = rewriteWords(row.value, edits)
   return {
     ...row,
+    para,
     quote: next.quote,
     value,
     valueKey: valueKey(value),
@@ -89,21 +101,27 @@ function rewriteClaim(row: ClaimRow, rewrite: Rewrite): ClaimRow {
 function rewriteCard(row: CardRow, rewrite: Rewrite): CardRow {
   const all = [...rewrite.edits.values()].flat()
   const fields = parse(row.fields, CardFields, emptyCardFields())
-  const field = (value: CardField | null): CardField | null => {
-    if (value === null) return null
-    const edits = rewrite.edits.get(value.p) ?? []
+  const moveField = (value: CardField): CardField => {
+    const p = paraOf(rewrite, value.p, value.quote)
+    const edits = rewrite.edits.get(p) ?? []
     return {
       ...value,
+      p,
       value: rewriteWords(value.value, edits),
-      quote: rewriteQuote(rewrite.before[value.p] ?? '', value.quote, edits) ?? value.quote
+      quote: rewriteQuote(rewrite.before[p] ?? '', value.quote, edits) ?? value.quote
     }
   }
-  const present = parse(row.present, z.array(CardPresent), []).map((each) => ({
-    ...each,
-    quote:
-      rewriteQuote(rewrite.before[each.p] ?? '', each.quote, rewrite.edits.get(each.p) ?? []) ??
-      each.quote
-  }))
+  const field = (value: CardField | null): CardField | null =>
+    value === null ? null : moveField(value)
+  const present = parse(row.present, z.array(CardPresent), []).map((each) => {
+    const p = paraOf(rewrite, each.p, each.quote)
+    return {
+      ...each,
+      p,
+      quote:
+        rewriteQuote(rewrite.before[p] ?? '', each.quote, rewrite.edits.get(p) ?? []) ?? each.quote
+    }
+  })
   return {
     ...row,
     line: rewriteWords(row.line, all),
@@ -111,7 +129,8 @@ function rewriteCard(row: CardRow, rewrite: Rewrite): CardRow {
     fields: JSON.stringify({
       where: field(fields.where),
       when: field(fields.when),
-      pov: fields.pov,
+      // The POV's value is a record id: only its quote and paragraph follow the rename.
+      pov: fields.pov === null ? null : { ...moveField(fields.pov), value: fields.pov.value },
       year: field(fields.year),
       flashback: field(fields.flashback),
       elapsed: field(fields.elapsed)

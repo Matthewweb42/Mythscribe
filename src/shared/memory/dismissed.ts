@@ -18,8 +18,9 @@ import { normName } from './names'
  * - `notSame`: two records she said are different (the switch-over's kept spellings).
  * - `unlink`: a plan link she removed.
  * - `notRight` (F-16.18): an AI line the author said is wrong (*Not right › Wrong value*), keyed by
- *   the record, slot, value and the sentences it rested on, so a new sentence stating the same
- *   value is new evidence and comes back.
+ *   the record, slot, value and the quote's own sentences (their gate texts, every name as one
+ *   placeholder), so a new sentence stating the same value is new evidence and comes back, while
+ *   an edit beside it, Rename in book or *Same as…* leaves the dismissal standing (answer 22).
  * - `notProblem`: a conflict that is fine: a filed line's (F-16.9, by the caller's `ref`), the
  *   typed-detail conflict's *Keep mine* (decision 4, F-16.18: `detail`), and P4's findings.
  */
@@ -43,20 +44,31 @@ export type DismissedKeyInput =
   | { kind: 'notMention'; recordId: string; phrase: string }
   | { kind: 'split' | 'notSame'; a: string; b: string }
   | { kind: 'unlink'; planId: string; sceneId: string }
-  | { kind: 'notRight'; recordId: string; slot: string; value: string; anchor: readonly string[] }
+  | {
+      kind: 'notRight'
+      recordId: string
+      slot: string
+      value: string
+      /** The gate texts (`gateText`) of the quote's own sentences, in order. */
+      stating: readonly string[]
+    }
   | { kind: 'notProblem'; ref: string }
   | { kind: 'notProblem'; detail: { nodeId: string; field: string; value: string } }
 
-/** The anchor part of a `notRight` key: one hash over its sentence hashes, in order. */
-export function anchorKey(anchor: readonly string[]): string {
-  return sentenceHash(anchor.join(' '))
+/**
+ * The evidence part of a `notRight` key: one hash over the quote's sentences as the gate reads
+ * them, with each name's record token (`⟨r1|r2⟩`) folded to one placeholder, so a rename or a
+ * merge of records never moves it (the key's record says whose line it was).
+ */
+export function statingKey(stating: readonly string[]): string {
+  return sentenceHash(stating.map((gate) => gate.replace(/⟨[^⟩]*⟩/gu, '⟨⟩')).join(' '))
 }
 
 /**
  * The one key shape per kind (unique per kind in the table): `name` → the name's norm; `alias`
  * → `recordId|norm`; `notMention` → `recordId|norm(the span with one word either side)`;
  * `split` and `notSame` → the two record ids in sorted order; `unlink` → `planId|sceneId`;
- * `notRight` → `recordId|slot|valueKey|anchorKey`; `notProblem` → the caller's reference, or for a
+ * `notRight` → `recordId|slot|valueKey|statingKey`; `notProblem` → the caller's reference, or for a
  * typed detail `detail|nodeId|field|valueKey` (the text's value the author kept hers against).
  */
 export function dismissedKey(input: DismissedKeyInput): string {
@@ -73,7 +85,7 @@ export function dismissedKey(input: DismissedKeyInput): string {
     case 'unlink':
       return `${input.planId}|${input.sceneId}`
     case 'notRight':
-      return `${input.recordId}|${input.slot}|${valueKey(input.value)}|${anchorKey(input.anchor)}`
+      return `${input.recordId}|${input.slot}|${valueKey(input.value)}|${statingKey(input.stating)}`
     case 'notProblem':
       if ('ref' in input) return input.ref
       return `detail|${input.detail.nodeId}|${input.detail.field}|${valueKey(input.detail.value)}`

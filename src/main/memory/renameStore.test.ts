@@ -457,7 +457,8 @@ describe('Rename in book over the evidence (F-16.17, plan P2a §1.4)', () => {
         theme: null,
         anchor: sceneSentences(sceneTexts(db, scenes[0] ?? ''))
           .map((each) => each.hash)
-          .slice(0, 1)
+          .slice(0, 1),
+        seen: []
       },
       NOW
     )
@@ -514,6 +515,70 @@ describe('Rename in book over the evidence (F-16.17, plan P2a §1.4)', () => {
       expect(sceneMemory(db, id).unread).toBe(0)
     }
     clean()
+  })
+
+  it('finds a quote whose paragraph moved before the anchors job ran, and rewrites it there', () => {
+    const { coat } = seed()
+    // A paragraph put above the quote; the rename comes before the anchors job runs.
+    saveDocument(
+      db,
+      scenes[0] ?? '',
+      doc('A new start.', 'Hesk came in.', "Hesk's coat was wet; Heskel stayed out.")
+    )
+    applyRename(db, applying(), NOW)
+    expect(getClaim(db, coat)).toMatchObject({ quote: "Haskel's coat was wet", para: 2 })
+    expect(getCard(db, scenes[0] ?? '', activeDraftId(db))?.present[0]).toMatchObject({
+      quote: 'Haskel came in',
+      p: 1
+    })
+    expect(runAnchors(db, scenes[0] ?? '', NOW).staled).toEqual([])
+    clean()
+  })
+
+  it('brings the open scene’s claims back once its renamed text is saved, after a check between', () => {
+    const { coat } = seed()
+    applyRename(db, applying('Haskel', { openId: scenes[0] ?? '' }), NOW)
+    // The anchors job runs before the editor's save: the stored text still has the old name.
+    expect(runAnchors(db, scenes[0] ?? '', NOW).staled).toEqual([coat])
+    saveDocument(
+      db,
+      scenes[0] ?? '',
+      doc('Haskel came in.', "Haskel's coat was wet; Heskel stayed out.")
+    )
+    expect(runAnchors(db, scenes[0] ?? '', NOW).restored).toEqual([coat])
+    expect(getClaim(db, coat)?.state).toBe('live')
+    clean()
+  })
+
+  it('puts another draft’s evidence back only with that draft’s text', () => {
+    seed()
+    const other = otherDraft()
+    const [inOther] = insertClaims(
+      db,
+      [
+        {
+          ...anchoredClaim(db, scenes[1] ?? '', {
+            recordId: hesk,
+            slot: 'history',
+            value: 'waited',
+            quote: 'They waited for Hesk',
+            para: 0
+          }),
+          draftId: other
+        }
+      ],
+      NOW
+    )
+    applyRename(db, applying('Haskel', { otherDrafts: true }), NOW)
+    // The other draft's text of the scene changes after the rename: its undo is skipped.
+    db.update(draftText)
+      .set({ content: JSON.stringify(doc('They waited for Haskel, long.')) })
+      .where(and(eq(draftText.draftId, other), eq(draftText.nodeId, scenes[1] ?? '')))
+      .run()
+    const undone = undoRename(db, NOW)
+    expect(undone.drafts.skipped).toBe(1)
+    expect(textOf(scenes[1] ?? '')).toBe('They waited for Hesk.')
+    expect(getClaim(db, inOther ?? '')?.quote).toBe('They waited for Haskel')
   })
 
   it('rewrites the open scene’s evidence for the editor’s save that follows, and an inactive draft’s', () => {

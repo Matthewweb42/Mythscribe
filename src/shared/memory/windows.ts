@@ -171,26 +171,31 @@ export function piecesParas(pieces: readonly ReadPiece[]): Set<number> {
 }
 
 export interface CardDueInput {
-  /** The scene's card's anchor (every card quote's sentence hash), or null when it has none. */
-  cardAnchor: readonly string[] | null
+  /**
+   * The scene's card (its quotes' sentence hashes, and the gate hashes of the finished sentences
+   * it was made from), or null when it has none.
+   */
+  card: { anchor: readonly string[]; seen: readonly string[] } | null
   /** A first or full read. */
   full: boolean
   /** The scene's current sentence hashes (`sceneSentences`). */
   present: ReadonlySet<string>
-  /** Finished sentences, and those unread now. */
-  finished: number
-  unread: number
+  /** The gate hashes of the scene's finished sentences now (`gateSentences`). */
+  finished: readonly string[]
 }
 
 /**
  * Whether the reading asks for a new card (P2a-D17): on a first or full read, when the scene has
- * none, when a card quote's sentence changed, or when a quarter of the finished sentences are
- * unread.
+ * none, when a card quote's sentence changed, or when a quarter of the finished sentences are new
+ * since the card was made (window reads in between do not reset that count).
  */
 export function cardDue(input: CardDueInput): boolean {
-  if (input.full || input.cardAnchor === null) return true
-  if (input.cardAnchor.some((hash) => !input.present.has(hash))) return true
-  return input.finished > 0 && input.unread >= input.finished * CARD_DUE_SHARE
+  if (input.full || input.card === null) return true
+  if (input.card.anchor.some((hash) => !input.present.has(hash))) return true
+  if (input.finished.length === 0) return false
+  const seen = new Set(input.card.seen)
+  const changed = input.finished.filter((hash) => !seen.has(hash)).length
+  return changed >= input.finished.length * CARD_DUE_SHARE
 }
 
 /**

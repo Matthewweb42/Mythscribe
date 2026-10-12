@@ -957,7 +957,8 @@ export function splitRecord(
       tx,
       id,
       target,
-      moving.map((entry) => entry.norm)
+      moving.map((entry) => entry.norm),
+      from.aliases.filter((entry) => !aliasIds.includes(entry.id)).map((entry) => entry.norm)
     )
     markRosterForRebuild(tx)
     const intoName = into?.name ?? moving[0]?.text ?? ''

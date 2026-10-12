@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import {
   ClaimPending,
@@ -195,7 +195,10 @@ export function draftClaims(db: TreeDb, draftId: string): Claim[] {
   )
 }
 
-/** A stale claim brought back by a fresh item: its quote, paragraph, anchor and proof replaced. */
+/**
+ * A stale claim brought back by a fresh item: its quote, paragraph, anchor and proof replaced.
+ * Only a claim with a record comes back live this way (a claim with no subject never does).
+ */
 export function reviveClaim(
   db: TreeDb,
   id: string,
@@ -218,8 +221,26 @@ export function reviveClaim(
       state: 'live',
       proved: now.toISOString()
     })
-    .where(eq(claim.id, id))
+    .where(and(eq(claim.id, id), isNotNull(claim.recordId)))
     .run()
+}
+
+/** A claim whose anchor holds, following its quote to another paragraph (`moved`). */
+export function setClaimPara(db: TreeDb, id: string, para: number): void {
+  db.update(claim).set({ para }).where(eq(claim.id, id)).run()
+}
+
+/**
+ * A stale claim whose anchor holds in place again (`restored`): back to `live`, or to `waiting`
+ * when it still waits on its subject, with its quote's paragraph now. Its proof stands as it was.
+ */
+export function restoreClaim(
+  db: TreeDb,
+  id: string,
+  para: number,
+  state: 'live' | 'waiting'
+): void {
+  db.update(claim).set({ para, state }).where(eq(claim.id, id)).run()
 }
 
 /** A literal claim re-proved for free: live, with its new paragraph and anchor. */

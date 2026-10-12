@@ -89,16 +89,25 @@ describe('planPages (F-16.16)', () => {
 
 describe('cardDue (P2a-D17) and outputCap (design §2.3)', () => {
   const present = new Set(['a', 'b', 'c'])
-  it('asks for a card on a full read, without one, after a card quote changed, or a quarter unread', () => {
-    expect(cardDue({ cardAnchor: ['a'], full: true, present, finished: 20, unread: 1 })).toBe(true)
-    expect(cardDue({ cardAnchor: null, full: false, present, finished: 20, unread: 1 })).toBe(true)
-    expect(cardDue({ cardAnchor: ['a', 'z'], full: false, present, finished: 20, unread: 1 })).toBe(
-      true
-    )
-    expect(cardDue({ cardAnchor: ['a'], full: false, present, finished: 20, unread: 5 })).toBe(true)
-    expect(cardDue({ cardAnchor: ['a'], full: false, present, finished: 20, unread: 4 })).toBe(
-      false
-    )
+  const twenty = Array.from({ length: 20 }, (_, i) => `g${i}`)
+  const card = (seen: readonly string[], anchor: readonly string[] = ['a']) => ({ anchor, seen })
+
+  it('asks for a card on a full read, without one, after a card quote changed, or a quarter new', () => {
+    const base = { full: false, present, finished: twenty }
+    expect(cardDue({ ...base, full: true, card: card(twenty) })).toBe(true)
+    expect(cardDue({ ...base, card: null })).toBe(true)
+    expect(cardDue({ ...base, card: card(twenty, ['a', 'z']) })).toBe(true)
+    expect(cardDue({ ...base, card: card(twenty.slice(5)) })).toBe(true)
+    expect(cardDue({ ...base, card: card(twenty.slice(4)) })).toBe(false)
+  })
+
+  it('counts what changed since the card across window reads that kept it', () => {
+    const made = card(twenty)
+    // Two window reads each took in three edited sentences; the card was kept both times.
+    const afterFirst = [...twenty.slice(3), 'n1', 'n2', 'n3']
+    expect(cardDue({ full: false, present, finished: afterFirst, card: made })).toBe(false)
+    const afterSecond = [...afterFirst.slice(3), 'n4', 'n5', 'n6']
+    expect(cardDue({ full: false, present, finished: afterSecond, card: made })).toBe(true)
   })
 
   it('caps a full page at 720 and a window at min(600, 120 + 0.3 × prose), plus 120 for a card', () => {

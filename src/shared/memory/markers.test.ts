@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findMarkers, hasReproofMarker, scopeBackMarkers } from './markers'
+import { findMarkers, hasReproofMarker } from './markers'
 
 const kinds = (text: string): string[] => findMarkers(text).map((hit) => hit.kind)
 
@@ -28,12 +28,9 @@ describe('findMarkers (F-16.17)', () => {
   })
 })
 
-describe('scope-back markers and the re-proof markers', () => {
-  it('finds the markers that reach back over a sentence', () => {
-    expect(scopeBackMarkers(', if the letter was true.')).toHaveLength(1)
-    expect(scopeBackMarkers(', or so they said.')).toHaveLength(1)
-    expect(scopeBackMarkers(', and nobody spoke of how.')).toHaveLength(0)
-    expect(scopeBackMarkers(', though he seldom said so.')).toHaveLength(0)
+describe('the question mark and the re-proof markers', () => {
+  it('reads a question mark as a marker', () => {
+    expect(kinds('Mara was dead?')).toEqual(['question'])
   })
 
   it('knows the re-proof words', () => {

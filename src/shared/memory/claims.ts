@@ -176,6 +176,11 @@ export const Card = z.object({
   theme: z.string().nullable(),
   /** Hashes of every card quote's sentence: when one changes, the card is due (P2a-D17). */
   anchor: Anchor,
+  /**
+   * The gate hashes (`gate.ts`, names out) of the scene's finished sentences when the card was
+   * made: once a quarter of today's are not among them, the card is due (P2a-D17).
+   */
+  seen: z.array(z.string()),
   /** A hash of the line: plan links run only when it moves. */
   lineHash: z.string().nullable(),
   created: z.string()

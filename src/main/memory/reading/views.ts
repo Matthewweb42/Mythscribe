@@ -1,7 +1,14 @@
 import { passageParagraphs } from '@shared/mentions'
-import { sheetAsOf, trueNow, type ReadingOrder, type SheetLine } from '@shared/memory/asOf'
+import {
+  sheetAsOf,
+  trueNow,
+  type AsOfClaim,
+  type ReadingOrder,
+  type SheetLine
+} from '@shared/memory/asOf'
 import type { Claim } from '@shared/memory/claims'
 import { gateSentences, readSetOf, unreadSentences } from '@shared/memory/gate'
+import { locateInText } from '@shared/memory/quote'
 import { sceneRefs } from '@shared/memory/sceneRef'
 import { slotLabel } from '@shared/memory/slots'
 import { compareTyped, type TypedNames } from '@shared/memory/typedVsText'
@@ -38,8 +45,10 @@ import { getSceneRead } from './sceneReadStore'
 
 /**
  * The manuscript's reading order for story memory: the readable scenes (not Idea, not left out
- * of compile) in reading order, and every scene's reference ("14.2", chapters counted across
- * parts as compile counts them).
+ * of compile) in reading order, where every manuscript scene reads "as of", and each scene's
+ * reference. Chapters are counted as compile counts them (a chapter left out of compile is not
+ * counted) and scenes are numbered among the readable scenes of their chapter, so "since 12.1"
+ * names the compiled book's 12.1; an Idea scene or one left out of compile is named by its title.
  */
 export function readingOrder(db: TreeDb, all: NodeRow[] = listNodes(db)): ReadingOrder {
   const docs = manuscriptDocuments(db, all)
@@ -61,22 +70,64 @@ export function readingOrder(db: TreeDb, all: NodeRow[] = listNodes(db)): Readin
     }
     return false
   }
+  const statuses = sceneStatuses(db, all)
+  const readableDoc = (row: NodeRow): boolean =>
+    !statuses.idea.has(row.id) && !statuses.excluded.has(row.id)
   const chapters = nodesInTreeOrder(all)
-    .filter((row) => row.hierarchyLevel === 'chapter' && inBook(row))
+    .filter(
+      (row) => row.hierarchyLevel === 'chapter' && inBook(row) && !statuses.excluded.has(row.id)
+    )
     .map((row) => row.id)
+  const readable = docs.filter(readableDoc)
   const refs = sceneRefs({
     chapters,
-    scenes: docs.map((row) => ({
+    scenes: readable.map((row) => ({
       id: row.id,
       title: searchableText(row.title),
       chapterId: chapterOf(row)
     }))
   })
-  const statuses = sceneStatuses(db, all)
-  const readable = docs.filter(
-    (row) => !statuses.idea.has(row.id) && !statuses.excluded.has(row.id)
-  )
-  return { order: new Map(readable.map((row, i) => [row.id, i])), refs }
+  const order = new Map(readable.map((row, i) => [row.id, i]))
+  const at = new Map<string, number>()
+  let last = -1
+  for (const row of docs) {
+    const own = order.get(row.id)
+    if (own !== undefined) last = own
+    at.set(row.id, own ?? last)
+    if (own === undefined) refs.set(row.id, searchableText(row.title).trim() || 'Untitled scene')
+  }
+  return { order, at, refs }
+}
+
+/**
+ * Claims as the as-of rules read them, each with where its quote starts in its paragraph when
+ * another claim shares the paragraph (so the text's order holds inside it); the scenes' texts are
+ * read only for those.
+ */
+function asOfClaims(db: TreeDb, claims: readonly Claim[]): AsOfClaim[] {
+  const counts = new Map<string, number>()
+  for (const each of claims) {
+    const key = `${each.nodeId}|${each.para}`
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  const shared = claims.filter((each) => (counts.get(`${each.nodeId}|${each.para}`) ?? 0) > 1)
+  const texts = new Map<string, string[]>()
+  if (shared.length > 0) {
+    const wanted = new Set(shared.map((each) => each.nodeId))
+    for (const row of manuscriptDocuments(db)) {
+      if (!wanted.has(row.id)) continue
+      texts.set(
+        row.id,
+        passageParagraphs(documentJson(row) ?? EMPTY_DOC).map((paragraph) => paragraph.text)
+      )
+    }
+  }
+  return claims.map((each) => {
+    const paragraph = texts.get(each.nodeId)?.[each.para]
+    const pos =
+      paragraph === undefined ? null : (locateInText(paragraph, each.quote)?.start ?? null)
+    return { ...each, pos }
+  })
 }
 
 const refOf = (reading: ReadingOrder, nodeId: string): string => reading.refs.get(nodeId) ?? ''
@@ -141,7 +192,9 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
       here.push(chip)
     }
   }
-  const textPov = card?.fields.pov?.verified === true ? card.fields.pov : null
+  // A verified POV whose record is gone (deleted since) is no POV: the typed one stands.
+  const cardPov = card?.fields.pov ?? null
+  const textPov = cardPov?.verified === true && records.has(cardPov.value) ? cardPov : null
   const typedPov = details.povRecordId
   if (textPov !== null) {
     add({
@@ -180,7 +233,10 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
   const shown = new Set([...here.map((each) => each.recordId), ...counts.keys()])
   const claims = draftId === null ? [] : draftClaims(db, draftId)
   const lines = trueNow(
-    claims.filter((each) => each.recordId !== null && shown.has(each.recordId)),
+    asOfClaims(
+      db,
+      claims.filter((each) => each.recordId !== null && shown.has(each.recordId))
+    ),
     reading,
     nodeId
   ).map((line) => ({ ...line, label: slotLabel(line.slot) }))
@@ -221,14 +277,15 @@ export function sheetMemory(db: TreeDb, recordId: string, asOf: string | null): 
   const draftId = currentDraftId(db)
   const reading = readingOrder(db)
   const sheet = sheetAsOf(
-    draftId === null ? [] : recordClaims(db, recordId, draftId),
+    draftId === null ? [] : asOfClaims(db, recordClaims(db, recordId, draftId)),
     reading,
     asOf
   )
   return {
     recordId,
     asOf,
-    asOfRef: asOf === null ? null : (reading.refs.get(asOf) ?? null),
+    // A node that is not a manuscript scene has no place in the book: no reference.
+    asOfRef: asOf === null || !reading.at.has(asOf) ? null : (reading.refs.get(asOf) ?? null),
     fixed: sheet.fixed.map(sheetLine),
     lasting: sheet.lasting.map(sheetLine),
     transient: sheet.transient.map(sheetLine),

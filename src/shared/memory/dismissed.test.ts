@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sceneSentences } from './anchor'
-import { anchorKey, dismissedKey } from './dismissed'
+import { dismissedKey, statingKey } from './dismissed'
 
 describe('dismissedKey (F-16.10)', () => {
   it('keys a name and an alias by their norm', () => {
@@ -24,18 +23,15 @@ describe('dismissedKey (F-16.10)', () => {
     expect(dismissedKey({ kind: 'notProblem', ref: 'x:1' })).toBe('x:1')
   })
 
-  it('keys a Not right line by record, slot, value key and the sentences it rested on (F-16.18)', () => {
-    const [a, b] = sceneSentences(["Mara's eyes were grey.", 'Her eyes were grey again.']).map(
-      (sentence) => sentence.hash
-    )
+  it('keys a Not right line by record, slot, value key and the quote’s own sentences (F-16.18)', () => {
     const key = dismissedKey({
       kind: 'notRight',
       recordId: 'mara',
       slot: 'eyes',
       value: ' The Grey ',
-      anchor: [a ?? '']
+      stating: ["⟨mara⟩'s eyes were grey."]
     })
-    expect(key).toBe(`mara|eyes|grey|${anchorKey([a ?? ''])}`)
+    expect(key).toBe(`mara|eyes|grey|${statingKey(["⟨mara⟩'s eyes were grey."])}`)
     // The same value stated by a new sentence is new evidence: another key.
     expect(
       dismissedKey({
@@ -43,10 +39,14 @@ describe('dismissedKey (F-16.10)', () => {
         recordId: 'mara',
         slot: 'eyes',
         value: 'grey',
-        anchor: [b ?? '']
+        stating: ['her eyes were grey again.']
       })
     ).not.toBe(key)
-    expect(anchorKey(['x', 'y'])).not.toBe(anchorKey(['y', 'x']))
+    // A rename or a merge moves the record tokens in the gate text, never the key.
+    expect(statingKey(["⟨mara⟩'s eyes were grey."])).toBe(
+      statingKey(["⟨kept|mara⟩'s eyes were grey."])
+    )
+    expect(statingKey(['a.', 'b.'])).not.toBe(statingKey(['b.', 'a.']))
   })
 
   it('keys a kept typed detail by scene, field and the text’s value (decision 4)', () => {

@@ -894,7 +894,13 @@ export function registerHandlers({
           const counter = memoryInvariantCounter(kind)
           if (counter !== null) diagnostics.count(counter)
         }
-        const changed = result.staled.length + result.reproved.length + result.attached.length > 0
+        const changed =
+          result.staled.length +
+            result.reproved.length +
+            result.restored.length +
+            result.attached.length +
+            result.parked.length >
+          0
         return Promise.resolve({ requested: false, value: { changed, scanned: changed } })
       }
       if (job.kind === 'names') {
@@ -944,6 +950,9 @@ export function registerHandlers({
     const stale = stalePassageOwners(db)
     const scenes = [...new Set(stale.filter((o) => o.kind !== 'record').map((o) => o.id))]
     mentionQueue.indexAll('passages', scenes)
+    // F-16.17: a scene whose passages read differently now (an Idea status or compile inclusion
+    // changed) has its claims parked or brought back by the anchors job.
+    mentionQueue.indexAll('anchors', scenes)
     const root = manuscriptRootId(db)
     if (root !== null && stale.some((owner) => owner.kind === 'record')) {
       mentionQueue.indexAll('passages', [root])

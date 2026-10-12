@@ -45,6 +45,41 @@ describe('compareTyped (decision 4, F-16.18)', () => {
     )
   })
 
+  it('counts a place or time from the text only when its value is words of its quote (or verified)', () => {
+    const typed = details({
+      place: { recordId: null, text: 'the harbour' },
+      time: { text: 'dawn' }
+    })
+    // The reader paraphrased: the quote says "down by the boats", the value says "the quay".
+    const paraphrase = card({
+      where: { value: 'the quay', quote: 'She went down by the boats', p: 0, verified: false },
+      when: { value: 'evening', quote: 'as the light went', p: 0, verified: false }
+    })
+    const compared = compareTyped(typed, paraphrase, NAMES)
+    expect(compared.place).toMatchObject({ outcome: 'typedOnly', text: null })
+    expect(compared.time).toMatchObject({ outcome: 'typedOnly', text: null })
+    expect(effectiveSceneLine(compared)).toMatchObject({
+      place: 'the harbour',
+      time: 'dawn',
+      fromText: []
+    })
+    // Verified by the second read, it counts even in other words.
+    const verified = card({
+      where: { value: 'the quay', quote: 'She went down by the boats', p: 0, verified: true }
+    })
+    expect(compareTyped(typed, verified, NAMES).place.outcome).toBe('differs')
+  })
+
+  it('reads a POV whose record is gone as no POV, so the typed one stands', () => {
+    const compared = compareTyped(
+      details({ povRecordId: 'tomas' }),
+      card({ pov: field('gone') }),
+      NAMES
+    )
+    expect(compared.pov).toMatchObject({ outcome: 'typedOnly', typed: 'Tomas', text: null })
+    expect(effectiveSceneLine(compared).pov).toBe('Tomas')
+  })
+
   it('compares the place by the record’s names or the typed text, articles and case folded', () => {
     const typedQuay = details({ place: { recordId: 'quay', text: '' } })
     expect(

@@ -1,12 +1,12 @@
 import { straightenQuotes } from '../critique'
 import type { Paragraph } from '../mentions'
-import { valueKey, type ClaimMode, type ClaimVoice } from './claims'
-import { findMarkers, scopeBackMarkers, type MarkerKind } from './markers'
+import type { ClaimMode, ClaimVoice } from './claims'
+import { findMarkers, type MarkerKind } from './markers'
 import type { NameMention } from './nameScan'
 import { locateInText } from './quote'
 import type { RecordKind } from './records'
 import type { SentenceSpan } from './sentences'
-import type { Slot } from './slots'
+import { OBJECT_SLOTS, type Slot } from './slots'
 
 /**
  * Literal proof in code (F-16.17; design §2.3, the verification ladder's step 3): a claim the
@@ -16,14 +16,22 @@ import type { Slot } from './slots'
  * was dead", "<Name> wore <value>", "<Name> carried <value>", "<Name> was at <value>" …), and:
  * - the claim is narration in `now` mode (code cannot prove a voice or a mode);
  * - its sentence names exactly one character, the subject, and no name in it is ambiguous;
- * - the quote sits outside quotation marks;
- * - no marker (`markers.ts`) sits before the quote or in the rest of its clause, and no marker
- *   that reaches back over a sentence (if, dream, rumour, or so …) sits in the clauses after it;
+ * - a claim that names a second record (kinship with an object) is not proved here: the second
+ *   person is never named in the sentence, so code cannot check it;
+ * - the quote sits outside quotation marks, read over its whole paragraph (a speech opened in an
+ *   earlier sentence, or carried over from the paragraph before, still holds it);
+ * - no marker (`markers.ts`: negation, modal, conditional, comparative, simile, pluperfect,
+ *   reported, a question mark) sits anywhere in its sentence (design §2.3 step 3);
+ * - the words between a possessive and its cue are modifiers only ("Mara's cold grey eyes", never
+ *   "Mara's brother had blue eyes" or "Mara's mother's grey eyes");
+ * - an age or a death ends its clause ("Mara was ten minutes late" and "dead tired" are no age and
+ *   no death);
  * - the claim's value is words of the quote, in order: the displayed value is cut to them.
  *
- * Beyond the plan's slots, `traits` ("<Name> was <value>") and `kinship` ("<Name> was the son of
- * …") have patterns, because the test book's labels expect those claims proved in code (decided
- * by Claude, unconfirmed). A miss is never a rejection: the claim goes to the verifier.
+ * Beyond the plan's slots, `kinship` ("<Name> was the son of …") has a pattern, because the test
+ * book's labels expect it proved in code (decided by Claude, unconfirmed). Traits have no cue
+ * word, so code cannot tell the slot is right: they go to the verifier. A miss is never a
+ * rejection: the claim goes to the verifier.
  */
 
 /** A name the name scan found in the sentence, by offsets into the sentence's own text. */
@@ -39,13 +47,34 @@ export interface LiteralClaim {
   recordId: string
   slot: Slot
   value: string
+  /** The second record of a kinship or relation claim (`OBJECT_SLOTS`), or null. */
+  objectId: string | null
   voice: ClaimVoice
   mode: ClaimMode
   quote: string
 }
 
+/**
+ * The quote's sentence where it sits: the scene's paragraph texts, its paragraph, and its span
+ * in that paragraph (`splitSentences`). The paragraphs are read for quotation marks only.
+ */
+export interface LiteralSentence {
+  paragraphs: readonly string[]
+  p: number
+  span: SentenceSpan
+}
+
 export type LiteralMiss =
-  'voiceMode' | 'slot' | 'quote' | 'quoted' | 'names' | 'subject' | 'pattern' | 'value' | 'marker'
+  | 'voiceMode'
+  | 'slot'
+  | 'object'
+  | 'quote'
+  | 'quoted'
+  | 'names'
+  | 'subject'
+  | 'pattern'
+  | 'value'
+  | 'marker'
 
 export type LiteralResult =
   { ok: true; value: string } | { ok: false; reason: LiteralMiss; marker?: MarkerKind }
@@ -55,7 +84,7 @@ const N = '(?:the\\s+)?§+'
 /** The subject with a possessive. */
 const P = `${N}(?:'s|')`
 const BE = '(?:was|is|were|are)'
-/** Up to four words before a cue ("a cold, clear"). */
+/** Up to four words before a cue ("a cold, clear"); `modifiersOnly` then checks them. */
 const WORDS = "[\\p{L}'-]+(?:,?\\s+[\\p{L}'-]+){0,3}"
 const END = '(?![\\p{L}\\p{N}])'
 const NUMBER_WORDS =
@@ -63,24 +92,148 @@ const NUMBER_WORDS =
   'sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred'
 /** An age: digits or number words, joined as "seven-and-twenty", "twenty-one" or "a hundred". */
 const AGE = `(?:a\\s+)?(?:\\d{1,3}|${NUMBER_WORDS})(?:[- ](?:and[- ])?(?:${NUMBER_WORDS}))*`
-const KIN =
-  'son|daughter|brother|sister|father|mother|wife|husband|widow|widower|cousin|aunt|uncle|' +
-  'niece|nephew|grandson|granddaughter|grandfather|grandmother|heir|heiress|twin|child|stepson|' +
-  'stepdaughter|stepmother|stepfather|half-brother|half-sister'
+const KIN_WORDS = [
+  'son',
+  'daughter',
+  'brother',
+  'sister',
+  'father',
+  'mother',
+  'wife',
+  'husband',
+  'widow',
+  'widower',
+  'cousin',
+  'aunt',
+  'uncle',
+  'niece',
+  'nephew',
+  'grandson',
+  'granddaughter',
+  'grandfather',
+  'grandmother',
+  'heir',
+  'heiress',
+  'twin',
+  'child',
+  'stepson',
+  'stepdaughter',
+  'stepmother',
+  'stepfather',
+  'half-brother',
+  'half-sister'
+]
+const KIN = KIN_WORDS.join('|')
 
-/** One pattern: the regex over the masked quote, and, for `alive`, the value it proves. */
+/**
+ * Words that may not stand between a possessive (or "had") and its cue: verbs, which make the
+ * sentence about someone or something else ("Mara's brother had blue eyes", "Mara had seen blue
+ * eyes"), kin, and "of".
+ */
+const NOT_MODIFIERS = new Set([
+  ...KIN_WORDS,
+  'of',
+  'had',
+  'has',
+  'have',
+  'having',
+  'was',
+  'were',
+  'is',
+  'are',
+  'be',
+  'been',
+  'being',
+  'wore',
+  'wears',
+  'bore',
+  'bears',
+  'did',
+  'does',
+  'do',
+  'got',
+  'gets',
+  'kept',
+  'keeps',
+  'showed',
+  'shows',
+  'saw',
+  'sees',
+  'seen',
+  'met',
+  'meets',
+  'watched',
+  'watches',
+  'noticed',
+  'notices',
+  'loved',
+  'loves',
+  'admired',
+  'admires',
+  'envied',
+  'envies',
+  'liked',
+  'likes',
+  'hated',
+  'hates',
+  'inherited',
+  'shared',
+  'shares',
+  'gave',
+  'gives',
+  'took',
+  'takes',
+  'made',
+  'makes',
+  'found',
+  'finds',
+  'felt',
+  'feels',
+  'knew',
+  'knows',
+  'known',
+  'turned',
+  'turns',
+  'closed',
+  'closes',
+  'opened',
+  'opens',
+  'narrowed',
+  'narrows'
+])
+
+/** Whether the words captured before a cue are modifiers only: no verb, kin, "of" or possessive. */
+function modifiersOnly(captured: string): boolean {
+  return captured
+    .split(/[\s,]+/u)
+    .filter((word) => word !== '')
+    .every((word) => {
+      const lower = word.toLowerCase()
+      return !NOT_MODIFIERS.has(lower) && !/(?:'s|s'|')$/u.test(lower)
+    })
+}
+
+/** What may follow an age in its sentence: the clause's end, or a word of time ("that spring"). */
+const AGE_TAIL =
+  /^(?:\s*(?:$|[,;:.!?)—–]|\s-\s)|\s+(?:that|this|last|next|now|then|when|by|before|since)(?![\p{L}\p{N}]))/u
+/** What may follow a death or "alive" in its sentence: the clause's end only ("dead tired" is no death). */
+const CLAUSE_END_TAIL = /^\s*(?:$|[,;:.!?)—–]|\s-\s)/u
+
+/** One pattern: the regex over the masked quote, and what it needs around it. */
 interface LiteralPattern {
   pattern: RegExp
-  /** The slot value the pattern proves when it is not the words it captured ("died" → dead). */
-  fixed?: string
+  /** The words captured before a cue must be modifiers only (`modifiersOnly`). */
+  modifiers?: boolean
+  /** What the rest of the sentence after the match must start with. */
+  tail?: RegExp
 }
 
 const rx = (source: string): RegExp => new RegExp(source, 'iud')
 
 const cuePatterns = (cue: string): LiteralPattern[] => [
-  { pattern: rx(`${P}\\s+(?<v>${WORDS})\\s+${cue}${END}`) },
+  { pattern: rx(`${P}\\s+(?<v>${WORDS})\\s+${cue}${END}`), modifiers: true },
   { pattern: rx(`${P}\\s+${cue}\\s+${BE}\\s+(?<v>.+)$`) },
-  { pattern: rx(`${N}\\s+(?<verb>had|has)\\s+(?<v>${WORDS})\\s+${cue}${END}`) }
+  { pattern: rx(`${N}\\s+(?<verb>had|has)\\s+(?<v>${WORDS})\\s+${cue}${END}`), modifiers: true }
 ]
 
 export const LITERAL_PATTERNS: Readonly<Partial<Record<Slot, readonly LiteralPattern[]>>> = {
@@ -96,13 +249,11 @@ export const LITERAL_PATTERNS: Readonly<Partial<Record<Slot, readonly LiteralPat
     {
       pattern: rx(
         `${N}\\s+(?:was|is|turned)\\s+(?<v>${AGE})(?:\\s+years?\\s+(?:old|of\\s+age))?(?![\\p{L}\\p{N}-])`
-      )
+      ),
+      tail: AGE_TAIL
     }
   ],
-  alive: [
-    { pattern: rx(`${N}\\s+(?:was|lay)\\s+(?<v>dead|alive)${END}`) },
-    { pattern: rx(`${N}\\s+(?<v>died)${END}`), fixed: 'dead' }
-  ],
+  alive: [{ pattern: rx(`${N}\\s+(?:was|lay)\\s+(?<v>dead|alive)${END}`), tail: CLAUSE_END_TAIL }],
   location: [
     {
       pattern: rx(
@@ -127,17 +278,6 @@ export const LITERAL_PATTERNS: Readonly<Partial<Record<Slot, readonly LiteralPat
         `${N}\\s+(?:was|is)\\s+(?<v>(?:(?:the|a|an|his|her|their)\\s+)?(?:${KIN})${END}.*)$`
       )
     }
-  ],
-  traits: [
-    {
-      pattern: rx(
-        `${N}\\s+(?:was|is)\\s+(?<v>` +
-          '(?!(?:at|in|on|by|with|inside|near|dead|alive|born|wearing|carrying|holding|dressed)(?![\\p{L}]))' +
-          `(?!${AGE}(?![\\p{L}\\p{N}-]))` +
-          `(?!(?:(?:the|a|an|his|her|their)\\s+)?(?:${KIN})${END})` +
-          '.+)$'
-      )
-    }
   ]
 }
 
@@ -146,31 +286,66 @@ export function hasLiteralPatterns(slot: Slot): boolean {
   return LITERAL_PATTERNS[slot] !== undefined
 }
 
-/**
- * Whether the quote sits inside quotation marks: an odd number of double quotes before it, a
- * double quote inside it, or any single quote that opens a quotation in the sentence (British
- * style; an apostrophe after a letter never does).
- */
-function quoted(text: string, at: { start: number; end: number }): boolean {
-  const before = (text.slice(0, at.start).match(/"/g) ?? []).length
-  if (before % 2 === 1) return true
-  if (text.slice(at.start, at.end).includes('"')) return true
-  return /(?:^|[\s([—–-])'(?=\p{L})/u.test(text)
+const WORD_CHAR = /[\p{L}\p{N}]/u
+/** What may stand before a straight single quote that opens a quotation. */
+const OPENS_SINGLE = /^(?:|[\s([{—–"“-])$/u
+
+interface QuoteState {
+  double: boolean
+  single: boolean
 }
 
-const CONJUNCTIONS =
-  'and|but|or|nor|yet|so|for|though|although|while|whereas|because|since|unless|until|when|' +
-  'where|which|who|whom|whose|after|before'
-const CLAUSE_BREAK = new RegExp(
-  `[;:()\\u2014\\u2013]|\\s-\\s|,\\s*(?:${CONJUNCTIONS})(?![\\p{L}\\p{N}])`,
-  'gu'
-)
+const CLOSED: QuoteState = { double: false, single: false }
 
-/** Where the clause that holds `from` ends: the next ; : ( ) dash, or a comma before a conjunction. */
-function clauseEnd(text: string, from: number): number {
-  CLAUSE_BREAK.lastIndex = from
-  const found = CLAUSE_BREAK.exec(text)
-  return found === null ? text.length : found.index
+/**
+ * The quotation state after the first `until` characters of `text`, from `from` (a quotation
+ * carried over from the paragraph before). Curly marks say which way they face; a straight
+ * double quote toggles; a straight or right single quote between two letters is an apostrophe.
+ * A carried quotation's paragraph opens with its marks again: they re-open it, never close it.
+ */
+function scanQuotes(text: string, from: QuoteState, until = text.length): QuoteState {
+  let { double, single } = from
+  let i = 0
+  while (i < until && /\s/u.test(text[i] ?? '')) i += 1
+  if (double && (text[i] === '"' || text[i] === '“')) i += 1
+  else if (single && (text[i] === "'" || text[i] === '‘')) i += 1
+  for (; i < until; i += 1) {
+    const ch = text[i]
+    if (ch === '“') double = true
+    else if (ch === '”') double = false
+    else if (ch === '"') double = !double
+    else if (ch === '‘') single = true
+    else if (ch === "'" || ch === '’') {
+      const before = text[i - 1] ?? ''
+      const after = text[i + 1] ?? ''
+      const wordAfter = WORD_CHAR.test(after)
+      if (WORD_CHAR.test(before) && wordAfter) continue
+      if (ch === "'" && wordAfter && OPENS_SINGLE.test(before)) single = true
+      else if (single && !wordAfter) single = false
+    }
+  }
+  return { double, single }
+}
+
+/**
+ * Whether offset `at` of paragraph `p` lies inside a quotation: one opened before it in the
+ * paragraph, or one the paragraph before opened and did not close (a speech running on).
+ */
+export function insideQuotation(paragraphs: readonly string[], p: number, at: number): boolean {
+  const carried = p > 0 ? scanQuotes(paragraphs[p - 1] ?? '', CLOSED) : CLOSED
+  const state = scanQuotes(paragraphs[p] ?? '', carried, at)
+  return state.double || state.single
+}
+
+/**
+ * Whether the quote sits inside quotation marks: inside a quotation open at its start (read over
+ * the paragraph), a double quote inside it, or any single quote that opens a quotation in its
+ * sentence (British style; an apostrophe after a letter never does).
+ */
+function quoted(where: LiteralSentence, text: string, at: { start: number; end: number }): boolean {
+  if (insideQuotation(where.paragraphs, where.p, where.span.start + at.start)) return true
+  if (text.slice(at.start, at.end).includes('"')) return true
+  return /(?:^|[\s([—–-])'(?=\p{L})/u.test(text)
 }
 
 /** The words of a value, with offsets: letters and digits, joined by inner hyphens and apostrophes. */
@@ -186,9 +361,9 @@ function words(text: string): { word: string; start: number; end: number }[] {
  * The claim's value as words of `captured`, in order and side by side, cut from it as written;
  * null when the value has words the capture does not.
  */
-function cutValue(value: string, captured: string): string | null {
+export function cutValue(value: string, captured: string): string | null {
   const want = words(straightenQuotes(value)).map((entry) => entry.word)
-  const have = words(captured)
+  const have = words(straightenQuotes(captured))
   if (want.length === 0) return null
   for (let i = 0; i + want.length <= have.length; i += 1) {
     if (want.every((word, j) => have[i + j]?.word === word)) {
@@ -205,22 +380,23 @@ const miss = (reason: LiteralMiss, marker?: MarkerKind): LiteralResult =>
   marker === undefined ? { ok: false, reason } : { ok: false, reason, marker }
 
 /**
- * Proves `claim` in code from `sentence` (the sentence its quote is in, as `splitSentences` gives
- * it) and the names the scan found there (`names`, offsets into `sentence`). Answers the value
- * to display, cut to the quote's words, or why it could not prove it.
+ * Proves `claim` in code from its sentence (`where`) and the names the scan found there
+ * (`names`, offsets into the sentence). Answers the value to display, cut to the quote's words,
+ * or why it could not prove it.
  */
 export function literalProof(
   claim: LiteralClaim,
-  sentence: string,
+  where: LiteralSentence,
   names: readonly LiteralName[]
 ): LiteralResult {
   if (claim.voice !== 'narration' || claim.mode !== 'now') return miss('voiceMode')
   const patterns = LITERAL_PATTERNS[claim.slot]
   if (patterns === undefined) return miss('slot')
-  const text = straightenQuotes(sentence)
+  if (claim.objectId !== null && OBJECT_SLOTS.includes(claim.slot)) return miss('object')
+  const text = straightenQuotes(where.span.text)
   const at = locateInText(text, claim.quote)
   if (at === null) return miss('quote')
-  if (quoted(text, at)) return miss('quoted')
+  if (quoted(where, text, at)) return miss('quoted')
 
   if (names.some((name) => name.ambiguous)) return miss('names')
   if (names.some((name) => name.recordId !== claim.recordId && name.kind === 'character')) {
@@ -243,14 +419,18 @@ export function literalProof(
 
   let proved: { value: string; ignore: [number, number][] } | null = null
   let valueMiss = false
-  for (const { pattern, fixed } of patterns) {
+  for (const { pattern, modifiers, tail } of patterns) {
     const match = pattern.exec(region)
     const captured = match?.groups?.v
     const span = match?.indices?.groups?.v
     if (match === null || captured === undefined || span === undefined) continue
+    if (modifiers === true && !modifiersOnly(captured)) continue
+    if (tail !== undefined && !tail.test(masked.slice(at.start + match.index + match[0].length))) {
+      continue
+    }
     const original = text.slice(at.start + span[0], at.start + span[1]).replace(/[\s,;:.!?]+$/u, '')
-    const value = fixed ?? cutValue(claim.value, original)
-    if (value === null || (fixed !== undefined && valueKey(claim.value) !== fixed)) {
+    const value = cutValue(claim.value, original)
+    if (value === null) {
       valueMiss = true
       continue
     }
@@ -262,13 +442,9 @@ export function literalProof(
   }
   if (proved === null) return miss(valueMiss ? 'value' : 'pattern')
 
-  // Markers: everything before the quote and the rest of its clause; after that clause, only the
-  // markers that reach back over the whole sentence.
-  const end = clauseEnd(masked, at.end)
-  const own = findMarkers(masked.slice(0, end), { ignore: proved.ignore })[0]
-  if (own !== undefined) return miss('marker', own.kind)
-  const after = scopeBackMarkers(masked.slice(end))[0]
-  if (after !== undefined) return miss('marker', after.kind)
+  // Markers: anywhere in the sentence (design §2.3 step 3), the pattern's own "had" aside.
+  const marker = findMarkers(masked, { ignore: proved.ignore })[0]
+  if (marker !== undefined) return miss('marker', marker.kind)
   return { ok: true, value: proved.value }
 }
 

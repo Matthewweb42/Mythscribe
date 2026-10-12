@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  NAMING_MARK,
   SENTENCE_HASH_LENGTH,
+  anchorInPlace,
   anchorFor,
   anchorHolds,
   sceneSentences,
@@ -60,12 +62,32 @@ describe('anchorFor and anchorHolds (F-16.3)', () => {
     const located = locateQuote(SCENE, 2, 'She did not look back')
     if (!located.ok) throw new Error('quote not located')
     const anchor = anchorFor(sentences, located, 0)
+    // The ±1 run, then the naming sentence apart, marked.
     expect(anchor).toEqual([
-      sentences[0]?.hash,
       sentences[3]?.hash,
       sentences[4]?.hash,
-      sentences[5]?.hash
+      sentences[5]?.hash,
+      `${NAMING_MARK}${sentences[0]?.hash ?? ''}`
     ])
+    expect(anchorHolds(anchor, hashes(SCENE))).toBe(true)
+    // A naming sentence inside the run adds nothing.
+    expect(anchorFor(sentences, located, 4)).toEqual(anchorFor(sentences, located))
+  })
+
+  it('holds in place only while the run stands side by side, its naming sentence before it', () => {
+    const located = locateQuote(SCENE, 2, 'She did not look back')
+    if (!located.ok) throw new Error('quote not located')
+    const anchor = anchorFor(sentences, located, 0)
+    const order = sentences.map((sentence) => sentence.hash)
+    expect(anchorInPlace(anchor, order)).toBe(true)
+    // A sentence put between the quote and its neighbour breaks the run.
+    const wedged = [...order.slice(0, 5), 'inserted', ...order.slice(5)]
+    expect(anchorInPlace(anchor, wedged)).toBe(false)
+    expect(anchorHolds(anchor, new Set(wedged))).toBe(true)
+    // The naming sentence moved after the quote no longer names it.
+    const after = [...order.slice(1), order[0] ?? '']
+    expect(anchorInPlace(anchor, after)).toBe(false)
+    expect(anchorInPlace([], order)).toBe(false)
   })
 
   it('breaks only the anchors that cover an edited sentence', () => {

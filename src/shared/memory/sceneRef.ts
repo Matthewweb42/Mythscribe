@@ -1,10 +1,11 @@
 /**
  * Scene references (F-16.18): "14.2" for the second scene of the fourteenth chapter, so the panel
  * and sheets can say "since 12.1" and "last stated in 13.4". Chapters are counted across parts as
- * compile counts them (every chapter-level node, in reading order, whether or not it holds
- * scenes). A chapter that is itself a document reads as its number ("14"). A scene outside any
- * chapter takes its title, or "Scene N" (its position in reading order) when it has none. Pure:
- * main feeds the manuscript's chapters and scenes in reading order.
+ * compile counts them (every chapter-level node it compiles, in reading order, whether or not it
+ * holds scenes). A chapter that is itself a document reads as its number ("14"). A scene outside
+ * any chapter takes its title, or "Scene N" (its position in reading order) when it has none.
+ * Pure: main feeds the compiled chapters and the readable scenes in reading order (`readingOrder`
+ * names an Idea scene or one left out of compile by its title).
  */
 
 export interface SceneRefRow {
@@ -15,9 +16,9 @@ export interface SceneRefRow {
 }
 
 export interface SceneRefInput {
-  /** Every chapter-level node of the manuscript, in reading order. */
+  /** Every chapter-level node compile counts, in reading order. */
   chapters: readonly string[]
-  /** Every manuscript document, in reading order. */
+  /** The scenes to number, in reading order. */
   scenes: readonly SceneRefRow[]
 }
 

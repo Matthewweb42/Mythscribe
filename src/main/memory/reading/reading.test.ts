@@ -12,11 +12,12 @@ import { saveDocument } from '../../document/documentStore'
 import { activeDraftId, duplicateDraft, switchDraft } from '../../draft/draftStore'
 import { setSceneMeta } from '../../document/sceneMetaStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
-import { createNode, deleteNode, getNode, type TreeDb } from '../../tree/treeStore'
+import { ensureResearchRoot } from '../../project/seed'
+import { createNode, deleteNode, getNode, moveNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
 import { nameScanShared, scanNamesFor } from '../nameIndexer'
 import { indexScene, searchMemoryPassages, stalePassageOwners } from '../passageIndexer'
-import { createRecord } from '../recordStore'
+import { createRecord, deleteRecord } from '../recordStore'
 import { setSceneDetails } from '../sceneDetailStore'
 import { runAnchors } from './anchors'
 import { getCard, upsertCard } from './cardStore'
@@ -253,7 +254,8 @@ describe('the card store (F-16.18)', () => {
     present: [{ recordId: mara, quote: 'Mara wore a blue coat', p: 2, verified: true }],
     mood: 'tense',
     theme: null,
-    anchor: []
+    anchor: [],
+    seen: []
   })
 
   it('upserts one card per scene and draft and indexes the active one as a map', () => {
@@ -268,6 +270,21 @@ describe('the card store (F-16.18)', () => {
     expect(hits.map((hit) => [hit.source, hit.ownerId, hit.canon, hit.label])).toEqual([
       ['card', one, 'notCanon', 'card']
     ])
+  })
+
+  it('stores a card for a node outside the manuscript without indexing it (no throw)', () => {
+    const research = ensureResearchRoot(db, NOW)
+    const page = createNode(db, 'novel', {
+      parentId: research,
+      kind: 'document',
+      hierarchyLevel: null,
+      title: 'Notes'
+    }).id
+    expect(() => upsertCard(db, { ...card(activeDraftId(db)), nodeId: page }, NOW)).not.toThrow()
+    expect(getCard(db, page, activeDraftId(db))?.line).toBe(
+      'Mara waits by the Quay in a blue coat.'
+    )
+    expect(searchMemoryPassages(db, 'blue coat', { sources: ['card'] })).toEqual([])
   })
 
   it('keeps another draft’s card apart, unindexed until it is the active draft', () => {
@@ -444,19 +461,118 @@ describe('the anchors job (F-16.17, P2a-D19, P2a-D22)', () => {
     expect(getClaim(db, id ?? '')).toMatchObject({ recordId: mara, state: 'live', pending: null })
   })
 
-  it('demotes a live claim that breaks an invariant and reports its kind', () => {
+  it('parks the claims of a scene marked as an Idea, uncounted, and brings them back after', () => {
     const [id] = seedClaims(
       db,
       one,
       [{ recordId: mara, slot: 'eyes', value: 'grey', quote: "Mara's eyes were grey", para: 1 }],
       NOW
     )
-    // A claim of a scene the author then marks as an Idea is never real (design §2.2).
+    // A claim of a scene the author then marks as an Idea is never real (design §2.2), but that
+    // is her doing, not a fault: it is parked, not counted as a broken invariant.
     setSceneMeta(db, one, { ...parseStoredSceneMeta(null), status: 'idea' })
-    const result = runAnchors(db, one, LATER)
-    expect(result.violations).toEqual(['unreadableSource'])
+    const parked = runAnchors(db, one, LATER)
+    expect(parked).toMatchObject({ parked: [id], violations: [] })
     expect(getClaim(db, id ?? '')?.state).toBe('stale')
-    expect(invariants().filter((each) => each.kind !== 'unreadableSource')).toEqual([])
+    setSceneMeta(db, one, parseStoredSceneMeta(null))
+    expect(runAnchors(db, one, LATER)).toMatchObject({ restored: [id], violations: [] })
+    expect(getClaim(db, id ?? '')?.state).toBe('live')
+    expect(invariants()).toEqual([])
+  })
+
+  it('follows a quote when paragraphs come above it, the card’s too, and keeps it live', () => {
+    const [id] = seedClaims(
+      db,
+      one,
+      [
+        {
+          recordId: mara,
+          slot: 'eyes',
+          value: 'grey',
+          quote: "Mara's eyes were grey",
+          para: 1,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    upsertCard(
+      db,
+      {
+        nodeId: one,
+        draftId: activeDraftId(db),
+        readingId: null,
+        line: 'Mara waits.',
+        gist: 'A gist.',
+        fields: {
+          ...emptyCardFields(),
+          where: { value: 'the Quay', quote: 'She waited by the Quay', p: 1, verified: false }
+        },
+        present: [{ recordId: mara, quote: 'Mara wore a blue coat', p: 2, verified: true }],
+        mood: null,
+        theme: null,
+        anchor: [],
+        seen: []
+      },
+      NOW
+    )
+    saveDocument(db, one, doc('A new opening.', 'And a second.', ...SCENE_ONE))
+    const result = runAnchors(db, one, LATER)
+    expect(result.staled).toEqual([])
+    expect(getClaim(db, id ?? '')).toMatchObject({ state: 'live', para: 3 })
+    const card = getCard(db, one, activeDraftId(db))
+    expect(card?.fields.where?.p).toBe(3)
+    expect(card?.present[0]?.p).toBe(4)
+    expect(invariants()).toEqual([])
+  })
+
+  it('restores a stale claim for free when the edit is undone', () => {
+    const [id] = seedClaims(
+      db,
+      one,
+      [
+        {
+          recordId: mara,
+          slot: 'eyes',
+          value: 'grey',
+          quote: "Mara's eyes were grey",
+          para: 1,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    saveDocument(db, one, doc('The ridge was warm.', ...SCENE_ONE.slice(1)))
+    expect(runAnchors(db, one, LATER).staled).toEqual([id])
+    saveDocument(db, one, doc(...SCENE_ONE))
+    expect(runAnchors(db, one, LATER).restored).toEqual([id])
+    expect(getClaim(db, id ?? '')?.state).toBe('live')
+  })
+
+  it('stales a claim waiting on its subject when its sentences change, and waits again after', () => {
+    const [id] = seedClaims(
+      db,
+      one,
+      [
+        {
+          recordId: null,
+          state: 'waiting',
+          subjectText: null,
+          pending: { kind: 'subject', candidates: [mara, tomas] },
+          slot: 'location',
+          value: 'the Quay',
+          quote: 'She waited by the Quay',
+          para: 1,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    saveDocument(db, one, doc(...SCENE_ONE.slice(0, 2), 'Mara wore a red coat.'))
+    expect(runAnchors(db, one, LATER).staled).toEqual([id])
+    saveDocument(db, one, doc(...SCENE_ONE))
+    expect(runAnchors(db, one, LATER).restored).toEqual([id])
+    expect(getClaim(db, id ?? '')).toMatchObject({ state: 'waiting', recordId: null })
   })
 
   it('switching drafts leaves each draft’s claims where they were', () => {
@@ -483,6 +599,98 @@ describe('the views (F-16.18)', () => {
     expect(order.refs.get(one)).toBe('1.1')
     expect(order.refs.get(two)).toBe('2.1')
     expect([...order.order.keys()]).toEqual([one, two])
+  })
+
+  it('numbers only readable scenes, names an Idea scene by its title, and reads it as of before', () => {
+    const chapter = getNode(db, two)?.parentId ?? ''
+    const idea = createNode(db, 'novel', {
+      parentId: chapter,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'What if'
+    }).id
+    moveNode(db, idea, chapter, null)
+    setSceneMeta(db, idea, { ...parseStoredSceneMeta(null), status: 'idea' })
+    const order = readingOrder(db)
+    // The Idea comes first in chapter 2, yet the drafted scene stays 2.1.
+    expect(order.refs.get(two)).toBe('2.1')
+    expect(order.refs.get(idea)).toBe('What if')
+    expect(order.at.get(idea)).toBe(order.order.get(one))
+    seedClaims(
+      db,
+      two,
+      [{ recordId: mara, slot: 'hair', value: 'red', quote: 'Mara had red hair now', para: 0 }],
+      NOW
+    )
+    const sheet = sheetMemory(db, mara, idea)
+    expect(sheet).toMatchObject({ asOfRef: 'What if', later: 1, lasting: [] })
+    expect(sheetMemory(db, mara, 'not-a-scene')).toMatchObject({ asOfRef: null, later: 1 })
+  })
+
+  it('keeps the text’s order inside one paragraph on the sheet', () => {
+    saveDocument(
+      db,
+      two,
+      doc('Mara had red hair now, but she dyed her hair black.', 'Tomas said Mara was tall.')
+    )
+    // Stored the other way round: the dye first.
+    seedClaims(
+      db,
+      two,
+      [
+        {
+          recordId: mara,
+          slot: 'hair',
+          value: 'black',
+          quote: 'she dyed her hair black',
+          para: 0,
+          proof: 'verified'
+        },
+        { recordId: mara, slot: 'hair', value: 'red', quote: 'Mara had red hair now', para: 0 }
+      ],
+      NOW
+    )
+    expect(sheetMemory(db, mara, null).lasting.map((line) => line.value.value)).toEqual(['black'])
+  })
+
+  it('falls back to the typed POV when the card’s verified POV record was deleted', () => {
+    setSceneDetails(
+      db,
+      one,
+      {
+        povRecordId: tomas,
+        place: { recordId: null, text: '' },
+        time: { text: '' },
+        storyYear: null,
+        alsoHere: []
+      },
+      NOW
+    )
+    const gone = record('Gone')
+    upsertCard(
+      db,
+      {
+        nodeId: one,
+        draftId: activeDraftId(db),
+        readingId: null,
+        line: 'A line.',
+        gist: 'A gist.',
+        fields: {
+          ...emptyCardFields(),
+          pov: { value: gone, quote: 'Mara wore a blue coat', p: 2, verified: true }
+        },
+        present: [],
+        mood: null,
+        theme: null,
+        anchor: [],
+        seen: []
+      },
+      NOW
+    )
+    deleteRecord(db, gone)
+    const memory = sceneMemory(db, one)
+    expect(memory.here[0]).toMatchObject({ recordId: tomas, why: 'pov', typedPov: null })
+    expect(memory.typed.pov).toMatchObject({ outcome: 'typedOnly', typed: 'Tomas', text: null })
   })
 
   it('builds the scene memory: Here, Mentioned, True now and typed against the card', () => {
@@ -542,7 +750,8 @@ describe('the views (F-16.18)', () => {
         present: [{ recordId: mara, quote: 'Mara wore a blue coat', p: 2, verified: true }],
         mood: null,
         theme: null,
-        anchor: []
+        anchor: [],
+        seen: []
       },
       NOW
     )

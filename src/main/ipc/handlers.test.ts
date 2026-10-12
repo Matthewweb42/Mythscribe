@@ -8919,6 +8919,44 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     }
   })
 
+  it('parks a scene’s claims when it becomes an Idea and brings them back after (F-16.17)', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await openV2()
+      const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+      if (!('record' in made)) throw new Error('blocked')
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs('The ridge was cold.', "Mara's eyes were grey. She waited.")
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      const db = manager.require().connection.orm
+      const [id] = seedClaims(
+        db,
+        scene,
+        [
+          {
+            recordId: made.record.id,
+            slot: 'eyes',
+            value: 'grey',
+            quote: "Mara's eyes were grey",
+            para: 1,
+            proof: 'verified'
+          }
+        ],
+        new Date()
+      )
+      await invoke('sceneMeta:set', { id: scene, meta: { ...EMPTY_SCENE_META, status: 'idea' } })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect(getClaim(db, id ?? '')?.state).toBe('stale')
+      await invoke('sceneMeta:set', { id: scene, meta: EMPTY_SCENE_META })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect(getClaim(db, id ?? '')?.state).toBe('live')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('never opens the v1 conversion dialog from Summarize all scenes, and keeps the held scene held', async () => {
     const scene = await openV2()
     await invoke('document:save', {

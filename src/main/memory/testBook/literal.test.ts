@@ -38,7 +38,10 @@ const INDEX = buildNameIndex(
   ALIASES
 )
 
-function prove(id: string): ReturnType<typeof literalProof> {
+function prove(
+  id: string,
+  force?: { voice: 'narration'; mode: 'now' }
+): ReturnType<typeof literalProof> {
   const label = TEST_BOOK_LABELS.claims.find((claim) => claim.id === id)
   if (label === undefined) throw new Error(`No claim ${id}`)
   const scene = TEST_BOOK.find((each) => each.id === label.scene)
@@ -61,11 +64,12 @@ function prove(id: string): ReturnType<typeof literalProof> {
       recordId: label.record,
       slot,
       value: label.value,
-      voice: label.voice,
-      mode: label.mode,
+      objectId: null,
+      voice: force?.voice ?? label.voice,
+      mode: force?.mode ?? label.mode,
       quote: label.quote
     },
-    span.text,
+    { paragraphs: scene.paragraphs, p: label.p, span },
     sentenceNames(paragraph, span, mentions, (recordId) => KINDS.get(recordId))
   )
 }
@@ -75,7 +79,7 @@ describe('literal proof over the test book (F-16.17)', () => {
   const others = TEST_BOOK_LABELS.claims.filter((claim) => claim.expect !== 'literal')
 
   it('has labels of both kinds to check', () => {
-    expect(literal.length).toBeGreaterThanOrEqual(8)
+    expect(literal.length).toBeGreaterThanOrEqual(2)
     expect(others.length).toBeGreaterThanOrEqual(10)
   })
 
@@ -94,9 +98,21 @@ describe('literal proof over the test book (F-16.17)', () => {
     }
   )
 
+  // The reader may mislabel a voice or a mode ("the lie answered as narration"): code must still
+  // refuse every claim the labels do not expect proved in code, whatever voice and mode it says.
+  it.each(others.map((claim) => [claim.id, claim.expect]))(
+    'refuses %s (%s) even when the reader calls it narration, now',
+    (id) => {
+      expect(prove(id, { voice: 'narration', mode: 'now' }).ok, id).toBe(false)
+    }
+  )
+
   it('says why the hard cases miss', () => {
     expect(prove('captain-not-blue')).toEqual({ ok: false, reason: 'marker', marker: 'negation' })
-    expect(prove('harrow-traits')).toMatchObject({ ok: false, reason: 'marker' })
+    expect(prove('harrow-traits')).toEqual({ ok: false, reason: 'slot' })
+    // A marker anywhere in the sentence, even in a later clause, sends a claim to the verifier.
+    expect(prove('johanna-age')).toMatchObject({ ok: false, reason: 'marker' })
+    expect(prove('varrow-eyes-brown')).toEqual({ ok: false, reason: 'marker', marker: 'negation' })
     expect(prove('johanna-dream')).toEqual({ ok: false, reason: 'voiceMode' })
     expect(prove('green-eyes-trap')).toEqual({ ok: false, reason: 'subject' })
     expect(prove('lottie-tallest')).toEqual({ ok: false, reason: 'voiceMode' })

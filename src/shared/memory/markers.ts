@@ -3,7 +3,7 @@ import { straightenQuotes } from '../critique'
 /**
  * Marker words (F-16.17; design §2.3, the verification ladder's step 3 and the free re-proof): the
  * words that make a sentence say less than it seems to. Literal proof in code (`literal.ts`) fails
- * when one sits in the clause it reads, and the free re-proof (`reproof.ts`) fails when a changed
+ * when one sits anywhere in the quote's sentence, and the free re-proof (`reproof.ts`) fails when a changed
  * neighbouring sentence brings one. Matching is on whole words, case-insensitively, over straight
  * quotes. The lists are deliberately wide: a miss here only sends a claim to the verifier.
  *
@@ -17,9 +17,10 @@ import { straightenQuotes } from '../critique'
  * - `pluperfect`: "had" before a past participle ("had fought", "had once been"); a pattern's own
  *   "had <value> <cue>" is excluded by the caller (`ignore`);
  * - `reported`: words that report rather than narrate (said, told, heard, rumoured, believed,
- *   thought, remembered, dreamt, imagined, pretended, wished, lied …). Not in the plan's list:
- *   added because a narrated report ("She heard Mara was dead") is not a fact about Mara
- *   (decided by Claude, unconfirmed).
+ *   thought, remembered, dreamt, imagined, pretended, wished, lied, according …). Not in the
+ *   plan's list: added because a narrated report ("She heard Mara was dead") is not a fact about
+ *   Mara (decided by Claude, unconfirmed);
+ * - `question`: a question mark ("Mara was dead?" is free indirect wondering, not a statement).
  */
 
 export const MARKER_KINDS = [
@@ -29,7 +30,8 @@ export const MARKER_KINDS = [
   'comparative',
   'simile',
   'pluperfect',
-  'reported'
+  'reported',
+  'question'
 ] as const
 export type MarkerKind = (typeof MARKER_KINDS)[number]
 
@@ -41,7 +43,7 @@ export interface MarkerHit {
   end: number
 }
 
-const WORDS: Readonly<Record<Exclude<MarkerKind, 'pluperfect'>, readonly string[]>> = {
+const WORDS: Readonly<Record<Exclude<MarkerKind, 'pluperfect' | 'question'>, readonly string[]>> = {
   negation: ['not', 'never', 'no', 'nor', 'neither', 'without', 'cannot'],
   modal: [
     'might',
@@ -128,7 +130,8 @@ const PHRASES: readonly { kind: MarkerKind; pattern: RegExp }[] = [
   { kind: 'simile', pattern: /(?<![\p{L}\p{N}])as\s+(?:if|though)(?![\p{L}\p{N}])/giu },
   // "as tall as", "as much as": a comparison of degree.
   { kind: 'comparative', pattern: /(?<![\p{L}\p{N}])as\s+[\p{L}-]+\s+as(?![\p{L}\p{N}])/giu },
-  { kind: 'negation', pattern: /[\p{L}]n't(?![\p{L}\p{N}])/giu }
+  { kind: 'negation', pattern: /[\p{L}]n't(?![\p{L}\p{N}])/giu },
+  { kind: 'question', pattern: /\?/gu }
 ]
 
 /** Past participles that do not end in -ed or -en. */
@@ -368,65 +371,38 @@ export function findMarkers(
 }
 
 /**
- * Markers that reach back over a whole sentence wherever they sit ("Mara was dead, if the letter
- * was true"; "…, or so they said"): conditions, dreams, rumours and pretence. Literal proof checks
- * these in the clauses after the quote's own, where the other markers belong to another clause.
- */
-const SCOPE_BACK = new RegExp(
-  `(?<![\\p{L}\\p{N}'])(?:${wordAlternation([
-    'if',
-    'unless',
-    'provided',
-    'lest',
-    'suppose',
-    'supposing',
-    'dream',
-    'dreams',
-    'dreamt',
-    'dreamed',
-    'dreaming',
-    'rumour',
-    'rumours',
-    'rumoured',
-    'rumor',
-    'rumors',
-    'rumored',
-    'supposedly',
-    'apparently',
-    'pretended',
-    'imagined',
-    'lied'
-  ])}|or\\s+so)(?![\\p{L}\\p{N}])`,
-  'giu'
-)
-
-export function scopeBackMarkers(text: string): MarkerHit[] {
-  const hits: MarkerHit[] = []
-  collect(SCOPE_BACK, 'conditional', straightenQuotes(text), hits)
-  return hits
-}
-
-/**
  * The marker words of the free re-proof (design §2.3 Invalidation): a literal claim whose quote is
  * still word for word in the text stays live only if the changed neighbouring sentences brought
  * none of these.
  */
 export const REPROOF_MARKERS: readonly string[] = [
   'dream',
+  'dreams',
   'dreamt',
   'dreamed',
+  'dreaming',
+  'nightmare',
+  'nightmares',
+  'woke',
+  'awoke',
+  'remember',
   'remembered',
   'rumour',
   'rumoured',
+  'rumor',
+  'rumored',
   'said',
   'if',
+  'imagine',
   'imagined',
   'perhaps',
   'maybe',
   'lied',
   'not',
   'never',
+  'pretend',
   'pretended',
+  'wish',
   'wished',
   'supposed'
 ]

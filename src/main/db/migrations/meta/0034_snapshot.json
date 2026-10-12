@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "25e43daa-4304-4998-ba8e-2a6f4786d6a2",
+  "id": "da56ff2a-4dd2-41d4-ac20-22c96e4f83b0",
   "prevId": "78488f13-d23d-41c3-857e-e370ac5b601e",
   "tables": {
     "ai_cache": {
@@ -666,6 +666,14 @@
         },
         "anchor": {
           "name": "anchor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "seen": {
+          "name": "seen",
           "type": "text",
           "primaryKey": false,
           "notNull": true,

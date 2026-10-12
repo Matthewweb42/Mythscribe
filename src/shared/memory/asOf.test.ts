@@ -3,9 +3,11 @@ import { sheetAsOf, trueNow, type AsOfClaim, type ReadingOrder } from './asOf'
 import { valueKey } from './claims'
 
 const SCENES = ['s1', 's2', 's3', 's4', 's5']
+/** s1–s5 are readable; `idea` (an Idea scene between s1 and s2) reads as of s1. */
 const READING: ReadingOrder = {
   order: new Map(SCENES.map((id, i) => [id, i])),
-  refs: new Map(SCENES.map((id, i) => [id, `1.${i + 1}`]))
+  at: new Map([...SCENES.map((id, i): [string, number] => [id, i]), ['idea', 0]]),
+  refs: new Map([...SCENES.map((id, i): [string, string] => [id, `1.${i + 1}`]), ['idea', 'Idea']])
 }
 
 let next = 0
@@ -23,6 +25,8 @@ const claim = (
     objectId: null,
     para: 0,
     state: 'live',
+    created: '2026-10-12T00:00:00.000Z',
+    pos: null,
     ...over
   }
 }
@@ -67,6 +71,28 @@ describe('trueNow (F-16.18)', () => {
     expect(lines.some((line) => line.slot === 'traits')).toBe(false)
   })
 
+  it('keeps the text’s order inside one paragraph, whatever the claims’ ids', () => {
+    // Stated brown, then dyed red, in one paragraph; ids sort the other way round.
+    const brown = claim({ id: 'z9', nodeId: 's5', slot: 'hair', value: 'brown', para: 3, pos: 0 })
+    const red = claim({ id: 'a1', nodeId: 's5', slot: 'hair', value: 'red', para: 3, pos: 40 })
+    expect(trueNow([red, brown], READING, 's5')).toMatchObject([{ value: 'red' }])
+    expect(trueNow([brown, red], READING, 's5')).toMatchObject([{ value: 'red' }])
+    // Without positions, the order they were stored in (a reading stores in text order).
+    const first = claim({ id: 'z8', nodeId: 's5', slot: 'hair', value: 'brown', para: 4 })
+    const later = {
+      ...claim({ id: 'a0', nodeId: 's5', slot: 'hair', value: 'red', para: 4 }),
+      created: '2026-10-12T00:00:01.000Z'
+    }
+    expect(trueNow([later, first], READING, 's5')).toMatchObject([{ value: 'red' }])
+  })
+
+  it('reads an Idea scene as of the readable scene before it', () => {
+    expect(trueNow(BOOK, READING, 'idea').map((line) => [line.slot, line.value])).toEqual([
+      ['hair', 'red'],
+      ['location', 'the quay']
+    ])
+  })
+
   it('shows a stale latest value flagged, never a waiting one, and nothing for an unknown scene', () => {
     const stale = claim({ nodeId: 's5', slot: 'hair', value: 'grey', state: 'stale' })
     const waiting = claim({ nodeId: 's5', slot: 'alive', value: 'dead', state: 'waiting' })
@@ -103,6 +129,14 @@ describe('sheetAsOf (F-16.18)', () => {
     ])
     // s4 (hair, eyes) and s5 (location) come later.
     expect(sheet.later).toBe(3)
+  })
+
+  it('reads an Idea scene as of the scene before it, and never an unknown node as the book’s end', () => {
+    const idea = sheetAsOf(BOOK, READING, 'idea')
+    expect(idea.lasting.map((line) => [line.slot, line.value.value])).toEqual([['hair', 'red']])
+    const unknown = sheetAsOf(BOOK, READING, 'elsewhere')
+    expect([...unknown.fixed, ...unknown.lasting, ...unknown.transient]).toEqual([])
+    expect(unknown.later).toBe(BOOK.length)
   })
 
   it('shows differing fixed values side by side at the end of the book', () => {

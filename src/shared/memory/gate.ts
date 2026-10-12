@@ -19,8 +19,9 @@ import { splitSentences } from './sentences'
  *   still does. The lookup is context-free (one sentence at a time), so a stored sentence can be
  *   hashed again under today's roster: a record or nickname added later changes nothing.
  * - A cosmetic edit (whitespace or punctuation only, or one word changed by at most two letters
- *   where the old word is not a known word) does not trigger a read and stays unread, so the next
- *   real read takes it in.
+ *   where the old word is not a known word and neither word holds a digit: "1814" to "1815" is a
+ *   real change) does not trigger a read and stays unread, so the next real read takes it in. A
+ *   cosmetic edit to a sentence the card's quotes rest on still reads (`cardStale`).
  * - A scene is read whole on its first read, when more than half its finished sentences are
  *   unread, or after five window reads; otherwise the paragraphs with unread sentences, plus the
  *   paragraphs of claims gone stale (so "re-checking after you pause" is kept even when the only
@@ -249,6 +250,7 @@ export function isCosmetic(
   const old = wordsA[changed[0] ?? 0] ?? ''
   const fresh = wordsB[changed[0] ?? 0] ?? ''
   if (old.includes('⟨') || fresh.includes('⟨')) return false
+  if (/\p{N}/u.test(old) || /\p{N}/u.test(fresh)) return false
   if (options.knownWords.has(old.toLowerCase())) return false
   return editDistance(old.toLowerCase(), fresh.toLowerCase()) <= COSMETIC_MAX_EDITS
 }
@@ -262,6 +264,8 @@ export interface ReadDecisionInput {
   partials: number
   /** Paragraphs holding a stale claim (its anchor changed and no free re-proof held it). */
   staleParas: ReadonlySet<number>
+  /** A sentence the card's quotes rest on changed (`cardStale`): no edit there is cosmetic. */
+  cardStale: boolean
   knownWords: ReadonlySet<string>
 }
 
@@ -281,10 +285,12 @@ export function readDecision(input: ReadDecisionInput): ReadDecision {
   const unread = unreadSentences(sentences, read)
   const present = new Set(sentences.map((sentence) => sentence.hash))
   const removed = [...read].filter(([hash]) => !present.has(hash)).map(([, entry]) => entry.gate)
-  const real = unread.filter(
-    (sentence) =>
-      !removed.some((gate) => isCosmetic(gate, sentence.gate, { knownWords: input.knownWords }))
-  )
+  const real = input.cardStale
+    ? unread
+    : unread.filter(
+        (sentence) =>
+          !removed.some((gate) => isCosmetic(gate, sentence.gate, { knownWords: input.knownWords }))
+      )
   if (real.length === 0 && input.staleParas.size === 0) {
     return {
       read: 'nothing',

@@ -1,5 +1,6 @@
 import { straightenQuotes } from '../critique'
 import type { CardField, CardFields } from './claims'
+import { cutValue } from './literal'
 import type { SceneDetails } from './sceneDetails'
 
 /**
@@ -9,7 +10,9 @@ import type { SceneDetails } from './sceneDetails'
  * Pure: the card's fields against the scene's typed details.
  *
  * Only what the verifier confirmed counts for POV and year (they feed computation: a POV the AI
- * read never anchors a claim); place and time are compared on their quoted value.
+ * read never anchors a claim), and a POV whose record is gone counts as none. Place and time count
+ * only when their value is words of their own quote, in order (or the verifier confirmed them):
+ * a paraphrase or a guess is the AI's map, not the text, and never overrides what the author typed.
  */
 
 export const TYPED_FIELDS = ['pov', 'place', 'time', 'year'] as const
@@ -63,17 +66,22 @@ const outcomeOf = (typed: boolean, text: boolean, same: boolean): TypedOutcome =
 const shown = (field: CardField | null, verifiedOnly: boolean): CardField | null =>
   field === null || (verifiedOnly && !field.verified) ? null : field
 
+/** A place or time the text says: verified, or its value words of its own quote. */
+const fromQuote = (field: CardField | null): CardField | null =>
+  field === null || (!field.verified && cutValue(field.value, field.quote) === null) ? null : field
+
 function comparePov(
   details: SceneDetails,
   card: CardFields | null,
   names: TypedNames
 ): TypedComparison {
-  const field = shown(card?.pov ?? null, true)
+  const verified = shown(card?.pov ?? null, true)
+  const field = verified !== null && names.nameOf(verified.value) !== null ? verified : null
   const typed = details.povRecordId
   return {
     outcome: outcomeOf(typed !== null, field !== null, typed === field?.value),
     typed: typed === null ? null : names.nameOf(typed),
-    text: field === null ? null : (names.nameOf(field.value) ?? null),
+    text: field === null ? null : names.nameOf(field.value),
     quote: field?.quote ?? null
   }
 }
@@ -83,7 +91,7 @@ function comparePlace(
   card: CardFields | null,
   names: TypedNames
 ): TypedComparison {
-  const field = shown(card?.where ?? null, false)
+  const field = fromQuote(card?.where ?? null)
   const { recordId, text } = details.place
   const typedNames = [
     ...(recordId === null ? [] : [names.nameOf(recordId) ?? '', ...names.aliasesOf(recordId)]),
@@ -103,7 +111,7 @@ function comparePlace(
 }
 
 function compareTime(details: SceneDetails, card: CardFields | null): TypedComparison {
-  const field = shown(card?.when ?? null, false)
+  const field = fromQuote(card?.when ?? null)
   const typed = foldDetail(details.time.text)
   const quoted = field === null ? '' : foldDetail(field.value)
   return {

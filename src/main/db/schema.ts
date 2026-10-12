@@ -1219,7 +1219,9 @@ export type SceneReadInsert = typeof sceneRead.$inferInsert
 /**
  * A scene's card per draft (F-16.18): the AI's map of it, findable and never citable. Line and
  * gist, the quoted fields (JSON), who is on the page (JSON), mood and theme, the anchor of every
- * card quote (JSON hashes) and a hash of the line (plan links run only when it moves).
+ * card quote (JSON hashes), the gate hashes of the finished sentences the card was made from (JSON:
+ * a quarter changed since makes it due, P2a-D17) and a hash of the line (plan links run only when
+ * it moves).
  */
 export const card = sqliteTable(
   'card',
@@ -1238,6 +1240,7 @@ export const card = sqliteTable(
     mood: text('mood'),
     theme: text('theme'),
     anchor: text('anchor').notNull().default('[]'),
+    seen: text('seen').notNull().default('[]'),
     lineHash: text('line_hash'),
     created: text('created').notNull()
   },

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { passageParagraphs } from '../mentions'
 import type { ClaimMode, ClaimVoice } from './claims'
-import { hasLiteralPatterns, literalProof, sentenceNames, type LiteralName } from './literal'
+import {
+  hasLiteralPatterns,
+  insideQuotation,
+  literalProof,
+  sentenceNames,
+  type LiteralName
+} from './literal'
 import type { NameMention } from './nameScan'
 import { splitSentences } from './sentences'
 import type { Slot } from './slots'
@@ -36,22 +42,51 @@ const MARA = { text: 'Mara', recordId: 'mara' }
 const TOMAS = { text: 'Tomas', recordId: 'tomas' }
 const QUAY = { text: 'the Quay', recordId: 'quay', kind: 'place' as const }
 
+interface ClaimSpec {
+  slot: Slot
+  value: string
+  quote?: string
+  voice?: ClaimVoice
+  mode?: ClaimMode
+  objectId?: string | null
+}
+
+const claimOf = (claim: ClaimSpec, sentence: string) => ({
+  recordId: 'mara',
+  slot: claim.slot,
+  value: claim.value,
+  objectId: claim.objectId ?? null,
+  voice: claim.voice ?? 'narration',
+  mode: claim.mode ?? 'now',
+  quote: claim.quote ?? sentence.replace(/[.!?]$/, '')
+})
+
+/** Proves a claim from a one-sentence paragraph. */
 function prove(
   sentence: string,
-  claim: { slot: Slot; value: string; quote?: string; voice?: ClaimVoice; mode?: ClaimMode },
+  claim: ClaimSpec,
   names: readonly NameSpec[] = [MARA, TOMAS, QUAY]
 ): ReturnType<typeof literalProof> {
   return literalProof(
-    {
-      recordId: 'mara',
-      slot: claim.slot,
-      value: claim.value,
-      voice: claim.voice ?? 'narration',
-      mode: claim.mode ?? 'now',
-      quote: claim.quote ?? sentence.replace(/[.!?]$/, '')
-    },
-    sentence,
+    claimOf(claim, sentence),
+    { paragraphs: [sentence], p: 0, span: { start: 0, end: sentence.length, text: sentence } },
     namesIn(sentence, names)
+  )
+}
+
+/** Proves a claim from sentence `index` of paragraph `p` in a scene. */
+function proveIn(
+  paragraphs: readonly string[],
+  p: number,
+  index: number,
+  claim: ClaimSpec
+): ReturnType<typeof literalProof> {
+  const span = splitSentences(paragraphs[p] ?? '')[index]
+  if (span === undefined) throw new Error('no sentence')
+  return literalProof(
+    claimOf(claim, span.text),
+    { paragraphs, p, span },
+    namesIn(span.text, [MARA, TOMAS, QUAY])
   )
 }
 
@@ -73,14 +108,15 @@ describe('literalProof: the patterns (F-16.17)', () => {
     ['Mara was 34.', 'age', '34', '34'],
     ['Mara was seven-and-twenty that winter.', 'age', 'seven-and-twenty', 'seven-and-twenty'],
     ['Mara was dead.', 'alive', 'dead', 'dead'],
-    ['Mara died in the night.', 'alive', 'dead', 'dead'],
+    ['Mara was dead, and the bells rang.', 'alive', 'dead', 'dead'],
     ['Mara wore a blue coat.', 'clothing', 'a blue coat', 'a blue coat'],
     ['Mara was wearing a blue coat.', 'clothing', 'blue coat', 'blue coat'],
     ['Mara carried a lantern.', 'objects', 'a lantern', 'a lantern'],
     ['Mara held the map.', 'objects', 'the map', 'the map'],
     ['Mara was at the Quay.', 'location', 'the Quay', 'the Quay'],
     ['Mara stood in the doorway.', 'location', 'in the doorway', 'in the doorway'],
-    ['Mara was clever and quick.', 'traits', 'clever and quick', 'clever and quick'],
+    ["Mara's cold, clear grey eyes followed him.", 'eyes', 'grey', 'grey'],
+    ['Mara was eighteen now.', 'age', 'eighteen', 'eighteen'],
     [
       'Mara was the daughter of a miller.',
       'kinship',
@@ -124,6 +160,12 @@ describe('literalProof: the patterns (F-16.17)', () => {
 
   it('has no pattern for slots code cannot read and proves no other voice or mode', () => {
     expect(hasLiteralPatterns('detail:income')).toBe(false)
+    // Traits have no cue word: code cannot tell the slot is right, so the verifier decides.
+    expect(hasLiteralPatterns('traits')).toBe(false)
+    expect(prove('Mara was asleep.', { slot: 'traits', value: 'asleep' })).toEqual({
+      ok: false,
+      reason: 'slot'
+    })
     expect(prove('Mara was rich.', { slot: 'detail:income', value: 'rich' })).toEqual({
       ok: false,
       reason: 'slot'
@@ -148,10 +190,50 @@ describe('literalProof: the patterns (F-16.17)', () => {
     expect(
       prove('Mara was the daughter of a miller.', { slot: 'traits', value: 'daughter of a miller' })
     ).toMatchObject({ ok: false })
-    expect(prove('Mara died.', { slot: 'alive', value: 'alive' })).toEqual({
+    expect(prove('Mara was dead.', { slot: 'alive', value: 'alive' })).toEqual({
       ok: false,
       reason: 'value'
     })
+  })
+
+  it('never proves a kinship claim that names a second person: code cannot check the object', () => {
+    expect(
+      prove('Mara was his daughter.', { slot: 'kinship', value: 'daughter', objectId: 'tomas' })
+    ).toEqual({ ok: false, reason: 'object' })
+    expect(prove('Mara was his daughter.', { slot: 'kinship', value: 'daughter' })).toEqual({
+      ok: true,
+      value: 'daughter'
+    })
+  })
+})
+
+describe('literalProof: a feature that belongs to someone else (F-16.17)', () => {
+  it.each<[string, Slot, string]>([
+    ["Mara's brother had blue eyes.", 'eyes', 'blue'],
+    ["Mara's mother's grey eyes watched her.", 'eyes', 'grey'],
+    ["Mara's sister had red hair.", 'hair', 'red'],
+    ["Mara's horse had brown eyes.", 'eyes', 'brown'],
+    ["Mara's dog's brown eyes followed her.", 'eyes', 'brown'],
+    ['Mara had seen blue eyes like that before.', 'eyes', 'blue']
+  ])('does not prove "%s" for the named character', (sentence, slot, value) => {
+    expect(prove(sentence, { slot, value }).ok).toBe(false)
+  })
+
+  it.each<[string, Slot, string]>([
+    ['Mara was one of the guests.', 'age', 'one'],
+    ['Mara was ten minutes late.', 'age', 'ten'],
+    ['Mara was dead tired.', 'alive', 'dead'],
+    ['Mara died a little inside.', 'alive', 'dead'],
+    ['Mara died in the night.', 'alive', 'dead'],
+    ['Mara was alive with excitement.', 'alive', 'alive']
+  ])('reads no age or death into "%s"', (sentence, slot, value) => {
+    expect(prove(sentence, { slot, value }).ok).toBe(false)
+  })
+
+  it('reads no death from a quote cut short of its clause', () => {
+    expect(
+      prove('Mara was dead tired.', { slot: 'alive', value: 'dead', quote: 'Mara was dead' })
+    ).toEqual({ ok: false, reason: 'pattern' })
   })
 })
 
@@ -196,6 +278,60 @@ describe('literalProof: each blocker (F-16.17)', () => {
     ).toEqual({ ok: false, reason: 'quoted' })
   })
 
+  it('refuses a sentence inside a speech that began earlier in the paragraph', () => {
+    const speech = ['"Listen. Mara was dead. I saw it."']
+    expect(proveIn(speech, 0, 1, { slot: 'alive', value: 'dead' })).toEqual({
+      ok: false,
+      reason: 'quoted'
+    })
+    const last = ['"Run," Tomas said. "Listen to me. Mara wore the red coat that night."']
+    expect(
+      proveIn(last, 0, 2, {
+        slot: 'clothing',
+        value: 'the red coat',
+        quote: 'Mara wore the red coat'
+      })
+    ).toEqual({ ok: false, reason: 'quoted' })
+    const curly = ['“Listen to me. Mara was born in Calder.”']
+    expect(proveIn(curly, 0, 1, { slot: 'born', value: 'in Calder' })).toEqual({
+      ok: false,
+      reason: 'quoted'
+    })
+  })
+
+  it('refuses a sentence inside a single-quoted speech (British style)', () => {
+    const british = ['‘Listen to me. Mara was born in Calder.’']
+    expect(proveIn(british, 0, 1, { slot: 'born', value: 'in Calder' })).toEqual({
+      ok: false,
+      reason: 'quoted'
+    })
+    const straight = ["'Listen to me. Mara was born in Calder.'"]
+    expect(proveIn(straight, 0, 1, { slot: 'born', value: 'in Calder' })).toEqual({
+      ok: false,
+      reason: 'quoted'
+    })
+  })
+
+  it('refuses a speech that runs on into the next paragraph, with or without its opening mark', () => {
+    const conventional = ['"Listen to me.', '"Mara was born in Calder."']
+    expect(proveIn(conventional, 1, 0, { slot: 'born', value: 'in Calder' })).toEqual({
+      ok: false,
+      reason: 'quoted'
+    })
+    const bare = ['"Listen to me.', 'Mara was born in Calder."']
+    expect(proveIn(bare, 1, 0, { slot: 'born', value: 'in Calder' })).toEqual({
+      ok: false,
+      reason: 'quoted'
+    })
+    // After a closed speech, narration is narration again.
+    const closed = ['"Listen to me," Tomas said.', 'Mara was born in Calder.']
+    expect(proveIn(closed, 1, 0, { slot: 'born', value: 'in Calder' })).toEqual({
+      ok: true,
+      value: 'in Calder'
+    })
+    expect(insideQuotation(["Mara's coat and the boys' caps were wet."], 0, 30)).toBe(false)
+  })
+
   it.each<[string, string]>([
     ['negation', "Mara's eyes were not grey."],
     ['negation', "It wasn't true that Mara's eyes were grey."],
@@ -206,7 +342,8 @@ describe('literalProof: each blocker (F-16.17)', () => {
     ['simile', "Mara's eyes were like grey slate."],
     ['simile', "Mara's eyes were grey, as if washed."],
     ['pluperfect', "Mara's eyes were grey where the fever had faded them."],
-    ['reported', "Tomel said Mara's eyes were grey."]
+    ['reported', "Tomel said Mara's eyes were grey."],
+    ['question', "Mara's eyes were grey?"]
   ])('stops at a %s marker: "%s"', (kind, sentence) => {
     const quote = sentence.slice(sentence.indexOf('Mara')).replace(/[,.].*$/, '')
     const result = prove(sentence, { slot: 'eyes', value: 'grey', quote })
@@ -215,28 +352,31 @@ describe('literalProof: each blocker (F-16.17)', () => {
     else expect(result.ok ? 'proved' : result.reason).toBe('marker')
   })
 
-  it('ignores the markers of a later clause unless they reach back over the sentence', () => {
-    expect(
-      prove('Mara was eighteen now, and nobody had asked her to dance.', {
-        slot: 'age',
-        value: 'eighteen',
-        quote: 'Mara was eighteen now'
+  it('stops at a marker anywhere in the sentence, after a clause break too (design §2.3 step 3)', () => {
+    for (const [sentence, slot, value, quote] of [
+      [
+        'Mara was eighteen now, and nobody had asked her to dance.',
+        'age',
+        'eighteen',
+        'Mara was eighteen now'
+      ],
+      ['Mara was dead, if the letter was true.', 'alive', 'dead', 'Mara was dead'],
+      ['Mara was dead, or so they said.', 'alive', 'dead', 'Mara was dead'],
+      ['Mara was dead \u2014 or seemed to be.', 'alive', 'dead', 'Mara was dead'],
+      ['Mara was dead; no, she was only sleeping.', 'alive', 'dead', 'Mara was dead'],
+      [
+        'Mara was at the Quay \u2014 according to Hesk.',
+        'location',
+        'the Quay',
+        'Mara was at the Quay'
+      ],
+      ['Mara was dead?', 'alive', 'dead', 'Mara was dead']
+    ] as const) {
+      expect(prove(sentence, { slot, value, quote }), sentence).toMatchObject({
+        ok: false,
+        reason: 'marker'
       })
-    ).toEqual({ ok: true, value: 'eighteen' })
-    expect(
-      prove('Mara was dead, if the letter was true.', {
-        slot: 'alive',
-        value: 'dead',
-        quote: 'Mara was dead'
-      })
-    ).toEqual({ ok: false, reason: 'marker', marker: 'conditional' })
-    expect(
-      prove('Mara was dead, or so they said.', {
-        slot: 'alive',
-        value: 'dead',
-        quote: 'Mara was dead'
-      })
-    ).toMatchObject({ ok: false, reason: 'marker' })
+    }
   })
 
   it('does not read the pattern’s own "had" as a pluperfect, nor a name as a marker word', () => {
