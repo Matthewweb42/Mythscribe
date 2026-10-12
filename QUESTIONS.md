@@ -12,6 +12,12 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-12 · F-16.4–16.15 · P1 ticked before your checks in the app
+- Question: The slices said each P1 feature stays unticked until you check it. P1's final verification passed (full gates; `e2e/memory.spec.ts` covers the v2 path with Use AI off, the Story notes block and filing at the fake provider, and the switch-over on a copy, beside the v1 smoke). Tick now, or wait for your checks?
+- Chosen (decided by Claude, unconfirmed): ticked F-16.4 to F-16.15 on 2026-10-12, as P0 was, with each entry naming the check still owed. v2 is not in installed builds, so the checks run in a development build: `MYTHSCRIBE_STORY_MEMORY=v2 npm run dev` with a new project or a copy (the override makes every project it opens run v2, your real one included), and for F-16.15 Help › Try the story-memory switch-over on a copy… on a copy of your real project with no override. Live fidelity is unrun for the 14 new prompt versions (`MYTHSCRIBE_EVAL_LIVE=1`).
+- Alternatives: leave them unticked until you have checked each one.
+- To change it: untick the entries in `FEATURES.md` §2.16 and the M8 row.
+
 ## 2026-10-12 · F-16.15 · P1 slice 6 review: calls made while fixing it
 - Question: The review of slice 6 found AI-written sheet text that would have converted as canon, author text that would have been lost or hidden, and a few dry-run gaps. The fixes needed calls of their own. Nothing here changes your installed app (v1); the switch-over still runs only on a test copy in a development build.
 - Chosen (decided by Claude, unconfirmed):
