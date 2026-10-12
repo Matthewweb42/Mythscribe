@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(35)
+    expect(result.version).toBe(36)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1390,7 +1390,7 @@ describe('story reading tables (0034, F-16.17) leave every older table untouched
       tablesBefore.filter((table) => table !== 'schema_migrations')
     )
 
-    expect(migrate(db).applied).toEqual(['0034_story_reading'])
+    expect(migrate(db, loadMigrations().slice(0, 35)).applied).toEqual(['0034_story_reading'])
 
     const kept = schemaOf(db).filter((object) =>
       objectsBefore.some((before) => before.type === object.type && before.name === object.name)
@@ -1495,5 +1495,36 @@ describe('story reading tables (0034, F-16.17) leave every older table untouched
     db.prepare("DELETE FROM draft WHERE id = 'd2'").run()
     for (const table of ['claim', 'card', 'scene_read', 'reading'])
       expect(count(table), table).toBe(0)
+  })
+
+  it('0035 adds a nullable draft_id to plan_link, keeps its rows and drops a link with its draft (F-16.21)', () => {
+    migrate(db, loadMigrations().slice(0, 35))
+    db.pragma('foreign_keys = ON')
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
+       VALUES (?, 'ms', NULL, 'document', ?, 0, NULL, '2026-10-12', '2026-10-12')`
+    ).run('plan', 'Plan')
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
+       VALUES (?, 'ms', NULL, 'document', ?, 1, NULL, '2026-10-12', '2026-10-12')`
+    ).run('done', 'Done')
+    db.prepare(
+      "INSERT INTO plan_link (plan_id, scene_id, origin, created) VALUES ('plan', 'done', 'code', 'x')"
+    ).run()
+    const before = db.prepare('SELECT * FROM plan_link').all() as Record<string, unknown>[]
+    expect(migrate(db).applied).toEqual(['0035_plan_link_draft'])
+    const columns = (
+      db.prepare('PRAGMA table_info(plan_link)').all() as { name: string; notnull: number }[]
+    ).map((column) => [column.name, column.notnull])
+    expect(columns.at(-1)).toEqual(['draft_id', 0])
+    expect(db.prepare('SELECT * FROM plan_link').all()).toEqual(
+      before.map((row) => ({ ...row, draft_id: null }))
+    )
+    db.prepare(
+      "INSERT INTO draft (id, name, position, created, modified) VALUES ('d3', 'Three', 2, 'x', 'x')"
+    ).run()
+    db.prepare("UPDATE plan_link SET draft_id = 'd3' WHERE plan_id = 'plan'").run()
+    db.prepare("DELETE FROM draft WHERE id = 'd3'").run()
+    expect(db.prepare('SELECT COUNT(*) AS n FROM plan_link').get()).toEqual({ n: 0 })
   })
 })

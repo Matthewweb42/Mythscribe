@@ -356,8 +356,14 @@ function PlanLinkLinesV2({
   const linkClass = 'rounded px-0.5 text-left underline-offset-2 hover:underline'
   const actionClass =
     'rounded border border-line px-1 text-[11px] text-fg-muted hover:bg-surface-raised hover:text-fg'
-  const mine = fulfilledBy !== undefined ? byId[fulfilledBy] : undefined
-  const auto = aiLink !== undefined && mine === undefined ? byId[aiLink.sceneId] : undefined
+  const linkedByAuthor = fulfilledBy !== undefined ? byId[fulfilledBy] : undefined
+  // Design §2.7: Not yet drafted is no link to a drafted scene. The author's link to a scene with
+  // no words yet is kept as a note under it, and the plan stays on the story map.
+  const mine =
+    linkedByAuthor !== undefined && linkedByAuthor.wordCount > 0 ? linkedByAuthor : undefined
+  const pending = linkedByAuthor !== undefined && mine === undefined ? linkedByAuthor : undefined
+  const auto =
+    aiLink !== undefined && linkedByAuthor === undefined ? byId[aiLink.sceneId] : undefined
   const by = mine ?? auto
   const linkedId =
     mine !== undefined ? fulfilledBy : auto !== undefined ? aiLink?.sceneId : undefined
@@ -399,8 +405,27 @@ function PlanLinkLinesV2({
           </button>
         </p>
       ) : progress === 'planned' ? (
-        <p data-testid="outline-not-drafted" className="m-0 pl-4 text-xs text-fg-subtle">
+        <p
+          data-testid="outline-not-drafted"
+          className="m-0 flex flex-wrap items-center gap-1 pl-4 text-xs text-fg-subtle"
+        >
           Not yet drafted
+          {pending !== undefined && fulfilledBy !== undefined ? (
+            <span data-testid="outline-linked-unwritten" className="flex items-center gap-1">
+              · linked to{' '}
+              <button type="button" className={linkClass} onClick={() => select(fulfilledBy)}>
+                {pending.title}
+              </button>{' '}
+              (no words yet)
+              <button
+                type="button"
+                className={actionClass}
+                onClick={() => void unlink({ kind: 'scene', nodeId: id })}
+              >
+                Unlink
+              </button>
+            </span>
+          ) : null}
         </p>
       ) : null}
       {fulfils.map((planId) => (

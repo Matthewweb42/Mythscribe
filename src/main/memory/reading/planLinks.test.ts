@@ -9,18 +9,19 @@ import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { storyMapItems } from '../../ai/context/storyTime'
 import { PLAN_LINKS_V2_SENTINEL } from '../../ai/prompts/planLinks.v2'
+import { AiRateLimitError } from '../../ai/providers/types'
 import { saveDocument } from '../../document/documentStore'
 import { getSceneMeta, setSceneMeta } from '../../document/sceneMetaStore'
-import { activeDraftId } from '../../draft/draftStore'
+import { activeDraftId, duplicateDraft, switchDraft } from '../../draft/draftStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { getAiSettings, setAiSettings } from '../../project/settingsStore'
 import { createNode, getNode, listNodes, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
-import { getDismissedByKey } from '../dismissedStore'
+import { getDismissedByKey, undoDismissed } from '../dismissedStore'
 import { scanNamesFor } from '../nameIndexer'
 import { createRecord } from '../recordStore'
 import { upsertCard } from './cardStore'
-import { keepPlanLink, linkPlansAfterReading, unlinkPlanV2 } from './planLinks'
+import { keepPlanLink, linkPlansAfterReading, restoreUnlinked, unlinkPlanV2 } from './planLinks'
 import { livePlanLinks, planLinkRows, planLinkViewV2 } from './planLinkStore'
 import { insertReading } from './readingStore'
 import { fakeAi, type FakeAi } from './readingFixture'
@@ -195,15 +196,100 @@ describe('plan links applied automatically (F-16.21)', () => {
     expect(planLinkRows(db)).toEqual([])
   })
 
-  it('makes nothing while Plan links is off, and nothing on a failed request', async () => {
+  it('makes nothing while Plan links is off, past the Cloud cap, or on a failed request', async () => {
     card(quay, 'Mara waits at the quay for the ferry.')
     card(harbour, 'Mara waits at the quay for the ferry.')
     const settings = getAiSettings(db)
     setAiSettings(db, { ...settings, features: { ...settings.features, planLinks: false } })
     expect(await link(quay, true)).toEqual({ changed: false, asked: false, costUsd: 0 })
     setAiSettings(db, settings)
+    // Past the Cloud cap the pick is not asked (code still links what is clear).
+    const capped = await linkPlansAfterReading(db, ai.deps, {
+      settings,
+      readingId,
+      nodeId: quay,
+      lineMoved: true,
+      requestId: 'test-cap',
+      askAi: false
+    })
+    expect(capped).toEqual({ changed: false, asked: false, costUsd: 0 })
+    expect(planRequests()).toBe(0)
+    ai = fakeAi(() => {
+      throw new AiRateLimitError('Slow down.')
+    })
+    expect(await link(quay, true)).toEqual({ changed: false, asked: false, costUsd: 0 })
+    expect(planLinkRows(db)).toEqual([])
+  })
+
+  it('counts the cost of a reply that does not read, and links nothing', async () => {
     ai = fakeAi(() => ({ text: 'not json' }))
-    expect(await link(quay, true)).toMatchObject({ changed: false, asked: false })
+    card(quay, 'Mara waits at the quay for the ferry.')
+    card(harbour, 'Mara waits at the quay for the ferry.')
+    const spent: number[] = []
+    const result = await linkPlansAfterReading(db, ai.deps, {
+      settings: getAiSettings(db),
+      readingId,
+      nodeId: quay,
+      lineMoved: true,
+      requestId: 'test-unread',
+      onSpend: (usd) => void spent.push(usd)
+    })
+    expect(result.changed).toBe(false)
+    expect(result.asked).toBe(true)
+    expect(result.costUsd).toBeGreaterThan(0)
+    expect(spent).toEqual([result.costUsd])
+    expect(planLinkRows(db)).toEqual([])
+  })
+
+  it('matches code links again as cards arrive: a stronger scene read later takes the plan', async () => {
+    // Rebuild order: the weaker scene is read first and, alone, is linked.
+    card(quay, 'Mara walks to the quay.')
+    expect(await link(quay, true)).toMatchObject({ changed: true, asked: false })
+    expect(livePlanLinks(db)).toMatchObject([{ planId: plan, sceneId: quay, origin: 'code' }])
+    const dusk = scene('Dusk', 'Mara waited at the quay for the ferry at dusk.')
+    scanNamesFor(db, dusk, NOW)
+    card(dusk, 'Mara waits at the quay for the ferry.')
+    expect(await link(dusk, true)).toMatchObject({ changed: true, asked: false })
+    expect(livePlanLinks(db)).toMatchObject([{ planId: plan, sceneId: dusk, origin: 'code' }])
+    expect(planRequests()).toBe(0)
+    // The same pass again changes nothing.
+    expect(await link(quay, false)).toMatchObject({ changed: false })
+  })
+
+  it('takes a code link off when a later card makes the match too close, and asks the AI', async () => {
+    ai = fakeAi(() => ({ text: JSON.stringify({ pick: 'none', why: 'Neither.' }) }))
+    card(quay, 'Mara waits at the quay.')
+    await link(quay, true)
+    expect(livePlanLinks(db)).toMatchObject([{ sceneId: quay, origin: 'code' }])
+    const dusk = scene('Dusk', 'Mara waited at the quay for the ferry.')
+    scanNamesFor(db, dusk, NOW)
+    card(dusk, 'Mara waits at the quay for the ferry.')
+    // 1 against 0.75: too close for code. The code link goes; the AI says neither.
+    expect(await link(dusk, true)).toMatchObject({ changed: true, asked: true })
+    expect(planRequests()).toBe(1)
+    expect(planLinkRows(db)).toEqual([])
+  })
+
+  it('checks an AI pick again when its scene’s card line moves', async () => {
+    card(quay, 'Mara waits at the quay for the ferry.')
+    card(harbour, 'Mara waits at the quay for the ferry.')
+    await link(quay, true)
+    expect(planLinkRows(db)).toMatchObject([{ sceneId: harbour, origin: 'ai' }])
+    // Another scene's reading leaves the pick alone.
+    expect(await link(quay, true)).toMatchObject({ changed: false })
+    card(harbour, 'Tomas mends nets in the rain.')
+    expect(await link(harbour, true)).toMatchObject({ changed: true })
+    // The pick no longer holds; code links the clear match left.
+    expect(livePlanLinks(db)).toMatchObject([{ planId: plan, sceneId: quay, origin: 'code' }])
+  })
+
+  it('never links a name-only match', async () => {
+    const nets = scene('Nets', 'Mara mended a net by the fire.')
+    scanNamesFor(db, nets, NOW)
+    card(nets, 'Mara mends a net.')
+    card(harbour, 'Tomas mends nets.')
+    // Mara is the only thing the plan and the scene share: one term, not two.
+    expect(await link(nets, true)).toMatchObject({ changed: false, asked: false })
     expect(planLinkRows(db)).toEqual([])
   })
 
@@ -228,15 +314,83 @@ describe('plan links applied automatically (F-16.21)', () => {
     expect(planLinkRows(db)).toEqual([])
   })
 
-  it('Unlink of an automatic link drops the row and dismisses the pair', async () => {
+  it('Unlink of an automatic link drops the row and dismisses the pair; Undo puts it back', async () => {
     card(quay, 'Mara waits at the quay for the ferry.')
     card(harbour, 'Tomas mends nets.')
     await link(quay, true)
+    const before = planLinkRows(db)
     expect(unlinkPlanV2(db, { kind: 'scene', nodeId: plan }, NOW)).toEqual({ changedNodeIds: [] })
     expect(planLinkRows(db)).toEqual([])
-    expect(
-      getDismissedByKey(db, 'unlink', dismissedKey({ kind: 'unlink', planId: plan, sceneId: quay }))
-    ).not.toBeNull()
+    const row = getDismissedByKey(
+      db,
+      'unlink',
+      dismissedKey({ kind: 'unlink', planId: plan, sceneId: quay })
+    )
+    if (row === null) throw new Error('not dismissed')
+    undoDismissed(db, row.id)
+    expect(restoreUnlinked(db, row)).toEqual({ changedNodeIds: [], linksChanged: true })
+    expect(planLinkRows(db)).toEqual(before)
+    // Undone once: a second restore finds nothing kept.
+    expect(restoreUnlinked(db, row)).toEqual({ changedNodeIds: [], linksChanged: false })
+  })
+
+  it('Undo of an Unlink of the author’s own link writes it back into her metadata', async () => {
+    setSceneMeta(db, plan, { ...getSceneMeta(db, plan).meta, fulfilledBy: harbour })
+    unlinkPlanV2(db, { kind: 'scene', nodeId: plan }, NOW)
+    const row = getDismissedByKey(
+      db,
+      'unlink',
+      dismissedKey({ kind: 'unlink', planId: plan, sceneId: harbour })
+    )
+    if (row === null) throw new Error('not dismissed')
+    undoDismissed(db, row.id)
+    expect(restoreUnlinked(db, row)).toEqual({ changedNodeIds: [plan], linksChanged: false })
+    expect(parseStoredSceneMeta(getNode(db, plan)?.sceneMeta ?? null).fulfilledBy).toBe(harbour)
+  })
+
+  it('after Unlink, a later reading does not hand the plan to the runner-up', async () => {
+    card(quay, 'Mara walks to the quay.')
+    const dusk = scene('Dusk', 'Mara waited at the quay for the ferry.')
+    scanNamesFor(db, dusk, NOW)
+    card(dusk, 'Mara waits at the quay for the ferry.')
+    await link(dusk, true)
+    expect(livePlanLinks(db)).toMatchObject([{ sceneId: dusk, origin: 'code' }])
+    unlinkPlanV2(db, { kind: 'scene', nodeId: plan }, NOW)
+    expect(await link(quay, true)).toMatchObject({ changed: false, asked: false })
+    expect(await link(dusk, true)).toMatchObject({ changed: false, asked: false })
+    expect(planLinkRows(db)).toEqual([])
+  })
+
+  it('a link stands only in its draft, and not once its scene is an Idea', async () => {
+    card(quay, 'Mara waits at the quay for the ferry.')
+    card(harbour, 'Tomas mends nets.')
+    await link(quay, true)
+    expect(livePlanLinks(db)).toHaveLength(1)
+    // An Idea scene never happened: it fulfils nothing, and the story map keeps the plan.
+    setSceneMeta(db, quay, { ...getSceneMeta(db, quay).meta, status: 'idea' })
+    expect(livePlanLinks(db)).toEqual([])
+    expect(storyMapItems(db, listNodes(db), 'v2').map((item) => item.id)).toContain(plan)
+    setSceneMeta(db, quay, { ...getSceneMeta(db, quay).meta, status: 'none' })
+    expect(livePlanLinks(db)).toHaveLength(1)
+    // Another draft: the link made from this draft's cards is not live there.
+    const drafts = duplicateDraft(db, activeDraftId(db), 'Second')
+    const other = drafts.drafts.find((each) => each.name === 'Second')?.id ?? ''
+    switchDraft(db, other)
+    expect(livePlanLinks(db)).toEqual([])
+    // It waits for its own draft rather than being dropped.
+    await link(quay, false)
+    switchDraft(db, drafts.activeId)
+    expect(livePlanLinks(db)).toMatchObject([{ planId: plan, sceneId: quay }])
+  })
+
+  it('keeps a plan the author linked to a scene with no words on the v2 story map', () => {
+    const empty = scene('Later', null)
+    setSceneMeta(db, plan, { ...getSceneMeta(db, plan).meta, fulfilledBy: empty })
+    expect(storyMapItems(db, listNodes(db), 'v2').map((item) => item.id)).toContain(plan)
+    // v1 as it was: any link the author made writes the plan.
+    expect(storyMapItems(db, listNodes(db), 'v1').map((item) => item.id)).not.toContain(plan)
+    setSceneMeta(db, plan, { ...getSceneMeta(db, plan).meta, fulfilledBy: quay })
+    expect(storyMapItems(db, listNodes(db), 'v2').map((item) => item.id)).not.toContain(plan)
   })
 
   it('drops a link that no longer stands once the plan has words', async () => {

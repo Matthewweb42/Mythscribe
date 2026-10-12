@@ -8,7 +8,9 @@ import { resetSceneMetaStore, useSceneMetaStore } from '@renderer/features/edito
 import { resetSummaryStore } from '@renderer/features/editor/summaryStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { resetMemoryStore, useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { useProjectStore } from '@renderer/features/project/projectStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { cardDropTarget, cardStepTarget } from './cardMove'
 import { CorkBoard, FolderViewToggle } from './CorkBoard'
@@ -31,6 +33,7 @@ const nodes: TreeNode[] = [
 let metas: Record<string, SceneMeta>
 let summaries: Record<string, SceneSummaryState>
 let moves: { id: string; parentId: string; afterId?: string | null }[]
+let invoked: string[] = []
 
 const summaryOf = (id: string, text: string): SceneSummaryState => ({
   available: true,
@@ -55,7 +58,9 @@ const summaryOf = (id: string, text: string): SceneSummaryState => ({
  * at the gap-closed target position (like main); the tag channels answer empty lists.
  */
 function install(): void {
+  invoked = []
   const invoke = vi.fn(async (channel: string, input: unknown) => {
+    invoked.push(channel)
     if (channel === 'sceneMeta:get') {
       const { id } = input as { id: string }
       return { id, meta: metas[id] ?? emptySceneMeta() }
@@ -91,6 +96,8 @@ function install(): void {
 beforeEach(() => {
   resetSceneMetaStore()
   resetSummaryStore()
+  resetMemoryStore()
+  useProjectStore.setState({ current: null })
   resetPendingSaves()
   resetOutlineViewStore()
   useTreeStore.getState().clear()
@@ -104,6 +111,8 @@ afterEach(() => {
   // The synopsis edits schedule a debounced `sceneMeta:set`; it must not fire into the next file.
   resetSceneMetaStore()
   resetSummaryStore()
+  resetMemoryStore()
+  useProjectStore.setState({ current: null })
 })
 
 const board = (): HTMLElement => screen.getByRole('list', { name: 'Cork board' })
@@ -194,6 +203,30 @@ describe('CorkBoard', () => {
     expect(synopsisOf('Scene 1')).toHaveValue('')
     await userEvent.type(synopsisOf('Scene 1'), 'Mine')
     expect(within(card('Scene 1')).queryByTestId('card-ai-summary')).toBeNull()
+  })
+
+  it('in story memory v2: shows the card line greyed, and asks for no summary', async () => {
+    useProjectStore.setState({
+      current: {
+        id: '0123456789',
+        name: 'Ridge',
+        format: 'novel',
+        path: '/books/Ridge.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 1,
+        storyMemory: 'v2'
+      }
+    })
+    useMemoryStore.setState({ cardLines: { 'sc-1': 'Kael waits out the storm at the quay.' } })
+    summaries['sc-1'] = summaryOf('sc-1', 'A frozen v1 summary.')
+    render(<CorkBoard folderId="ch-1" format="webnovel" />)
+    const line = await within(card('Scene 1')).findByTestId('card-card-line')
+    expect(line).toHaveTextContent('Kael waits out the storm at the quay.')
+    expect(within(card('Scene 1')).queryByTestId('card-ai-summary')).toBeNull()
+    expect(screen.queryByText('A frozen v1 summary.')).toBeNull()
+    expect(invoked).not.toContain('summary:get')
   })
 
   it('writes synopsis and status edits through the scene metadata store', async () => {

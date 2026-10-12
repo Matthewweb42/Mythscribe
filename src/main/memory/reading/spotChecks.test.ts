@@ -109,8 +109,11 @@ describe('spot checks (F-16.17, P2a-D8)', () => {
     expect(fast.every((request) => sentChecks(request).length === 10)).toBe(true)
     expect(strong).toHaveLength(REBUILD_STRONG_CHECKS)
     expect(strong.every((request) => request.maxTokens === 40)).toBe(true)
-    // Three sentences either side for the strong model.
-    expect(sentChecks(strong[0] ?? { messages: [] })[0]?.text.split('.').length).toBeGreaterThan(5)
+    // Three sentences either side for the strong model (the sample is ordered by a hash of the
+    // claim ids, so the first one may sit at the scene's start with fewer before it).
+    expect(
+      strong.some((request) => (sentChecks(request)[0]?.text.split('.').length ?? 0) > 5)
+    ).toBe(true)
     const agreed = literal.map((id) => getClaim(db, id)).filter((claim) => claim?.spot === 'agree')
     expect(agreed).toHaveLength(REBUILD_FAST_CHECKS)
     expect(getSpotState(db).rebuildPass).toBe(false)

@@ -1013,13 +1013,16 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
       }
       if (c.scoring.kind === 'planLinksPick') {
         const pick = parsePlanLinksV2Answer(reply.text)
+        const expected = c.scoring.expected
         results.push({
           ...base,
           answer: reply.text,
           verdict:
             pick === null
               ? { kind: 'json', ok: false, problem: 'not { pick: S1 | S2 | none }' }
-              : { kind: 'json', ok: true, problem: null }
+              : expected !== null && pick.pick !== expected
+                ? { kind: 'json', ok: false, problem: `picked ${pick.pick}, expected ${expected}` }
+                : { kind: 'json', ok: true, problem: null }
         })
         continue
       }

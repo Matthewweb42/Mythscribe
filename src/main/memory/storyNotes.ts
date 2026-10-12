@@ -11,6 +11,7 @@ import { currentDraftId } from '../draft/draftStore'
 import { getNode, type TreeDb } from '../tree/treeStore'
 import { labelsForNode } from './labelStore'
 import { listNameMentions } from './nameIndexer'
+import { cardMoodOf } from './reading/cardContext'
 import { getCard } from './reading/cardStore'
 import { heldCard, hereChips, hereValues, readingOrder, typedNames } from './reading/views'
 import { getRecord, listRecords } from './recordStore'
@@ -85,15 +86,13 @@ export function storyNotesFacts(db: TreeDb, nodeId: string): StoryNotesFacts | n
     .sort(([, a], [, b]) => b.count - a.count || a.first - b.first)
     .map(([id]) => id)
 
-  const draftId = currentDraftId(db)
-  const card = draftId === null ? null : getCard(db, nodeId, draftId)
   return {
     pov: povId === null ? null : recordOf(povId),
     alsoHere: present(hereIds.filter((id) => id !== povId)),
     named: present(named),
     labels: labelsForNode(db, nodeId).map((label) => ({ name: label.name, kind: label.kind })),
     values: Object.fromEntries(hereValues(db, reading, nodeId, hereIds)),
-    mood: card === null ? null : { mood: card.mood ?? '', theme: card.theme ?? '' }
+    mood: cardMoodOf(db, nodeId)
   }
 }
 

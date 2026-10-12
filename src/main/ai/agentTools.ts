@@ -66,6 +66,8 @@ import {
   recordByNameV2,
   refusesV2Edit,
   scenesNaming,
+  UNREAL_SCENE_NOTE,
+  unrealScenes,
   todoV2
 } from './agentToolsV2'
 import { headTruncate } from './context/chatContext'
@@ -486,7 +488,10 @@ function cards(project: AgentProject, idsArg: unknown, nameArg: unknown): ToolOu
             : `No record is called "${name}". Try find_passages, or name the scene ids.`
       }
     }
-    nodeIds = scenesNaming(project, record.id).map((each) => each.nodeId)
+    // Only the book's own scenes: an Idea or left-out scene never happened (design §2.2).
+    nodeIds = scenesNaming(project, record.id)
+      .filter((each) => each.real)
+      .map((each) => each.nodeId)
     if (nodeIds.length === 0) {
       return {
         step: { tool: 'cards', label: 'Reading scene cards…' },
@@ -530,10 +535,12 @@ function cards(project: AgentProject, idsArg: unknown, nameArg: unknown): ToolOu
     label: `Reading ${nodeIds.length} scene card${nodeIds.length === 1 ? '' : 's'}…`
   }
   if (nodeIds.length === 0) return { step, result: 'Those ids name no scene; read the outline.' }
+  const unreal = project.memory === 'v2' ? unrealScenes(project) : () => false
   const blocks = nodeIds.map((nodeId) => {
     const head = sceneHead(project, nodeId)
     // F-16.20: a v2 project reads its v2 cards (the reader's map), never v1's frozen rows.
     if (project.memory === 'v2') {
+      if (unreal(nodeId)) return `${head}\n${UNREAL_SCENE_NOTE}`
       const card = promptCard(project.db, nodeId)
       return card === null ? `${head}\nNo card yet; read the scene.` : renderToolCard(head, card)
     }
@@ -761,6 +768,7 @@ function readSummary(project: AgentProject, ref: unknown): ToolOutcome {
   const step: AgentStep = { tool: 'read_summary', label: `Reading the summary of ${title}…` }
   const when = positionNote(project.time, row.id)
   if (project.memory === 'v2') {
+    if (unrealScenes(project)(row.id)) return { step, result: `${title}: ${UNREAL_SCENE_NOTE}` }
     const card = promptCard(project.db, row.id)
     if (card === null) return { step, result: `${title} has no card yet; read the scene.` }
     const gist = card.gist.trim() || card.line.trim()

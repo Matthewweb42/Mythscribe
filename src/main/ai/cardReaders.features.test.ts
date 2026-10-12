@@ -18,7 +18,7 @@ import { createSeededProject } from '../project/testProject'
 import { createNode, getNode, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { resetVoiceProfileCache } from '../voice/versionCache'
-import { runBetaReader } from './betaReader'
+import { parseBetaReaderAnswerV2, runBetaReader } from './betaReader'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { resetInflight } from './inflight'
 import { BETA_READER_MAP_HEADING } from './prompts/betaReader.v2'
@@ -242,6 +242,27 @@ describe('the summary readers read cards in v2 (F-16.20)', () => {
     ])
     expect(result.dropped).toBe(1)
     expect(result.missing).toBe(0)
+  })
+
+  it('the beta reader keeps an item whose ref is malformed, reading a ref written as digits', () => {
+    const answer = JSON.stringify({
+      items: [
+        { category: 'knows', quote: 'the ferryman had not come', note: 'Late.', ref: '1' },
+        { category: 'expects', quote: 'the dark came down', note: 'Night.', ref: 'two' },
+        { category: 'confusion', quote: 'cold', note: 'Cold.', ref: 1.5 }
+      ]
+    })
+    const { items, dropped } = parseBetaReaderAnswerV2(
+      answer,
+      'At the quay the ferryman had not come, and the dark came down. It was cold.',
+      1
+    )
+    expect(dropped).toBe(0)
+    expect(items).toEqual([
+      { category: 'knows', scene: 2, quote: 'the ferryman had not come', note: 'Late.', ref: 1 },
+      { category: 'expects', scene: 2, quote: 'the dark came down', note: 'Night.' },
+      { category: 'confusion', scene: 2, quote: 'cold', note: 'Cold.' }
+    ])
   })
 
   it('the beta reader counts an earlier scene with no card as missing in v2', async () => {

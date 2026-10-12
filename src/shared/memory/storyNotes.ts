@@ -3,6 +3,7 @@ import { STORY_BIBLE_VALUE_MAX } from '../storyBible'
 import { labelSteerParts, type Label } from '../storyLabels'
 import type { TiptapNodeT } from '../tiptap'
 import { markedParagraphs } from './pageMarks'
+import { foldDetail } from './typedVsText'
 
 /**
  * The Story notes block (F-16.14, P1 slice 5; story memory v2): what every prose prompt of a v2
@@ -168,28 +169,46 @@ function moodLine(mood: { mood: string; theme: string } | null | undefined): str
   return parts.length === 0 ? null : `Mood (as read from the prose): ${parts.join('; ')}`
 }
 
-/** `Name (from the book so far): a; b; c.` with as many values as fit in `room`, or null. */
-function fitValues(name: string, values: readonly string[], room: number): string | null {
+/**
+ * `Name (from the book so far): a; b; c.` with as many values as fit in `room` (the values kept
+ * with it), or null.
+ */
+function fitValues(
+  name: string,
+  values: readonly string[],
+  room: number
+): { line: string; kept: string[] } | null {
   for (let keep = values.length; keep >= 1; keep -= 1) {
-    const line = `${name} ${STORY_NOTES_VALUES_MARK}: ${values.slice(0, keep).join('; ')}.`
-    if (estimateTokens(`${line}\n`) <= room) return line
+    const line = valuesLine(name, values.slice(0, keep))
+    if (estimateTokens(`${line}\n`) <= room) return { line, kept: values.slice(0, keep) }
   }
   return null
+}
+
+const valuesLine = (name: string, values: readonly string[]): string =>
+  `${name} ${STORY_NOTES_VALUES_MARK}: ${values.join('; ')}.`
+
+/** Whether a record's admitted Pinned line already says `Label: value` (never sent twice). */
+function pinnedSays(line: string | undefined, value: string): boolean {
+  if (line === undefined) return false
+  const said = foldDetail(value)
+  return said !== '' && ` ${foldDetail(line)} `.includes(` ${said} `)
 }
 
 /**
  * Renders the block within `maxTokens` estimated tokens (`STORY_BIBLE_TOKEN_BUDGET`, or
  * `STORY_BIBLE_GHOST_TOKEN_BUDGET` for ghost text), or null when it would say nothing (nobody here
  * or named, and no steering label). The heading, Here, Named and label lines are kept (a list that
- * would not fit is cut to "… and N more"), then the Mood line when it fits (F-16.20). What the
- * book states about the Here records comes next (F-16.20: before their Pinned lines, the POV first,
- * a record's values cut from the end to fit). The record lines are trimmed by priority (CLAUDE.md,
- * token efficiency rule 8): each Here record's first Pinned paragraph is admitted first (the POV,
- * then *also here*; one that does not fit whole is cut at a word, and then no Named line is
- * admitted), then the rest of their paragraphs while they fit, then the Named records' lines in
- * what room is left, most named first, each with as many paragraphs as fit. The first Named record
+ * would not fit is cut to "… and N more"), then the Mood line when it fits (F-16.20). The record
+ * lines are trimmed by priority (CLAUDE.md, token efficiency rule 8): each Here record's first
+ * Pinned paragraph is admitted first (the POV, then *also here*; one that does not fit whole is
+ * cut at a word, and then no Named line is admitted), so the author's own canon always wins the
+ * room; then what the book states about the Here records (F-16.20, the POV first, a record's
+ * values cut from the end to fit; a value its admitted Pinned line already says is never sent
+ * twice); then the rest of their paragraphs while they fit; then the Named records' lines in what
+ * room is left, most named first, each with as many paragraphs as fit. The first Named record
  * that does not fit ends the Named lines, so a less named record never keeps a line a more named
- * one lost.
+ * one lost. The value lines are shown before the record lines.
  */
 export function renderStoryNotes(
   facts: StoryNotesFacts,
@@ -230,16 +249,6 @@ export function renderStoryNotes(
         )
   const moodKept =
     mood === null || estimateTokens(`${mood}\n`) > maxTokens - used ? null : keep(mood)
-  // F-16.20: what the book states about the Here records, before their Pinned lines.
-  const valueLines = continuity
-    ? []
-    : here.flatMap((record) => {
-        const values = facts.values?.[record.id] ?? []
-        if (values.length === 0) return []
-        const line = keep(fitValues(record.name, values, maxTokens - used))
-        return line === null ? [] : [line]
-      })
-
   /** Each record's line as admitted so far, by id. */
   const lines = new Map<string, string>()
   const lineOf = (record: StoryNotesRecord, paragraphs: readonly string[]): string =>
@@ -267,6 +276,20 @@ export function renderStoryNotes(
     lines.set(record.id, line)
     used += cost(line)
   }
+  // F-16.20: what the book states about the Here records, after their first Pinned paragraphs.
+  const values = new Map<string, string[]>()
+  if (!continuity) {
+    for (const record of here) {
+      const stated = (facts.values?.[record.id] ?? []).filter(
+        (value) => !pinnedSays(lines.get(record.id), value)
+      )
+      if (stated.length === 0) continue
+      const fitted = fitValues(record.name, stated, maxTokens - used)
+      if (fitted === null) continue
+      values.set(record.id, fitted.kept)
+      used += cost(fitted.line)
+    }
+  }
   // The rest of their paragraphs, in order, while they fit.
   for (const { record, paragraphs } of hereParagraphs) {
     const current = lines.get(record.id)
@@ -282,6 +305,17 @@ export function renderStoryNotes(
     }
     lines.set(record.id, line)
   }
+  // A value a later Pinned paragraph says too goes, its room handed back.
+  const valueLines = here.flatMap((record) => {
+    const kept = values.get(record.id)
+    if (kept === undefined) return []
+    const left = kept.filter((value) => !pinnedSays(lines.get(record.id), value))
+    used -= cost(valuesLine(record.name, kept))
+    if (left.length === 0) return []
+    const line = valuesLine(record.name, left)
+    used += cost(line)
+    return [line]
+  })
   // The Named records' lines, most named first; the first that does not fit ends them.
   for (const record of squeezed ? [] : named) {
     const paragraphs = pinnedCanonLines(record)

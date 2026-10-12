@@ -15,7 +15,7 @@ import { sceneRefs } from '@shared/memory/sceneRef'
 import { slotLabel, type Slot } from '@shared/memory/slots'
 import type { StoryRecordSummary } from '@shared/memory/records'
 import type { SceneDetails } from '@shared/memory/sceneDetails'
-import { compareTyped, type TypedNames } from '@shared/memory/typedVsText'
+import { compareTyped, detailsAgree, type TypedNames } from '@shared/memory/typedVsText'
 import type {
   ClaimInfo,
   ClaimView,
@@ -245,7 +245,8 @@ export function hereChips(
  * design §2.6): per record, its fixed and lasting values that are live (narration in `now` mode,
  * the sentence unchanged since it was read), then the transient values this scene itself states
  * ("Last seen at: the quay"), each `Label: value`. Never dialogue, thought, rumour, memory or a
- * dream as fact, never a stale line, never an absence: a record with nothing stated has no entry.
+ * dream as fact, never a stale line, never an absence, never one side of a fixed slot the book
+ * contradicts itself on: a record with nothing stated has no entry.
  */
 export function hereValues(
   db: TreeDb,
@@ -265,8 +266,14 @@ export function hereValues(
     const claims = asOfClaims(db, recordClaims(db, recordId, draftId))
     if (claims.length === 0) continue
     const sheet = sheetAsOf(claims, reading, nodeId)
+    // A fixed slot the book gives two different values for is left out: until the author
+    // settles it, a prompt is steered toward neither side.
     const fixed = sheet.fixed
-      .filter((line) => !line.value.stale)
+      .filter(
+        (line) =>
+          !line.value.stale &&
+          !line.also.some((other) => !other.stale && !detailsAgree(other.value, line.value.value))
+      )
       .map((line) => labelled(line.slot, line.value.value, line.objectId))
     const now = trueNow(claims, reading, nodeId).filter((line) => !line.stale)
     const lasting = now

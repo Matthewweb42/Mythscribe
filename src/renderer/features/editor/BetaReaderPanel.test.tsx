@@ -9,6 +9,7 @@ import { resetAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -100,6 +101,7 @@ beforeEach(() => {
   resetAiSettingsStore()
   resetProposalStore()
   resetPendingSaves()
+  useProjectStore.setState({ current: null })
   useDialogStore.setState({ modals: [], toasts: [] })
   requests = []
   settles = []
@@ -151,6 +153,7 @@ afterEach(() => {
   resetAiSettingsStore()
   resetProposalStore()
   resetPendingSaves()
+  useProjectStore.setState({ current: null })
   if (!editor.isDestroyed) editor.destroy()
   setIpcClient(null)
 })
@@ -240,6 +243,30 @@ describe('BetaReaderPanel (F-14.11)', () => {
       'The reader had nothing to report.'
     )
     expect(screen.queryByTestId('beta-reader-item')).not.toBeInTheDocument()
+  })
+
+  it('in story memory v2: says an unread earlier scene wants reading, and what an item relates to', async () => {
+    useProjectStore.setState({
+      current: {
+        id: '0123456789',
+        name: 'Ridge',
+        format: 'novel',
+        path: '/books/Ridge.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 1,
+        storyMemory: 'v2'
+      }
+    })
+    render(<BetaReaderPanel id="sc-1" editor={editor} />)
+    await ready({ items: [item({ ref: 1 })], missing: 2 })
+    expect(screen.getByTestId('beta-reader-missing')).toHaveTextContent(
+      '2 earlier scenes have not been read yet, so the reader skipped them; open and leave them, or Rebuild memory'
+    )
+    expect(screen.getByTestId('beta-reader-ref')).toHaveTextContent(
+      'Relates to Chapter 1 › Opening'
+    )
   })
 
   it('the honesty select writes the setting', async () => {

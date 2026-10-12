@@ -9053,6 +9053,36 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     expect((await invoke('app:info', undefined)).newProjectMemory).toBe('v1')
   })
 
+  it('F-16.21: Undo of an Unlink in Dismissed puts the author’s plan link back', async () => {
+    const written = await openV2()
+    await invoke('document:save', { id: written, content: paragraphs('Mara reached the quay.') })
+    const parentId = (await invoke('tree:list', undefined)).find(
+      (row) => row.id === written
+    )?.parentId
+    const planned = await invoke('tree:create', {
+      parentId: parentId ?? '',
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'Mara at the quay'
+    })
+    await invoke('sceneMeta:set', {
+      id: planned.id,
+      meta: { ...emptySceneMeta(), fulfilledBy: written }
+    })
+    expect(
+      await invoke('planLinks:unlink', { plan: { kind: 'scene', nodeId: planned.id } })
+    ).toEqual({ changedNodeIds: [planned.id] })
+    expect((await invoke('sceneMeta:get', { id: planned.id })).meta.fulfilledBy).toBeUndefined()
+    const listed = await invoke('dismissed:list', undefined)
+    const row = listed.items.find((item) => item.kind === 'unlink')
+    if (row === undefined) throw new Error('no unlink row')
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    await invoke('dismissed:undo', { id: row.id })
+    expect((await invoke('sceneMeta:get', { id: planned.id })).meta.fulfilledBy).toBe(written)
+    expect(sentOf('planLinks:changed')).toEqual([{ changedNodeIds: [planned.id] }])
+    expect((await invoke('dismissed:list', undefined)).count).toBe(0)
+  })
+
   it('scans and indexes a duplicated scene, and relabels a scene moved under an Idea chapter', async () => {
     vi.useFakeTimers()
     try {

@@ -1415,7 +1415,9 @@ test('story memory v2: card lines, plan links, synopsis and beta reader on cards
   })
   await invoke('sceneMeta:set', {
     id: plan.id,
-    meta: { ...planMeta.meta, synopsis: 'She waits at the quay.' }
+    // Mara counts once (her record), so the plan's terms are quay, walk, wait, dusk and Mara:
+    // Scene 1 holds 3 of 5, the dusk scene 4 of 5, too close for code (P2a slice 5 review).
+    meta: { ...planMeta.meta, synopsis: 'She walks to the quay and waits at dusk.' }
   })
   const dusk = await newScene('Quay at dusk')
   const duskText = [

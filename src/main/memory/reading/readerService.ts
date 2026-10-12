@@ -674,16 +674,17 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
 
   /**
    * F-16.21: plan links after a reading that wrote (code first, `planLinks.v2` at most once), in
-   * the reading's own job, so its cost is tallied as the reading's (asked or background) and a
-   * Stop ends it. Nothing here fails the reading.
+   * the reading's own job, so a Stop ends it. The pick is never part of what the author asked or
+   * was priced (Read now, a rebuild, a priced backlog or back-fill price readings only), so its
+   * cost is tallied as background spend and, past the Cloud cap, it is not asked at all: code
+   * still links (P2a-D9). Nothing here fails the reading.
    */
   const linkPlans = async (
     db: TreeDb,
     nodeId: string,
     outcome: ReadingOutcome,
     requestId: string,
-    signal: AbortSignal,
-    asked: boolean
+    signal: AbortSignal
   ): Promise<void> => {
     if (!outcome.read) return
     try {
@@ -694,7 +695,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
         lineMoved: outcome.lineMoved,
         requestId,
         signal,
-        onSpend: spender(db, asked)
+        askAi: !(isCloud(db) && capReached(deps.cloud.get(), month())),
+        onSpend: spender(db, false)
       })
       if (result.changed) deps.planLinksChanged()
     } catch (err) {
@@ -756,9 +758,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       )
       settled = true
       afterReading(db, nodeId, outcome)
-      await withSignal(requestId, (signal) =>
-        linkPlans(db, nodeId, outcome, requestId, signal, asked)
-      )
+      await withSignal(requestId, (signal) => linkPlans(db, nodeId, outcome, requestId, signal))
       return { requested: requested(outcome), value: { outcome } }
     } finally {
       // A caret a later idle pause set while this ran is that run's (the job runs once more).
@@ -794,7 +794,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       )
     )
     afterReading(db, nodeId, outcome)
-    await withSignal(requestId, (signal) => linkPlans(db, nodeId, outcome, requestId, signal, true))
+    await withSignal(requestId, (signal) => linkPlans(db, nodeId, outcome, requestId, signal))
     // Counted; the rebuild closes once its last scene job ends, however it ends (`closeRebuild`).
     rebuildSceneDone(db)
     return { requested: requested(outcome), value: { outcome } }
@@ -884,7 +884,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
             )
             sent ||= requested(outcome)
             afterReading(db, scene.nodeId, outcome)
-            await linkPlans(db, scene.nodeId, outcome, `${requestId}:b${n}`, signal, group.asked)
+            await linkPlans(db, scene.nodeId, outcome, `${requestId}:b${n}`, signal)
           }
           for (const row of group.rows) {
             setBackfillState(db, record.recordId, 'done', now(), row.norm)

@@ -5,6 +5,7 @@ import {
   CLAIM_PROOFS,
   CLAIM_STATES,
   CLAIM_VOICES,
+  PLAN_LINK_ORIGINS,
   SPOT_TIERS,
   SPOT_VERDICTS
 } from '@shared/memory/claims'
@@ -30,6 +31,9 @@ import type { TreeDb } from '../../tree/treeStore'
  * - `memoryNotAbout`: the record each *Not right › Not about* moved a line to, by the Dismissed
  *   row its first record got, so a later reading (a rebuild too) stores the line again for the
  *   record the author picked rather than dropping it (F-16.18).
+ * - `memoryUnlinked`: the plan link each *Unlink* took off (F-16.21), by the Dismissed row's id:
+ *   whose it was (the author's `fulfilledBy`, or one applied automatically, with its score, reason
+ *   and draft), so *Undo* in Dismissed puts it back as it was.
  */
 
 export const MEMORY_REBUILD_KEY = 'memoryRebuild'
@@ -38,6 +42,7 @@ export const MEMORY_HEALTH_KEY = 'memoryHealth'
 export const MEMORY_ASKED_KEY = 'memoryAsked'
 export const MEMORY_NOT_RIGHT_KEY = 'memoryNotRight'
 export const MEMORY_NOT_ABOUT_KEY = 'memoryNotAbout'
+export const MEMORY_UNLINKED_KEY = 'memoryUnlinked'
 
 export const SpotState = z.object({
   rebuiltAt: z.string().nullable().default(null),
@@ -182,4 +187,28 @@ export function notAboutMovedTo(db: TreeDb): Map<string, string> {
       return to === undefined ? [] : [[row.key, to] as const]
     })
   )
+}
+
+/** A plan link an *Unlink* took off: the author's own, or one applied automatically. */
+const UnlinkedLink = z.discriminatedUnion('origin', [
+  z.object({ origin: z.literal('author') }),
+  z.object({
+    origin: z.enum(PLAN_LINK_ORIGINS),
+    score: z.number(),
+    reason: z.string(),
+    readingId: z.string().nullable(),
+    draftId: z.string().nullable(),
+    created: z.string()
+  })
+])
+export type UnlinkedLink = z.infer<typeof UnlinkedLink>
+const UnlinkedStash = z.record(z.string(), UnlinkedLink)
+export type UnlinkedStash = Record<string, UnlinkedLink>
+
+export function getUnlinkedStash(db: TreeDb): UnlinkedStash {
+  return readRow(db, MEMORY_UNLINKED_KEY, UnlinkedStash, {})
+}
+
+export function setUnlinkedStash(db: TreeDb, stash: UnlinkedStash): void {
+  writeRow(db, MEMORY_UNLINKED_KEY, stash)
 }

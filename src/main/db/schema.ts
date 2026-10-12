@@ -1303,7 +1303,9 @@ export type ClaimInsert = typeof claim.$inferInsert
 /**
  * AI-made plan links (F-16.21; P2a-D12): which drafted scene fulfils a planned one, matched in
  * code or picked by `planLinks.v2`. Derived, never in scene meta: the author's own links stay in
- * `fulfilledBy`, and *Keep* makes one hers.
+ * `fulfilledBy`, and *Keep* makes one hers. `draft_id` (migration `0035_plan_link_draft`,
+ * additive) is the draft whose cards made the link: only the active draft's rows are live (design
+ * §2.2); a row with none (made before 0035) is dropped on the next pass and matched again.
  */
 export const planLink = sqliteTable('plan_link', {
   planId: text('plan_id')
@@ -1316,7 +1318,8 @@ export const planLink = sqliteTable('plan_link', {
   score: real('score').notNull().default(0),
   reason: text('reason').notNull().default(''),
   readingId: text('reading_id').references(() => reading.id, { onDelete: 'set null' }),
-  created: text('created').notNull()
+  created: text('created').notNull(),
+  draftId: text('draft_id').references(() => draft.id, { onDelete: 'cascade' })
 })
 export type PlanLinkRow = typeof planLink.$inferSelect
 export type PlanLinkInsert = typeof planLink.$inferInsert

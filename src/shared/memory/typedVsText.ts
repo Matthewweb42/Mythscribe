@@ -57,6 +57,13 @@ function holds(haystack: string, needle: string): boolean {
   return ` ${haystack} `.includes(` ${needle} `)
 }
 
+/** Whether two values say the same thing, one's words holding the other's ("grey" in "grey-blue"). */
+export function detailsAgree(a: string, b: string): boolean {
+  const left = foldDetail(a)
+  const right = foldDetail(b)
+  return left === right || holds(left, right) || holds(right, left)
+}
+
 const outcomeOf = (typed: boolean, text: boolean, same: boolean): TypedOutcome => {
   if (!typed && !text) return 'none'
   if (!text) return 'typedOnly'
@@ -67,8 +74,11 @@ const outcomeOf = (typed: boolean, text: boolean, same: boolean): TypedOutcome =
 const shown = (field: CardField | null, verifiedOnly: boolean): CardField | null =>
   field === null || (verifiedOnly && !field.verified) ? null : field
 
-/** A place or time the text says: verified, or its value words of its own quote. */
-const fromQuote = (field: CardField | null): CardField | null =>
+/**
+ * A place or time the text says: verified, or its value words of its own quote. Anything else is
+ * the AI's paraphrase, never set against the author's typed detail nor sent as the text's (F-16.20).
+ */
+export const fromQuote = (field: CardField | null): CardField | null =>
   field === null || (!field.verified && cutValue(field.value, field.quote) === null) ? null : field
 
 function comparePov(

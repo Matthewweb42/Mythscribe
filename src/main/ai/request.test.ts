@@ -922,6 +922,24 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     expect(seen.at(-1)).not.toHaveProperty('lowestEffort')
     await runAiRequest(f.deps, { ...input, feature: 'tags', contextHash: 'tg' })
     expect(seen.at(-1)).not.toHaveProperty('lowestEffort')
+    // F-16.21: the plan-link pick in v2 too; v1's job leaves as it did.
+    await runAiRequest(f.deps, {
+      ...input,
+      feature: 'planLinks',
+      json: true,
+      promptVersion: 'planLinks.v2',
+      contextHash: 'pl2'
+    })
+    expect(seen.at(-1)).toMatchObject({ reasoning: 'off', lowestEffort: true })
+    await runAiRequest(f.deps, {
+      ...input,
+      feature: 'planLinks',
+      json: true,
+      promptVersion: 'planLinks.v1',
+      contextHash: 'pl1'
+    })
+    expect(seen.at(-1)).not.toHaveProperty('lowestEffort')
+    expect(seen.at(-1)?.reasoning).not.toBe('off')
   })
 
   it('F-16.9: sends contextImport.v3 and reviewChat.v3 with reasoning off, and leaves reviewChat.v2 as it was', async () => {

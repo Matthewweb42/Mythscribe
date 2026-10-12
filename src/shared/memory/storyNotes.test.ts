@@ -265,8 +265,10 @@ describe('renderStoryNotes with the reading (F-16.20)', () => {
   it('puts the Here records’ values before the Pinned lines, the POV first, and the mood last', () => {
     const block = renderStoryNotes(read, STORY_BIBLE_TOKEN_BUDGET) ?? ''
     const lines = block.split('\n')
-    const maraValues = `Mara Vell ${STORY_NOTES_VALUES_MARK}: Eyes: grey; Hair: cut short; Last seen at: the quay.`
+    // "Eyes: grey" is Mara's own Pinned canon: it is not sent a second time as the book's.
+    const maraValues = `Mara Vell ${STORY_NOTES_VALUES_MARK}: Hair: cut short; Last seen at: the quay.`
     expect(lines.indexOf(maraValues)).toBe(3)
+    expect(block.match(/Eyes: grey/gu)).toHaveLength(1)
     expect(lines[4]).toBe(`Orrin Dask ${STORY_NOTES_VALUES_MARK}: Role: ferryman.`)
     expect(lines.findIndex((line) => line.startsWith('Mara Vell (Mara, the Captain):'))).toBe(5)
     expect(block).not.toContain(`Tomas Harrow ${STORY_NOTES_VALUES_MARK}`)
@@ -280,7 +282,30 @@ describe('renderStoryNotes with the reading (F-16.20)', () => {
     expect(continuity).not.toContain('Mood')
   })
 
-  it('cuts values from the end before the Pinned lines when room is short', () => {
+  it('gives the Here records’ first Pinned paragraphs the room before the book’s values', () => {
+    const long = record('r-mara', 'Mara Vell', {
+      pinned: page(
+        paragraph('Lost her brother Daven to the river at twelve; will not cross water at night.')
+      )
+    })
+    const ferry = record('r-orrin', 'Orrin Dask', {
+      pinned: page(paragraph('Keeps the Hollow Elm ferry; owes the harbourmaster money.'))
+    })
+    const tight = facts({
+      pov: long,
+      alsoHere: [ferry],
+      values: {
+        'r-mara': Array.from({ length: 12 }, (_, i) => `Detail ${i}: ${'x'.repeat(20)}`),
+        'r-orrin': ['Role: ferryman']
+      }
+    })
+    const block = renderStoryNotes(tight, STORY_BIBLE_GHOST_TOKEN_BUDGET) ?? ''
+    expect(estimateTokens(block)).toBeLessThanOrEqual(STORY_BIBLE_GHOST_TOKEN_BUDGET)
+    expect(block).toContain('will not cross water at night.')
+    expect(block).toContain('owes the harbourmaster money.')
+  })
+
+  it('cuts values from the end when room is short', () => {
     const many = facts({
       values: { 'r-mara': Array.from({ length: 40 }, (_, i) => `Detail ${i}: ${'x'.repeat(30)}`) }
     })

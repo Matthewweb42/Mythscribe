@@ -470,7 +470,7 @@ import { createReaderService, dropSummaryJobs } from '../memory/reading/readerSe
 import { settleOwnedNames } from '../memory/reading/waiting'
 import { claimInfo, sceneMemory, sheetMemory } from '../memory/reading/views'
 import { cardLines } from '../memory/reading/cardContext'
-import { keepPlanLink, unlinkPlanV2 } from '../memory/reading/planLinks'
+import { keepPlanLink, restoreUnlinked, unlinkPlanV2 } from '../memory/reading/planLinks'
 import { planLinkViewV2 } from '../memory/reading/planLinkStore'
 import { cardNotRight, restoreNotRight } from '../memory/reading/notRight'
 import {
@@ -4862,6 +4862,13 @@ export function registerHandlers({
       reader.detailsChanged()
     }
     if (undone.kind === 'notProblem') reader.detailsChanged()
+    // F-16.21: *Undo* of an *Unlink* puts the plan link back as it was (the author's or automatic).
+    if (undone.kind === 'unlink') {
+      const restored = restoreUnlinked(db, undone)
+      if (restored.linksChanged || restored.changedNodeIds.length > 0) {
+        emit(windows(), 'planLinks:changed', { changedNodeIds: restored.changedNodeIds })
+      }
+    }
     publishQuestions()
     return undone
   })

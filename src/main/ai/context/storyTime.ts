@@ -93,7 +93,7 @@ export function positionNote(time: StoryTime, nodeId: string): string {
  * document's progress (F-11.1d) and, in story memory v1, its stored summary; in v2 (F-16.20) its
  * card's line (the AI's one-line map of it). A planned document the author linked to the scene
  * that fulfils it (`SceneMeta.fulfilledBy`, F-11.1d) is left out: that plan is written; in v2 so
- * is one linked automatically (F-16.21).
+ * is one linked automatically (F-16.21), and an author's link counts only to a drafted scene.
  */
 export function storyMapItems(
   db: TreeDb,
@@ -109,6 +109,11 @@ export function storyMapItems(
       ? cardLines(db)
       : new Map([...summariesFor(db, documents)].map(([id, row]) => [id, row.summary]))
   const linkedByApp = new Set(memory === 'v2' ? livePlanLinks(db).map((link) => link.planId) : [])
+  const wordsOf = new Map(manuscript.map((row) => [row.id, row.wordCount]))
+  // v2 (design §2.7): a plan is written only by a drafted scene; the author's link to a scene
+  // with no words yet leaves the plan on the map.
+  const fulfils = (id: string): boolean =>
+    ids.has(id) && (memory === 'v1' || (wordsOf.get(id) ?? 0) > 0)
   const depth = new Map<string, number>()
   const items: StoryMapItem[] = []
   for (const row of manuscript) {
@@ -117,7 +122,7 @@ export function storyMapItems(
     depth.set(row.id, level)
     const meta = parseStoredSceneMeta(row.sceneMeta)
     const progress = row.kind === 'document' ? sceneProgress(row.wordCount, meta.status) : null
-    if (progress === 'planned' && meta.fulfilledBy !== undefined && ids.has(meta.fulfilledBy)) {
+    if (progress === 'planned' && meta.fulfilledBy !== undefined && fulfils(meta.fulfilledBy)) {
       continue
     }
     if (progress === 'planned' && linkedByApp.has(row.id)) continue

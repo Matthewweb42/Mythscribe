@@ -6,7 +6,7 @@ import {
   type AgentStep,
   type AgentTool
 } from '@shared/agent'
-import { renderToolCard } from '@shared/memory/cardText'
+import { CARD_MAP_NOTE, renderToolCard } from '@shared/memory/cardText'
 import { markedParagraphs } from '@shared/memory/pageMarks'
 import { normName } from '@shared/memory/names'
 import { meaningOf, type MemorySource } from '@shared/memory/sources'
@@ -15,7 +15,7 @@ import { searchableText } from '@shared/search'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { nameMention, sceneDetail } from '../db/schema'
 import { listAuthorTodos } from '../memory/authorTodoStore'
-import { promptCard } from '../memory/reading/cardContext'
+import { hereTest, promptCard } from '../memory/reading/cardContext'
 import { sceneStatuses, searchMemoryPassages } from '../memory/passageIndexer'
 import { getRecord, listRecords } from '../memory/recordStore'
 import { getNode } from '../tree/treeStore'
@@ -108,6 +108,16 @@ export function recordByNameV2(
   const partial = records.filter((each) => normName(each.name).includes(norm))
   return partial.length === 1 ? partial[0] : undefined
 }
+
+/** Whether a scene is an Idea scene or one left out of compile (design §2.2: never real). */
+export function unrealScenes(project: AgentProject): (nodeId: string) => boolean {
+  const statuses = sceneStatuses(project.db)
+  return (nodeId) => statuses.idea.has(nodeId) || statuses.excluded.has(nodeId)
+}
+
+/** What a v2 tool says of an Idea or left-out scene in a card's place. */
+export const UNREAL_SCENE_NOTE =
+  '[idea] An Idea scene or one left out of the book (never happened): it has no card.'
 
 /**
  * The scenes of the run that name a record for certain, in reading order, with the paragraphs;
@@ -237,11 +247,26 @@ export function lookupV2(project: AgentProject, nameArg: unknown): ToolOutcome {
       `Named in ${named.length} scene${named.length === 1 ? '' : 's'} (${upToNow} up to now): ` +
         `first ${where(first, false)}, last ${where(last, true)}`
     )
-    // F-16.20: the card of the last scene up to now that names it (a map, never quoted).
-    const seen = [...named].reverse().find((each) => readingIndex(project, each.nodeId) <= now)
-    const card = seen === undefined ? null : promptCard(project.db, seen.nodeId)
-    if (seen !== undefined && card !== null) {
-      lines.push(renderToolCard(`Last seen ${sceneHead(project, seen.nodeId)}:`, card))
+    // F-16.20: the card of the last scene up to now where it is Here (the POV, on the page by a
+    // verified quote, or + also here): a map, never quoted. A scene that only names it says
+    // nothing of where it was, so only its line is given, with no place, time or POV.
+    const before = [...named].reverse().filter((each) => readingIndex(project, each.nodeId) <= now)
+    const isHere = hereTest(project.db)
+    const seen = before.find((each) => isHere(each.nodeId, record.id))
+    const seenCard = seen === undefined ? null : promptCard(project.db, seen.nodeId)
+    if (seen !== undefined && seenCard !== null) {
+      lines.push(renderToolCard(`Last seen ${sceneHead(project, seen.nodeId)}:`, seenCard))
+    }
+    const lastNamed = before[0]
+    const namedCard =
+      lastNamed === undefined || lastNamed.nodeId === seen?.nodeId
+        ? null
+        : promptCard(project.db, lastNamed.nodeId)
+    if (lastNamed !== undefined && namedCard !== null) {
+      lines.push(
+        `Last named in ${sceneHead(project, lastNamed.nodeId)} (not Here there):\n` +
+          `Map (${CARD_MAP_NOTE}): ${namedCard.line.trim()}`
+      )
     }
   }
   const unreal = naming.filter((each) => !each.real)

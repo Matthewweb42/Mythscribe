@@ -23,7 +23,13 @@ import { activeDraftId } from '../draft/draftStore'
 import { upsertCard } from '../memory/reading/cardStore'
 import { cardAnchorOf } from '../memory/reading/claimFixture'
 import { loadAgentProject, resolveAgentEdit, runAgentTool, type AgentProject } from './agentTools'
-import { AGENT_V2_REFUSED, AGENT_V2_REFUSED_EDITS, passageMark } from './agentToolsV2'
+import { sceneHead } from './agentRefs'
+import {
+  AGENT_V2_REFUSED,
+  AGENT_V2_REFUSED_EDITS,
+  passageMark,
+  UNREAL_SCENE_NOTE
+} from './agentToolsV2'
 
 /**
  * F-16.4 (P1 slice 4): `agent.v8` runs unchanged in a story memory v2 project until P3, so its
@@ -240,6 +246,53 @@ describe('the v2 cards in tool outputs (F-16.20)', () => {
     const lookup = runAgentTool(project, null, 'lookup', { name: 'Mara' }).result
     expect(lookup).toContain(`Last seen ${ref(project, scenes[1])}`)
     expect(lookup).toContain('Map (')
+  })
+
+  it('lookup never puts a record in a scene that only names it: Last named, with no place', () => {
+    setSceneDetails(
+      db,
+      scenes[1] ?? '',
+      {
+        povRecordId: null,
+        place: { recordId: null, text: '' },
+        time: { text: '' },
+        storyYear: null,
+        alsoHere: []
+      },
+      NOW
+    )
+    card(scenes[1] ?? '', 'The ferry leaves at dusk.', 'Tomas thinks of Mara as it leaves.')
+    const project = v2()
+    const lookup = runAgentTool(project, null, 'lookup', { name: 'Mara' }).result
+    expect(lookup).not.toContain('Last seen')
+    expect(lookup).toContain(
+      `Last named in ${sceneHead(project, scenes[1] ?? '')} (not Here there):\nMap (${CARD_MAP_NOTE}): The ferry leaves at dusk.`
+    )
+    expect(lookup).not.toContain('Where: the ferry')
+  })
+
+  it('cards by name reads only the book’s own scenes; an Idea scene by id says it never happened', () => {
+    const parentId = getNode(db, scenes[0] ?? '')?.parentId ?? ''
+    const idea = createNode(db, 'novel', {
+      parentId,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'Dream'
+    }).id
+    saveDocument(db, idea, doc({ text: 'Mara dreamed the lantern went out.' }))
+    scanNamesFor(db, idea, NOW)
+    card(idea, 'Mara dreams of the lantern.', 'A dream.')
+    setSceneMeta(db, idea, { location: '', pov: '', timeline: '', status: 'idea' })
+    const project = v2()
+    const byName = runAgentTool(project, null, 'cards', { name: 'Mara Vell' })
+    expect(byName.step.label).toBe('Reading 2 scene cards…')
+    expect(byName.result).not.toContain('Mara dreams of the lantern.')
+    const byId = runAgentTool(project, null, 'cards', { ids: [ref(project, idea)] }).result
+    expect(byId).toContain(UNREAL_SCENE_NOTE)
+    expect(byId).not.toContain('Mara dreams of the lantern.')
+    expect(
+      runAgentTool(project, null, 'read_summary', { id: ref(project, idea) }, AGENT_TOOLS).result
+    ).toContain(UNREAL_SCENE_NOTE)
   })
 })
 

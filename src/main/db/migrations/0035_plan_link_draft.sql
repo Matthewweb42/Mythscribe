@@ -1,0 +1,1 @@
+ALTER TABLE `plan_link` ADD `draft_id` text REFERENCES draft(id) ON UPDATE no action ON DELETE cascade;

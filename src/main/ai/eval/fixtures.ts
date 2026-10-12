@@ -855,8 +855,11 @@ export interface EvalCase {
     | { kind: 'storyTime'; forbidden: string[] }
     /** Plan links (F-11.1d): the answer must parse to `{ links }` naming only labels that were sent. */
     | { kind: 'planLinks'; plans: number; scenes: number }
-    /** F-16.21: `planLinks.v2` picks S1, S2 or none, read as the feature reads it. */
-    | { kind: 'planLinksPick' }
+    /**
+     * F-16.21: `planLinks.v2` picks S1, S2 or none, read as the feature reads it; `expected` is
+     * the right pick (null: the format only, as for a case of filler at the caps).
+     */
+    | { kind: 'planLinksPick'; expected: 'S1' | 'S2' | 'none' | null }
     /**
      * The To do check (F-9.16): the answer must parse to `{ items, resolved }`, every item of a
      * known type naming a scene label that was sent.
@@ -4074,7 +4077,12 @@ function betaReaderCaseV2(
   }
 }
 
-function planLinksCaseV2(name: string, note: string, input: BuildPlanLinksPromptV2Input): EvalCase {
+function planLinksCaseV2(
+  name: string,
+  note: string,
+  input: BuildPlanLinksPromptV2Input,
+  expected: 'S1' | 'S2' | 'none' | null
+): EvalCase {
   const built = buildPlanLinksPromptV2(input)
   return {
     version: built.version,
@@ -4082,7 +4090,7 @@ function planLinksCaseV2(name: string, note: string, input: BuildPlanLinksPrompt
     note,
     messages: built.messages,
     maxTokens: built.maxTokens,
-    scoring: { kind: 'planLinksPick' }
+    scoring: { kind: 'planLinksPick', expected }
   }
 }
 
@@ -4183,7 +4191,31 @@ const CARD_READER_CASES: EvalCase[] = [
           gist: 'Mara and Tomas walk the quay at noon, counting boats.'
         }
       ]
-    }
+    },
+    'S1'
+  ),
+  planLinksCaseV2(
+    'neither',
+    'two drafted scenes on the quay, neither of which carries out the plan (the letter is never burned)',
+    {
+      plan: {
+        title: 'Mara burns the letter',
+        synopsis: 'Alone on the quay at dusk, she burns Tomas’s letter.'
+      },
+      scenes: [
+        {
+          title: 'The quay',
+          line: 'Mara walks to the quay and waits for the ferry.',
+          gist: 'Mara walks down to the quay at dusk and waits; the ferry is late.'
+        },
+        {
+          title: 'Harbour',
+          line: 'Tomas counts boats on the quay.',
+          gist: 'Tomas counts the boats at noon and thinks of the letter he sent.'
+        }
+      ]
+    },
+    'none'
   ),
   planLinksCaseV2(
     'maxed',
@@ -4194,7 +4226,8 @@ const CARD_READER_CASES: EvalCase[] = [
         { title: 'T'.repeat(80), line: MAXED_CARD.line, gist: MAXED_CARD.gist },
         { title: 'U'.repeat(80), line: MAXED_CARD.line, gist: MAXED_CARD.gist }
       ]
-    }
+    },
+    null
   )
 ]
 

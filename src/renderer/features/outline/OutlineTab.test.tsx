@@ -212,6 +212,35 @@ describe('OutlineTab in story memory v2 (F-16.20, F-16.21)', () => {
     // The unlinked pair is a Dismissed row: the list is read again.
     await waitFor(() => expect(calls.some(([channel]) => channel === 'dismissed:list')).toBe(true))
   })
+
+  it('reads a plan the author linked to a scene with no words as Not yet drafted, the link a note', async () => {
+    const before = stored['sc-5'] ?? meta({})
+    stored['sc-5'] = meta({ beats: { saveTheCat: 'catalyst' }, fulfilledBy: 'sc-3' })
+    // Scene 3's row names Scene 5 too ("Fulfils plan"): find the row by its own title.
+    const own = (title: string): HTMLElement => {
+      const found = rows().find((r) => within(r).getAllByRole('button')[0]?.textContent === title)
+      if (!found) throw new Error(`no row ${title}`)
+      return found
+    }
+    try {
+      render(<OutlineTab />)
+      const note = await within(own('Scene 5')).findByTestId('outline-linked-unwritten')
+      expect(note).toHaveTextContent('linked to Scene 3 (no words yet)')
+      expect(within(own('Scene 5')).getByTestId('outline-not-drafted')).toHaveTextContent(
+        'Not yet drafted'
+      )
+      expect(within(own('Scene 5')).queryByTestId('outline-fulfilled')).toBeNull()
+      await userEvent.click(within(note).getByRole('button', { name: 'Unlink' }))
+      await waitFor(() =>
+        expect(calls).toContainEqual([
+          'planLinks:unlink',
+          { plan: { kind: 'scene', nodeId: 'sc-5' } }
+        ])
+      )
+    } finally {
+      stored['sc-5'] = before
+    }
+  })
 })
 
 describe('OutlineTab, planned and written (F-11.1d)', () => {

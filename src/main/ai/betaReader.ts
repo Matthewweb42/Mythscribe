@@ -381,15 +381,24 @@ const ModelItemV2 = z.object({
   category: z.enum(BETA_READER_CATEGORIES),
   quote: z.string(),
   note: z.string(),
-  ref: z.number().nullable().optional()
+  // Checked in code: a malformed ref is left off, never the item with it.
+  ref: z.unknown().optional()
 })
+
+/** A `ref` as a scene number: a whole number, or one written as digits ("2"); else null. */
+function refNumber(ref: unknown): number | null {
+  if (typeof ref === 'number') return Number.isInteger(ref) ? ref : null
+  if (typeof ref === 'string' && /^\s*\d+\s*$/u.test(ref)) return Number.parseInt(ref, 10)
+  return null
+}
 
 /**
  * `betaReader.v2`'s `{ items: [...] }` (F-16.20): PROVIDER when it is not JSON or not that shape,
  * item by item otherwise. Every item's quote must be in the current scene as sent (`sceneText`,
  * matched through `normalizeForMatch`), so nothing quotes a gist; an item that fails, or has an
  * unknown category, a blank quote or note, is dropped and counted. A `ref` that is not a whole
- * number naming one of the `earlier` scenes is left off (the item stays). Each kept item names the
+ * number (or one written as digits) naming one of the `earlier` scenes is left off (the item
+ * stays). Each kept item names the
  * current scene (`earlier + 1`). Duplicates by quote collapse; at most `BETA_READER_MAX_ITEMS`.
  */
 export function parseBetaReaderAnswerV2(
@@ -423,8 +432,8 @@ export function parseBetaReaderAnswerV2(
     const key = normalizeForMatch(quote)
     if (seen.has(key)) continue
     seen.add(key)
-    const ref = parsed.data.ref
-    const named = typeof ref === 'number' && Number.isInteger(ref) && ref >= 1 && ref <= earlier
+    const ref = refNumber(parsed.data.ref)
+    const named = ref !== null && ref >= 1 && ref <= earlier
     items.push({
       category: parsed.data.category,
       scene: earlier + 1,
