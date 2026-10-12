@@ -88,6 +88,7 @@ function collectBook(db: TreeDb, opts: Options, projectName: string): CompiledBo
   const plain = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:plain-text')
   if (!plain) throw new Error('no plain text format')
   return compileProject(db, {
+    memory: 'v1',
     format: {
       ...plain,
       matter: { ...plain.matter, frontMatter: opts.includeFront, endMatter: opts.includeEnd }

@@ -1,7 +1,7 @@
 import path from 'node:path'
 import type { CloudProvider, CloudSide } from '@shared/cloudSync'
 import type { NovelFormat, ProjectInfo } from '@shared/ipc/contract'
-import type { StoryMemoryVersion } from '@shared/storyMemory'
+import { DEFAULT_STORY_MEMORY, type StoryMemoryVersion } from '@shared/storyMemory'
 import { AppError } from '../ipc/errors'
 import { cloudProviderFor } from './cloudFolder'
 import {
@@ -49,6 +49,14 @@ export class ProjectManager {
     this.backupDirFor = options.backupDirFor
     this.storyMemoryOverride = options.storyMemoryOverride ?? null
     this.detectCloud = options.detectCloud ?? ((folder) => cloudProviderFor(folder))
+  }
+
+  /**
+   * The story memory a project made now runs (F-16.15: an import into a new project, a v0
+   * conversion): the dev override when there is one, else the default. Never written.
+   */
+  newProjectMemory(): StoryMemoryVersion {
+    return this.storyMemoryOverride ?? DEFAULT_STORY_MEMORY
   }
 
   current(): ProjectInfo | null {

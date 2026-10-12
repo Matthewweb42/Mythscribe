@@ -31,6 +31,7 @@ function builtin(id: string): CompileFormat {
 
 function book(format: CompileFormat): CompiledBook {
   return compileBook({
+    memory: 'v1',
     source: {
       front: [node({ id: 'fw', title: 'Foreword', content: words('First.') })],
       manuscript: [

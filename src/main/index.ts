@@ -292,6 +292,7 @@ if (!primaryInstance) {
       manager,
       devTools: () => devtools?.enabled() ?? false,
       assistantName: () => appState.get().view.assistantName,
+      switchover: !app.isPackaged,
       platform: process.platform,
       target: () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
     })

@@ -370,7 +370,12 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'research:undoFiling': 'write',
   'research:filedConflicts': 'read',
   'research:keepFiledLine': 'write',
-  'research:updateFiledLine': 'write'
+  'research:updateFiledLine': 'write',
+  'switchover:available': 'read',
+  'switchover:trialCopy': 'write',
+  'switchover:plan': 'read',
+  'switchover:consent': 'read',
+  'switchover:convert': 'write'
 }
 
 /** Whether a channel is refused while the app is read-only. */
@@ -739,7 +744,13 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'research:undoFiling': 'v2',
   'research:filedConflicts': 'v2',
   'research:keepFiledLine': 'v2',
-  'research:updateFiledLine': 'v2'
+  'research:updateFiledLine': 'v2',
+  // F-16.15: the switch-over runs on a v1 project (a second run is refused in v2).
+  'switchover:available': 'any',
+  'switchover:trialCopy': 'v1',
+  'switchover:plan': 'v1',
+  'switchover:consent': 'v1',
+  'switchover:convert': 'v1'
 }
 
 /** The message a channel of the other memory is refused with. */

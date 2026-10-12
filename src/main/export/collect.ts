@@ -1,4 +1,5 @@
 import type { CompileFormat, CompileOutput, CompileScope } from '@shared/compileFormat'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { compileBook, type CompiledBook } from '@shared/compileModel'
 import { compileSource } from '../document/compileStore'
 import { AppError } from '../ipc/errors'
@@ -21,6 +22,8 @@ export function checkCompileScope(db: TreeDb, scope: CompileScope): void {
 }
 
 export interface CompileRequest {
+  /** F-16.15: the project's story memory (`keepTags` is off in v2). */
+  memory: StoryMemoryVersion
   format: CompileFormat
   output: CompileOutput
   scope: CompileScope
@@ -51,6 +54,7 @@ export function compileProject(db: TreeDb, request: CompileRequest): CompiledBoo
     output: request.output,
     details: getBookDetails(db),
     projectName: request.projectName,
+    memory: request.memory,
     scope: request.scope,
     excluded: getCompileState(db).excluded
   })

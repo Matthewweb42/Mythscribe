@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { eq, inArray } from 'drizzle-orm'
 import { existingChanges, sceneDocument, type ImportDraft, type ImportScene } from '@shared/import'
 import type { NovelFormat } from '@shared/ipc/contract'
@@ -66,7 +67,12 @@ interface Rewrite {
   wordCount: number
 }
 
-export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft): ImportResult {
+export function importDraft(
+  db: TreeDb,
+  format: NovelFormat,
+  draft: ImportDraft,
+  memory: StoryMemoryVersion
+): ImportResult {
   return db.transaction((tx) => {
     const all = listNodes(tx)
     const byId = new Map(all.map((row) => [row.id, row]))
@@ -243,7 +249,9 @@ export function importDraft(db: TreeDb, format: NovelFormat, draft: ImportDraft)
             content: JSON.stringify(doc),
             wordCount: count
           })
-          const tags = [...new Set(scene.tags.map((tag) => tag.trim()).filter(Boolean))]
+          // F-16.15: a v2 project has no tags, so the pass's tag candidates go nowhere.
+          const tags =
+            memory === 'v2' ? [] : [...new Set(scene.tags.map((tag) => tag.trim()).filter(Boolean))]
           if (tags.length > 0) tagCandidates.push({ nodeId: row.id, tags })
         }
       }

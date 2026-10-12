@@ -77,7 +77,8 @@ describe('importDraft', () => {
     const { rows, words } = importDraft(
       db,
       'novel',
-      draftOf([part('p1', [chapter('p1c1', [scene('p1c1s1', 'One two three.')])])])
+      draftOf([part('p1', [chapter('p1c1', [scene('p1c1s1', 'One two three.')])])]),
+      'v1'
     )
 
     const after = children(root('manuscript').id)
@@ -100,7 +101,8 @@ describe('importDraft', () => {
           chapter('c1', [scene('s1', 'One two.'), scene('s2', 'Three.')]),
           chapter('c2', [scene('s3', 'Four five six.')])
         ])
-      ])
+      ]),
+      'v1'
     )
     expect(rows.map((row) => row.title)).toEqual(['p1', 'c1', 's1', 's2', 'c2', 's3'])
 
@@ -123,7 +125,8 @@ describe('importDraft', () => {
     const { rows } = importDraft(
       db,
       'novel',
-      draftOf([part('p1', [chapter('c1', [scene('s1', 'The bell rang.')])])])
+      draftOf([part('p1', [chapter('c1', [scene('s1', 'The bell rang.')])])]),
+      'v1'
     )
     const stored: unknown = JSON.parse(rows[2]?.content ?? 'null')
     expect(stored).toEqual({
@@ -148,7 +151,8 @@ describe('importDraft', () => {
           chapter('skipped', [scene('s1', 'Nothing.')], { excluded: true }),
           chapter('kept', [scene('s2', 'One.'), scene('s3', 'Two.', true)])
         ])
-      ])
+      ]),
+      'v1'
     )
     expect(rows.map((row) => row.title)).toEqual(['p1', 'kept', 's2'])
   })
@@ -159,7 +163,8 @@ describe('importDraft', () => {
       'novel',
       draftOf([
         part('p1', [chapter('Dedication', [scene('s1', 'For no one.')], { placement: 'front' })])
-      ])
+      ]),
+      'v1'
     )
     expect(rows.map((row) => row.title)).toEqual(['Dedication'])
     expect(rows[0]?.parentId).toBe(root('front').id)
@@ -179,7 +184,8 @@ describe('importDraft', () => {
           }),
           chapter('c1', [scene('s3', 'Four.')])
         ])
-      ])
+      ]),
+      'v1'
     )
     const afterword = rows.find((row) => row.title === 'Afterword')
     expect(afterword?.parentId).toBe(root('end').id)
@@ -196,7 +202,8 @@ describe('importDraft', () => {
     const { rows } = importDraft(
       db,
       'novel',
-      draftOf([part('  ', [chapter(' ', [{ ...scene('s1', 'One.'), title: '' }])])])
+      draftOf([part('  ', [chapter(' ', [{ ...scene('s1', 'One.'), title: '' }])])]),
+      'v1'
     )
     expect(rows.map((row) => row.title)).toEqual([
       'Untitled Part',
@@ -224,7 +231,8 @@ describe('importDraft', () => {
           ]),
           chapter('Afterword', [tagged('s4', 'Four.', ['protagonist'])], { placement: 'end' })
         ])
-      ])
+      ]),
+      'v1'
     )
     const idOf = (title: string): string => rows.find((row) => row.title === title)?.id ?? ''
     expect(tagCandidates).toEqual([
@@ -236,14 +244,19 @@ describe('importDraft', () => {
   it('refuses a draft with nothing left to import and writes nothing', () => {
     const before = listNodes(db).length
     expect(() =>
-      importDraft(db, 'novel', draftOf([part('p1', [chapter('c1', [scene('s1', 'One.', true)])])]))
+      importDraft(
+        db,
+        'novel',
+        draftOf([part('p1', [chapter('c1', [scene('s1', 'One.', true)])])]),
+        'v1'
+      )
     ).toThrow(AppError)
     expect(listNodes(db)).toHaveLength(before)
   })
 
   it('refuses an empty draft', () => {
     try {
-      importDraft(db, 'novel', draftOf([]))
+      importDraft(db, 'novel', draftOf([]), 'v1')
     } catch (err) {
       expect(err).toBeInstanceOf(AppError)
       expect((err as AppError).code).toBe('VALIDATION')
@@ -307,7 +320,8 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
     const result = importDraft(
       db,
       'novel',
-      combined([part('p1', [chapter('c1', [scene('s1', 'New text.')])])])
+      combined([part('p1', [chapter('c1', [scene('s1', 'New text.')])])]),
+      'v1'
     )
     expect(result).toMatchObject({ changedExisting: false, rewritten: [], deleted: [], words: 2 })
     const after = listNodes(db)
@@ -346,7 +360,7 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
         { ...part('p1', []) }
       ]
     }
-    const result = importDraft(db, 'novel', edited)
+    const result = importDraft(db, 'novel', edited, 'v1')
     const sceneRow = getNode(db, sceneId)
     expect(sceneRow?.title).toBe('The Climb')
     expect(textOf(sceneRow?.id ?? '')).toEqual(['Mara climbed.', 'Also new.'])
@@ -398,7 +412,7 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
         ...draft.parts.slice(1)
       ]
     }
-    const result = importDraft(db, 'novel', edited)
+    const result = importDraft(db, 'novel', edited, 'v1')
     expect(result.deleted.sort()).toEqual([second.id, third.id].sort())
     expect(getNode(db, second.id)).toBeUndefined()
     expect(getNode(db, third.id)).toBeUndefined()
@@ -437,10 +451,15 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
     const chapterOne = mine.chapters[0]
     const [s1] = chapterOne?.scenes ?? []
     if (!chapterOne || !s1) throw new Error('fixture')
-    const result = importDraft(db, 'novel', {
-      ...draft,
-      parts: [{ ...mine, chapters: [{ ...chapterOne, scenes: [s1] }] }, ...draft.parts.slice(1)]
-    })
+    const result = importDraft(
+      db,
+      'novel',
+      {
+        ...draft,
+        parts: [{ ...mine, chapters: [{ ...chapterOne, scenes: [s1] }] }, ...draft.parts.slice(1)]
+      },
+      'v1'
+    )
     expect(result.deleted).toContain(second.id)
     expect(result.factEntityIds).toEqual([mara.id])
     expect(listFactsForEntity(db, mara.id).filter((each) => each.origin === 'ai')).toEqual([])
@@ -451,7 +470,8 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
     const result = importDraft(
       db,
       'novel',
-      combined([part('p1', [chapter('c1', [scene('s1', 'New text.')])])])
+      combined([part('p1', [chapter('c1', [scene('s1', 'New text.')])])]),
+      'v1'
     )
     expect(result.factEntityIds).toEqual([])
   })
@@ -467,10 +487,15 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
     })
     const draft = combined([part('p1', [chapter('c1', [scene('s1', 'New.')])])])
     const mine = existingPart(draft)
-    const result = importDraft(db, 'novel', {
-      ...draft,
-      parts: [{ ...mine, chapters: [] }, ...draft.parts.slice(1)]
-    })
+    const result = importDraft(
+      db,
+      'novel',
+      {
+        ...draft,
+        parts: [{ ...mine, chapters: [] }, ...draft.parts.slice(1)]
+      },
+      'v1'
+    )
     expect(result.deleted.sort()).toEqual([chapterOne.id, sceneOne].sort())
     expect(getNode(db, chapterOne.id)).toBeUndefined()
     expect(getNode(db, loose.id)?.parentId).toBe(root('manuscript').id)
@@ -500,7 +525,7 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
     const draft = combined([part('p1', [chapter('c1', [scene('s1', 'New.')])])])
     expect(draft.parts.map((p) => p.title)).toEqual(['Part 1', 'p1'])
     const before = getNode(db, prologue.id)
-    importDraft(db, 'novel', draft)
+    importDraft(db, 'novel', draft, 'v1')
     expect(children(manuscript.id).map((row) => [row.title, row.position])).toEqual([
       ['Prologue', 0],
       ['Part 1', 1],
@@ -522,7 +547,7 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
       existing: { parts: [], chapters: [], scenes: ['gone'] }
     }
     const before = listNodes(db)
-    expect(() => importDraft(db, 'novel', stale)).toThrowError(/changed since the import/)
+    expect(() => importDraft(db, 'novel', stale, 'v1')).toThrowError(/changed since the import/)
     expect(listNodes(db)).toEqual(before)
   })
 
@@ -532,10 +557,15 @@ describe('importDraft with the combined outline (F-12.2 rework)', () => {
     const chapterOne = mine.chapters[0]
     if (!chapterOne) throw new Error('fixture')
     expect(() =>
-      importDraft(db, 'novel', {
-        ...draft,
-        parts: [{ ...mine, chapters: [{ ...chapterOne, placement: 'front' }] }]
-      })
+      importDraft(
+        db,
+        'novel',
+        {
+          ...draft,
+          parts: [{ ...mine, chapters: [{ ...chapterOne, placement: 'front' }] }]
+        },
+        'v1'
+      )
     ).toThrowError(/stays in the manuscript/)
   })
 })

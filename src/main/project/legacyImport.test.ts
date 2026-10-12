@@ -4,7 +4,11 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import type { TiptapNodeT } from '@shared/tiptap'
+import Database from 'better-sqlite3'
+import { pageTextBlocks } from '@shared/memory/pageMarks'
 import { listEntities } from '../entity/entityStore'
+import { labelsForNode, listLabels } from '../memory/labelStore'
+import { getRecord, listRecords } from '../memory/recordStore'
 import { listAllDocumentTags } from '../tag/documentTagStore'
 import { listTags } from '../tag/tagStore'
 import { listNodes } from '../tree/treeStore'
@@ -30,7 +34,7 @@ afterEach(() => {
 function convert(input: string): ReturnType<typeof convertLegacyProject> {
   const location = locateProject(input)
   if (location.kind !== 'legacy') throw new Error('expected a v0 project')
-  return convertLegacyProject(location, NOW)
+  return convertLegacyProject(location, NOW, 'v1')
 }
 
 const text = (doc: TiptapNodeT): string =>
@@ -125,6 +129,49 @@ describe('convertLegacyProject (F-1.6)', () => {
     expect(result).toMatchObject({ tags: 3, entities: 2 })
   })
 
+  it('in story memory v2 makes records and labels, and no tags or sheets (F-16.15)', () => {
+    const file = path.join(tmp, 'Ferryman.mythscribe')
+    writeV0Project(file)
+    const raw = new Database(file)
+    try {
+      raw
+        .prepare(
+          'INSERT INTO tags (id, name, category, parent_tag_id, color, created, modified) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )
+        .run('t-grim', 'Grim', 'tone', null, '#123456', 'x', 'x')
+      raw
+        .prepare('INSERT INTO document_tags (id, document_id, tag_id, created) VALUES (?, ?, ?, ?)')
+        .run('l9', 's1', 't-grim', 'x')
+    } finally {
+      raw.close()
+    }
+    const location = locateProject(file)
+    if (location.kind !== 'legacy') throw new Error('expected a v0 project')
+    const result = convertLegacyProject(location, NOW, 'v2')
+    expect(result).toMatchObject({ tags: 0, entities: 0, records: 4, labels: 1 })
+
+    session = openProject(file)
+    const db = session.connection.orm
+    expect(listTags(db)).toEqual([])
+    expect(listEntities(db)).toEqual([])
+    const records = listRecords(db)
+    expect(records.map((r) => `${r.name} (${r.categoryId}, ${r.origin})`).sort()).toEqual([
+      'Mara (character, conversion)',
+      'The Debt (thread, conversion)',
+      'The Landing (setting, conversion)',
+      'Young Mara (character, conversion)'
+    ])
+    // The reference's page is Mara's Pinned; her tag merged into the record the reference made.
+    const mara = getRecord(db, records.find((r) => r.name === 'Mara')?.id ?? '')
+    expect(pageTextBlocks(mara?.pinned ?? { type: 'doc' }).map((block) => block.text)).toEqual([
+      'Grey eyes.\nAfraid of deep water.'
+    ])
+    const labels = listLabels(db)
+    expect(labels.map((l) => [l.name, l.kind, l.colour])).toEqual([['Grim', 'tone', '#123456']])
+    const landing = listNodes(db).find((row) => row.title === 'Landing')
+    expect(labelsForNode(db, landing?.id ?? '').map((l) => l.name)).toEqual(['Grim'])
+  })
+
   it('converts a v0 folder project, picked by its project.db, and moves the whole folder aside', () => {
     const folder = path.join(tmp, 'Saga.mythscribe')
     writeV0Project(path.join(folder, 'project.db'), 'Saga')
@@ -154,7 +201,7 @@ describe('convertLegacyProject (F-1.6)', () => {
     // A row the converter cannot place: a document name that is not text breaks nothing, but a
     // corrupt database does.
     expect(() =>
-      convertLegacyProject({ source: file, dbFile: path.join(tmp, 'missing.db') }, NOW)
+      convertLegacyProject({ source: file, dbFile: path.join(tmp, 'missing.db') }, NOW, 'v1')
     ).toThrowError(/Could not read the v0 project/)
     expect(fs.readFileSync(file)).toEqual(original)
     expect(fs.readdirSync(tmp)).toEqual(['Broken.mythscribe'])

@@ -224,6 +224,10 @@ import {
   type StructurePromptParagraph
 } from '../prompts/importStructure.v1'
 import {
+  buildImportStructurePromptV2,
+  IMPORT_STRUCTURE_PROMPT_V2_VERSION
+} from '../prompts/importStructure.v2'
+import {
   buildContextImportPrompt,
   CONTEXT_IMPORT_PROMPT_VERSION,
   type BuildContextImportPromptInput
@@ -1869,6 +1873,23 @@ function structureCase(
     messages: built.messages,
     maxTokens: built.maxTokens,
     scoring: { kind: 'structure', bank, indices: paragraphs.map((p) => p.index) }
+  }
+}
+
+/** F-16.15: the same chunk on story memory v2 (`importStructure.v2`): no bank, so no tag is in it. */
+function structureV2Case(
+  name: string,
+  note: string,
+  paragraphs: StructurePromptParagraph[]
+): EvalCase {
+  const built = buildImportStructurePromptV2({ paragraphs })
+  return {
+    version: IMPORT_STRUCTURE_PROMPT_V2_VERSION,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'structure', bank: [], indices: paragraphs.map((p) => p.index) }
   }
 }
 
@@ -6289,5 +6310,15 @@ export const EVAL_CASES: EvalCase[] = [
     maxedFilingReview(),
     'Tidy this up.',
     []
+  ),
+  structureV2Case(
+    'fixture',
+    'story memory v2: the fixture chunk with two scene starts already found, and no tag bank',
+    structureChunk(IMPORT_PARAGRAPHS, 8)
+  ),
+  structureV2Case(
+    'maxed',
+    `story memory v2: a chunk at the ${IMPORT_CHUNK_WORDS}-word cap: the most one chunk of an import can cost`,
+    maxedChunk()
   )
 ]

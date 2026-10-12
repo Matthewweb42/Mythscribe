@@ -210,6 +210,7 @@ describe('installApplicationMenu (F-7.1)', () => {
       manager: fakeManager,
       devTools: () => devTools,
       assistantName: () => assistantName,
+      switchover: true,
       platform: 'linux',
       target: () => win
     })
@@ -227,6 +228,9 @@ describe('installApplicationMenu (F-7.1)', () => {
     item(second, 'openShortcuts').click?.(undefined as never, undefined, undefined as never)
     expect(send).toHaveBeenCalledWith('menu:action', { id: 'openShortcuts' })
     expect(JSON.stringify(second)).not.toContain('openDeveloperTools')
+    // F-16.15: an unpackaged build offers the switch-over on a copy while a v1 project is open.
+    item(second, 'trySwitchover').click?.(undefined as never, undefined, undefined as never)
+    expect(send).toHaveBeenCalledWith('menu:action', { id: 'trySwitchover' })
 
     // Developer tools: the Help items appear on the rebuild after the switch turns on.
     devTools = true
@@ -251,6 +255,7 @@ describe('installApplicationMenu (F-7.1)', () => {
       manager,
       devTools: () => false,
       assistantName: () => 'Ms Scribe',
+      switchover: false,
       platform: 'win32',
       target: () => null
     })

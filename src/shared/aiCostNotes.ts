@@ -104,7 +104,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   importStructure: {
     trigger: 'on request',
-    when: 'Detect chapters/scenes in an imported manuscript, one request per ~2,500 words.',
+    when: 'Detect chapters/scenes in an imported manuscript, one request per ~2,500 words (importStructure.v1, story memory v1). Story memory v2 (F-16.15): importStructure.v2, the same without the tag bank and tag output.',
     callsPerUse: 40,
     typicalOutTokens: 150,
     ideas:

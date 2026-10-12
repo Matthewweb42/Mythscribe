@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { docToText } from '@shared/docText'
 import {
   DraftName,
@@ -10,6 +10,8 @@ import {
   type DraftList
 } from '@shared/drafts'
 import { diffWordCount, diffWords } from '@shared/textDiff'
+import type { TiptapNodeT } from '@shared/tiptap'
+import { countWords } from '@shared/wordCount'
 import { draft, draftText, settings, type DraftRow, type NodeRow } from '../db/schema'
 import { parseStoredTiptap, writeDocumentText, type StoredText } from '../document/documentStore'
 import { AppError } from '../ipc/errors'
@@ -130,6 +132,23 @@ function availableName(state: DraftState, name: string, exceptId?: string): stri
     })
   }
   return parsed.data
+}
+
+/**
+ * Rewrites one inactive draft's stored text of one document (F-16.15: the switch-over's inline
+ * tags as words), its word count recounted. The row must exist; the active draft's text is the
+ * live `node.content` and is written through the document store instead.
+ */
+export function rewriteDraftText(
+  db: TreeDb,
+  draftId: string,
+  nodeId: string,
+  content: TiptapNodeT
+): void {
+  db.update(draftText)
+    .set({ content: JSON.stringify(content), wordCount: countWords(content) })
+    .where(and(eq(draftText.draftId, draftId), eq(draftText.nodeId, nodeId)))
+    .run()
 }
 
 /** The stored rows of one draft, by node id. */

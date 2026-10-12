@@ -175,7 +175,7 @@ describe('dataSharingSends (F-16.4)', () => {
     expect(AI_DATA_SHARING.proofread.sendsV2).toContain('names and nicknames of your records')
   })
 
-  it('F-16.14, F-16.9: every v2 prose and filing row names what v2 sends, and never the story bible', () => {
+  it('F-16.14, F-16.9, F-16.15: every v2 prose, filing and import row names what v2 sends, and never the story bible', () => {
     const v2 = [
       'ghostText',
       'rewrite',
@@ -188,7 +188,8 @@ describe('dataSharingSends (F-16.4)', () => {
       'agent',
       'contextImport',
       'reviewChat',
-      'proofread'
+      'proofread',
+      'importStructure'
     ] as const
     for (const id of v2) {
       const text = AI_DATA_SHARING[id].sendsV2

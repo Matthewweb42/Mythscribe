@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { StoryMemoryVersion } from './storyMemory'
 import { bookSurname, bookTitle, isbnFor, type BookDetails } from './bookDetails'
 import { CompiledEntry } from './compile'
 import {
@@ -608,6 +609,11 @@ export interface CompiledBook {
 export interface CompileInput {
   source: CompileSource
   format: CompileFormat
+  /**
+   * F-16.15: the project's story memory. A v2 project has no tags, so `keepTags` is read as false
+   * there (an inert inline token still prints its name, never `#name`).
+   */
+  memory: StoryMemoryVersion
   output: CompileOutput
   details: BookDetails
   projectName: string
@@ -988,7 +994,7 @@ export function compileBook(input: CompileInput): CompiledBook {
   const b: Builder = {
     format,
     content: {
-      keepTags: format.contents.keepTags && !final,
+      keepTags: format.contents.keepTags && !final && input.memory === 'v1',
       keepAiMarks: format.contents.keepAiMarks && !final,
       separator: format.sceneSeparator,
       replace: compileReplacements(format.replacements)

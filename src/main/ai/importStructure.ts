@@ -19,10 +19,15 @@ import { getAiSettings } from '../project/settingsStore'
 import { listTags } from '../tag/tagStore'
 import { assertFeatureAllowed } from './dial'
 import { cancelInflight } from './inflight'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import {
   buildImportStructurePrompt,
   IMPORT_STRUCTURE_PROMPT_VERSION
 } from './prompts/importStructure.v1'
+import {
+  buildImportStructurePromptV2,
+  IMPORT_STRUCTURE_PROMPT_V2_VERSION
+} from './prompts/importStructure.v2'
 import { createProposal, settleProposal } from './proposalStore'
 import { AiCancelledError, AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
@@ -46,6 +51,11 @@ import type { AiDb } from './usageStore'
  */
 export interface DetectImportStructureInput {
   draft: ImportDraft
+  /**
+   * F-16.15: the project's story memory. v1 sends `importStructure.v1` with the tag bank and
+   * keeps its tag candidates; v2 sends `importStructure.v2`, which has no bank and no tags.
+   */
+  memory: StoryMemoryVersion
   /** The renderer's id for `ai:cancel` (F-5.10); each chunk registers under `<requestId>:c<n>`. */
   requestId: string
   /** The parent request's signal: an abort stops the loop and the chunk in flight. */
@@ -100,7 +110,8 @@ export async function detectImportStructure(
 
   const flat = flattenDraft(input.draft)
   const chunks = chunkParagraphs(flat)
-  const bank = listTags(db).map((tag) => tag.name)
+  const v2 = input.memory === 'v2'
+  const bank = v2 ? [] : listTags(db).map((tag) => tag.name)
   const bankByName = new Map(bank.map((name) => [toTagName(name), name]))
   const bankKey = [...bank].sort().join(',')
 
@@ -123,7 +134,9 @@ export async function detectImportStructure(
     for (const [index, chunk] of chunks.entries()) {
       stopIfCancelled(input.signal)
       const paragraphs = flat.slice(chunk.start, chunk.end)
-      const prompt = buildImportStructurePrompt({ paragraphs, tagNames: bank })
+      const prompt = v2
+        ? buildImportStructurePromptV2({ paragraphs })
+        : buildImportStructurePrompt({ paragraphs, tagNames: bank })
       const chunkId = `${input.requestId}:c${index}`
       inFlight = chunkId
       const answer = await runAiRequest(deps, {
@@ -133,7 +146,7 @@ export async function detectImportStructure(
         maxTokens: prompt.maxTokens,
         json: true,
         contextHash: sha256(
-          `${paragraphs.map((p) => `${p.index}:${p.text}`).join('\n')}|${bankKey}`
+          `${paragraphs.map((p) => `${p.index}:${p.text}`).join('\n')}|${v2 ? 'v2' : bankKey}`
         ),
         promptVersion: prompt.version,
         requestId: chunkId
@@ -186,7 +199,7 @@ export async function detectImportStructure(
     usage,
     costUsd,
     model,
-    promptVersion: IMPORT_STRUCTURE_PROMPT_VERSION,
+    promptVersion: v2 ? IMPORT_STRUCTURE_PROMPT_V2_VERSION : IMPORT_STRUCTURE_PROMPT_VERSION,
     proposalIds
   }
 }

@@ -13,11 +13,22 @@ import {
   toTagName,
   type TagCategory
 } from '@shared/tags'
+import { normName } from '@shared/memory/names'
+import {
+  labelFromTag,
+  pageFromLines,
+  recordFromTag,
+  textParagraphs
+} from '@shared/memory/switchoverMapping'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
+import { LABELS_MAX } from '@shared/storyLabels'
 import { createEntity } from '../entity/entityStore'
+import { assignLabel, createLabel } from '../memory/labelStore'
+import { insertConvertedRecord } from '../memory/recordStore'
 import { AppError } from '../ipc/errors'
 import { addDocumentTag } from '../tag/documentTagStore'
 import { findTagByName, importTagBank } from '../tag/tagStore'
-import { insertNodes, listNodes } from '../tree/treeStore'
+import { insertNodes, listNodes, type TreeDb } from '../tree/treeStore'
 import { slateToText } from './legacySlate'
 import { planLegacyTree, type LegacyDocument, type SectionIds } from './legacyTree'
 import { createProject, PROJECT_EXTENSION } from './projectStore'
@@ -52,9 +63,15 @@ export interface LegacyConversion {
   /** Where the untouched original now lives. */
   backup: string
   documents: number
+  /** Story memory v1: the tags and sheets made (0 in v2). */
   tags: number
   entities: number
+  /** Story memory v2 (F-16.15): the records and labels made instead (0 in v1). */
+  records: number
+  labels: number
 }
+
+type BuildCounts = Omit<LegacyConversion, 'folder' | 'backup'>
 
 interface LegacyData {
   name: string
@@ -102,18 +119,24 @@ export function legacyBackupPath(source: string, now: Date): string {
   }
 }
 
+/**
+ * `memory` is the story memory the new project runs (F-16.15): v1 imports the tag bank, its
+ * links and the references as sheets; v2 makes records and labels of them through the
+ * switch-over's mapping (`recordFromTag`, `labelFromTag`), and writes no tag rows.
+ */
 export function convertLegacyProject(
   location: LegacyLocation,
-  now: Date = new Date()
+  now: Date,
+  memory: StoryMemoryVersion
 ): LegacyConversion {
   const data = readLegacy(location)
   const temp = path.join(
     path.dirname(location.source),
     `.${path.basename(location.source)}.converting-${randomUUID().slice(0, 8)}`
   )
-  let counts: { documents: number; tags: number; entities: number }
+  let counts: BuildCounts
   try {
-    counts = buildProject(temp, data, now)
+    counts = buildProject(temp, data, now, memory)
   } catch (err) {
     fs.rmSync(temp, { recursive: true, force: true })
     throw err
@@ -227,8 +250,9 @@ function normalizeDocument(row: Partial<LegacyDocument> & { id: string }): Legac
 function buildProject(
   folder: string,
   data: LegacyData,
-  now: Date
-): { documents: number; tags: number; entities: number } {
+  now: Date,
+  memory: StoryMemoryVersion
+): BuildCounts {
   const session = createProject(folder, data.name, data.format, { skeleton: false })
   try {
     const db = session.connection.orm
@@ -247,6 +271,10 @@ function buildProject(
     db.transaction((tx) => insertNodes(tx, plan.rows))
 
     setEditorSettings(db, legacyEditorSettings(data.settings, data.format))
+    if (memory === 'v2') {
+      const made = db.transaction((tx) => buildMemoryV2(tx, data, plan.ids, now))
+      return { documents: plan.rows.length, tags: 0, entities: 0, ...made }
+    }
 
     const tags = importTagBank(db, legacyTagRecords(data.tags)).created.length
     const tagIdOf = new Map<string, string>()
@@ -278,10 +306,101 @@ function buildProject(
         // Two v0 references with one name: the first is kept, the rest stay in the backup.
       }
     }
-    return { documents: plan.rows.length, tags, entities }
+    return { documents: plan.rows.length, tags, entities, records: 0, labels: 0 }
   } finally {
     session.close()
   }
+}
+
+/**
+ * Story memory v2 (F-16.15): the v0 tags and references as records and labels, through the same
+ * mapping as the switch-over. A name tag (character, setting, world building) or a plot thread
+ * becomes a record; a reference becomes one too, its page as Pinned paragraphs, and a tag of the
+ * same name merges into it (the reference spells the name). Tone, content and custom tags become
+ * labels on the documents v0 linked them to. A name two records hold is shared on both.
+ */
+function buildMemoryV2(
+  db: TreeDb,
+  data: LegacyData,
+  ids: ReadonlyMap<string, string>,
+  now: Date
+): { records: number; labels: number } {
+  interface Planned {
+    name: string
+    categoryId: string
+    aliases: string[]
+    pinned: string[]
+  }
+  const records: Planned[] = []
+  const byNorm = new Map<string, Planned>()
+  for (const reference of data.references) {
+    const categoryId = ENTITY_KIND_OF[reference.category]
+    const name = reference.name.trim().slice(0, ENTITY_NAME_MAX)
+    if (categoryId === undefined || name === '' || byNorm.has(normName(name))) continue
+    const planned: Planned = {
+      name,
+      categoryId,
+      aliases: [],
+      pinned: textParagraphs(slateToText(reference.content).slice(0, ENTITY_BODY_MAX))
+    }
+    records.push(planned)
+    byNorm.set(normName(name), planned)
+  }
+  const labelTags: { id: string; label: NonNullable<ReturnType<typeof labelFromTag>> }[] = []
+  const seenLabels = new Set<string>()
+  for (const tag of data.tags) {
+    const category = TAG_CATEGORY_OF[tag.category ?? ''] ?? 'custom'
+    const kebab = toTagName(tag.name).slice(0, TAG_NAME_MAX)
+    const fromTag = recordFromTag({ name: kebab, category, aliases: [] })
+    if (fromTag !== null) {
+      const known = byNorm.get(normName(fromTag.name))
+      if (known === undefined) {
+        const planned: Planned = { ...fromTag, pinned: [] }
+        records.push(planned)
+        byNorm.set(normName(fromTag.name), planned)
+      }
+      continue
+    }
+    // A label keeps the author's own spelling of the v0 tag ("Grim"), a record its name's words.
+    const label = labelFromTag({ name: tag.name.trim(), category, color: tag.color })
+    if (label === null || seenLabels.has(label.name.toLowerCase())) continue
+    seenLabels.add(label.name.toLowerCase())
+    labelTags.push({ id: tag.id, label })
+  }
+  const holders = new Map<string, number>()
+  for (const planned of records) {
+    for (const text of [planned.name, ...planned.aliases]) {
+      holders.set(normName(text), (holders.get(normName(text)) ?? 0) + 1)
+    }
+  }
+  const shared = (text: string): boolean => (holders.get(normName(text)) ?? 0) > 1
+  for (const planned of records) {
+    insertConvertedRecord(
+      db,
+      {
+        name: planned.name,
+        categoryId: planned.categoryId,
+        image: null,
+        aliases: planned.aliases.map((text) => ({ text, shared: shared(text) })),
+        mainShared: shared(planned.name),
+        pinned: pageFromLines(planned.pinned.map((text) => ({ text }))),
+        ideas: null,
+        legacyEntityId: null,
+        legacyTagId: null
+      },
+      now
+    )
+  }
+  let labels = 0
+  for (const { id, label } of labelTags.slice(0, LABELS_MAX)) {
+    const made = createLabel(db, label, now)
+    labels += 1
+    const nodes = new Set(
+      data.links.flatMap((link) => (link.tag_id === id ? (ids.get(link.document_id) ?? []) : []))
+    )
+    for (const nodeId of nodes) assignLabel(db, made.id, nodeId)
+  }
+  return { records: records.length, labels }
 }
 
 /** v0's `editor_*` settings over the format's defaults, each kept only when v1 accepts it. */

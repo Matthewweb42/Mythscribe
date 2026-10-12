@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { assetUrl, imageExtension } from '@shared/assets'
 import type { ExportProgress } from '@shared/bookExport'
 import { webDocument } from '@shared/compileHtml'
@@ -69,6 +70,8 @@ export async function renderOutput(
 
 export interface CompileFileInput {
   format: CompileFormat
+  /** F-16.15: the project's story memory (`keepTags` is off in v2). */
+  memory: StoryMemoryVersion
   output: CompileOutput
   scope: CompileScope
   /** The book's title when Book details has none. */

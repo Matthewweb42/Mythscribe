@@ -46,6 +46,7 @@ function builtin(id: string): CompileFormat {
 function book(words: number, format = builtin('paperback-6x9')): CompiledBook {
   const text = Array.from({ length: words }, () => 'word').join(' ')
   return compileBook({
+    memory: 'v1',
     source: {
       front: [],
       manuscript: [1, 2, 3].flatMap((n) => [

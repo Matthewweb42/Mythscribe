@@ -46,6 +46,7 @@ async function run(format: Extract<CompileOutput, 'md' | 'pdf' | 'docx' | 'epub'
   const editorCopy = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:editor-copy')
   if (!editorCopy) throw new Error('no editor copy')
   const result = await compileToFile(db, {
+    memory: 'v1',
     format: editorCopy,
     output: format,
     scope: { kind: 'manuscript' },
@@ -107,6 +108,7 @@ describe('compileToFile (Compile v2)', () => {
     for (const output of COMPILE_OUTPUTS) {
       const file = path.join(tmp, `book.${output}`)
       const result = await compileToFile(db, {
+        memory: 'v1',
         format,
         output,
         scope: { kind: 'manuscript' },
@@ -135,6 +137,7 @@ describe('compileToFile (Compile v2)', () => {
     if (!format) throw new Error('no ebook')
     const file = path.join(tmp, 'book.epub')
     await compileToFile(db, {
+      memory: 'v1',
       format,
       output: 'epub',
       scope: { kind: 'manuscript' },

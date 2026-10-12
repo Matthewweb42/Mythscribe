@@ -9,6 +9,7 @@ function book(output: CompileOutput): CompiledBook {
   const format = BUILTIN_COMPILE_FORMATS.find((f) => f.id === 'builtin:paperback-6x9')
   if (!format) throw new Error('no paperback')
   return compileBook({
+    memory: 'v1',
     source: {
       front: [],
       manuscript: [

@@ -67,7 +67,8 @@ export const MENU_ITEM_IDS = [
   'checkForUpdates',
   'openAbout',
   'openDeveloperTools',
-  'openChromiumDevTools'
+  'openChromiumDevTools',
+  'trySwitchover'
 ] as const
 export const MenuItemId = z.enum(MENU_ITEM_IDS)
 export type MenuItemId = z.infer<typeof MenuItemId>
@@ -257,6 +258,21 @@ export const DEVELOPER_MENU_ENTRIES: readonly MenuEntry[] = [
   { id: 'openChromiumDevTools', label: 'Chromium DevTools', when: 'always' }
 ]
 
+/**
+ * Help › Developer's story-memory switch-over on a copy (F-16.15, decision P1-D12): only in an
+ * unpackaged build (developer tools being on is not enough) and only while a v1 project is open.
+ * It duplicates the project and runs the switch-over on the duplicate.
+ */
+export const SWITCHOVER_MENU_ENTRIES: readonly MenuEntry[] = [
+  SEPARATOR,
+  {
+    id: 'trySwitchover',
+    label: 'Try the story-memory switch-over on a copy…',
+    when: 'project',
+    memory: 'v1'
+  }
+]
+
 /** `MENU` for one story memory: the items of the other one left out (F-16.4). */
 function menuForMemory(memory: StoryMemoryVersion): readonly MenuSection[] {
   return MENU.map((section) => ({
@@ -274,20 +290,25 @@ const MENU_BY_MEMORY: Readonly<Record<StoryMemoryVersion, readonly MenuSection[]
 
 /**
  * The menu as shown now: `MENU` less the items of the other story memory (`memory`), plus Help's
- * developer items while developer tools are on. With no project open (`storyMemory` null) it is
- * v1's, as it always was: a v2 project's own items join only while one is open.
+ * developer items while developer tools are on, and the switch-over on a copy in an unpackaged
+ * build (`switchover`) while a v1 project is open. With no project open (`storyMemory` null) it
+ * is v1's, as it always was: a v2 project's own items join only while one is open.
  */
 export function menuFor(options: {
   devTools: boolean
   storyMemory: StoryMemoryVersion | null
+  /** F-16.15: the build offers the switch-over on a copy (`switchover:available`). */
+  switchover?: boolean
 }): readonly MenuSection[] {
   const { devTools, storyMemory } = options
   const base = MENU_BY_MEMORY[storyMemory ?? 'v1']
-  if (!devTools) return base
+  const extra = [
+    ...(devTools ? DEVELOPER_MENU_ENTRIES : []),
+    ...(options.switchover === true && storyMemory === 'v1' ? SWITCHOVER_MENU_ENTRIES : [])
+  ]
+  if (extra.length === 0) return base
   return base.map((section) =>
-    section.id === 'help'
-      ? { ...section, entries: [...section.entries, ...DEVELOPER_MENU_ENTRIES] }
-      : section
+    section.id === 'help' ? { ...section, entries: [...section.entries, ...extra] } : section
   )
 }
 

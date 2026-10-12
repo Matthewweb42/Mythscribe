@@ -2,7 +2,9 @@ import { createDocument, getSchema } from '@tiptap/core'
 import type { Schema } from '@tiptap/pm/model'
 import { describe, expect, it } from 'vitest'
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
+import { replaceInlineTags } from '@shared/memory/inlineTagReplace'
 import { AI_FILED_ATTR, AI_WRITTEN_ATTR, NOT_CANON_ATTR } from '@shared/memory/pageMarks'
+import { pageFromLines, pinnedPage } from '@shared/memory/switchoverMapping'
 import { AI_ORIGIN_MARK, IMPORTED_ORIGIN, PARAGRAPH_ORIGIN_ATTR } from '@shared/provenance'
 import { TAG_RANGE_MARK } from '@shared/tagRanges'
 import { EMPTY_DOC, TiptapNode, type TiptapNodeT } from '@shared/tiptap'
@@ -19,7 +21,9 @@ import { buildExtensions, manuscriptSchema, pageSchema } from './extensions'
  * - `node.notes`: the notes schema (the manuscript's core without its tools).
  * - Research documents (F-16.8) and, from slice 3, Pinned and Ideas: the page schema, with what
  *   the Research converters write (Word, Markdown, text and PDF pages) and the page marks.
- * Slice 6 adds the documents the switch-over converts.
+ * - What the switch-over writes (F-16.15, slice 6): manuscript text with its inline tags replaced
+ *   (`replaceInlineTags`, tag ranges kept, inert) and the pages it builds (Pinned with the Not
+ *   canon "Filed by AI earlier" block, Ideas, the Project notes as a Research note).
  */
 
 const SCENE_BREAK = '* * *'
@@ -131,6 +135,54 @@ const PAGE: Record<string, TiptapNodeT> = {
   })
 }
 
+/** The switch-over's output (F-16.15): manuscript text after the inline tags became words. */
+const CONVERTED_MANUSCRIPT: Record<string, TiptapNodeT> = {
+  'inline tags replaced, marks and a tag range kept': replaceInlineTags(
+    doc(
+      {
+        type: 'paragraph',
+        content: [
+          text('Then '),
+          {
+            type: INLINE_TAG_NODE_TYPE,
+            attrs: { id: 't-1', name: 'mara' },
+            marks: [{ type: 'bold' }]
+          },
+          text(' crossed the '),
+          text('harbour', [{ type: TAG_RANGE_MARK, attrs: { tagId: 't-2' } }]),
+          text('.')
+        ]
+      },
+      {
+        type: 'blockquote',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: INLINE_TAG_NODE_TYPE, attrs: { id: 't-3', name: 'old-mill' } }]
+          }
+        ]
+      }
+    ),
+    new Map([['t-1', 'Mara']])
+  ).doc
+}
+
+/** The switch-over's pages (F-16.15): Pinned, Ideas and the Project notes note. */
+const CONVERTED_PAGE: Record<string, TiptapNodeT> = {
+  'Pinned with the Filed by AI earlier block':
+    pinnedPage(
+      [{ text: 'Age: 35' }, { text: "Age (from 3.1 'Scene 1'): 36" }],
+      ['Personality: Stubborn\nand loud']
+    ) ?? EMPTY_DOC,
+  'Ideas lines': pageFromLines([{ text: 'Origin: Minted in the old city' }]) ?? EMPTY_DOC,
+  'the Project notes, partly Not canon':
+    pageFromLines([
+      { text: 'The book ends at the harbour.' },
+      { text: 'Filed by AI earlier: please check', heading: true, notCanon: true },
+      { text: 'Maybe a sequel.', notCanon: true }
+    ]) ?? EMPTY_DOC
+}
+
 const NOTES_SCHEMA = getSchema(
   buildExtensions({ sceneBreak: SCENE_BREAK, onSave: () => undefined })
 )
@@ -156,17 +208,20 @@ describe('stored documents load with errorOnInvalidContent (P1 §2.4)', () => {
   const manuscript = manuscriptSchema(SCENE_BREAK)
   const page = pageSchema(SCENE_BREAK)
 
-  it.each(Object.entries({ ...COMMON, ...MANUSCRIPT }))('manuscript: %s', (_name, json) => {
-    const loaded = load(json, manuscript)
-    expect(loaded.content?.length).toBe(json.content?.length)
-    expect(JSON.stringify(loaded)).not.toContain(NOT_CANON_ATTR)
-  })
+  it.each(Object.entries({ ...COMMON, ...MANUSCRIPT, ...CONVERTED_MANUSCRIPT }))(
+    'manuscript: %s',
+    (_name, json) => {
+      const loaded = load(json, manuscript)
+      expect(loaded.content?.length).toBe(json.content?.length)
+      expect(JSON.stringify(loaded)).not.toContain(NOT_CANON_ATTR)
+    }
+  )
 
   it.each(Object.entries(COMMON))('notes: %s', (_name, json) => {
     expect(load(json, NOTES_SCHEMA).content?.length).toBe(json.content?.length)
   })
 
-  it.each(Object.entries({ ...COMMON, ...PAGE }))('page: %s', (_name, json) => {
+  it.each(Object.entries({ ...COMMON, ...PAGE, ...CONVERTED_PAGE }))('page: %s', (_name, json) => {
     expect(load(json, page).content?.length).toBe(json.content?.length)
   })
 
@@ -177,6 +232,24 @@ describe('stored documents load with errorOnInvalidContent (P1 §2.4)', () => {
     expect(notCanon).toMatchObject({ notCanon: true, aiFiled: null, aiWritten: null })
     expect(filed).toMatchObject({ aiFiled: { doc: 'n-1', para: 3, quote: 'Mara is 35.' } })
     expect(written).toMatchObject({ aiWritten: { turn: 'turn-2', date: '2026-10-11' } })
+  })
+
+  it('keeps the converted marks: the token’s bold, the inert tag range, every Not canon block', () => {
+    const manuscript = load(
+      CONVERTED_MANUSCRIPT['inline tags replaced, marks and a tag range kept'] ?? EMPTY_DOC,
+      manuscriptSchema(SCENE_BREAK)
+    )
+    const json = JSON.stringify(manuscript)
+    expect(json).toContain('{"type":"text","marks":[{"type":"bold"}],"text":"Mara"}')
+    expect(json).toContain(TAG_RANGE_MARK)
+    expect(json).toContain('"text":"old mill"')
+    expect(json).not.toContain(INLINE_TAG_NODE_TYPE)
+    const pinned = load(
+      CONVERTED_PAGE['Pinned with the Filed by AI earlier block'] ?? EMPTY_DOC,
+      pageSchema(SCENE_BREAK)
+    )
+    const blocks = (pinned.content ?? []).map((block) => block.attrs?.[NOT_CANON_ATTR] === true)
+    expect(blocks).toEqual([false, false, true, true])
   })
 
   it('refuses what no schema holds, so the corpus would catch a dropped node or mark', () => {

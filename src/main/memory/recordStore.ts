@@ -345,6 +345,89 @@ export function createRecord(db: TreeDb, input: CreateRecordInput, now: Date): C
   return { record: requireRecord(db, id) }
 }
 
+/** A record made from v1 or v0 data (F-16.15: the switch-over, and the v0 import in v2). */
+export interface ConvertedRecordInput {
+  name: string
+  categoryId: string
+  image: string | null
+  /** Other names; `shared` where another converted record answers to the same norm. */
+  aliases: readonly { text: string; shared: boolean }[]
+  /** Whether the record's own name is shared with another record. */
+  mainShared: boolean
+  pinned: TiptapNodeT | null
+  ideas: TiptapNodeT | null
+  legacyEntityId: string | null
+  legacyTagId: string | null
+}
+
+/**
+ * Inserts a converted record with its names (origin `conversion`) and pages, without the twin
+ * gate: the author's own sheets and tags become records as they are, and near twins go to the
+ * switch-over's merge list instead. A name another record holds unshared is still refused
+ * (identity rule 4), and a name that becomes a record leaves Dismissed's `name` list. Answers the
+ * new id. The caller runs it inside its own transaction.
+ */
+export function insertConvertedRecord(db: TreeDb, input: ConvertedRecordInput, now: Date): string {
+  requireCategoryId(db, input.categoryId)
+  const id = randomUUID()
+  const at = now.toISOString()
+  refuseClash(db, null, input.name, input.mainShared)
+  for (const entry of input.aliases) refuseClash(db, null, entry.text, entry.shared)
+  db.insert(record)
+    .values({
+      id,
+      categoryId: input.categoryId,
+      image: input.image,
+      origin: 'conversion',
+      pinned: isBlank(input.pinned) ? null : JSON.stringify(input.pinned),
+      ideas: isBlank(input.ideas) ? null : JSON.stringify(input.ideas),
+      legacyEntityId: input.legacyEntityId,
+      legacyTagId: input.legacyTagId,
+      created: at,
+      modified: at
+    })
+    .run()
+  insertAlias(
+    db,
+    id,
+    { text: input.name, isMain: true, shared: input.mainShared, origin: 'conversion' },
+    now
+  )
+  for (const entry of input.aliases) {
+    insertAlias(
+      db,
+      id,
+      { text: entry.text, isMain: false, shared: entry.shared, origin: 'conversion' },
+      now
+    )
+  }
+  return id
+}
+
+/**
+ * Clears `shared` on converted names only one record holds any more (a merge took the other
+ * holder away), so a name is shared only while two records answer to it.
+ */
+export function unshareLoneConvertedNames(db: TreeDb): number {
+  const rows = db
+    .select({ id: alias.id, norm: alias.norm })
+    .from(alias)
+    .where(and(eq(alias.shared, true), eq(alias.origin, 'conversion')))
+    .all()
+  let cleared = 0
+  for (const row of rows) {
+    const holders = db
+      .select({ id: alias.id })
+      .from(alias)
+      .where(eq(alias.norm, row.norm))
+      .all().length
+    if (holders > 1) continue
+    db.update(alias).set({ shared: false }).where(eq(alias.id, row.id)).run()
+    cleared += 1
+  }
+  return cleared
+}
+
 /** Moves a record to another category (its kind follows) or changes its image file. */
 export function updateRecord(
   db: TreeDb,

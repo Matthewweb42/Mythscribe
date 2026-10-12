@@ -15,6 +15,7 @@ import { compileBook, type CompiledBook } from '@shared/compileModel'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useOpenDocument } from '@renderer/features/manuscript/useOpenDocument'
 import { useProjectStore } from '@renderer/features/project/projectStore'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { dialogs, toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { BookDetailsDialog } from './BookDetailsDialog'
@@ -94,6 +95,8 @@ export function CompileWindow({ onClose }: { onClose: () => void }): React.JSX.E
     [byId, childrenOf, rootIds]
   )
   const openDocumentId = openDoc?.id ?? null
+  // F-16.15: a v2 project has no tags, so the model never keeps `#` on a name there.
+  const memory = useStoryMemory()
   const scope = useMemo(
     () =>
       resolveScope(store.scopeKind, store.chapterIds, { chapterIds: chapterSet, openDocumentId }),
@@ -105,13 +108,14 @@ export function CompileWindow({ onClose }: { onClose: () => void }): React.JSX.E
     return compileBook({
       source: store.source,
       format: draft,
+      memory,
       output,
       details,
       projectName,
       scope: scope ?? { kind: 'manuscript' },
       excluded: store.excluded
     })
-  }, [store.source, details, problem, draft, output, projectName, scope, store.excluded])
+  }, [store.source, details, problem, draft, memory, output, projectName, scope, store.excluded])
 
   const confirmLeave = async (): Promise<boolean> =>
     !store.dirty ||

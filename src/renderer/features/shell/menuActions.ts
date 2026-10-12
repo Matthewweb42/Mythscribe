@@ -11,6 +11,7 @@ import {
 import type { FloatingPanel } from '@shared/layout'
 import type { EntityKind } from '@shared/entities'
 import { useDevToolsStore } from '@renderer/features/devtools/devToolsStore'
+import { useSwitchoverStore } from '@renderer/features/switchover/switchoverStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
@@ -102,6 +103,10 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         return
       case 'openChromiumDevTools':
         await useDevToolsStore.getState().openChromium()
+        return
+      case 'trySwitchover':
+        // F-16.15: the story-memory switch-over on a copy (unpackaged builds only).
+        await useSwitchoverStore.getState().start()
         return
       case 'openSettings':
         // App-wide since F-15.2: without a project the dialog shows only the app-wide tabs.

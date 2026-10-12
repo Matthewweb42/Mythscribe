@@ -7,7 +7,7 @@ import type { CloudConflict, CloudProvider, CloudSide, CloudVersion } from '@sha
 import { CLOUD_PROVIDER_LABEL } from '@shared/cloudSync'
 import { rollbackSnapshot } from '../db/snapshot'
 import { AppError } from '../ipc/errors'
-import { OPEN_LOCK_FILE } from './openLock'
+import { saveDatedCopy } from './datedCopy'
 import { RECOVERY_DIR } from './recoveryJournal'
 
 /**
@@ -150,10 +150,6 @@ function writeState(dir: string, state: WorkingState): void {
   fs.renameSync(tmp, file)
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0')
-}
-
 /** When a version last changed and its size, for the question on a conflict. */
 function versionOf(folder: string): CloudVersion {
   const print = fingerprintOf(folder)
@@ -169,49 +165,14 @@ function versionOf(folder: string): CloudVersion {
  * (` 2`, ` 3` on collision): a whole project the author can open, minus the open marker, the
  * crash journal, and temp files. `database`, when given, is a self-contained database file
  * (no `-wal`) that stands in for the cloud folder's: the working copy's version with the
- * folder's assets. Throws when it cannot, and then nothing gets overwritten.
+ * folder's assets. Throws when it cannot, and then nothing gets overwritten. One caller of
+ * `saveDatedCopy` (F-16.15 generalised it for the switch-over's dated copies).
  */
 export function saveConflictCopy(cloudFolder: string, now: Date, database?: string): string {
-  const ext = path.extname(cloudFolder)
-  const base = path.basename(cloudFolder, ext)
-  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}${pad(now.getMinutes())}`
-  const parent = path.dirname(cloudFolder)
-  let target = path.join(parent, `${base} (conflict ${stamp})${ext}`)
-  for (let n = 2; fs.existsSync(target); n++) {
-    target = path.join(parent, `${base} (conflict ${stamp}) ${n}${ext}`)
-  }
-  const root = path.resolve(cloudFolder)
-  try {
-    fs.cpSync(cloudFolder, target, {
-      recursive: true,
-      errorOnExist: true,
-      force: false,
-      filter: (src) => {
-        const rel = path.relative(root, path.resolve(src))
-        if (rel === '') return true
-        const top = rel.split(path.sep)[0]
-        const name = path.basename(src)
-        if (database !== undefined && top === name && (name === DB || name === `${DB}-wal`)) {
-          return false
-        }
-        return (
-          top !== OPEN_LOCK_FILE &&
-          top !== RECOVERY_DIR &&
-          name !== `${DB}-shm` &&
-          !name.endsWith('.tmp')
-        )
-      }
-    })
-    if (database !== undefined) fs.copyFileSync(database, path.join(target, DB))
-  } catch (err) {
-    fs.rmSync(target, { recursive: true, force: true })
-    throw new AppError(
-      'IO',
-      `Could not keep the other version of this project beside it: ${(err as Error).message}`,
-      { folder: cloudFolder }
-    )
-  }
-  return target
+  return saveDatedCopy(cloudFolder, now, 'conflict', {
+    ...(database === undefined ? {} : { database }),
+    failure: 'Could not keep the other version of this project beside it'
+  })
 }
 
 /**

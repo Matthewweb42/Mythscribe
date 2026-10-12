@@ -92,6 +92,7 @@ import { NOTES_SUGGEST_PROMPT_V3_VERSION } from './notesSuggest.v3'
 import { CONTEXT_IMPORT_PROMPT_V3_VERSION } from './contextImport.v3'
 import { REVIEW_CHAT_PROMPT_V3_VERSION } from './reviewChat.v3'
 import { ROUTE_PROMPT_V2_VERSION } from './route.v2'
+import { IMPORT_STRUCTURE_PROMPT_V2_VERSION } from './importStructure.v2'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -203,7 +204,9 @@ export const PROMPT_VERSIONS = [
   NOTES_SUGGEST_PROMPT_V3_VERSION,
   // F-16.9 (story memory v2 only): filing an upload into Pinned, and its review chat.
   CONTEXT_IMPORT_PROMPT_V3_VERSION,
-  REVIEW_CHAT_PROMPT_V3_VERSION
+  REVIEW_CHAT_PROMPT_V3_VERSION,
+  // F-16.15 (story memory v2 only): the import's structure pass without the tag bank.
+  IMPORT_STRUCTURE_PROMPT_V2_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -641,6 +644,12 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'strong',
     output: 'json',
     since: 'F-16.9'
+  },
+  [IMPORT_STRUCTURE_PROMPT_V2_VERSION]: {
+    feature: 'importStructure',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-16.15'
   }
 }
 

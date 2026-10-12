@@ -472,6 +472,13 @@ import {
 } from '../memory/passageIndexer'
 import { answerQuestion, listNameQuestions, resetNameQuestionCache } from '../memory/questions'
 import { applyRename, clearRenameUndo, previewRename, undoRename } from '../memory/renameStore'
+import { convertSwitchover, prepareSwitchover } from '../memory/switchover/convert'
+import { inlineTagReplacements, planSwitchover } from '../memory/switchover/plan'
+import {
+  createTrialCopy,
+  requireSwitchoverTarget,
+  saveSafetyCopy
+} from '../memory/switchover/trial'
 import {
   createRecord,
   deleteRecord,
@@ -1096,7 +1103,7 @@ export function registerHandlers({
     if (location.kind === 'legacy') {
       const backup = legacyBackupPath(location.source, new Date())
       if (!(await dialogs.confirmLegacyConversion(location.source, backup))) return null
-      folder = convertLegacyProject(location).folder
+      folder = convertLegacyProject(location, new Date(), manager.newProjectMemory()).folder
     }
     const info = manager.open(folder, cloudConflict)
     diagnostics.count('project.open')
@@ -1599,6 +1606,7 @@ export function registerHandlers({
     if (chosen === null) return null
     const result = await compileToFile(db, {
       format,
+      memory: session.storyMemory,
       output,
       scope,
       projectName: session.info.name,
@@ -4213,10 +4221,12 @@ export function registerHandlers({
   // whole pass and not just the chunk in flight. Expected AI failures — no key, the dial, the
   // cap, a stop — come back as data like `ai:recommendTags`; NO_PROJECT stays an error.
   register('import:detectStructure', async ({ draft, requestId }): Promise<ImportDetectResult> => {
-    const db = manager.require().connection.orm
+    const session = manager.require()
+    const db = session.connection.orm
     const controller = registerInflight(requestId)
     try {
       const result = await detectImportStructure(db, requestDeps(db), {
+        memory: session.storyMemory,
         draft,
         requestId,
         signal: controller.signal,
@@ -4281,7 +4291,7 @@ export function registerHandlers({
   register('import:commit', ({ draft }) => {
     const session = manager.require()
     const db = session.connection.orm
-    const result = importDraft(db, session.info.format, draft)
+    const result = importDraft(db, session.info.format, draft, session.storyMemory)
     afterImport(db, result)
     return {
       nodes: result.rows.map(toTreeNode),
@@ -4302,7 +4312,7 @@ export function registerHandlers({
     const info = manager.create(folder, name, format, {
       skeleton: false,
       fill: (db) => {
-        written.result = importDraft(db, format, draft)
+        written.result = importDraft(db, format, draft, manager.newProjectMemory())
       }
     })
     diagnostics.count('project.create')
@@ -4900,6 +4910,70 @@ export function registerHandlers({
       updateFiledLine(db, { recordId, lineIndex, line, text }, new Date())
     )
   )
+
+  // F-16.15: the story-memory switch-over, built and tested on copies only (decision P1-D12): an
+  // unpackaged build offers Help › Try the story-memory switch-over on a copy…, and the dry run,
+  // the consent rows and the conversion refuse any project without the trial row. Only F-16.31's
+  // in-place run will pass `allowInPlace`.
+  const switchoverAvailable = !app.isPackaged
+  const requireSwitchoverBuild = (): void => {
+    if (!switchoverAvailable) {
+      throw new AppError('VALIDATION', 'The story-memory switch-over is not in this build yet.')
+    }
+  }
+  const switchoverTarget = (): TreeDb => {
+    requireSwitchoverBuild()
+    const db = manager.require().connection.orm
+    requireSwitchoverTarget(db, { allowInPlace: false })
+    return db
+  }
+  register('switchover:available', () => ({ available: switchoverAvailable }))
+  register('switchover:trialCopy', () => {
+    requireSwitchoverBuild()
+    const session = manager.require()
+    const folder = createTrialCopy(
+      { folder: session.folder, sqlite: session.connection.sqlite, name: session.info.name },
+      new Date()
+    )
+    return { folder, info: manager.open(folder) }
+  })
+  register('switchover:plan', () => {
+    const db = switchoverTarget()
+    const source = sourceOf(db)
+    const provider = ai.get(source)
+    return planSwitchover(db, {
+      source,
+      fastModel: provider?.resolveModel('fast') ?? '',
+      strongModel: provider?.resolveModel('strong') ?? '',
+      pricing: appState.get().cloudPricing?.pricing ?? null
+    })
+  })
+  register('switchover:consent', () => inlineTagReplacements(switchoverTarget()))
+  register('switchover:convert', async (consent) => {
+    const db = switchoverTarget()
+    const session = manager.require()
+    const now = new Date()
+    // Step 1, safety, just before the only write: the Drive working copy copied back, the full
+    // backup (a failure stops here), and a dated copy beside the project wherever it lives.
+    session.workingCopy?.syncNow(session.connection.sqlite)
+    const backup = backups.backupNow().backups[0]?.file ?? null
+    const datedCopy = saveSafetyCopy(
+      { folder: session.folder, sqlite: session.connection.sqlite },
+      now
+    )
+    const prepared = await prepareSwitchover(db, session.folder)
+    if (manager.current() !== session.info) {
+      throw new AppError(
+        'VALIDATION',
+        'The project changed during the switch-over; nothing was converted.'
+      )
+    }
+    const counts = convertSwitchover(db, session.info.format, prepared, consent, now)
+    const folder = session.folder
+    // The project reopens on v2: main closes it and the renderer opens it again.
+    manager.close()
+    return { folder, backup, datedCopy, counts }
+  })
 
   manager.onChange((info) => {
     // Open, create, and close all land here: a profile built for one project never answers for another.

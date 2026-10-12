@@ -27,7 +27,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `rewrite` | Rewrite in my voice | on request | rewrite.v5 | strong | 849 / 2676 | 250 / 1500 | $0.00235 · $0.00988 | $0.00293 | $0.00587 | 1 | $0.00235 |
 | `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000448 · $0.000813 | $0.000560 | $0.00276 | 1 | $0.000448 |
 | `betaReader` | Beta reader | on request | betaReader.v1 | strong | 673 / 11599 | 700 / 1200 | $0.00361 · $0.0244 | $0.00451 | $0.0122 | 1 | $0.00361 |
-| `importStructure` | Import structure detection | on request | importStructure.v1 | fast | 2428 / 4178 | 150 / 400 | $0.000382 · $0.000697 | $0.000477 | $0.00250 | 40 | $0.0153 |
+| `importStructure` | Import structure detection | on request | importStructure.v2 | fast | 2189 / 3814 | 150 / 400 | $0.000348 · $0.000646 | $0.000436 | $0.00232 | 40 | $0.0139 |
 | `continuity` | Consistency check | background | continuity.v2 | strong | 1334 / 5702 | 300 / 800 | $0.00337 · $0.0127 | $0.00421 | $0.00783 | 1 | $0.00337 |
 | `proofread` | Proofread | on request | proofread.v1 | fast | 1055 / 7578 | 600 / 2000 | $0.000316 · $0.00162 | $0.000395 | $0.00349 | 1 | $0.000316 |
 | `whatNext` | What comes next | on request | whatNext.v4 | fast | 995 / 2921 | 200 / 300 | $0.000195 · $0.000493 | $0.000244 | $0.00165 | 1 | $0.000195 |
@@ -103,7 +103,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `importStructure` — Import structure detection
 
-- **When:** Detect chapters/scenes in an imported manuscript, one request per ~2,500 words.
+- **When:** Detect chapters/scenes in an imported manuscript, one request per ~2,500 words (importStructure.v1, story memory v1). Story memory v2 (F-16.15): importStructure.v2, the same without the tag bank and tag output.
 - **Ideas:** Local heuristics first, AI only for ambiguous breaks; batch API (not latency sensitive).
 
 ### `continuity` — Consistency check

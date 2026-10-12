@@ -136,6 +136,8 @@ import {
 import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { GoalsDialog } from '@renderer/features/goals/GoalsDialog'
 import { ConversionDialog } from '@renderer/features/knowledge/ConversionDialog'
+import { SwitchoverDialog } from '@renderer/features/switchover/SwitchoverDialog'
+import { useSwitchoverStore } from '@renderer/features/switchover/switchoverStore'
 import { useConversionStore } from '@renderer/features/knowledge/conversionStore'
 import { useThreadStore } from '@renderer/features/threads/threadStore'
 import { useGoalsStore } from '@renderer/features/goals/goalsStore'
@@ -225,6 +227,8 @@ export function App(): React.JSX.Element {
     const offBackups = useBackupStore.getState().subscribe()
     // 2026-10-08: the working copy of a project in a cloud-synced folder; main pushes each copy.
     const offCloudSync = useCloudSyncStore.getState().subscribe()
+    // F-16.15: whether this build offers the story-memory switch-over on a copy (Help menu).
+    void useSwitchoverStore.getState().loadAvailable()
     // F-8.3: leaving the window writes every pending save at once, not after the debounce.
     const offBlur = installSaveOnBlur()
     return () => {
@@ -634,6 +638,8 @@ export function App(): React.JSX.Element {
       </main>
       {/* F-12.2: the import review, which is open only while a draft is under review. */}
       <ImportDialog />
+      {/* F-16.15: the switch-over on a copy; app-wide, since it closes and reopens the project. */}
+      <SwitchoverDialog />
       {/* The dialog service last, so a confirm from inside a shell dialog stacks above it. */}
       <ShellDialogs format={current?.format ?? null} />
       <DialogHost />

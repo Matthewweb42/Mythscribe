@@ -538,6 +538,10 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       'The manuscript you are importing, in chunks of about 2,500 words (long paragraphs ' +
       'shortened), and your tag names, only when you ask for the check in the import dialog.',
+    // F-16.15: `importStructure.v2` has no tag bank.
+    sendsV2:
+      'The manuscript you are importing, in chunks of about 2,500 words (long paragraphs ' +
+      'shortened), only when you ask for the check in the import dialog.',
     minDial: 1
   },
   rewrite: {

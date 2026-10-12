@@ -110,7 +110,11 @@ const statuses = (): string[] =>
 
 async function failure(draft = DRAFT): Promise<{ code: string; message: string }> {
   try {
-    await detectImportStructure(db, deps, { draft, requestId: 'r-1' })
+    await detectImportStructure(db, deps, {
+      memory: 'v1',
+      draft,
+      requestId: 'r-1'
+    })
   } catch (err) {
     if (err instanceof AiProviderError || err instanceof AppError) {
       return { code: err.code, message: err.message }
@@ -173,7 +177,11 @@ describe('detectImportStructure (F-12.3)', () => {
       '{"breaks":[{"before":1,"kind":"scene","reason":"time skip"}],' +
         '"scenes":[{"start":0,"title":"The Bell","tags":["protagonist"]}]}'
     )
-    const result = await detectImportStructure(db, deps, { draft: DRAFT, requestId: 'r-1' })
+    const result = await detectImportStructure(db, deps, {
+      memory: 'v1',
+      draft: DRAFT,
+      requestId: 'r-1'
+    })
 
     expect(result).toMatchObject({
       suggestions: {
@@ -218,6 +226,7 @@ describe('detectImportStructure (F-12.3)', () => {
     const text = '{"breaks":[],"scenes":[{"start":0,"title":"The Bell","tags":[]}]}'
     answer(text)
     const { proposalIds } = await detectImportStructure(db, deps, {
+      memory: 'v1',
       draft: DRAFT,
       requestId: 'r-1'
     })
@@ -244,6 +253,7 @@ describe('detectImportStructure (F-12.3)', () => {
         '{"before":4,"kind":"scene","reason":"a real one"}],"scenes":[]}'
     )
     const { suggestions } = await detectImportStructure(db, deps, {
+      memory: 'v1',
       draft: DRAFT,
       requestId: 'r-1'
     })
@@ -277,6 +287,7 @@ describe('detectImportStructure (F-12.3)', () => {
       })
     )
     const { suggestions } = await detectImportStructure(db, deps, {
+      memory: 'v1',
       draft: DRAFT,
       requestId: 'r-1'
     })
@@ -320,6 +331,7 @@ describe('detectImportStructure (F-12.3)', () => {
     // ms across this test), and a wall-clock check could not tell a gap from a slow machine.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const pass = detectImportStructure(db, deps, {
+      memory: 'v1',
       draft,
       requestId: 'r-1',
       onProgress: (entry) => void progress.push(entry)
@@ -371,6 +383,7 @@ describe('detectImportStructure (F-12.3)', () => {
       )
     const controller = registerInflight('r-1')
     const pending = detectImportStructure(db, deps, {
+      memory: 'v1',
       draft,
       requestId: 'r-1',
       signal: controller.signal
@@ -458,7 +471,11 @@ describe('detectImportStructure (F-12.3)', () => {
 
   it('sends nothing for a draft with no paragraphs left and answers an empty pass', async () => {
     const empty = draftOf([{ chapter: 'One', scene: scene('s1', 'Scene 1', []) }])
-    const result = await detectImportStructure(db, deps, { draft: empty, requestId: 'r-1' })
+    const result = await detectImportStructure(db, deps, {
+      memory: 'v1',
+      draft: empty,
+      requestId: 'r-1'
+    })
     expect(result).toEqual({
       suggestions: { breaks: [], scenes: [] },
       chunks: 0,
@@ -473,8 +490,16 @@ describe('detectImportStructure (F-12.3)', () => {
 
   it('answers an identical chunk from the cache at no cost', async () => {
     answer('{"breaks":[],"scenes":[{"start":0,"title":"The Bell","tags":[]}]}')
-    await detectImportStructure(db, deps, { draft: DRAFT, requestId: 'r-1' })
-    const again = await detectImportStructure(db, deps, { draft: DRAFT, requestId: 'r-2' })
+    await detectImportStructure(db, deps, {
+      memory: 'v1',
+      draft: DRAFT,
+      requestId: 'r-1'
+    })
+    const again = await detectImportStructure(db, deps, {
+      memory: 'v1',
+      draft: DRAFT,
+      requestId: 'r-2'
+    })
     expect(complete).toHaveBeenCalledTimes(1)
     expect(again).toMatchObject({
       costUsd: 0,

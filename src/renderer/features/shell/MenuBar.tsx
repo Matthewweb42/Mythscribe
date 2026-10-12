@@ -19,6 +19,7 @@ import {
   type MenuSectionId
 } from '@shared/menu'
 import { useDevToolsStore } from '@renderer/features/devtools/devToolsStore'
+import { useSwitchoverStore } from '@renderer/features/switchover/switchoverStore'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { runMenuAction } from '@renderer/features/shell/menuActions'
 import { formatShortcut } from '@renderer/features/shell/shortcuts'
@@ -40,6 +41,8 @@ export function MenuBar(): React.JSX.Element {
   const format = useProjectStore((s) => s.current?.format ?? null)
   // 2026-10-07: Help › Developer items only while developer tools are on.
   const devTools = useDevToolsStore((s) => s.enabled)
+  // F-16.15: an unpackaged build offers the story-memory switch-over on a copy.
+  const switchover = useSwitchoverStore((s) => s.available)
   // F-16.4: a project on story memory v2 has no tag items.
   const storyMemory = useProjectStore((s) => s.current?.storyMemory ?? null)
   const [openId, setOpenId] = useState<MenuSectionId | null>(null)
@@ -174,7 +177,7 @@ export function MenuBar(): React.JSX.Element {
       data-testid="menu-bar"
       className="flex items-center gap-0.5 text-sm"
     >
-      {menuFor({ devTools, storyMemory }).map((section, index) => (
+      {menuFor({ devTools, storyMemory, switchover }).map((section, index) => (
         <MenuTrigger
           key={section.id}
           section={section}

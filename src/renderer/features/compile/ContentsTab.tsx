@@ -9,6 +9,7 @@ import { sectionLabel } from '@shared/labels'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useOpenDocument } from '@renderer/features/manuscript/useOpenDocument'
 import { useProjectStore } from '@renderer/features/project/projectStore'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { chapterGroups, includeRows, type ScopeKind } from './compileContents'
 import { useCompileWindowStore } from './compileWindowStore'
 import { CheckField, FieldGrid, HINT, SECTION_TITLE, SelectField } from './fields'
@@ -43,6 +44,7 @@ export function ContentsTab({
   const rootIds = useTreeStore((s) => s.rootIds)
   const openDoc = useOpenDocument()
   const novelFormat = useProjectStore((s) => s.current?.format ?? 'novel')
+  const memory = useStoryMemory()
   const scopeKind = useCompileWindowStore((s) => s.scopeKind)
   const chapterIds = useCompileWindowStore((s) => s.chapterIds)
   const excluded = useCompileWindowStore((s) => s.excluded)
@@ -168,11 +170,16 @@ export function ContentsTab({
             options={NOTES_MODES.map((value) => ({ value, label: NOTES_LABELS[value] }))}
             onChange={(notes) => edit((f) => ({ ...f, contents: { ...f.contents, notes } }))}
           />
-          <CheckField
-            label="Keep # on tags (never in PDF or EPUB)"
-            checked={format.contents.keepTags}
-            onChange={(keepTags) => edit((f) => ({ ...f, contents: { ...f.contents, keepTags } }))}
-          />
+          {/* F-16.15: a v2 project has no tags; the model reads keepTags as false there. */}
+          {memory === 'v1' ? (
+            <CheckField
+              label="Keep # on tags (never in PDF or EPUB)"
+              checked={format.contents.keepTags}
+              onChange={(keepTags) =>
+                edit((f) => ({ ...f, contents: { ...f.contents, keepTags } }))
+              }
+            />
+          ) : null}
           <CheckField
             label="Mark AI-written text (never in PDF or EPUB)"
             checked={format.contents.keepAiMarks}

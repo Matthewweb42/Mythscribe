@@ -44,6 +44,7 @@ function builtin(id: string): CompileFormat {
 
 function book(format: CompileFormat, output: CompileOutput = 'pdf'): CompiledBook {
   return compileBook({
+    memory: 'v1',
     source: {
       front: [],
       manuscript: [
@@ -132,6 +133,7 @@ describe('compileHtml (Compile v2)', () => {
     const format = builtin('paperback-6x9')
     const body = bookBodyHtml(
       compileBook({
+        memory: 'v1',
         source: { front: [], manuscript: [node({ id: 's', content: doc('Text.') })], end: [] },
         format,
         output: 'pdf',

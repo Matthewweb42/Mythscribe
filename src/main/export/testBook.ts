@@ -137,6 +137,7 @@ export function sampleBook(
     output,
     details: BookDetails.parse(details),
     projectName: 'Salt',
+    memory: 'v1',
     scope: { kind: 'manuscript' },
     excluded: []
   })

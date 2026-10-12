@@ -112,10 +112,12 @@ interface Run2 {
   scope?: CompileScope
   excluded?: string[]
   source?: Partial<CompileSource>
+  memory?: 'v1' | 'v2'
 }
 
 function compile(args: Run2 = {}): ReturnType<typeof compileBook> {
   return compileBook({
+    memory: args.memory ?? 'v1',
     source: { front: [], manuscript: novel(), end: [], ...args.source },
     format: args.format ?? builtin('plain-text'),
     output: args.output ?? 'docx',
@@ -881,6 +883,15 @@ describe('compileBook: contents options and scopes', () => {
         { kind: 'paragraph', align: null, opening: 'none', runs: [run('Saw '), run('mara')] }
       ])
     }
+    // F-16.15: a v2 project has no tags; an inert token prints its name without `#`.
+    expect(textItem(compile({ format, source: { manuscript }, memory: 'v2' }).items, 's')).toEqual([
+      {
+        kind: 'paragraph',
+        align: null,
+        opening: 'none',
+        runs: [run('Saw ', { ai: true }), run('mara')]
+      }
+    ])
   })
 
   it('compiles selected chapters with their part, and one document alone from any section', () => {

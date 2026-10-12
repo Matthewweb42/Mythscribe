@@ -310,31 +310,59 @@ export async function addResearchFiles(
     }
     const data = outcome.data ?? Buffer.alloc(0)
     const page = await researchPage(outcome.type, data, outcome.text)
-    const fileId = outcome.id
-    const fileType = outcome.type
-    const made = db.transaction((tx) => {
-      const row = createNode(tx, format, {
-        parentId: parent.id,
-        kind: 'document',
-        hierarchyLevel: null,
-        title: titleOf(outcome.name)
-      })
-      saveDocument(tx, row.id, page.doc)
-      tx.insert(researchDoc)
-        .values({
-          nodeId: row.id,
-          origin: 'upload',
-          contextFileId: fileId,
-          fileType,
-          converted: page.converted,
-          created: now.toISOString()
-        })
-        .run()
-      return row
-    })
+    const made = insertResearchUpload(
+      db,
+      format,
+      parent.id,
+      { name: outcome.name, contextFileId: outcome.id, fileType: outcome.type, page },
+      now
+    )
     created.push(made.id)
   }
   return { created, skipped }
+}
+
+/** One upload's page and original, as `insertResearchUpload` writes it. */
+export interface ResearchUpload {
+  /** The file name; the document is titled by it without its extension. */
+  name: string
+  contextFileId: string
+  fileType: ContextFileType
+  page: ResearchPage
+}
+
+/**
+ * Writes one upload as a Research document under `parentId` (a Research folder the caller
+ * checked), in one transaction: the node, its page, and its meta row pointing at the original.
+ * `research:add` and the switch-over (F-16.15: uploads become Research) both write through it.
+ */
+export function insertResearchUpload(
+  db: TreeDb,
+  format: NovelFormat,
+  parentId: string,
+  upload: ResearchUpload,
+  now: Date = new Date()
+): NodeRow {
+  return db.transaction((tx) => {
+    const row = createNode(tx, format, {
+      parentId,
+      kind: 'document',
+      hierarchyLevel: null,
+      title: titleOf(upload.name)
+    })
+    saveDocument(tx, row.id, upload.page.doc)
+    tx.insert(researchDoc)
+      .values({
+        nodeId: row.id,
+        origin: 'upload',
+        contextFileId: upload.contextFileId,
+        fileType: upload.fileType,
+        converted: upload.page.converted,
+        created: now.toISOString()
+      })
+      .run()
+    return row
+  })
 }
 
 /**

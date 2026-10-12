@@ -79,6 +79,12 @@ import {
   ContextSkipped
 } from '../contextLibrary'
 import { RESEARCH_TITLE_MAX, ResearchDoc } from '../research'
+import {
+  InlineTagReplacement,
+  SwitchoverConsent,
+  SwitchoverPlan,
+  SwitchoverResult
+} from '../memory/switchover'
 import { ContinuityFinding } from '../continuity'
 import { REVIEW_CHAT_MESSAGE_MAX, ReviewChatResult, ReviewChatTurn } from '../reviewChat'
 import {
@@ -3364,7 +3370,31 @@ export const contract = {
       text: z.string().trim().min(1).max(FILING_LINE_MAX)
     }),
     output: StoryRecord
-  }
+  },
+  /**
+   * F-16.15: whether this build offers the story-memory switch-over on a copy (Help › Try the
+   * story-memory switch-over on a copy…): unpackaged builds only in P1 (decision P1-D12).
+   */
+  'switchover:available': { input: z.undefined(), output: z.object({ available: z.boolean() }) },
+  /**
+   * F-16.15: copies the open (v1) project beside it as `<Name> (story memory test <date>)` with a
+   * new id and the `switchoverTrial` row, and opens the copy (still v1). The renderer flushes
+   * pending saves first. VALIDATION in a packaged build.
+   */
+  'switchover:trialCopy': {
+    input: z.undefined(),
+    output: z.object({ folder: z.string(), info: ProjectInfo })
+  },
+  /** F-16.15: the dry run on a trial copy; writes nothing. VALIDATION without the trial row. */
+  'switchover:plan': { input: z.undefined(), output: SwitchoverPlan },
+  /** F-16.15: the consent screen's inline-tag rows on a trial copy; writes nothing. */
+  'switchover:consent': { input: z.undefined(), output: z.array(InlineTagReplacement) },
+  /**
+   * F-16.15: the conversion of a trial copy: the working copy copied back, a full backup and a
+   * dated copy first, then one transaction (v2 tables, inline tags as the consented words, the
+   * ticked merges, `storyMemory` v2). Main then closes the project; the renderer reopens `folder`.
+   */
+  'switchover:convert': { input: SwitchoverConsent, output: SwitchoverResult }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract

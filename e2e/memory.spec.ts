@@ -40,6 +40,11 @@ import { caretToEnd, clickIntoEditor } from './support'
  * sends the Story notes block (and the panel's *What the AI is told* shows the same block); a
  * Research upload is filed into Pinned through the estimate and the deck, the line carries its
  * "Filed from" mark, and editing the source sentence raises a Needs a look conflict.
+ *
+ * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
+ * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
+ * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
+ * v2 with plain "Mara" and a Mara record; the original reopens as v1 with its inline tag.
  */
 
 let app: ElectronApplication
@@ -150,22 +155,27 @@ const RESEARCH_WORD = 'Quillback'
 const TYPED = ' The reef drops away past the second buoy.'
 const SECOND_PARAGRAPH = 'Maybe the lighthouse keeper lied about the wreck.'
 
+/** The launch environment without the story-memory override (slice 6 launches on v1 with it). */
+let baseEnv: Record<string, string>
+
 test.beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-e2e-memory-'))
   const providerUrl = await startFakeProvider()
-  const env = {
+  baseEnv = {
     ...Object.fromEntries(
-      Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined)
+      Object.entries(process.env).filter(
+        (e): e is [string, string] => e[1] !== undefined && e[0] !== 'MYTHSCRIBE_STORY_MEMORY'
+      )
     ),
     NODE_ENV: 'test',
     MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData'),
-    MYTHSCRIBE_STORY_MEMORY: 'v2',
     MYTHSCRIBE_E2E_PLAINTEXT_KEYS: '1',
     // Nothing leaves the machine: the own-key provider is the fake on loopback, and a closed
     // port answers any Cloud request at once.
     OPENAI_BASE_URL: providerUrl,
     MYTHSCRIBE_CLOUD_API_URL: 'http://127.0.0.1:9'
   }
+  const env = { ...baseEnv, MYTHSCRIBE_STORY_MEMORY: 'v2' }
   app = await electron.launch({ args: ['.'], env })
   app.on('close', () => {
     exited = true
@@ -861,4 +871,138 @@ test('story memory v2: the Story notes block and filing into Pinned (P1 slice 5)
   await expect
     .poll(async () => pageText((await invoke<StoredRecord>('record:get', { id: maraId })).pinned))
     .toBe(`Eyes: grey as the harbour.\n${FILED_LINE}`)
+})
+
+test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {
+  // A second launch without the override, with its own app data: new projects run v1.
+  if (!exited) await app.close()
+  app = await electron.launch({
+    args: ['.'],
+    env: { ...baseEnv, MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData-v1') }
+  })
+  exited = false
+  app.on('close', () => {
+    exited = true
+  })
+  page = await app.firstWindow()
+
+  const projectPath = path.join(tmp, 'Switch Novel.mythscribe')
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
+  }, projectPath)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const wizard = page.getByRole('dialog')
+  await wizard.getByRole('textbox', { name: 'Project name' }).fill('Switch Novel')
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByText('Off', { exact: true }).click()
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByTestId('project-name')).toHaveText('Switch Novel')
+  expect((await invoke<ProjectInfo | null>('project:current', undefined))?.storyMemory).toBe('v1')
+
+  // A character tag, made in the Index, typed inline through the `#` suggestion.
+  await showSection('Index')
+  const tagsPanel = page.getByRole('region', { name: 'Index section', exact: true })
+  await tagsPanel
+    .getByRole('tablist', { name: 'Tag categories' })
+    .getByRole('tab', { name: 'Characters' })
+    .click()
+  const tagForm = tagsPanel.getByRole('form', { name: 'New tag' })
+  await tagForm.getByRole('textbox', { name: 'Tag name' }).fill('mara')
+  await tagForm.getByRole('button', { name: 'Create tag' }).click()
+  await showSection('Manuscript')
+  const scene = (await invoke<TreeNode[]>('tree:list', undefined)).find(
+    (n) => n.hierarchyLevel === 'scene'
+  )
+  if (scene === undefined) throw new Error('the new project has no scene')
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByText(scene.title, { exact: true })
+    .click()
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await clickIntoEditor(editor)
+  await page.keyboard.type('Then #mar')
+  const suggestions = page.getByRole('listbox', { name: 'Tag suggestions' })
+  await expect(suggestions.getByRole('option').first()).toHaveText('mara')
+  await page.keyboard.press('Tab')
+  await page.keyboard.type('left.')
+  await expect(editor.locator('[data-inline-tag]')).toHaveText(['#mara'])
+  const storedText = async (): Promise<string> =>
+    JSON.stringify(
+      (await invoke<{ content: TiptapNodeT | null }>('document:get', { id: scene.id })).content
+    )
+  await expect.poll(storedText).toContain('left.')
+  expect(await storedText()).toContain('inlineTag')
+
+  // Help › Try the story-memory switch-over on a copy…: the dry run lists the tag as a record.
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'Help' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'Help' })
+    .getByRole('menuitem', { name: 'Try the story-memory switch-over on a copy…' })
+    .click()
+  const dryRun = page.getByRole('dialog', { name: 'Switch-over dry run' })
+  // (A character tag arrives with its sheet in v1, F-9.12, so the record comes from both.)
+  await expect(dryRun.getByRole('list', { name: 'Converted' })).toContainText(
+    'Mara: Record (character): from its sheet and tag.'
+  )
+  await dryRun.getByRole('button', { name: 'Next' }).click()
+
+  // The consent screen: the replacement (the linked sheet's name), edited to "Mara".
+  const replacement = page.getByRole('textbox', { name: 'Replacement for #mara' })
+  await expect(replacement).toHaveValue('Mara')
+  await replacement.fill('')
+  await replacement.fill('Mara')
+  await page.getByRole('button', { name: 'Convert' }).click()
+  const done = page.getByRole('dialog', { name: 'Switched over' })
+  await expect(done).toBeVisible({ timeout: 15_000 })
+
+  // The copy opens on v2: plain "Mara" in the scene, and a Mara record.
+  const copy = await invoke<ProjectInfo | null>('project:current', undefined)
+  expect(copy?.storyMemory).toBe('v2')
+  expect(path.basename(copy?.path ?? '')).toMatch(
+    /^Switch Novel \(story memory test \d{4}-\d\d-\d\d \d{4}\)\.mythscribe$/
+  )
+  const converted = await storedText()
+  expect(converted).not.toContain('inlineTag')
+  expect(converted).toContain('Then Mara left.')
+  expect((await invoke<{ name: string }[]>('record:list', undefined)).map((r) => r.name)).toEqual([
+    'Mara'
+  ])
+  await done.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(done).toHaveCount(0)
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByText(scene.title, { exact: true })
+    .click()
+  await expect(editor).toContainText('Then Mara left.')
+  await expect(editor.locator('[data-inline-tag]')).toHaveCount(0)
+
+  // The original reopens (File › Open project…) as v1, its inline tag as it was.
+  await app.evaluate(({ dialog }, chosen) => {
+    dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] })
+  }, projectPath)
+  await page
+    .getByRole('menubar', { name: 'Application menu' })
+    .getByRole('menuitem', { name: 'File' })
+    .click()
+  await page
+    .getByRole('menu', { name: 'File' })
+    .getByRole('menuitem', { name: 'Open project…' })
+    .click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(page.getByTestId('project-name')).toHaveText('Switch Novel')
+  const original = await invoke<ProjectInfo | null>('project:current', undefined)
+  expect(original?.path).toBe(projectPath)
+  expect(original?.storyMemory).toBe('v1')
+  expect(await storedText()).toContain('inlineTag')
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByText(scene.title, { exact: true })
+    .click()
+  await expect(editor.locator('[data-inline-tag]')).toHaveText(['#mara'])
 })

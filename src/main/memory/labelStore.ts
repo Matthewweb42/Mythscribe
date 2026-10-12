@@ -54,6 +54,8 @@ export interface LabelInput {
   name: string
   kind: LabelKind
   colour?: string
+  /** F-16.15: the v1 tag a switch-over label was made from (its mapping). */
+  legacyTagId?: string | null
 }
 
 export function createLabel(db: TreeDb, input: LabelInput, now: Date): Label {
@@ -70,7 +72,7 @@ export function createLabel(db: TreeDb, input: LabelInput, now: Date): Label {
     colour: input.colour ?? LABEL_DEFAULT_COLOUR[input.kind],
     kind: input.kind,
     position: existing.length,
-    legacyTagId: null,
+    legacyTagId: input.legacyTagId ?? null,
     created: at,
     modified: at
   }
