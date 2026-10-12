@@ -12,6 +12,21 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-12 · F-16.16, F-16.17, F-16.18 · P2a slice 1 (the evidence data): calls made while building it
+- Question: Building the data layer of the evidence reader (no AI yet, nothing you can see yet) needed calls the plan did not spell out. None changes v1.
+- Chosen (decided by Claude, unconfirmed):
+  1. **Names out of the reading gate:** each name in a sentence counts as "this person" rather than as its letters, so renaming someone never makes a scene read again, while swapping one person for another in a sentence does. What was read is kept with the names in, so a name or nickname you add later changes nothing either; *Rename in book* rewrites what was read along with the prose.
+  2. **A fact that went stale is re-checked** the next time the scene is read even when the only change near it was cosmetic (a typo fix, a comma) or a name: otherwise "re-checking after you pause" could wait for ever. When a scene is read anyway, the cosmetic edits in it are read too.
+  3. **Facts proved in code:** besides eyes, hair, scars, birth, age, death, place, clothing and things carried, two more kinds of sentence prove themselves: "Mara was good-looking and gentlemanlike" (a trait) and "Mara was the daughter of a miller" (family), because the test book expects them proved without the second AI read. Code proves only plain narration of the present; speech, rumour, memories and dreams always go to the checker.
+  4. **Words that stop a proof in code:** not, never, might, if, than, like, "had fought" and the like, as planned, plus words that report rather than narrate (said, heard, rumoured, believed, remembered, dreamt…). They count before the quote and in the rest of its clause; in a later clause only the ones that reach back over a whole sentence count ("…, if the letter was true", "…, or so they said"), so "Johanna was two-and-twenty that spring, and had learnt to read bad news…" still proves her age.
+  5. **"Mara died"** proves she is dead, although "dead" is not a word of the sentence (the slot has two values).
+  6. **Card lines are left out of the passage search** unless asked for by name, so Ms Scribe's passage search does not change before P3 gives cards their own place.
+  7. **Rename in book also renames** the person in the AI's card line and summary and in a fact's value ("waited for Hesk" becomes "waited for Haskel"), not only in the quotes.
+  8. **Diagnostics:** a fact demoted because it broke one of the memory's rules is counted (only the count, never the text) as `memory.invariant.<kind>`, when you have turned diagnostics on. The Cloud server accepts these counts from this build on, so **deploy the Worker from this build before a release that carries them** (an older server refuses a report with a counter it does not know).
+  9. **Scene numbers** ("14.2") count every chapter in reading order, including empty ones; a scene outside any chapter shows its title.
+- Alternatives: one placeholder for every name (swaps would not trigger a read); leave stale facts until the next real edit; only the plan's slots proved in code; a whole-sentence marker check (fewer facts proved for free); leave card lines in the default search; rename only the quotes; no diagnostics count.
+- To change it: `src/shared/memory/gate.ts` (1, 2), `literal.ts` and `markers.ts` (3–5), `passages.ts` `DEFAULT_PASSAGE_SOURCES` (6), `src/main/memory/reading/renameEvidence.ts` (7), `src/shared/diagnostics.ts` (8), `sceneRef.ts` (9).
+
 ## 2026-10-12 · F-16.16–16.21 · P2a plan: the calls the design left open
 - Question: Planning P2a, the evidence reader (`docs/research/story-memory-2026-10-11/plans/P2a.md`, five slices, nothing built yet), needed calls the design did not make. Details are in the plan's §7 (P2a-D1 to P2a-D25).
 - Chosen (decided by Claude, unconfirmed):

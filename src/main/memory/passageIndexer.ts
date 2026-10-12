@@ -1,7 +1,8 @@
-import { asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import { passageParagraphs } from '@shared/mentions'
 import { markedParagraphs } from '@shared/memory/pageMarks'
 import {
+  DEFAULT_PASSAGE_SOURCES,
   MEMORY_PASSAGE_SEARCH_MAX,
   passageCanon,
   passageLabel,
@@ -13,7 +14,8 @@ import {
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import { TiptapNode, type TiptapNodeT } from '@shared/tiptap'
 import { sha256 } from '../ai/request'
-import { memoryScan, record, researchDoc, type NodeRow } from '../db/schema'
+import { card, memoryScan, record, researchDoc, type NodeRow } from '../db/schema'
+import { currentDraftId } from '../draft/draftStore'
 import { AppError } from '../ipc/errors'
 import { getCompileState } from '../project/settingsStore'
 import { isUnderResearch, researchDocumentIds } from '../research/researchTree'
@@ -33,7 +35,9 @@ import { deleteScanRow, getScanHashes, scanHashesOf, setScanHash } from './scanS
  * - a record's Pinned paragraphs are `pinned` and its Ideas `idea`, each `notCanon` where marked;
  * - a Research page's paragraphs (F-16.8) are `note` when the author wrote it in MythScribe and
  *   `research` when it was made from an upload, every one `notCanon` when the page is switched
- *   Not canon, else where marked.
+ *   Not canon, else where marked;
+ * - a scene's card in the active draft (F-16.18), its line and its gist, are `card`, always
+ *   `notCanon`: a map, findable and never cited (owner kind `card`, keyed by the scene).
  * An owner is skipped while its rows hash as they did (`memory_scan.passages_hash`). Local and
  * free; nothing leaves the machine.
  */
@@ -55,7 +59,8 @@ const SOURCES_OF: Record<MemoryOwnerKind, readonly PassageSource[]> = {
   scene: ['scene', 'ideaScene', 'excludedScene'],
   sceneNote: ['sceneNote'],
   record: ['pinned', 'idea'],
-  research: ['note', 'research']
+  research: ['note', 'research'],
+  card: ['card']
 }
 
 function parseDoc(raw: string | null): TiptapNodeT | null {
@@ -139,6 +144,23 @@ function recordRows(db: TreeDb, id: string): PassageRow[] | null {
   return [...pageRows(parseDoc(row.pinned), 'pinned'), ...pageRows(parseDoc(row.ideas), 'idea')]
 }
 
+/** A scene's card rows (F-16.18): the active draft's line (¶0) and gist (¶1), when it has a card. */
+function cardRows(db: TreeDb, nodeId: string): PassageRow[] {
+  const draftId = currentDraftId(db)
+  if (draftId === null) return []
+  const row = db
+    .select({ line: card.line, gist: card.gist })
+    .from(card)
+    .where(and(eq(card.nodeId, nodeId), eq(card.draftId, draftId)))
+    .get()
+  if (row === undefined) return []
+  return [row.line, row.gist].flatMap((text, para) =>
+    text.trim() === ''
+      ? []
+      : [{ source: 'card' as const, para, canon: passageCanon('card', false), text }]
+  )
+}
+
 /** A Research page's rows (F-16.8): `note` for a written page, `research` for an upload. */
 function researchRows(db: TreeDb, row: NodeRow): PassageRow[] {
   const meta = db
@@ -216,14 +238,21 @@ export function indexOwner(db: TreeDb, kind: MemoryOwnerKind, id: string, now: D
   const row = manuscriptDocuments(db, nodes).find((document) => document.id === id)
   if (row === undefined) throw new AppError('NOT_FOUND', 'Not a manuscript document', { id })
   if (kind === 'sceneNote') return writeOwner(db, 'sceneNote', id, noteRows(row), now)
+  if (kind === 'card') {
+    // A scene that never had a card has nothing to index and keeps no scan row.
+    const rows = cardRows(db, id)
+    if (rows.length === 0 && getScanHashes(db, 'card', id).passagesHash === null) return false
+    return writeOwner(db, 'card', id, rows, now)
+  }
   return writeOwner(db, 'scene', id, sceneRows(row, sceneStatuses(db, nodes)), now)
 }
 
-/** A scene's text and its notes, as one `passages` job does. */
+/** A scene's text, its notes and its card (the active draft's), as one `passages` job does. */
 export function indexScene(db: TreeDb, nodeId: string, now: Date): boolean {
   const text = indexOwner(db, 'scene', nodeId, now)
   const notes = indexOwner(db, 'sceneNote', nodeId, now)
-  return text || notes
+  const map = indexOwner(db, 'card', nodeId, now)
+  return text || notes || map
 }
 
 /**
@@ -265,6 +294,7 @@ export function stalePassageOwners(db: TreeDb): StaleOwner[] {
   const statuses = sceneStatuses(db, nodes)
   const scenes = scanHashesOf(db, 'scene')
   const notes = scanHashesOf(db, 'sceneNote')
+  const cards = scanHashesOf(db, 'card')
   const stale: StaleOwner[] = []
   for (const row of manuscriptDocuments(db, nodes)) {
     if (scenes.get(row.id)?.passagesHash !== rowsHash(sceneRows(row, statuses))) {
@@ -272,6 +302,11 @@ export function stalePassageOwners(db: TreeDb): StaleOwner[] {
     }
     if (notes.get(row.id)?.passagesHash !== rowsHash(noteRows(row))) {
       stale.push({ kind: 'sceneNote', id: row.id })
+    }
+    const cardHash = cards.get(row.id)?.passagesHash ?? null
+    const cardText = cardRows(db, row.id)
+    if (cardHash === null ? cardText.length > 0 : cardHash !== rowsHash(cardText)) {
+      stale.push({ kind: 'card', id: row.id })
     }
   }
   const research = scanHashesOf(db, 'research')
@@ -328,6 +363,7 @@ function liveOwners(db: TreeDb): LiveOwners {
 function ownerKindOf(source: PassageSource): MemoryOwnerKind {
   if (source === 'pinned' || source === 'idea') return 'record'
   if (source === 'sceneNote') return 'sceneNote'
+  if (source === 'card') return 'card'
   if (source === 'note' || source === 'research') return 'research'
   return 'scene'
 }
@@ -370,7 +406,8 @@ export function pruneMemoryIndex(db: TreeDb): number {
 /**
  * The paragraphs that best match `query`, best first (bm25), each labelled with its source and
  * canon status. Every word of the query is quoted (`ftsQuery`), so FTS operators in it are plain
- * words. `sources` narrows the search; rows of an owner that is gone are skipped.
+ * words. `sources` narrows the search (none: every source but card lines); rows of an owner that
+ * is gone are skipped.
  */
 export function searchMemoryPassages(
   db: TreeDb,
@@ -381,14 +418,15 @@ export function searchMemoryPassages(
   const max = Math.min(Math.max(0, Math.floor(options.limit ?? 10)), MEMORY_PASSAGE_SEARCH_MAX)
   if (match === null || max === 0) return []
   const live = liveOwners(db)
-  const sources = options.sources ?? null
-  const filter =
-    sources === null || sources.length === 0
-      ? sql``
-      : sql` AND source IN (${sql.join(
-          sources.map((source) => sql`${source}`),
-          sql`, `
-        )})`
+  // Card lines are a map (F-16.18): searched only when asked for by name.
+  const sources =
+    options.sources === undefined || options.sources.length === 0
+      ? DEFAULT_PASSAGE_SOURCES
+      : options.sources
+  const filter = sql` AND source IN (${sql.join(
+    sources.map((source) => sql`${source}`),
+    sql`, `
+  )})`
   const rows = db.all<{
     source: PassageSource
     owner_id: string

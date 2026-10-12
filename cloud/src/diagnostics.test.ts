@@ -186,6 +186,17 @@ describe('POST /diagnostics', () => {
     expect(store.diagnosticCounts()).toHaveLength(1)
   })
 
+  it('counts a newer app’s memory invariant it does not know, but never free text (F-16.17)', async () => {
+    await expectAccepted(
+      report({ counts: [{ day: '2026-09-20', counter: 'memory.invariant.newKind', n: 1 }] })
+    )
+    expect(store.diagnosticCounts().map((row) => row.counter)).toEqual(['memory.invariant.newKind'])
+    for (const counter of ['memory.invariant.Mara is here', 'memory.invariant.', 'memory.notes']) {
+      const response = await send({ ...report(), counts: [{ day: '2026-09-20', counter, n: 1 }] })
+      expect(response.status).toBe(400)
+    }
+  })
+
   it('refuses a day that is not a calendar day', async () => {
     const response = await send({
       ...report(),

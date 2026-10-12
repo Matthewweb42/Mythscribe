@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { sentenceHash } from './anchor'
+import { valueKey } from './claims'
 import { normName } from './names'
 
 /**
@@ -15,7 +17,11 @@ import { normName } from './names'
  * - `split`: two records she split apart; never proposed as the same again.
  * - `notSame`: two records she said are different (the switch-over's kept spellings).
  * - `unlink`: a plan link she removed.
- * - `notRight`, `notProblem`: written from P2a and P4 (a wrong line, a contradiction that is fine).
+ * - `notRight` (F-16.18): an AI line the author said is wrong (*Not right › Wrong value*), keyed by
+ *   the record, slot, value and the sentences it rested on, so a new sentence stating the same
+ *   value is new evidence and comes back.
+ * - `notProblem`: a conflict that is fine: a filed line's (F-16.9, by the caller's `ref`), the
+ *   typed-detail conflict's *Keep mine* (decision 4, F-16.18: `detail`), and P4's findings.
  */
 export const DISMISSED_KINDS = [
   'name',
@@ -37,13 +43,21 @@ export type DismissedKeyInput =
   | { kind: 'notMention'; recordId: string; phrase: string }
   | { kind: 'split' | 'notSame'; a: string; b: string }
   | { kind: 'unlink'; planId: string; sceneId: string }
-  | { kind: 'notRight' | 'notProblem'; ref: string }
+  | { kind: 'notRight'; recordId: string; slot: string; value: string; anchor: readonly string[] }
+  | { kind: 'notProblem'; ref: string }
+  | { kind: 'notProblem'; detail: { nodeId: string; field: string; value: string } }
+
+/** The anchor part of a `notRight` key: one hash over its sentence hashes, in order. */
+export function anchorKey(anchor: readonly string[]): string {
+  return sentenceHash(anchor.join(' '))
+}
 
 /**
  * The one key shape per kind (unique per kind in the table): `name` → the name's norm; `alias`
  * → `recordId|norm`; `notMention` → `recordId|norm(the span with one word either side)`;
  * `split` and `notSame` → the two record ids in sorted order; `unlink` → `planId|sceneId`;
- * `notRight` and `notProblem` → the caller's reference.
+ * `notRight` → `recordId|slot|valueKey|anchorKey`; `notProblem` → the caller's reference, or for a
+ * typed detail `detail|nodeId|field|valueKey` (the text's value the author kept hers against).
  */
 export function dismissedKey(input: DismissedKeyInput): string {
   switch (input.kind) {
@@ -59,8 +73,10 @@ export function dismissedKey(input: DismissedKeyInput): string {
     case 'unlink':
       return `${input.planId}|${input.sceneId}`
     case 'notRight':
+      return `${input.recordId}|${input.slot}|${valueKey(input.value)}|${anchorKey(input.anchor)}`
     case 'notProblem':
-      return input.ref
+      if ('ref' in input) return input.ref
+      return `detail|${input.detail.nodeId}|${input.detail.field}|${valueKey(input.detail.value)}`
   }
 }
 

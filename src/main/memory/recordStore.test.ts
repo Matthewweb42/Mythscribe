@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { dismissedKey } from '@shared/memory/dismissed'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
 import { RECORD_ALIASES_MAX } from '@shared/memory/records'
-import { alias, nameMention } from '../db/schema'
+import { sceneSentences } from '@shared/memory/anchor'
+import { emptyCardFields } from '@shared/memory/claims'
+import { alias, memoryBackfill, nameMention, settings } from '../db/schema'
+import { activeDraftId } from '../draft/draftStore'
 import { saveDocument } from '../document/documentStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import type { TreeDb } from '../tree/treeStore'
@@ -29,6 +32,10 @@ import {
   splitRecord,
   updateRecord
 } from './recordStore'
+import { getCard, upsertCard } from './reading/cardStore'
+import { sceneTexts, seedClaims } from './reading/claimFixture'
+import { getClaim, invariantClaims } from './reading/claimStore'
+import { MEMORY_ROSTER_KEY } from './reading/roster'
 import { getSceneDetails, setSceneDetails } from './sceneDetailStore'
 
 let tmp: string
@@ -415,5 +422,206 @@ describe('splitRecord (F-16.4)', () => {
     expect(into.aliases.map((entry) => entry.text)).toEqual(['Jem Falsire', 'Falsire'])
     expect(isDismissed(db, 'split', dismissedKey({ kind: 'split', a: id, b: other }))).toBe(true)
     clean()
+  })
+})
+
+describe('the reading’s evidence through merge, split and delete (F-16.17, plan P2a §1.4)', () => {
+  /** The claim invariants over the active draft against the scene as stored. */
+  const claimsClean = (): void => {
+    const scene = scenes[0] ?? ''
+    expect(
+      checkMemoryInvariants({
+        claims: invariantClaims(db),
+        sceneHashes: new Map([
+          [scene, new Set(sceneSentences(sceneTexts(db, scene)).map((each) => each.hash))]
+        ]),
+        aliases: invariantAliases(db),
+        citations: []
+      })
+    ).toEqual([])
+  }
+  const rosterMarked = (): boolean =>
+    db.select().from(settings).where(eq(settings.key, MEMORY_ROSTER_KEY)).get() === undefined
+  const seedRoster = (): void => {
+    db.insert(settings).values({ key: MEMORY_ROSTER_KEY, value: '{}' }).run()
+  }
+
+  beforeEach(() => {
+    saveDocument(
+      db,
+      scenes[0] ?? '',
+      page("Ry ran. Ry's eyes were grey. Rynna told Ry. She smiled at him.")
+    )
+  })
+
+  it('re-points claims, the card, back-fill rows and Not right keys on Same as…', () => {
+    const keep = make('Rynna')
+    const merge = make('Ry')
+    const [subject, spoken] = seedClaims(
+      db,
+      scenes[0] ?? '',
+      [
+        { recordId: merge, slot: 'eyes', value: 'grey', quote: "Ry's eyes were grey", para: 0 },
+        {
+          recordId: keep,
+          slot: 'relation',
+          value: 'told',
+          quote: 'Rynna told Ry',
+          para: 0,
+          objectId: merge,
+          speakerId: merge,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    upsertCard(
+      db,
+      {
+        nodeId: scenes[0] ?? '',
+        draftId: activeDraftId(db),
+        readingId: null,
+        line: 'Ry runs.',
+        gist: 'A gist.',
+        fields: {
+          ...emptyCardFields(),
+          pov: { value: merge, quote: 'Ry ran', p: 0, verified: true }
+        },
+        present: [
+          { recordId: merge, quote: 'Ry ran', p: 0, verified: true },
+          { recordId: keep, quote: 'Rynna told Ry', p: 0, verified: true }
+        ],
+        mood: null,
+        theme: null,
+        anchor: []
+      },
+      NOW
+    )
+    db.insert(memoryBackfill)
+      .values([
+        { recordId: merge, norm: 'ry', state: 'due', created: 'x' },
+        { recordId: merge, norm: 'rynna', state: 'due', created: 'x' },
+        { recordId: keep, norm: 'rynna', state: 'done', created: 'x' }
+      ])
+      .run()
+    const key = dismissedKey({
+      kind: 'notRight',
+      recordId: merge,
+      slot: 'hair',
+      value: 'red',
+      anchor: ['h']
+    })
+    dismiss(db, { kind: 'notRight', key, recordId: merge, label: 'Ry: hair red is not right' }, NOW)
+    seedRoster()
+
+    sameAs(db, keep, merge, NOW)
+    expect(getClaim(db, subject ?? '')?.recordId).toBe(keep)
+    expect(getClaim(db, spoken ?? '')).toMatchObject({
+      recordId: keep,
+      objectId: keep,
+      speakerId: keep
+    })
+    const card = getCard(db, scenes[0] ?? '', activeDraftId(db))
+    expect(card?.present.map((each) => each.recordId)).toEqual([keep])
+    expect(card?.fields.pov?.value).toBe(keep)
+    expect(
+      db
+        .select()
+        .from(memoryBackfill)
+        .all()
+        .map((row) => [row.recordId, row.norm, row.state])
+        .sort()
+    ).toEqual([
+      [keep, 'ry', 'due'],
+      [keep, 'rynna', 'done']
+    ])
+    expect(
+      isDismissed(
+        db,
+        'notRight',
+        dismissedKey({
+          kind: 'notRight',
+          recordId: keep,
+          slot: 'hair',
+          value: 'red',
+          anchor: ['h']
+        })
+      )
+    ).toBe(true)
+    expect(rosterMarked()).toBe(true)
+    claimsClean()
+  })
+
+  it('moves on Split the claims a moved name pinned, and leaves pronoun claims', () => {
+    const id = make('Rynna', ['Ry'])
+    const ry = requireRecord(db, id).aliases.find((entry) => entry.text === 'Ry')?.id ?? ''
+    const [named, pronoun, own] = seedClaims(
+      db,
+      scenes[0] ?? '',
+      [
+        {
+          recordId: id,
+          slot: 'eyes',
+          value: 'grey',
+          quote: "Ry's eyes were grey",
+          para: 0,
+          subjectText: 'Ry'
+        },
+        {
+          recordId: id,
+          slot: 'traits',
+          value: 'smiling',
+          quote: 'She smiled at him',
+          para: 0,
+          subjectText: null,
+          proof: 'verified'
+        },
+        {
+          recordId: id,
+          slot: 'history',
+          value: 'told Ry',
+          quote: 'Rynna told Ry',
+          para: 0,
+          subjectText: 'Rynna',
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    seedRoster()
+    const { into } = splitRecord(db, id, [ry], null, NOW)
+    expect(getClaim(db, named ?? '')?.recordId).toBe(into.id)
+    expect(getClaim(db, pronoun ?? '')?.recordId).toBe(id)
+    expect(getClaim(db, own ?? '')?.recordId).toBe(id)
+    expect(rosterMarked()).toBe(true)
+    claimsClean()
+  })
+
+  it('drops a deleted record’s claims and clears it where it was the object', () => {
+    const gone = make('Ry')
+    const stays = make('Rynna')
+    const [own, about] = seedClaims(
+      db,
+      scenes[0] ?? '',
+      [
+        { recordId: gone, slot: 'eyes', value: 'grey', quote: "Ry's eyes were grey", para: 0 },
+        {
+          recordId: stays,
+          slot: 'relation',
+          value: 'told',
+          quote: 'Rynna told Ry',
+          para: 0,
+          objectId: gone,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    seedRoster()
+    deleteRecord(db, gone)
+    expect(getClaim(db, own ?? '')).toBeNull()
+    expect(getClaim(db, about ?? '')?.objectId).toBeNull()
+    expect(rosterMarked()).toBe(true)
+    claimsClean()
   })
 })

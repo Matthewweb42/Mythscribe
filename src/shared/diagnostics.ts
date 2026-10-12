@@ -19,7 +19,13 @@ const APP_COUNTERS = [
   'export.run',
   'focus.enter',
   'proposal.accept',
-  'proposal.reject'
+  'proposal.reject',
+  // F-16.17 (P2a-D19): a story-memory claim that broke an invariant on save and was demoted to
+  // stale. A count only: never the claim, the scene or the record.
+  'memory.invariant.anchorMissing',
+  'memory.invariant.anchorEmpty',
+  'memory.invariant.unproved',
+  'memory.invariant.unreadableSource'
 ] as const
 
 /**
@@ -34,6 +40,17 @@ export const DIAGNOSTIC_COUNTERS: readonly DiagnosticCounter[] = [
 ]
 
 export const DiagnosticCounter = z.enum(DIAGNOSTIC_COUNTERS)
+
+/** The invariant kinds a save can heal (F-16.17), each counted as `memory.invariant.<kind>`. */
+export type MemoryInvariantCounter = Extract<DiagnosticCounter, `memory.invariant.${string}`>
+
+/** The counter a healed invariant violation is counted under, or null for a kind not counted. */
+export function memoryInvariantCounter(kind: string): MemoryInvariantCounter | null {
+  const counter = `memory.invariant.${kind}`
+  return (APP_COUNTERS as readonly string[]).includes(counter)
+    ? (counter as MemoryInvariantCounter)
+    : null
+}
 
 /** The counter one AI feature's requests are counted under (F-5.14 names the features). */
 export function aiRequestCounter(feature: AiFeatureId): DiagnosticCounter {

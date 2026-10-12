@@ -99,6 +99,8 @@ import {
   setVoiceNotes
 } from '../project/settingsStore'
 import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
+import { seedClaims } from '../memory/reading/claimFixture'
+import { getClaim } from '../memory/reading/claimStore'
 import { listRecords } from '../memory/recordStore'
 import { NOT_A_TRIAL } from '../memory/switchover/trial'
 import { createTag } from '../tag/tagStore'
@@ -8837,6 +8839,81 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       expect(dismissed.count).toBe(1)
       await invoke('dismissed:undo', { id: dismissed.items[0]?.id ?? '' })
       expect((await invoke('names:questions', undefined)).map((q) => q.name)).toEqual(['Hesk'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('checks the claims’ anchors after an editor save settles, and at once after a bulk write (F-16.17)', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await openV2()
+      const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+      if (!('record' in made)) throw new Error('blocked')
+      const text = ['The ridge was cold.', "Mara's eyes were grey. She waited."]
+      await invoke('document:save', { id: scene, content: paragraphs(...text) })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      const db = manager.require().connection.orm
+      const now = new Date()
+      const [literal, verified] = seedClaims(
+        db,
+        scene,
+        [
+          {
+            recordId: made.record.id,
+            slot: 'eyes',
+            value: 'grey',
+            quote: "Mara's eyes were grey",
+            para: 1
+          },
+          {
+            recordId: made.record.id,
+            slot: 'traits',
+            value: 'patient',
+            quote: "Mara's eyes were grey. She waited",
+            para: 1,
+            proof: 'verified'
+          }
+        ],
+        now
+      )
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs('The ridge was very cold.', ...text.slice(1))
+      })
+      // Nothing yet: the editor's saves wait for the burst to settle.
+      expect(getClaim(db, verified ?? '')?.state).toBe('live')
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect(getClaim(db, literal ?? '')).toMatchObject({ state: 'live' })
+      expect(getClaim(db, verified ?? '')?.state).toBe('stale')
+
+      // A bulk write (Replace in project) checks them without waiting for a debounce.
+      const [again] = seedClaims(
+        db,
+        scene,
+        [
+          {
+            recordId: made.record.id,
+            slot: 'eyes',
+            value: 'grey',
+            quote: "Mara's eyes were grey",
+            para: 1,
+            proof: 'verified'
+          }
+        ],
+        now
+      )
+      await invoke('replace:commit', {
+        query: 'very cold',
+        replacement: 'bitter',
+        matchCase: false,
+        wholeWord: false,
+        scopeId: null,
+        ids: [scene]
+      })
+      await vi.advanceTimersByTimeAsync(10)
+      expect(getClaim(db, again ?? '')?.state).toBe('stale')
+      expect(complete).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }

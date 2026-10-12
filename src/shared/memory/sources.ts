@@ -8,6 +8,8 @@
  * - Ideas, Try, chats, inactive drafts, Idea-status scenes, scenes left out of compile, and Not
  *   canon pages and paragraphs are never real and never read.
  *
+ * - A card (F-16.18) is the AI's map of a scene: findable, never citable, never canon (`map`).
+ *
  * Only manuscript scenes are read for claims (`readerMayRead`): the evidence reader (F-16.17)
  * refuses everything else, and `checkMemoryInvariants` reports a claim from anywhere else.
  */
@@ -26,11 +28,12 @@ export const MEMORY_SOURCES = [
   'inactiveDraft',
   'ideaScene',
   'excludedScene',
-  'notCanon'
+  'notCanon',
+  'card'
 ] as const
 export type MemorySource = (typeof MEMORY_SOURCES)[number]
 
-export const MEMORY_MEANINGS = ['happened', 'later', 'canon', 'plan', 'never'] as const
+export const MEMORY_MEANINGS = ['happened', 'later', 'canon', 'plan', 'never', 'map'] as const
 export type MemoryMeaning = (typeof MEMORY_MEANINGS)[number]
 
 const MEANING: Record<
@@ -50,7 +53,8 @@ const MEANING: Record<
   inactiveDraft: 'never',
   ideaScene: 'never',
   excludedScene: 'never',
-  notCanon: 'never'
+  notCanon: 'never',
+  card: 'map'
 }
 
 /**

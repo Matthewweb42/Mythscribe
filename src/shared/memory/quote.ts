@@ -81,6 +81,22 @@ function occurrences(haystack: string, needle: string): number[] {
 }
 
 /**
+ * Where `quote` sits in one text, by offsets into that text (whitespace and quote style may
+ * differ, word boundaries hold), or null unless it sits there exactly once. Literal proof reads a
+ * sentence with it; Rename in book rewrites a stored quote with it.
+ */
+export function locateInText(text: string, quote: string): { start: number; end: number } | null {
+  const needle = normalizeForMatch(quote)
+  if (needle === '') return null
+  const normalized = normalizeWithOffsets(text)
+  const [only, ...rest] = occurrences(normalized.text, needle)
+  if (only === undefined || rest.length > 0) return null
+  const start = normalized.offsets[only] ?? 0
+  const end = (normalized.offsets[only + needle.length - 1] ?? start) + 1
+  return { start, end }
+}
+
+/**
  * Locates `quote` in `paragraphs` (the window sent to the reader) and checks it is in paragraph
  * `p`. Misses, in the order they are checked: `tooShort` and `tooLong` (outside 3–25 words),
  * `notFound`, `repeated` (more than once anywhere in the window, even if once in `p`), and

@@ -24,6 +24,7 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
 import { dismissed, draftText } from '../db/schema'
 import { parseStoredTiptap, saveDocument, writeDocumentText } from '../document/documentStore'
+import { currentDraftId } from '../draft/draftStore'
 import { AppError } from '../ipc/errors'
 import { takeAutoSnapshot } from '../snapshot/snapshotStore'
 import { getNode, type TreeDb } from '../tree/treeStore'
@@ -38,6 +39,7 @@ import {
   restoreAliasText,
   type AliasText
 } from './recordStore'
+import { restoreEvidence, rewriteEvidence, type EvidenceUndo } from './reading/renameEvidence'
 import { povOf } from './sceneDetailStore'
 
 /**
@@ -50,6 +52,11 @@ import { povOf } from './sceneDetailStore'
  * editor is left to the renderer, which applies the same edits through the editor and keeps its
  * own undo for it. The undo here is in memory for the session (like `replaceStore`'s): a text is
  * put back only while it still reads as the rename left it.
+ *
+ * F-16.17 (P2a): the reading's evidence follows in the same transaction, the open scene's too
+ * (the renderer writes the same edits): each rewritten scene's claims, card and read set in that
+ * draft (`rewriteEvidence`), so nothing goes stale and nothing reads as changed. The undo puts
+ * the evidence back with the text.
  */
 
 interface DocUndo {
@@ -76,6 +83,14 @@ interface DismissedUndo {
   added: { id: string; key: string }[]
 }
 
+/** One rewritten scene's evidence in one draft, and whether it is the scene open in the editor. */
+interface EvidenceEntry {
+  nodeId: string
+  draftId: string
+  open: boolean
+  undo: EvidenceUndo
+}
+
 interface RenameUndo {
   recordId: string
   aliasId: string
@@ -83,6 +98,7 @@ interface RenameUndo {
   docs: DocUndo[]
   drafts: DraftUndo[]
   dismissed: DismissedUndo
+  evidence: EvidenceEntry[]
 }
 
 let pending: RenameUndo | null = null
@@ -285,6 +301,28 @@ export function applyRename(db: TreeDb, request: RenameApplyRequest, now: Date):
       moves.push(...notMentionMoves(text.paragraphs, scope.index, text.ctx, edits))
     }
 
+    // F-16.17: the evidence read from each rewritten text follows it (the open scene's too).
+    const evidence: EvidenceEntry[] = []
+    const follow = (nodeId: string, draftId: string, text: PlannedText, open: boolean): void => {
+      const undo = rewriteEvidence(
+        tx,
+        {
+          nodeId,
+          draftId,
+          before: text.paragraphs,
+          after: passageParagraphs(text.rewritten),
+          edits: text.edits
+        },
+        now
+      )
+      if (undo !== null) evidence.push({ nodeId, draftId, open, undo })
+    }
+    const active = currentDraftId(tx)
+    if (active !== null) {
+      for (const { id, text } of sceneWrites) follow(id, active, text, id === request.openId)
+    }
+    for (const { draftId, nodeId, text } of draftWrites) follow(nodeId, draftId, text, false)
+
     const name = renameAlias(tx, request.recordId, request.aliasId, scope.to, now)
     return {
       undo: {
@@ -293,7 +331,8 @@ export function applyRename(db: TreeDb, request: RenameApplyRequest, now: Date):
         name,
         docs: docUndo,
         drafts: draftUndo,
-        dismissed: moveNotMentions(tx, moves, now)
+        dismissed: moveNotMentions(tx, moves, now),
+        evidence
       },
       written,
       draftMatches,
@@ -408,6 +447,7 @@ export function undoRename(db: TreeDb, now: Date): RenameUndoResult {
       })
     }
     const drafts = { restored: 0, skipped: 0 }
+    const draftsBack = new Set<string>()
     for (const text of entry.drafts) {
       const where = and(eq(draftText.draftId, text.draftId), eq(draftText.nodeId, text.nodeId))
       const row = tx.select().from(draftText).where(where).get()
@@ -421,6 +461,14 @@ export function undoRename(db: TreeDb, now: Date): RenameUndoResult {
         .where(where)
         .run()
       drafts.restored += 1
+      draftsBack.add(`${text.draftId}|${text.nodeId}`)
+    }
+    // F-16.17: the evidence goes back with its text; the open scene's with the renderer's undo.
+    const docsBack = new Set(restored.map((each) => each.id))
+    for (const each of entry.evidence) {
+      const back =
+        each.open || docsBack.has(each.nodeId) || draftsBack.has(`${each.draftId}|${each.nodeId}`)
+      if (back) restoreEvidence(tx, each.undo, now)
     }
     const nameRestored = restoreAliasText(
       tx,

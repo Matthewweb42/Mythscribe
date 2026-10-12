@@ -23,7 +23,8 @@ describe('meaning by place (F-16.3, design §2.2)', () => {
       inactiveDraft: 'never',
       ideaScene: 'never',
       excludedScene: 'never',
-      notCanon: 'never'
+      notCanon: 'never',
+      card: 'map'
     }
     for (const source of MEMORY_SOURCES) {
       if (source === 'scene') continue

@@ -48,7 +48,15 @@ export const JobKind = z.enum([
   'names',
   // F-16.5 (story memory v2 only): the local passage index of one scene and its notes, or, keyed
   // to the manuscript root, of every record page that changed. On the mention queue.
-  'passages'
+  'passages',
+  // F-16.17 (story memory v2 only): the local anchor check of one scene's claims after a save
+  // (stale, re-proved for free, or held). On the mention queue, after the name scan.
+  'anchors',
+  // F-16.16, F-16.17, F-16.19 (story memory v2 only, slice 3): one scene's reading, one scene of
+  // a *Rebuild memory*, and a batch of spot checks, on the reader's provider-backed queue.
+  'read',
+  'rebuild',
+  'spotCheck'
 ])
 export type JobKind = z.infer<typeof JobKind>
 

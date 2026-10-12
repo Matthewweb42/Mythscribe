@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { passageParagraphs } from '../mentions'
 import type { TiptapNodeT } from '../tiptap'
 import { markedParagraphs } from './pageMarks'
-import { PASSAGE_SOURCES, passageCanon, passageLabel } from './passages'
+import { DEFAULT_PASSAGE_SOURCES, PASSAGE_SOURCES, passageCanon, passageLabel } from './passages'
 import { meaningOf } from './sources'
 
 const para = (text: string, notCanon = false): TiptapNodeT => ({
@@ -27,12 +27,21 @@ describe('passage labels (F-16.5)', () => {
       expect(passageCanon(source, false)).toBe('notCanon')
       expect(passageLabel(source, passageCanon(source, false))).toBe(source)
     }
-    // Every source whose text means anything but never is canon until marked.
+    // Every source whose text means anything but never (or a map) is canon until marked.
     for (const source of PASSAGE_SOURCES) {
-      const never = meaningOf(source, { order: 0, openOrder: 0 }) === 'never'
-      expect(passageCanon(source, false)).toBe(never ? 'notCanon' : 'canon')
+      const meaning = meaningOf(source, { order: 0, openOrder: 0 })
+      const real = meaning !== 'never' && meaning !== 'map'
+      expect(passageCanon(source, false)).toBe(real ? 'canon' : 'notCanon')
       expect(passageCanon(source, true)).toBe('notCanon')
     }
+  })
+
+  it('keeps a card line (F-16.18) a map: never canon, labelled card, left out of a default search', () => {
+    expect(passageCanon('card', false)).toBe('notCanon')
+    expect(passageLabel('card', 'notCanon')).toBe('card')
+    expect(meaningOf('card', { order: 0, openOrder: 0 })).toBe('map')
+    expect(DEFAULT_PASSAGE_SOURCES).not.toContain('card')
+    expect(DEFAULT_PASSAGE_SOURCES).toHaveLength(PASSAGE_SOURCES.length - 1)
   })
 })
 

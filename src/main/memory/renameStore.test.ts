@@ -14,7 +14,19 @@ import { createProject, projectFolderFor, type ProjectSession } from '../project
 import { listSnapshots } from '../snapshot/snapshotStore'
 import { createNode, getNode, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
+import { sceneSentences } from '@shared/memory/anchor'
+import { emptyCardFields } from '@shared/memory/claims'
+import { gateSentences, nextReadSet } from '@shared/memory/gate'
+import { checkMemoryInvariants } from '@shared/memory/invariants'
+import { activeDraftId } from '../draft/draftStore'
 import { dismiss, getDismissedByKey, listDismissed } from './dismissedStore'
+import { nameScanShared } from './nameIndexer'
+import { runAnchors } from './reading/anchors'
+import { getCard, upsertCard } from './reading/cardStore'
+import { anchoredClaim, sceneTexts, seedClaims } from './reading/claimFixture'
+import { getClaim, insertClaims, invariantClaims } from './reading/claimStore'
+import { getSceneRead, writeSceneRead } from './reading/sceneReadStore'
+import { sceneMemory } from './reading/views'
 import { createRecord, requireRecord } from './recordStore'
 import {
   applyRename,
@@ -374,5 +386,165 @@ describe('undoRename (F-16.13)', () => {
     // Only the last rename can be undone: it goes back to Haskel.
     expect(undoRename(db, NOW).record?.name).toBe('Haskel')
     expect(() => undoRename(db, NOW)).toThrow(/no rename/)
+  })
+})
+
+describe('Rename in book over the evidence (F-16.17, plan P2a §1.4)', () => {
+  /** The invariants over the active draft's claims against the scenes as stored now. */
+  const clean = (): void => {
+    const hashes = new Map(
+      manuscriptDocuments(db).map((row) => [
+        row.id,
+        new Set(sceneSentences(sceneTexts(db, row.id)).map((each) => each.hash))
+      ])
+    )
+    expect(
+      checkMemoryInvariants({
+        claims: invariantClaims(db),
+        sceneHashes: hashes,
+        aliases: [],
+        citations: []
+      })
+    ).toEqual([])
+  }
+
+  /** A claim in the first scene, one in the second, a card, and both scenes read. */
+  function seed(): { coat: string; waited: string } {
+    const [coat] = seedClaims(
+      db,
+      scenes[0] ?? '',
+      [
+        {
+          recordId: hesk,
+          slot: 'traits',
+          value: 'wet',
+          quote: "Hesk's coat was wet",
+          para: 1,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    const [waited] = seedClaims(
+      db,
+      scenes[1] ?? '',
+      [
+        {
+          recordId: hesk,
+          slot: 'history',
+          value: 'waited for Hesk',
+          quote: 'They waited for Hesk',
+          para: 0,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    upsertCard(
+      db,
+      {
+        nodeId: scenes[0] ?? '',
+        draftId: activeDraftId(db),
+        readingId: null,
+        line: 'Hesk comes in wet.',
+        gist: 'Hesk arrives soaked.',
+        fields: {
+          ...emptyCardFields(),
+          where: { value: 'in', quote: 'Hesk came in', p: 0, verified: false }
+        },
+        present: [{ recordId: hesk, quote: 'Hesk came in', p: 0, verified: true }],
+        mood: null,
+        theme: null,
+        anchor: sceneSentences(sceneTexts(db, scenes[0] ?? ''))
+          .map((each) => each.hash)
+          .slice(0, 1)
+      },
+      NOW
+    )
+    const names = nameScanShared(db).index
+    for (const id of [scenes[0] ?? '', scenes[1] ?? '']) {
+      const current = gateSentences(sceneTexts(db, id), { caretPara: null, names })
+      writeSceneRead(
+        db,
+        {
+          nodeId: id,
+          draftId: activeDraftId(db),
+          entries: nextReadSet(null, current, 'all'),
+          full: true,
+          readingId: null
+        },
+        NOW
+      )
+    }
+    return { coat: coat ?? '', waited: waited ?? '' }
+  }
+
+  it('rewrites quotes, values, the card and the read set: nothing goes stale or reads as changed', () => {
+    const { coat, waited } = seed()
+    applyRename(db, applying(), NOW)
+    expect(getClaim(db, coat)?.quote).toBe("Haskel's coat was wet")
+    expect(getClaim(db, waited)).toMatchObject({
+      quote: 'They waited for Haskel',
+      value: 'waited for Haskel',
+      valueKey: 'waited for haskel'
+    })
+    const card = getCard(db, scenes[0] ?? '', activeDraftId(db))
+    expect(card).toMatchObject({ line: 'Haskel comes in wet.', gist: 'Haskel arrives soaked.' })
+    expect(card?.present[0]?.quote).toBe('Haskel came in')
+    expect(card?.fields.where?.quote).toBe('Haskel came in')
+    expect(
+      getSceneRead(db, scenes[1] ?? '', activeDraftId(db))?.entries.map(([, text]) => text)
+    ).toEqual(['They waited for Haskel.'])
+    for (const id of [scenes[0] ?? '', scenes[1] ?? '']) {
+      expect(runAnchors(db, id, NOW).staled).toEqual([])
+      expect(sceneMemory(db, id).unread).toBe(0)
+    }
+    clean()
+  })
+
+  it('puts the evidence back with the text on undo', () => {
+    const { coat, waited } = seed()
+    const before = [getClaim(db, coat), getClaim(db, waited)]
+    applyRename(db, applying(), NOW)
+    undoRename(db, NOW)
+    expect([getClaim(db, coat), getClaim(db, waited)]).toEqual(before)
+    expect(getCard(db, scenes[0] ?? '', activeDraftId(db))?.line).toBe('Hesk comes in wet.')
+    for (const id of [scenes[0] ?? '', scenes[1] ?? '']) {
+      expect(runAnchors(db, id, NOW).staled).toEqual([])
+      expect(sceneMemory(db, id).unread).toBe(0)
+    }
+    clean()
+  })
+
+  it('rewrites the open scene’s evidence for the editor’s save that follows, and an inactive draft’s', () => {
+    const { coat } = seed()
+    const other = otherDraft()
+    const elsewhere = {
+      ...anchoredClaim(db, scenes[1] ?? '', {
+        recordId: hesk,
+        slot: 'history',
+        value: 'waited',
+        quote: 'They waited for Hesk',
+        para: 0
+      }),
+      draftId: other
+    }
+    const [inOther] = insertClaims(db, [elsewhere], NOW)
+    const result = applyRename(
+      db,
+      applying('Haskel', { openId: scenes[0] ?? '', otherDrafts: true }),
+      NOW
+    )
+    expect(getClaim(db, coat)?.quote).toBe("Haskel's coat was wet")
+    expect(getClaim(db, inOther ?? '')?.quote).toBe('They waited for Haskel')
+    // The renderer writes the same edits through the editor, then saves.
+    expect(result.openEdits).toHaveLength(2)
+    saveDocument(
+      db,
+      scenes[0] ?? '',
+      doc('Haskel came in.', "Haskel's coat was wet; Heskel stayed out.")
+    )
+    expect(runAnchors(db, scenes[0] ?? '', NOW).staled).toEqual([])
+    clean()
   })
 })

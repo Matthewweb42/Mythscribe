@@ -25,7 +25,7 @@ import {
 } from '@shared/compileFormat'
 import { CHECKOUT_HOST_SUFFIX, isCheckoutUrl, type PricingResult } from '@shared/cloudApi'
 import { bundledPricing, hostedQuote } from '@shared/hostedPricing'
-import { aiRequestCounter } from '@shared/diagnostics'
+import { aiRequestCounter, memoryInvariantCounter } from '@shared/diagnostics'
 import { formatDiagnosticsReport } from '@shared/devtools'
 import { ENTITY_IMAGES_DIR } from '@shared/entities'
 import {
@@ -462,6 +462,7 @@ import {
   scanNamesFor,
   staleNameScans
 } from '../memory/nameIndexer'
+import { runAnchors } from '../memory/reading/anchors'
 import {
   dropOwner,
   indexNodePassages,
@@ -878,12 +879,24 @@ export function registerHandlers({
   const mentionQueue = createIndexQueue<{ changed: boolean; scanned: boolean }>({
     // F-16.5: the v2 name scan and passage index ride the same local queue; each run below
     // keeps to its own story memory, so a job left by the other one is dropped quietly.
-    kind: ['mentions', 'names', 'passages'],
+    kind: ['mentions', 'names', 'passages', 'anchors'],
     db: () => (manager.current() === null ? null : manager.require().connection.orm),
     run: (job) => {
       const db = manager.require().connection.orm
       const now = new Date()
       const v2 = memory() === 'v2'
+      if (job.kind === 'anchors') {
+        if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
+        // F-16.17: the scene's claims checked against its sentences; a claim that broke an
+        // invariant was demoted, and only its kind is counted (P2a-D19).
+        const result = runAnchors(db, job.nodeId, now)
+        for (const kind of result.violations) {
+          const counter = memoryInvariantCounter(kind)
+          if (counter !== null) diagnostics.count(counter)
+        }
+        const changed = result.staled.length + result.reproved.length + result.attached.length > 0
+        return Promise.resolve({ requested: false, value: { changed, scanned: changed } })
+      }
       if (job.kind === 'names') {
         if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
         const value = scanNamesFor(db, job.nodeId, now)
@@ -1183,9 +1196,15 @@ export function registerHandlers({
   /**
    * What follows every write of document content, whoever wrote it: the editor's `document:save`
    * and the bulk writes of find and replace (F-10.2) both end here, so a replaced document is
-   * re-summarized and rescanned exactly like a typed one.
+   * re-summarized and rescanned exactly like a typed one. `origin` says which (F-16.16): the
+   * editor's saves come in bursts while the author types, the rest (replace, a draft switch or
+   * revert, a restore, a rename, the chat's bulk tools) are one-off writes of many scenes.
    */
-  const documentsWritten = (db: TreeDb, ids: readonly string[]): void => {
+  const documentsWritten = (
+    db: TreeDb,
+    ids: readonly string[],
+    origin: 'editor' | 'bulk'
+  ): void => {
     if (ids.length === 0) return
     // F-14.1: every save moves the voice profile's version (a cheap integer; checking whether the
     // document is under the manuscript would cost a lookup on the hot path for nothing).
@@ -1199,9 +1218,11 @@ export function registerHandlers({
     for (const id of ids) {
       if (summaries) queue.touch('summary', id)
       if (v2) {
-        // F-16.5: the local name scan and passage index, with no gate either.
+        // F-16.5: the local name scan and passage index, with no gate either. F-16.17: and the
+        // claims' anchors, once a burst of typing settles, or at once after a bulk write.
         mentionQueue.touch('names', id)
         mentionQueue.touch('passages', id)
+        if (origin === 'editor') mentionQueue.touch('anchors', id)
         continue
       }
       // F-4.12: the mention scan is local, so it has no gate to read — every save queues one, and
@@ -1209,6 +1230,7 @@ export function registerHandlers({
       // F-4.12b: a scan that read the document again republishes the proposed tags itself.
       mentionQueue.touch('mentions', id)
     }
+    if (v2 && origin === 'bulk') mentionQueue.indexAll('anchors', [...ids])
     // F-14.14: one debounced voice job per burst of saves, whichever documents they were.
     const root = manuscriptRootId(db)
     if (root !== null) voiceQueue.touch('voice', root)
@@ -1297,7 +1319,7 @@ export function registerHandlers({
     const previous = manuscriptWordCount(db, id)
     const saved = saveDocument(db, id, content)
     if (previous !== null) recordWriting(db, saved.wordCount - previous)
-    documentsWritten(db, [id])
+    documentsWritten(db, [id], 'editor')
     return saved
   }
 
@@ -2029,7 +2051,8 @@ export function registerHandlers({
       clearSearchCache()
       documentsWritten(
         db,
-        result.changed.map((each) => each.id)
+        result.changed.map((each) => each.id),
+        'bulk'
       )
     }
     return result
@@ -2042,7 +2065,8 @@ export function registerHandlers({
       clearSearchCache()
       documentsWritten(
         db,
-        result.restored.map((each) => each.id)
+        result.restored.map((each) => each.id),
+        'bulk'
       )
     }
     return result
@@ -2058,8 +2082,12 @@ export function registerHandlers({
     const result = switchDraft(db, id)
     documentsWritten(
       db,
-      result.changed.map((each) => each.id)
+      result.changed.map((each) => each.id),
+      'bulk'
     )
+    // F-16.18: each draft has its own cards, so the passage index takes the new draft's card
+    // lines, scenes whose text did not change included (v2 only; by hash, nothing else is read).
+    queueMemoryIndex(db)
     return result
   })
 
@@ -2082,7 +2110,8 @@ export function registerHandlers({
     const result = revertDocuments(db, fromId, nodeIds)
     documentsWritten(
       db,
-      result.changed.map((each) => each.id)
+      result.changed.map((each) => each.id),
+      'bulk'
     )
     return result
   })
@@ -2106,7 +2135,8 @@ export function registerHandlers({
     const result = restoreSnapshot(db, id, nodeIds)
     documentsWritten(
       db,
-      result.changed.map((each) => each.id)
+      result.changed.map((each) => each.id),
+      'bulk'
     )
     return result
   })
@@ -4273,7 +4303,8 @@ export function registerHandlers({
     }
     documentsWritten(
       db,
-      result.rewritten.map((each) => each.id)
+      result.rewritten.map((each) => each.id),
+      'bulk'
     )
     if (result.deleted.length > 0)
       emit(windows(), 'continuity:changed', { nodeIds: result.deleted })
@@ -4713,7 +4744,8 @@ export function registerHandlers({
     clearSearchCache()
     documentsWritten(
       db,
-      result.written.map((each) => each.id)
+      result.written.map((each) => each.id),
+      'bulk'
     )
     rosterChanged(db, [request.recordId])
     return result
@@ -4725,7 +4757,8 @@ export function registerHandlers({
     clearSearchCache()
     documentsWritten(
       db,
-      result.restored.map((each) => each.id)
+      result.restored.map((each) => each.id),
+      'bulk'
     )
     if (result.record !== null) rosterChanged(db, [result.record.id])
     return result

@@ -73,7 +73,9 @@ export type V2Mark = '[canon]' | '[plan]' | '[idea]'
 /** What a labelled passage reads as for the model, by where it is (design §2.2). */
 export function passageMark(label: MemorySource): V2Mark {
   const meaning = meaningOf(label, { order: 0, openOrder: 0 })
-  if (meaning === 'plan') return '[plan]'
+  // A card line (F-16.18) is a map, never the book: the search leaves cards out unless asked
+  // (`DEFAULT_PASSAGE_SOURCES`), and one that reaches here is never marked as canon.
+  if (meaning === 'plan' || meaning === 'map') return '[plan]'
   if (meaning === 'never') return '[idea]'
   return '[canon]'
 }
@@ -276,6 +278,10 @@ function hitPlace(
       if (row === undefined) return null
       return `Research "${searchableText(row.title)}" ¶${hit.para}`
     }
+    // A card line (F-16.18) is a map, never a passage to cite: the default search leaves it
+    // out, and one that reaches here is not listed.
+    case 'card':
+      return null
   }
 }
 

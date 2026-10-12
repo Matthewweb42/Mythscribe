@@ -11,6 +11,7 @@ import {
   EXTERNAL_FRAME,
   aiRequestCounter,
   defaultDiagnosticsSettings,
+  memoryInvariantCounter,
   scrubMessage,
   scrubStack
 } from './diagnostics'
@@ -31,6 +32,15 @@ describe('diagnostic counters (F-15.8)', () => {
     expect(DIAGNOSTIC_COUNTERS).toContain('app.launch')
     expect(DiagnosticCounter.safeParse('ai.request.somethingElse').success).toBe(false)
     expect(DiagnosticCounter.safeParse('scene.title.The Fall of Ys').success).toBe(false)
+  })
+
+  it('counts the story-memory invariants a save heals, and nothing else under memory (F-16.17)', () => {
+    for (const kind of ['anchorMissing', 'anchorEmpty', 'unproved', 'unreadableSource']) {
+      expect(memoryInvariantCounter(kind)).toBe(`memory.invariant.${kind}`)
+      expect(DIAGNOSTIC_COUNTERS).toContain(`memory.invariant.${kind}`)
+    }
+    expect(memoryInvariantCounter('citesCard')).toBeNull()
+    expect(memoryInvariantCounter('Mara is on the ridge')).toBeNull()
   })
 
   it('has no duplicate counters', () => {

@@ -38,6 +38,17 @@ import { EXEMPLAR_KINDS, VOICE_EXEMPLAR_SOURCES } from '../../shared/voice'
 import { ALIAS_ORIGINS, CASE_RULES, RECORD_ORIGINS } from '../../shared/memory/records'
 import { DISMISSED_KINDS } from '../../shared/memory/dismissed'
 import { MEMORY_OWNER_KINDS } from '../../shared/memory/passages'
+import {
+  BACKFILL_STATES,
+  CLAIM_MODES,
+  CLAIM_PROOFS,
+  CLAIM_STATES,
+  CLAIM_VOICES,
+  PLAN_LINK_ORIGINS,
+  READING_PURPOSES,
+  SPOT_TIERS,
+  SPOT_VERDICTS
+} from '../../shared/memory/claims'
 import { LABEL_KINDS } from '../../shared/storyLabels'
 import { RESEARCH_ORIGINS } from '../../shared/research'
 
@@ -1127,3 +1138,204 @@ export const researchDoc = sqliteTable('research_doc', {
 })
 export type ResearchDocRow = typeof researchDoc.$inferSelect
 export type ResearchDocInsert = typeof researchDoc.$inferInsert
+
+/**
+ * Story memory v2's evidence (F-16.17, F-16.18; migration `0034_story_reading`, additive): derived
+ * rows only, each pointing at the reading that made it and the draft it was read in. Only the
+ * active draft's rows are live (design §2.2); switching back to a draft whose anchors hold costs
+ * nothing. Every table starts empty; v1 never writes them.
+ *
+ * `reading`: one row per reading of one scene (all its pages, P2a-D1): why, what was sent, which
+ * prompt versions and model, tokens, the cost of reader and verify together, and the yields the
+ * health gate reads.
+ */
+export const reading = sqliteTable(
+  'reading',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    draftId: text('draft_id')
+      .notNull()
+      .references(() => draft.id, { onDelete: 'cascade' }),
+    purpose: text('purpose', { enum: READING_PURPOSES }).notNull(),
+    pages: integer('pages').notNull().default(1),
+    /** JSON `[from, to][]`: the paragraph ranges sent. */
+    paras: text('paras').notNull().default('[]'),
+    promptVersion: text('prompt_version').notNull(),
+    verifyVersion: text('verify_version'),
+    model: text('model').notNull(),
+    tokensIn: integer('tokens_in').notNull().default(0),
+    tokensOut: integer('tokens_out').notNull().default(0),
+    reasoningTokens: integer('reasoning_tokens').notNull().default(0),
+    costUsd: real('cost_usd').notNull().default(0),
+    cloud: integer('cloud', { mode: 'boolean' }).notNull().default(false),
+    finishReason: text('finish_reason'),
+    items: integer('items').notNull().default(0),
+    quotesFound: integer('quotes_found').notNull().default(0),
+    literal: integer('literal').notNull().default(0),
+    verifySent: integer('verify_sent').notNull().default(0),
+    verified: integer('verified').notNull().default(0),
+    rejected: integer('rejected').notNull().default(0),
+    /** JSON `{ reason: count }`. */
+    rejections: text('rejections').notNull().default('{}'),
+    cut: integer('cut').notNull().default(0),
+    created: text('created').notNull()
+  },
+  (t) => [
+    index('reading_model_idx').on(t.model, t.created),
+    index('reading_node_idx').on(t.nodeId, t.draftId)
+  ]
+)
+export type ReadingRow = typeof reading.$inferSelect
+export type ReadingInsert = typeof reading.$inferInsert
+
+/**
+ * What of a scene has been read, per draft (F-16.16; P2a-D2): every finished sentence counted as
+ * read (JSON `[gateHash, normalised text][]`, the text kept so the cosmetic skip can compare and a
+ * later roster can hash it again), window reads since the last full one, and when that was.
+ */
+export const sceneRead = sqliteTable(
+  'scene_read',
+  {
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    draftId: text('draft_id')
+      .notNull()
+      .references(() => draft.id, { onDelete: 'cascade' }),
+    sentences: text('sentences').notNull().default('[]'),
+    partials: integer('partials').notNull().default(0),
+    fullAt: text('full_at'),
+    readingId: text('reading_id').references(() => reading.id, { onDelete: 'set null' }),
+    updated: text('updated').notNull()
+  },
+  (t) => [primaryKey({ columns: [t.nodeId, t.draftId] })]
+)
+export type SceneReadRow = typeof sceneRead.$inferSelect
+export type SceneReadInsert = typeof sceneRead.$inferInsert
+
+/**
+ * A scene's card per draft (F-16.18): the AI's map of it, findable and never citable. Line and
+ * gist, the quoted fields (JSON), who is on the page (JSON), mood and theme, the anchor of every
+ * card quote (JSON hashes) and a hash of the line (plan links run only when it moves).
+ */
+export const card = sqliteTable(
+  'card',
+  {
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    draftId: text('draft_id')
+      .notNull()
+      .references(() => draft.id, { onDelete: 'cascade' }),
+    readingId: text('reading_id').references(() => reading.id, { onDelete: 'set null' }),
+    line: text('line').notNull(),
+    gist: text('gist').notNull(),
+    fields: text('fields').notNull().default('{}'),
+    present: text('present').notNull().default('[]'),
+    mood: text('mood'),
+    theme: text('theme'),
+    anchor: text('anchor').notNull().default('[]'),
+    lineHash: text('line_hash'),
+    created: text('created').notNull()
+  },
+  (t) => [primaryKey({ columns: [t.nodeId, t.draftId] })]
+)
+export type CardRow = typeof card.$inferSelect
+export type CardInsert = typeof card.$inferInsert
+
+/**
+ * One claim (F-16.17): what a scene's prose states about a record, with its quote, paragraph and
+ * anchor (JSON hashes of the sentences its proof rests on), its proof (`literal` in code or
+ * `verified`), its voice and mode, and its state. `record_id` is null while the claim waits on a
+ * new name (`pending`, JSON); `how` and `from_id` are P2b's (knows claims), added now so P2b needs
+ * no migration.
+ */
+export const claim = sqliteTable(
+  'claim',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    draftId: text('draft_id')
+      .notNull()
+      .references(() => draft.id, { onDelete: 'cascade' }),
+    readingId: text('reading_id').references(() => reading.id, { onDelete: 'set null' }),
+    recordId: text('record_id').references(() => record.id, { onDelete: 'cascade' }),
+    pending: text('pending'),
+    subjectText: text('subject_text'),
+    slot: text('slot').notNull(),
+    value: text('value').notNull(),
+    valueKey: text('value_key').notNull(),
+    objectId: text('object_id').references(() => record.id, { onDelete: 'set null' }),
+    how: text('how'),
+    fromId: text('from_id').references(() => record.id, { onDelete: 'set null' }),
+    voice: text('voice', { enum: CLAIM_VOICES }).notNull(),
+    speakerId: text('speaker_id').references(() => record.id, { onDelete: 'set null' }),
+    mode: text('mode', { enum: CLAIM_MODES }).notNull(),
+    quote: text('quote').notNull(),
+    para: integer('para').notNull(),
+    anchor: text('anchor').notNull().default('[]'),
+    proof: text('proof', { enum: CLAIM_PROOFS }).notNull(),
+    change: integer('change', { mode: 'boolean' }).notNull().default(false),
+    state: text('state', { enum: CLAIM_STATES }).notNull(),
+    spot: text('spot', { enum: SPOT_VERDICTS }),
+    spotTier: text('spot_tier', { enum: SPOT_TIERS }),
+    spotAt: text('spot_at'),
+    created: text('created').notNull(),
+    proved: text('proved').notNull()
+  },
+  (t) => [
+    index('claim_node_idx').on(t.nodeId, t.draftId),
+    index('claim_record_idx').on(t.recordId, t.slot),
+    index('claim_state_idx').on(t.state)
+  ]
+)
+export type ClaimRow = typeof claim.$inferSelect
+export type ClaimInsert = typeof claim.$inferInsert
+
+/**
+ * AI-made plan links (F-16.21; P2a-D12): which drafted scene fulfils a planned one, matched in
+ * code or picked by `planLinks.v2`. Derived, never in scene meta: the author's own links stay in
+ * `fulfilledBy`, and *Keep* makes one hers.
+ */
+export const planLink = sqliteTable('plan_link', {
+  planId: text('plan_id')
+    .primaryKey()
+    .references(() => node.id, { onDelete: 'cascade' }),
+  sceneId: text('scene_id')
+    .notNull()
+    .references(() => node.id, { onDelete: 'cascade' }),
+  origin: text('origin', { enum: PLAN_LINK_ORIGINS }).notNull(),
+  score: real('score').notNull().default(0),
+  reason: text('reason').notNull().default(''),
+  readingId: text('reading_id').references(() => reading.id, { onDelete: 'set null' }),
+  created: text('created').notNull()
+})
+export type PlanLinkRow = typeof planLink.$inferSelect
+export type PlanLinkInsert = typeof planLink.$inferInsert
+
+/**
+ * The lazy back-fill (F-16.17): one row per name a late record or nickname brought, so the
+ * scenes read before it existed are read for it once (`due`, `asked` with a price, `done`,
+ * `declined`).
+ */
+export const memoryBackfill = sqliteTable(
+  'memory_backfill',
+  {
+    recordId: text('record_id')
+      .notNull()
+      .references(() => record.id, { onDelete: 'cascade' }),
+    norm: text('norm').notNull(),
+    state: text('state', { enum: BACKFILL_STATES }).notNull(),
+    pages: integer('pages').notNull().default(0),
+    created: text('created').notNull(),
+    doneAt: text('done_at')
+  },
+  (t) => [primaryKey({ columns: [t.recordId, t.norm] })]
+)
+export type MemoryBackfillRow = typeof memoryBackfill.$inferSelect
+export type MemoryBackfillInsert = typeof memoryBackfill.$inferInsert

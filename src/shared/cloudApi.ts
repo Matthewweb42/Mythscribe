@@ -464,10 +464,13 @@ export const DIAGNOSTICS_BODY_MAX = 32 * 1024
  * request counter of an AI feature this build does not know (`ai.request.` and a well-formed
  * `CloudFeatureId`, never free text), so an older Worker still counts a newer app's feature
  * instead of refusing the report, and every report after it, since the app keeps what failed.
+ * F-16.17: a story-memory invariant this build does not know (`memory.invariant.` and the same
+ * well-formed id) is accepted the same way.
  */
 export const DiagnosticWireCounter = z.union([
   DiagnosticCounter,
-  z.string().regex(new RegExp(`^ai\\.request\\.${CLOUD_FEATURE_ID_PATTERN}$`))
+  z.string().regex(new RegExp(`^ai\\.request\\.${CLOUD_FEATURE_ID_PATTERN}$`)),
+  z.string().regex(new RegExp(`^memory\\.invariant\\.${CLOUD_FEATURE_ID_PATTERN}$`))
 ])
 
 export const DiagnosticsBody = DiagnosticsEnvironment.extend({

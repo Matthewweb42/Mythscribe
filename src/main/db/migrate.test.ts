@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(34)
+    expect(result.version).toBe(35)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -144,7 +144,13 @@ describe('migrate', () => {
       'scene_detail',
       'name_mention',
       'memory_scan',
-      'memory_passage_fts'
+      'memory_passage_fts',
+      'reading',
+      'scene_read',
+      'card',
+      'claim',
+      'plan_link',
+      'memory_backfill'
     ]) {
       expect(tables()).toContain(table)
     }
@@ -1177,72 +1183,81 @@ describe('ai_usage.reported_cost_usd and reasoning_tokens (0028, F-16.1)', () =>
  * one of those tables, their rows and every schema object byte for byte as they were; only new
  * objects are added, and they start empty (decision P1-D1: nothing is copied in a migration).
  */
+/** Every schema object's definition, by type and name. */
+const schemaOf = (db: Database.Database): { type: string; name: string; sql: string | null }[] =>
+  db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all() as {
+    type: string
+    name: string
+    sql: string | null
+  }[]
+
+/** Every table's rows, in rowid order (virtual tables and their shadow tables included). */
+const dumpOf = (db: Database.Database, names: readonly string[]): Record<string, unknown[]> =>
+  Object.fromEntries(names.map((name) => [name, db.prepare(`SELECT * FROM "${name}"`).all()]))
+
+const tableNamesOf = (db: Database.Database): string[] =>
+  (
+    db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+      )
+      .all() as { name: string }[]
+  ).map((row) => row.name)
+
+/** A value for a column nobody constrained: text, a number, or a real. */
+const valueFor = (type: string, column: string): string | number => {
+  if (/INT/i.test(type)) return 1
+  if (/REAL/i.test(type)) return 0.5
+  return `${column}-1`
+}
+
+/**
+ * One row in every table of `db`, foreign keys off so each can be filled on its own. The node
+ * table carries a check (a root has a section type), so its row is written by hand; virtual
+ * tables' shadow tables are left to their virtual table.
+ */
+function fillEveryTable(db: Database.Database): void {
+  db.pragma('foreign_keys = OFF')
+  db.prepare(
+    `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
+     VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, NULL, '2026-01-01', '2026-01-01')`
+  ).run()
+  const virtual = new Set(
+    (
+      db.prepare("SELECT name FROM sqlite_master WHERE sql LIKE 'CREATE VIRTUAL TABLE%'").all() as {
+        name: string
+      }[]
+    ).map((row) => row.name)
+  )
+  const shadow = (name: string): boolean =>
+    [...virtual].some((table) => name.startsWith(`${table}_`))
+  for (const table of tableNamesOf(db)) {
+    if (table === 'node' || table === 'schema_migrations' || shadow(table)) continue
+    const columns = db.prepare(`PRAGMA table_info("${table}")`).all() as {
+      name: string
+      type: string
+    }[]
+    const names = columns.map((column) => `"${column.name}"`).join(', ')
+    const marks = columns.map(() => '?').join(', ')
+    db.prepare(`INSERT INTO "${table}" (${names}) VALUES (${marks})`).run(
+      ...columns.map((column) => valueFor(column.type, column.name))
+    )
+  }
+  db.pragma('foreign_keys = ON')
+}
+
 describe('story memory tables (0029–0033) leave every older table untouched', () => {
   let db: Database.Database
   const BEFORE = 29
 
-  /** Every schema object's definition, by type and name. */
-  const schema = (): { type: string; name: string; sql: string | null }[] =>
-    db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all() as {
-      type: string
-      name: string
-      sql: string | null
-    }[]
-
-  /** Every table's rows, in rowid order (virtual tables and their shadow tables included). */
-  const dump = (names: readonly string[]): Record<string, unknown[]> =>
-    Object.fromEntries(names.map((name) => [name, db.prepare(`SELECT * FROM "${name}"`).all()]))
-
-  const tableNames = (): string[] =>
-    (
-      db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-        )
-        .all() as { name: string }[]
-    ).map((row) => row.name)
-
-  /** A value for a column nobody constrained: text, a number, or a real. */
-  const valueFor = (type: string, column: string): string | number => {
-    if (/INT/i.test(type)) return 1
-    if (/REAL/i.test(type)) return 0.5
-    return `${column}-1`
-  }
+  const schema = (): { type: string; name: string; sql: string | null }[] => schemaOf(db)
+  const dump = (names: readonly string[]): Record<string, unknown[]> => dumpOf(db, names)
+  const tableNames = (): string[] => tableNamesOf(db)
 
   beforeEach(() => {
     db = new Database(':memory:')
     migrate(db, loadMigrations().slice(0, BEFORE))
-    // One row in every table, foreign keys off so each can be filled on its own. The node table
-    // carries a check (a root has a section type), so its row is written by hand.
-    db.pragma('foreign_keys = OFF')
-    db.prepare(
-      `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
-       VALUES ('ms', NULL, 'manuscript', 'folder', 'Manuscript', 0, NULL, '2026-01-01', '2026-01-01')`
-    ).run()
-    const virtual = new Set(
-      (
-        db
-          .prepare("SELECT name FROM sqlite_master WHERE sql LIKE 'CREATE VIRTUAL TABLE%'")
-          .all() as {
-          name: string
-        }[]
-      ).map((row) => row.name)
-    )
-    const shadow = (name: string): boolean =>
-      [...virtual].some((table) => name.startsWith(`${table}_`))
-    for (const table of tableNames()) {
-      if (table === 'node' || table === 'schema_migrations' || shadow(table)) continue
-      const columns = db.prepare(`PRAGMA table_info("${table}")`).all() as {
-        name: string
-        type: string
-      }[]
-      const names = columns.map((column) => `"${column.name}"`).join(', ')
-      const marks = columns.map(() => '?').join(', ')
-      db.prepare(`INSERT INTO "${table}" (${names}) VALUES (${marks})`).run(
-        ...columns.map((column) => valueFor(column.type, column.name))
-      )
-    }
-    db.pragma('foreign_keys = ON')
+    fillEveryTable(db)
   })
   afterEach(() => db.close())
 
@@ -1259,7 +1274,7 @@ describe('story memory tables (0029–0033) leave every older table untouched', 
     const objectsBefore = schema()
     const rowsBefore = dump(tablesBefore.filter((table) => table !== 'schema_migrations'))
 
-    const result = migrate(db)
+    const result = migrate(db, loadMigrations().slice(0, 34))
     expect(result.applied).toEqual([
       '0029_story_records',
       '0030_name_index',
@@ -1307,7 +1322,7 @@ describe('story memory tables (0029–0033) leave every older table untouched', 
        VALUES ('ms', 'upload', NULL, 'md', 0, 0, '2026-10-12')`
     ).run()
     const before = db.prepare('SELECT * FROM research_doc').all()
-    expect(migrate(db).applied).toEqual(['0033_research_filed'])
+    expect(migrate(db, loadMigrations().slice(0, 34)).applied).toEqual(['0033_research_filed'])
     const columns = (
       db.prepare('PRAGMA table_info(research_doc)').all() as { name: string; notnull: number }[]
     ).map((column) => [column.name, column.notnull])
@@ -1347,5 +1362,138 @@ describe('story memory tables (0029–0033) leave every older table untouched', 
     expect(hits('"mara"', 'pinned')).toBe(1)
     // The labels are not searchable words.
     expect(hits('"notCanon"')).toBe(0)
+  })
+})
+
+describe('story reading tables (0034, F-16.17) leave every older table untouched', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, loadMigrations().slice(0, 34))
+    fillEveryTable(db)
+  })
+  afterEach(() => db.close())
+
+  it('keeps sqlite_master and every pre-0034 table byte-identical, and adds only empty tables', () => {
+    const tablesBefore = tableNamesOf(db)
+    for (const table of tablesBefore) {
+      if (table === 'schema_migrations' || table.startsWith('memory_passage_fts_')) continue
+      expect(
+        (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n,
+        table
+      ).toBeGreaterThan(0)
+    }
+    const objectsBefore = schemaOf(db)
+    const rowsBefore = dumpOf(
+      db,
+      tablesBefore.filter((table) => table !== 'schema_migrations')
+    )
+
+    expect(migrate(db).applied).toEqual(['0034_story_reading'])
+
+    const kept = schemaOf(db).filter((object) =>
+      objectsBefore.some((before) => before.type === object.type && before.name === object.name)
+    )
+    expect(JSON.stringify(kept)).toBe(JSON.stringify(objectsBefore))
+    expect(JSON.stringify(dumpOf(db, Object.keys(rowsBefore)))).toBe(JSON.stringify(rowsBefore))
+
+    const added = tableNamesOf(db).filter((table) => !tablesBefore.includes(table))
+    expect(added.sort()).toEqual([
+      'card',
+      'claim',
+      'memory_backfill',
+      'plan_link',
+      'reading',
+      'scene_read'
+    ])
+    for (const table of added) {
+      expect(
+        (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n,
+        table
+      ).toBe(0)
+    }
+    // Only tables and their indexes were added: nothing else in sqlite_master moved.
+    const addedObjects = schemaOf(db)
+      .filter(
+        (object) =>
+          !objectsBefore.some(
+            (before) => before.type === object.type && before.name === object.name
+          )
+      )
+      .map((object) => `${object.type} ${object.name}`)
+    expect(addedObjects.sort()).toEqual([
+      'index claim_node_idx',
+      'index claim_record_idx',
+      'index claim_state_idx',
+      'index reading_model_idx',
+      'index reading_node_idx',
+      'index sqlite_autoindex_card_1',
+      'index sqlite_autoindex_claim_1',
+      'index sqlite_autoindex_memory_backfill_1',
+      'index sqlite_autoindex_plan_link_1',
+      'index sqlite_autoindex_reading_1',
+      'index sqlite_autoindex_scene_read_1',
+      'table card',
+      'table claim',
+      'table memory_backfill',
+      'table plan_link',
+      'table reading',
+      'table scene_read'
+    ])
+  })
+
+  it('drops a scene’s evidence with the scene and with its draft, and a claim with its record', () => {
+    migrate(db)
+    db.pragma('foreign_keys = ON')
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
+       VALUES ('s1', 'ms', NULL, 'document', 'One', 0, NULL, '2026-10-12', '2026-10-12')`
+    ).run()
+    db.prepare(
+      "INSERT INTO draft (id, name, position, created, modified) VALUES ('d2', 'Two', 1, 'x', 'x')"
+    ).run()
+    db.prepare(
+      "INSERT INTO record (id, category_id, origin, created, modified) VALUES ('r2', 'character', 'author', 'x', 'x')"
+    ).run()
+    const reading = db.prepare(
+      `INSERT INTO reading (id, node_id, draft_id, purpose, prompt_version, model, created)
+       VALUES (?, 's1', ?, 'first', 'reader.v1', 'm', 'x')`
+    )
+    reading.run('g1', 'd2')
+    const claim = db.prepare(
+      `INSERT INTO claim (id, node_id, draft_id, reading_id, record_id, slot, value, value_key, voice,
+         mode, quote, para, proof, state, created, proved)
+       VALUES (?, 's1', 'd2', 'g1', ?, 'eyes', 'grey', 'grey', 'narration', 'now', 'q', 0, 'literal',
+         'live', 'x', 'x')`
+    )
+    claim.run('c1', 'r2')
+    claim.run('c2', null)
+    db.prepare(
+      "INSERT INTO card (node_id, draft_id, reading_id, line, gist, created) VALUES ('s1', 'd2', 'g1', 'l', 'g', 'x')"
+    ).run()
+    db.prepare(
+      "INSERT INTO scene_read (node_id, draft_id, reading_id, updated) VALUES ('s1', 'd2', 'g1', 'x')"
+    ).run()
+    const count = (table: string): number =>
+      (
+        db.prepare(`SELECT COUNT(*) AS n FROM "${table}" WHERE node_id = 's1'`).get() as {
+          n: number
+        }
+      ).n
+
+    db.prepare("DELETE FROM record WHERE id = 'r2'").run()
+    expect(count('claim')).toBe(1)
+    // A reading that goes leaves its rows, the link cleared.
+    db.prepare("DELETE FROM reading WHERE id = 'g1'").run()
+    expect(
+      db.prepare("SELECT reading_id FROM claim WHERE id = 'c2'").get() as {
+        reading_id: string | null
+      }
+    ).toEqual({ reading_id: null })
+    reading.run('g2', 'd2')
+    db.prepare("DELETE FROM draft WHERE id = 'd2'").run()
+    for (const table of ['claim', 'card', 'scene_read', 'reading'])
+      expect(count(table), table).toBe(0)
   })
 })

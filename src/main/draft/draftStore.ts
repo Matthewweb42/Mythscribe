@@ -108,6 +108,25 @@ export function ensureDrafts(db: TreeDb): DraftState {
   return { drafts, activeId: first.id }
 }
 
+/**
+ * The active draft's id, its row made first when the project has none (F-16.17): story memory's
+ * derived rows point at a draft, so a writer makes sure the row exists before one does.
+ */
+export function activeDraftId(db: TreeDb): string {
+  return ensureDrafts(db).activeId
+}
+
+/**
+ * The active draft's id without writing anything (story memory's readers): null while the project
+ * has no drafts (then no derived row can exist); the first draft when the active id dangles, as
+ * `ensureDrafts` would repair it.
+ */
+export function currentDraftId(db: TreeDb): string | null {
+  const drafts = listDraftRows(db)
+  const stored = readActiveId(db)
+  return (drafts.find((each) => each.id === stored) ?? drafts[0])?.id ?? null
+}
+
 function requireDraft(state: DraftState, id: string): DraftRow {
   const found = state.drafts.find((each) => each.id === id)
   if (!found) throw new AppError('NOT_FOUND', 'Draft not found', { id })

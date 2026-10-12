@@ -1,6 +1,6 @@
 # P2a Evidence reader: implementation plan
 
-**Features:** F-16.16 to F-16.21 (`FEATURES.md` §2.16). Phase P2a of the story memory redesign, approved by the author on 2026-10-11 (`../design.md` §2.1–2.3, §2.6 (the prose block, the beta reader, data sharing), §2.7, §2.10, Part 3, Part 4, Part 5; `../author-answers.md` answers 1, 4, 5, 7, 17, 19, 20, 21, 22; decisions 2, 4 and 7). **Size:** L, about 2.5 weeks, in five slices. **Status:** planned 2026-10-12; nothing built.
+**Features:** F-16.16 to F-16.21 (`FEATURES.md` §2.16). Phase P2a of the story memory redesign, approved by the author on 2026-10-11 (`../design.md` §2.1–2.3, §2.6 (the prose block, the beta reader, data sharing), §2.7, §2.10, Part 3, Part 4, Part 5; `../author-answers.md` answers 1, 4, 5, 7, 17, 19, 20, 21, 22; decisions 2, 4 and 7). **Size:** L, about 2.5 weeks, in five slices. **Status:** planned 2026-10-12; slice 1 (the evidence data layer) built 2026-10-12.
 
 **Goal:** the app reads the author's prose and keeps what it states, each line proved by a quote. When she leaves a scene or pauses, a code gate decides whether a finished sentence changed; if so, `reader.v1` reads the changed paragraphs (±2) on the fast tier with reasoning off, a verification ladder keeps only what is proved (in code where it can, by `verify.v1` where it cannot), and the claims stay live only while their sentences are unchanged. The This scene panel gains Here (on the page), Mentioned and True now; sheets gain **From the book, as of [scene]**; every AI line has ⓘ and *Not right*. *Rebuild memory* reads the whole book once, priced first. On Cloud, background reading spends up to a monthly cap ($1 by default). Everything that read stored summaries reads cards instead, plan links are applied automatically, and `summary.v5` stops in v2.
 
@@ -107,6 +107,16 @@ No migration for the passage index: `memory_passage_fts.source` and `memory_scan
 - `migrate.test.ts` as §1.1.
 
 **e2e:** none (no UI path and no request yet). **Ticks:** none; F-16.16 and F-16.17 note the data layer.
+
+### 1.6 Built (2026-10-12): notes for the later slices
+
+- **The gate** (`gate.ts`) replaces each roster name span, context-free, by `⟨record ids⟩` (not one placeholder): a rename is no change, a swap of people is. `scene_read` keeps the normalised text with the names in; `readSetOf(entries, names)` hashes it again under today's roster, so a record added later changes nothing (the back-fill stays the only way new names cost). `readDecision` takes `staleParas` (paragraphs of stale claims) and answers a window with reason `stale` when nothing else changed; a window's paragraphs include the cosmetic ones. `nextReadSet(previous, current, readParas | 'all')` gives the new read set: slice 2 passes every paragraph the pieces sent (`piecesParas`).
+- **Literal proof** (`literal.ts`) takes the sentence and `sentenceNames(paragraph, span, mentions, kindOf)`; it proves only narration in `now` mode; traits and kinship have patterns; the `reported` marker class and the clause scope (markers before the quote and in its clause, scope-back markers after) are QUESTIONS 2026-10-12 slice 1 items 3–4. `quote.ts` `locateInText` is the one single-text locator.
+- **Reconcile** keeps shared-alias waits (`subject_text` set) through a full read; the anchors job attaches them (P2a-D22).
+- **Stores:** `claimStore` (`insertClaims` computes `value_key`), `cardStore.upsertCard` (indexes the active draft's card), `readingStore`, `sceneReadStore.writeSceneRead` (partials +1, reset on full), `views.ts` (`readingOrder`, `sceneMemory`, `sheetMemory`, `claimInfo`); `claimFixture.ts` stores claims as the pipeline will (tests only).
+- **Roster:** `reading/roster.ts` holds `MEMORY_ROSTER_KEY` and `markRosterForRebuild` (drops the row); rename, restore, merge, split and delete call it. Slice 2 builds the row and must still detect additions and removals made through `record:setAliases` by comparing.
+- **Not yet:** a rename does not rewrite `notRight` keys (their value key and anchor key change); slice 4, which writes them, should keep enough on the row (node and quote) to rewrite them in `rewriteEvidence`.
+- **Diagnostics:** `memory.invariant.<kind>` counters ship with this build; the Worker must be deployed from it before a release that carries them (`docs/OPERATOR-SETUP.md` in slice 5).
 
 ---
 

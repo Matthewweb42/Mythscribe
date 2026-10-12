@@ -33,6 +33,8 @@ import { hasCategory } from '../entity/categoryStore'
 import { AppError } from '../ipc/errors'
 import type { TreeDb } from '../tree/treeStore'
 import { dismiss, dismissedKeys, forgetDismissed } from './dismissedStore'
+import { mergeEvidence, splitEvidence } from './reading/recordEvidence'
+import { markRosterForRebuild } from './reading/roster'
 
 /**
  * Records and their names (F-16.4, story memory v2): the one writer of `record` and `alias`. A
@@ -654,6 +656,8 @@ export function renameAlias(
   forgetDismissed(db, 'alias', dismissedKey({ kind: 'alias', recordId, alias: text }))
   db.update(alias).set({ text, norm, caseRule }).where(eq(alias.id, aliasId)).run()
   db.update(record).set({ modified: now.toISOString() }).where(eq(record.id, recordId)).run()
+  // F-16.17: a renamed name rebuilds the reader's roster.
+  markRosterForRebuild(db)
   return {
     before: { text: current.text, norm: current.norm, caseRule: current.caseRule },
     after: { text, norm, caseRule }
@@ -687,6 +691,7 @@ export function restoreAliasText(
     .where(eq(alias.id, aliasId))
     .run()
   db.update(record).set({ modified: now.toISOString() }).where(eq(record.id, row.recordId)).run()
+  markRosterForRebuild(db)
   return true
 }
 
@@ -715,12 +720,16 @@ export function savePage(
   return requireRecord(db, id)
 }
 
-/** Deletes a record; its names, mentions and dismissals go with it. Answers what it was. */
+/**
+ * Deletes a record; its names, mentions, dismissals and claims (F-16.17) go with it, and the
+ * reader's roster is rebuilt. Answers what it was.
+ */
 export function deleteRecord(db: TreeDb, id: string): StoryRecord {
   const gone = requireRecord(db, id)
   db.transaction((tx) => {
     removeFromAlsoHere(tx, id, null)
     tx.delete(record).where(eq(record.id, id)).run()
+    markRosterForRebuild(tx)
   })
   return gone
 }
@@ -760,7 +769,10 @@ function appendPages(a: TiptapNodeT | null, b: TiptapNodeT | null): TiptapNodeT 
   return { ...a, content: [...(a.content ?? []), ...(b?.content ?? [])] }
 }
 
-/** Rewrites the record id inside a dismissal key (`recordId|…`, or a sorted pair). */
+/**
+ * Rewrites the record id inside a dismissal key (`recordId|…`, or a sorted pair). A Not right key
+ * (F-16.18) starts with its record too.
+ */
 function rekey(kind: string, key: string, from: string, to: string): string | null {
   if (kind === 'split' || kind === 'notSame') {
     const [a, b] = key.split('|')
@@ -768,7 +780,10 @@ function rekey(kind: string, key: string, from: string, to: string): string | nu
     if (pair[0] === pair[1]) return null
     return dismissedKey({ kind: 'notSame', a: pair[0] ?? '', b: pair[1] ?? '' })
   }
-  if ((kind === 'alias' || kind === 'notMention') && key.startsWith(`${from}|`)) {
+  if (
+    (kind === 'alias' || kind === 'notMention' || kind === 'notRight') &&
+    key.startsWith(`${from}|`)
+  ) {
     return `${to}${key.slice(from.length)}`
   }
   return key
@@ -784,9 +799,10 @@ export interface SameAsResult {
  * *Same as…*: merges `mergeId` into `keepId` in one transaction. The merged record's names
  * become nicknames of the kept one (a name it already has is dropped), its Pinned and Ideas are
  * appended, and every row that pointed at it now points at the kept record: mentions, scene
- * details ("+ also here" too), to-dos and dismissals (their keys rewritten; a split or not-same
- * between the two goes). The merged record is then deleted. Refused when the kept record would
- * end with more than `RECORD_ALIASES_MAX` other names.
+ * details ("+ also here" too), to-dos, dismissals (their keys rewritten; a split or not-same
+ * between the two goes) and, F-16.17, the reading's claims, cards and back-fill rows
+ * (`mergeEvidence`), with the reader's roster marked for a rebuild. The merged record is then
+ * deleted. Refused when the kept record would end with more than `RECORD_ALIASES_MAX` other names.
  */
 export function sameAs(db: TreeDb, keepId: string, mergeId: string, now: Date): SameAsResult {
   if (keepId === mergeId) throw new AppError('VALIDATION', 'A record cannot be merged into itself')
@@ -834,6 +850,8 @@ export function sameAs(db: TreeDb, keepId: string, mergeId: string, now: Date): 
       .run()
     removeFromAlsoHere(tx, mergeId, keepId)
     tx.update(authorTodo).set({ recordId: keepId }).where(eq(authorTodo.recordId, mergeId)).run()
+    mergeEvidence(tx, keepId, mergeId)
+    markRosterForRebuild(tx)
     const tombstones = tx
       .select()
       .from(dismissed)
@@ -872,7 +890,9 @@ export interface SplitResult {
  * *Split*: moves some of a record's nicknames to a new record (in the same category, named by the
  * first moved name) or to an existing one, and writes a `split` dismissal so the two are never
  * proposed as the same again. The record keeps its own name, Pinned and Ideas; a name `into`
- * already has is dropped. The author's explicit act: no twin gate.
+ * already has is dropped. The author's explicit act: no twin gate. F-16.17: the claims whose
+ * subject a moved name pinned move with it (`splitEvidence`; pronoun claims stay), and the
+ * reader's roster is marked for a rebuild.
  */
 export function splitRecord(
   db: TreeDb,
@@ -933,6 +953,13 @@ export function splitRecord(
       tx.update(record).set({ modified: now.toISOString() }).where(eq(record.id, target)).run()
     }
     tx.update(record).set({ modified: now.toISOString() }).where(eq(record.id, id)).run()
+    splitEvidence(
+      tx,
+      id,
+      target,
+      moving.map((entry) => entry.norm)
+    )
+    markRosterForRebuild(tx)
     const intoName = into?.name ?? moving[0]?.text ?? ''
     dismiss(
       tx,
