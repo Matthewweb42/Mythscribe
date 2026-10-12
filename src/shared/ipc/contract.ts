@@ -259,6 +259,7 @@ import {
 } from '../filing'
 import { TwinGateBlocked, TwinGateVerdict } from '../memory/twinGate'
 import {
+  CardNotRight,
   ClaimInfo,
   MemoryHealthReport,
   MemoryNotice,
@@ -3427,6 +3428,13 @@ export const contract = {
     input: z.object({ claimId: z.string(), choice: NotRightChoice, requestId: z.string() }),
     output: NotRightResult
   },
+  /**
+   * F-16.18: *Not right* on a value the scene's card gives (its POV, place, time or year, or a
+   * character on the page): a `notRight` Dismissed row, so Here, the card and the typed-detail
+   * conflicts leave it out and the typed detail stands. Local; *Undo* in Dismissed brings it back.
+   * NOT_FOUND when the active draft's card no longer gives that value.
+   */
+  'memory:cardNotRight': { input: CardNotRight, output: Dismissed },
   /**
    * F-16.16: the renderer's leave and idle triggers (`readerTriggers.ts`, v2 only): the scene was
    * left for another manuscript scene, or its last save is `idleMinutes` old (with the caret's

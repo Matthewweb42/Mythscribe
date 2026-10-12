@@ -715,7 +715,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "one either side (and, for a 'she' or 'he', up to eight sentences back to the first that " +
       "names someone it could mean); the scene card's point of view, year and flashback, and who " +
       'is on the page, ' +
-      'each with its sentence; for spot checks, a fact with three sentences either side.',
+      'each with its sentence; for spot checks, a fact with three sentences either side; for ' +
+      'Not right › Not about, that line, the record you pick and everyone named in the eight ' +
+      'sentences before it (name, nicknames and kind), with three sentences either side.',
     minDial: 1
   }
 }

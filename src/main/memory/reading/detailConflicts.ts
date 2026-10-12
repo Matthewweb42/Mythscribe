@@ -7,15 +7,17 @@ import { dismiss, dismissedKeys } from '../dismissedStore'
 import { listRecords } from '../recordStore'
 import { storedSceneDetails } from '../sceneDetailStore'
 import { draftCards } from './cardStore'
-import { readingOrder, typedNames } from './views'
+import { heldCard, readingOrder, typedNames } from './views'
 
 /**
  * Decision 4's one question (F-16.18, P2a-D13; design §2.7 "Typed details"): where a scene's
  * card quotes a POV, place, time or year that disagrees with what the author typed, Needs a look
  * asks once: "14.2: the text says the quay; you typed the harbour · Update my detail · Keep mine".
  * *Keep mine* writes a `notProblem` Dismissed row keyed by the scene, the field and the text's
- * value, so the same disagreement is never asked again (a new value in the text is). Computed on
- * each look from the active draft's cards; readable scenes only.
+ * value (for a POV, the text's record, so a rename never asks again), so the same disagreement is
+ * never asked again (a new value in the text is). Computed on each look from the active draft's
+ * cards; readable scenes only; a card value whose quote no longer stands on the text, or that the
+ * author said is not right, raises nothing (`heldCard`).
  */
 
 export type DetailConflict = DetailConflictNotice
@@ -32,10 +34,19 @@ const FIELD_NOUN: Record<TypedField, string> = {
 export const detailConflictId = (nodeId: string, field: TypedField): string =>
   `detail:${nodeId}:${field}`
 
-const keyOf = (conflict: { nodeId: string; field: TypedField; text: string }): string =>
+const keyOf = (conflict: {
+  nodeId: string
+  field: TypedField
+  text: string
+  textRecordId: string | null
+}): string =>
   dismissedKey({
     kind: 'notProblem',
-    detail: { nodeId: conflict.nodeId, field: conflict.field, value: conflict.text }
+    detail: {
+      nodeId: conflict.nodeId,
+      field: conflict.field,
+      value: conflict.field === 'pov' ? (conflict.textRecordId ?? conflict.text) : conflict.text
+    }
   })
 
 /** The one place record the text's place names (its name or a nickname, whole words), or null. */
@@ -58,17 +69,23 @@ export function detailConflicts(db: TreeDb): DetailConflict[] {
   if (cards.length === 0) return []
   const names = typedNames(db)
   const kept = dismissedKeys(db, 'notProblem')
+  let notRight: Set<string> | null = null
   const found: { conflict: Omit<DetailConflict, 'ref'>; nodeId: string }[] = []
   let places: { id: string; names: string[] }[] | null = null
   for (const card of cards) {
-    const typed = compareTyped(storedSceneDetails(db, card.nodeId), card.fields, names)
+    const details = storedSceneDetails(db, card.nodeId)
+    // Only a card that disagrees as stored is read against the text now (one scene's words).
+    const stored = compareTyped(details, card.fields, names)
+    if (!TYPED_FIELDS.some((field) => stored[field].outcome === 'differs')) continue
+    notRight ??= dismissedKeys(db, 'notRight')
+    const held = heldCard(db, card, true, notRight)
+    const typed = compareTyped(details, held.fields, names)
     for (const field of TYPED_FIELDS) {
       const entry = typed[field]
       if (entry.outcome !== 'differs' || entry.typed === null || entry.text === null) continue
-      const base = { nodeId: card.nodeId, field, text: entry.text }
-      if (kept.has(keyOf(base))) continue
       let textRecordId: string | null = null
-      if (field === 'pov') textRecordId = card.fields.pov?.value ?? null
+      if (field === 'pov') textRecordId = held.fields.pov?.value ?? null
+      if (kept.has(keyOf({ nodeId: card.nodeId, field, text: entry.text, textRecordId }))) continue
       if (field === 'place') {
         places ??= listRecords(db)
           .filter((record) => record.kind === 'place')

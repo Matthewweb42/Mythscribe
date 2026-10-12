@@ -635,6 +635,7 @@ describe('the reading in the panel (F-16.18, F-16.16, F-16.19)', () => {
           flashback: null,
           elapsed: null
         },
+        stale: [],
         mood: null,
         theme: null,
         readingId: 'rd-1',
@@ -701,6 +702,47 @@ describe('the reading in the panel (F-16.18, F-16.16, F-16.19)', () => {
     act(() => useMemoryStore.setState({ status: memoryStatusFixture({ paused: 'off' }) }))
     expect(within(mara).getAllByTestId('claim-line')[1]).toHaveTextContent('reading paused')
     expect(screen.getByTestId('last-read')).toHaveTextContent('Read 3 min ago')
+  })
+
+  it('opens ⓘ on a Here chip, and Not right sends the card’s POV or on-page character to Dismissed', async () => {
+    const row = (field: string, value: string): Dismissed => ({
+      id: `d-${field}`,
+      kind: 'notRight',
+      key: `${value}|card|sc-1|${field}`,
+      recordId: value,
+      nodeId: 'sc-1',
+      label: `1.1: ${field}`,
+      quote: null,
+      created: READ_AT
+    })
+    install({
+      'memory:scene': () => read(),
+      'memory:cardNotRight': (input) => {
+        const { field, value } = input as Input<'memory:cardNotRight'>
+        return row(field, value)
+      }
+    })
+    await open()
+    const here = await screen.findByRole('region', { name: 'Here' })
+    fireEvent.click(await within(here).findByTestId('here-pov'))
+    const info = within(here).getByRole('group', { name: 'Where this comes from: Mara Vell' })
+    expect(info).toHaveTextContent('Mara looked out')
+    expect(info).toHaveTextContent('¶1 · checked by a second AI read')
+    await act(async () => {
+      fireEvent.click(within(info).getByRole('button', { name: 'Not right' }))
+    })
+    expect(sent('memory:cardNotRight')).toEqual([{ nodeId: 'sc-1', field: 'pov', value: 'r-mara' }])
+    fireEvent.click(within(within(here).getByTestId('on-page')).getByText('Ella Harrow'))
+    const ella = within(here).getByRole('group', { name: 'Where this comes from: Ella Harrow' })
+    await act(async () => {
+      fireEvent.click(within(ella).getByRole('button', { name: 'Not right' }))
+    })
+    expect(sent('memory:cardNotRight')[1]).toEqual({
+      nodeId: 'sc-1',
+      field: 'present',
+      value: 'r-ella'
+    })
+    expect(screen.getByRole('button', { name: 'Dismissed (2)' })).toBeInTheDocument()
   })
 
   it('reads a scene again when main says a reading changed it', async () => {
@@ -776,6 +818,7 @@ describe('the reading in the panel (F-16.18, F-16.16, F-16.19)', () => {
   it('asks about a typed detail the text disagrees with: Update my detail, Keep mine', async () => {
     install({
       'memory:answerNotice': () => [],
+      'memory:notices': () => [PLACE_CONFLICT],
       'sceneDetail:get': () => ({
         ...emptySceneDetails(),
         place: { recordId: null, text: 'the harbour' },
@@ -803,6 +846,29 @@ describe('the reading in the panel (F-16.18, F-16.16, F-16.19)', () => {
       fireEvent.click(within(conflicts).getByRole('button', { name: 'Keep mine' }))
     })
     expect(sent('memory:answerNotice')).toEqual([{ id: 'detail:sc-1:place', action: 'keepMine' }])
+    expect(screen.queryByRole('group', { name: 'Conflicts' })).toBeNull()
+  })
+
+  it('writes nothing when the text changed since the conflict was raised', async () => {
+    install({
+      'memory:notices': () => [],
+      'memory:status': () => memoryStatusFixture(),
+      'sceneDetail:get': () => ({
+        ...emptySceneDetails(),
+        place: { recordId: null, text: 'the harbour' },
+        gone: []
+      })
+    })
+    useMemoryStore.setState({ notices: [PLACE_CONFLICT] })
+    await open()
+    const conflicts = screen.getByRole('group', { name: 'Conflicts' })
+    await act(async () => {
+      fireEvent.click(within(conflicts).getByRole('button', { name: 'Update my detail' }))
+    })
+    expect(sent('sceneDetail:set')).toEqual([])
+    expect(useDialogStore.getState().toasts.map((t) => t.message)).toContain(
+      'The text changed since: this is looked at again once the scene is read.'
+    )
     expect(screen.queryByRole('group', { name: 'Conflicts' })).toBeNull()
   })
 })

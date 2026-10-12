@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { AiErrorCode } from '../ai'
 import {
+  CARD_FIELDS,
   CardFields,
   CLAIM_PROOFS,
   ClaimMode,
@@ -86,11 +87,16 @@ export const TypedComparisonView = z.object({
 })
 export type TypedComparisonView = z.infer<typeof TypedComparisonView>
 
-/** The card as scene details show it: the AI's map of the scene, never quoted. */
+/**
+ * The card as scene details show it: the AI's map of the scene, never quoted. `fields` leaves out
+ * what the author said is not right; `stale` names the fields whose quote no longer stands on the
+ * text (`holdingCard`): dimmed, never compared with the typed details, until the next reading.
+ */
 export const CardView = z.object({
   line: z.string(),
   gist: z.string(),
   fields: CardFields,
+  stale: z.array(z.enum(CARD_FIELDS)),
   mood: z.string().nullable(),
   theme: z.string().nullable(),
   readingId: z.string().nullable(),
@@ -437,16 +443,34 @@ export const NotRightChoice = z.discriminatedUnion('kind', [
 export type NotRightChoice = z.infer<typeof NotRightChoice>
 
 /**
- * What `memory:notRight` answers: the line `moved` to the picked record, or `dismissed` (with the
- * Dismissed row it wrote, when the quote could still be found to key it), or `gone` (it had gone
- * already); an AI failure of the *Not about* check as data.
+ * What `memory:notRight` answers: the line `moved` to the picked record, `dismissed` (with the
+ * Dismissed row it wrote, which *Undo* brings it back from), `unchecked` (*Not about* could not be
+ * checked: its sentence changed since it was read, or the checker gave no verdict; nothing
+ * changed), or `gone` (it had gone already); an AI failure of the *Not about* check as data.
  */
 export const NotRightResult = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true),
-    outcome: z.enum(['moved', 'dismissed', 'gone']),
+    outcome: z.enum(['moved', 'dismissed', 'unchecked', 'gone']),
     dismissed: Dismissed.nullable()
   }),
   z.object({ ok: z.literal(false), code: AiErrorCode, message: z.string(), nextStep: z.string() })
 ])
 export type NotRightResult = z.infer<typeof NotRightResult>
+
+/** A card entry *Not right* may dismiss: one of its fields, or a character on the page. */
+export const CardEntryName = z.enum([...CARD_FIELDS, 'present'])
+
+/**
+ * *Not right* on a value the card gives (F-16.18; design Part 1 "every line the AI wrote has ⓘ
+ * and Not right"): the scene's POV, place, time or year, or a character on the page (`value`: the
+ * record's id for `pov` and `present`). A `notRight` Dismissed row for the scene, the field and
+ * the value: Here, the card and the typed-detail conflicts leave it out, so the typed detail
+ * stands; *Undo* in Dismissed brings it back.
+ */
+export const CardNotRight = z.object({
+  nodeId: z.string(),
+  field: CardEntryName,
+  value: z.string()
+})
+export type CardNotRight = z.infer<typeof CardNotRight>

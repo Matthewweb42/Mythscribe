@@ -84,3 +84,8 @@ export function seedClaims(
     now
   )
 }
+
+/** A card's anchor as a reading of the saved scene would leave it: every sentence's hash. */
+export function cardAnchorOf(db: TreeDb, nodeId: string): string[] {
+  return [...new Set(sceneSentences(sceneTexts(db, nodeId)).map((sentence) => sentence.hash))]
+}

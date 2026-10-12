@@ -15,8 +15,9 @@ import { enqueueJob, listJobs } from '../../jobs/jobStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { createNode, getNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
-import { createRecord } from '../recordStore'
-import { sceneClaims } from './claimStore'
+import { createRecord, listRecords, setAliases } from '../recordStore'
+import { getClaim, sceneClaims } from './claimStore'
+import { cardAnchorOf, seedClaims } from './claimFixture'
 import { lastReading, insertReading } from './readingStore'
 import {
   fakeAi,
@@ -34,7 +35,10 @@ import { emptySceneDetails } from '@shared/memory/sceneDetails'
 import { listDismissed, undoDismissed } from '../dismissedStore'
 import { setSceneDetails } from '../sceneDetailStore'
 import { upsertCard } from './cardStore'
-import { restoreNotRight } from './notRight'
+import { runAnchors } from './anchors'
+import { cardNotRight, dismissClaimsNotRight, restoreNotRight } from './notRight'
+import { sceneMemory } from './views'
+import { reading as readingTable } from '../../db/schema'
 
 let tmp: string
 let session: ProjectSession
@@ -172,6 +176,13 @@ function addScene(title: string, ...paragraphs: string[]): string {
   }).id
   saveDocument(db, id, doc(...paragraphs))
   return id
+}
+
+/** A record's id by its name. */
+function rosterRecord(name: string): string {
+  const found = listRecords(db).find((each) => each.name === name)
+  if (found === undefined) throw new Error(`No record ${name}`)
+  return found.id
 }
 
 beforeEach(() => {
@@ -855,17 +866,19 @@ describe('Not right (F-16.18)', () => {
     const made = createRecord(db, { name: 'Ella Harrow', categoryId: 'character' }, NOW)
     if (!('record' in made)) throw new Error('blocked')
     const ella = made.record.id
+    let rechecking = false
     const ai = fakeAi(
       (request) => {
         if (requestKind(request) !== 'verify') return answerReading(request)
-        // The re-check names Ella only: it is supported for her.
+        // The re-check: the checker picks the record the text points to by a role (Ella, not
+        // named here); a reading's own checks pass as asked.
         const checks = sentChecks(request)
         return {
           text: JSON.stringify({
             v: checks.map((check) => ({
               i: check.i,
               ok: true,
-              r: check.who[0] ?? null,
+              r: (rechecking ? check.unnamed[0] : check.who[0]) ?? null,
               voice: 'narration',
               mode: 'now'
             }))
@@ -877,6 +890,7 @@ describe('Not right (F-16.18)', () => {
     const reader = await readScene(ai)
     const mara = eyes()?.recordId
     const sent = ai.requests.length
+    rechecking = true
     const result = await reader.notRight(
       eyes()?.id ?? '',
       { kind: 'notAbout', recordId: ella },
@@ -885,9 +899,156 @@ describe('Not right (F-16.18)', () => {
     expect(result).toMatchObject({ ok: true, outcome: 'moved' })
     expect(ai.requests).toHaveLength(sent + 1)
     expect(requestKind(ai.requests.at(-1)!)).toBe('verify')
+    // The checker saw both: Mara, named in the quote, and Ella, marked not named here.
+    const [check] = sentChecks(ai.requests.at(-1)!)
+    expect(check?.names).toEqual(['Mara Vell', 'Ella Harrow'])
+    expect(check?.unnamed).toHaveLength(1)
     expect(eyes()).toMatchObject({ recordId: ella, proof: 'verified', value: 'grey' })
     // Mara keeps a tombstone for it, so a later reading does not hand the line back to her.
     expect(result.ok ? result.dismissed : null).toMatchObject({ kind: 'notRight', recordId: mara })
+    // A later reading of the scene (a rebuild too) stores the line for Ella again, not for Mara.
+    saveDocument(db, scene, doc("Mara's eyes were grey.", 'At dawn the boats went out at last.'))
+    rechecking = false
+    const full = await reader.readNow(scene, 'read-again')
+    expect(full).toMatchObject({ ok: true })
+    const lines = sceneClaims(db, scene, activeDraftId(db)).filter((each) => each.slot === 'eyes')
+    expect(lines.map((each) => each.recordId)).toEqual([ella])
+  })
+
+  it('Not about checks a pronoun against everyone named near it, never a third record by default', async () => {
+    const tomas = createRecord(
+      db,
+      { name: 'Tomas Harrow', categoryId: 'character', aliases: [{ text: 'Tomas' }] },
+      NOW
+    )
+    const ella = createRecord(db, { name: 'Ella Marsh', categoryId: 'character' }, NOW)
+    if (!('record' in tomas) || !('record' in ella)) throw new Error('blocked')
+    saveDocument(db, scene, doc('Mara met Tomas at the quay. Her eyes were grey.'))
+    const mara = rosterRecord('Mara Vell')
+    const [id] = seedClaims(
+      db,
+      scene,
+      [
+        {
+          recordId: mara,
+          slot: 'eyes',
+          value: 'grey',
+          quote: 'Her eyes were grey',
+          para: 0,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    // A naive checker that answers the first record it is shown.
+    const ai = fakeAi(
+      (request) => ({
+        text: JSON.stringify({
+          v: sentChecks(request).map((check) => ({
+            i: check.i,
+            ok: true,
+            r: check.who[0] ?? null,
+            voice: 'narration',
+            mode: 'now'
+          }))
+        })
+      }),
+      { providerId: 'openai', now: NOW }
+    )
+    const reader = service(ai)
+    const result = await reader.notRight(
+      id ?? '',
+      { kind: 'notAbout', recordId: ella.record.id },
+      'nr-p'
+    )
+    const [check] = sentChecks(ai.requests.at(-1)!)
+    expect(check?.names).toEqual(['Mara Vell', 'Tomas Harrow', 'Ella Marsh'])
+    expect(check?.unnamed).toHaveLength(1)
+    expect(check?.text).toBe('Mara met Tomas at the quay. Her eyes were grey.')
+    // The checker named Mara: the move is refused, and the line goes to Dismissed as a wrong value.
+    expect(result).toMatchObject({ ok: true, outcome: 'dismissed' })
+    expect(getClaim(db, id ?? '')).toBeNull()
+  })
+
+  it('Not about changes nothing when the checker gives no verdict', async () => {
+    const made = createRecord(db, { name: 'Ella Harrow', categoryId: 'character' }, NOW)
+    if (!('record' in made)) throw new Error('blocked')
+    let rechecking = false
+    const ai = fakeAi(
+      (request) => {
+        if (requestKind(request) !== 'verify' || !rechecking) return answerReading(request)
+        return { text: JSON.stringify({ v: [] }) }
+      },
+      { providerId: 'openai', now: NOW }
+    )
+    const reader = await readScene(ai)
+    const before = eyes()
+    rechecking = true
+    const result = await reader.notRight(
+      before?.id ?? '',
+      { kind: 'notAbout', recordId: made.record.id },
+      'nr-none'
+    )
+    expect(result).toEqual({ ok: true, outcome: 'unchecked', dismissed: null })
+    expect(eyes()).toEqual(before)
+    expect(listDismissed(db).count).toBe(0)
+  })
+
+  it('keeps a stale line undoable: Wrong value writes a row, Not about sends nothing', async () => {
+    const made = createRecord(db, { name: 'Ella Harrow', categoryId: 'character' }, NOW)
+    if (!('record' in made)) throw new Error('blocked')
+    const ai = reading()
+    const reader = await readScene(ai)
+    const before = eyes()
+    // The sentence is edited since it was read: its quote is no longer in the scene.
+    saveDocument(db, scene, doc("Mara's eyes were a stormy blue.", 'At dawn the boats went out.'))
+    runAnchors(db, scene, NOW)
+    expect(eyes()).toMatchObject({ state: 'stale' })
+    const sent = ai.requests.length
+    const about = await reader.notRight(
+      before?.id ?? '',
+      { kind: 'notAbout', recordId: made.record.id },
+      'nr-stale'
+    )
+    expect(about).toEqual({ ok: true, outcome: 'unchecked', dismissed: null })
+    expect(ai.requests).toHaveLength(sent)
+    const wrong = await reader.notRight(before?.id ?? '', { kind: 'wrongValue' }, 'nr-stale-2')
+    expect(wrong).toMatchObject({ ok: true, outcome: 'dismissed' })
+    const row = wrong.ok ? wrong.dismissed : null
+    expect(row).toMatchObject({ kind: 'notRight', label: 'Mara Vell: Eyes grey' })
+    expect(eyes()).toBeUndefined()
+    undoDismissed(db, row?.id ?? '')
+    restoreNotRight(db, row?.id ?? '')
+    expect(eyes()).toMatchObject({ id: before?.id, value: 'grey', state: 'stale' })
+  })
+
+  it('brings back every line a bulk Not right took, even with their reading gone', async () => {
+    const reader = await readScene(reading())
+    const two = addScene('Two', "Mara's eyes were green.")
+    expect(await reader.readNow(two, 'read-2')).toMatchObject({ ok: true, read: true })
+    const mara = eyes()?.recordId ?? ''
+    const all = [
+      ...sceneClaims(db, scene, activeDraftId(db)),
+      ...sceneClaims(db, two, activeDraftId(db))
+    ]
+    // The rebuild summary's bulk Not right for Mara's sheet (`applyRebuildAction` runs this).
+    const lines = all.filter((each) => each.recordId === mara)
+    expect(lines).toHaveLength(2)
+    db.transaction((tx) => dismissClaimsNotRight(tx, lines, NOW))
+    expect(sceneClaims(db, scene, activeDraftId(db))).toEqual([])
+    db.delete(readingTable).run()
+    const rows = listDismissed(db).items.filter((row) => row.kind === 'notRight')
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      undoDismissed(db, row.id)
+      restoreNotRight(db, row.id)
+    }
+    const back = [
+      ...sceneClaims(db, scene, activeDraftId(db)),
+      ...sceneClaims(db, two, activeDraftId(db))
+    ]
+    expect(back.map((each) => each.id).sort()).toEqual(all.map((each) => each.id).sort())
+    expect(back.every((each) => each.readingId === null)).toBe(true)
   })
 
   it('Not about dismisses a line the checker does not support for the picked record', async () => {
@@ -933,19 +1094,31 @@ describe('Not right (F-16.18)', () => {
 })
 
 describe('typed details against the text (decision 4, F-16.18)', () => {
-  const card = (where: string, quote: string): Parameters<typeof upsertCard>[1] => ({
-    nodeId: scene,
-    draftId: activeDraftId(db),
-    readingId: null,
-    line: 'Mara waits.',
-    gist: 'Mara waits.',
-    fields: { ...emptyCardFields(), where: { value: where, quote, p: 1, verified: true } },
-    present: [],
-    mood: null,
-    theme: null,
-    anchor: [],
-    seen: []
-  })
+  /** A card read from the scene as saved, its place quoted from paragraph 2. */
+  const card = (
+    where: string,
+    quote: string,
+    over: Partial<Parameters<typeof upsertCard>[1]['fields']> = {}
+  ): Parameters<typeof upsertCard>[1] => {
+    saveDocument(db, scene, doc("Mara's eyes were grey.", `${quote}.`))
+    return {
+      nodeId: scene,
+      draftId: activeDraftId(db),
+      readingId: null,
+      line: 'Mara waits.',
+      gist: 'Mara waits.',
+      fields: {
+        ...emptyCardFields(),
+        where: { value: where, quote, p: 1, verified: true },
+        ...over
+      },
+      present: [],
+      mood: null,
+      theme: null,
+      anchor: cardAnchorOf(db, scene),
+      seen: []
+    }
+  }
 
   it('asks once where the text disagrees, and Keep mine never asks again', () => {
     upsertCard(db, card('the quay', 'At dawn the boats went out from the quay'), NOW)
@@ -998,6 +1171,63 @@ describe('typed details against the text (decision 4, F-16.18)', () => {
     expect(noticeLists.at(-1)?.find((notice) => notice.kind === 'detailConflict')).toMatchObject({
       textRecordId: quay.record.id
     })
+  })
+
+  it('asks nothing once the quote’s sentence is edited, and nothing about a value said to be not right', () => {
+    upsertCard(db, card('the quay', 'At dawn the boats went out from the quay'), NOW)
+    setSceneDetails(
+      db,
+      scene,
+      { ...emptySceneDetails(), place: { recordId: null, text: 'the harbour' } },
+      NOW
+    )
+    const reader = service(reading())
+    expect(reader.notices().some((notice) => notice.kind === 'detailConflict')).toBe(true)
+    // She fixes the prose instead: the card's place no longer stands, so nothing is asked, and
+    // the scene's memory shows the typed place with the card's dimmed as stale.
+    saveDocument(
+      db,
+      scene,
+      doc("Mara's eyes were grey.", 'At dawn the boats went out from the harbour.')
+    )
+    expect(reader.notices().some((notice) => notice.kind === 'detailConflict')).toBe(false)
+    const memory = sceneMemory(db, scene)
+    expect(memory.typed.place).toMatchObject({ outcome: 'typedOnly', typed: 'the harbour' })
+    expect(memory.card?.stale).toEqual(['where'])
+    // Back as it was: asked again; Not right on the card's place: never asked, and gone from the card.
+    saveDocument(
+      db,
+      scene,
+      doc("Mara's eyes were grey.", 'At dawn the boats went out from the quay.')
+    )
+    expect(reader.notices().some((notice) => notice.kind === 'detailConflict')).toBe(true)
+    const row = cardNotRight(db, { nodeId: scene, field: 'where', value: 'the quay' }, NOW)
+    expect(row).toMatchObject({ kind: 'notRight', label: '1.1: place “the quay”, from the card' })
+    expect(reader.notices().some((notice) => notice.kind === 'detailConflict')).toBe(false)
+    expect(sceneMemory(db, scene).card?.fields.where).toBeNull()
+    undoDismissed(db, row.id)
+    expect(sceneMemory(db, scene).card?.fields.where).toMatchObject({ value: 'the quay' })
+  })
+
+  it('keys Keep mine on a POV by its record, so a rename never asks again', () => {
+    const tomas = createRecord(db, { name: 'Tomas Harrow', categoryId: 'character' }, NOW)
+    if (!('record' in tomas)) throw new Error('blocked')
+    const mara = rosterRecord('Mara Vell')
+    upsertCard(
+      db,
+      card('the quay', 'At dawn the boats went out from the quay', {
+        where: null,
+        pov: { value: mara, quote: "Mara's eyes were grey", p: 0, verified: true }
+      }),
+      NOW
+    )
+    setSceneDetails(db, scene, { ...emptySceneDetails(), povRecordId: tomas.record.id }, NOW)
+    const reader = service(reading())
+    const conflict = reader.notices().find((notice) => notice.kind === 'detailConflict')
+    expect(conflict).toMatchObject({ field: 'pov', text: 'Mara Vell', textRecordId: mara })
+    reader.answerNotice(conflict?.id ?? '', 'keepMine')
+    setAliases(db, mara, { name: { text: 'Mara Quill' }, aliases: [{ text: 'Mara' }] }, NOW)
+    expect(reader.notices().some((notice) => notice.kind === 'detailConflict')).toBe(false)
   })
 
   it('carries the last rebuild in the status', () => {

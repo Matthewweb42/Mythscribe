@@ -30,6 +30,7 @@ import {
   readNowMessage,
   typedNote
 } from '@renderer/features/memory/memoryView'
+import { CardValueInfo } from '@renderer/features/memory/CardValue'
 import { RebuildMemory } from '@renderer/features/memory/RebuildMemory'
 import { useNow } from '@renderer/features/memory/useNow'
 import { openPassage } from '@renderer/features/editor/openPassage'
@@ -40,6 +41,7 @@ import { namedInLabel } from '@renderer/features/records/recordView'
 import { RenameInBook } from '@renderer/features/records/RenameInBook'
 import { DockPanelControls, PANEL_TITLE } from '@renderer/features/shell/Dock'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -203,13 +205,39 @@ function hereWhy(chip: HereChip): string {
  * *Here*: the scene's POV and the records present without being named (F-16.11's details); once
  * the scene has a card (F-16.18), the text's POV where it quotes one (decision 4: a typed POV that
  * differs shows dimmed, "you typed: Tomas") and the characters on the page, each saying where.
+ * Each of those chips opens its ⓘ (the quote, *Go there*, how it was checked) with *Not right*,
+ * which sends the card's value to Dismissed so the typed POV stands.
  */
 function Here({ sceneId, memory }: { sceneId: string; memory?: SceneEntry }): React.JSX.Element {
   const editor = useSceneDetailsEditor(sceneId)
   const byId = useRecordStore((s) => s.byId)
   const povId = useId()
+  const [openChip, setOpenChip] = useState<string | null>(null)
   const textPov = memory?.here.find((chip) => chip.why === 'pov' && chip.quote !== null)
   const onPage = memory?.here.filter((chip) => chip.why === 'onPage') ?? []
+  const chipKey = (chip: HereChip): string => `${chip.why}:${chip.recordId}`
+  const opened = [textPov, ...onPage].find(
+    (chip) => chip !== undefined && chipKey(chip) === openChip
+  )
+  const openedQuote = opened?.quote ?? null
+  const openedP = opened?.p ?? null
+  const toggle = (chip: HereChip): void => {
+    const key = chipKey(chip)
+    setOpenChip((current) => (current === key ? null : key))
+  }
+  const chipButton = (chip: HereChip, testId?: string): React.JSX.Element => (
+    <button
+      key={chip.recordId}
+      type="button"
+      className={CHIP}
+      title={hereWhy(chip)}
+      aria-expanded={openChip === chipKey(chip)}
+      data-testid={testId}
+      onClick={() => toggle(chip)}
+    >
+      {byId[chip.recordId]?.name ?? 'Gone'}
+    </button>
+  )
   return (
     <section aria-labelledby={`${povId}-heading`}>
       <h3 id={`${povId}-heading`} className={HEADING}>
@@ -226,9 +254,7 @@ function Here({ sceneId, memory }: { sceneId: string; memory?: SceneEntry }): Re
         ) : (
           <>
             <span className="w-10 shrink-0 text-xs text-fg-muted">POV</span>
-            <span className={CHIP} title={hereWhy(textPov)} data-testid="here-pov">
-              {byId[textPov.recordId]?.name ?? 'Gone'}
-            </span>
+            {chipButton(textPov, 'here-pov')}
             {textPov.typedPov === null ? null : (
               <span className="text-xs text-fg-subtle opacity-70" data-testid="typed-pov">
                 {typedNote(byId[textPov.typedPov]?.name ?? 'a record that is gone')}
@@ -240,11 +266,20 @@ function Here({ sceneId, memory }: { sceneId: string; memory?: SceneEntry }): Re
       {onPage.length === 0 ? null : (
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1" data-testid="on-page">
           <span className="w-10 shrink-0 text-xs text-fg-muted">On page</span>
-          {onPage.map((chip) => (
-            <span key={chip.recordId} className={CHIP} title={hereWhy(chip)}>
-              {byId[chip.recordId]?.name ?? 'Gone'}
-            </span>
-          ))}
+          {onPage.map((chip) => chipButton(chip))}
+        </div>
+      )}
+      {opened === undefined || openedQuote === null || openedP === null ? null : (
+        <div className="mt-1">
+          <CardValueInfo
+            nodeId={sceneId}
+            field={opened.why === 'pov' ? 'pov' : 'present'}
+            value={opened.recordId}
+            shown={byId[opened.recordId]?.name ?? 'Gone'}
+            quote={openedQuote}
+            p={openedP}
+            checked="verified"
+          />
         </div>
       )}
       <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
@@ -968,6 +1003,21 @@ function DetailConflictRow({ conflict }: { conflict: DetailConflictNotice }): Re
   const update = async (): Promise<void> => {
     setBusy(true)
     try {
+      // The text may have changed since the conflict was raised: saves land first, and the
+      // conflict is asked again of main, so a value the text no longer says is never written.
+      await flushPendingSaves()
+      const notices = await ipc().invoke('memory:notices', undefined)
+      const still = notices.some(
+        (notice) =>
+          notice.kind === 'detailConflict' &&
+          notice.id === conflict.id &&
+          notice.text === conflict.text
+      )
+      if (!still) {
+        await useMemoryStore.getState().load()
+        toast.info('The text changed since: this is looked at again once the scene is read.')
+        return
+      }
       const store = useSceneDetailStore.getState()
       if (store.docs[conflict.nodeId] === undefined) await store.load(conflict.nodeId)
       const current = useSceneDetailStore.getState().docs[conflict.nodeId]

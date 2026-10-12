@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import type {
+  CardNotRight,
   ClaimView,
   MemoryNotice,
   MemoryNoticeAction,
@@ -64,6 +65,11 @@ interface MemoryState {
   answerNotice: (id: string, action: MemoryNoticeAction) => Promise<boolean>
   /** *Not right* on an AI line; the line goes from what is shown at once. */
   notRight: (claimId: string, choice: NotRightChoice) => Promise<NotRightResult | null>
+  /**
+   * *Not right* on a value the scene's card gives; main's `memory:changed` reads the scene again.
+   * Answers whether main took it.
+   */
+  cardNotRight: (input: CardNotRight) => Promise<boolean>
   /** Opens the subscriptions (idempotent); call it where a v2 project opens. */
   subscribe: () => void
   clear: () => void
@@ -272,6 +278,17 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         set({ claims, scenes, sheets })
       }
       return result
+    },
+
+    async cardNotRight(input) {
+      try {
+        const row = await ipc().invoke('memory:cardNotRight', input)
+        useDismissedStore.getState().add(row)
+        return true
+      } catch (err) {
+        report(err)
+        return false
+      }
     },
 
     subscribe() {

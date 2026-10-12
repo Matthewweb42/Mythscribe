@@ -1139,7 +1139,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
           { ai: deps.requestDeps(db) },
           { claimId, recordId: choice.recordId, requestId, onSpend: spender(db, true) }
         )
-        if (outcome.outcome !== 'gone') {
+        if (outcome.outcome === 'moved' || outcome.outcome === 'dismissed') {
           deps.changed({ nodeIds: outcome.nodeIds, recordIds: outcome.recordIds })
         }
         publish()

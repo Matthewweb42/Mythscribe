@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { z } from 'zod'
 import {
   CLAIM_MODES,
@@ -9,7 +9,7 @@ import {
   SPOT_VERDICTS
 } from '@shared/memory/claims'
 import { RebuildProgress } from '@shared/memory/views'
-import { settings, type ClaimRow } from '../../db/schema'
+import { dismissed, settings, type ClaimRow } from '../../db/schema'
 import type { TreeDb } from '../../tree/treeStore'
 
 /**
@@ -27,6 +27,9 @@ import type { TreeDb } from '../../tree/treeStore'
  *   backlog, a draft never read), spent as asked and never held back by the Cloud cap (P2a-D9).
  * - `memoryNotRight`: the claims each *Not right › Wrong value* took away, by the Dismissed row's
  *   id, so *Undo* in Dismissed brings the lines back as they were (F-16.18).
+ * - `memoryNotAbout`: the record each *Not right › Not about* moved a line to, by the Dismissed
+ *   row its first record got, so a later reading (a rebuild too) stores the line again for the
+ *   record the author picked rather than dropping it (F-16.18).
  */
 
 export const MEMORY_REBUILD_KEY = 'memoryRebuild'
@@ -34,6 +37,7 @@ export const MEMORY_SPOT_KEY = 'memorySpot'
 export const MEMORY_HEALTH_KEY = 'memoryHealth'
 export const MEMORY_ASKED_KEY = 'memoryAsked'
 export const MEMORY_NOT_RIGHT_KEY = 'memoryNotRight'
+export const MEMORY_NOT_ABOUT_KEY = 'memoryNotAbout'
 
 export const SpotState = z.object({
   rebuiltAt: z.string().nullable().default(null),
@@ -145,4 +149,37 @@ export function getNotRightStash(db: TreeDb): NotRightStash {
 
 export function setNotRightStash(db: TreeDb, stash: NotRightStash): void {
   writeRow(db, MEMORY_NOT_RIGHT_KEY, stash)
+}
+
+/** Where each *Not about* moved its line: the Dismissed row's id to the record picked. */
+const NotAboutMoves = z.record(z.string(), z.string())
+export type NotAboutMoves = Record<string, string>
+
+export function getNotAboutMoves(db: TreeDb): NotAboutMoves {
+  return readRow(db, MEMORY_NOT_ABOUT_KEY, NotAboutMoves, {})
+}
+
+export function setNotAboutMoves(db: TreeDb, moves: NotAboutMoves): void {
+  writeRow(db, MEMORY_NOT_ABOUT_KEY, moves)
+}
+
+/**
+ * The `notRight` keys of the lines *Not about* moved (their rows still dismissed), each to the
+ * record it went to: what reconciliation stores a fresh item for instead of dropping it.
+ */
+export function notAboutMovedTo(db: TreeDb): Map<string, string> {
+  const moves = getNotAboutMoves(db)
+  const ids = Object.keys(moves)
+  if (ids.length === 0) return new Map()
+  const rows = db
+    .select({ id: dismissed.id, key: dismissed.key })
+    .from(dismissed)
+    .where(inArray(dismissed.id, ids))
+    .all()
+  return new Map(
+    rows.flatMap((row) => {
+      const to = moves[row.id]
+      return to === undefined ? [] : [[row.key, to] as const]
+    })
+  )
 }

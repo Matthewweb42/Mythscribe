@@ -465,11 +465,11 @@ import {
   scanNamesFor,
   staleNameScans
 } from '../memory/nameIndexer'
-import { runAnchors } from '../memory/reading/anchors'
+import { anchorsChanged, runAnchors } from '../memory/reading/anchors'
 import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
 import { settleOwnedNames } from '../memory/reading/waiting'
 import { claimInfo, sceneMemory, sheetMemory } from '../memory/reading/views'
-import { restoreNotRight } from '../memory/reading/notRight'
+import { cardNotRight, restoreNotRight } from '../memory/reading/notRight'
 import {
   dropOwner,
   indexNodePassages,
@@ -904,13 +904,17 @@ export function registerHandlers({
           const counter = memoryInvariantCounter(kind)
           if (counter !== null) diagnostics.count(counter)
         }
-        const changed =
-          result.staled.length +
-            result.reproved.length +
-            result.restored.length +
-            result.attached.length +
-            result.parked.length >
-          0
+        const changed = anchorsChanged(result)
+        // F-16.18: a line that went stale (or came back) dims at once in True now, a shown sheet
+        // and ⓘ, with no reading in between; a scene with a card is looked at again too, since
+        // Here, the card and decision 4's conflicts read its fields against the text as it is now.
+        if (changed || result.card) {
+          emit(windows(), 'memory:changed', {
+            nodeIds: [job.nodeId],
+            recordIds: result.recordIds
+          })
+          if (result.card) reader.detailsChanged()
+        }
         return Promise.resolve({ requested: false, value: { changed, scanned: changed } })
       }
       if (job.kind === 'names') {
@@ -4816,10 +4820,19 @@ export function registerHandlers({
     // be asked again.
     if (undone.kind === 'notRight') {
       const restored = restoreNotRight(db, undone.id)
-      if (restored.nodeIds.length > 0) {
-        mentionQueue.indexAll('anchors', restored.nodeIds)
-        emit(windows(), 'memory:changed', restored)
+      // The anchors job's own `memory:changed` follows once it has checked them.
+      if (restored.nodeIds.length > 0) mentionQueue.indexAll('anchors', restored.nodeIds)
+      // A card value said to be not right (no lines kept) counts again in Here and the card.
+      const nodeIds = [
+        ...new Set([...restored.nodeIds, ...(undone.nodeId === null ? [] : [undone.nodeId])])
+      ]
+      const recordIds = [
+        ...new Set([...restored.recordIds, ...(undone.recordId === null ? [] : [undone.recordId])])
+      ]
+      if (nodeIds.length > 0 || recordIds.length > 0) {
+        emit(windows(), 'memory:changed', { nodeIds, recordIds })
       }
+      reader.detailsChanged()
     }
     if (undone.kind === 'notProblem') reader.detailsChanged()
     publishQuestions()
@@ -5016,7 +5029,14 @@ export function registerHandlers({
 
   register('memory:notices', () => reader.notices())
 
-  register('memory:answerNotice', ({ id, action }) => reader.answerNotice(id, action))
+  register('memory:answerNotice', ({ id, action }) => {
+    // Decision 4's *Keep mine* (closing the conflict too) writes a Dismissed row: refused after
+    // the trial, as its Undo is. The other answers only steer reading.
+    if (id.startsWith('detail:') && (action === 'keepMine' || action === 'dismiss')) {
+      access.assertWritable()
+    }
+    return reader.answerNotice(id, action)
+  })
 
   register('memory:health', () => reader.health())
 
@@ -5040,9 +5060,23 @@ export function registerHandlers({
     sheetMemory(manager.require().connection.orm, recordId, asOf)
   )
 
-  register('memory:notRight', ({ claimId, choice, requestId }) =>
-    reader.notRight(claimId, choice, requestId)
-  )
+  register('memory:notRight', ({ claimId, choice, requestId }) => {
+    // *Wrong value* writes a Dismissed row and runs no model, so the AI path cannot refuse it:
+    // after the trial it is refused here, as its Undo (`dismissed:undo`) is.
+    if (choice.kind === 'wrongValue') access.assertWritable()
+    return reader.notRight(claimId, choice, requestId)
+  })
+
+  register('memory:cardNotRight', (input) => {
+    const db = manager.require().connection.orm
+    const row = cardNotRight(db, input, new Date())
+    emit(windows(), 'memory:changed', {
+      nodeIds: [input.nodeId],
+      recordIds: row.recordId === null ? [] : [row.recordId]
+    })
+    reader.detailsChanged()
+    return row
+  })
 
   // F-16.14: the Story notes block as the v2 prose prompts send it (the 400-token budget).
   register('storyNotes:get', ({ nodeId }) => ({

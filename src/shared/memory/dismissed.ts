@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { sentenceHash } from './anchor'
-import { valueKey } from './claims'
+import { valueKey, type CardFieldName } from './claims'
 import { normName } from './names'
 
 /**
@@ -20,7 +20,11 @@ import { normName } from './names'
  * - `notRight` (F-16.18): an AI line the author said is wrong (*Not right › Wrong value*), keyed by
  *   the record, slot, value and the quote's own sentences (their gate texts, every name as one
  *   placeholder), so a new sentence stating the same value is new evidence and comes back, while
- *   an edit beside it, Rename in book or *Same as…* leaves the dismissal standing (answer 22).
+ *   an edit beside it, Rename in book or *Same as…* leaves the dismissal standing (answer 22). A
+ *   line whose quote is no longer in its scene (a stale line) is keyed by its stored anchor
+ *   instead: no new sentence can match it, but the row is there to undo. A card's value (its POV,
+ *   place, time or year, or a character on the page) the author said is not right is keyed by
+ *   the scene, the field and the value: the views and the conflicts then leave it out.
  * - `notProblem`: a conflict that is fine: a filed line's (F-16.9, by the caller's `ref`), the
  *   typed-detail conflict's *Keep mine* (decision 4, F-16.18: `detail`), and P4's findings.
  */
@@ -52,8 +56,28 @@ export type DismissedKeyInput =
       /** The gate texts (`gateText`) of the quote's own sentences, in order. */
       stating: readonly string[]
     }
+  | {
+      kind: 'notRight'
+      recordId: string
+      slot: string
+      value: string
+      /** A stale line's stored anchor (its quote is no longer in the scene). */
+      anchor: readonly string[]
+    }
+  | {
+      kind: 'notRight'
+      /** A card's value: for `pov` and `present`, the value is the record's id. */
+      card: { nodeId: string; field: CardEntryName; value: string }
+    }
   | { kind: 'notProblem'; ref: string }
   | { kind: 'notProblem'; detail: { nodeId: string; field: string; value: string } }
+
+/** A card entry *Not right* may dismiss: one of its fields, or a character on the page. */
+export type CardEntryName = CardFieldName | 'present'
+
+/** Whether a card entry's value is a record's id (the POV, a character on the page). */
+export const cardEntryIsRecord = (field: CardEntryName): boolean =>
+  field === 'pov' || field === 'present'
 
 /**
  * The evidence part of a `notRight` key: one hash over the quote's sentences as the gate reads
@@ -68,8 +92,11 @@ export function statingKey(stating: readonly string[]): string {
  * The one key shape per kind (unique per kind in the table): `name` → the name's norm; `alias`
  * → `recordId|norm`; `notMention` → `recordId|norm(the span with one word either side)`;
  * `split` and `notSame` → the two record ids in sorted order; `unlink` → `planId|sceneId`;
- * `notRight` → `recordId|slot|valueKey|statingKey`; `notProblem` → the caller's reference, or for a
- * typed detail `detail|nodeId|field|valueKey` (the text's value the author kept hers against).
+ * `notRight` → `recordId|slot|valueKey|statingKey` (a stale line: `recordId|slot|valueKey|a` and
+ * its anchor's hash; a card's record value: `recordId|card|nodeId|field`, so a merge re-keys it;
+ * another card value: `card|nodeId|field|valueKey`); `notProblem` → the caller's reference, or for
+ * a typed detail `detail|nodeId|field|valueKey` (the text's value the author kept hers against; for
+ * a POV, the text's record id, so a rename never asks again).
  */
 export function dismissedKey(input: DismissedKeyInput): string {
   switch (input.kind) {
@@ -85,6 +112,15 @@ export function dismissedKey(input: DismissedKeyInput): string {
     case 'unlink':
       return `${input.planId}|${input.sceneId}`
     case 'notRight':
+      if ('card' in input) {
+        const { nodeId, field, value } = input.card
+        return cardEntryIsRecord(field)
+          ? `${value}|card|${nodeId}|${field}`
+          : `card|${nodeId}|${field}|${valueKey(value)}`
+      }
+      if ('anchor' in input) {
+        return `${input.recordId}|${input.slot}|${valueKey(input.value)}|a${sentenceHash(input.anchor.join(' '))}`
+      }
       return `${input.recordId}|${input.slot}|${valueKey(input.value)}|${statingKey(input.stating)}`
     case 'notProblem':
       if ('ref' in input) return input.ref

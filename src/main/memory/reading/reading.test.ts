@@ -21,7 +21,7 @@ import { createRecord, deleteRecord } from '../recordStore'
 import { setSceneDetails } from '../sceneDetailStore'
 import { runAnchors } from './anchors'
 import { getCard, upsertCard } from './cardStore'
-import { sceneTexts, seedClaims } from './claimFixture'
+import { cardAnchorOf, sceneTexts, seedClaims } from './claimFixture'
 import {
   attachClaims,
   claimsByState,
@@ -682,7 +682,7 @@ describe('the views (F-16.18)', () => {
         present: [],
         mood: null,
         theme: null,
-        anchor: [],
+        anchor: cardAnchorOf(db, one),
         seen: []
       },
       NOW
@@ -750,7 +750,7 @@ describe('the views (F-16.18)', () => {
         present: [{ recordId: mara, quote: 'Mara wore a blue coat', p: 2, verified: true }],
         mood: null,
         theme: null,
-        anchor: [],
+        anchor: cardAnchorOf(db, one),
         seen: []
       },
       NOW

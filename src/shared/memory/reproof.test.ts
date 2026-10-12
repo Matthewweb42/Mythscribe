@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { anchorFor, sceneSentences } from './anchor'
 import type { LiteralName } from './literal'
 import { locateQuote } from './quote'
-import { cardParas, cardStale, checkAnchors, type ReproofClaim, type ReproofScene } from './reproof'
+import {
+  cardParas,
+  cardStale,
+  checkAnchors,
+  holdingCard,
+  type ReproofClaim,
+  type ReproofScene
+} from './reproof'
 import { splitSentences } from './sentences'
 
 const PEOPLE = ['Mara', 'Tomas']
@@ -204,5 +211,58 @@ describe('cardStale', () => {
     const present = new Set(sceneSentences(BEFORE).map((sentence) => sentence.hash))
     expect(cardStale(EYES.anchor, present)).toBe(false)
     expect(cardStale([...EYES.anchor, 'gone'], present)).toBe(true)
+  })
+})
+
+describe('holdingCard (F-16.18)', () => {
+  const card = {
+    fields: {
+      where: { value: 'the ridge', quote: 'The ridge was cold', p: 0, verified: false },
+      when: null,
+      pov: { value: 'mara', quote: "Mara's eyes were grey", p: 1, verified: true },
+      year: null,
+      flashback: null,
+      elapsed: null
+    },
+    present: [{ recordId: 'tomas', quote: 'Tomas came at dusk', p: 2, verified: true }],
+    anchor: [...new Set(sceneSentences(BEFORE).map((sentence) => sentence.hash))]
+  }
+  const none = (): boolean => false
+
+  it('keeps what stands on the text, following its paragraph', () => {
+    const held = holdingCard(card, ['A new opening.', ...BEFORE], none)
+    expect(held.fields.where?.value).toBe('the ridge')
+    expect(held.fields.pov?.value).toBe('mara')
+    expect(held.present.map((entry) => entry.recordId)).toEqual(['tomas'])
+    expect(held.stale).toEqual([])
+  })
+
+  it('stales a field once its sentence is edited (even with the quote’s words still there) or gone', () => {
+    const edited = [
+      'The ridge was not cold.',
+      "Mara's eyes were grey. She waited.",
+      'Tomas never came at dusk.'
+    ]
+    const held = holdingCard(card, edited, none)
+    expect(held.fields.where).toBeNull()
+    expect(held.shown.where?.value).toBe('the ridge')
+    expect(held.stale).toEqual(['where'])
+    expect(held.present).toEqual([])
+    expect(held.fields.pov?.value).toBe('mara')
+  })
+
+  it('holds nothing in a scene that is not readable, and leaves out what the author dismissed', () => {
+    const unreadable = holdingCard(card, null, none)
+    expect(unreadable.fields.pov).toBeNull()
+    expect(unreadable.stale).toEqual(['where', 'pov'])
+    const dismissed = holdingCard(
+      card,
+      BEFORE,
+      (field, value) => (field === 'pov' && value === 'mara') || field === 'present'
+    )
+    expect(dismissed.fields.pov).toBeNull()
+    expect(dismissed.shown.pov).toBeNull()
+    expect(dismissed.stale).toEqual([])
+    expect(dismissed.present).toEqual([])
   })
 })

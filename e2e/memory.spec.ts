@@ -56,7 +56,8 @@ import { caretToEnd, clickIntoEditor } from './support'
  * book with ⓘ ("quote checked in code"); *Not right › Wrong value* sends it to Dismissed and its
  * *Undo* brings it back; a typed place shows dimmed beside the card's place in scene details and
  * Needs a look asks once (*Keep mine* clears it); Settings › AI shows the reading switch and the
- * idle minutes; *Rebuild memory* goes from its price to the summary grouped by sheet.
+ * idle minutes; *Rebuild memory* goes from its price to the summary grouped by sheet; an edit to
+ * the quay sentence dims its True now line ("re-checking after you pause") with no reading.
  *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
@@ -1321,6 +1322,28 @@ test('story memory v2: Here, True now, sheets, cards and Rebuild memory (P2a sli
   expect(providerBodies.filter(isReader).length).toBeGreaterThan(readsBeforeRebuild)
   await rebuild.getByRole('button', { name: 'Close' }).click()
   await expect(rebuild).toHaveCount(0)
+
+  // F-16.18: an edit to a line's sentence dims it in True now once the save settles (the anchors
+  // job's push), with no reading in between.
+  await panel.getByRole('tab', { name: 'This scene' }).click()
+  const quayLine = panel
+    .getByRole('group', { name: 'True now: Mara Vell' })
+    .getByTestId('claim-line')
+    .filter({ hasText: 'Last seen at the quay' })
+  await expect(quayLine).toBeVisible({ timeout: 15_000 })
+  await expect(quayLine).not.toHaveAttribute('data-stale', 'true')
+  const readsBeforeDim = providerBodies.filter(isReader).length
+  await caretToEnd(editor)
+  // Back over "The tide turned at noon." (24 characters), the paragraph break and the quay
+  // sentence's full stop, then end that sentence otherwise.
+  for (let i = 0; i < 26; i += 1) await page.keyboard.press('Backspace')
+  await page.keyboard.type(' at last.')
+  await expect
+    .poll(async () => (await storedText(first.id)).replace(/’/g, "'"), { timeout: 15_000 })
+    .toContain('She walked to the quay at last.')
+  await expect(quayLine).toHaveAttribute('data-stale', 'true', { timeout: 15_000 })
+  await expect(quayLine).toContainText('re-checking after you pause')
+  expect(providerBodies.filter(isReader)).toHaveLength(readsBeforeDim)
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

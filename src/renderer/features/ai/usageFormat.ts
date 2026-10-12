@@ -28,12 +28,16 @@ export const formatUsd = (usd: number): string =>
  */
 export const formatCents = (usd: number): string => {
   if (usd <= 0) return '0¢'
-  if (usd >= 1) return Number.isInteger(usd) ? `$${usd}` : `$${usd.toFixed(2)}`
   const cents = usd * 100
+  // Rounded to the cent first, so $0.996 reads "$1" (never "100¢") and $1.004 reads "$1".
+  const whole = Math.round(cents)
+  if (whole >= 100) {
+    return whole % 100 === 0 ? `$${whole / 100}` : `$${(whole / 100).toFixed(2)}`
+  }
   if (cents < 0.01) return '<0.01¢'
   if (cents < 0.1) return `${Number(cents.toFixed(2))}¢`
   if (cents < 10) return `${Number(cents.toFixed(1))}¢`
-  return `${Math.round(cents)}¢`
+  return `${whole}¢`
 }
 
 /** One request's cost (F-4.7's note): four decimals, since a single fast-tier call is well under a cent. */

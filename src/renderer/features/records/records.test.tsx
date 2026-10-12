@@ -12,6 +12,8 @@ import {
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { locateText } from '@renderer/features/editor/locateText'
 import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
+import { sheetMemoryFixture } from '@renderer/features/memory/memoryFixture'
+import { resetMemoryStore } from '@renderer/features/memory/memoryStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -85,6 +87,11 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
         } as Output<C>
       }
       if (channel === 'names:byRecord') return NAMED_IN as Output<C>
+      // F-16.18: a sheet's From the book (empty: nothing read yet).
+      if (channel === 'memory:sheet') {
+        const { recordId, asOf } = input as Input<'memory:sheet'>
+        return sheetMemoryFixture(recordId, { asOf }) as Output<C>
+      }
       if (channel === 'record:savePage') {
         const { id } = input as Input<'record:savePage'>
         return withPages(id === 'r-mara' ? MARA : TOMAS) as Output<C>
@@ -118,6 +125,7 @@ async function loaded(): Promise<void> {
 
 beforeEach(() => {
   install()
+  resetMemoryStore()
   resetRecordStore()
   resetNameMentionStore()
   resetPageStore()
@@ -131,6 +139,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   resetActiveEditorStore()
+  resetMemoryStore()
   resetRecordStore()
   resetNameMentionStore()
   resetPageStore()
@@ -394,6 +403,9 @@ describe('RecordSheet (F-16.6)', () => {
         id === 'r-mara' ? 'Eyes: grey.' : ''
       )
     )
+    // F-16.18: the sheet's From the book reads its memory without an error.
+    await waitFor(() => expect(sent('memory:sheet')).toContainEqual({ recordId: id, asOf: null }))
+    expect(toasts().filter((message) => message.includes('unexpected'))).toEqual([])
   }
 
   /** `record:setAliases` answering the record as sent, the fixture's other fields kept. */

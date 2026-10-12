@@ -58,6 +58,13 @@ export interface AnchorsResult {
   parked: string[]
   /** Invariant violations found and healed (each claim demoted to stale). */
   violations: InvariantViolation['kind'][]
+  /** The records whose lines changed state (what a shown sheet reads again). */
+  recordIds: string[]
+  /**
+   * The scene has a card: the views read its fields against the text as it is now, so a shown
+   * scene is read again after every check (`heldCard`), whether or not a claim moved.
+   */
+  card: boolean
 }
 
 const nothing = (): AnchorsResult => ({
@@ -67,8 +74,23 @@ const nothing = (): AnchorsResult => ({
   restored: [],
   attached: [],
   parked: [],
-  violations: []
+  violations: [],
+  recordIds: [],
+  card: false
 })
+
+/** Whether the run changed anything a view shows. */
+export function anchorsChanged(result: AnchorsResult): boolean {
+  return (
+    result.staled.length +
+      result.reproved.length +
+      result.restored.length +
+      result.attached.length +
+      result.parked.length +
+      result.violations.length >
+    0
+  )
+}
 
 /** The scene's paragraphs now (none for a node that is no longer a manuscript document). */
 export function paragraphsOf(db: TreeDb, nodeId: string): Paragraph[] {
@@ -117,9 +139,17 @@ export function runAnchors(
   if (claims.length === 0 && card === null) return nothing()
 
   const result = nothing()
+  result.card = card !== null
+  const recordsOf = (ids: readonly string[]): string[] => {
+    const wanted = new Set(ids)
+    return claims.flatMap((each) =>
+      wanted.has(each.id) && each.recordId !== null ? [each.recordId] : []
+    )
+  }
   if (!readerMayRead(claimSources(db)(nodeId))) {
     result.parked = claims.filter((each) => each.state === 'live').map((each) => each.id)
     setClaimsState(db, result.parked, 'stale')
+    result.recordIds = [...new Set(recordsOf(result.parked))]
     return result
   }
 
@@ -224,5 +254,14 @@ export function runAnchors(
     )
     result.violations = violations.map((violation) => violation.kind)
   })
+  const attachedTo = sceneClaims(db, nodeId, draftId).flatMap((each) =>
+    result.attached.includes(each.id) && each.recordId !== null ? [each.recordId] : []
+  )
+  result.recordIds = [
+    ...new Set([
+      ...recordsOf([...result.staled, ...result.reproved, ...result.restored]),
+      ...attachedTo
+    ])
+  ]
   return result
 }

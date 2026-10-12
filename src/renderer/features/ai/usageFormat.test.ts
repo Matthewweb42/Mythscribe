@@ -78,4 +78,13 @@ describe('formatCents (F-16.16, F-16.19)', () => {
     expect(formatCents(1)).toBe('$1')
     expect(formatCents(1.25)).toBe('$1.25')
   })
+
+  it('switches to dollars once the sum rounds to a dollar, with no trailing .00', () => {
+    expect(formatCents(0.994)).toBe('99¢')
+    expect(formatCents(0.996)).toBe('$1')
+    expect(formatCents(0.9999)).toBe('$1')
+    expect(formatCents(1.004)).toBe('$1')
+    expect(formatCents(1.006)).toBe('$1.01')
+    expect(formatCents(20)).toBe('$20')
+  })
 })

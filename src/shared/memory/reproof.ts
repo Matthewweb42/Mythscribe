@@ -2,10 +2,18 @@ import {
   anchorFor,
   anchorHolds,
   anchorInPlace,
+  sceneSentences,
   type MemoryAnchor,
   type SceneSentence
 } from './anchor'
-import type { CardFields, CardPresent, Claim } from './claims'
+import {
+  CARD_FIELDS,
+  emptyCardFields,
+  type CardFieldName,
+  type CardFields,
+  type CardPresent,
+  type Claim
+} from './claims'
 import { literalProof, type LiteralName } from './literal'
 import { hasReproofMarker } from './markers'
 import { locateQuote, type QuoteLocation } from './quote'
@@ -193,4 +201,58 @@ export function cardParas(
   }
   const present = card.present.map(follow)
   return moved ? { fields, present } : null
+}
+
+/** A card as the views may use it (`holdingCard`). */
+export interface HeldCard {
+  /** The fields that stand on the text now; the rest are null (never compared, never counted). */
+  fields: CardFields
+  /** The characters on the page whose quote stands. */
+  present: CardPresent[]
+  /** The fields the author did not dismiss (what scene details show, stale ones dimmed). */
+  shown: CardFields
+  /** Shown fields whose quote no longer stands: dimmed until the next reading. */
+  stale: CardFieldName[]
+}
+
+/**
+ * What of a card still stands on the text (F-16.18; design §2.3 "Invalidation", §2.10): an entry
+ * stands while its quote is in the scene once and every sentence it sits in is one the card was
+ * read from (its `anchor`), so an edit to that sentence (or the quote gone, or repeated) leaves it
+ * stale until the next reading, as a claim's line goes stale. `paragraphs` null: the scene is not
+ * readable (an Idea, left out of compile), and nothing stands. An entry the author said is not
+ * right (`dismissed`) is gone from every view.
+ */
+export function holdingCard(
+  card: { fields: CardFields; present: readonly CardPresent[]; anchor: MemoryAnchor },
+  paragraphs: readonly string[] | null,
+  dismissed: (field: CardFieldName | 'present', value: string) => boolean
+): HeldCard {
+  const anchor = new Set(card.anchor)
+  const sentences = paragraphs === null ? [] : sceneSentences(paragraphs)
+  const stands = (entry: { quote: string; p: number }): boolean => {
+    if (paragraphs === null) return false
+    const location = locateInScene(paragraphs, entry.p, entry.quote)
+    if (location === null) return false
+    const hashes = sentences
+      .filter(
+        (sentence) => sentence.p === location.p && location.sentences.includes(sentence.index)
+      )
+      .map((sentence) => sentence.hash)
+    return hashes.length > 0 && hashes.every((hash) => anchor.has(hash))
+  }
+  const fields = emptyCardFields()
+  const shown = emptyCardFields()
+  const stale: CardFieldName[] = []
+  for (const name of CARD_FIELDS) {
+    const entry = card.fields[name]
+    if (entry === null || dismissed(name, entry.value)) continue
+    shown[name] = entry
+    if (stands(entry)) fields[name] = entry
+    else stale.push(name)
+  }
+  const present = card.present.filter(
+    (entry) => !dismissed('present', entry.recordId) && stands(entry)
+  )
+  return { fields, present, shown, stale }
 }

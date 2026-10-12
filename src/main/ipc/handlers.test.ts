@@ -99,7 +99,9 @@ import {
   setVoiceNotes
 } from '../project/settingsStore'
 import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
-import { seedClaims } from '../memory/reading/claimFixture'
+import { cardAnchorOf, seedClaims } from '../memory/reading/claimFixture'
+import { upsertCard } from '../memory/reading/cardStore'
+import { emptyCardFields } from '@shared/memory/claims'
 import { getClaim } from '../memory/reading/claimStore'
 import { writeSceneRead } from '../memory/reading/sceneReadStore'
 import { activeDraftId } from '../draft/draftStore'
@@ -9207,10 +9209,129 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
 
   // F-16.16, F-16.17 (plan P2a §3.2, §3.7): `summary.v5` is off in v2, and the reader's queue
   // owns jobs:* there; a v1 project keeps its summary queue as it was.
+  it('Not right in main: Wrong value and its Undo, the anchors job’s push, a card value, and read-only after the trial (F-16.18)', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await openV2()
+      const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+      if (!('record' in made)) throw new Error('blocked')
+      const mara = made.record.id
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs('The ridge was cold.', "Mara's eyes were grey. She waited.")
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      const db = manager.require().connection.orm
+      const now = new Date()
+      const [id] = seedClaims(
+        db,
+        scene,
+        [{ recordId: mara, slot: 'eyes', value: 'grey', quote: "Mara's eyes were grey", para: 1 }],
+        now
+      )
+      upsertCard(
+        db,
+        {
+          nodeId: scene,
+          draftId: activeDraftId(db),
+          readingId: null,
+          line: 'Mara waits on the ridge.',
+          gist: 'Mara waits on the ridge.',
+          fields: {
+            ...emptyCardFields(),
+            pov: { value: mara, quote: "Mara's eyes were grey", p: 1, verified: true }
+          },
+          present: [],
+          mood: null,
+          theme: null,
+          anchor: cardAnchorOf(db, scene),
+          seen: []
+        },
+        now
+      )
+      expect((await invoke('memory:scene', { nodeId: scene })).here[0]).toMatchObject({
+        recordId: mara,
+        quote: "Mara's eyes were grey"
+      })
+
+      // Wrong value: a Dismissed row; Undo brings the line back and says so.
+      const wrong = await invoke('memory:notRight', {
+        claimId: id ?? '',
+        choice: { kind: 'wrongValue' },
+        requestId: 'nr-h'
+      })
+      expect(wrong).toMatchObject({ ok: true, outcome: 'dismissed' })
+      expect(getClaim(db, id ?? '')).toBeNull()
+      vi.mocked(fakeWin.webContents.send).mockClear()
+      await invoke('dismissed:undo', { id: wrong.ok ? (wrong.dismissed?.id ?? '') : '' })
+      expect(getClaim(db, id ?? '')).toMatchObject({ state: 'live', value: 'grey' })
+      expect(sentOf('memory:changed')).toContainEqual({ nodeIds: [scene], recordIds: [mara] })
+      await vi.advanceTimersByTimeAsync(10)
+
+      // An edit to the sentence: the anchors job stales the line and pushes it, with no reading.
+      vi.mocked(fakeWin.webContents.send).mockClear()
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs('The ridge was cold.', "Mara's eyes were brown. She waited.")
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect(getClaim(db, id ?? '')?.state).toBe('stale')
+      expect(sentOf('memory:changed')).toContainEqual({ nodeIds: [scene], recordIds: [mara] })
+      // The card's POV rests on that sentence too: Here no longer takes it from the text.
+      const edited = await invoke('memory:scene', { nodeId: scene })
+      expect(edited.here).toEqual([])
+      expect(edited.card?.stale).toEqual(['pov'])
+
+      // Back as it was; then Not right on the card's POV sends it to Dismissed.
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs('The ridge was cold.', "Mara's eyes were grey. She waited.")
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect((await invoke('memory:scene', { nodeId: scene })).here).toHaveLength(1)
+      const row = await invoke('memory:cardNotRight', { nodeId: scene, field: 'pov', value: mara })
+      expect(row).toMatchObject({ kind: 'notRight', recordId: mara, nodeId: scene })
+      expect((await invoke('memory:scene', { nodeId: scene })).here).toEqual([])
+      await invoke('dismissed:undo', { id: row.id })
+      expect((await invoke('memory:scene', { nodeId: scene })).here).toHaveLength(1)
+
+      // After the trial: Wrong value, Keep mine and a card's Not right are refused like Undo.
+      accessNow += 31 * 24 * 60 * 60_000
+      access.refresh()
+      const refused = await handlerFor('memory:notRight')(null, {
+        claimId: id ?? '',
+        choice: { kind: 'wrongValue' },
+        requestId: 'nr-ro'
+      })
+      expect(refused.ok).toBe(false)
+      if (!refused.ok) expect(refused.error.message).toBe(TRIAL_ENDED_MESSAGE)
+      const keep = await handlerFor('memory:answerNotice')(null, {
+        id: `detail:${scene}:pov`,
+        action: 'keepMine'
+      })
+      expect(keep.ok).toBe(false)
+      const card = await handlerFor('memory:cardNotRight')(null, {
+        nodeId: scene,
+        field: 'pov',
+        value: mara
+      })
+      expect(card.ok).toBe(false)
+      expect(getClaim(db, id ?? '')).not.toBeNull()
+      // Reading the notices still answers.
+      expect(await invoke('memory:notices', undefined)).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('drops summary jobs on a v2 open, never queues one there, and gives jobs:* to the reader', async () => {
     vi.useFakeTimers()
     try {
-      const plain = await invoke('project:create', { name: 'Plain', format: 'novel', directory: tmp })
+      const plain = await invoke('project:create', {
+        name: 'Plain',
+        format: 'novel',
+        directory: tmp
+      })
       const v1Scene = manuscriptReadingOrder(await invoke('tree:list', undefined))[0] ?? ''
       enqueueJob(manager.require().connection.orm, 'summary', v1Scene, new Date())
       await invoke('project:close', undefined)
@@ -9238,7 +9359,10 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       })
       await vi.advanceTimersByTimeAsync(SUMMARY_BACKFILL_DELAY_MS + 10_000)
       expect(listJobs(db, 'summary')).toEqual([])
-      expect(await invoke('jobs:indexAll', undefined)).toMatchObject({ ok: false, code: 'DISABLED' })
+      expect(await invoke('jobs:indexAll', undefined)).toMatchObject({
+        ok: false,
+        code: 'DISABLED'
+      })
       expect(await invoke('ai:summarize', { nodeId: scene, requestId: 'sum-1' })).toMatchObject({
         ok: false,
         code: 'DISABLED'

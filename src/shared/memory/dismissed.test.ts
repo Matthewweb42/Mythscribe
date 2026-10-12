@@ -49,6 +49,28 @@ describe('dismissedKey (F-16.10)', () => {
     expect(statingKey(['a.', 'b.'])).not.toBe(statingKey(['b.', 'a.']))
   })
 
+  it('keys a stale line by its anchor, and a card value by scene, field and value (F-16.18)', () => {
+    const stale = dismissedKey({
+      kind: 'notRight',
+      recordId: 'mara',
+      slot: 'eyes',
+      value: 'grey',
+      anchor: ['h1', 'h2']
+    })
+    expect(stale.startsWith('mara|eyes|grey|a')).toBe(true)
+    // Never the key a fresh item's sentences make.
+    expect(stale).not.toBe(
+      dismissedKey({ kind: 'notRight', recordId: 'mara', slot: 'eyes', value: 'grey', stating: [] })
+    )
+    // A record value starts with its record, so a merge re-keys it.
+    expect(
+      dismissedKey({ kind: 'notRight', card: { nodeId: 'n1', field: 'pov', value: 'mara' } })
+    ).toBe('mara|card|n1|pov')
+    expect(
+      dismissedKey({ kind: 'notRight', card: { nodeId: 'n1', field: 'where', value: 'The Quay' } })
+    ).toBe('card|n1|where|quay')
+  })
+
   it('keys a kept typed detail by scene, field and the text’s value (decision 4)', () => {
     expect(
       dismissedKey({

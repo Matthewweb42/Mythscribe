@@ -6,9 +6,11 @@ import {
   type ReadingOrder,
   type SheetLine
 } from '@shared/memory/asOf'
-import type { Claim } from '@shared/memory/claims'
+import type { Card, Claim } from '@shared/memory/claims'
+import { dismissedKey } from '@shared/memory/dismissed'
 import { gateSentences, readSetOf, unreadSentences } from '@shared/memory/gate'
 import { locateInText } from '@shared/memory/quote'
+import { holdingCard, type HeldCard } from '@shared/memory/reproof'
 import { sceneRefs } from '@shared/memory/sceneRef'
 import { slotLabel } from '@shared/memory/slots'
 import { compareTyped, type TypedNames } from '@shared/memory/typedVsText'
@@ -28,6 +30,7 @@ import { currentDraftId } from '../../draft/draftStore'
 import { nodesInTreeOrder } from '../../search/searchStore'
 import { getNode, listNodes, type TreeDb } from '../../tree/treeStore'
 import { documentJson, manuscriptDocuments } from '../../voice/profile'
+import { dismissedKeys } from '../dismissedStore'
 import { listNameMentions, nameScanShared } from '../nameIndexer'
 import { sceneStatuses } from '../passageIndexer'
 import { listRecords } from '../recordStore'
@@ -161,6 +164,32 @@ export function typedNames(db: TreeDb): TypedNames {
   }
 }
 
+/** A document's paragraph texts as stored now (none for a node that is no document). */
+function sceneTexts(db: TreeDb, nodeId: string): string[] {
+  const row = getNode(db, nodeId)
+  return row === undefined
+    ? []
+    : passageParagraphs(documentJson(row) ?? EMPTY_DOC).map((paragraph) => paragraph.text)
+}
+
+/**
+ * A scene's card as Here, the card block and decision 4's conflicts may use it (F-16.18;
+ * `holdingCard`): what the author said is not right left out, what no longer stands on the text
+ * (its quote's sentence edited or gone) stale until the next reading, and nothing standing in a
+ * scene that is not `readable`. `notRight`: the `notRight` Dismissed keys, when the caller has
+ * them.
+ */
+export function heldCard(
+  db: TreeDb,
+  card: Card,
+  readable: boolean,
+  notRight: ReadonlySet<string> = dismissedKeys(db, 'notRight')
+): HeldCard {
+  return holdingCard(card, readable ? sceneTexts(db, card.nodeId) : null, (field, value) =>
+    notRight.has(dismissedKey({ kind: 'notRight', card: { nodeId: card.nodeId, field, value } }))
+  )
+}
+
 /** Finished sentences of the scene the active draft has not read yet. */
 function unreadCount(db: TreeDb, nodeId: string, draftId: string | null): number {
   const row = manuscriptDocuments(db).find((document) => document.id === nodeId)
@@ -177,13 +206,16 @@ function unreadCount(db: TreeDb, nodeId: string, draftId: string | null): number
  * The This scene panel's memory of one scene (P2a-D21): Here (the POV, with the text's POV over
  * a typed one that differs; characters on the page with a verified quote; "+ also here"),
  * Mentioned (named for certain, not Here), True now for those records as of this scene, the
- * typed details against the card (decision 4), the last reading, and what is unread.
+ * typed details against the card (decision 4), the last reading, and what is unread. Only what of
+ * the card still stands on the text counts (`heldCard`): a POV, place or character whose quote's
+ * sentence was edited since is shown dimmed in the card and never overrides the typed details.
  */
 export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
   const draftId = currentDraftId(db)
   const reading = readingOrder(db)
   const details = storedSceneDetails(db, nodeId)
   const card = draftId === null ? null : getCard(db, nodeId, draftId)
+  const held = card === null ? null : heldCard(db, card, reading.order.has(nodeId))
   const records = new Map(listRecords(db).map((each) => [each.id, each]))
 
   const here: HereChip[] = []
@@ -193,7 +225,7 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
     }
   }
   // A verified POV whose record is gone (deleted since) is no POV: the typed one stands.
-  const cardPov = card?.fields.pov ?? null
+  const cardPov = held?.fields.pov ?? null
   const textPov = cardPov?.verified === true && records.has(cardPov.value) ? cardPov : null
   const typedPov = details.povRecordId
   if (textPov !== null) {
@@ -207,7 +239,7 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
   } else if (typedPov !== null) {
     add({ recordId: typedPov, why: 'pov', quote: null, p: null, typedPov: null })
   }
-  for (const present of card?.present ?? []) {
+  for (const present of held?.present ?? []) {
     if (!present.verified || records.get(present.recordId)?.kind !== 'character') continue
     add({
       recordId: present.recordId,
@@ -246,12 +278,13 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
     nodeId,
     ref: reading.refs.get(nodeId) ?? null,
     card:
-      card === null
+      card === null || held === null
         ? null
         : {
             line: card.line,
             gist: card.gist,
-            fields: card.fields,
+            fields: held.shown,
+            stale: held.stale,
             mood: card.mood,
             theme: card.theme,
             readingId: card.readingId,
@@ -260,7 +293,7 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
     here,
     mentioned,
     trueNow: lines,
-    typed: compareTyped(details, card?.fields ?? null, typedNames(db)),
+    typed: compareTyped(details, held?.fields ?? null, typedNames(db)),
     lastRead:
       last === null
         ? null

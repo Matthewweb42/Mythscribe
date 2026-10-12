@@ -150,6 +150,33 @@ export function noticeButtons(notice: MemoryNotice): NoticeButton[] {
 /** Decision 4's dimmed note beside the text's value: "you typed: the harbour". */
 export const typedNote = (typed: string): string => `you typed: ${typed}`
 
+/**
+ * How a card value was checked (F-16.18): by a second AI read (`verified`), in code (a place or
+ * time whose words are words of its own quote), or not at all (an AI paraphrase or a refused POV
+ * or year, which never stands for the scene's value).
+ */
+export type CardChecked = 'verified' | 'code' | 'none'
+
+export function cardCheckedNote(checked: CardChecked): string {
+  switch (checked) {
+    case 'verified':
+      return 'checked by a second AI read'
+    case 'code':
+      return 'quote checked in code'
+    case 'none':
+      return 'read by AI, not checked'
+  }
+}
+
+/**
+ * A card value that does not stand for the scene's value, dimmed (decision 4, design §2.10):
+ * "AI read: Tomas, not checked", or, its sentence edited since, "AI read: the quay · re-checking
+ * after you pause".
+ */
+export function aiReadNote(value: string, stale: boolean, paused: MemoryPause | null): string {
+  return stale ? `AI read: ${value} · ${staleNote(paused)}` : `AI read: ${value}, not checked`
+}
+
 /** The field's name in a conflict ("place"). */
 export const fieldNoun = (field: TypedField): string => FIELD_NOUN[field]
 

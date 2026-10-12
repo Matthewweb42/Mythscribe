@@ -220,6 +220,33 @@ describe('reconcile (F-16.17, design §2.3 Reconciliation)', () => {
     expect(result.inserts.map((item) => item.anchor)).toEqual([['h3']])
   })
 
+  it('stores a dismissed fresh item for the record Not about moved it to, and keeps the moved line on a rebuild', () => {
+    const key = dismissedKey({
+      kind: 'notRight',
+      recordId: 'mara',
+      slot: 'eyes',
+      value: 'grey',
+      stating: ["⟨mara⟩'s eyes were grey."]
+    })
+    const moved = stored({ id: 'moved', recordId: 'ella', subjectText: 'Mara' })
+    const result = reconcile(
+      input({
+        stored: [moved],
+        window: { paras: new Set([1]), full: true, replace: true },
+        fresh: [fresh()],
+        dismissed: new Set([key]),
+        movedTo: new Map([[key, 'ella']])
+      })
+    )
+    // Stated again for Ella: the moved line is kept as it is, nothing new, nothing dropped.
+    expect(result).toMatchObject({ inserts: [], deletes: [], dismissed: 0 })
+    // With the moved line gone, the fresh item is stored for Ella, never for Mara.
+    const fresh2 = reconcile(
+      input({ fresh: [fresh()], dismissed: new Set([key]), movedTo: new Map([[key, 'ella']]) })
+    )
+    expect(fresh2.inserts.map((item) => [item.recordId, item.pending])).toEqual([['ella', null]])
+  })
+
   it('deletes a stale claim inside the window read that nothing revived (P2a-D23)', () => {
     const result = reconcile(
       input({

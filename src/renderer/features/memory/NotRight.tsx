@@ -10,7 +10,8 @@ const SMALL =
 /**
  * *Not right* on an AI line (F-16.18; design §2.7): which is wrong?
  * - *Not about Mara*: pick the record it is about; one check reads the quote for that record
- *   (supported: the line moves there; not: it is dismissed);
+ *   (supported: the line moves there; refused: it is dismissed; no answer, or a sentence changed
+ *   since it was read: nothing changes, and it says so);
  * - *Wrong value*: the line goes to Dismissed, where *Undo* brings it back.
  */
 export function NotRightChoices({
@@ -57,9 +58,21 @@ export function NotRightChoices({
       toast.error(`${result.message} ${result.nextStep}`.trim())
       return
     }
+    if (result.outcome === 'unchecked') {
+      // Nothing changed: the choices stay open, so Wrong value is one click away.
+      setPicking(false)
+      toast.info(
+        'This line could not be checked: its sentence changed since it was read, or the check gave no answer. Nothing changed; Wrong value still sends it to Dismissed.'
+      )
+      return
+    }
     if (result.outcome === 'moved') toast.success(`Moved to ${target.name}.`)
     else if (result.outcome === 'dismissed') {
-      toast.info(`The text does not say this about ${target.name}: the line went to Dismissed.`)
+      toast.info(
+        result.dismissed === null
+          ? `The text does not say this about ${target.name}: the line went.`
+          : `The text does not say this about ${target.name}: the line went to Dismissed.`
+      )
     }
     onDone()
   }

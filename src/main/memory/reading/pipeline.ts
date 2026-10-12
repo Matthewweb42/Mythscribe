@@ -31,6 +31,7 @@ import {
   type ReadSentence
 } from '@shared/memory/gate'
 import {
+  ANTECEDENT_SENTENCES,
   nameInSentence,
   resolveSubject,
   type LadderReject,
@@ -94,6 +95,7 @@ import {
   type Book,
   type ReadingScene
 } from './readerContext'
+import { notAboutMovedTo } from './readerRows'
 import { insertReading } from './readingStore'
 import { readerRoster, type ReaderRoster } from './rosterCache'
 import { getSceneRead, writeSceneRead } from './sceneReadStore'
@@ -431,6 +433,75 @@ export function claimCheck(
   }
 }
 
+/** *Not about*'s check: the checker's item, the short id it must answer, and every candidate's. */
+export interface NotAboutCheck {
+  item: VerifyPromptItem
+  expect: string
+}
+
+/**
+ * A stored claim as *Not right › Not about* sends it (F-16.18): the line checked for the record
+ * the author picks, with the reading's subject safeguards (design §2.3 step 2). Every record named
+ * for certain in the quote and in the `ANTECEDENT_SENTENCES` sentences before it (characters, the
+ * picked record and the line's own) is a candidate, so the checker sees each rival a pronoun could
+ * mean; the picked record joins them marked "not named here" when nothing in reach names it. The
+ * text runs from the earliest naming sentence to `around` sentences after the quote. Null when the
+ * quote is no longer in its paragraph (the line is stale: nothing can be checked).
+ */
+export function notAboutCheck(
+  scene: ReadingScene,
+  claim: Claim,
+  pickedId: string,
+  roster: ReaderRoster,
+  around: number
+): NotAboutCheck | null {
+  const only = scene.texts.map((text, i) => (i === claim.para ? text : ''))
+  const location = locateQuote(only, claim.para, claim.quote)
+  if (!location.ok) return null
+  const quoted = location.sentences.map((i) => scene.position(claim.para, i))
+  const first = Math.min(...quoted)
+  const last = Math.max(...quoted)
+  const counts = (recordId: string): boolean =>
+    recordId === pickedId || recordId === claim.recordId || scene.kindOf(recordId) === 'character'
+  const named: string[] = []
+  let naming: number | undefined
+  const read = (position: number): void => {
+    for (const name of scene.ladderSentence(position).names) {
+      if (name.ambiguous || !counts(name.recordId)) continue
+      if (!named.includes(name.recordId)) named.push(name.recordId)
+      if (position < first) naming = Math.min(naming ?? position, position)
+    }
+  }
+  for (const position of quoted) read(position)
+  for (
+    let position = first - 1;
+    position >= Math.max(0, first - ANTECEDENT_SENTENCES);
+    position -= 1
+  ) {
+    read(position)
+  }
+  const unnamed = !named.includes(pickedId)
+  const candidates = unnamed ? [...named, pickedId] : named
+  const object = claim.objectId === null ? '' : ` (of ${roster.shortOf(claim.objectId)})`
+  const by =
+    claim.speakerId !== null && (claim.voice === 'dialogue' || claim.voice === 'thought')
+      ? ` by ${roster.shortOf(claim.speakerId)}`
+      : ''
+  return {
+    item: {
+      kind: 'claim',
+      who: candidates.map((id) =>
+        unnamed && id === pickedId
+          ? `${roster.whoLine(id)}${VERIFY_UNNAMED_MARK}`
+          : roster.whoLine(id)
+      ),
+      fact: `${claim.slot}: ${claim.value}${object} (${claim.voice}${by}, ${claim.mode})`,
+      text: contextText(scene, first, last, naming, around)
+    },
+    expect: roster.shortOf(pickedId)
+  }
+}
+
 /** Whether a verdict agrees with a fact as stated: supported, about that record, voice and mode. */
 export function agrees(
   verdict: VerifyVerdict,
@@ -575,11 +646,7 @@ export async function runReading(
           : 'window'
 
   // 2. The plan.
-  const windowParas = backfill
-    ? backfillParas
-    : decision.read === 'window'
-      ? decision.paras
-      : []
+  const windowParas = backfill ? backfillParas : decision.read === 'window' ? decision.paras : []
   const pieces = full
     ? planPages(scene.texts)
     : planWindows(scene.texts, windowParas, namingParas(scene))
@@ -1414,7 +1481,8 @@ export async function runReading(
         drop: mapIds(answers.flatMap(({ answer }) => answer.drop)),
         rejected,
         fresh,
-        dismissed: dismissedKeys(tx, 'notRight')
+        dismissed: dismissedKeys(tx, 'notRight'),
+        movedTo: notAboutMovedTo(tx)
       })
       const ordered = [...result.inserts].sort(
         (a, b) =>
@@ -1423,25 +1491,25 @@ export async function runReading(
             (scene.texts[b.para] ?? '').indexOf(b.quote)
       )
       const inserts: NewClaim[] = ordered.map((claim) => ({
-          nodeId: input.nodeId,
-          draftId,
-          readingId,
-          recordId: claim.recordId,
-          pending: claim.pending,
-          subjectText: claim.subjectText,
-          slot: claim.slot,
-          value: claim.value,
-          objectId: claim.objectId,
-          voice: claim.voice,
-          speakerId: claim.speakerId,
-          mode: claim.mode,
-          quote: claim.quote,
-          para: claim.para,
-          anchor: claim.anchor,
-          proof: claim.proof,
-          change: claim.change,
-          state: claim.pending === null ? 'live' : 'waiting'
-        }))
+        nodeId: input.nodeId,
+        draftId,
+        readingId,
+        recordId: claim.recordId,
+        pending: claim.pending,
+        subjectText: claim.subjectText,
+        slot: claim.slot,
+        value: claim.value,
+        objectId: claim.objectId,
+        voice: claim.voice,
+        speakerId: claim.speakerId,
+        mode: claim.mode,
+        quote: claim.quote,
+        para: claim.para,
+        anchor: claim.anchor,
+        proof: claim.proof,
+        change: claim.change,
+        state: claim.pending === null ? 'live' : 'waiting'
+      }))
       const ids = insertClaims(tx, inserts, at0)
       for (const [i, id] of ids.entries()) {
         const fact = ordered[i]

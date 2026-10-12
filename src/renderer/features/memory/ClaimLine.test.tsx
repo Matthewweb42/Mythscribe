@@ -49,6 +49,8 @@ const DISMISSED = {
 
 let main: FakeMain
 let rows: (typeof DISMISSED)[]
+/** What *Not about* answers in this test. */
+let aboutOutcome: 'moved' | 'unchecked'
 
 beforeEach(async () => {
   resetMemoryStore()
@@ -56,12 +58,13 @@ beforeEach(async () => {
   resetRecordStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   rows = []
+  aboutOutcome = 'moved'
   main = installFakeMain({
     'record:list': () => [MARA, ELLA],
     'memory:claim': () => INFO,
     'memory:notRight': (input) => {
       const { choice } = input as Input<'memory:notRight'>
-      if (choice.kind === 'notAbout') return { ok: true, outcome: 'moved', dismissed: null }
+      if (choice.kind === 'notAbout') return { ok: true, outcome: aboutOutcome, dismissed: null }
       rows = [DISMISSED]
       return { ok: true, outcome: 'dismissed', dismissed: DISMISSED }
     },
@@ -160,6 +163,23 @@ describe('ClaimLine (F-16.18)', () => {
       'Moved to Ella Harrow.'
     )
     expect(screen.queryByRole('group', { name: 'What is not right' })).toBeNull()
+  })
+
+  it('says so when Not about could not be checked, and leaves Wrong value one click away', async () => {
+    aboutOutcome = 'unchecked'
+    render(line())
+    fireEvent.click(screen.getByRole('button', { name: 'Not right' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Not about Mara Vell' }))
+    fireEvent.change(screen.getByLabelText('It is about'), { target: { value: 'r-ella' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Check' }))
+    })
+    expect(useDialogStore.getState().toasts.map((toast) => toast.message)).toContain(
+      'This line could not be checked: its sentence changed since it was read, or the check gave no answer. Nothing changed; Wrong value still sends it to Dismissed.'
+    )
+    const group = screen.getByRole('group', { name: 'What is not right' })
+    expect(within(group).getByRole('button', { name: 'Wrong value' })).toBeInTheDocument()
+    expect(useDismissedStore.getState().items).toEqual([])
   })
 
   it('dims a stale line with why', () => {

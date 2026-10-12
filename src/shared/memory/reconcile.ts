@@ -17,7 +17,9 @@ import { dismissedKey } from './dismissed'
  * - Values merge by containment within one reading only ("grey" and "grey-blue" keep the
  *   longer); across scenes they sit side by side (`asOf.ts`).
  * - A fresh item on the Dismissed list (`notRight`, by record, slot, value and the quote's own
- *   sentences) is dropped before storing.
+ *   sentences) is dropped before storing, unless the author moved that line to another record
+ *   (*Not right › Not about*, `movedTo`): it is then stored for that record, so a rebuild keeps
+ *   her choice.
  * - A fresh item that states a stored live or waiting claim again, word for word, is not stored
  *   twice: the stored claim stays as it is.
  * - P2a-D23: a stale claim whose paragraph lay inside the window read, and that no fresh item
@@ -85,6 +87,11 @@ export interface ReconcileInput {
   fresh: readonly FreshClaim[]
   /** Every `notRight` key on the Dismissed list. */
   dismissed: ReadonlySet<string>
+  /**
+   * The `notRight` keys of lines the author moved to another record (*Not about*), to that record:
+   * a fresh item with one of these keys is stored for that record rather than dropped.
+   */
+  movedTo?: ReadonlyMap<string, string>
 }
 
 export interface Revival {
@@ -185,8 +192,8 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
     merged: 0,
     dismissed: 0
   }
-  const undismissed = input.fresh.filter((item) => {
-    if (item.recordId === null) return true
+  const undismissed = input.fresh.flatMap((item): FreshClaim[] => {
+    if (item.recordId === null) return [item]
     const key = dismissedKey({
       kind: 'notRight',
       recordId: item.recordId,
@@ -194,9 +201,13 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
       value: item.value,
       stating: item.stating
     })
-    if (!input.dismissed.has(key)) return true
+    if (!input.dismissed.has(key)) return [item]
+    const to = input.movedTo?.get(key)
+    if (to !== undefined && to !== item.recordId) {
+      return [{ ...item, recordId: to, pending: null, subjectText: null }]
+    }
     result.dismissed += 1
-    return false
+    return []
   })
   const { kept: fresh, merged } = mergeFresh(undismissed)
   result.merged = merged

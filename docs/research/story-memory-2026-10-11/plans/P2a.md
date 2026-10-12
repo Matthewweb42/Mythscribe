@@ -334,6 +334,15 @@ In v2: `documentsWritten` never touches the summary queue, `backfillSummaries` r
 - **Calls** in `QUESTIONS.md` "P2a slice 4": the conflict now (P2a-D13), *Not about* and *Undo*, the footer's "today" being the reading's spend, Here's POV chip, line wording, the sheet's default as-of, the card block, Rebuild memory's place, Settings, the cents format.
 - **e2e** (`memory.spec.ts`, "Here, True now, sheets, cards and Rebuild memory (P2a slice 4)"): Here and the True now line, *Read now* after an edit then "Nothing new", the sheet's "Eyes: brown" with ⓘ, *Not right › Wrong value* and *Undo*, the typed place dimmed in the card and the conflict cleared by *Keep mine*, the Settings fields, and *Rebuild memory* from its price to "Mara Vell: 1 new line".
 - **Still for slice 5:** the Outline and cork board card lines, the re-pointed summary readers, plan links, and the `v1` channel flips (§3.7).
+- **Review fixes (2026-10-12):**
+  - *Card values stand on the text:* `reproof.holdingCard` / `views.heldCard` (a field or on-page entry counts while its quote is in the scene once and its sentences are in the card's anchor; nothing in an unreadable scene; the author's dismissals left out) feed Here, `SceneMemory.typed` and `detailConflicts`; `CardView.stale` names the rest. Slice 5's Story notes line and prompts must read the held card too (`effectiveSceneLine(compareTyped(details, heldCard(...).fields, names))`), never `card.fields`.
+  - *The card block follows decision 4's comparison:* the text's value only where `memory.typed` counts it; else the typed value with "AI read: …, not checked" (or "· re-checking after you pause") dimmed; ⓘ says "quote checked in code" for a place or time in its quote's words.
+  - *Not right on card values:* `memory:cardNotRight` (`write`) from `CardValueInfo` on Here's POV and on-page chips and on each card row; a `notRight` row keyed by scene, field and value (a record's id first for the POV and a character, so merges re-key it).
+  - *Not right on lines:* a stale line's row is keyed by its anchor (Undo always works); *Not about* uses `notAboutCheck` (everyone named in reach), answers `unchecked` with no verdict or no possible check, and keeps the move (`memoryNotAbout` → `reconcile` `movedTo`).
+  - *Pushes:* the anchors job emits `memory:changed` (with `recordIds`) when a line changed state or the scene has a card; `dismissed:undo` of a `notRight` row emits for its scene and record.
+  - *Read-only:* *Wrong value*, *Keep mine* (and closing a conflict) and `memory:cardNotRight` are refused after the trial, like `dismissed:undo`.
+  - *Keep mine* on a POV is keyed by the text's record id; *Update my detail* re-asks main after flushing saves; `formatCents` rounds to the cent before choosing cents or dollars.
+  - *e2e:* the slice 4 test ends with an edit to the quay sentence dimming its True now line with no reading in between.
 
 ---
 
