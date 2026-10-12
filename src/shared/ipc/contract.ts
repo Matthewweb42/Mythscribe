@@ -3235,14 +3235,16 @@ export const contract = {
   /** Answers a question: *Add as* · *Not a name*, or *Yes* · *No*. */
   'names:answer': { input: z.object({ answer: NameAnswer }), output: NameAnswerResult },
   /**
-   * Rename in book (F-16.13): the matches of one of a record's names per scene of the active
-   * draft, and in the inactive drafts. Writes nothing.
+   * Rename in book (F-16.13): the places the name scan reads as the record by one of its names,
+   * per scene of the active draft (with samples), the places that stay and why, and the places in
+   * the inactive drafts. Refuses what the apply refuses. Writes nothing.
    */
   'rename:preview': { input: RenameRequest, output: RenamePreview },
   /**
    * Applies a rename: an automatic snapshot, then every manuscript scene but `openId` (the
-   * renderer applies `match` to it through the editor), the inactive drafts, the name and the
-   * Not a mention keys that hold it, in one transaction. The renderer flushes pending saves first.
+   * renderer applies `openEdits` to it through the editor), the inactive drafts when
+   * `otherDrafts`, the name and the Not a mention keys whose phrases changed, in one transaction.
+   * The renderer flushes pending saves first.
    */
   'rename:apply': { input: RenameApplyRequest, output: RenameApplyResult },
   /** Takes the last rename back where the text still reads as the rename left it (session only). */

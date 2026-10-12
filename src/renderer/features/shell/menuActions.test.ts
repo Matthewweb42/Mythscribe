@@ -370,6 +370,11 @@ describe('runMenuAction (F-7.1)', () => {
     expect(useLayoutStore.getState().layout.tags.open).toBe(false)
     expect(useLayoutStore.getState().layout.sidebar.tab).not.toBe('tags')
     expect(toasts()).toEqual([NO_TAGS_MESSAGE, NO_TAGS_MESSAGE])
+    // F-16.12: View › This scene opens the panel in the tags column's place.
+    await runMenuAction('toggleThisScene')
+    expect(useLayoutStore.getState().layout.tags.open).toBe(true)
+    await runMenuAction('toggleThisScene')
+    expect(useLayoutStore.getState().layout.tags.open).toBe(false)
   })
 
   it('Insert › Character with no project open toasts instead (F-9.3)', async () => {

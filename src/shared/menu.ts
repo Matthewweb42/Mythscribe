@@ -46,6 +46,7 @@ export const MENU_ITEM_IDS = [
   'toggleAssistant',
   'toggleReferences',
   'toggleTags',
+  'toggleThisScene',
   'resetLayout',
   'openCompile',
   'toggleFocusMode',
@@ -198,6 +199,8 @@ export const MENU: readonly MenuSection[] = [
       { id: 'toggleReferences', label: 'References', when: 'project' },
       // The tags column, which replaced the tag bar above the editor (2026-10-06).
       { id: 'toggleTags', label: 'Tags', when: 'project', memory: 'v1' },
+      // F-16.12: the This scene panel sits in the tags column's place in a v2 project.
+      { id: 'toggleThisScene', label: 'This scene', when: 'project', memory: 'v2' },
       // Layout 3c: the columns back to the default arrangement and widths.
       { id: 'resetLayout', label: 'Reset layout', when: 'project' },
       // F-3.12: the read-only compiled preview of the manuscript.
@@ -254,28 +257,38 @@ export const DEVELOPER_MENU_ENTRIES: readonly MenuEntry[] = [
   { id: 'openChromiumDevTools', label: 'Chromium DevTools', when: 'always' }
 ]
 
+/** `MENU` for one story memory: the items of the other one left out (F-16.4). */
+function menuForMemory(memory: StoryMemoryVersion): readonly MenuSection[] {
+  return MENU.map((section) => ({
+    ...section,
+    entries: section.entries.filter(
+      (entry) => isSeparator(entry) || entry.memory === undefined || entry.memory === memory
+    )
+  }))
+}
+
+const MENU_BY_MEMORY: Readonly<Record<StoryMemoryVersion, readonly MenuSection[]>> = {
+  v1: menuForMemory('v1'),
+  v2: menuForMemory('v2')
+}
+
 /**
- * The menu as shown now: `MENU`, plus Help's developer items while developer tools are on, less
- * the items of the other story memory (`memory`) while a project is open (`storyMemory` null:
- * none is, and every item shows as it always did).
+ * The menu as shown now: `MENU` less the items of the other story memory (`memory`), plus Help's
+ * developer items while developer tools are on. With no project open (`storyMemory` null) it is
+ * v1's, as it always was: a v2 project's own items join only while one is open.
  */
 export function menuFor(options: {
   devTools: boolean
   storyMemory: StoryMemoryVersion | null
 }): readonly MenuSection[] {
   const { devTools, storyMemory } = options
-  const fits = (entry: MenuEntry): boolean =>
-    isSeparator(entry) ||
-    entry.memory === undefined ||
-    storyMemory === null ||
-    entry.memory === storyMemory
-  if (!devTools && MENU.every((section) => section.entries.every(fits))) return MENU
-  return MENU.map((section) => {
-    const entries = section.entries.filter(fits)
-    return section.id === 'help' && devTools
-      ? { ...section, entries: [...entries, ...DEVELOPER_MENU_ENTRIES] }
-      : { ...section, entries }
-  })
+  const base = MENU_BY_MEMORY[storyMemory ?? 'v1']
+  if (!devTools) return base
+  return base.map((section) =>
+    section.id === 'help'
+      ? { ...section, entries: [...section.entries, ...DEVELOPER_MENU_ENTRIES] }
+      : section
+  )
 }
 
 export function isSeparator(entry: MenuEntry): entry is MenuSeparator {

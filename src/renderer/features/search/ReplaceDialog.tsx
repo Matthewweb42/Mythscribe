@@ -20,8 +20,11 @@ export function ReplaceDialog(): React.JSX.Element | null {
   return open ? <ReplaceDialogBody /> : null
 }
 
-/** One occurrence as it will change: the match struck through, the replacement after it. */
-function SampleLine({ sample }: { sample: ReplaceSample }): React.JSX.Element {
+/**
+ * One occurrence as it will change: the match struck through, the replacement after it. Rename
+ * in book's preview (F-16.13) shows its samples with it too.
+ */
+export function SampleLine({ sample }: { sample: ReplaceSample }): React.JSX.Element {
   const { text, range } = sample.before
   const [from, to] = range
   const [insFrom, insTo] = sample.after.range

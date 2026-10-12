@@ -574,7 +574,9 @@ test('story memory v2: This scene, Needs a look, Dismissed and Rename in book (P
   await needs.getByRole('button', { name: 'Add', exact: true }).click()
   const tick = needs.getByRole('checkbox', { name: 'Done: Check the tide tables' })
   await expect(tick).toBeVisible()
-  await tick.check()
+  // Ticked, it moves behind the collapsed "1 done" line (it never crowds Needs a look).
+  await tick.click()
+  await expect(needs.getByText('1 done', { exact: true })).toBeVisible()
   await expect
     .poll(async () =>
       (
@@ -586,8 +588,9 @@ test('story memory v2: This scene, Needs a look, Dismissed and Rename in book (P
     )
     .toEqual([['Check the tide tables', true, second.id]])
 
-  // F-16.13: Rename in book, from Hesk's chip in the open scene: the preview counts 2 matches in
-  // 2 scenes; Rename changes the open scene in its editor and the other one in main.
+  // F-16.13: Rename in book, from Hesk's chip in the open scene: the preview counts the 2 places
+  // the name scan reads as Hesk in 2 scenes; Rename changes the open scene in its editor (at
+  // main's places) and the other one in main.
   const heskChip = chips.getByRole('button', { name: /^Hesk/ })
   await expect(heskChip).toBeVisible({ timeout: 15_000 })
   await heskChip.click()

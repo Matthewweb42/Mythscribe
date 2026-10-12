@@ -8,6 +8,7 @@ import {
   countInDoc,
   findInRun,
   isReplaceable,
+  replaceAtPositions,
   replaceInDoc,
   samplesInDoc,
   type ReplaceOptions
@@ -348,5 +349,40 @@ describe('countInDoc / samplesInDoc', () => {
     expect(sample.before.text.endsWith('…')).toBe(true)
     expect(sample.after.range).toEqual([from, from])
     expect(sample.after.text).toBe(sample.before.text.replace('lantern', ''))
+  })
+})
+
+describe('replaceAtPositions (F-16.13)', () => {
+  // ¶1 "Hesk came." holds 1–10; a hard break is one position; ¶2 starts at 12.
+  const start = (): TiptapNodeT => ({
+    type: 'doc',
+    content: [
+      paragraph('Hesk came.'),
+      paragraph(text('Then '), { type: 'hardBreak' }, text('Hesk', { type: 'bold' }), ' sat.')
+    ]
+  })
+
+  it('replaces each place at its ProseMirror range, marks kept, in document order', () => {
+    const result = replaceAtPositions(start(), [
+      { from: 19, to: 23, text: 'Hesk', replacement: 'HASKEL' },
+      { from: 1, to: 5, text: 'Hesk', replacement: 'Haskel' }
+    ])
+    expect(result.applied.map((edit) => edit.from)).toEqual([1, 19])
+    const [first, second] = result.doc.content ?? []
+    expect(first?.content?.[0]?.text).toBe('Haskel came.')
+    expect(second?.content?.[2]).toEqual(text('HASKEL', { type: 'bold' }))
+  })
+
+  it('skips a place that no longer holds its words, crosses a leaf, or overlaps another', () => {
+    const original = start()
+    const result = replaceAtPositions(original, [
+      { from: 1, to: 5, text: 'Mara', replacement: 'Mira' },
+      { from: 17, to: 23, text: ' Hesk', replacement: 'x' },
+      { from: 2, to: 4, text: 'es', replacement: 'x' },
+      { from: 1, to: 3, text: 'He', replacement: 'x' }
+    ])
+    expect(result.applied.map((edit) => edit.replacement)).toEqual(['x'])
+    expect(result.doc.content?.[0]?.content?.[0]?.text).toBe('xsk came.')
+    expect(replaceAtPositions(original, []).doc).toBe(original)
   })
 })

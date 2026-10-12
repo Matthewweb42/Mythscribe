@@ -168,5 +168,8 @@ export const toast = {
   info: (message: string) => useDialogStore.getState().toast('info', message),
   /** A success toast with one button, shown long enough to reach it (8 s). */
   successWithAction: (message: string, action: ToastAction) =>
-    useDialogStore.getState().toast('success', message, 8000, action)
+    useDialogStore.getState().toast('success', message, 8000, action),
+  /** A warning toast with one button (8 s): it worked, with a part the author should know about. */
+  warningWithAction: (message: string, action: ToastAction) =>
+    useDialogStore.getState().toast('warning', message, 8000, action)
 }

@@ -205,16 +205,18 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
         togglePanel('assistant')
         return
       case 'toggleReferences':
-      case 'toggleTags': {
+      case 'toggleTags':
+      case 'toggleThisScene': {
         if (id === 'toggleTags' && project?.storyMemory === 'v2') {
           toast.info(NO_TAGS_MESSAGE)
           return
         }
         // F-9.6: the panel is part of the project screen and does not float, so focus mode is
-        // left first, like Tools › Tags; the tags column is the same.
+        // left first, like Tools › Tags; the tags column is the same, and so is the This scene
+        // panel that takes its place in a v2 project (F-16.12).
         const focus = useFocusStore.getState()
         if (focus.active) await focus.exit()
-        useLayoutStore.getState().toggle(id === 'toggleTags' ? 'tags' : 'references')
+        useLayoutStore.getState().toggle(id === 'toggleReferences' ? 'references' : 'tags')
         return
       }
       case 'resetLayout':

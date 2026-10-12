@@ -8,6 +8,7 @@ import type { NameQuestion } from '@shared/memory/nameQuestions'
 import type { NamedInRow, NameMentionView } from '@shared/memory/nameScan'
 import { emptySceneDetails } from '@shared/memory/sceneDetails'
 import { resetAiStore } from '@renderer/features/ai/aiStore'
+import { resetDocumentStore, useDocumentStore } from '@renderer/features/editor/documentStore'
 import { resetSceneDetailStore } from '@renderer/features/editor/sceneDetailStore'
 import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
@@ -27,6 +28,7 @@ import { resetDismissedStore, useDismissedStore } from './dismissedStore'
 import { resetQuestionStore, useQuestionStore } from './questionStore'
 import { ThisScenePanel } from './ThisScenePanel'
 import {
+  INLINE_TAGS_NOTICE,
   ambiguousLabel,
   castOf,
   namedChips,
@@ -215,6 +217,7 @@ function resetAll(): void {
   resetAiStore()
   resetCategoryStore()
   resetLayoutStore()
+  resetDocumentStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   useTreeStore.getState().clear()
 }
@@ -246,6 +249,17 @@ describe('the This scene panel’s rules (F-16.12)', () => {
         (group) => group.id
       )
     ).toEqual(['todos'])
+    // Ticked to-dos sit apart from the open ones, and keep the group drawn.
+    const [mine] = needsALookGroups({
+      todos: [todo('t1', 'Tide', 0), todo('t2', 'Ferry', 1, true)],
+      questions: [],
+      notices: []
+    })
+    expect(mine).toEqual({
+      id: 'todos',
+      todos: [todo('t1', 'Tide', 0)],
+      done: [todo('t2', 'Ferry', 1, true)]
+    })
   })
 
   it('counts conflicts only in the badge, and shows nothing at zero', () => {
@@ -377,6 +391,94 @@ describe('ThisScenePanel (F-16.12)', () => {
     fireEvent.click(tick)
     await waitFor(() => expect(screen.getByLabelText('Done: Check the tide tables')).toBeChecked())
     expect(sent('authorTodo:update')).toEqual([{ id: 't1', patch: { done: true } }])
+  })
+
+  it('keeps ticked to-dos behind a collapsed line, moves open ones past them, and deletes', async () => {
+    const reordered: string[][] = []
+    install({
+      'authorTodo:reorder': (input) => {
+        const { ids } = input as { ids: string[] }
+        reordered.push(ids)
+        return ids.map((id) => todos.find((each) => each.id === id)!)
+      },
+      'authorTodo:delete': (input) => {
+        const { id } = input as { id: string }
+        return todos.filter((each) => each.id !== id)
+      }
+    })
+    todos = [
+      todo('t1', 'Check the tide tables', 0),
+      todo('t2', 'Name the ferry', 1, true),
+      todo('t3', 'Fix the lantern colour', 2)
+    ]
+    await act(async () => useAuthorTodoStore.getState().load())
+    await open()
+    const group = screen.getByRole('group', { name: 'My to-dos' })
+    // The done one waits behind "1 done"; the open ones keep their order.
+    expect(within(group).getByText('1 done')).toBeInTheDocument()
+    expect(within(group).getByLabelText('Done: Name the ferry')).toBeChecked()
+    expect(
+      within(group).getByRole('button', { name: 'Move up: Check the tide tables' })
+    ).toBeDisabled()
+    expect(
+      within(group).getByRole('button', { name: 'Move down: Fix the lantern colour' })
+    ).toBeDisabled()
+    fireEvent.click(within(group).getByRole('button', { name: 'Move up: Fix the lantern colour' }))
+    await waitFor(() => expect(reordered).toHaveLength(1))
+    // It steps past the hidden done one to the open one above.
+    expect(reordered[0]).toEqual(['t3', 't1', 't2'])
+    fireEvent.click(within(group).getByRole('button', { name: 'Delete to-do: Name the ferry' }))
+    await waitFor(() => expect(sent('authorTodo:delete')).toEqual([{ id: 't2' }]))
+    await waitFor(() => expect(within(group).queryByText('1 done')).toBeNull())
+  })
+
+  it('adds a to-do about a record, and shows both its links', async () => {
+    install({
+      'authorTodo:create': (input) => {
+        const { text, nodeId, recordId } = input as {
+          text: string
+          nodeId: string | null
+          recordId: string | null
+        }
+        return { ...todo('t9', text, 0), nodeId, recordId }
+      }
+    })
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Add a to-do' }))
+    fireEvent.change(screen.getByLabelText('New to-do'), { target: { value: 'Her eyes' } })
+    fireEvent.change(screen.getByLabelText('About a record'), { target: { value: 'r-mara' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await screen.findByLabelText('Done: Her eyes')
+    expect(sent('authorTodo:create')).toEqual([
+      { text: 'Her eyes', nodeId: 'sc-1', recordId: 'r-mara' }
+    ])
+    const line = screen.getByLabelText('Done: Her eyes').closest('li')
+    expect(line).toHaveTextContent(/· Mara Vell$/)
+  })
+
+  it('notices inline tags in the open scene until the switch-over', async () => {
+    useDocumentStore.setState({
+      docs: {
+        'sc-1': {
+          content: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  { type: 'text', text: 'The ' },
+                  { type: 'inlineTag', attrs: { id: 'tag-1', name: 'storm' } }
+                ]
+              }
+            ]
+          },
+          dirty: false
+        }
+      }
+    })
+    await open()
+    const notices = screen.getByRole('group', { name: 'Notices' })
+    expect(notices).toHaveTextContent(INLINE_TAGS_NOTICE)
   })
 
   it('lists the Cast on the Book tab, most-named first, and opens a sheet', async () => {

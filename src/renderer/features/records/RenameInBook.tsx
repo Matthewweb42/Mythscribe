@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react'
-import { describeRenamePreview } from '@shared/memory/rename'
+import { describeRenameKept, describeRenamePreview } from '@shared/memory/rename'
 import { RECORD_NAME_MAX, type StoryRecordSummary } from '@shared/memory/records'
+import { SampleLine } from '@renderer/features/search/ReplaceDialog'
 import { useRenameStore } from './renameStore'
 
 const BUTTON =
@@ -12,9 +13,11 @@ export const RENAME_PREVIEW_DEBOUNCE_MS = 200
 /**
  * *Rename in book…* on a record's sheet (F-16.13; story memory v2): pick one of the record's
  * names, type the new one, see what it changes ("12 matches in 7 scenes (+3 in other drafts)",
- * scene by scene), then Rename. The manuscript (every draft), the name and the Dismissed keys
- * change; notes, Research and sheets do not (decision P1-D10: Replace in project covers them).
- * While the last rename of this record can be undone, *Undo rename* sits beside the button.
+ * scene by scene with samples, and the places that stay and why), then Rename. The places are
+ * those the name scan reads as this record by that name. The active draft, the name and the
+ * Dismissed keys change, and the other drafts only when ticked (no snapshot holds them); notes,
+ * Research and sheets do not (decision P1-D10: Replace in project covers them). While the last
+ * rename of this record can be undone, *Undo rename* sits beside the button.
  */
 export function RenameInBook({
   record,
@@ -66,12 +69,14 @@ function RenameForm({
   const toId = useId()
   const [aliasId, setAliasId] = useState(record.aliases.find((alias) => alias.isMain)?.id ?? '')
   const [to, setTo] = useState('')
+  const [otherDrafts, setOtherDrafts] = useState(false)
   const preview = useRenameStore((s) => s.preview)
   const previewFor = useRenameStore((s) => s.previewFor)
   const error = useRenameStore((s) => s.error)
   const busy = useRenameStore((s) => s.busy)
   const trimmed = to.trim()
   const current = previewFor?.aliasId === aliasId && previewFor.to === trimmed ? preview : null
+  const kept = current === null ? null : describeRenameKept(current)
 
   useEffect(() => {
     const store = useRenameStore.getState()
@@ -86,7 +91,7 @@ function RenameForm({
   useEffect(() => () => useRenameStore.getState().forget(), [])
 
   const apply = async (): Promise<void> => {
-    if (await useRenameStore.getState().apply()) onDone()
+    if (await useRenameStore.getState().apply({ otherDrafts })) onDone()
   }
 
   return (
@@ -103,7 +108,7 @@ function RenameForm({
         >
           {record.aliases.map((alias) => (
             <option key={alias.id} value={alias.id}>
-              {alias.text}
+              {alias.shared ? `${alias.text} (shared)` : alias.text}
             </option>
           ))}
         </select>
@@ -137,17 +142,34 @@ function RenameForm({
         <div role="status" data-testid="rename-preview" className="flex flex-col gap-1">
           <p className="m-0 text-xs">{describeRenamePreview(current)}</p>
           {current.scenes.length > 0 ? (
-            <ul className="m-0 list-none p-0 text-xs text-fg-muted">
+            <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs text-fg-muted">
               {current.scenes.map((scene) => (
                 <li key={scene.nodeId}>
                   {scene.title} · {scene.count}
+                  <ul className="m-0 list-none py-0 pl-2">
+                    {scene.samples.map((sample, index) => (
+                      <SampleLine key={index} sample={sample} />
+                    ))}
+                  </ul>
                 </li>
               ))}
             </ul>
           ) : null}
+          {kept === null ? null : <p className="m-0 text-xs text-fg-muted">{kept}</p>}
+          {current.otherDrafts.matches > 0 ? (
+            <label className="flex items-baseline gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={otherDrafts}
+                onChange={(event) => setOtherDrafts(event.target.checked)}
+              />
+              Also rename in other drafts (+{current.otherDrafts.matches.toLocaleString()}). No
+              snapshot holds them: only Undo rename, until the project closes, puts them back.
+            </label>
+          ) : null}
           <p className="m-0 text-[11px] text-fg-subtle">
-            Notes, Research and sheets stay as they are; Replace in project changes those. A
-            snapshot is taken first.
+            Notes, Research and sheets stay as they are; Replace in project changes those.
+            {current.total > 0 ? ' A snapshot of the book is taken first.' : ''}
           </p>
         </div>
       )}

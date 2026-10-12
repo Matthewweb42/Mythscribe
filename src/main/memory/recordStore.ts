@@ -487,19 +487,19 @@ export function requireAlias(db: TreeDb, recordId: string, aliasId: string): Rec
 }
 
 /**
- * Renames one of a record's names in place (Rename in book, F-16.13; the caller's transaction):
- * the row keeps its id, origin, shared flag and case rule (the case rule follows the new text
- * when it was the default for the old one). Refused when the new name is another of the record's
- * names or another record's unshared name; a name made a record's leaves Dismissed's `name` list
- * and the record's own `alias` dismissal of it. Answers the text before and after.
+ * The checks a rename of one of a record's names must pass, read only (Rename in book, F-16.13:
+ * the preview runs them too, so the form says why before the click). Refused: a name with no
+ * letter or digit, the name it already has, another of the record's names, another record's
+ * unshared name, and a shared name another record also holds (the name scan cannot tell whose
+ * each place is, so the prose cannot be rewritten for one of them). Answers the name and the new
+ * text as stored.
  */
-export function renameAlias(
+export function checkAliasRename(
   db: TreeDb,
   recordId: string,
   aliasId: string,
-  to: string,
-  now: Date
-): { before: AliasText; after: AliasText } {
+  to: string
+): { current: RecordAlias; text: string; norm: string } {
   const current = requireAlias(db, recordId, aliasId)
   const text = to.normalize('NFC').trim().replace(/\s+/g, ' ')
   const norm = normName(text)
@@ -510,7 +510,40 @@ export function renameAlias(
   if (siblings.some((entry) => entry.norm === norm)) {
     throw new AppError('VALIDATION', `"${text}" is already another name of this record`, { text })
   }
+  if (current.shared) {
+    const other = db
+      .select({ recordId: alias.recordId })
+      .from(alias)
+      .where(and(eq(alias.norm, current.norm), ne(alias.recordId, recordId)))
+      .get()
+    if (other !== undefined) {
+      const owner = getRecord(db, other.recordId)?.name ?? 'another record'
+      throw new AppError(
+        'VALIDATION',
+        `"${current.text}" is shared with ${owner}, so the book cannot tell whose it is everywhere. Rename a name only this record has.`,
+        { text: current.text, owner }
+      )
+    }
+  }
   refuseClash(db, recordId, text, current.shared)
+  return { current, text, norm }
+}
+
+/**
+ * Renames one of a record's names in place (Rename in book, F-16.13; the caller's transaction):
+ * the row keeps its id, origin, shared flag and case rule (the case rule follows the new text
+ * when it was the default for the old one). Refused as `checkAliasRename` says; a name made a
+ * record's leaves Dismissed's `name` list and the record's own `alias` dismissal of it. Answers
+ * the text before and after.
+ */
+export function renameAlias(
+  db: TreeDb,
+  recordId: string,
+  aliasId: string,
+  to: string,
+  now: Date
+): { before: AliasText; after: AliasText } {
+  const { current, text, norm } = checkAliasRename(db, recordId, aliasId, to)
   const caseRule =
     current.caseRule === defaultCaseRule(current.text) ? defaultCaseRule(text) : current.caseRule
   forgetNotAName(db, text)

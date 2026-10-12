@@ -14,7 +14,7 @@ import { searchableText } from '@shared/search'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { nameMention, sceneDetail } from '../db/schema'
 import { listAuthorTodos } from '../memory/authorTodoStore'
-import { searchMemoryPassages } from '../memory/passageIndexer'
+import { sceneStatuses, searchMemoryPassages } from '../memory/passageIndexer'
 import { getRecord, listRecords } from '../memory/recordStore'
 import { getNode } from '../tree/treeStore'
 import { nowIndex, readingIndex } from './agentRefs'
@@ -104,11 +104,14 @@ export function recordByNameV2(
   return partial.length === 1 ? partial[0] : undefined
 }
 
-/** The scenes of the run that name a record for certain, in reading order, with the paragraphs. */
+/**
+ * The scenes of the run that name a record for certain, in reading order, with the paragraphs;
+ * `real` is false for an Idea scene or one left out of compile (design §2.2: never real).
+ */
 export function scenesNaming(
   project: AgentProject,
   recordId: string
-): { nodeId: string; paras: number[] }[] {
+): { nodeId: string; paras: number[]; real: boolean }[] {
   const rows = project.db
     .select({ nodeId: nameMention.nodeId, para: nameMention.para })
     .from(nameMention)
@@ -122,8 +125,13 @@ export function scenesNaming(
     if (!paras.includes(row.para)) paras.push(row.para)
     byScene.set(row.nodeId, paras)
   }
+  const statuses = sceneStatuses(project.db)
   return [...byScene.entries()]
-    .map(([nodeId, paras]) => ({ nodeId, paras }))
+    .map(([nodeId, paras]) => ({
+      nodeId,
+      paras,
+      real: !statuses.idea.has(nodeId) && !statuses.excluded.has(nodeId)
+    }))
     .filter((each) => readingIndex(project, each.nodeId) < project.time.order.length)
     .sort((a, b) => readingIndex(project, a.nodeId) - readingIndex(project, b.nodeId))
 }
@@ -207,9 +215,10 @@ export function lookupV2(project: AgentProject, nameArg: unknown): ToolOutcome {
   if (ideas !== '') lines.push(`Ideas [idea]: ${ideas}`)
   const pov = povLines(project, record)
   if (pov !== '') lines.push(pov)
-  const named = scenesNaming(project, record.id)
+  const naming = scenesNaming(project, record.id)
+  const named = naming.filter((each) => each.real)
   if (named.length === 0) {
-    lines.push('Named in no scene yet.')
+    lines.push('Named in no scene of the book yet.')
   } else {
     const now = nowIndex(project)
     const first = named[0]!
@@ -222,6 +231,14 @@ export function lookupV2(project: AgentProject, nameArg: unknown): ToolOutcome {
     lines.push(
       `Named in ${named.length} scene${named.length === 1 ? '' : 's'} (${upToNow} up to now): ` +
         `first ${where(first, false)}, last ${where(last, true)}`
+    )
+  }
+  const unreal = naming.filter((each) => !each.real)
+  if (unreal.length > 0) {
+    lines.push(
+      `[idea] Also named in Idea or left-out scenes (never happened): ${unreal
+        .map((each) => project.refOf.get(each.nodeId) ?? '?')
+        .join(', ')}`
     )
   }
   return { step, result: headTruncate(lines.join('\n'), AGENT_LOOKUP_CHARS) }
@@ -239,8 +256,13 @@ function hitPlace(
     case 'sceneNote': {
       const ref = project.refOf.get(hit.ownerId)
       if (ref === undefined) return null
-      const where = hit.source === 'sceneNote' ? `${ref} notes` : ref
-      return `${where} ¶${hit.para} (${positionNote(project.time, hit.ownerId)})`
+      // Only the book's own scenes sit before or after now; the rest never happened (§2.2).
+      if (hit.source === 'scene') {
+        return `${ref} ¶${hit.para} (${positionNote(project.time, hit.ownerId)})`
+      }
+      if (hit.source === 'sceneNote') return `${ref} notes ¶${hit.para} (notes for ${ref}: a plan)`
+      const what = hit.source === 'ideaScene' ? 'an Idea scene' : 'left out of the book'
+      return `${ref} ¶${hit.para} (${what}: never happened)`
     }
     case 'pinned':
     case 'idea': {

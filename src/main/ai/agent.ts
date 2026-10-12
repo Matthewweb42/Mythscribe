@@ -65,7 +65,7 @@ export interface AgentInput {
   /**
    * F-16.4: the project's story memory. In v2 the tag and sheet tools are refused, lookup,
    * find_passages, todo and cards read the v2 records (`agentToolsV2.ts`), and an organise
-   * request is dropped (Organise is v1's).
+   * request is dropped and counted, the answer saying so (`AGENT_V2_NO_ORGANISE`; Organise is v1's).
    */
   memory: StoryMemoryVersion
 }
@@ -111,6 +111,10 @@ export interface AgentHooks {
 export const AGENT_OUT_OF_STEPS =
   'I ran out of lookups before I could answer. Ask again, a little more narrowly.'
 /** What an older tool result becomes when the step would go over the input budget. */
+/** What a v2 answer that asked for an Organise run says instead (F-16.4: Organise is v1's). */
+export const AGENT_V2_NO_ORGANISE =
+  "(Organise is not part of this project's story memory, so no plan follows. Tidy names on the record sheets with Same as or Split.)"
+
 export const AGENT_DROPPED_RESULT = '(Result dropped to save space; look again if you need it.)'
 
 /** The request id of step `n` of run `requestId`, so `ai:cancel` on the run stops the step in flight. */
@@ -610,7 +614,17 @@ function finishAnswer(
   } else {
     dropped += reply.edits.length
   }
-  // F-16.4: Organise is v1's; a v2 answer carries no organise run.
-  const organise = project.memory === 'v2' ? null : readOrganiseRequest(reply.organise)
+  // F-16.4: Organise is v1's. A v2 answer carries no organise run; the request is counted and
+  // the answer says no plan follows (agent.v8 asks the model to promise one).
+  const organise = readOrganiseRequest(reply.organise)
+  if (project.memory === 'v2' && organise !== null) {
+    return {
+      answer: `${answer}${answer === '' ? '' : '\n\n'}${AGENT_V2_NO_ORGANISE}`,
+      query,
+      changes,
+      dropped: dropped + 1,
+      organise: null
+    }
+  }
   return { answer, query, changes, dropped, organise }
 }

@@ -45,18 +45,24 @@ let editor: Editor
 let calls: [Channel, unknown][]
 let stored: Record<string, TiptapNodeT>
 let undoAnswer: RenameUndoResult
+let applyAnswer: RenameApplyResult
 
+/** Main's places in the open scene: "Hesk" at 1–5 and at 16–20 ("Hesk's coat"). */
 const APPLIED: RenameApplyResult = {
   record: RECORD,
-  match: { query: 'Hesk', replacement: 'Haskel', matchCase: true, wholeWord: true },
   written: [{ id: 'sc-2', wordCount: 4, count: 1 }],
   drafts: 2,
-  openId: 'sc-1'
+  openId: 'sc-1',
+  openEdits: [
+    { from: 1, to: 5, text: 'Hesk', replacement: 'Haskel' },
+    { from: 16, to: 20, text: 'Hesk', replacement: 'Haskel' }
+  ]
 }
 
 function install(): void {
   calls = []
   stored = {}
+  applyAnswer = APPLIED
   undoAnswer = {
     record: { ...RECORD, name: 'Hesk' },
     restored: [{ id: 'sc-2', wordCount: 4 }],
@@ -71,16 +77,17 @@ function install(): void {
         case 'rename:preview':
           return {
             from: 'Hesk',
-            to: 'Haskel',
+            to: (input as Input<'rename:preview'>).to,
             scenes: [
-              { nodeId: 'sc-1', title: 'One', count: 2 },
-              { nodeId: 'sc-2', title: 'Two', count: 1 }
+              { nodeId: 'sc-1', title: 'One', count: 2, samples: [] },
+              { nodeId: 'sc-2', title: 'Two', count: 1, samples: [] }
             ],
             total: 3,
+            kept: { notMention: 0, unsure: 0, other: 0 },
             otherDrafts: { matches: 2, scenes: 1 }
           } as Output<C>
         case 'rename:apply':
-          return APPLIED as Output<C>
+          return applyAnswer as Output<C>
         case 'rename:undo':
           return undoAnswer as Output<C>
         case 'document:get': {
@@ -127,14 +134,20 @@ afterEach(() => {
 
 const previewAndApply = async (): Promise<boolean> => {
   await useRenameStore.getState().ask({ recordId: 'r-hesk', aliasId: 'a-1', to: 'Haskel' })
-  return useRenameStore.getState().apply()
+  return useRenameStore.getState().apply({ otherDrafts: true })
 }
 
 describe('Rename in book with an open editor (F-16.13)', () => {
   it('sends the open scene to main, then renames it through the editor in one undoable step', async () => {
     expect(await previewAndApply()).toBe(true)
     const apply = calls.find(([channel]) => channel === 'rename:apply')?.[1]
-    expect(apply).toEqual({ recordId: 'r-hesk', aliasId: 'a-1', to: 'Haskel', openId: 'sc-1' })
+    expect(apply).toEqual({
+      recordId: 'r-hesk',
+      aliasId: 'a-1',
+      to: 'Haskel',
+      openId: 'sc-1',
+      otherDrafts: true
+    })
     expect(text()).toBe("Haskel came in.\nHaskel's coat dripped; Heskel waited.")
     // The caret stays in the word it was in.
     expect(editor.state.selection.head).toBeGreaterThan(1)
@@ -182,8 +195,39 @@ describe('Rename in book with an open editor (F-16.13)', () => {
     expect(restored).toEqual(['Hesk came in.', "Hesk's coat dripped; Heskel waited."])
   })
 
+  it('skips a place that no longer holds its words', async () => {
+    applyAnswer = {
+      ...APPLIED,
+      openEdits: [...APPLIED.openEdits, { from: 22, to: 26, text: 'Hesk', replacement: 'Haskel' }]
+    }
+    await previewAndApply()
+    expect(text()).toBe("Haskel came in.\nHaskel's coat dripped; Heskel waited.")
+  })
+
+  it('keeps the undo of the rename main made when the open scene’s step fails', async () => {
+    await previewAndApply()
+    // A second rename: main renames, then the open scene's places no longer hold their words.
+    applyAnswer = {
+      ...APPLIED,
+      openEdits: [{ from: 1, to: 5, text: 'Hesk', replacement: 'Hasko' }]
+    }
+    await useRenameStore.getState().ask({ recordId: 'r-hesk', aliasId: 'a-1', to: 'Hasko' })
+    expect(await useRenameStore.getState().apply({ otherDrafts: false })).toBe(true)
+    expect(useRenameStore.getState().undoable).toEqual({
+      recordId: 'r-hesk',
+      from: 'Hesk',
+      to: 'Hasko'
+    })
+    expect(toasts().at(-1)).toBe(
+      'Renamed “Hesk” to “Hasko”: 1 match in 1 scene (+2 in other drafts). The open scene was not changed (it changed meanwhile).'
+    )
+    // Its Undo is the second rename's: the open scene keeps the first rename's text.
+    await useRenameStore.getState().undo()
+    expect(text()).toBe("Haskel came in.\nHaskel's coat dripped; Heskel waited.")
+  })
+
   it('does nothing without a preview to apply', async () => {
-    expect(await useRenameStore.getState().apply()).toBe(false)
+    expect(await useRenameStore.getState().apply({ otherDrafts: false })).toBe(false)
     expect(calls).toEqual([])
   })
 })

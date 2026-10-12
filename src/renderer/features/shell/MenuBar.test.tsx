@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, Input, Output, ProjectInfo } from '@shared/ipc/contract'
-import { MENU, menuItems } from '@shared/menu'
+import { MENU, menuFor, menuItems } from '@shared/menu'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import {
@@ -81,7 +81,7 @@ describe('MenuBar (F-7.1)', () => {
     expect(within(file).getAllByRole('separator')).toHaveLength(2)
     expect(item('File', 'Save')).toHaveAttribute('aria-keyshortcuts', 'Ctrl+S')
     expect(item('File', 'Save')).not.toHaveAttribute('aria-disabled')
-    // Every item of the definition is reachable through the bar.
+    // Every item of the definition for this project's story memory is reachable through the bar.
     await userEvent.click(trigger('File'))
     let seen = 0
     for (const section of MENU) {
@@ -89,7 +89,7 @@ describe('MenuBar (F-7.1)', () => {
       seen += within(popup(section.label)).getAllByRole('menuitem').length
       await userEvent.keyboard('{Escape}')
     }
-    expect(seen).toBe(menuItems().length)
+    expect(seen).toBe(menuItems(menuFor({ devTools: false, storyMemory: 'v1' })).length)
   })
 
   it('disables the project items without a project, and a click on one does nothing', async () => {

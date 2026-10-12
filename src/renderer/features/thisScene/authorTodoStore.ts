@@ -22,7 +22,10 @@ interface AuthorTodoState {
   /** Edits a to-do, or ticks and unticks it. */
   update: (id: string, patch: AuthorTodoPatch) => Promise<void>
   remove: (id: string) => Promise<void>
-  /** Moves a to-do one place up (-1) or down (1). */
+  /**
+   * Moves a to-do one place up (-1) or down (1) among the ones of its kind: open to-dos past open
+   * ones, done past done (the panel draws the two apart, so a hidden one is never the step).
+   */
   move: (id: string, step: -1 | 1) => Promise<void>
   clear: () => void
 }
@@ -76,10 +79,13 @@ export const useAuthorTodoStore = create<AuthorTodoState>((set, get) => {
     },
 
     async move(id, step) {
-      const ids = get().todos.map((each) => each.id)
-      const at = ids.indexOf(id)
-      const to = at + step
-      if (at < 0 || to < 0 || to >= ids.length) return
+      const todos = get().todos
+      const at = todos.findIndex((each) => each.id === id)
+      const done = todos[at]?.done
+      let to = at + step
+      while (to >= 0 && to < todos.length && todos[to]?.done !== done) to += step
+      if (at < 0 || to < 0 || to >= todos.length) return
+      const ids = todos.map((each) => each.id)
       ids.splice(at, 1)
       ids.splice(to, 0, id)
       await write(() => ipc().invoke('authorTodo:reorder', { ids }))

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { straightenQuotes } from './critique'
+import { nodeSize } from './mentions'
 import { withoutAiMarks } from './memory/pageMarks'
 import { SEARCH_QUERY_MAX, SearchRange, buildSnippet, foldCase } from './search'
 import type { TiptapNodeT } from './tiptap'
@@ -228,17 +229,20 @@ export function samplesInDoc(
   return samples
 }
 
+/** One replacement inside a run: `[from, to)` offsets into the run's text and what goes there. */
+interface RunEdit {
+  range: SearchRange
+  replacement: string
+}
+
 /**
  * One run rewritten. Text outside a match stays in a node carrying everything its source node
  * carried (marks included, so a provenance mark rides along); the replacement takes the marks of
  * the node holding the match's first character. Empty nodes are dropped and pieces that come
- * from the same source node are joined, so a match inside one node leaves one node.
+ * from the same source node are joined, so a match inside one node leaves one node. `edits` are
+ * in order and never overlap.
  */
-function replaceInRun(
-  nodes: readonly TiptapNodeT[],
-  matches: readonly SearchRange[],
-  replacement: string
-): TiptapNodeT[] {
+function replaceInRun(nodes: readonly TiptapNodeT[], edits: readonly RunEdit[]): TiptapNodeT[] {
   const pieces: { source: TiptapNodeT; text: string }[] = []
   const push = (source: TiptapNodeT, text: string): void => {
     if (text === '') return
@@ -255,8 +259,9 @@ function replaceInRun(
     const end = offset + text.length
     let cursor = offset
     while (cursor < end) {
-      const match = matches[next]
-      if (match === undefined || match[0] >= end) {
+      const edit = edits[next]
+      const match = edit?.range
+      if (edit === undefined || match === undefined || match[0] >= end) {
         push(source, text.slice(cursor - offset))
         cursor = end
       } else if (cursor < match[0]) {
@@ -264,7 +269,7 @@ function replaceInRun(
         cursor = match[0]
       } else {
         if (!inMatch) {
-          push(source, replacement)
+          push(source, edit.replacement)
           inMatch = true
         }
         cursor = Math.min(end, match[1])
@@ -280,21 +285,29 @@ function replaceInRun(
 }
 
 /**
- * The document with every occurrence replaced, and how many there were. Never mutates its
- * input: a changed node is a new object and everything untouched is shared, so a document with
- * no match comes back as the very same object. The replacement is literal and is never scanned
- * again (replacing `a` with `aa` terminates). A page block (F-16.6) whose words changed loses its
- * `aiFiled`/`aiWritten` marks (`withoutAiMarks`), as typing in the page editor does.
+ * The document with the edits `editsOf` answers for each run applied, and how many there were.
+ * `editsOf` gets the run's text and the ProseMirror position of its first character (the
+ * arithmetic of `nodeSize`). Never mutates its input: a changed node is a new object and
+ * everything untouched is shared, so a document with no edit comes back as the very same object.
+ * A page block (F-16.6) whose words changed loses its `aiFiled`/`aiWritten` marks
+ * (`withoutAiMarks`), as typing in the page editor does.
  */
-export function replaceInDoc(
+function rewriteRuns(
   doc: TiptapNodeT,
-  options: ReplaceOptions
+  editsOf: (text: string, start: number) => RunEdit[]
 ): { doc: TiptapNodeT; count: number } {
   let count = 0
-  const rewrite = (node: TiptapNodeT): TiptapNodeT => {
+  /** `start`: the position of the node's first child (0 for the root). */
+  const rewrite = (node: TiptapNodeT, start: number): TiptapNodeT => {
     const content = node.content
     if (content === undefined) return node
     const runs = runsOf(content)
+    const positions: number[] = []
+    let at = start
+    for (const child of content) {
+      positions.push(at)
+      at += nodeSize(child)
+    }
     const out: TiptapNodeT[] = []
     let changed = false
     // Whether this block's own words changed (not only a block inside it).
@@ -307,19 +320,19 @@ export function replaceInDoc(
       if (run?.[0] === index) {
         next++
         const nodes = content.slice(run[0], run[1])
-        const matches = findInRun(runText(nodes), options)
-        if (matches.length === 0) {
+        const edits = editsOf(runText(nodes), positions[index] ?? start)
+        if (edits.length === 0) {
           out.push(...nodes)
         } else {
-          count += matches.length
+          count += edits.length
           changed = true
           words = true
-          out.push(...replaceInRun(nodes, matches, options.replacement))
+          out.push(...replaceInRun(nodes, edits))
         }
         index = run[1] - 1
         continue
       }
-      const rewritten = rewrite(child)
+      const rewritten = rewrite(child, (positions[index] ?? start) + 1)
       if (rewritten !== child) changed = true
       out.push(rewritten)
     }
@@ -332,5 +345,57 @@ export function replaceInDoc(
     delete emptied.content
     return emptied
   }
-  return { doc: rewrite(doc), count }
+  return { doc: rewrite(doc, 0), count }
+}
+
+/**
+ * The document with every occurrence replaced, and how many there were. Never mutates its
+ * input (a document with no match comes back as the very same object). The replacement is
+ * literal and is never scanned again (replacing `a` with `aa` terminates).
+ */
+export function replaceInDoc(
+  doc: TiptapNodeT,
+  options: ReplaceOptions
+): { doc: TiptapNodeT; count: number } {
+  return rewriteRuns(doc, (text) =>
+    findInRun(text, options).map((range) => ({ range, replacement: options.replacement }))
+  )
+}
+
+/** A replacement at a ProseMirror range of a stored document, with the words it expects there. */
+export interface PositionEdit {
+  from: number
+  to: number
+  /** The words the range must still hold; an edit that finds others there is skipped. */
+  text: string
+  replacement: string
+}
+
+/**
+ * The document with each edit applied at its ProseMirror range (Rename in book, F-16.13, which
+ * rewrites only the places the name scan reads as the record). An edit is applied only when its
+ * range lies inside one run and still holds its `text`, and never over an earlier one; answers
+ * the edits applied, in document order, so a caller counts and reports exactly those.
+ */
+export function replaceAtPositions(
+  doc: TiptapNodeT,
+  edits: readonly PositionEdit[]
+): { doc: TiptapNodeT; applied: PositionEdit[] } {
+  const sorted = [...edits].sort((a, b) => a.from - b.from || a.to - b.to)
+  const applied: PositionEdit[] = []
+  const result = rewriteRuns(doc, (text, start) => {
+    const out: RunEdit[] = []
+    let last = -1
+    for (const edit of sorted) {
+      const from = edit.from - start
+      const to = edit.to - start
+      if (from < 0 || to > text.length || from >= to || from < last) continue
+      if (text.slice(from, to) !== edit.text) continue
+      out.push({ range: [from, to], replacement: edit.replacement })
+      applied.push(edit)
+      last = to
+    }
+    return out
+  })
+  return { doc: result.doc, applied }
 }

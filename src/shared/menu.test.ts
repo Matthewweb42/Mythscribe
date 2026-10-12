@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { APP_SHORTCUTS } from './shortcuts'
 import {
+  DEVELOPER_MENU_ENTRIES,
   DOCS_URL,
   MENU,
   MENU_ITEM_IDS,
@@ -24,24 +25,40 @@ describe('menu definition (F-7.1)', () => {
 
   it('uses every item id exactly once, and every id is an item', () => {
     // The developer items join only while developer tools are on (2026-10-07).
-    const ids = menuItems(menuFor({ devTools: true, storyMemory: null })).map((item) => item.id)
+    const ids = [...MENU.flatMap((section) => section.entries), ...DEVELOPER_MENU_ENTRIES]
+      .filter((entry) => !isSeparator(entry))
+      .map((entry) => (isSeparator(entry) ? '' : entry.id))
     expect([...ids].sort()).toEqual([...MENU_ITEM_IDS].sort())
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('leaves the tag items out of a project on story memory v2, which has no tags (F-16.4)', () => {
+  it('shows each story memory its own items: tags in v1, This scene in v2 (F-16.4, F-16.12)', () => {
     const ids = (storyMemory: 'v1' | 'v2' | null, devTools = false): string[] =>
       menuItems(menuFor({ devTools, storyMemory })).map((item) => item.id)
     expect(ids('v1')).toEqual(expect.arrayContaining(['toggleTags', 'openTags']))
-    expect(ids(null)).toEqual(ids('v1'))
+    // No project open: the menu as it always was.
+    expect(menuFor({ devTools: false, storyMemory: null })).toBe(
+      menuFor({ devTools: false, storyMemory: 'v1' })
+    )
+    expect(ids('v1')).toEqual(
+      menuItems(MENU)
+        .map((item) => item.id)
+        .filter((id) => id !== 'toggleThisScene')
+    )
     expect(ids('v1').filter((id) => !ids('v2').includes(id))).toEqual(['toggleTags', 'openTags'])
+    expect(ids('v2').filter((id) => !ids('v1').includes(id))).toEqual(['toggleThisScene'])
+    const thisScene = menuItems(MENU).find((item) => item.id === 'toggleThisScene')
+    expect(thisScene?.label).toBe('This scene')
+    expect(thisScene?.when).toBe('project')
     expect(ids('v2', true)).toEqual(expect.arrayContaining(['openDeveloperTools', 'openSettings']))
     expect(ids('v2', true)).not.toContain('openTags')
   })
 
   it('adds Help › Developer tools and Chromium DevTools only while developer tools are on', () => {
-    expect(menuFor({ devTools: false, storyMemory: null })).toBe(MENU)
-    expect(menuFor({ devTools: false, storyMemory: 'v1' })).toBe(MENU)
+    // Built once per story memory, so a redraw without developer tools reuses the same menu.
+    expect(menuFor({ devTools: false, storyMemory: 'v1' })).toBe(
+      menuFor({ devTools: false, storyMemory: 'v1' })
+    )
     const ids = (devTools: boolean): string[] =>
       menuItems(menuFor({ devTools, storyMemory: 'v1' })).map((item) => item.id)
     expect(ids(false)).not.toContain('openDeveloperTools')
@@ -128,6 +145,7 @@ describe('menu definition (F-7.1)', () => {
       'toggleAssistant',
       'toggleReferences',
       'toggleTags',
+      'toggleThisScene',
       'resetLayout',
       'openCompile',
       'separator',

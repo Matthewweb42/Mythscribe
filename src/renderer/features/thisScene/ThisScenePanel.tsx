@@ -399,6 +399,7 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
           {group.id === 'todos' ? (
             <TodoList
               todos={group.todos}
+              done={group.done}
               sceneId={sceneId}
               adding={adding}
               onDoneAdding={() => setAdding(false)}
@@ -418,33 +419,111 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
   )
 }
 
-/** My to-dos: add, tick, delete and reorder; a to-do may point at a scene or a record. */
+/** One to-do's line: its tick, its words and links, and (open ones) its move buttons. */
+function TodoRow({
+  todo,
+  index,
+  count
+}: {
+  todo: AuthorTodo
+  /** Its place among the open to-dos, for the move buttons; null for a done one. */
+  index: number | null
+  count: number
+}): React.JSX.Element {
+  const store = useAuthorTodoStore.getState
+  const scene = useTreeStore((s) =>
+    todo.nodeId === null ? null : (s.byId[todo.nodeId]?.title ?? null)
+  )
+  const record = useRecordStore((s) =>
+    todo.recordId === null ? null : (s.byId[todo.recordId]?.name ?? null)
+  )
+  const links = [scene, record].filter((link): link is string => link !== null)
+  return (
+    <li className="flex min-w-0 items-center gap-1 py-0.5 text-sm">
+      <input
+        type="checkbox"
+        aria-label={`Done: ${todo.text}`}
+        checked={todo.done}
+        onChange={(event) => void store().update(todo.id, { done: event.target.checked })}
+      />
+      <span className={`min-w-0 flex-1 ${todo.done ? 'text-fg-muted line-through' : ''}`}>
+        {todo.text}
+        {links.length === 0 ? null : (
+          <span className="ml-1 text-[11px] text-fg-subtle">{links.join(' · ')}</span>
+        )}
+      </span>
+      {index === null ? null : (
+        <>
+          <button
+            type="button"
+            aria-label={`Move up: ${todo.text}`}
+            disabled={index === 0}
+            onClick={() => void store().move(todo.id, -1)}
+            className={ICON_BUTTON}
+          >
+            <ArrowUp size={12} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            aria-label={`Move down: ${todo.text}`}
+            disabled={index === count - 1}
+            onClick={() => void store().move(todo.id, 1)}
+            className={ICON_BUTTON}
+          >
+            <ArrowDown size={12} aria-hidden="true" />
+          </button>
+        </>
+      )}
+      <button
+        type="button"
+        aria-label={`Delete to-do: ${todo.text}`}
+        onClick={() => void store().remove(todo.id)}
+        className={ICON_BUTTON}
+      >
+        <X size={12} aria-hidden="true" />
+      </button>
+    </li>
+  )
+}
+
+/**
+ * My to-dos: add, tick, delete and reorder; a to-do may point at this scene, a record, or both.
+ * Ticked ones wait behind a collapsed "n done" line, so the list never needs clearing.
+ */
 function TodoList({
   todos,
+  done,
   sceneId,
   adding,
   onDoneAdding
 }: {
   todos: AuthorTodo[]
+  done: AuthorTodo[]
   sceneId: string | null
   adding: boolean
   onDoneAdding: () => void
 }): React.JSX.Element {
   const store = useAuthorTodoStore.getState
-  const titles = useTreeStore((s) => s.byId)
   const records = useRecordStore((s) => s.byId)
   const [text, setText] = useState('')
   const [here, setHere] = useState(true)
+  const [recordId, setRecordId] = useState('')
+  const choices = Object.values(records).sort((a, b) => a.name.localeCompare(b.name))
 
   const submit = (event: FormEvent): void => {
     event.preventDefault()
     const trimmed = text.trim()
     if (trimmed === '') return
     void store()
-      .create({ text: trimmed, nodeId: here && sceneId !== null ? sceneId : null })
+      .create({
+        text: trimmed,
+        nodeId: here && sceneId !== null ? sceneId : null,
+        recordId: recordId === '' || records[recordId] === undefined ? null : recordId
+      })
       .then((made) => {
         if (!made) return
         setText('')
+        setRecordId('')
         onDoneAdding()
       })
   }
@@ -452,57 +531,20 @@ function TodoList({
   return (
     <>
       <ul className="m-0 list-none p-0">
-        {todos.map((todo, index) => {
-          const link =
-            todo.nodeId !== null
-              ? (titles[todo.nodeId]?.title ?? null)
-              : todo.recordId !== null
-                ? (records[todo.recordId]?.name ?? null)
-                : null
-          return (
-            <li key={todo.id} className="flex min-w-0 items-center gap-1 py-0.5 text-sm">
-              <input
-                type="checkbox"
-                aria-label={`Done: ${todo.text}`}
-                checked={todo.done}
-                onChange={(event) => void store().update(todo.id, { done: event.target.checked })}
-              />
-              <span className={`min-w-0 flex-1 ${todo.done ? 'text-fg-muted line-through' : ''}`}>
-                {todo.text}
-                {link === null ? null : (
-                  <span className="ml-1 text-[11px] text-fg-subtle">{link}</span>
-                )}
-              </span>
-              <button
-                type="button"
-                aria-label={`Move up: ${todo.text}`}
-                disabled={index === 0}
-                onClick={() => void store().move(todo.id, -1)}
-                className={ICON_BUTTON}
-              >
-                <ArrowUp size={12} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                aria-label={`Move down: ${todo.text}`}
-                disabled={index === todos.length - 1}
-                onClick={() => void store().move(todo.id, 1)}
-                className={ICON_BUTTON}
-              >
-                <ArrowDown size={12} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                aria-label={`Delete to-do: ${todo.text}`}
-                onClick={() => void store().remove(todo.id)}
-                className={ICON_BUTTON}
-              >
-                <X size={12} aria-hidden="true" />
-              </button>
-            </li>
-          )
-        })}
+        {todos.map((todo, index) => (
+          <TodoRow key={todo.id} todo={todo} index={index} count={todos.length} />
+        ))}
       </ul>
+      {done.length === 0 ? null : (
+        <details className="mt-1 text-xs text-fg-muted">
+          <summary className="cursor-pointer">{done.length} done</summary>
+          <ul className="m-0 list-none p-0">
+            {done.map((todo) => (
+              <TodoRow key={todo.id} todo={todo} index={null} count={done.length} />
+            ))}
+          </ul>
+        </details>
+      )}
       {adding ? (
         <form onSubmit={submit} className="mt-1 flex flex-col gap-1">
           <input
@@ -517,7 +559,7 @@ function TodoList({
             }}
             className="w-full rounded-md border border-line bg-bg px-2 py-1 text-sm"
           />
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {sceneId === null ? null : (
               <label className="flex items-center gap-1 text-xs text-fg-muted">
                 <input
@@ -527,6 +569,21 @@ function TodoList({
                 />
                 For this scene
               </label>
+            )}
+            {choices.length === 0 ? null : (
+              <select
+                aria-label="About a record"
+                value={recordId}
+                onChange={(event) => setRecordId(event.target.value)}
+                className="min-w-0 rounded-md border border-line bg-bg px-1 py-0.5 text-xs"
+              >
+                <option value="">About no record</option>
+                {choices.map((record) => (
+                  <option key={record.id} value={record.id}>
+                    About {record.name}
+                  </option>
+                ))}
+              </select>
             )}
             <button type="button" className={`${SMALL} ml-auto`} onClick={onDoneAdding}>
               Cancel

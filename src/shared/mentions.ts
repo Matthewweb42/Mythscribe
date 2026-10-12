@@ -157,6 +157,15 @@ export function textRuns(doc: TiptapNodeT): TextRun[] {
   return runs
 }
 
+/** How many ProseMirror positions a stored node takes up (the arithmetic `textRuns` walks by). */
+export function nodeSize(node: TiptapNodeT): number {
+  if (typeof node.text === 'string') return node.text.length
+  if (LEAF_TYPES.has(node.type)) return 1
+  let inner = 0
+  for (const child of node.content ?? []) inner += nodeSize(child)
+  return inner + 2
+}
+
 /** Collects `node`'s text runs and answers how many positions it takes up. */
 function walk(node: TiptapNodeT, pos: number, runs: TextRun[]): number {
   if (typeof node.text === 'string') {

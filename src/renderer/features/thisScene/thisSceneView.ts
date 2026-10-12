@@ -96,7 +96,13 @@ export const INLINE_TAGS_NOTICE = 'Inline tags show as plain text until you swit
 
 /** One group of Needs a look, as drawn. */
 export type NeedsALookGroup =
-  | { id: 'todos'; todos: AuthorTodo[] }
+  | {
+      id: 'todos'
+      /** The open to-dos, in her order. */
+      todos: AuthorTodo[]
+      /** The ticked ones, drawn behind a collapsed "n done" line (no upkeep: they never crowd it). */
+      done: AuthorTodo[]
+    }
   | { id: 'questions'; questions: NameQuestion[] }
   | { id: 'notices'; notices: string[] }
 
@@ -108,8 +114,8 @@ export const NEEDS_A_LOOK_HEADING: Record<NeedsALookGroup['id'], string> = {
 
 /**
  * The groups of Needs a look in their order (My to-dos on top, then the name Questions, then
- * Notices); a group with nothing in it is not drawn. `todosOpen` keeps the to-do group drawn while
- * the author is adding the first one.
+ * Notices); a group with nothing in it is not drawn. Ticked to-dos sit apart from the open ones
+ * (`done`). `todosOpen` keeps the to-do group drawn while the author is adding the first one.
  */
 export function needsALookGroups(input: {
   todos: readonly AuthorTodo[]
@@ -119,7 +125,11 @@ export function needsALookGroups(input: {
 }): NeedsALookGroup[] {
   const groups: NeedsALookGroup[] = []
   if (input.todos.length > 0 || input.todosOpen === true) {
-    groups.push({ id: 'todos', todos: [...input.todos] })
+    groups.push({
+      id: 'todos',
+      todos: input.todos.filter((todo) => !todo.done),
+      done: input.todos.filter((todo) => todo.done)
+    })
   }
   if (input.questions.length > 0) groups.push({ id: 'questions', questions: [...input.questions] })
   if (input.notices.length > 0) groups.push({ id: 'notices', notices: [...input.notices] })

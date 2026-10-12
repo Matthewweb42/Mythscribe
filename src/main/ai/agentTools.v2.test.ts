@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
+import { setSceneMeta } from '../document/sceneMetaStore'
 import { createAuthorTodo, updateAuthorTodo } from '../memory/authorTodoStore'
 import { scanNamesFor } from '../memory/nameIndexer'
 import { indexOwner, indexScene } from '../memory/passageIndexer'
@@ -13,7 +14,7 @@ import { setSceneDetails } from '../memory/sceneDetailStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { ensureResearchRoot } from '../project/seed'
 import { createResearchNote } from '../research/researchStore'
-import { createNode, getNode, type TreeDb } from '../tree/treeStore'
+import { createNode, getNode, moveNode, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { loadAgentProject, resolveAgentEdit, runAgentTool, type AgentProject } from './agentTools'
 import { AGENT_V2_REFUSED, AGENT_V2_REFUSED_EDITS, passageMark } from './agentToolsV2'
@@ -191,6 +192,39 @@ describe('find_passages in v2 (F-16.4)', () => {
     expect(line("Mara Vell's Pinned ¶1")).toContain('[idea]: She has a twin lantern')
     expect(line("Mara Vell's Ideas ¶0")).toContain('[idea]')
     expect(line('Research "Lantern lore" ¶0')).toContain('[canon]: A ferry lantern')
+  })
+
+  it('never places an Idea scene or a scene note in time, and lookup lists Idea scenes apart', () => {
+    // An Idea scene before now: it never happened, wherever it sits.
+    const parentId = getNode(db, scenes[0] ?? '')?.parentId ?? ''
+    const idea = createNode(db, 'novel', {
+      parentId,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'Dream'
+    }).id
+    moveNode(db, idea, parentId, scenes[0] ?? null)
+    saveDocument(db, idea, doc({ text: 'Mara dreamed the lantern went out.' }))
+    setSceneMeta(db, idea, { location: '', pov: '', timeline: '', status: 'idea' })
+    scanNamesFor(db, idea, NOW)
+    indexScene(db, idea, NOW)
+    const project = v2()
+    const result = runAgentTool(project, null, 'find_passages', { query: 'lantern' }).result
+    const lines = result.split('\n')
+    const line = (start: string): string => lines.find((each) => each.startsWith(start)) ?? ''
+    expect(line(`${ref(project, idea)} ¶0`)).toBe(
+      `${ref(project, idea)} ¶0 (an Idea scene: never happened) [idea]: Mara dreamed the lantern went out.`
+    )
+    const notes = line(`${ref(project, scenes[1])} notes ¶0`)
+    expect(notes).toContain(`(notes for ${ref(project, scenes[1])}: a plan) [plan]`)
+    expect(result).not.toMatch(/never happened\) \[canon\]|notes ¶0 \(before now/)
+    const lookup = runAgentTool(project, null, 'lookup', { name: 'Mara Vell' }).result
+    expect(lookup).toContain(
+      `Named in 2 scenes (2 up to now): first ${ref(project, scenes[0])} ¶0, last ${ref(project, scenes[1])} ¶1`
+    )
+    expect(lookup).toContain(
+      `[idea] Also named in Idea or left-out scenes (never happened): ${ref(project, idea)}`
+    )
   })
 
   it('maps each source to its mark', () => {

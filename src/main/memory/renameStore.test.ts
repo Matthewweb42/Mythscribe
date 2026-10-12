@@ -4,7 +4,7 @@ import path from 'node:path'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { dismissedKey } from '@shared/memory/dismissed'
-import { describeRenamePreview, renamedPhraseKey } from '@shared/memory/rename'
+import { describeRenameKept, describeRenamePreview } from '@shared/memory/rename'
 import { docToText } from '@shared/docText'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { draftText } from '../db/schema'
@@ -87,9 +87,38 @@ afterEach(() => {
 })
 
 const request = (to = 'Haskel') => ({ recordId: hesk, aliasId: heskName, to })
+const applying = (
+  to = 'Haskel',
+  extra: { openId?: string | null; otherDrafts?: boolean } = {}
+) => ({
+  ...request(to),
+  openId: extra.openId ?? null,
+  otherDrafts: extra.otherDrafts ?? false
+})
+
+/** A record made for a test, with its id and its names' ids by text. */
+function make(
+  name: string,
+  aliases: { text: string; shared?: boolean }[] = [],
+  force = true
+): { id: string; alias: (text: string) => string } {
+  const made = createRecord(db, { name, categoryId: 'character', aliases, force }, NOW)
+  if (!('record' in made)) throw new Error('blocked')
+  const record = made.record
+  return {
+    id: record.id,
+    alias: (text) => record.aliases.find((each) => each.text === text)?.id ?? ''
+  }
+}
+
+const otherDraft = (): string => {
+  const active = listDrafts(db).drafts[0]?.id ?? ''
+  duplicateDraft(db, active, 'Second')
+  return listDrafts(db).drafts.find((each) => each.name === 'Second')?.id ?? ''
+}
 
 describe('previewRename (F-16.13)', () => {
-  it('counts whole-word matches per scene in reading order, possessives included', () => {
+  it('counts the places per scene in reading order, possessives included, with samples', () => {
     const preview = previewRename(db, request())
     expect(preview.from).toBe('Hesk')
     expect(preview.to).toBe('Haskel')
@@ -97,43 +126,49 @@ describe('previewRename (F-16.13)', () => {
       [scenes[0], 2],
       [scenes[1], 1]
     ])
+    expect(preview.scenes[1]?.samples.map((sample) => sample.after.text)).toEqual([
+      'They waited for Haskel.'
+    ])
     expect(preview.total).toBe(3)
+    // "hesk" written in lower case is a word, not the name; "Heskel" is another word.
+    expect(preview.kept).toEqual({ notMention: 0, unsure: 0, other: 0 })
     expect(preview.otherDrafts).toEqual({ matches: 0, scenes: 0 })
     expect(describeRenamePreview(preview)).toBe('3 matches in 2 scenes')
+    expect(describeRenameKept(preview)).toBeNull()
   })
 
   it('counts the inactive drafts apart', () => {
-    const active = listDrafts(db).drafts[0]?.id ?? ''
-    duplicateDraft(db, active, 'Second')
+    otherDraft()
     const preview = previewRename(db, request())
     expect(preview.total).toBe(3)
     expect(preview.otherDrafts).toEqual({ matches: 3, scenes: 2 })
     expect(describeRenamePreview(preview)).toBe('3 matches in 2 scenes (+3 in other drafts)')
   })
 
-  it('refuses a name that is not the record’s', () => {
+  it('refuses what the apply refuses, before the click', () => {
     expect(() => previewRename(db, { ...request(), aliasId: 'nope' })).toThrow(/no longer/)
+    expect(() => previewRename(db, request('Hesk'))).toThrow(/already its name/)
+    make('Haskel')
+    expect(() => previewRename(db, request())).toThrow(/already a name of Haskel/)
   })
 })
 
 describe('applyRename (F-16.13)', () => {
-  it('rewrites every scene, the name and an inactive draft in one go, after a snapshot', () => {
-    const active = listDrafts(db).drafts[0]?.id ?? ''
-    duplicateDraft(db, active, 'Second')
-    const other = listDrafts(db).drafts.find((each) => each.name === 'Second')?.id ?? ''
-    const result = applyRename(db, { ...request(), openId: null }, NOW)
+  it('rewrites every scene and the name after a snapshot, and leaves the other drafts unticked', () => {
+    const other = otherDraft()
+    const result = applyRename(db, applying(), NOW)
     expect(textOf(scenes[0] ?? '')).toBe(
       "Haskel came in.\nHaskel's coat was wet; Heskel stayed out."
     )
     expect(textOf(scenes[1] ?? '')).toBe('They waited for Haskel.')
     // A lower-case word is not the name (its case rule is exact for a capitalised name).
     expect(textOf(scenes[2] ?? '')).toBe('Nobody came. hesk is a word here.')
-    expect(draftTextOf(other, scenes[0] ?? '')).toContain("Haskel's coat")
+    expect(draftTextOf(other, scenes[0] ?? '')).toContain("Hesk's coat")
     expect(result.written.map((each) => [each.id, each.count])).toEqual([
       [scenes[0], 2],
       [scenes[1], 1]
     ])
-    expect(result.drafts).toBe(3)
+    expect(result.drafts).toBe(0)
     expect(result.record.name).toBe('Haskel')
     expect(requireRecord(db, hesk).aliases[0]?.norm).toBe('haskel')
     const snapshots = listSnapshots(db)
@@ -142,55 +177,164 @@ describe('applyRename (F-16.13)', () => {
     expect(hasRenameUndo()).toBe(true)
   })
 
-  it('leaves the open scene to the editor and answers the match it should apply', () => {
-    const result = applyRename(db, { ...request(), openId: scenes[0] ?? '' }, NOW)
+  it('rewrites the inactive drafts when ticked', () => {
+    const other = otherDraft()
+    const result = applyRename(db, applying('Haskel', { otherDrafts: true }), NOW)
+    expect(result.drafts).toBe(3)
+    expect(draftTextOf(other, scenes[0] ?? '')).toContain("Haskel's coat")
+  })
+
+  it('leaves the open scene to the editor and answers its places', () => {
+    const result = applyRename(db, applying('Haskel', { openId: scenes[0] ?? '' }), NOW)
     expect(textOf(scenes[0] ?? '')).toContain('Hesk came in.')
     expect(textOf(scenes[1] ?? '')).toBe('They waited for Haskel.')
     expect(result.openId).toBe(scenes[0])
-    expect(result.match).toEqual({
-      query: 'Hesk',
-      replacement: 'Haskel',
-      matchCase: true,
-      wholeWord: true
-    })
+    // ProseMirror ranges of the stored text: ¶1 holds 1–5, ¶2 starts at 16.
+    expect(result.openEdits).toEqual([
+      { from: 1, to: 5, text: 'Hesk', replacement: 'Haskel' },
+      { from: 16, to: 20, text: 'Hesk', replacement: 'Haskel' }
+    ])
     // The open scene's text is in the snapshot taken before.
     expect(listSnapshots(db)[0]?.docCount).toBeGreaterThan(0)
   })
 
-  it('rewrites the Not a mention keys that hold the old name, any record’s', () => {
-    const made = createRecord(db, { name: 'Mara', categoryId: 'character' }, NOW)
-    if (!('record' in made)) throw new Error('blocked')
-    const mara = made.record.id
-    const key = dismissedKey({ kind: 'notMention', recordId: mara, phrase: 'Hesk and Mara' })
+  it('leaves a place the author marked Not a mention, and its mark', () => {
+    const hope = make('Hope')
+    saveDocument(
+      db,
+      scenes[2] ?? '',
+      doc('Hope came in late.', 'All Hope was gone from the room.', 'Hope walked out.')
+    )
+    const key = dismissedKey({ kind: 'notMention', recordId: hope.id, phrase: 'All Hope was' })
+    dismiss(db, { kind: 'notMention', key, recordId: hope.id, label: 'not Hope' }, NOW)
+    const ask = { recordId: hope.id, aliasId: hope.alias('Hope'), to: 'Faith' }
+    const preview = previewRename(db, ask)
+    expect(preview.total).toBe(2)
+    expect(preview.kept).toEqual({ notMention: 1, unsure: 0, other: 0 })
+    expect(describeRenameKept(preview)).toBe('Left as they are: 1 marked Not a mention.')
+    applyRename(db, { ...ask, openId: null, otherDrafts: false }, NOW)
+    expect(textOf(scenes[2] ?? '')).toBe(
+      'Faith came in late.\nAll Hope was gone from the room.\nFaith walked out.'
+    )
+    expect(getDismissedByKey(db, 'notMention', key)).not.toBeNull()
+  })
+
+  it('leaves a sentence start the scan does not count as the name ("Will" beside "will")', () => {
+    const will = make('Will')
+    saveDocument(
+      db,
+      scenes[2] ?? '',
+      doc('Will walked to the door.', 'She said she will wait. Will you come back?')
+    )
+    const ask = { recordId: will.id, aliasId: will.alias('Will'), to: 'Bill' }
+    const preview = previewRename(db, ask)
+    expect(preview.total).toBe(0)
+    expect(preview.kept.other).toBe(2)
+    applyRename(db, { ...ask, openId: null, otherDrafts: false }, NOW)
+    expect(textOf(scenes[2] ?? '')).toBe(
+      'Will walked to the door.\nShe said she will wait. Will you come back?'
+    )
+    // The record is renamed all the same, and no prose changed, so no snapshot was needed.
+    expect(requireRecord(db, will.id).name).toBe('Bill')
+    expect(listSnapshots(db)).toEqual([])
+  })
+
+  it('leaves a longer name that holds the nickname ("Mara Vell" for "Mara")', () => {
+    const mara = make('Mara Vell', [{ text: 'Mara' }])
+    saveDocument(db, scenes[2] ?? '', doc('Mara Vell came in. Later Mara sat down.'))
+    const ask = { recordId: mara.id, aliasId: mara.alias('Mara'), to: 'Mira' }
+    const preview = previewRename(db, ask)
+    expect(preview.total).toBe(1)
+    expect(preview.kept.other).toBe(1)
+    applyRename(db, { ...ask, openId: null, otherDrafts: false }, NOW)
+    expect(textOf(scenes[2] ?? '')).toBe('Mara Vell came in. Later Mira sat down.')
+    expect(requireRecord(db, mara.id).aliases.map((each) => each.text)).toEqual([
+      'Mara Vell',
+      'Mira'
+    ])
+  })
+
+  it('leaves another record’s name that holds it, and refuses a name shared with another record', () => {
+    const tomas = make('Tomas Harrow', [{ text: 'Harrow' }])
+    make('Ella Harrow')
+    saveDocument(db, scenes[2] ?? '', doc('Ella Harrow met Tomas Harrow. Harrow nodded.'))
+    const ask = { recordId: tomas.id, aliasId: tomas.alias('Harrow'), to: 'Harlow' }
+    applyRename(db, { ...ask, openId: null, otherDrafts: false }, NOW)
+    expect(textOf(scenes[2] ?? '')).toBe('Ella Harrow met Tomas Harrow. Harlow nodded.')
+
+    const rynna = make('Rynna Ash', [{ text: 'Ash', shared: true }])
+    make('Bren Ash', [{ text: 'Ash', shared: true }])
+    expect(() =>
+      previewRename(db, { recordId: rynna.id, aliasId: rynna.alias('Ash'), to: 'Oak' })
+    ).toThrow(/shared with Bren Ash/)
+  })
+
+  it('keeps the case of each place: all caps, and a sentence start for a lower-case nickname', () => {
+    saveDocument(db, scenes[2] ?? '', doc('Hesk came in.', '"HESK!" she shouted.'))
+    applyRename(db, applying(), NOW)
+    expect(textOf(scenes[2] ?? '')).toBe('Haskel came in.\n"HASKEL!" she shouted.')
+
+    const captain = make('Orla Brand', [{ text: 'the captain' }])
+    saveDocument(db, scenes[1] ?? '', doc('The captain smiled.', 'She saw the captain wave.'))
+    const ask = { recordId: captain.id, aliasId: captain.alias('the captain'), to: 'the skipper' }
+    applyRename(db, { ...ask, openId: null, otherDrafts: false }, NOW)
+    expect(textOf(scenes[1] ?? '')).toBe('The skipper smiled.\nShe saw the skipper wave.')
+  })
+
+  it('moves a Not a mention key whose phrase held the renamed word, and undo puts it back', () => {
+    const mara = make('Mara')
+    saveDocument(db, scenes[1] ?? '', doc('Hesk, Mara, and Tomas left.'))
+    const key = dismissedKey({ kind: 'notMention', recordId: mara.id, phrase: 'Hesk, Mara, and' })
     dismiss(
       db,
       {
         kind: 'notMention',
         key,
-        recordId: mara,
-        label: '"Hesk and Mara" is not Mara',
-        quote: 'Hesk and Mara'
+        recordId: mara.id,
+        label: '"Hesk, Mara, and" is not Mara',
+        quote: 'Hesk, Mara, and'
       },
       NOW
     )
-    applyRename(db, { ...request(), openId: null }, NOW)
-    const renamed = dismissedKey({ kind: 'notMention', recordId: mara, phrase: 'Haskel and Mara' })
+    applyRename(db, applying(), NOW)
+    expect(textOf(scenes[1] ?? '')).toBe('Haskel, Mara, and Tomas left.')
+    const moved = dismissedKey({
+      kind: 'notMention',
+      recordId: mara.id,
+      phrase: 'Haskel, Mara, and'
+    })
     expect(getDismissedByKey(db, 'notMention', key)).toBeNull()
-    expect(getDismissedByKey(db, 'notMention', renamed)?.quote).toBe('Haskel and Mara')
+    expect(getDismissedByKey(db, 'notMention', moved)?.label).toBe(
+      '"Haskel, Mara, and" is not Mara'
+    )
     undoRename(db, NOW)
-    expect(getDismissedByKey(db, 'notMention', key)?.label).toBe('"Hesk and Mara" is not Mara')
+    expect(getDismissedByKey(db, 'notMention', key)?.label).toBe('"Hesk, Mara, and" is not Mara')
+    expect(listDismissed(db).count).toBe(1)
+  })
+
+  it('keeps the old key while an untouched draft still writes the phrase, with a row for the new one', () => {
+    const mara = make('Mara')
+    saveDocument(db, scenes[1] ?? '', doc('Hesk, Mara, and Tomas left.'))
+    otherDraft()
+    const key = dismissedKey({ kind: 'notMention', recordId: mara.id, phrase: 'Hesk, Mara, and' })
+    dismiss(db, { kind: 'notMention', key, recordId: mara.id, label: 'not Mara' }, NOW)
+    applyRename(db, applying(), NOW)
+    const moved = dismissedKey({
+      kind: 'notMention',
+      recordId: mara.id,
+      phrase: 'Haskel, Mara, and'
+    })
+    expect(getDismissedByKey(db, 'notMention', key)).not.toBeNull()
+    expect(getDismissedByKey(db, 'notMention', moved)).not.toBeNull()
+    undoRename(db, NOW)
+    expect(getDismissedByKey(db, 'notMention', moved)).toBeNull()
     expect(listDismissed(db).count).toBe(1)
   })
 
   it('refuses another record’s name and the name it already has', () => {
-    const made = createRecord(db, { name: 'Haskel', categoryId: 'character', force: true }, NOW)
-    if (!('record' in made)) throw new Error('blocked')
-    expect(() => applyRename(db, { ...request(), openId: null }, NOW)).toThrow(
-      /already a name of Haskel/
-    )
-    expect(() => applyRename(db, { ...request('Hesk'), openId: null }, NOW)).toThrow(
-      /already its name/
-    )
+    make('Haskel')
+    expect(() => applyRename(db, applying(), NOW)).toThrow(/already a name of Haskel/)
+    expect(() => applyRename(db, applying('Hesk'), NOW)).toThrow(/already its name/)
     // Nothing was written by the refused renames.
     expect(textOf(scenes[1] ?? '')).toBe('They waited for Hesk.')
     expect(listSnapshots(db)).toEqual([])
@@ -198,11 +342,9 @@ describe('applyRename (F-16.13)', () => {
 })
 
 describe('undoRename (F-16.13)', () => {
-  it('restores every scene, draft and the name', () => {
-    const active = listDrafts(db).drafts[0]?.id ?? ''
-    duplicateDraft(db, active, 'Second')
-    const other = listDrafts(db).drafts.find((each) => each.name === 'Second')?.id ?? ''
-    applyRename(db, { ...request(), openId: null }, NOW)
+  it('restores every scene, the ticked drafts and the name', () => {
+    const other = otherDraft()
+    applyRename(db, applying('Haskel', { otherDrafts: true }), NOW)
     const undone = undoRename(db, NOW)
     expect(undone.restored.map((each) => each.id).sort()).toEqual(
       [scenes[0] ?? '', scenes[1] ?? ''].sort()
@@ -217,7 +359,7 @@ describe('undoRename (F-16.13)', () => {
   })
 
   it('skips a scene edited since the rename and names it', () => {
-    applyRename(db, { ...request(), openId: null }, NOW)
+    applyRename(db, applying(), NOW)
     saveDocument(db, scenes[1] ?? '', doc('They waited for Haskel, long.'))
     const undone = undoRename(db, NOW)
     expect(undone.skipped).toEqual([{ id: scenes[1], title: 'Two' }])
@@ -227,18 +369,10 @@ describe('undoRename (F-16.13)', () => {
   })
 
   it('leaves the name when it was changed again since', () => {
-    applyRename(db, { ...request(), openId: null }, NOW)
-    applyRename(db, { ...request('Hasko'), openId: null }, NOW)
+    applyRename(db, applying(), NOW)
+    applyRename(db, applying('Hasko'), NOW)
     // Only the last rename can be undone: it goes back to Haskel.
     expect(undoRename(db, NOW).record?.name).toBe('Haskel')
     expect(() => undoRename(db, NOW)).toThrow(/no rename/)
-  })
-})
-
-describe('renamedPhraseKey (F-16.13)', () => {
-  it('replaces the norm as a whole word only', () => {
-    expect(renamedPhraseKey('r1|old hesk said', 'hesk', 'haskel')).toBe('r1|old haskel said')
-    expect(renamedPhraseKey('r1|old heskel said', 'hesk', 'haskel')).toBeNull()
-    expect(renamedPhraseKey('broken', 'hesk', 'haskel')).toBeNull()
   })
 })

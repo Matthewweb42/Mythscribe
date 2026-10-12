@@ -29,6 +29,7 @@ import { manuscriptDocuments } from '../voice/profile'
 import {
   AGENT_DROPPED_RESULT,
   AGENT_OUT_OF_STEPS,
+  AGENT_V2_NO_ORGANISE,
   AnswerStream,
   agentStepRequestId,
   fitAgentPrompt,
@@ -620,7 +621,8 @@ describe('the organise request (F-9.10, agent.v4)', () => {
     })
     const result = await run({ memory: 'v2' })
     expect(result.organise).toBeNull()
-    expect(result.answer).toBe('I will plan a tidier story bible.')
+    expect(result.dropped).toBe(1)
+    expect(result.answer).toBe(`I will plan a tidier story bible.\n\n${AGENT_V2_NO_ORGANISE}`)
   })
 })
 
