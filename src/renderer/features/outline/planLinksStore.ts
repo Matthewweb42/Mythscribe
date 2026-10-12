@@ -1,8 +1,15 @@
 import { create } from 'zustand'
 import type { EventPayload } from '@shared/ipc/contract'
-import { planLinkKey, type PlanLinkSuggestion, type PlanRef } from '@shared/planLinks'
+import {
+  planLinkKey,
+  type AiPlanLink,
+  type PlanLinkSuggestion,
+  type PlanRef
+} from '@shared/planLinks'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
+import { currentStoryMemory } from '@renderer/features/project/storyMemory'
+import { useDismissedStore } from '@renderer/features/thisScene/dismissedStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -16,11 +23,16 @@ import { ipc } from '@renderer/lib/ipc'
  * `useSceneMetaStore`, so no queued autosave writes the old metadata back (the timeline's
  * pattern). The background job's `planLinks:changed` does the same. Loaded by the Outline tab,
  * cleared on project close (`App.tsx`); generation-guarded.
+ *
+ * F-16.21 (story memory v2): the links applied automatically after a reading (`aiLinks`, main's
+ * `plan_link`), with *Keep* (it becomes the author's) and *Unlink* (it goes to Dismissed).
  */
 interface PlanLinksState {
   suggestions: readonly PlanLinkSuggestion[]
   /** `planLinkKey`s the job applied itself at Auto: the outline marks them as AI-made. */
   aiApplied: readonly string[]
+  /** F-16.21 (v2): the links applied automatically, one per planned scene. */
+  aiLinks: readonly AiPlanLink[]
   /** True while Find links runs. */
   running: boolean
   load: () => Promise<void>
@@ -29,6 +41,8 @@ interface PlanLinksState {
   confirm: (key: string) => Promise<void>
   dismiss: (key: string) => Promise<void>
   unlink: (plan: PlanRef) => Promise<void>
+  /** F-16.21 (v2): makes a planned scene's automatic link the author's. */
+  keep: (planId: string) => Promise<void>
   clear: () => void
 }
 
@@ -63,6 +77,7 @@ async function rewrite(write: () => Promise<{ changedNodeIds: string[] }>): Prom
 export const usePlanLinksStore = create<PlanLinksState>((set, get) => ({
   suggestions: [],
   aiApplied: [],
+  aiLinks: [],
   running: false,
 
   async load() {
@@ -71,7 +86,7 @@ export const usePlanLinksStore = create<PlanLinksState>((set, get) => ({
     try {
       const view = await ipc().invoke('planLinks:get', undefined)
       if (mine !== generation) return
-      set({ suggestions: view.suggestions, aiApplied: view.aiApplied })
+      set({ suggestions: view.suggestions, aiApplied: view.aiApplied, aiLinks: view.aiLinks })
     } catch (err) {
       if (mine === generation) toast.error(describeError(err))
     }
@@ -110,13 +125,24 @@ export const usePlanLinksStore = create<PlanLinksState>((set, get) => ({
     })
   },
 
-  unlink(plan) {
-    return rewrite(() => ipc().invoke('planLinks:unlink', { plan }))
+  async unlink(plan) {
+    await rewrite(() => ipc().invoke('planLinks:unlink', { plan }))
+    // F-16.21: in v2 an unlinked pair is a Dismissed row the author can undo.
+    if (currentStoryMemory() === 'v2') {
+      await useDismissedStore
+        .getState()
+        .load()
+        .catch((err: unknown) => toast.error(describeError(err)))
+    }
+  },
+
+  keep(planId) {
+    return rewrite(() => ipc().invoke('planLinks:keep', { planId }))
   },
 
   clear() {
     generation++
-    set({ suggestions: [], aiApplied: [], running: false })
+    set({ suggestions: [], aiApplied: [], aiLinks: [], running: false })
   }
 }))
 

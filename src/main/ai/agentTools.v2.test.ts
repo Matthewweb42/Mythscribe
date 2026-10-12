@@ -16,6 +16,12 @@ import { ensureResearchRoot } from '../project/seed'
 import { createResearchNote } from '../research/researchStore'
 import { createNode, getNode, moveNode, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
+import { AGENT_TOOLS } from '@shared/agent'
+import { emptyCardFields } from '@shared/memory/claims'
+import { CARD_MAP_NOTE } from '@shared/memory/cardText'
+import { activeDraftId } from '../draft/draftStore'
+import { upsertCard } from '../memory/reading/cardStore'
+import { cardAnchorOf } from '../memory/reading/claimFixture'
 import { loadAgentProject, resolveAgentEdit, runAgentTool, type AgentProject } from './agentTools'
 import { AGENT_V2_REFUSED, AGENT_V2_REFUSED_EDITS, passageMark } from './agentToolsV2'
 
@@ -178,6 +184,62 @@ describe('lookup in v2 (F-16.4)', () => {
   it('finds the scenes for cards by the name scan', () => {
     const result = runAgentTool(v2(), null, 'cards', { name: 'Mara Vell' })
     expect(result.step.label).toBe('Reading 2 scene cards…')
+  })
+})
+
+describe('the v2 cards in tool outputs (F-16.20)', () => {
+  const card = (nodeId: string, line: string, gist: string): void =>
+    upsertCard(
+      db,
+      {
+        nodeId,
+        draftId: activeDraftId(db),
+        readingId: null,
+        line,
+        gist,
+        fields: {
+          ...emptyCardFields(),
+          where: { value: 'the ferry', quote: 'The ferry left', p: 0, verified: true }
+        },
+        present: [],
+        mood: 'still',
+        theme: null,
+        anchor: cardAnchorOf(db, nodeId),
+        seen: []
+      },
+      NOW
+    )
+
+  it('cards reads the v2 card as a map, and says when a scene has none yet', () => {
+    card(scenes[1] ?? '', 'The ferry leaves with Mara asleep.', 'The ferry leaves at night.')
+    const project = v2()
+    const result = runAgentTool(project, null, 'cards', { name: 'Mara Vell' }).result
+    expect(result).toContain(`Map (${CARD_MAP_NOTE}): The ferry leaves with Mara asleep.`)
+    expect(result).toContain('Where: the ferry')
+    expect(result).toContain('Mood: still')
+    expect(result).toContain('No card yet; read the scene.')
+  })
+
+  it('read_summary gives the gist labelled as a map; lookup gives the last card up to now', () => {
+    card(scenes[1] ?? '', 'The ferry leaves with Mara asleep.', 'The ferry leaves at night.')
+    const project = v2()
+    // `read_summary` left the tool list in agent.v6; a run on an older list still reaches it.
+    const read = runAgentTool(
+      project,
+      null,
+      'read_summary',
+      { id: ref(project, scenes[1]) },
+      AGENT_TOOLS
+    ).result
+    expect(read).toContain(CARD_MAP_NOTE)
+    expect(read).toContain('The ferry leaves at night.')
+    expect(
+      runAgentTool(project, null, 'read_summary', { id: ref(project, scenes[0]) }, AGENT_TOOLS)
+        .result
+    ).toContain('has no card yet; read the scene.')
+    const lookup = runAgentTool(project, null, 'lookup', { name: 'Mara' }).result
+    expect(lookup).toContain(`Last seen ${ref(project, scenes[1])}`)
+    expect(lookup).toContain('Map (')
   })
 })
 

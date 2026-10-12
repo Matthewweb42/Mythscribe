@@ -9,8 +9,11 @@ import {
   type StoryMapItem,
   type StoryPosition
 } from '@shared/storyTime'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import type { NodeRow } from '../../db/schema'
 import { summariesFor } from '../../document/summaryStore'
+import { cardLines } from '../../memory/reading/cardContext'
+import { livePlanLinks } from '../../memory/reading/planLinkStore'
 import { nodesInTreeOrder } from '../../search/searchStore'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
 
@@ -87,20 +90,25 @@ export function positionNote(time: StoryTime, nodeId: string): string {
 
 /**
  * The story map's lines (F-5.23): the manuscript's folders and documents in reading order, each
- * document's progress (F-11.1d) and stored summary. A planned document the author linked to the
- * scene that fulfils it (`SceneMeta.fulfilledBy`, F-11.1d) is left out: that plan is written.
+ * document's progress (F-11.1d) and, in story memory v1, its stored summary; in v2 (F-16.20) its
+ * card's line (the AI's one-line map of it). A planned document the author linked to the scene
+ * that fulfils it (`SceneMeta.fulfilledBy`, F-11.1d) is left out: that plan is written; in v2 so
+ * is one linked automatically (F-16.21).
  */
 export function storyMapItems(
   db: TreeDb,
   rows: NodeRow[],
+  memory: StoryMemoryVersion,
   refOf: ReadonlyMap<string, string> = new Map()
 ): StoryMapItem[] {
   const manuscript = manuscriptRows(rows)
   const ids = new Set(manuscript.map((row) => row.id))
-  const summaries = summariesFor(
-    db,
-    manuscript.filter((row) => row.kind === 'document').map((row) => row.id)
-  )
+  const documents = manuscript.filter((row) => row.kind === 'document').map((row) => row.id)
+  const lineOf: ReadonlyMap<string, string> =
+    memory === 'v2'
+      ? cardLines(db)
+      : new Map([...summariesFor(db, documents)].map(([id, row]) => [id, row.summary]))
+  const linkedByApp = new Set(memory === 'v2' ? livePlanLinks(db).map((link) => link.planId) : [])
   const depth = new Map<string, number>()
   const items: StoryMapItem[] = []
   for (const row of manuscript) {
@@ -112,6 +120,7 @@ export function storyMapItems(
     if (progress === 'planned' && meta.fulfilledBy !== undefined && ids.has(meta.fulfilledBy)) {
       continue
     }
+    if (progress === 'planned' && linkedByApp.has(row.id)) continue
     items.push({
       id: row.id,
       ref: refOf.get(row.id) ?? '',
@@ -119,7 +128,7 @@ export function storyMapItems(
       depth: level,
       kind: row.kind === 'document' ? 'document' : 'folder',
       progress,
-      summary: row.kind === 'document' ? (summaries.get(row.id)?.summary ?? null) : null
+      summary: row.kind === 'document' ? (lineOf.get(row.id) ?? null) : null
     })
   }
   return items
@@ -129,8 +138,13 @@ export function storyMapItems(
 export function buildStoryMap(
   db: TreeDb,
   time: StoryTime,
-  input: { maxTokens: number; refOf?: ReadonlyMap<string, string>; rows?: NodeRow[] }
+  input: {
+    maxTokens: number
+    memory: StoryMemoryVersion
+    refOf?: ReadonlyMap<string, string>
+    rows?: NodeRow[]
+  }
 ): string | null {
-  const items = storyMapItems(db, input.rows ?? listNodes(db), input.refOf)
+  const items = storyMapItems(db, input.rows ?? listNodes(db), input.memory, input.refOf)
   return renderStoryMap(items, { nowId: time.nowId, basis: time.basis }, input.maxTokens)
 }

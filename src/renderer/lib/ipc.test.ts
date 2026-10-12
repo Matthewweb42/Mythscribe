@@ -9,11 +9,15 @@ function bridgeWith(invoke: IpcBridge['invoke'], on: IpcBridge['on'] = () => () 
 describe('createIpcClient', () => {
   it('returns validated data on success', async () => {
     const client = createIpcClient(
-      bridgeWith(async () => ({ ok: true, data: { version: '0.1.0', platform: 'linux' } }))
+      bridgeWith(async () => ({
+        ok: true,
+        data: { version: '0.1.0', platform: 'linux', newProjectMemory: 'v1' }
+      }))
     )
     await expect(client.invoke('app:info', undefined)).resolves.toEqual({
       version: '0.1.0',
-      platform: 'linux'
+      platform: 'linux',
+      newProjectMemory: 'v1'
     })
   })
 

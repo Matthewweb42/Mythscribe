@@ -2431,7 +2431,11 @@ describe('planLinks:* (F-11.1d)', () => {
 
   it('runs on request, stores a suggestion at Ask, and confirms it into the planned scene', async () => {
     const { written, planned } = await ready()
-    expect(await invoke('planLinks:get', undefined)).toEqual({ suggestions: [], aiApplied: [] })
+    expect(await invoke('planLinks:get', undefined)).toEqual({
+      suggestions: [],
+      aiApplied: [],
+      aiLinks: []
+    })
     const result = await invoke('planLinks:run', { requestId: 'pl-1' })
     expect(result).toMatchObject({ suggested: 1, applied: 0, requested: true })
     const view = await invoke('planLinks:get', undefined)
@@ -9019,14 +9023,34 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
     vi.mocked(fakeWin.webContents.send).mockClear()
-    expect(await invoke('ai:summarize', { nodeId: scene, requestId: 'v2-1' })).toMatchObject({
-      ok: false,
-      code: 'DISABLED'
-    })
-    expect(await invoke('jobs:indexAll', undefined)).toMatchObject({ ok: false, code: 'DISABLED' })
+    // F-16.20: the summary channels are v1's; a v2 project is refused before any handler runs.
+    await expect(invoke('ai:summarize', { nodeId: scene, requestId: 'v2-1' })).rejects.toThrow(
+      'VALIDATION: This project uses the other story memory'
+    )
+    await expect(invoke('jobs:indexAll', undefined)).rejects.toThrow(
+      'VALIDATION: This project uses the other story memory'
+    )
+    await expect(invoke('summary:get', { id: scene })).rejects.toThrow(
+      'VALIDATION: This project uses the other story memory'
+    )
     expect(complete).not.toHaveBeenCalled()
     expect(getSummary(manager.require().connection.orm, scene)).toBeNull()
     expect(sentOf('knowledge:conversionChanged')).toEqual([])
+  })
+
+  it('F-16.20, F-16.21: answers card lines and the automatic plan links in v2, and refuses v1’s job', async () => {
+    await openV2()
+    expect(await invoke('memory:cardLines', undefined)).toEqual({})
+    expect(await invoke('planLinks:get', undefined)).toEqual({
+      suggestions: [],
+      aiApplied: [],
+      aiLinks: []
+    })
+    await expect(invoke('planLinks:run', { requestId: 'pl-v2' })).rejects.toThrow(
+      'VALIDATION: This project uses the other story memory'
+    )
+    await expect(invoke('planLinks:keep', { planId: 'nope' })).rejects.toThrow(/^NOT_FOUND: /)
+    expect((await invoke('app:info', undefined)).newProjectMemory).toBe('v1')
   })
 
   it('scans and indexes a duplicated scene, and relabels a scene moved under an Idea chapter', async () => {
@@ -9359,14 +9383,10 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       })
       await vi.advanceTimersByTimeAsync(SUMMARY_BACKFILL_DELAY_MS + 10_000)
       expect(listJobs(db, 'summary')).toEqual([])
-      expect(await invoke('jobs:indexAll', undefined)).toMatchObject({
-        ok: false,
-        code: 'DISABLED'
-      })
-      expect(await invoke('ai:summarize', { nodeId: scene, requestId: 'sum-1' })).toMatchObject({
-        ok: false,
-        code: 'DISABLED'
-      })
+      await expect(invoke('jobs:indexAll', undefined)).rejects.toThrow(/^VALIDATION: /)
+      await expect(invoke('ai:summarize', { nodeId: scene, requestId: 'sum-1' })).rejects.toThrow(
+        /^VALIDATION: /
+      )
       // The reader's queue answers jobs:*; with no key, reading says it has no provider.
       expect(await invoke('jobs:status', undefined)).toMatchObject({ queued: 0, running: null })
       expect(await invoke('memory:status', undefined)).toMatchObject({ paused: 'noProvider' })

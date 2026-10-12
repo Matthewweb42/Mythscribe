@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
-import { FIXTURE_STORY_NOTES } from '../eval/storyNotesFixture'
+import { FIXTURE_STORY_NOTES_NO_MOOD } from '../eval/storyNotesFixture'
 import type { BuildRewritePromptV5Input } from './rewrite.v5'
 import { buildRewriteRegenPromptV4 } from './rewriteRegen.v4'
 import { buildRewriteRegenPromptV5 } from './rewriteRegen.v5'
@@ -11,7 +11,7 @@ const input: BuildRewritePromptV5Input = {
   after: 'The ferry would not wait.',
   meta: { location: '', pov: 'Mara Vell', timeline: '', brief: EMPTY_SCENE_BRIEF },
   voice: null,
-  storyNotes: FIXTURE_STORY_NOTES,
+  storyNotes: FIXTURE_STORY_NOTES_NO_MOOD,
   mood: null
 }
 

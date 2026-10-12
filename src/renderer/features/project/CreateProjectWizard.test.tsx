@@ -154,6 +154,25 @@ describe('CreateProjectWizard', () => {
     expect(onCreate).toHaveBeenCalledWith('My Book', 'novel', 'cloud', 'ask', [])
   })
 
+  it('F-16.20: describes story memory v2’s reading when main says a new project gets v2', async () => {
+    setIpcClient({
+      async invoke<C extends Channel>(channel: C, _input: Input<C>): Promise<Output<C>> {
+        if (channel === 'app:info') {
+          return { version: '1', platform: 'linux', newProjectMemory: 'v2' } as Output<C>
+        }
+        if (channel === 'library:choose') return chosen as Output<C>
+        throw new Error(`unexpected ${channel}`)
+      },
+      on: () => () => {}
+    })
+    setup()
+    await goToDialStep('My Book')
+    const explainer = screen.getByTestId('wizard-dial-explainer')
+    expect(explainer).toHaveTextContent('reads what changed')
+    expect(explainer).toHaveTextContent('each line with its quote')
+    expect(explainer).not.toHaveTextContent('summarizes the scene')
+  })
+
   it('explains the background work and recommends Use AI on (chat in Ask) on step 4, with off one click away (F-5.18, 2026-10-07)', async () => {
     const { onCreate } = setup()
     await goToDialStep('My Book')

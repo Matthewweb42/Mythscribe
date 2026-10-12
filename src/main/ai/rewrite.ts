@@ -117,14 +117,19 @@ export async function runRewrite(
   const voice = voiceBlock(profile, { text: input.text, pov: pov || null })
   // F-16.14: v2 carries the Story notes block in the bible's slot and no separate steer.
   const storyNotes = v2
-    ? buildStoryNotes(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
+    ? buildStoryNotes(db, {
+        nodeId: input.nodeId,
+        maxTokens: STORY_BIBLE_TOKEN_BUDGET,
+        mood: false
+      })
     : null
   const bible = v2
     ? null
     : buildStoryBible(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
   const steer = v2 ? null : buildSceneSteer(db, input.nodeId)
-  // F-5.6: the scene's mood and theme from its last reading, so the rewrite stays in line with them.
-  const mood = buildSceneMood(db, input.nodeId)
+  // F-5.6: the scene's mood and theme from its last reading, so the rewrite stays in line with them
+  // (F-16.20: in v2 the card's, and the Story notes block leaves its own Mood line out).
+  const mood = buildSceneMood(db, input.nodeId, input.memory)
 
   const base: BuildRewritePromptV4Input = {
     text: input.text,

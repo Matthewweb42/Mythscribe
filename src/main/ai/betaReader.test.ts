@@ -111,7 +111,7 @@ const item = (over: ModelItem = {}): ModelItem => ({
 })
 
 const read = (over: Partial<BetaReaderInput> = {}): ReturnType<typeof runBetaReader> =>
-  runBetaReader(db, deps, { nodeId: scene, ...over })
+  runBetaReader(db, deps, { nodeId: scene, memory: 'v1', ...over })
 
 async function failure(
   over: Partial<BetaReaderInput> = {}
@@ -250,7 +250,7 @@ describe('runBetaReader (F-14.11)', () => {
     const documents = manuscriptDocuments(db)
     const fourth = documents[3]?.id ?? ''
     saveDocument(db, fourth, doc(SCENE))
-    const result = await runBetaReader(db, deps, { nodeId: fourth })
+    const result = await runBetaReader(db, deps, { nodeId: fourth, memory: 'v1' })
     expect(result.missing).toBe(1)
     // Chapter 3's scene has no summary, so it is counted and left out; the current scene is
     // Part 2's first, which is why the chapter names repeat.

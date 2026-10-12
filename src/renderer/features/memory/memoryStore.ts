@@ -30,7 +30,9 @@ import { ipc } from '@renderer/lib/ipc'
  * `useSheetMemory`), counted while shown, and dropped when nothing shows them. Main says what
  * moved: `memory:changed` (a reading, *Not right*, typed details: the shown scenes and sheets it
  * names are read again), `names:changed` (Mentioned), a roster `record:changed` (everything shown),
- * and pushes the status and the notices whole. Loaded on a v2 open; reset in tests.
+ * and pushes the status and the notices whole. F-16.20: the active draft's card lines by scene
+ * (`cardLines`, what the Outline and the cork board show in grey), read on open and again when a
+ * reading moved a scene. Loaded on a v2 open; reset in tests.
  */
 
 /** A scene's memory as stored here: its lines by id. */
@@ -43,14 +45,17 @@ interface MemoryState {
   sheets: Record<string, SheetMemory>
   status: MemoryStatus | null
   notices: MemoryNotice[]
+  /** F-16.20: each scene's card line (the AI's one-line map of it), by node. */
+  cardLines: Record<string, string>
   /**
    * The *Rebuild memory* dialog (F-16.19): closed, opened to start one (price first), or opened on
    * what the last one changed (the activity bar's Open, the Book tab's *See what changed*).
    */
   rebuildOpen: 'start' | 'summary' | null
   setRebuildOpen: (open: 'start' | 'summary' | null) => void
-  /** The status and the notices (what a v2 open loads). */
+  /** The status, the notices and the card lines (what a v2 open loads). */
   load: () => Promise<void>
+  loadCardLines: () => Promise<void>
   loadScene: (nodeId: string) => Promise<void>
   loadSheet: (recordId: string, asOf: string | null) => Promise<void>
   /** Counts a view showing the scene and reads it; answers the release. */
@@ -134,6 +139,7 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
     sheets: {},
     status: null,
     notices: [],
+    cardLines: {},
     rebuildOpen: null,
 
     setRebuildOpen(open) {
@@ -142,11 +148,18 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
 
     async load() {
       const mine = generation
-      const [status, notices] = await Promise.all([
+      const [status, notices, cardLines] = await Promise.all([
         ipc().invoke('memory:status', undefined),
-        ipc().invoke('memory:notices', undefined)
+        ipc().invoke('memory:notices', undefined),
+        ipc().invoke('memory:cardLines', undefined)
       ])
-      if (mine === generation) set({ status, notices })
+      if (mine === generation) set({ status, notices, cardLines })
+    },
+
+    async loadCardLines() {
+      const mine = generation
+      const cardLines = await ipc().invoke('memory:cardLines', undefined)
+      if (mine === generation) set({ cardLines })
     },
 
     async loadScene(nodeId) {
@@ -295,6 +308,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
       if (unsubscribers.length > 0) return
       unsubscribers = [
         ipc().on('memory:changed', ({ nodeIds, recordIds }) => {
+          // A reading (or an edit beside a card) may have moved a scene's card line.
+          if (nodeIds.length > 0) get().loadCardLines().catch(report)
           const nodes = new Set(nodeIds)
           const records = new Set(recordIds)
           refresh(
@@ -326,7 +341,15 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
       generation++
       sceneWatchers.clear()
       sheetWatchers.clear()
-      set({ claims: {}, scenes: {}, sheets: {}, status: null, notices: [], rebuildOpen: null })
+      set({
+        claims: {},
+        scenes: {},
+        sheets: {},
+        status: null,
+        notices: [],
+        cardLines: {},
+        rebuildOpen: null
+      })
     }
   }
 })

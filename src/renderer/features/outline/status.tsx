@@ -64,23 +64,32 @@ export function StatusSelect({
   )
 }
 
+/** What the "AI" mark says the grey line is, by story memory. */
+const AI_LINE_TITLE = {
+  summary: 'AI summary, shown until you write a synopsis',
+  card: "The AI's map of this scene (its card line), shown until you write a synopsis"
+} as const
+
 /**
  * The F-5.6 summary standing in for an empty synopsis (F-11.1): greyed, behind an "AI" mark,
  * display only. Shared by the index card and the outline row; `className` sets the clamp.
+ * F-16.20: in story memory v2 the line is the scene's card line (`kind: 'card'`).
  */
 export function AiSummaryLine({
   summary,
   className,
-  testId
+  testId,
+  kind = 'summary'
 }: {
   summary: string
   className: string
   testId?: string
+  kind?: keyof typeof AI_LINE_TITLE
 }): React.JSX.Element {
   return (
     <p data-testid={testId} className={`m-0 text-xs text-fg-subtle ${className}`}>
       <span
-        title="AI summary, shown until you write a synopsis"
+        title={AI_LINE_TITLE[kind]}
         className="mr-1 rounded border border-line px-0.5 text-[10px] font-medium"
       >
         AI

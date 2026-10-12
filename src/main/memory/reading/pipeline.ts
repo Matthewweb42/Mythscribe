@@ -208,6 +208,11 @@ export type ReadingOutcome =
       inserted: { id: string; proof: ClaimProof }[]
       /** The model that read. */
       model: string
+      /**
+       * F-16.21: whether the reading wrote a card whose line differs from the one before (or the
+       * scene's first card): only then may plan links ask `planLinks.v2`.
+       */
+      lineMoved: boolean
     }
 
 /** A reading's running totals over its requests. */
@@ -1433,6 +1438,7 @@ export async function runReading(
     let readingId = ''
     const touched = new Set<string>()
     const inserted: { id: string; proof: ClaimProof }[] = []
+    let lineMoved = false
     db.transaction((tx) => {
       readingId = insertReading(
         tx,
@@ -1544,13 +1550,16 @@ export async function runReading(
             )
           )
         ].filter((hash) => hash !== '')
+        const before = getCard(tx, input.nodeId, draftId)?.lineHash ?? null
+        const line = capWords(merged.line, CARD_LINE_MAX_WORDS)
+        lineMoved = before !== sha256(line)
         upsertCard(
           tx,
           {
             nodeId: input.nodeId,
             draftId,
             readingId,
-            line: capWords(merged.line, CARD_LINE_MAX_WORDS),
+            line,
             gist: capWords(merged.gist, CARD_GIST_MAX_WORDS),
             fields: cardFields,
             present: cardPresent,
@@ -1598,7 +1607,8 @@ export async function runReading(
       recordIds: [...touched].sort(),
       names: [...waitingNames].sort(),
       inserted,
-      model: spend.model
+      model: spend.model,
+      lineMoved
     }
   } catch (err) {
     if (err instanceof LocalCutoff) {

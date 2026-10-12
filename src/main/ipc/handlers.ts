@@ -469,6 +469,9 @@ import { anchorsChanged, runAnchors } from '../memory/reading/anchors'
 import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
 import { settleOwnedNames } from '../memory/reading/waiting'
 import { claimInfo, sceneMemory, sheetMemory } from '../memory/reading/views'
+import { cardLines } from '../memory/reading/cardContext'
+import { keepPlanLink, unlinkPlanV2 } from '../memory/reading/planLinks'
+import { planLinkViewV2 } from '../memory/reading/planLinkStore'
 import { cardNotRight, restoreNotRight } from '../memory/reading/notRight'
 import {
   dropOwner,
@@ -1022,6 +1025,8 @@ export function registerHandlers({
     cancelRequest: (requestId) => void cancelInflight(requestId),
     changed: (payload) => emit(windows(), 'memory:changed', payload),
     questions: () => publishQuestions(),
+    // F-16.21: links applied after a reading live in `plan_link` (no scene metadata moved).
+    planLinksChanged: () => emit(windows(), 'planLinks:changed', { changedNodeIds: [] }),
     status: (status) => emit(windows(), 'memory:statusChanged', status),
     notices: (notices) => emit(windows(), 'memory:noticesChanged', notices),
     jobs: (status) => emit(windows(), 'jobs:changed', status),
@@ -1105,6 +1110,8 @@ export function registerHandlers({
   })
 
   const queuePlanLinks = (db: TreeDb): void => {
+    // F-16.21: v2 links plans after each reading (the reader service); v1's job never runs there.
+    if (manager.require().storyMemory === 'v2') return
     if (!isFeatureAllowed(getAiSettings(db), 'planLinks')) return
     const root = manuscriptRootId(db)
     if (root !== null) planQueue.touch('planLinks', root)
@@ -1151,7 +1158,11 @@ export function registerHandlers({
     }
   }
 
-  register('app:info', () => ({ version: app.getVersion(), platform: process.platform }))
+  register('app:info', () => ({
+    version: app.getVersion(),
+    platform: process.platform,
+    newProjectMemory: manager.newProjectMemory()
+  }))
 
   // AI-BILLING-SPEC M1: the trial or the license; a change arrives as `app:accessChanged`.
   register('app:getAccess', () => access.status())
@@ -1576,7 +1587,11 @@ export function registerHandlers({
     return stored
   })
 
-  register('planLinks:get', () => getPlanLinks(manager.require().connection.orm))
+  // F-16.21: in v2 the links applied automatically after a reading (`plan_link`).
+  register('planLinks:get', () => {
+    const db = manager.require().connection.orm
+    return memory() === 'v2' ? planLinkViewV2(db) : getPlanLinks(db)
+  })
 
   register('planLinks:run', ({ requestId }) => {
     const db = manager.require().connection.orm
@@ -1590,7 +1605,12 @@ export function registerHandlers({
     return null
   })
 
-  register('planLinks:unlink', ({ plan }) => unlinkPlan(manager.require().connection.orm, plan))
+  register('planLinks:unlink', ({ plan }) => {
+    const db = manager.require().connection.orm
+    return memory() === 'v2' ? unlinkPlanV2(db, plan, new Date()) : unlinkPlan(db, plan)
+  })
+
+  register('planLinks:keep', ({ planId }) => keepPlanLink(manager.require().connection.orm, planId))
 
   register('timeline:get', () => getProjectTimeline(manager.require().connection.orm))
 
@@ -3779,7 +3799,11 @@ export function registerHandlers({
     async ({ nodeId, requestId }): Promise<AiSuggestSynopsisResult> => {
       try {
         const db = manager.require().connection.orm
-        const result = await runSuggestSynopsis(db, requestDeps(db), { nodeId, requestId })
+        const result = await runSuggestSynopsis(db, requestDeps(db), {
+          nodeId,
+          requestId,
+          memory: memory()
+        })
         const { synopsis, truncated, usage, costUsd, cached, model } = result
         const proposal = createProposal(db, {
           feature: 'synopsis',
@@ -3925,7 +3949,13 @@ export function registerHandlers({
       try {
         const db = manager.require().connection.orm
         const deps = requestDeps(db)
-        const result = await runBetaReader(db, deps, { nodeId, note, regeneratedFrom, requestId })
+        const result = await runBetaReader(db, deps, {
+          nodeId,
+          note,
+          regeneratedFrom,
+          requestId,
+          memory: memory()
+        })
         const { items, usage, costUsd, cached, model } = result
         const proposal = createProposal(db, {
           feature: 'betaReader',
@@ -4191,8 +4221,6 @@ export function registerHandlers({
   // event and this reply agree. VALIDATION (not a manuscript document, too little text) comes
   // back through the error envelope; the expected AI failures come back as data, like the rest.
   register('ai:summarize', async ({ nodeId, requestId }): Promise<AiSummarizeResult> => {
-    // F-16.17 (plan P2a §3.7): nothing is summarised in a v2 project (slice 5 makes it v1-only).
-    if (memory() === 'v2') return { ...aiFailure('DISABLED', SUMMARIES_OFF_V2), requestId }
     try {
       const result = await queue.runNow('summary', nodeId, requestId)
       return {
@@ -4227,7 +4255,6 @@ export function registerHandlers({
   // `ai:summarize`'s failures; the runs gate again anyway.
   register('jobs:indexAll', (): JobsIndexAllResult => {
     const db = manager.require().connection.orm
-    if (memory() === 'v2') return aiFailure('DISABLED', SUMMARIES_OFF_V2)
     try {
       assertFeatureAllowed(getAiSettings(db), 'summary')
     } catch (err) {
@@ -5054,6 +5081,11 @@ export function registerHandlers({
 
   register('memory:scene', ({ nodeId }) => sceneMemory(manager.require().connection.orm, nodeId))
 
+  // F-16.20: the card lines the Outline and the cork board show where a scene has no synopsis.
+  register('memory:cardLines', () =>
+    Object.fromEntries(cardLines(manager.require().connection.orm))
+  )
+
   register('memory:claim', ({ claimId }) => claimInfo(manager.require().connection.orm, claimId))
 
   register('memory:sheet', ({ recordId, asOf }) =>
@@ -5392,10 +5424,6 @@ export function registerHandlers({
     manager.onBeforeClose(() => cloudSync.projectClosing())
   }
 }
-
-/** What `ai:summarize` and "Summarize all scenes" answer in a story memory v2 project. */
-const SUMMARIES_OFF_V2 =
-  'Scene summaries are off in this project: story memory reads the scenes instead.'
 
 /** Every name a record answers to, its own first (the lazy back-fill's names, F-16.17). */
 function namesOf(record: StoryRecordSummary): string[] {

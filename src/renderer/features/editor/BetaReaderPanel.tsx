@@ -7,9 +7,11 @@ import {
   type BetaReaderItem
 } from '@shared/betaReader'
 import { normalizeProposalNote, PROPOSAL_NOTE_MAX } from '@shared/proposal'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { AiWaitText } from '@renderer/features/ai/AiWaitText'
 import { AI_WAIT_PHRASES } from '@renderer/features/ai/aiWaitPhrases'
 import { RequestCost } from '@renderer/features/ai/RequestCost'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { useBetaReaderStore, type BetaReaderSession } from './betaReaderStore'
 import { HonestySelect } from './HonestySelect'
@@ -29,10 +31,14 @@ const skippedMessage = (n: number): string =>
   n === 1
     ? 'The reader skipped the first scene to fit the budget'
     : `The reader skipped the first ${n} scenes to fit the budget`
-const missingMessage = (n: number): string =>
-  n === 1
-    ? '1 earlier scene has no summary yet; turn on Scene summaries and open it so the reader can read it'
-    : `${n} earlier scenes have no summary yet; turn on Scene summaries and open them so the reader can read them`
+const missingMessage = (n: number, memory: StoryMemoryVersion): string =>
+  memory === 'v2'
+    ? n === 1
+      ? '1 earlier scene has not been read yet, so the reader skipped it; open it and leave it, or Rebuild memory'
+      : `${n} earlier scenes have not been read yet, so the reader skipped them; open and leave them, or Rebuild memory`
+    : n === 1
+      ? '1 earlier scene has no summary yet; turn on Scene summaries and open it so the reader can read it'
+      : `${n} earlier scenes have no summary yet; turn on Scene summaries and open them so the reader can read them`
 
 /**
  * The beta reader's read-through up to this scene (F-14.11), shown while the beta reader store
@@ -75,6 +81,7 @@ function Body({
   const stop = useBetaReaderStore((s) => s.stop)
   const close = useBetaReaderStore((s) => s.close)
   const regenerate = useBetaReaderStore((s) => s.regenerate)
+  const memory = useStoryMemory()
   const { result } = session
 
   if (session.status === 'pending') {
@@ -153,7 +160,7 @@ function Body({
       ) : null}
       {result.missing > 0 ? (
         <p data-testid="beta-reader-missing" className="m-0 text-xs text-warning">
-          {missingMessage(result.missing)}
+          {missingMessage(result.missing, memory)}
         </p>
       ) : null}
       {groups.length === 0 ? (
@@ -275,6 +282,11 @@ function Item({
           </p>
         </>
       )}
+      {item.ref !== undefined ? (
+        <span data-testid="beta-reader-ref" className="text-[0.65rem] text-fg-subtle">
+          {`Relates to ${session.scenes[item.ref - 1]?.title ?? `scene ${item.ref}`}`}
+        </span>
+      ) : null}
       <p className="m-0 text-xs text-fg-muted">{item.note}</p>
       {stale ? (
         <span data-testid="beta-reader-stale" className="text-xs text-warning">

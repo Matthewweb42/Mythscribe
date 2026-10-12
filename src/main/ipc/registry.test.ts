@@ -24,9 +24,16 @@ describe('createHandler', () => {
   })
 
   it('passes parsed input to the handler and wraps the result', async () => {
-    const handler = createHandler('app:info', async () => ({ version: '1.0.0', platform: 'linux' }))
+    const handler = createHandler('app:info', async () => ({
+      version: '1.0.0',
+      platform: 'linux',
+      newProjectMemory: 'v1' as const
+    }))
     const result = await handler(undefined)
-    expect(result).toEqual({ ok: true, data: { version: '1.0.0', platform: 'linux' } })
+    expect(result).toEqual({
+      ok: true,
+      data: { version: '1.0.0', platform: 'linux', newProjectMemory: 'v1' }
+    })
   })
 
   it('converts AppError into a typed error envelope', async () => {
@@ -79,7 +86,7 @@ describe('the story-memory gate (F-16.4)', () => {
     expect((await createHandler('record:list', fn, undefined, () => null)(undefined)).ok).toBe(true)
     const both = createHandler(
       'app:info',
-      async () => ({ version: '1', platform: 'linux' }),
+      async () => ({ version: '1', platform: 'linux', newProjectMemory: 'v1' as const }),
       undefined,
       () => 'v1'
     )

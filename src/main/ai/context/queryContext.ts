@@ -9,6 +9,7 @@ import {
   QUERY_SUMMARY_SCENES
 } from '@shared/query'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
+import { queryTerms } from '@shared/searchTerms'
 import type { StoryBibleEntity } from '@shared/storyBible'
 import type { StoredSceneSummary } from '@shared/summary'
 import { summariesFor } from '../../document/summaryStore'
@@ -19,6 +20,9 @@ import { listNodes, type TreeDb } from '../../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../../voice/profile'
 import { headTruncate } from './chatContext'
 import { storyBibleEntities } from './storyBible'
+
+/** F-5.7's search terms live in `@shared/searchTerms` (plan links reuse them, F-16.21). */
+export { queryTerms }
 
 /**
  * Candidate ranking for Story Intelligence (F-5.7). The author asks a question about the whole
@@ -38,90 +42,6 @@ import { storyBibleEntities } from './storyBible'
  * read from is boosted, so the passage behind the fact goes out in full and can be cited.
  */
 
-/** A token shorter than this is noise ("who", "did" are also stopwords below). */
-const TERM_MIN = 3
-
-/**
- * Words that match everything and mean nothing here: ordinary English function words plus the
- * five nouns every question about a manuscript contains. Kept small: a stopword that is also a
- * character's name would silently un-rank the scenes about them.
- */
-const STOPWORDS = new Set([
-  'the',
-  'and',
-  'but',
-  'for',
-  'not',
-  'are',
-  'was',
-  'were',
-  'been',
-  'being',
-  'have',
-  'has',
-  'had',
-  'does',
-  'did',
-  'doing',
-  'what',
-  'when',
-  'where',
-  'which',
-  'while',
-  'who',
-  'whom',
-  'whose',
-  'why',
-  'how',
-  'that',
-  'this',
-  'these',
-  'those',
-  'there',
-  'then',
-  'than',
-  'with',
-  'without',
-  'from',
-  'into',
-  'onto',
-  'over',
-  'about',
-  'after',
-  'before',
-  'her',
-  'hers',
-  'his',
-  'she',
-  'him',
-  'they',
-  'them',
-  'their',
-  'theirs',
-  'you',
-  'your',
-  'yours',
-  'its',
-  'any',
-  'all',
-  'can',
-  'could',
-  'would',
-  'should',
-  'will',
-  'just',
-  'ever',
-  'anything',
-  'something',
-  'scene',
-  'scenes',
-  'chapter',
-  'chapters',
-  'manuscript',
-  'story',
-  'book'
-])
-
 /** What a hit is worth, by where it landed; a `#name` the author typed outranks every guess. */
 export const QUERY_WEIGHTS = {
   title: 4,
@@ -137,20 +57,6 @@ export const QUERY_WEIGHTS = {
 /** A term repeated in the body is worth a little more, up to ten occurrences. */
 const BODY_OCCURRENCE_WEIGHT = 0.1
 const BODY_OCCURRENCE_MAX = 10
-
-/**
- * The question's search terms: lower-cased, split on everything that is not a letter or a
- * digit, tokens under `TERM_MIN` and the stopwords dropped, deduplicated in the order the
- * author wrote them.
- */
-export function queryTerms(question: string): string[] {
-  const terms: string[] = []
-  for (const token of question.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
-    if (token.length < TERM_MIN || STOPWORDS.has(token) || terms.includes(token)) continue
-    terms.push(token)
-  }
-  return terms
-}
 
 /** One document's searchable text, already gathered, so the scorer stays pure and testable. */
 export interface CandidateFields {

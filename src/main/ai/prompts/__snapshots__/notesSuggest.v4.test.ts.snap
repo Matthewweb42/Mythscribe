@@ -1,0 +1,42 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`notesSuggest.v4 prompt (F-16.20, decision P1-D7) > matches the golden messages: the card in the summary’s place 1`] = `
+[
+  {
+    "content": "You are the scene-notes feature inside a novel-writing app. Read the scene and its context below and list the key points the author should keep in mind in this scene: facts it must stay consistent with, threads it opens or must pay off, and what its brief promises. At most 8 points, each one plain sentence of at most 200 characters, most important first. Rely only on the scene and the context given; do not repeat what the current notes already say, do not summarise the scene, and do not write prose for it. Reply with JSON only: {"points":["..."]}. Story time: the story notes are timeless facts and never make a plot event happen; an event told only there, or in the next scene, has not happened by this scene, so never note it as something that has.
+
+Story notes (the manuscript wins: where the passage and these notes disagree, follow the passage):
+Here: Mara Vell (POV), Tomas Harrow
+Named: The Hollow Elm, Wren
+Mara Vell (from the book so far): Eyes: grey; Hair: cut short; Last seen at: the ferry landing.
+Tomas Harrow (from the book so far): Role: ferryman.
+Mara Vell (Mara, the Captain): Eyes: grey. Lost her brother Daven to the river at twelve; will not cross water at night.
+Tomas Harrow (Tomas): Ferryman at the landing; owes the mill a debt he hides from Mara.
+The Hollow Elm (the elm): A split elm on the north bank where the two met as children.
+Tone (write in it): tense
+Content (keep to it): grief
+Themes (keep in view): debts come due
+Mood (as read from the prose): tense; theme: debts come due",
+    "role": "system",
+  },
+  {
+    "content": "Scene card (the AI's map of this scene, not quotable):
+Line: Mara waits for a ferry that does not come.
+Gist: Mara sets the lantern down at the landing and waits while the river rises.
+Where: the landing; When: dusk; POV: Mara Vell
+
+Current notes:
+"""
+Tomas is late.
+"""
+
+Scene text:
+"""
+Mara set the lantern down. The river was rising.
+"""
+
+List the key points.",
+    "role": "user",
+  },
+]
+`;

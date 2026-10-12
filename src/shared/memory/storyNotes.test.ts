@@ -13,6 +13,7 @@ import {
   STORY_NOTES_ALIASES_MAX,
   STORY_NOTES_CONTINUITY_HEADING,
   STORY_NOTES_HEADING,
+  STORY_NOTES_VALUES_MARK,
   type StoryNotesFacts,
   type StoryNotesRecord
 } from './storyNotes'
@@ -247,6 +248,52 @@ describe('renderStoryNotes trims by priority (F-16.14)', () => {
         { continuity: true }
       )
     ).toBeNull()
+  })
+})
+
+describe('renderStoryNotes with the reading (F-16.20)', () => {
+  const read = facts({
+    values: {
+      'r-mara': ['Eyes: grey', 'Hair: cut short', 'Last seen at: the quay'],
+      'r-orrin': ['Role: ferryman'],
+      // A Named record's values are never sent: only Here records carry them.
+      'r-tomas': ['Role: ferryman']
+    },
+    mood: { mood: 'tense', theme: 'debts come due' }
+  })
+
+  it('puts the Here records’ values before the Pinned lines, the POV first, and the mood last', () => {
+    const block = renderStoryNotes(read, STORY_BIBLE_TOKEN_BUDGET) ?? ''
+    const lines = block.split('\n')
+    const maraValues = `Mara Vell ${STORY_NOTES_VALUES_MARK}: Eyes: grey; Hair: cut short; Last seen at: the quay.`
+    expect(lines.indexOf(maraValues)).toBe(3)
+    expect(lines[4]).toBe(`Orrin Dask ${STORY_NOTES_VALUES_MARK}: Role: ferryman.`)
+    expect(lines.findIndex((line) => line.startsWith('Mara Vell (Mara, the Captain):'))).toBe(5)
+    expect(block).not.toContain(`Tomas Harrow ${STORY_NOTES_VALUES_MARK}`)
+    expect(lines.at(-1)).toBe('Mood (as read from the prose): tense; theme: debts come due')
+  })
+
+  it('leaves the mood out on request, and values and mood out of the continuity block', () => {
+    expect(renderStoryNotes(read, STORY_BIBLE_TOKEN_BUDGET, { mood: false })).not.toContain('Mood')
+    const continuity = renderStoryNotes(read, STORY_BIBLE_TOKEN_BUDGET, { continuity: true }) ?? ''
+    expect(continuity).not.toContain(STORY_NOTES_VALUES_MARK)
+    expect(continuity).not.toContain('Mood')
+  })
+
+  it('cuts values from the end before the Pinned lines when room is short', () => {
+    const many = facts({
+      values: { 'r-mara': Array.from({ length: 40 }, (_, i) => `Detail ${i}: ${'x'.repeat(30)}`) }
+    })
+    const block = renderStoryNotes(many, STORY_BIBLE_GHOST_TOKEN_BUDGET) ?? ''
+    expect(estimateTokens(block)).toBeLessThanOrEqual(STORY_BIBLE_GHOST_TOKEN_BUDGET)
+    const values = block.split('\n').find((line) => line.includes(STORY_NOTES_VALUES_MARK)) ?? ''
+    expect(values).toContain('Detail 0:')
+    expect(values).not.toContain('Detail 39:')
+  })
+
+  it('says nothing new with no reading: no values line, no mood line', () => {
+    const block = renderStoryNotes(facts({ values: {}, mood: null }), STORY_BIBLE_TOKEN_BUDGET)
+    expect(block).toBe(renderStoryNotes(facts(), STORY_BIBLE_TOKEN_BUDGET))
   })
 })
 

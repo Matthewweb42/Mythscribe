@@ -11,6 +11,8 @@ let calls: [Channel, unknown][] = []
 let onChanged: ((payload: EventPayload<'planLinks:changed'>) => void) | null = null
 let run: Output<'planLinks:run'>
 
+const AI_LINK = { planId: 'sc-3', sceneId: 'sc-1', origin: 'code' as const, reason: '' }
+
 const SUGGESTION = {
   plan: { kind: 'scene' as const, nodeId: 'sc-5' },
   sceneId: 'sc-6',
@@ -29,8 +31,9 @@ beforeEach(() => {
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
       calls.push([channel, input])
       if (channel === 'planLinks:get') {
-        return { suggestions: [SUGGESTION], aiApplied: [] } as Output<C>
+        return { suggestions: [SUGGESTION], aiApplied: [], aiLinks: [AI_LINK] } as Output<C>
       }
+      if (channel === 'planLinks:keep') return { changedNodeIds: ['sc-3'] } as Output<C>
       if (channel === 'planLinks:run') return run as Output<C>
       if (channel === 'sceneMeta:get') {
         const { id } = input as Input<'sceneMeta:get'>
@@ -55,6 +58,16 @@ afterEach(() => {
 })
 
 describe('usePlanLinksStore (F-11.1d)', () => {
+  it('F-16.21: holds the automatic links, and Keep reloads the plan it made the author’s', async () => {
+    await usePlanLinksStore.getState().load()
+    expect(usePlanLinksStore.getState().aiLinks).toEqual([AI_LINK])
+    calls = []
+    await usePlanLinksStore.getState().keep('sc-3')
+    // The rewritten plan's metadata is reloaded only where something holds it (none here).
+    expect(calls.map(([channel]) => channel)).toEqual(['planLinks:keep', 'planLinks:get'])
+    expect(calls[0]?.[1]).toEqual({ planId: 'sc-3' })
+  })
+
   it('loads the suggestions and refetches when the background job says they changed', async () => {
     await usePlanLinksStore.getState().load()
     expect(usePlanLinksStore.getState().suggestions).toEqual([SUGGESTION])

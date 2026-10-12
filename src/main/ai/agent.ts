@@ -23,11 +23,12 @@ import {
   type QuerySheetRef,
   type QueryTurn
 } from '@shared/query'
+import { cardMapText } from '@shared/memory/cardText'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { STORY_MAP_TOKEN_BUDGET } from '@shared/storyTime'
 import { getSummary } from '../document/summaryStore'
-import { currentSummary } from './summarize'
+import { promptCard } from '../memory/reading/cardContext'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, documentText, type VoiceProfile } from '../voice/profile'
@@ -308,6 +309,7 @@ export async function runAgent(
   // F-5.23: the story map, with now at the open scene (or the latest written one).
   const map = buildStoryMap(db, project.time, {
     maxTokens: STORY_MAP_TOKEN_BUDGET,
+    memory: input.memory,
     refOf: project.refOf
   })
   const active = input.nodeId === null ? undefined : project.byId.get(input.nodeId)
@@ -322,10 +324,8 @@ export async function runAgent(
         level: active.hierarchyLevel ?? active.kind,
         synopsis: parseStoredSceneMeta(active.sceneMeta).synopsis.trim(),
         notes: headTruncate(notesText(active.notes, active.id), AGENT_NOTES_CHARS),
-        // F-16.17: v2 writes no summaries; one the text has moved past is left out.
-        summary:
-          (input.memory === 'v2' ? currentSummary(db, active.id) : getSummary(db, active.id))
-            ?.summary ?? '',
+        // F-16.20: in v2 the open scene's card (its line and gist, a map) in the summary's place.
+        summary: focusSummary(db, active.id, input.memory),
         beforeCaret: input.focus.beforeCaret.trim(),
         selection: input.focus.selection.trim()
       })
@@ -631,4 +631,11 @@ function finishAnswer(
     }
   }
   return { answer, query, changes, dropped, organise }
+}
+
+/** The open document's summary line in the agent's focus block: v1's stored summary, v2's card. */
+function focusSummary(db: TreeDb, nodeId: string, memory: StoryMemoryVersion): string {
+  if (memory === 'v1') return getSummary(db, nodeId)?.summary ?? ''
+  const card = promptCard(db, nodeId)
+  return card === null ? '' : cardMapText(card)
 }

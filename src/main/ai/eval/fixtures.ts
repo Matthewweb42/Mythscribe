@@ -66,6 +66,19 @@ import {
 } from '@shared/voice'
 import { voiceBlock } from '../../voice/voiceBlock'
 import { MEMORY_EVAL_CASES } from './memoryFixtures'
+import { CARD_GIST_MAX_WORDS, CARD_LINE_MAX_WORDS } from '@shared/memory/claims'
+import type { PromptCard } from '@shared/memory/cardText'
+import {
+  buildBetaReaderPromptV2,
+  type BuildBetaReaderPromptV2Input
+} from '../prompts/betaReader.v2'
+import { buildBetaReaderRegenPromptV2 } from '../prompts/betaReaderRegen.v2'
+import {
+  buildNotesSuggestPromptV4,
+  type BuildNotesSuggestPromptV4Input
+} from '../prompts/notesSuggest.v4'
+import { buildPlanLinksPromptV2, type BuildPlanLinksPromptV2Input } from '../prompts/planLinks.v2'
+import { buildSynopsisPromptV2, type BuildSynopsisPromptV2Input } from '../prompts/synopsis.v2'
 import type { AiMessage } from '../providers/types'
 import type { PromptVersion } from '../prompts/catalogue'
 import { buildBriefPrompt, BRIEF_PROMPT_VERSION } from '../prompts/brief.v1'
@@ -461,10 +474,13 @@ import {
   FIXTURE_CONTINUITY_NOTES,
   FIXTURE_GHOST_STORY_NOTES,
   FIXTURE_STORY_NOTES,
+  FIXTURE_STORY_NOTES_NO_MOOD,
   MAXED_CONTINUITY_NOTES,
   MAXED_GHOST_CONTINUITY_NOTES,
   MAXED_GHOST_STORY_NOTES,
+  MAXED_GHOST_STORY_NOTES_NO_MOOD,
   MAXED_STORY_NOTES,
+  MAXED_STORY_NOTES_NO_MOOD,
   STORY_NOTES_NOT_CANON_TEXT
 } from './storyNotesFixture'
 import { buildNotesSuggestPromptV2 } from '../prompts/notesSuggest.v2'
@@ -757,6 +773,8 @@ export interface EvalCase {
      * current scene last.
      */
     | { kind: 'betaReader'; texts: string[] }
+    /** F-16.20: `betaReader.v2`: every item quotes the current scene, never the map. */
+    | { kind: 'betaReaderV2'; sceneText: string; earlier: number }
     /**
      * A Story Intelligence answer (F-5.7): the answer must parse, every citation must name one
      * of the scenes sent in full, and its quote must be in that scene's text as sent.
@@ -837,6 +855,8 @@ export interface EvalCase {
     | { kind: 'storyTime'; forbidden: string[] }
     /** Plan links (F-11.1d): the answer must parse to `{ links }` naming only labels that were sent. */
     | { kind: 'planLinks'; plans: number; scenes: number }
+    /** F-16.21: `planLinks.v2` picks S1, S2 or none, read as the feature reads it. */
+    | { kind: 'planLinksPick' }
     /**
      * The To do check (F-9.16): the answer must parse to `{ items, resolved }`, every item of a
      * known type naming a scene label that was sent.
@@ -3931,6 +3951,253 @@ function reviewChatCaseV3(
 }
 
 /** The case names the Story notes checks look for (`prompts.eval.ts`). */
+// ---------------------------------------------------------------------------------------------
+// F-16.20, F-16.21 (story memory v2 only): the readers re-pointed from stored summaries to the
+// reader's cards, and the plan-link pick.
+
+/** The fixture scene's v2 card as the readers take it, and one at every cap. */
+const FIXTURE_CARD: PromptCard = {
+  line: 'Mara meets Tomas at the ferry landing and tells him she knows about the elm.',
+  gist:
+    'Mara waits at the ferry landing for Tomas, who wants the mill ledger back. She tells him ' +
+    'her brother only copied it, then that she knows he buried her brother under the elm. The ' +
+    'river is rising and the ferry does not come.',
+  where: 'the ferry landing',
+  when: 'dusk',
+  pov: 'Mara Vell',
+  mood: 'tense',
+  theme: 'debts come due'
+}
+const MAXED_CARD: PromptCard = {
+  line: Array.from({ length: CARD_LINE_MAX_WORDS }, () => 'wordy').join(' '),
+  gist: Array.from({ length: CARD_GIST_MAX_WORDS }, () => 'considerable').join(' '),
+  where: 'w'.repeat(80),
+  when: 't'.repeat(80),
+  pov: 'P'.repeat(80),
+  mood: 'm'.repeat(40),
+  theme: 'h'.repeat(40)
+}
+
+function synopsisCaseV2(name: string, note: string, input: BuildSynopsisPromptV2Input): EvalCase {
+  const { sceneText } = fitSceneToBudget(
+    input.sceneText,
+    inputBudget('synopsis'),
+    (cut) => buildSynopsisPromptV2({ ...input, sceneText: cut }).messages,
+    { chars: SCENE_SUGGEST_CHAR_BUDGET, min: SCENE_SUGGEST_TEXT_MIN }
+  )
+  const built = buildSynopsisPromptV2({ ...input, sceneText })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'synopsis' }
+  }
+}
+
+function notesSuggestCaseV4(
+  name: string,
+  note: string,
+  input: BuildNotesSuggestPromptV4Input
+): EvalCase {
+  const { sceneText } = fitSceneToBudget(
+    input.sceneText,
+    inputBudget('notesSuggest'),
+    (cut) => buildNotesSuggestPromptV4({ ...input, sceneText: cut }).messages,
+    { chars: SCENE_SUGGEST_CHAR_BUDGET, min: SCENE_SUGGEST_TEXT_MIN }
+  )
+  const built = buildNotesSuggestPromptV4({ ...input, sceneText })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'notesSuggest' }
+  }
+}
+
+/** The beta reader's map of the scenes before the fixture scene: their card gists. */
+const betaReaderMap: BuildBetaReaderPromptV2Input['scenes'] = [
+  {
+    title: 'Chapter 1 \u203a The ledger',
+    gist:
+      'Mara finds the ledger her brother copied and learns the mill has been paying Tomas for ' +
+      'a debt that was never hers. She hides the copy under the floor.'
+  },
+  {
+    title: 'Chapter 1 \u203a The north pasture',
+    gist: 'Tomas refuses to talk while the river is up and sends Mara back to the landing.'
+  }
+]
+const betaReaderFreshV2: BuildBetaReaderPromptV2Input = {
+  scenes: [],
+  current: { title: 'Chapter 1 \u203a The ferry landing', text: FIXTURE_PASSAGE },
+  honesty: DEFAULT_HONESTY
+}
+const betaReaderFullV2: BuildBetaReaderPromptV2Input = {
+  ...betaReaderFreshV2,
+  scenes: betaReaderMap,
+  current: { title: 'Chapter 2 \u203a The ferry landing', text: FIXTURE_PASSAGE }
+}
+/** Every cap at its limit: a 20,000-character scene, 20 earlier gists at their cap, long titles. */
+const betaReaderMaxedV2: BuildBetaReaderPromptV2Input = {
+  scenes: Array.from({ length: 20 }, (_, index) => ({
+    title: `${'C'.repeat(40)} \u203a ${'S'.repeat(40)} ${index}`,
+    gist: MAXED_CARD.gist
+  })),
+  current: {
+    title: 'T'.repeat(90),
+    text: `${FIXTURE_PASSAGE.repeat(20).slice(0, BETA_READER_SCENE_CHAR_BUDGET)}\u2026`
+  },
+  honesty: 'brutal'
+}
+
+function betaReaderCaseV2(
+  name: string,
+  note: string,
+  input: BuildBetaReaderPromptV2Input,
+  regenNote: string | null | undefined
+): EvalCase {
+  const built =
+    regenNote === undefined
+      ? buildBetaReaderPromptV2(input)
+      : buildBetaReaderRegenPromptV2({ ...input, note: regenNote })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'betaReaderV2', sceneText: input.current.text, earlier: input.scenes.length }
+  }
+}
+
+function planLinksCaseV2(name: string, note: string, input: BuildPlanLinksPromptV2Input): EvalCase {
+  const built = buildPlanLinksPromptV2(input)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'planLinksPick' }
+  }
+}
+
+const CARD_READER_CASES: EvalCase[] = [
+  betaReaderCaseV2(
+    'fresh',
+    'the first scene of a manuscript: nothing read before it, the default honesty line',
+    betaReaderFreshV2,
+    undefined
+  ),
+  betaReaderCaseV2(
+    'full',
+    'two earlier scenes as their card gists (a map, never quoted), then the scene in full',
+    betaReaderFullV2,
+    undefined
+  ),
+  betaReaderCaseV2(
+    'maxed',
+    'every cap at its limit: a 20,000-character scene, 20 earlier gists at their cap, the brutal honesty line',
+    betaReaderMaxedV2,
+    undefined
+  ),
+  betaReaderCaseV2(
+    'full note',
+    'the full case regenerated with an author note at the length limit',
+    betaReaderFullV2,
+    'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  betaReaderCaseV2(
+    'maxed note',
+    'the maxed case regenerated with an author note at the length limit',
+    betaReaderMaxedV2,
+    'n'.repeat(PROPOSAL_NOTE_MAX)
+  ),
+  synopsisCaseV2('fresh', 'the fixture scene before its first reading: no card yet', {
+    sceneText: FIXTURE_PASSAGE,
+    card: null
+  }),
+  synopsisCaseV2('full', 'the fixture scene with its card (line, gist, place, time and POV)', {
+    sceneText: FIXTURE_PASSAGE,
+    card: FIXTURE_CARD
+  }),
+  synopsisCaseV2(
+    'maxed',
+    'the worst input as the fit leaves it: a scene at the character budget and a card at every cap',
+    { sceneText: FIXTURE_PASSAGE.repeat(60), card: MAXED_CARD }
+  ),
+  notesSuggestCaseV4(
+    'notes',
+    'the fixture scene with its card, brief, notes, the Story notes at 400, and a focus',
+    {
+      sceneText: FIXTURE_PASSAGE,
+      card: FIXTURE_CARD,
+      brief: BRIEF_BLOCK,
+      notes: NOTES,
+      storyNotes: FIXTURE_STORY_NOTES,
+      instruction: 'What Tomas knows about the ledger.'
+    }
+  ),
+  notesSuggestCaseV4(
+    'notes 150',
+    "the same with a crowded scene's Story notes cut to the 150-token budget",
+    {
+      sceneText: FIXTURE_PASSAGE,
+      card: FIXTURE_CARD,
+      brief: BRIEF_BLOCK,
+      notes: NOTES,
+      storyNotes: MAXED_GHOST_STORY_NOTES,
+      instruction: 'What Tomas knows about the ledger.'
+    }
+  ),
+  notesSuggestCaseV4(
+    'maxed',
+    'the worst input as the fit leaves it: every block at its cap, the Story notes filling theirs',
+    {
+      sceneText: FIXTURE_PASSAGE.repeat(60),
+      card: MAXED_CARD,
+      brief: MAXED_BRIEF_BLOCK,
+      notes: `${FIXTURE_PASSAGE.repeat(2).slice(0, NOTES_SUGGEST_CURRENT_CHARS)}\u2026`,
+      storyNotes: MAXED_STORY_NOTES,
+      instruction: 'i'.repeat(NOTES_SUGGEST_INSTRUCTION_MAX)
+    }
+  ),
+  planLinksCaseV2(
+    'fixture',
+    'one planned scene against an ambiguous best two: both drafted scenes walk Mara to the quay',
+    {
+      plan: { title: 'Mara at the quay', synopsis: 'She waits at the quay for the ferry at dusk.' },
+      scenes: [
+        {
+          title: 'The quay',
+          line: 'Mara walks to the quay and waits for the ferry.',
+          gist: 'Mara walks down to the quay at dusk and waits; the ferry is late.'
+        },
+        {
+          title: 'Harbour',
+          line: 'Mara walks to the quay with Tomas.',
+          gist: 'Mara and Tomas walk the quay at noon, counting boats.'
+        }
+      ]
+    }
+  ),
+  planLinksCaseV2(
+    'maxed',
+    'every cap: a plan title and synopsis at their caps, two scenes with titles, lines and gists at theirs',
+    {
+      plan: { title: 'P'.repeat(80), synopsis: 's'.repeat(PLAN_LINKS_TEXT_MAX) },
+      scenes: [
+        { title: 'T'.repeat(80), line: MAXED_CARD.line, gist: MAXED_CARD.gist },
+        { title: 'U'.repeat(80), line: MAXED_CARD.line, gist: MAXED_CARD.gist }
+      ]
+    }
+  )
+]
+
 export const STORY_NOTES_CASE = 'notes'
 export const STORY_NOTES_GHOST_CASE = 'notes 150'
 
@@ -6093,25 +6360,25 @@ export const EVAL_CASES: EvalCase[] = [
   rewriteCaseV5(
     STORY_NOTES_CASE,
     "the v4 full case with the Story notes at 400 in place of the bible and steer, and the scene's mood (Ideas and Not canon text left out)",
-    rewriteV5(rewriteFullV3, FIXTURE_STORY_NOTES, FIXTURE_MOOD),
+    rewriteV5(rewriteFullV3, FIXTURE_STORY_NOTES_NO_MOOD, FIXTURE_MOOD),
     null
   ),
   rewriteCaseV5(
     STORY_NOTES_GHOST_CASE,
     "the full case with a crowded scene's Story notes cut to the 150-token budget",
-    rewriteV5(rewriteFullV3, MAXED_GHOST_STORY_NOTES, FIXTURE_MOOD),
+    rewriteV5(rewriteFullV3, MAXED_GHOST_STORY_NOTES_NO_MOOD, FIXTURE_MOOD),
     null
   ),
   rewriteCaseV5(
     'maxed',
     'every cap at its limit, the Story notes filling their budget',
-    rewriteV5(rewriteMaxedV3, MAXED_STORY_NOTES, MAXED_MOOD),
+    rewriteV5(rewriteMaxedV3, MAXED_STORY_NOTES_NO_MOOD, MAXED_MOOD),
     null
   ),
   rewriteCaseV5(
     'maxed both',
     'the maxed case regenerated with an author note and a tense violation',
-    rewriteV5(rewriteMaxedV3, MAXED_STORY_NOTES, MAXED_MOOD),
+    rewriteV5(rewriteMaxedV3, MAXED_STORY_NOTES_NO_MOOD, MAXED_MOOD),
     { note: 'n'.repeat(PROPOSAL_NOTE_MAX), violation: VIOLATION }
   ),
   chatCaseV6(
@@ -6344,5 +6611,7 @@ export const EVAL_CASES: EvalCase[] = [
     maxedChunk()
   ),
   // F-16.17: the story-memory reader and checker, from the test book.
-  ...MEMORY_EVAL_CASES
+  ...MEMORY_EVAL_CASES,
+  // F-16.20, F-16.21: the summary readers re-pointed to the v2 card, and the plan-link pick.
+  ...CARD_READER_CASES
 ]

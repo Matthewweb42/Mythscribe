@@ -40,8 +40,8 @@ import { THREAD_KIND, THREAD_STATUS_LABEL, deriveThreads, type ThreadView } from
 import { TODO_KINDS, TODO_KIND_NOUN, TodoKind, type TodoItem } from '@shared/todo'
 import type { NodeRow } from '../db/schema'
 import { getSummary } from '../document/summaryStore'
-import type { StoredSceneSummary } from '@shared/summary'
-import { currentSummary } from './summarize'
+import { CARD_MAP_NOTE, renderToolCard } from '@shared/memory/cardText'
+import { promptCard } from '../memory/reading/cardContext'
 import { listCategories } from '../entity/categoryStore'
 import { clearOptions, type ClearWanted } from '../knowledge/bibleClear'
 import { isEmptySheet } from '../organise/organiseProject'
@@ -532,9 +532,14 @@ function cards(project: AgentProject, idsArg: unknown, nameArg: unknown): ToolOu
   if (nodeIds.length === 0) return { step, result: 'Those ids name no scene; read the outline.' }
   const blocks = nodeIds.map((nodeId) => {
     const head = sceneHead(project, nodeId)
+    // F-16.20: a v2 project reads its v2 cards (the reader's map), never v1's frozen rows.
+    if (project.memory === 'v2') {
+      const card = promptCard(project.db, nodeId)
+      return card === null ? `${head}\nNo card yet; read the scene.` : renderToolCard(head, card)
+    }
     const card = sceneCardFor(project.db, nodeId)
     if (card !== null) return renderCard(head, card)
-    const summary = summaryOf(project, nodeId)?.summary.trim() ?? ''
+    const summary = getSummary(project.db, nodeId)?.summary.trim() ?? ''
     return `${head}\n${summary === '' ? 'No card yet; read the scene.' : headTruncate(summary, 300)}`
   })
   const tail = more > 0 ? `\n…and ${more} more scenes; name their ids for their cards.` : ''
@@ -744,13 +749,9 @@ function readNotes(project: AgentProject, ref: unknown): ToolOutcome {
 }
 
 /**
- * A scene's stored summary as the chat may use it: in v2 only while it still describes the text
- * (v2 writes no summaries, so a row there is frozen; `currentSummary`).
+ * `read_summary`: v1's stored summary and key points; in v2 (F-16.20) the scene's card gist,
+ * labelled as the map it is ("a map; read the scene to quote it").
  */
-function summaryOf(project: AgentProject, nodeId: string): StoredSceneSummary | null {
-  return project.memory === 'v2' ? currentSummary(project.db, nodeId) : getSummary(project.db, nodeId)
-}
-
 function readSummary(project: AgentProject, ref: unknown): ToolOutcome {
   const found = documentFor(project, ref)
   if ('error' in found) {
@@ -758,10 +759,16 @@ function readSummary(project: AgentProject, ref: unknown): ToolOutcome {
   }
   const { row, title } = found
   const step: AgentStep = { tool: 'read_summary', label: `Reading the summary of ${title}…` }
-  const summary = summaryOf(project, row.id)
+  const when = positionNote(project.time, row.id)
+  if (project.memory === 'v2') {
+    const card = promptCard(project.db, row.id)
+    if (card === null) return { step, result: `${title} has no card yet; read the scene.` }
+    const gist = card.gist.trim() || card.line.trim()
+    return { step, result: cap(`${title} (${when}), ${CARD_MAP_NOTE}:\n${gist}`) }
+  }
+  const summary = getSummary(project.db, row.id)
   if (summary === null) return { step, result: `${title} has no summary yet; read the scene.` }
   const points = summary.keyPoints.map((point) => `- ${point}`).join('\n')
-  const when = positionNote(project.time, row.id)
   return {
     step,
     result: cap(

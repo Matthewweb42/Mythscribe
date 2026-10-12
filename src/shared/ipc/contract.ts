@@ -1041,7 +1041,15 @@ const ResearchAddResult = z.object({
 export const contract = {
   'app:info': {
     input: z.undefined(),
-    output: z.object({ version: z.string(), platform: z.string() })
+    output: z.object({
+      version: z.string(),
+      platform: z.string(),
+      /**
+       * F-16.20: the story memory a new project gets (`v2` only under the development override),
+       * so the new-project wizard describes what that memory does.
+       */
+      newProjectMemory: StoryMemoryVersion
+    })
   },
   /** AI-BILLING-SPEC M1: the trial, the license, or read-only after the trial (main owns the clock). */
   'app:getAccess': { input: z.undefined(), output: AppAccess },
@@ -1222,7 +1230,10 @@ export const contract = {
   'structure:get': { input: z.undefined(), output: ProjectStructure },
   /** Replaces the project's structure template (F-11.1b); an unknown template is refused with VALIDATION. */
   'structure:set': { input: ProjectStructure, output: ProjectStructure },
-  /** The plan-link suggestions that still stand and the links the AI applied itself (F-11.1d). */
+  /**
+   * The plan-link suggestions that still stand and the links the AI applied itself (F-11.1d); in
+   * story memory v2 (F-16.21) the links applied automatically (`aiLinks`) and no suggestions.
+   */
   'planLinks:get': { input: z.undefined(), output: PlanLinkView },
   /**
    * Runs the plan-link job now (F-11.1d, the outline's Find links): gated on `planLinks`; at
@@ -1237,9 +1248,20 @@ export const contract = {
   },
   /** Drops one suggestion by its `planLinkKey` and never proposes the pair again. */
   'planLinks:dismiss': { input: z.object({ key: z.string() }), output: z.null() },
-  /** Unlinks a plan (a planned scene's `fulfilledBy`, or a beat's scene); the pair is not proposed again. */
+  /**
+   * Unlinks a plan (a planned scene's `fulfilledBy`, or a beat's scene); the pair is not proposed
+   * again. In v2 (F-16.21) an automatic link leaves `plan_link` too, and the pair goes to Dismissed.
+   */
   'planLinks:unlink': {
     input: z.object({ plan: PlanRef }),
+    output: z.object({ changedNodeIds: z.array(z.string()) })
+  },
+  /**
+   * F-16.21 (v2): *Keep*: a planned scene's automatic link becomes the author's (`fulfilledBy`);
+   * NOT_FOUND when it has none. Answers the node whose metadata it rewrote.
+   */
+  'planLinks:keep': {
+    input: z.object({ planId: z.string() }),
     output: z.object({ changedNodeIds: z.array(z.string()) })
   },
   /** The project's timeline events in story order (F-11.2); a missing or unreadable row answers with none. */
@@ -3408,6 +3430,14 @@ export const contract = {
   },
   /** F-16.18: what the reading shows for one scene (Here, Mentioned, True now, its claims). */
   'memory:scene': { input: z.object({ nodeId: z.string() }), output: SceneMemory },
+  /**
+   * F-16.20 (v2): the active draft's card lines by scene, the AI's one-line map of each, which the
+   * Outline and the cork board show in grey where a scene has no synopsis.
+   */
+  'memory:cardLines': {
+    input: z.undefined(),
+    output: z.record(z.string(), z.string())
+  },
   /** F-16.18: ⓘ on an AI line: its quote, scene, proof and reading; null once it is gone. */
   'memory:claim': { input: z.object({ claimId: z.string() }), output: ClaimInfo.nullable() },
   /**

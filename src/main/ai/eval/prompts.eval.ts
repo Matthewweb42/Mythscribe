@@ -17,6 +17,8 @@ import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { renderCostRegistry } from './costRegistry'
 import { WHAT_NEXT_DIRECTIONS } from '@shared/whatNext'
 import { parseAgentReply } from '../agent'
+import { parseBetaReaderAnswerV2 } from '../betaReader'
+import { parsePlanLinksV2Answer } from '../../memory/reading/planLinks'
 import { checkChatFidelity, postProcessChatText } from '../chat'
 import { postProcessGhostText } from '../ghostText'
 import { buildOpenAiProvider } from '../providers/openai'
@@ -114,7 +116,9 @@ describe('prompt eval harness (F-5.12)', () => {
       'critiqueRegen.v4',
       'editPass.v3',
       'whatNext.v4',
-      'notesSuggest.v3'
+      'notesSuggest.v3',
+      // F-16.20: the card in the summary's place, the same Story notes.
+      'notesSuggest.v4'
     ])
     const primary = notesVersions.filter((version) => !version.includes('Regen'))
     for (const version of primary) {
@@ -206,6 +210,26 @@ function scoreBetaReader(texts: string[], answer: string): LiveResult['verdict']
   return uncited === 0
     ? { kind: 'json', ok: true, problem: null }
     : { kind: 'json', ok: false, problem: `${uncited} of ${result.data.items.length} uncited` }
+}
+
+/**
+ * A v2 beta-reader report (F-16.20) scores on the rule `betaReader.v2` turns on: it must parse, and
+ * every item must quote the current scene (never the map of gists), checked by the feature's own
+ * parser (`parseBetaReaderAnswerV2`).
+ */
+function scoreBetaReaderV2(
+  sceneText: string,
+  earlier: number,
+  answer: string
+): LiveResult['verdict'] {
+  try {
+    const { items, dropped } = parseBetaReaderAnswerV2(answer, sceneText, earlier)
+    return dropped === 0
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `${dropped} of ${items.length + dropped} dropped` }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not { items: [{ quote }] }' }
+  }
 }
 
 const QueryAnswer = z.object({
@@ -976,6 +1000,26 @@ describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
           ...base,
           answer: reply.text,
           verdict: scoreStoryTime(c.scoring.forbidden, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'betaReaderV2') {
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict: scoreBetaReaderV2(c.scoring.sceneText, c.scoring.earlier, reply.text)
+        })
+        continue
+      }
+      if (c.scoring.kind === 'planLinksPick') {
+        const pick = parsePlanLinksV2Answer(reply.text)
+        results.push({
+          ...base,
+          answer: reply.text,
+          verdict:
+            pick === null
+              ? { kind: 'json', ok: false, problem: 'not { pick: S1 | S2 | none }' }
+              : { kind: 'json', ok: true, problem: null }
         })
         continue
       }

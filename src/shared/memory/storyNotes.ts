@@ -13,8 +13,11 @@ import { markedParagraphs } from './pageMarks'
  * one line per record that has Pinned canon text (the Here records first), then the scene's tone,
  * content and theme labels (`labelSteerParts`; custom labels never). Never Ideas, never a Not
  * canon paragraph (the switch-over's "Filed by AI earlier" block included), never an absence: a
- * scene with no POV has no POV line, nobody named means no Named line. P2a adds live values and
- * the card's mood. `renderStoryNotes` is pure; `src/main/memory/storyNotes.ts` gathers the facts.
+ * scene with no POV has no POV line, nobody named means no Named line. P2a (F-16.20, decision
+ * P2a-D11: data inside the existing v2 versions) adds what the book itself states about each Here
+ * record (`values`: its live fixed and lasting values, narration in `now` mode, and the transient
+ * values this scene states; never speech as fact, never an absence) and the card's mood (`mood`).
+ * `renderStoryNotes` is pure; `src/main/memory/storyNotes.ts` gathers the facts.
  */
 
 /**
@@ -57,7 +60,18 @@ export interface StoryNotesFacts {
   named: readonly StoryNotesRecord[]
   /** The scene's labels, in label order. */
   labels: readonly Pick<Label, 'name' | 'kind'>[]
+  /**
+   * F-16.20: what the book states about the Here records as of this scene, by record id, each
+   * `Label: value` in sheet order (fixed, lasting, then this scene's transient values). Absent or
+   * empty: nothing read yet.
+   */
+  values?: Readonly<Record<string, readonly string[]>>
+  /** F-16.20: the scene card's mood and theme as the reader read them, or null with no card. */
+  mood?: { mood: string; theme: string } | null
 }
+
+/** The line a Here record's values open with ("Mara Vell (from the book so far): …"). */
+export const STORY_NOTES_VALUES_MARK = '(from the book so far)'
 
 /** A value on one line and within `STORY_BIBLE_VALUE_MAX` characters, closed as a sentence. */
 function noteSentence(text: string): string {
@@ -132,16 +146,44 @@ function cutToFit(prefix: string, text: string, room: number): string | null {
 export interface StoryNotesOptions {
   /**
    * The continuity pass's block (`editPass.v3`): `STORY_NOTES_CONTINUITY_HEADING`, no label lines
-   * (tone and content are not facts to check against), and null when no record has a Pinned line.
+   * (tone and content are not facts to check against), no values read from the prose and no mood
+   * (the pass checks the passage against the author's notes, not against itself), and null when no
+   * record has a Pinned line.
    */
   continuity?: boolean
+  /**
+   * F-16.20: false leaves the Mood line out (rewrite and edit passes carry the mood in their own
+   * slot, `buildSceneMood`). Default true.
+   */
+  mood?: boolean
+}
+
+/** `Mood (as read from the prose): …; theme: …`, or null for neither. */
+function moodLine(mood: { mood: string; theme: string } | null | undefined): string | null {
+  if (mood === null || mood === undefined) return null
+  const parts = [
+    mood.mood.trim() === '' ? '' : mood.mood.trim(),
+    mood.theme.trim() === '' ? '' : `theme: ${mood.theme.trim()}`
+  ].filter((part) => part !== '')
+  return parts.length === 0 ? null : `Mood (as read from the prose): ${parts.join('; ')}`
+}
+
+/** `Name (from the book so far): a; b; c.` with as many values as fit in `room`, or null. */
+function fitValues(name: string, values: readonly string[], room: number): string | null {
+  for (let keep = values.length; keep >= 1; keep -= 1) {
+    const line = `${name} ${STORY_NOTES_VALUES_MARK}: ${values.slice(0, keep).join('; ')}.`
+    if (estimateTokens(`${line}\n`) <= room) return line
+  }
+  return null
 }
 
 /**
  * Renders the block within `maxTokens` estimated tokens (`STORY_BIBLE_TOKEN_BUDGET`, or
  * `STORY_BIBLE_GHOST_TOKEN_BUDGET` for ghost text), or null when it would say nothing (nobody here
  * or named, and no steering label). The heading, Here, Named and label lines are kept (a list that
- * would not fit is cut to "… and N more"). The record lines are trimmed by priority (CLAUDE.md,
+ * would not fit is cut to "… and N more"), then the Mood line when it fits (F-16.20). What the
+ * book states about the Here records comes next (F-16.20: before their Pinned lines, the POV first,
+ * a record's values cut from the end to fit). The record lines are trimmed by priority (CLAUDE.md,
  * token efficiency rule 8): each Here record's first Pinned paragraph is admitted first (the POV,
  * then *also here*; one that does not fit whole is cut at a word, and then no Named line is
  * admitted), then the rest of their paragraphs while they fit, then the Named records' lines in
@@ -159,7 +201,8 @@ export function renderStoryNotes(
   const hereIds = new Set(here.map((record) => record.id))
   const named = unique(facts.named).filter((record) => !hereIds.has(record.id))
   const steer = continuity ? [] : labelSteerParts(facts.labels)
-  if (here.length === 0 && named.length === 0 && steer.length === 0) return null
+  const mood = continuity || options.mood === false ? null : moodLine(facts.mood)
+  if (here.length === 0 && named.length === 0 && steer.length === 0 && mood === null) return null
 
   const heading = continuity ? STORY_NOTES_CONTINUITY_HEADING : STORY_NOTES_HEADING
   let used = estimateTokens(heading)
@@ -185,6 +228,17 @@ export function renderStoryNotes(
             maxTokens - used
           )
         )
+  const moodKept =
+    mood === null || estimateTokens(`${mood}\n`) > maxTokens - used ? null : keep(mood)
+  // F-16.20: what the book states about the Here records, before their Pinned lines.
+  const valueLines = continuity
+    ? []
+    : here.flatMap((record) => {
+        const values = facts.values?.[record.id] ?? []
+        if (values.length === 0) return []
+        const line = keep(fitValues(record.name, values, maxTokens - used))
+        return line === null ? [] : [line]
+      })
 
   /** Each record's line as admitted so far, by id. */
   const lines = new Map<string, string>()
@@ -250,7 +304,7 @@ export function renderStoryNotes(
   })
   if (continuity && recordLines.length === 0) return null
 
-  return [heading, hereLine, namedLine, ...recordLines, ...labelLines]
+  return [heading, hereLine, namedLine, ...valueLines, ...recordLines, ...labelLines, moodKept]
     .filter((line): line is string => line !== null)
     .join('\n')
 }

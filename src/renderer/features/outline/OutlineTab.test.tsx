@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Channel, Input, Output, Tag } from '@shared/ipc/contract'
+import type { Channel, Input, Output, ProjectInfo, Tag } from '@shared/ipc/contract'
 import { EMPTY_SCENE_META, type SceneMeta } from '@shared/sceneMeta'
 import { UNAVAILABLE_SUMMARY, type SceneSummaryState } from '@shared/summary'
 import { resetSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
@@ -14,6 +14,9 @@ import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStor
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
+import { resetMemoryStore, useMemoryStore } from '@renderer/features/memory/memoryStore'
+import { useProjectStore } from '@renderer/features/project/projectStore'
+import { resetDismissedStore } from '@renderer/features/thisScene/dismissedStore'
 import { OutlineTab } from './OutlineTab'
 import { resetOutlineViewStore } from './outlineViewStore'
 import { resetPlanLinksStore } from './planLinksStore'
@@ -81,7 +84,7 @@ const LINKS: Output<'documentTag:listAll'> = [
 ]
 
 let calls: [Channel, unknown][] = []
-let planView: Output<'planLinks:get'> = { suggestions: [], aiApplied: [] }
+let planView: Output<'planLinks:get'> = { suggestions: [], aiApplied: [], aiLinks: [] }
 
 function install(): void {
   calls = []
@@ -104,6 +107,8 @@ function install(): void {
         return { changedNodeIds: [] } as Output<C>
       }
       if (channel === 'planLinks:dismiss') return null as Output<C>
+      if (channel === 'planLinks:keep') return { changedNodeIds: [] } as Output<C>
+      if (channel === 'dismissed:list') return { items: [], count: 0 } as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}
@@ -128,8 +133,10 @@ beforeEach(() => {
   resetTagStore()
   resetDocumentTagStore()
   links = LINKS
-  planView = { suggestions: [], aiApplied: [] }
+  planView = { suggestions: [], aiApplied: [], aiLinks: [] }
   resetPlanLinksStore()
+  // v1 unless a test opens a v2 project (set before anything renders).
+  useProjectStore.setState({ current: null })
   useTreeStore.setState({ ...buildIndex(treeFixture), selectedId: null, loaded: true })
   useDialogStore.setState({ modals: [], toasts: [] })
   install()
@@ -140,7 +147,71 @@ afterEach(() => {
   resetSummaryStore()
   resetPendingSaves()
   resetPlanLinksStore()
+  resetMemoryStore()
+  resetDismissedStore()
   setIpcClient(null)
+})
+
+const V2_PROJECT: ProjectInfo = {
+  id: '0123456789',
+  name: 'Ridge',
+  format: 'novel',
+  path: '/books/Ridge.mythscribe',
+  created: 'c',
+  modified: 'm',
+  lastOpened: 'l',
+  schemaVersion: 1,
+  storyMemory: 'v2'
+}
+
+describe('OutlineTab in story memory v2 (F-16.20, F-16.21)', () => {
+  beforeEach(() => {
+    resetMemoryStore()
+    resetDismissedStore()
+    useProjectStore.setState({ current: V2_PROJECT })
+    useMemoryStore.setState({ cardLines: { 'sc-2': 'Tomas will not row tonight.' } })
+    planView = {
+      suggestions: [],
+      aiApplied: [],
+      aiLinks: [{ planId: 'sc-3', sceneId: 'sc-1', origin: 'ai', reason: 'The same river.' }]
+    }
+  })
+
+  it('shows the card line in grey where there is no synopsis, and reads no summary', async () => {
+    render(<OutlineTab />)
+    const line = await within(row('Scene 2')).findByTestId('outline-card-line')
+    expect(line).toHaveTextContent('Tomas will not row tonight.')
+    expect(within(row('Scene 2')).queryByTestId('outline-ai-summary')).toBeNull()
+    expect(calls.some(([channel]) => channel === 'summary:get')).toBe(false)
+    expect(screen.queryByTestId('outline-find-links')).toBeNull()
+  })
+
+  it('marks an automatic link with Keep and Unlink, and a plan with no link Not yet drafted', async () => {
+    render(<OutlineTab />)
+    const linked = await within(row('Scene 3')).findByTestId('outline-fulfilled')
+    expect(linked).toHaveTextContent('Fulfilled by Scene 1')
+    expect(linked).toHaveTextContent('AI')
+    expect(linked).toHaveTextContent('The same river.')
+    expect(within(row('Scene 1')).getByTestId('outline-fulfils')).toHaveTextContent(
+      'Fulfils plan Scene 3'
+    )
+    expect(within(row('Scene 5')).getByTestId('outline-not-drafted')).toHaveTextContent(
+      'Not yet drafted'
+    )
+    // A drafted scene is never "not yet drafted".
+    expect(within(row('Scene 1')).queryByTestId('outline-not-drafted')).toBeNull()
+    await userEvent.click(within(linked).getByRole('button', { name: 'Keep' }))
+    await waitFor(() => expect(calls).toContainEqual(['planLinks:keep', { planId: 'sc-3' }]))
+    await userEvent.click(within(linked).getByRole('button', { name: 'Unlink' }))
+    await waitFor(() =>
+      expect(calls).toContainEqual([
+        'planLinks:unlink',
+        { plan: { kind: 'scene', nodeId: 'sc-3' } }
+      ])
+    )
+    // The unlinked pair is a Dismissed row: the list is read again.
+    await waitFor(() => expect(calls.some(([channel]) => channel === 'dismissed:list')).toBe(true))
+  })
 })
 
 describe('OutlineTab, planned and written (F-11.1d)', () => {
@@ -188,7 +259,7 @@ describe('OutlineTab, planned and written (F-11.1d)', () => {
 
   it('shows a confirmed link both ways, with Unlink, and the AI mark on one the AI applied', async () => {
     stored['sc-3'] = meta({ fulfilledBy: 'sc-2' })
-    planView = { suggestions: [], aiApplied: ['scene:sc-3>sc-2'] }
+    planView = { suggestions: [], aiApplied: ['scene:sc-3>sc-2'], aiLinks: [] }
     try {
       render(<OutlineTab />)
       const fulfilled = await within(row('Scene 3')).findByTestId('outline-fulfilled')
@@ -219,7 +290,8 @@ describe('OutlineTab, planned and written (F-11.1d)', () => {
           reason: ''
         }
       ],
-      aiApplied: []
+      aiApplied: [],
+      aiLinks: []
     }
     render(<OutlineTab />)
     const planned = await within(row('Scene 5')).findByRole('group', { name: 'Suggested link' })

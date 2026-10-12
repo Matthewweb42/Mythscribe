@@ -101,7 +101,8 @@ export function getPlanLinks(db: TreeDb): PlanLinkView {
   const board = planBoard(db)
   return {
     suggestions: state.suggestions.filter((link) => stillValid(board, link)),
-    aiApplied: state.aiApplied
+    aiApplied: state.aiApplied,
+    aiLinks: []
   }
 }
 
@@ -409,34 +410,41 @@ export function dropAiPlanLinks(db: TreeDb): string[] {
 }
 
 /**
- * The author unlinks a plan: a planned scene loses its `fulfilledBy`, a beat leaves the scene it
- * sits on. The pair is remembered as dismissed, so the job does not link it again. Answers the
- * node it rewrote (none when the plan was not linked).
+ * A plan's link taken off the scene metadata: a planned scene loses its `fulfilledBy`, a beat
+ * leaves the scene it sits on. Answers the node it rewrote and the scene the plan was linked to
+ * (both null when it was not linked). Shared by v1's Unlink and v2's (F-16.21).
  */
-export function unlinkPlan(db: TreeDb, plan: PlanRef): { changedNodeIds: string[] } {
+export function clearPlanMeta(
+  db: TreeDb,
+  plan: PlanRef
+): { changed: string | null; sceneId: string | null } {
   const board = planBoard(db)
-  let changed: string | null = null
-  let sceneId: string | null = null
   if (plan.kind === 'scene') {
     const meta = board.metaOf.get(plan.nodeId)
-    if (meta?.fulfilledBy !== undefined) {
-      sceneId = meta.fulfilledBy
-      const next: SceneMeta = { ...meta }
-      delete next.fulfilledBy
-      setSceneMeta(db, plan.nodeId, next)
-      changed = plan.nodeId
-    }
-  } else {
-    for (const [id, meta] of board.metaOf) {
-      if (meta.beats[plan.template] !== plan.beatId) continue
-      const beats = { ...meta.beats }
-      delete beats[plan.template]
-      setSceneMeta(db, id, { ...meta, beats })
-      changed = id
-      sceneId = id
-      break
-    }
+    if (meta?.fulfilledBy === undefined) return { changed: null, sceneId: null }
+    const sceneId = meta.fulfilledBy
+    const next: SceneMeta = { ...meta }
+    delete next.fulfilledBy
+    setSceneMeta(db, plan.nodeId, next)
+    return { changed: plan.nodeId, sceneId }
   }
+  for (const [id, meta] of board.metaOf) {
+    if (meta.beats[plan.template] !== plan.beatId) continue
+    const beats = { ...meta.beats }
+    delete beats[plan.template]
+    setSceneMeta(db, id, { ...meta, beats })
+    return { changed: id, sceneId: id }
+  }
+  return { changed: null, sceneId: null }
+}
+
+/**
+ * The author unlinks a plan (story memory v1): a planned scene loses its `fulfilledBy`, a beat
+ * leaves the scene it sits on. The pair is remembered as dismissed, so the job does not link it
+ * again. Answers the node it rewrote (none when the plan was not linked).
+ */
+export function unlinkPlan(db: TreeDb, plan: PlanRef): { changedNodeIds: string[] } {
+  const { changed, sceneId } = clearPlanMeta(db, plan)
   if (sceneId !== null) {
     const key = planLinkKey({ plan, sceneId })
     const state = getPlanLinkState(db)

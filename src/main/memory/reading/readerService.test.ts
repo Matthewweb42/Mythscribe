@@ -38,6 +38,7 @@ import { upsertCard } from './cardStore'
 import { runAnchors } from './anchors'
 import { cardNotRight, dismissClaimsNotRight, restoreNotRight } from './notRight'
 import { sceneMemory } from './views'
+import { livePlanLinks } from './planLinkStore'
 import { reading as readingTable } from '../../db/schema'
 
 let tmp: string
@@ -48,6 +49,7 @@ let chapter: string
 let settings: AiSettings
 let cloud: MemoryCloudState
 let changed: { nodeIds: string[]; recordIds: string[] }[]
+let planLinkPushes: number[] = []
 let statuses: MemoryStatus[]
 let noticeLists: MemoryNotice[][]
 let services: ReaderService[]
@@ -87,6 +89,7 @@ function service(ai: FakeAi, over: Partial<ReaderServiceDeps> = {}): ReaderServi
     now: () => NOW,
     changed: (payload) => void changed.push(payload),
     questions: () => undefined,
+    planLinksChanged: () => void planLinkPushes.push(1),
     status: (status) => void statuses.push(status),
     notices: (notices) => void noticeLists.push(notices),
     jobs: () => undefined,
@@ -202,6 +205,7 @@ beforeEach(() => {
   settings = { ...defaultAiSettings(), dial: 1 }
   cloud = defaultMemoryCloudState()
   changed = []
+  planLinkPushes = []
   statuses = []
   noticeLists = []
   services = []
@@ -228,6 +232,41 @@ describe('Read now (F-16.16, F-16.17)', () => {
     })
     expect(ai.requests).toHaveLength(sent)
     expect(reader.status().lastRead?.nodeId).toBe(scene)
+  })
+
+  it('F-16.21: links an open plan after a reading that wrote a card, and says so', async () => {
+    const plan = createNode(db, 'novel', {
+      parentId: chapter,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'Boats at dawn'
+    }).id
+    const ai = fakeAi(
+      (request: CompletionRequest) => {
+        const base = answerReading(request)
+        if (requestKind(request) !== 'reader') return base
+        const user = request.messages.at(-1)?.content ?? ''
+        if (!user.endsWith('Card: yes')) return base
+        const answer = JSON.parse(base.text) as Record<string, unknown>
+        return {
+          text: JSON.stringify({
+            ...answer,
+            card: {
+              line: 'Mara watches the boats go out at dawn.',
+              gist: 'At dawn Mara watches the boats go out.',
+              present: []
+            }
+          })
+        }
+      },
+      { now: NOW }
+    )
+    const reader = service(ai)
+    expect(await reader.readNow(scene, 'read-plan')).toMatchObject({ ok: true, read: true })
+    expect(planLinkPushes).toHaveLength(1)
+    expect(livePlanLinks(db)).toEqual([
+      { planId: plan, sceneId: scene, origin: 'code', reason: '' }
+    ])
   })
 
   it('answers Use AI off, or the reading switch off, as a DISABLED failure without sending', async () => {

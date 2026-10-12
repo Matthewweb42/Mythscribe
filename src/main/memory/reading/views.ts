@@ -12,7 +12,9 @@ import { gateSentences, readSetOf, unreadSentences } from '@shared/memory/gate'
 import { locateInText } from '@shared/memory/quote'
 import { holdingCard, type HeldCard } from '@shared/memory/reproof'
 import { sceneRefs } from '@shared/memory/sceneRef'
-import { slotLabel } from '@shared/memory/slots'
+import { slotLabel, type Slot } from '@shared/memory/slots'
+import type { StoryRecordSummary } from '@shared/memory/records'
+import type { SceneDetails } from '@shared/memory/sceneDetails'
 import { compareTyped, type TypedNames } from '@shared/memory/typedVsText'
 import type {
   ClaimInfo,
@@ -190,34 +192,17 @@ export function heldCard(
   )
 }
 
-/** Finished sentences of the scene the active draft has not read yet. */
-function unreadCount(db: TreeDb, nodeId: string, draftId: string | null): number {
-  const row = manuscriptDocuments(db).find((document) => document.id === nodeId)
-  if (row === undefined) return 0
-  const texts = passageParagraphs(documentJson(row) ?? EMPTY_DOC).map((paragraph) => paragraph.text)
-  const names = nameScanShared(db).index
-  const current = gateSentences(texts, { caretPara: null, names })
-  const read = draftId === null ? null : getSceneRead(db, nodeId, draftId)
-  if (read === null) return current.length
-  return unreadSentences(current, readSetOf(read.entries, names)).length
-}
-
 /**
- * The This scene panel's memory of one scene (P2a-D21): Here (the POV, with the text's POV over
- * a typed one that differs; characters on the page with a verified quote; "+ also here"),
- * Mentioned (named for certain, not Here), True now for those records as of this scene, the
- * typed details against the card (decision 4), the last reading, and what is unread. Only what of
- * the card still stands on the text counts (`heldCard`): a POV, place or character whose quote's
- * sentence was edited since is shown dimmed in the card and never overrides the typed details.
+ * Here (P2a-D21, decision 4): the POV first (the card's verified POV, standing on the text, over a
+ * typed one that differs, which rides along as `typedPov`; else the typed POV), then the characters
+ * on the page with a verified quote that stands, then *+ also here*; each record once, and only
+ * records that exist. The This scene panel and the Story notes block (F-16.20) read the same list.
  */
-export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
-  const draftId = currentDraftId(db)
-  const reading = readingOrder(db)
-  const details = storedSceneDetails(db, nodeId)
-  const card = draftId === null ? null : getCard(db, nodeId, draftId)
-  const held = card === null ? null : heldCard(db, card, reading.order.has(nodeId))
-  const records = new Map(listRecords(db).map((each) => [each.id, each]))
-
+export function hereChips(
+  details: SceneDetails,
+  held: HeldCard | null,
+  records: ReadonlyMap<string, Pick<StoryRecordSummary, 'kind'>>
+): HereChip[] {
   const here: HereChip[] = []
   const add = (chip: HereChip): void => {
     if (records.has(chip.recordId) && !here.some((each) => each.recordId === chip.recordId)) {
@@ -252,6 +237,79 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
   for (const id of details.alsoHere) {
     add({ recordId: id, why: 'alsoHere', quote: null, p: null, typedPov: null })
   }
+  return here
+}
+
+/**
+ * What the book states about records as of a scene, as the Story notes block carries it (F-16.20,
+ * design §2.6): per record, its fixed and lasting values that are live (narration in `now` mode,
+ * the sentence unchanged since it was read), then the transient values this scene itself states
+ * ("Last seen at: the quay"), each `Label: value`. Never dialogue, thought, rumour, memory or a
+ * dream as fact, never a stale line, never an absence: a record with nothing stated has no entry.
+ */
+export function hereValues(
+  db: TreeDb,
+  reading: ReadingOrder,
+  nodeId: string,
+  recordIds: readonly string[]
+): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  const draftId = currentDraftId(db)
+  if (draftId === null || recordIds.length === 0 || !reading.at.has(nodeId)) return out
+  const names = new Map(listRecords(db).map((each) => [each.id, each.name]))
+  const labelled = (slot: Slot, value: string, objectId: string | null): string => {
+    const object = objectId === null ? undefined : names.get(objectId)
+    return `${slotLabel(slot)}: ${value}${object === undefined ? '' : ` (${object})`}`
+  }
+  for (const recordId of recordIds) {
+    const claims = asOfClaims(db, recordClaims(db, recordId, draftId))
+    if (claims.length === 0) continue
+    const sheet = sheetAsOf(claims, reading, nodeId)
+    const fixed = sheet.fixed
+      .filter((line) => !line.value.stale)
+      .map((line) => labelled(line.slot, line.value.value, line.objectId))
+    const now = trueNow(claims, reading, nodeId).filter((line) => !line.stale)
+    const lasting = now
+      .filter((line) => line.kind === 'since')
+      .map((line) => labelled(line.slot, line.value, line.objectId))
+    const here = now
+      .filter((line) => line.kind === 'lastStated' && line.nodeId === nodeId)
+      .map((line) => labelled(line.slot, line.value, line.objectId))
+    const values = [...fixed, ...lasting, ...here]
+    if (values.length > 0) out.set(recordId, values)
+  }
+  return out
+}
+
+/** Finished sentences of the scene the active draft has not read yet. */
+function unreadCount(db: TreeDb, nodeId: string, draftId: string | null): number {
+  const row = manuscriptDocuments(db).find((document) => document.id === nodeId)
+  if (row === undefined) return 0
+  const texts = passageParagraphs(documentJson(row) ?? EMPTY_DOC).map((paragraph) => paragraph.text)
+  const names = nameScanShared(db).index
+  const current = gateSentences(texts, { caretPara: null, names })
+  const read = draftId === null ? null : getSceneRead(db, nodeId, draftId)
+  if (read === null) return current.length
+  return unreadSentences(current, readSetOf(read.entries, names)).length
+}
+
+/**
+ * The This scene panel's memory of one scene (P2a-D21): Here (the POV, with the text's POV over
+ * a typed one that differs; characters on the page with a verified quote; "+ also here"),
+ * Mentioned (named for certain, not Here), True now for those records as of this scene, the
+ * typed details against the card (decision 4), the last reading, and what is unread. Only what of
+ * the card still stands on the text counts (`heldCard`): a POV, place or character whose quote's
+ * sentence was edited since is shown dimmed in the card and never overrides the typed details.
+ */
+export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
+  const draftId = currentDraftId(db)
+  const reading = readingOrder(db)
+  const details = storedSceneDetails(db, nodeId)
+  const card = draftId === null ? null : getCard(db, nodeId, draftId)
+  const held = card === null ? null : heldCard(db, card, reading.order.has(nodeId))
+  const records = new Map(listRecords(db).map((each) => [each.id, each]))
+
+  const here = hereChips(details, held, records)
 
   const counts = new Map<string, number>()
   for (const mention of listNameMentions(db, nodeId)) {

@@ -41,6 +41,7 @@ beforeEach(() => {
     },
     'memory:status': () => memoryStatusFixture({ todayUsd: 0.01 }),
     'memory:notices': () => [],
+    'memory:cardLines': () => ({}),
     'memory:notRight': () => ({
       ok: true,
       outcome: 'dismissed',

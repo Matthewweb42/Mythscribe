@@ -172,6 +172,9 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
         // F-16.18: a scene nothing has read yet (the AI-off form of the panel).
         case 'memory:scene':
           return sceneMemoryFixture((input as Input<'memory:scene'>).nodeId) as Output<C>
+        // F-16.20: the card lines the memory store reads with the status and the notices.
+        case 'memory:cardLines':
+          return {} as Output<C>
         default:
           throw new Error(`unexpected ${channel}`)
       }

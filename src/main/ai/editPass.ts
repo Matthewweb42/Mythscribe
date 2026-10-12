@@ -419,7 +419,10 @@ export async function editScene(
     return empty
   }
   // F-5.6: the scene's mood and theme from its last reading, for the passes that reshape prose.
-  const mood = EDIT_PASS_MOOD_TYPES.includes(input.type) ? buildSceneMood(db, input.nodeId) : null
+  // F-16.20: in v2 the mood is the v2 card's.
+  const mood = EDIT_PASS_MOOD_TYPES.includes(input.type)
+    ? buildSceneMood(db, input.nodeId, input.memory)
+    : null
 
   const prompted = (
     piece: string,

@@ -54,7 +54,13 @@ export const BetaReaderItem = z.object({
   category: BetaReaderCategory,
   scene: z.number().int().min(1),
   quote: z.string().min(1).max(BETA_READER_QUOTE_MAX),
-  note: z.string().min(1).max(BETA_READER_NOTE_MAX)
+  note: z.string().min(1).max(BETA_READER_NOTE_MAX),
+  /**
+   * F-16.20 (story memory v2, `betaReader.v2`): the earlier scene the item relates to, by its
+   * number in the read-through, when the reader named one. The quote is always the current
+   * scene's there (gists are a map, never quoted). Absent in v1.
+   */
+  ref: z.number().int().min(1).optional()
 })
 export type BetaReaderItem = z.infer<typeof BetaReaderItem>
 export const BetaReaderItems = z.array(BetaReaderItem).max(BETA_READER_MAX_ITEMS)

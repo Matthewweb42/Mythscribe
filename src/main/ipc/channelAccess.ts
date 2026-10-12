@@ -60,6 +60,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'planLinks:confirm': 'write',
   'planLinks:dismiss': 'write',
   'planLinks:unlink': 'write',
+  // F-16.21 (v2): Keep makes an automatic link the author's.
+  'planLinks:keep': 'write',
   'timeline:get': 'read',
   'timeline:set': 'write',
   'focusSettings:get': 'read',
@@ -374,6 +376,7 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   // F-16.17: Read now runs the reader; the scene's memory and ⓘ only read.
   'memory:readNow': 'ai',
   'memory:scene': 'read',
+  'memory:cardLines': 'read',
   'memory:claim': 'read',
   'memory:sheet': 'read',
   'memory:notRight': 'ai',
@@ -459,10 +462,13 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'structure:get': 'any',
   'structure:set': 'any',
   'planLinks:get': 'any',
-  'planLinks:run': 'any',
-  'planLinks:confirm': 'any',
-  'planLinks:dismiss': 'any',
+  // F-16.21: v2 applies links itself after a reading; the v1 job, its confirm and its dismiss
+  // never run there (plan P2a §5.2). Get and Unlink branch by memory; Keep is v2's.
+  'planLinks:run': 'v1',
+  'planLinks:confirm': 'v1',
+  'planLinks:dismiss': 'v1',
   'planLinks:unlink': 'any',
+  'planLinks:keep': 'v2',
   'timeline:get': 'any',
   'timeline:set': 'any',
   'focusSettings:get': 'any',
@@ -673,12 +679,15 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'continuity:settle': 'v1',
   'ai:betaReader': 'any',
   'ai:draftBrief': 'any',
-  'summary:get': 'any',
-  'ai:summarize': 'any',
+  // F-16.20 (plan P2a §3.7, slice 5): v2 writes no summaries and no longer reads them anywhere
+  // (the card replaced the summary block, the Outline and the cork board read card lines).
+  'summary:get': 'v1',
+  'ai:summarize': 'v1',
   'jobs:status': 'any',
   'jobs:cancel': 'any',
   'jobs:resume': 'any',
-  'jobs:indexAll': 'any',
+  // "Summarize all scenes": v1's; v2's queue is the reader's (Rebuild memory).
+  'jobs:indexAll': 'v1',
   'conversations:get': 'any',
   'conversations:set': 'any',
   'proposal:settle': 'any',
@@ -770,6 +779,7 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'research:updateFiledLine': 'v2',
   'memory:readNow': 'v2',
   'memory:scene': 'v2',
+  'memory:cardLines': 'v2',
   'memory:claim': 'v2',
   'memory:sheet': 'v2',
   'memory:notRight': 'v2',

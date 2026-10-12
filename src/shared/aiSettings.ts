@@ -354,8 +354,19 @@ export const STORY_MAP_SENDS =
  */
 export const STORY_NOTES_SENDS =
   'the Story notes block (the records here in the scene and the ones it names, with their names ' +
-  'and nicknames and their Pinned lines, never a line marked Not canon and never Ideas, and the ' +
-  "scene's tone, content and theme labels)"
+  'and nicknames and their Pinned lines, never a line marked Not canon and never Ideas; what ' +
+  'your prose has stated about the records here up to this scene, read from the narration and ' +
+  "never from speech or a dream; the scene's tone, content and theme labels; and the scene's " +
+  'mood as the AI read it)'
+
+/**
+ * F-16.20: the story map in a story memory v2 project, where each scene's line is its card line
+ * (the AI's one-line map of the scene) in place of the first sentence of a stored summary.
+ */
+export const STORY_MAP_SENDS_V2 =
+  'the story map (the chapter and scene titles in reading order, whether each scene is planned, ' +
+  "drafted, or revised, each scene's card line (the AI's one-line map of it, read from your " +
+  'prose), and which scene you are at)'
 
 export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   tags: {
@@ -433,7 +444,7 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sendsV2:
       'The last 6,000 characters of the scene, or of the text up to the end of the passage you ' +
       "selected, its brief plus the previous scene's reader-knows-after line and the next " +
-      `scene's goal, ${STORY_NOTES_SENDS}, and ${STORY_MAP_SENDS}, only when you click What ` +
+      `scene's goal, ${STORY_NOTES_SENDS}, and ${STORY_MAP_SENDS_V2}, only when you click What ` +
       'should come next?.',
     minDial: 1
   },
@@ -450,6 +461,10 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       "The scene's text (the first 12,000 characters) and its stored summary and key points, " +
       'only when you ask for a suggested synopsis.',
+    sendsV2:
+      "The scene's text (the first 12,000 characters) and its card (the AI's map of the scene, " +
+      'read from your prose: one line, a few sentences, and the place, time and point of view it ' +
+      'found there), only when you ask for a suggested synopsis.',
     minDial: 1
   },
   notesSuggest: {
@@ -460,8 +475,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "reader-knows-after line and the next scene's goal, " +
       `${STORY_BIBLE_SENDS}, and what you asked to focus on, only when you ask for suggested notes.`,
     sendsV2:
-      "The scene's text (the first 12,000 characters), its stored summary and key points, its " +
-      "notes (the first 1,500 characters), its brief plus the previous scene's " +
+      "The scene's text (the first 12,000 characters), its card (the AI's map of the scene, " +
+      'read from your prose: one line, a few sentences, and the place, time and point of view it ' +
+      "found there), its notes (the first 1,500 characters), its brief plus the previous scene's " +
       "reader-knows-after line and the next scene's goal, " +
       `${STORY_NOTES_SENDS}, and what you asked to focus on, only when you ask for suggested notes.`,
     minDial: 1
@@ -504,6 +520,12 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'of every manuscript scene before it, in reading order, so a first-time reader can report ' +
       'what they know, believe, and expect. No voice profile, no story bible: the reader knows ' +
       'only what is on the page.',
+    sendsV2:
+      "The scene's text (the first 20,000 characters) and the card gists of the manuscript " +
+      "scenes before it (a few sentences each, the AI's map of each scene, read from your prose; " +
+      'never Idea scenes or scenes left out of compile), in reading order, so a first-time reader ' +
+      'can report what they know, believe, and expect. No voice profile, no notes: the reader ' +
+      'knows only what is on the page.',
     minDial: 1
   },
   brief: {
@@ -599,13 +621,14 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'profile (stylometric rules, learned style notes, and up to 3 exemplar passages) and ' +
       'your author rules and banned phrases go too.',
     sendsV2:
-      `Your message, the recent turns of the conversation, ${STORY_MAP_SENDS}, the open ` +
+      `Your message, the recent turns of the conversation, ${STORY_MAP_SENDS_V2}, the open ` +
       "document's title, synopsis, " +
-      'notes (the first 1,500 characters), and stored summary, up to 1,500 characters before ' +
+      "notes (the first 1,500 characters), and card (the AI's map of it), up to 1,500 characters before " +
       'the caret and 2,000 of the selected passage, and then, one lookup at a time (at most 6 ' +
       'per message), what the assistant asks to read: a record (its names, its Pinned lines ' +
       'except those marked Not canon, its Ideas labelled as ideas, the scenes it is the point ' +
-      'of view of with their typed place and time, and where the book names it), scene cards, ' +
+      'of view of with their typed place and time, where the book names it, and the card of the ' +
+      'last scene that names it), scene cards, ' +
       'matching paragraphs of the manuscript, scene notes, Pinned, Ideas and Research ' +
       'documents (each labelled canon, plan or idea), the outline of titles and word counts, ' +
       'up to 6,000 characters of a document per read, notes, and your to-dos. When it may ' +
@@ -636,6 +659,11 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "hints of your structure template's empty beats, and the titles and stored summaries (the " +
       'first 240 characters) of your written scenes, to find which written scene fulfils which ' +
       'plan, in the background after a scene summary changes or when you ask the outline to find links.',
+    sendsV2:
+      'Most plan links are matched on your machine and send nothing. Only when a scene was just ' +
+      'read and two drafted scenes both look like one planned scene: that plan’s title and ' +
+      'synopsis (the first 240 characters) and the two scenes’ titles, card lines and card gists ' +
+      "(the AI's map of each, read from your prose), at most once per reading.",
     minDial: 1
   },
   sheetSync: {

@@ -9,6 +9,7 @@ import {
   type ElectronApplication,
   type Page
 } from '@playwright/test'
+import type { AiSettings } from '../src/shared/aiSettings'
 import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
 import type { ResearchDoc } from '../src/shared/research'
 import type { TiptapNodeT } from '../src/shared/tiptap'
@@ -58,6 +59,14 @@ import { caretToEnd, clickIntoEditor } from './support'
  * Needs a look asks once (*Keep mine* clears it); Settings › AI shows the reading switch and the
  * idle minutes; *Rebuild memory* goes from its price to the summary grouped by sheet; an edit to
  * the quay sentence dims its True now line ("re-checking after you pause") with no reading.
+ *
+ * P2a slice 5 (F-16.20, F-16.21), the same project: the Outline shows Scene 1's card line in grey
+ * where a synopsis would be; a planned scene ("Mara at the quay") and a drafted one whose card
+ * matches it as closely as Scene 1's does: the drafted scene's reading asks `planLinks.v2` once,
+ * the link is applied with the AI mark and the fake's reason, and *Unlink* sends the pair to
+ * Dismissed and leaves *Not yet drafted*; a synopsis suggestion sends `synopsis.v2` with the card
+ * and no stored summary; the beta reader sends the earlier scenes as card gists under its map
+ * heading.
  *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
@@ -110,6 +119,18 @@ const READER_SENTINEL = 'You are the story-memory reader inside a novel-writing 
 /** F-5.6: `summary.v5`'s opening (version 1's, byte for byte); never sent in v2 (P2a slice 3). */
 const SUMMARY_SENTINEL = 'You are the scene-summary feature inside a novel-writing app.'
 const VERIFY_SENTINEL = 'You are the fact checker inside a novel-writing app.'
+/** F-16.20: `synopsis.v2`'s opening (`SYNOPSIS_V2_SENTINEL`), which tells it from `synopsis.v1`. */
+const SYNOPSIS_V2_SENTINEL =
+  'You are the synopsis feature inside a novel-writing app. Read the scene below, with the card'
+/** F-16.20: the heading `betaReader.v2` puts over the earlier scenes' gists. */
+const BETA_READER_MAP_HEADING = 'A map of the earlier scenes (not quotable'
+/** The beta reader's opening (both versions). */
+const BETA_READER_OPENING = 'You are the beta-reader feature inside a novel-writing app.'
+/** F-16.21: `planLinks.v2`'s opening; the fake picks the first of the two scenes. */
+const PLAN_LINKS_V2_SENTINEL =
+  'You are the plan-link feature inside a novel-writing app, choosing which drafted scene'
+/** What the fake's plan-link pick says (F-16.21); the Outline shows it beside the AI mark. */
+const PLAN_LINK_WHY = 'She waits at the quay there.'
 /** The paragraph slice P2a types; the fake reads Mara's eyes and where she walked from it. */
 const READ_PARAGRAPH = "Mara's eyes were grey. She walked to the quay."
 
@@ -117,7 +138,7 @@ const READ_PARAGRAPH = "Mara's eyes were grey. She walked to the quay."
  * The fake reader (F-16.17): in the numbered paragraphs it finds `Mara's eyes were <colour>.` and
  * `She walked to <place>.`, and answers those two facts about Mara Vell (by her roster id) with
  * their paragraph numbers, and, when the card is due, a card whose place is the quay with Mara on
- * the page.
+ * the page. Its line is "Mara walks to the quay." unless a paragraph has Mara waiting somewhere.
  */
 function readerAnswer(messages: { content: string }[]): string {
   const system = messages[0]?.content ?? ''
@@ -165,11 +186,14 @@ function readerAnswer(messages: { content: string }[]): string {
     }
   }
   const eyesItem = claims.find((claim) => claim.s === 'eyes')
+  // P2a slice 5: a scene where Mara waits somewhere gets its own line, so a plan can match it.
+  const waited = /Mara waited at (the \w+)/.exec(user)
+  const line = waited === null ? 'Mara walks to the quay.' : `Mara waits at ${waited[1]}.`
   const card = user.endsWith('Card: yes')
     ? {
         card: {
-          line: 'Mara walks to the quay.',
-          gist: 'Mara walks to the quay.',
+          line,
+          gist: line,
           where: place,
           when: null,
           year: null,
@@ -206,7 +230,8 @@ let provider: http.Server
 
 /**
  * A fake OpenAI-compatible provider on loopback: a filing request (its sentinel) gets
- * `FILING_ANSWER`, a reader or checker request (F-16.17) the fake reader's or checker's answer, any
+ * `FILING_ANSWER`, a reader or checker request (F-16.17) the fake reader's or checker's answer, a
+ * plan-link pick (F-16.21) the first scene, a v2 synopsis one sentence, a beta read no items, any
  * other JSON request an empty object, a plain one `GHOST_ANSWER` (streamed when asked);
  * `GET /models/<id>` echoes the id.
  */
@@ -239,9 +264,15 @@ function startFakeProvider(): Promise<string> {
           ? readerAnswer(request.messages)
           : system.startsWith(VERIFY_SENTINEL)
             ? verifyAnswer(request.messages)
-            : json
-              ? '{}'
-              : GHOST_ANSWER
+            : system.startsWith(PLAN_LINKS_V2_SENTINEL)
+              ? JSON.stringify({ pick: 'S1', why: PLAN_LINK_WHY })
+              : system.startsWith(SYNOPSIS_V2_SENTINEL)
+                ? JSON.stringify({ synopsis: 'Mara walks to the quay and waits.' })
+                : system.startsWith(BETA_READER_OPENING)
+                  ? JSON.stringify({ items: [] })
+                  : json
+                    ? '{}'
+                    : GHOST_ANSWER
       const usage = { prompt_tokens: 400, completion_tokens: 40, total_tokens: 440 }
       const base = { id: 'chatcmpl-fake', created: 0, model: request.model }
       if (request.stream === true) {
@@ -1344,6 +1375,165 @@ test('story memory v2: Here, True now, sheets, cards and Rebuild memory (P2a sli
   await expect(quayLine).toHaveAttribute('data-stale', 'true', { timeout: 15_000 })
   await expect(quayLine).toContainText('re-checking after you pause')
   expect(providerBodies.filter(isReader)).toHaveLength(readsBeforeDim)
+})
+
+test('story memory v2: card lines, plan links, synopsis and beta reader on cards (P2a slice 5)', async () => {
+  // Continues with Use AI on, the own key at the fake, and Scene 1 read (its card line is "Mara
+  // walks to the quay."). Plan links, synopsis and the beta reader are switched on for it.
+  const isPlanPick = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(PLAN_LINKS_V2_SENTINEL) === true
+  const settings = await invoke<AiSettings>('aiSettings:get', undefined)
+  await invoke('aiSettings:set', {
+    ...settings,
+    features: { ...settings.features, planLinks: true, synopsis: true, betaReader: true }
+  })
+  const scenes = (await invoke<TreeNode[]>('tree:list', undefined)).filter(
+    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
+  )
+  const first = scenes[0]
+  if (!first) throw new Error('no scene in the seed')
+
+  // F-16.21: a planned scene (no words) with a synopsis, then a drafted scene whose card matches
+  // it as closely as Scene 1's does, both made in the book tree; the second's text is typed.
+  await showSection('Manuscript')
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  await bookTree.getByRole('treeitem', { name: 'Two', exact: true }).click()
+  const renameBox = page.getByRole('textbox', { name: 'Rename' })
+  const newScene = async (title: string): Promise<TreeNode> => {
+    await page.getByRole('button', { name: 'New scene' }).click()
+    await expect(renameBox).toBeFocused()
+    await renameBox.fill(title)
+    await renameBox.press('Enter')
+    await expect(renameBox).toBeHidden()
+    const made = (await invoke<TreeNode[]>('tree:list', undefined)).find((n) => n.title === title)
+    if (!made) throw new Error(`${title} was not made`)
+    return made
+  }
+  const plan = await newScene('Mara at the quay')
+  const planMeta = await invoke<{ meta: Record<string, unknown> }>('sceneMeta:get', {
+    id: plan.id
+  })
+  await invoke('sceneMeta:set', {
+    id: plan.id,
+    meta: { ...planMeta.meta, synopsis: 'She waits at the quay.' }
+  })
+  const dusk = await newScene('Quay at dusk')
+  const duskText = [
+    'Mara waited at the quay at dusk.',
+    'The ferry was late again, and the gulls had given up on the nets. She counted the lamps ' +
+      'along the far wall twice, then a third time, and still the water lay flat and grey ' +
+      'under the low cloud.'
+  ]
+  await bookTree.getByRole('treeitem', { name: 'Quay at dusk', exact: true }).click()
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await clickIntoEditor(editor)
+  await page.keyboard.type(duskText[0] ?? '')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type(duskText[1] ?? '')
+  await expect.poll(() => storedText(dusk.id), { timeout: 15_000 }).toContain('low cloud.')
+  const picksBefore = providerBodies.filter(isPlanPick).length
+  // The name scan of the new scene settles first (a save queues it), as it would while the
+  // author writes; then its first reading.
+  await expect
+    .poll(async () => (await invoke<unknown[]>('names:forNode', { nodeId: dusk.id })).length, {
+      timeout: 15_000
+    })
+    .toBeGreaterThan(0)
+  await invoke('memory:readNow', { nodeId: dusk.id, requestId: 'e2e-read-dusk' })
+  interface AiLink {
+    planId: string
+    sceneId: string
+    origin: string
+    reason: string
+  }
+  await expect
+    .poll(
+      async () =>
+        (await invoke<{ aiLinks: AiLink[] }>('planLinks:get', undefined)).aiLinks.find(
+          (link) => link.planId === plan.id
+        ),
+      { timeout: 15_000 }
+    )
+    .toEqual({ planId: plan.id, sceneId: dusk.id, origin: 'ai', reason: PLAN_LINK_WHY })
+  const picks = providerBodies.filter(isPlanPick).slice(picksBefore)
+  expect(picks).toHaveLength(1)
+  expect(picks[0]?.json).toBe(true)
+  expect(picks[0]?.messages.at(-1)?.content).toContain('Mara at the quay')
+  expect(picks[0]?.messages.at(-1)?.content).toContain('Mara waits at the quay.')
+
+  // F-16.20: the Outline shows Scene 1's card line, greyed behind the AI mark, where a synopsis
+  // would be (no summary is read in v2).
+  await showSection('Outline')
+  const outline = page.getByRole('region', { name: 'Outline section', exact: true })
+  // A row by its own title button (a plan line in another row names it too).
+  const rowOf = (title: string): ReturnType<Page['getByTestId']> =>
+    outline.getByTestId('outline-row').filter({
+      has: page.locator('div').getByRole('button', { name: title, exact: true })
+    })
+  await expect(rowOf(first.title).getByTestId('outline-card-line')).toContainText(
+    'Mara walks to the quay.',
+    { timeout: 15_000 }
+  )
+  await expect(outline.getByTestId('outline-ai-summary')).toHaveCount(0)
+
+  // F-16.21: the plan is fulfilled by the drafted scene, marked as the AI's, with its reason;
+  // Unlink takes it off, sends the pair to Dismissed, and the plan reads Not yet drafted.
+  const fulfilled = rowOf('Mara at the quay').getByTestId('outline-fulfilled')
+  await expect(fulfilled).toContainText('Fulfilled by Quay at dusk', { timeout: 15_000 })
+  await expect(fulfilled).toHaveAttribute('data-origin', 'ai')
+  await expect(fulfilled).toContainText(PLAN_LINK_WHY)
+  await expect(rowOf('Quay at dusk').getByTestId('outline-fulfils')).toContainText(
+    'Fulfils plan Mara at the quay'
+  )
+  const dismissedBefore = (await invoke<{ count: number }>('dismissed:list', undefined)).count
+  await fulfilled.getByRole('button', { name: 'Unlink' }).click()
+  await expect(fulfilled).toHaveCount(0)
+  await expect(rowOf('Mara at the quay').getByTestId('outline-not-drafted')).toHaveText(
+    'Not yet drafted'
+  )
+  const dismissed = await invoke<{ count: number; items: { kind: string; label: string }[] }>(
+    'dismissed:list',
+    undefined
+  )
+  expect(dismissed.count).toBe(dismissedBefore + 1)
+  expect(dismissed.items).toContainEqual(
+    expect.objectContaining({
+      kind: 'unlink',
+      label: 'Plan link: Mara at the quay fulfilled by Quay at dusk'
+    })
+  )
+  expect((await invoke<{ aiLinks: AiLink[] }>('planLinks:get', undefined)).aiLinks).toEqual([])
+
+  // F-16.20: a synopsis suggestion sends synopsis.v2 with the scene's card and no stored summary.
+  const opens = (opening: string) => (body: (typeof providerBodies)[number]) =>
+    body.messages[0]?.content.startsWith(opening) === true
+  const synopsesBefore = providerBodies.filter(opens(SYNOPSIS_V2_SENTINEL)).length
+  const synopsis = await invoke<{ ok: boolean }>('ai:suggestSynopsis', {
+    nodeId: dusk.id,
+    requestId: 'e2e-synopsis-v2'
+  })
+  expect(synopsis).toMatchObject({ ok: true })
+  const synopses = providerBodies.filter(opens(SYNOPSIS_V2_SENTINEL))
+  expect(synopses).toHaveLength(synopsesBefore + 1)
+  const synopsisBody = synopses.at(-1)
+  const synopsisUser = synopsisBody?.messages.at(-1)?.content ?? ''
+  expect(synopsisUser).toContain("Scene card (the AI's map of this scene, not quotable):")
+  expect(synopsisUser).toContain('Mara waits at the quay.')
+  expect(synopsisUser).not.toContain('Stored summary')
+
+  // F-16.20: the beta reader reads the earlier scenes as their card gists under the map heading,
+  // never their summaries, and this scene in full.
+  const beta = await invoke<{ ok: boolean }>('ai:betaReader', {
+    nodeId: dusk.id,
+    requestId: 'e2e-beta-v2'
+  })
+  expect(beta).toMatchObject({ ok: true })
+  const betaBody = providerBodies.filter(opens(BETA_READER_OPENING)).at(-1)
+  const betaUser = betaBody?.messages.at(-1)?.content ?? ''
+  expect(betaUser).toContain(BETA_READER_MAP_HEADING)
+  expect(betaUser).toContain('Mara walks to the quay.')
+  expect(betaUser).toContain(duskText[1])
+  expect(betaUser).not.toContain('Scenes read so far, in order (summaries)')
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

@@ -42,7 +42,7 @@ import {
 } from '../../ai/cloudTally'
 import { assertFeatureAllowed } from '../../ai/dial'
 import { registerInflight, releaseInflight } from '../../ai/inflight'
-import { AiProviderError } from '../../ai/providers/types'
+import { AiCancelledError, AiProviderError } from '../../ai/providers/types'
 import type { AiRequestDeps } from '../../ai/request'
 import { aiUsage, reading } from '../../db/schema'
 import { currentDraftId } from '../../draft/draftStore'
@@ -85,6 +85,7 @@ import {
   startRebuild,
   stopRebuild
 } from './rebuild'
+import { linkPlansAfterReading } from './planLinks'
 import { markRebuilt, pickStrongDue, runSpotChecks } from './spotChecks'
 import { detailConflicts, keepMine } from './detailConflicts'
 import { notAbout, wrongValue } from './notRight'
@@ -149,6 +150,8 @@ export interface ReaderServiceDeps {
   changed: (payload: { nodeIds: string[]; recordIds: string[] }) => void
   /** The name questions may have moved (facts waiting on a new name). */
   questions: () => void
+  /** F-16.21: the automatic plan links moved after a reading (`planLinks:changed`). */
+  planLinksChanged: () => void
   status: (status: MemoryStatus) => void
   notices: (notices: MemoryNotice[]) => void
   /** `jobs:changed` (only while a v2 project is open). */
@@ -669,6 +672,37 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     publish()
   }
 
+  /**
+   * F-16.21: plan links after a reading that wrote (code first, `planLinks.v2` at most once), in
+   * the reading's own job, so its cost is tallied as the reading's (asked or background) and a
+   * Stop ends it. Nothing here fails the reading.
+   */
+  const linkPlans = async (
+    db: TreeDb,
+    nodeId: string,
+    outcome: ReadingOutcome,
+    requestId: string,
+    signal: AbortSignal,
+    asked: boolean
+  ): Promise<void> => {
+    if (!outcome.read) return
+    try {
+      const result = await linkPlansAfterReading(db, deps.requestDeps(db), {
+        settings: deps.settings(db),
+        readingId: outcome.readingId,
+        nodeId,
+        lineMoved: outcome.lineMoved,
+        requestId,
+        signal,
+        onSpend: spender(db, asked)
+      })
+      if (result.changed) deps.planLinksChanged()
+    } catch (err) {
+      // A Stop while the plan-link pick was out: the reading stands, no link is made.
+      if (!(err instanceof AiCancelledError)) throw err
+    }
+  }
+
   const withSignal = async <T>(
     requestId: string,
     work: (signal: AbortSignal) => Promise<T>
@@ -722,6 +756,9 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       )
       settled = true
       afterReading(db, nodeId, outcome)
+      await withSignal(requestId, (signal) =>
+        linkPlans(db, nodeId, outcome, requestId, signal, asked)
+      )
       return { requested: requested(outcome), value: { outcome } }
     } finally {
       // A caret a later idle pause set while this ran is that run's (the job runs once more).
@@ -757,6 +794,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       )
     )
     afterReading(db, nodeId, outcome)
+    await withSignal(requestId, (signal) => linkPlans(db, nodeId, outcome, requestId, signal, true))
     // Counted; the rebuild closes once its last scene job ends, however it ends (`closeRebuild`).
     rebuildSceneDone(db)
     return { requested: requested(outcome), value: { outcome } }
@@ -846,6 +884,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
             )
             sent ||= requested(outcome)
             afterReading(db, scene.nodeId, outcome)
+            await linkPlans(db, scene.nodeId, outcome, `${requestId}:b${n}`, signal, group.asked)
           }
           for (const row of group.rows) {
             setBackfillState(db, record.recordId, 'done', now(), row.norm)

@@ -61,7 +61,11 @@ const ELM = record(
   page(paragraph('A split elm on the north bank where the two met as children.'))
 )
 
-/** A scene with a POV, one record also here, two named, and a tone, a content and a theme label. */
+/**
+ * A scene with a POV, one record also here, two named, and a tone, a content and a theme label;
+ * since F-16.20 (P2a-D11) also what the book states about the Here records as of the scene and
+ * the card's mood.
+ */
 export const FIXTURE_NOTES_FACTS: StoryNotesFacts = {
   pov: MARA,
   alsoHere: [TOMAS],
@@ -71,7 +75,12 @@ export const FIXTURE_NOTES_FACTS: StoryNotesFacts = {
     { name: 'grief', kind: 'content' },
     { name: 'debts come due', kind: 'theme' },
     { name: 'needs research', kind: 'custom' }
-  ]
+  ],
+  values: {
+    'r-mara': ['Eyes: grey', 'Hair: cut short', 'Last seen at: the ferry landing'],
+    'r-tomas': ['Role: ferryman']
+  },
+  mood: { mood: 'tense', theme: 'debts come due' }
 }
 
 const bulky = (index: number): StoryNotesRecord =>
@@ -87,7 +96,10 @@ const bulky = (index: number): StoryNotesRecord =>
     )
   )
 
-/** Every part of the block over its budget: many records here and named, labels at their cap. */
+/**
+ * Every part of the block over its budget: many records here and named, labels at their cap, and
+ * (F-16.20) many values for each Here record and a long mood.
+ */
 export const MAXED_NOTES_FACTS: StoryNotesFacts = {
   pov: bulky(0),
   alsoHere: [bulky(1), bulky(2)],
@@ -97,11 +109,23 @@ export const MAXED_NOTES_FACTS: StoryNotesFacts = {
       name: `${kind}${i}`.padEnd(LABEL_NAME_MAX, kind.charAt(0)),
       kind
     }))
-  )
+  ),
+  values: Object.fromEntries(
+    [0, 1, 2].map((index) => [
+      `r-bulk-${index}`,
+      Array.from({ length: 12 }, (_, i) => `Detail ${i}: ${'a long stated value '.repeat(3)}`)
+    ])
+  ),
+  mood: { mood: 'm'.repeat(40), theme: 'h'.repeat(40) }
 }
 
-const rendered = (facts: StoryNotesFacts, budget: number, continuity = false): string => {
-  const block = renderStoryNotes(facts, budget, { continuity })
+const rendered = (
+  facts: StoryNotesFacts,
+  budget: number,
+  continuity = false,
+  mood = true
+): string => {
+  const block = renderStoryNotes(facts, budget, { continuity, mood })
   if (block === null) throw new Error('the fixture block must render')
   return block
 }
@@ -124,4 +148,26 @@ export const MAXED_GHOST_CONTINUITY_NOTES = rendered(
   MAXED_NOTES_FACTS,
   STORY_BIBLE_GHOST_TOKEN_BUDGET,
   true
+)
+/**
+ * F-16.20: the blocks Rewrite in my voice sends, with no Mood line (it carries the scene's mood in
+ * its own slot).
+ */
+export const FIXTURE_STORY_NOTES_NO_MOOD = rendered(
+  FIXTURE_NOTES_FACTS,
+  STORY_BIBLE_TOKEN_BUDGET,
+  false,
+  false
+)
+export const MAXED_STORY_NOTES_NO_MOOD = rendered(
+  MAXED_NOTES_FACTS,
+  STORY_BIBLE_TOKEN_BUDGET,
+  false,
+  false
+)
+export const MAXED_GHOST_STORY_NOTES_NO_MOOD = rendered(
+  MAXED_NOTES_FACTS,
+  STORY_BIBLE_GHOST_TOKEN_BUDGET,
+  false,
+  false
 )

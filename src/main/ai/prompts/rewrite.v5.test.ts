@@ -4,7 +4,7 @@ import { renderSceneMood } from '@shared/sceneCard'
 import { EMPTY_SCENE_BRIEF } from '@shared/sceneMeta'
 import { SCENE_STEER_HEADING } from '@shared/sceneSteer'
 import {
-  FIXTURE_STORY_NOTES,
+  FIXTURE_STORY_NOTES_NO_MOOD,
   STORY_NOTES_IDEA_TEXT,
   STORY_NOTES_NOT_CANON_TEXT
 } from '../eval/storyNotesFixture'
@@ -22,7 +22,7 @@ const input: BuildRewritePromptV5Input = {
   after: '',
   meta: { location: 'Ferry landing', pov: 'Mara Vell', timeline: '', brief: EMPTY_SCENE_BRIEF },
   voice: "Match the author's voice:\n- Narration is in past tense.",
-  storyNotes: FIXTURE_STORY_NOTES,
+  storyNotes: FIXTURE_STORY_NOTES_NO_MOOD,
   mood: MOOD
 }
 

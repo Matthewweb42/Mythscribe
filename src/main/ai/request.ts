@@ -31,6 +31,7 @@ import {
 import type { PromptVersion } from './prompts/catalogue'
 import { CONTEXT_IMPORT_PROMPT_V3_VERSION } from './prompts/contextImport.v3'
 import { REVIEW_CHAT_PROMPT_V3_VERSION } from './prompts/reviewChat.v3'
+import { PLAN_LINKS_PROMPT_V2_VERSION } from './prompts/planLinks.v2'
 import type { SessionUsage } from './sessionUsage'
 import { insertUsage, type AiDb, type UsageEntry } from './usageStore'
 
@@ -78,6 +79,10 @@ const NO_REASONING_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
  * asks for no reasoning.
  */
 const LOWEST_EFFORT_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>(['reader', 'verify'])
+/** F-16.21: the story-memory prompt versions of existing features that ask for the lowest effort too. */
+const LOWEST_EFFORT_PROMPTS: ReadonlySet<PromptVersion> = new Set<PromptVersion>([
+  PLAN_LINKS_PROMPT_V2_VERSION
+])
 
 /**
  * F-16.9: prompt versions that always ask for no reasoning, whatever their feature does. Filing
@@ -86,7 +91,9 @@ const LOWEST_EFFORT_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>(['
  */
 const NO_REASONING_PROMPTS: ReadonlySet<PromptVersion> = new Set<PromptVersion>([
   CONTEXT_IMPORT_PROMPT_V3_VERSION,
-  REVIEW_CHAT_PROMPT_V3_VERSION
+  REVIEW_CHAT_PROMPT_V3_VERSION,
+  // F-16.21: the plan-link pick is a short JSON choice in the background (design §2.3).
+  PLAN_LINKS_PROMPT_V2_VERSION
 ])
 
 /** Whether a request asks the model for no reasoning: by its feature, or by its prompt version. */
@@ -444,7 +451,9 @@ function completionRequest(
     json: input.json,
     ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
     ...(prepared.reasoning === 'default' ? {} : { reasoning: prepared.reasoning }),
-    ...(LOWEST_EFFORT_FEATURES.has(input.feature) ? { lowestEffort: true } : {}),
+    ...(LOWEST_EFFORT_FEATURES.has(input.feature) || LOWEST_EFFORT_PROMPTS.has(input.promptVersion)
+      ? { lowestEffort: true }
+      : {}),
     ...(signal === undefined ? {} : { signal })
   }
 }

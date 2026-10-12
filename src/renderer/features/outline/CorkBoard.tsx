@@ -7,6 +7,8 @@ import { SCENE_SYNOPSIS_MAX, type SceneMeta } from '@shared/sceneMeta'
 import { EmptyFolder } from '@renderer/features/editor/StackedEditor'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useSummaryStore } from '@renderer/features/editor/summaryStore'
+import { useMemoryStore } from '@renderer/features/memory/memoryStore'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { LevelIcon } from '@renderer/features/manuscript/LevelIcon'
 import type { DropTarget } from '@renderer/features/manuscript/placement'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -187,7 +189,8 @@ interface CardHandlers {
 /**
  * One index card. It holds the node's scene metadata for as long as it is on the board (the
  * store counts holders, so the metadata pane may hold the same node), and fetches the summary
- * of a manuscript document for the AI fallback.
+ * of a manuscript document for the AI fallback (F-16.20: in v2 the card line, held by the memory
+ * store).
  */
 function IndexCard({
   id,
@@ -210,10 +213,13 @@ function IndexCard({
   const load = useSceneMetaStore((s) => s.load)
   const unload = useSceneMetaStore((s) => s.unload)
   const edit = useSceneMetaStore((s) => s.edit)
+  const memory = useStoryMemory()
   const summary = useSummaryStore((s) => s.byNode[id]?.summary?.summary ?? null)
   const loadSummary = useSummaryStore((s) => s.load)
+  // F-16.20: in v2 the reader's card line stands in for an empty synopsis.
+  const cardLine = useMemoryStore((s) => s.cardLines[id] ?? null)
   const synopsisId = useId()
-  const hasSummary = node?.kind === 'document' && section === 'manuscript'
+  const hasSummary = node?.kind === 'document' && section === 'manuscript' && memory === 'v1'
 
   useEffect(() => {
     load(id).catch((err: unknown) => toast.error(describeError(err)))
@@ -223,6 +229,7 @@ function IndexCard({
   useEffect(() => {
     if (hasSummary) void loadSummary(id)
   }, [id, hasSummary, loadSummary])
+  const aiLine = memory === 'v2' ? cardLine : summary
 
   if (!node) return null
 
@@ -303,8 +310,13 @@ function IndexCard({
           onChange={(event) => set({ synopsis: event.target.value })}
           className="w-full resize-none rounded-md border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-line focus:border-line disabled:opacity-50"
         />
-        {synopsis.length === 0 && summary !== null ? (
-          <AiSummaryLine summary={summary} testId="card-ai-summary" className="line-clamp-4 px-1" />
+        {synopsis.length === 0 && aiLine !== null ? (
+          <AiSummaryLine
+            summary={aiLine}
+            kind={memory === 'v2' ? 'card' : 'summary'}
+            testId={memory === 'v2' ? 'card-card-line' : 'card-ai-summary'}
+            className="line-clamp-4 px-1"
+          />
         ) : null}
         <StatusSelect
           value={status}

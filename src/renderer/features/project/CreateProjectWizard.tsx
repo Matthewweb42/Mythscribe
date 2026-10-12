@@ -12,7 +12,9 @@ import {
 } from '@shared/aiSettings'
 import { CLOUD_AI_AVAILABLE } from '@shared/cloudApi'
 import { PROJECT_NAME_MAX, type NovelFormat } from '@shared/ipc/contract'
+import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
+import { ipc } from '@renderer/lib/ipc'
 import { PROJECT_FORMATS } from './formats'
 import { useAssistantName } from '@renderer/features/shell/viewStore'
 import { nameAssistant } from '@shared/assistantName'
@@ -40,6 +42,19 @@ type UseAi = (typeof USE_AI_OPTIONS)[number]
 const RECOMMENDED_USE_AI: UseAi = 'on'
 const USE_AI_OPTION_LABEL: Record<UseAi, string> = { on: 'On', off: 'Off' }
 const switchFor = (useAi: UseAi): AiSwitch => (useAi === 'on' ? 'ask' : 'off')
+
+/**
+ * What AI does behind the author, by the story memory a new project gets (F-16.20; `app:info`'s
+ * `newProjectMemory`, v2 only under the development override until the switch-over).
+ */
+const BACKGROUND_WORK: Record<StoryMemoryVersion, string> = {
+  v1:
+    'When you pause typing it summarizes the scene, notes what it states about your ' +
+    'characters, places, and world in the story bible, tags it, and flags contradictions.',
+  v2:
+    'When you leave a scene or pause, it reads what changed and notes what your prose states, ' +
+    'each line with its quote.'
+}
 
 /**
  * What the choice asks of the author next (F-15.11). Neither option is a dead end: the key and
@@ -113,8 +128,23 @@ export function CreateProjectWizard({
   const [useAi, setUseAi] = useState<UseAi>(RECOMMENDED_USE_AI)
   const [contextPaths, setContextPaths] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [memory, setMemory] = useState<StoryMemoryVersion>('v1')
   const inputRef = useRef<HTMLInputElement>(null)
   const fieldsetRef = useRef<HTMLFieldSetElement>(null)
+
+  // F-16.20: which memory the project will get, for step 4's words; v1's words if main is silent.
+  useEffect(() => {
+    let live = true
+    ipc()
+      .invoke('app:info', undefined)
+      .then((info) => {
+        if (live) setMemory(info.newProjectMemory)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
 
   useEffect(() => {
     if (step === 'name') inputRef.current?.focus()
@@ -336,12 +366,10 @@ export function CreateProjectWizard({
           ) : (
             <>
               <p data-testid="wizard-dial-explainer" className="mt-4 mb-0 text-sm text-fg-muted">
-                You write; with AI on, it works behind you. When you pause typing it summarizes the
-                scene, notes what it states about your characters, places, and world in the story
-                bible, tags it, and flags contradictions. {assistantName} opens beside the editor
-                for questions and one-click actions. It starts in{' '}
-                {ASSISTANT_MODE_LABEL[DEFAULT_ASSISTANT_MODE]}: every change it wants to make asks
-                you first. Switch to Auto or Plan under the chat box.
+                You write; with AI on, it works behind you. {BACKGROUND_WORK[memory]}{' '}
+                {assistantName} opens beside the editor for questions and one-click actions. It
+                starts in {ASSISTANT_MODE_LABEL[DEFAULT_ASSISTANT_MODE]}: every change it wants to
+                make asks you first. Switch to Auto or Plan under the chat box.
               </p>
               <fieldset ref={fieldsetRef} className="mt-3 m-0 flex flex-col gap-2 border-0 p-0">
                 <legend className="mb-2 p-0 text-sm font-medium">{USE_AI_LABEL}</legend>

@@ -59,7 +59,8 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
         return { id, meta: { ...EMPTY_SCENE_META } } as Output<C>
       }
       if (channel === 'summary:get') return UNAVAILABLE_SUMMARY as Output<C>
-      if (channel === 'planLinks:get') return { suggestions: [], aiApplied: [] } as Output<C>
+      if (channel === 'planLinks:get')
+        return { suggestions: [], aiApplied: [], aiLinks: [] } as Output<C>
       throw new Error(`unexpected ${channel}`)
     },
     on: () => () => {}

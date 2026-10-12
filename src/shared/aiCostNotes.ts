@@ -97,7 +97,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   betaReader: {
     trigger: 'on request',
-    when: 'Beta reader reaction to a scene, reading earlier summaries.',
+    when: 'Beta reader reaction to a scene, reading earlier summaries (betaReader.v1). Story memory v2 (F-16.20) sends betaReader.v2: the earlier scenes as their card gists (a map the reader may relate to, never quote), quotes checked in code against the current scene; fixtures 710 vs 673 tokens typical (a longer rule), 10,981 vs 11,599 worst (gists are shorter than summaries with key points).',
     callsPerUse: 1,
     typicalOutTokens: 700,
     ideas: 'Strong tier: try fast tier with a tighter rubric and compare quality.'
@@ -142,14 +142,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   synopsis: {
     trigger: 'on request',
-    when: 'Suggest a synopsis for a scene.',
+    when: 'Suggest a synopsis for a scene (synopsis.v1, with the stored summary). Story memory v2 (F-16.20) sends synopsis.v2: the scene card in the summary’s place; fixtures 580 vs 495 tokens typical, 3,531 vs 3,400 worst.',
     callsPerUse: 1,
     typicalOutTokens: 120,
     ideas: 'Derive from the stored summary without re-sending the scene.'
   },
   notesSuggest: {
     trigger: 'on request',
-    when: 'Suggest key points for a scene’s notes. Story memory v2 (F-16.14) sends notesSuggest.v3: the Story notes block in the bible’s slot; about 60 tokens less than v2 (fixtures: 903 vs 961 typical, 4,774 vs 4,798 worst).',
+    when: 'Suggest key points for a scene’s notes. Story memory v2 (F-16.14) sent notesSuggest.v3: the Story notes block in the bible’s slot. Since F-16.20 it sends notesSuggest.v4: the scene card in the summary’s place, and the block carries the scene’s lasting values and mood; fixtures 1,006 vs v3’s 961 tokens typical, 4,892 vs 4,802 worst.',
     callsPerUse: 1,
     typicalOutTokens: 300,
     ideas: 'Share context building with synopsis; one call could answer both.'
@@ -187,7 +187,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   planLinks: {
     trigger: 'background',
-    when: 'About 20 s after a summary run (and from Find links): links planned scenes and template beats to the written scene that fulfils them.',
+    when: 'About 20 s after a summary run (and from Find links): links planned scenes and template beats to the written scene that fulfils them (planLinks.v1). Story memory v2 (F-16.21): code matches each plan against the card lines after a reading at no cost; planLinks.v2 picks between an ambiguous best two at most once per reading, only when the reading moved one of their card lines, reasoning off and cached (fixtures 211 tokens typical, 872 worst, vs v1’s 243 and 5,928).',
     callsPerUse: 1,
     typicalOutTokens: 150,
     ideas:
@@ -270,32 +270,6 @@ export interface PlannedCostNote {
 
 export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
   {
-    id: 'synopsis.v2',
-    prompt: 'synopsis.v2',
-    feature: 'synopsis',
-    existing: true,
-    phase: 'P2a',
-    tier: 'fast',
-    trigger: 'on request',
-    when: 'Suggest a synopsis, re-pointed from the summary to the scene card; priced like synopsis.v1.',
-    typicalInTokens: 495,
-    typicalOutTokens: 120,
-    callsPerUse: 1
-  },
-  {
-    id: 'notesSuggest.v4',
-    prompt: 'notesSuggest.v4',
-    feature: 'notesSuggest',
-    existing: true,
-    phase: 'P2a',
-    tier: 'fast',
-    trigger: 'on request',
-    when: 'Suggest key points for the notes, re-pointed to the scene card (P1 shipped notesSuggest.v3, the Story notes heading; decision P1-D7); priced like notesSuggest.v2.',
-    typicalInTokens: 961,
-    typicalOutTokens: 300,
-    callsPerUse: 1
-  },
-  {
     id: 'reader.v2:first',
     prompt: 'reader.v2',
     feature: 'reader',
@@ -332,19 +306,6 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     when: 'verify.v1 with knows and thread claims; replaces it from P2b; priced like it until measured.',
     typicalInTokens: 1_300,
     typicalOutTokens: 110,
-    callsPerUse: 1
-  },
-  {
-    id: 'planLinks.v2',
-    prompt: 'planLinks.v2',
-    feature: 'planLinks',
-    existing: true,
-    phase: 'P2a',
-    tier: 'fast',
-    trigger: 'background',
-    when: 'Plan links applied automatically after a scene settles (decision 2).',
-    typicalInTokens: 1_500,
-    typicalOutTokens: 100,
     callsPerUse: 1
   },
   {
@@ -468,7 +429,8 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
 
 /**
  * The story-memory rows that have shipped (F-16.9, P1 slice 5; F-16.17, P2a slice 2: the reader
- * and verify rows): their features' notes are in `AI_COST_NOTES` now (the registry's per-feature
+ * and verify rows; F-16.20, F-16.21, P2a slice 5: `synopsis.v2`, `notesSuggest.v4` and
+ * `planLinks.v2`): their features' notes are in `AI_COST_NOTES` now (the registry's per-feature
  * table shows them), and these rows keep the design's sizes so the planned tasks that run them
  * ("File a 20,000-word upload, once", "Index the book once") and the switch-over's rebuild price
  * (`plannedRow` in `switchover/plan.ts`) stay priced from the same figures.
@@ -576,6 +538,45 @@ export const SHIPPED_PLAN_ROWS: readonly PlannedCostNote[] = [
     when: 'An instant card that is out of date: one window read for its scene (about one card in five; the rest are local and free).',
     typicalInTokens: 4_000,
     typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
+    id: 'synopsis.v2',
+    prompt: 'synopsis.v2',
+    feature: 'synopsis',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'on request',
+    when: 'Suggest a synopsis in story memory v2: the scene card in the summary’s place (F-16.20); priced like synopsis.v1.',
+    typicalInTokens: 495,
+    typicalOutTokens: 120,
+    callsPerUse: 1
+  },
+  {
+    id: 'notesSuggest.v4',
+    prompt: 'notesSuggest.v4',
+    feature: 'notesSuggest',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'on request',
+    when: 'Suggest key points for the notes in story memory v2: the scene card in the summary’s place (F-16.20; P1 shipped notesSuggest.v3, decision P1-D7); priced like notesSuggest.v2.',
+    typicalInTokens: 961,
+    typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
+    id: 'planLinks.v2',
+    prompt: 'planLinks.v2',
+    feature: 'planLinks',
+    existing: true,
+    phase: 'P2a',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'Plan links applied automatically after a reading (F-16.21, decision 2): code first; this pick only for an ambiguous best two whose card line the reading moved, at most once per reading.',
+    typicalInTokens: 1_500,
+    typicalOutTokens: 100,
     callsPerUse: 1
   }
 ]

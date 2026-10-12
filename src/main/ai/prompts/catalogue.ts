@@ -95,6 +95,11 @@ import { ROUTE_PROMPT_V2_VERSION } from './route.v2'
 import { IMPORT_STRUCTURE_PROMPT_V2_VERSION } from './importStructure.v2'
 import { READER_PROMPT_VERSION } from './reader.v1'
 import { VERIFY_PROMPT_VERSION } from './verify.v1'
+import { BETA_READER_PROMPT_V2_VERSION } from './betaReader.v2'
+import { BETA_READER_REGEN_PROMPT_V2_VERSION } from './betaReaderRegen.v2'
+import { SYNOPSIS_PROMPT_V2_VERSION } from './synopsis.v2'
+import { NOTES_SUGGEST_PROMPT_V4_VERSION } from './notesSuggest.v4'
+import { PLAN_LINKS_PROMPT_V2_VERSION } from './planLinks.v2'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -211,7 +216,12 @@ export const PROMPT_VERSIONS = [
   IMPORT_STRUCTURE_PROMPT_V2_VERSION,
   // F-16.17 (story memory v2 only): the evidence reader and its fact checker.
   READER_PROMPT_VERSION,
-  VERIFY_PROMPT_VERSION
+  VERIFY_PROMPT_VERSION,
+  BETA_READER_PROMPT_V2_VERSION,
+  BETA_READER_REGEN_PROMPT_V2_VERSION,
+  SYNOPSIS_PROMPT_V2_VERSION,
+  NOTES_SUGGEST_PROMPT_V4_VERSION,
+  PLAN_LINKS_PROMPT_V2_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -657,7 +667,37 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     since: 'F-16.15'
   },
   [READER_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
-  [VERIFY_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' }
+  [VERIFY_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' },
+  [BETA_READER_PROMPT_V2_VERSION]: {
+    feature: 'betaReader',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-16.20'
+  },
+  [BETA_READER_REGEN_PROMPT_V2_VERSION]: {
+    feature: 'betaReader',
+    tier: 'strong',
+    output: 'json',
+    since: 'F-16.20'
+  },
+  [SYNOPSIS_PROMPT_V2_VERSION]: {
+    feature: 'synopsis',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-16.20'
+  },
+  [NOTES_SUGGEST_PROMPT_V4_VERSION]: {
+    feature: 'notesSuggest',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-16.20'
+  },
+  [PLAN_LINKS_PROMPT_V2_VERSION]: {
+    feature: 'planLinks',
+    tier: 'fast',
+    output: 'json',
+    since: 'F-16.21'
+  }
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

@@ -121,4 +121,25 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
       expect(CHANNEL_MEMORY[channel], channel).toBe('any')
     }
   })
+
+  it('F-16.20, F-16.21: refuses the summary channels and v1’s plan-link job in v2, and v2’s Keep and card lines in v1', () => {
+    for (const channel of [
+      'summary:get',
+      'ai:summarize',
+      'jobs:indexAll',
+      'planLinks:run',
+      'planLinks:confirm',
+      'planLinks:dismiss'
+    ] as const) {
+      expect(CHANNEL_MEMORY[channel], channel).toBe('v1')
+      expect(() => assertChannelMemory(channel, 'v2'), channel).toThrow(OTHER_MEMORY_MESSAGE)
+    }
+    for (const channel of ['planLinks:keep', 'memory:cardLines'] as const) {
+      expect(() => assertChannelMemory(channel, 'v1'), channel).toThrow(OTHER_MEMORY_MESSAGE)
+    }
+    // Get and Unlink branch by memory; the queue's status stays both's.
+    for (const channel of ['planLinks:get', 'planLinks:unlink', 'jobs:status'] as const) {
+      expect(CHANNEL_MEMORY[channel], channel).toBe('any')
+    }
+  })
 })

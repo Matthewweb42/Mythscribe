@@ -119,7 +119,8 @@ export async function runWhatNext(
         heading: STORY_BIBLE_PLANS_HEADING
       })
   const map = buildStoryMap(db, storyTime(db, input.nodeId), {
-    maxTokens: STORY_MAP_SMALL_TOKEN_BUDGET
+    maxTokens: STORY_MAP_SMALL_TOKEN_BUDGET,
+    memory: input.memory
   })
   const steer = v2 ? null : buildSceneSteer(db, input.nodeId)
   const build = (

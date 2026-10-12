@@ -53,6 +53,7 @@ beforeEach(() => {
     'memory:rebuild': () => ({ ok: true, queued: 90, estimate: ESTIMATE }),
     'memory:status': () => memoryStatusFixture({ rebuild: RUNNING }),
     'memory:notices': () => [],
+    'memory:cardLines': () => ({}),
     'memory:rebuildSummary': () => SUMMARY,
     'memory:rebuildAction': () => ({ changed: 2 }),
     'dismissed:list': () => ({ items: [], count: 0 }),

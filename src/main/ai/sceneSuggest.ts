@@ -10,11 +10,13 @@ import {
   SCENE_SUGGEST_TEXT_MIN
 } from '@shared/sceneSuggest'
 import { STORY_BIBLE_PLANS_HEADING, STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
+import type { PromptCard } from '@shared/memory/cardText'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { getDocumentContent } from '../document/documentStore'
 import { sceneBriefBlock } from '../document/sceneNeighbours'
 import { getSummary } from '../document/summaryStore'
 import { AppError } from '../ipc/errors'
+import { promptCard } from '../memory/reading/cardContext'
 import { buildStoryNotes } from '../memory/storyNotes'
 import { getAiSettings } from '../project/settingsStore'
 import { getNode, type TreeDb } from '../tree/treeStore'
@@ -25,8 +27,9 @@ import { buildStoryBible } from './context/storyBible'
 import { fitSceneToBudget } from './critique'
 import { assertFeatureAllowed } from './dial'
 import { buildNotesSuggestPromptV2 } from './prompts/notesSuggest.v2'
-import { buildNotesSuggestPromptV3 } from './prompts/notesSuggest.v3'
+import { buildNotesSuggestPromptV4 } from './prompts/notesSuggest.v4'
 import { buildSynopsisPrompt } from './prompts/synopsis.v1'
+import { buildSynopsisPromptV2 } from './prompts/synopsis.v2'
 import { AiFallbackError, type CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
 
@@ -55,16 +58,17 @@ export interface SuggestInput {
   nodeId: string
   /** The caller's id for `ai:cancel` (F-5.10); optional so tests can run without one. */
   requestId?: string
+  /**
+   * F-16.4: the open project's story memory. v1 sends the stored summary (`synopsis.v1`,
+   * `notesSuggest.v2` with the story bible as notes and plans); v2 (F-16.20) sends the scene's v2
+   * card in its place (`synopsis.v2`, `notesSuggest.v4` with the Story notes block, F-16.14).
+   */
+  memory: StoryMemoryVersion
 }
 
 export interface NotesSuggestInput extends SuggestInput {
   /** What the author asked to focus on (from the chat router's instruction), or null. */
   instruction?: string | null
-  /**
-   * F-16.4: the open project's story memory. v1 sends `notesSuggest.v2` (the story bible as notes
-   * and plans); v2 sends `notesSuggest.v3` (the Story notes block, F-16.14).
-   */
-  memory: StoryMemoryVersion
 }
 
 const BAD_FORMAT = 'The model did not answer in the expected format.'
@@ -72,13 +76,19 @@ const BAD_FORMAT = 'The model did not answer in the expected format.'
 /**
  * The scene both suggestions read (F-5.20): the gate first, then a manuscript document
  * (NOT_FOUND / VALIDATION from `getDocumentContent`, VALIDATION outside the manuscript) with at
- * least `SCENE_SUGGEST_TEXT_MIN` characters of text; and its stored summary (F-5.6), if any.
+ * least `SCENE_SUGGEST_TEXT_MIN` characters of text; in v1 its stored summary (F-5.6), if any, in
+ * v2 (F-16.20) its v2 card as the readers take it (`promptCard`), if any; never both.
  */
 function readScene(
   db: TreeDb,
   feature: 'synopsis' | 'notesSuggest',
-  nodeId: string
-): { text: string; summary: { summary: string; keyPoints: string[] } | null } {
+  nodeId: string,
+  memory: StoryMemoryVersion
+): {
+  text: string
+  summary: { summary: string; keyPoints: string[] } | null
+  card: PromptCard | null
+} {
   assertFeatureAllowed(getAiSettings(db), feature)
   const { content } = getDocumentContent(db, nodeId)
   if (!manuscriptDocuments(db).some((row) => row.id === nodeId)) {
@@ -94,10 +104,12 @@ function readScene(
       { nodeId, length: text.length }
     )
   }
+  if (memory === 'v2') return { text, summary: null, card: promptCard(db, nodeId) }
   const stored = getSummary(db, nodeId)
   return {
     text,
-    summary: stored ? { summary: stored.summary, keyPoints: stored.keyPoints } : null
+    summary: stored ? { summary: stored.summary, keyPoints: stored.keyPoints } : null,
+    card: null
   }
 }
 
@@ -106,30 +118,40 @@ const SCENE_LIMITS = { chars: SCENE_SUGGEST_CHAR_BUDGET, min: SCENE_SUGGEST_TEXT
 /**
  * A suggested synopsis for the side panel (F-5.20). Sends exactly what the data-sharing panel
  * lists: the head of the scene within `SCENE_SUGGEST_CHAR_BUDGET` (shorter still while the
- * prompt is over `inputBudget('synopsis')`, token rule 8) and its stored summary with key
- * points. Fast tier, JSON, not streamed. The handler records the answer as a proposal; nothing
- * is written into the panel until the author accepts it.
+ * prompt is over `inputBudget('synopsis')`, token rule 8) and, in v1, its stored summary with key
+ * points (`synopsis.v1`), in v2 its card (`synopsis.v2`, F-16.20). Fast tier, JSON, not streamed.
+ * The handler records the answer as a proposal; nothing is written into the panel until the
+ * author accepts it.
  */
 export async function runSuggestSynopsis(
   db: TreeDb,
   deps: AiRequestDeps,
   input: SuggestInput
 ): Promise<SynopsisResult> {
-  const scene = readScene(db, 'synopsis', input.nodeId)
+  const scene = readScene(db, 'synopsis', input.nodeId, input.memory)
+  const v2 = input.memory === 'v2'
+  const build = (
+    cut: string
+  ): ReturnType<typeof buildSynopsisPrompt> | ReturnType<typeof buildSynopsisPromptV2> =>
+    v2
+      ? buildSynopsisPromptV2({ sceneText: cut, card: scene.card })
+      : buildSynopsisPrompt({ sceneText: cut, summary: scene.summary })
   const { sceneText, truncated } = fitSceneToBudget(
     scene.text,
     inputBudget('synopsis'),
-    (cut) => buildSynopsisPrompt({ sceneText: cut, summary: scene.summary }).messages,
+    (cut) => build(cut).messages,
     SCENE_LIMITS
   )
-  const prompt = buildSynopsisPrompt({ sceneText, summary: scene.summary })
+  const prompt = build(sceneText)
   const result = await runAiRequest(deps, {
     feature: 'synopsis',
     tier: 'fast',
     messages: prompt.messages,
     maxTokens: prompt.maxTokens,
     json: true,
-    contextHash: sha256(JSON.stringify({ sceneText, summary: scene.summary })),
+    contextHash: sha256(
+      JSON.stringify(v2 ? { sceneText, card: scene.card } : { sceneText, summary: scene.summary })
+    ),
     promptVersion: prompt.version,
     ...(input.requestId === undefined ? {} : { requestId: input.requestId })
   })
@@ -157,7 +179,7 @@ export async function runSuggestNotes(
   deps: AiRequestDeps,
   input: NotesSuggestInput
 ): Promise<NotesSuggestResult> {
-  const scene = readScene(db, 'notesSuggest', input.nodeId)
+  const scene = readScene(db, 'notesSuggest', input.nodeId, input.memory)
   const row = getNode(db, input.nodeId)
   const current = headTruncate(
     notesText(row?.notes ?? null, input.nodeId),
@@ -169,7 +191,8 @@ export async function runSuggestNotes(
   const instruction = focus === '' ? null : focus
   const v2 = input.memory === 'v2'
   // F-5.23: the bible as the author's notes and plans, not ground truth about events. F-16.14:
-  // v2 carries the Story notes block in its slot (`notesSuggest.v3`).
+  // v2 carries the Story notes block in its slot, and since F-16.20 the card in the summary's
+  // place (`notesSuggest.v4`).
   const bible = v2
     ? null
     : buildStoryBible(db, {
@@ -181,14 +204,14 @@ export async function runSuggestNotes(
     ? buildStoryNotes(db, { nodeId: input.nodeId, maxTokens: STORY_BIBLE_TOKEN_BUDGET })
     : null
   const context = v2
-    ? { summary: scene.summary, brief, notes, storyNotes, instruction }
+    ? { card: scene.card, brief, notes, storyNotes, instruction }
     : { summary: scene.summary, brief, notes, bible, instruction }
   const build = (
     sceneText: string
-  ): ReturnType<typeof buildNotesSuggestPromptV2> | ReturnType<typeof buildNotesSuggestPromptV3> =>
+  ): ReturnType<typeof buildNotesSuggestPromptV2> | ReturnType<typeof buildNotesSuggestPromptV4> =>
     v2
-      ? buildNotesSuggestPromptV3({
-          summary: scene.summary,
+      ? buildNotesSuggestPromptV4({
+          card: scene.card,
           brief,
           notes,
           storyNotes,

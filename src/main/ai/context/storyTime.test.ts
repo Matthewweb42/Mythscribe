@@ -67,7 +67,7 @@ describe('storyTime (F-5.23)', () => {
     setSceneMeta(db, scenes[1]!, { ...emptySceneMeta(), status: 'final' })
     setSceneMeta(db, scenes[2]!, { ...emptySceneMeta(), fulfilledBy: scenes[1] })
     const rows = listNodes(db)
-    const items = storyMapItems(db, rows)
+    const items = storyMapItems(db, rows, 'v1')
     expect(items.some((item) => item.id === scenes[2])).toBe(false)
     expect(items.find((item) => item.id === scenes[0])).toMatchObject({
       progress: 'drafted',
@@ -75,7 +75,7 @@ describe('storyTime (F-5.23)', () => {
     })
     expect(items.find((item) => item.id === scenes[1])?.progress).toBe('revised')
     expect(items.find((item) => item.id === scenes[3])?.progress).toBe('planned')
-    const map = buildStoryMap(db, storyTime(db, null), { maxTokens: 1_200 }) ?? ''
+    const map = buildStoryMap(db, storyTime(db, null), { maxTokens: 1_200, memory: 'v1' }) ?? ''
     expect(map).toContain(STORY_MAP_LATEST_NOTE)
     expect(map).toContain('Scene 1 [drafted]: Mara lands at Keep.')
     expect(map).toContain('Scene 1 [revised] ▶ NOW')

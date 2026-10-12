@@ -246,12 +246,12 @@ describe('the prose features by story memory (F-16.14)', () => {
     })
   })
 
-  it('suggested notes: notesSuggest.v2 in v1, notesSuggest.v3 in v2', async () => {
+  it('suggested notes: notesSuggest.v2 in v1, notesSuggest.v4 in v2 (F-16.20: the card)', async () => {
     const run = (memory: StoryMemoryVersion): Promise<unknown> =>
       runSuggestNotes(db, deps, { nodeId: scene, memory })
     expect(await bothMemories(run, STORY_BIBLE_PLANS_HEADING)).toEqual({
       v1: ['notesSuggest.v2'],
-      v2: ['notesSuggest.v3']
+      v2: ['notesSuggest.v4']
     })
   })
 

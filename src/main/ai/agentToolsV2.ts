@@ -6,6 +6,7 @@ import {
   type AgentStep,
   type AgentTool
 } from '@shared/agent'
+import { renderToolCard } from '@shared/memory/cardText'
 import { markedParagraphs } from '@shared/memory/pageMarks'
 import { normName } from '@shared/memory/names'
 import { meaningOf, type MemorySource } from '@shared/memory/sources'
@@ -14,10 +15,11 @@ import { searchableText } from '@shared/search'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { nameMention, sceneDetail } from '../db/schema'
 import { listAuthorTodos } from '../memory/authorTodoStore'
+import { promptCard } from '../memory/reading/cardContext'
 import { sceneStatuses, searchMemoryPassages } from '../memory/passageIndexer'
 import { getRecord, listRecords } from '../memory/recordStore'
 import { getNode } from '../tree/treeStore'
-import { nowIndex, readingIndex } from './agentRefs'
+import { nowIndex, readingIndex, sceneHead } from './agentRefs'
 import type { AgentProject, ToolOutcome } from './agentTools'
 import { headTruncate } from './context/chatContext'
 import { positionNote } from './context/storyTime'
@@ -27,8 +29,9 @@ import { positionNote } from './context/storyTime'
  * until P3, so the tools and edits it names that read or write tags and sheets are refused here
  * with one fixed result, and the reads that have a v2 source are re-pointed to it: `lookup` reads
  * a record (names, Pinned canon lines, Ideas, where the book names it, the scenes it is the POV
- * of), `find_passages` the labelled local passage index (`memory_passage_fts`), `todo` the
- * author's own to-dos, and `cards` finds a record's scenes by the name scan.
+ * of, and since F-16.20 the v2 card of the last scene up to now that names it), `find_passages`
+ * the labelled local passage index (`memory_passage_fts`), `todo` the author's own to-dos, and
+ * `cards` finds a record's scenes by the name scan and reads their v2 cards (F-16.20).
  */
 
 /** What every refused tool and edit answers in a v2 project. */
@@ -234,6 +237,12 @@ export function lookupV2(project: AgentProject, nameArg: unknown): ToolOutcome {
       `Named in ${named.length} scene${named.length === 1 ? '' : 's'} (${upToNow} up to now): ` +
         `first ${where(first, false)}, last ${where(last, true)}`
     )
+    // F-16.20: the card of the last scene up to now that names it (a map, never quoted).
+    const seen = [...named].reverse().find((each) => readingIndex(project, each.nodeId) <= now)
+    const card = seen === undefined ? null : promptCard(project.db, seen.nodeId)
+    if (seen !== undefined && card !== null) {
+      lines.push(renderToolCard(`Last seen ${sceneHead(project, seen.nodeId)}:`, card))
+    }
   }
   const unreal = naming.filter((each) => !each.real)
   if (unreal.length > 0) {

@@ -17,6 +17,7 @@ import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useSummaryStore } from '@renderer/features/editor/summaryStore'
 import { LabelFilterBar } from '@renderer/features/labels/LabelFilterBar'
 import { useLabelFilterView } from '@renderer/features/labels/labelFilter'
+import { useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { BeatBoard } from './BeatsView'
@@ -192,12 +193,19 @@ function OutlineList(): React.JSX.Element {
     }
     progressOf.set(row.id, folderProgress(inside))
   })
-  // Which planned scenes each written scene fulfils.
+  // Which planned scenes each written scene fulfils (F-16.21: in v2 the automatic links too).
+  const aiLinks = usePlanLinksStore((s) => s.aiLinks)
   const fulfils = new Map<string, string[]>()
   for (const row of rows) {
     const by = metas[row.id]?.content?.fulfilledBy
     if (by !== undefined && byId[by] !== undefined)
       fulfils.set(by, [...(fulfils.get(by) ?? []), row.id])
+  }
+  if (memory === 'v2') {
+    for (const link of aiLinks) {
+      if (byId[link.sceneId] === undefined || byId[link.planId] === undefined) continue
+      fulfils.set(link.sceneId, [...(fulfils.get(link.sceneId) ?? []), link.planId])
+    }
   }
 
   const documentIds = rows.filter((row) => byId[row.id]?.kind === 'document').map((row) => row.id)
@@ -260,11 +268,16 @@ function OutlineList(): React.JSX.Element {
   )
 }
 
-/** F-11.1d: runs the plan-link job now; shown only while Plan links may run. */
+/**
+ * F-11.1d: runs the plan-link job now; shown only while Plan links may run. F-16.21: never in
+ * story memory v2, where plans are linked after each reading.
+ */
 function FindLinksButton(): React.JSX.Element | null {
   const settings = useAiSettingsStore((s) => s.settings)
   const running = usePlanLinksStore((s) => s.running)
   const run = usePlanLinksStore((s) => s.run)
+  const memory = useStoryMemory()
+  if (memory === 'v2') return null
   if (settings === null || !isFeatureAllowed(settings, 'planLinks')) return null
   return (
     <button
@@ -299,9 +312,117 @@ function AiMark({ title }: { title: string }): React.JSX.Element {
 /**
  * F-11.1d: a row's plan links. A planned scene shows the scene that fulfils it (with Unlink) or
  * the AI's suggestion for it; a written scene shows the planned scenes it fulfils and the beat
- * the AI suggests for it. Suggestions carry Confirm and Dismiss.
+ * the AI suggests for it. Suggestions carry Confirm and Dismiss. Story memory v2 has its own
+ * lines (`PlanLinkLinesV2`).
  */
-function PlanLinkLines({ id, fulfils }: { id: string; fulfils: string[] }): React.JSX.Element {
+function PlanLinkLines({
+  id,
+  fulfils,
+  progress
+}: {
+  id: string
+  fulfils: string[]
+  progress: SceneProgress | null
+}): React.JSX.Element {
+  const memory = useStoryMemory()
+  return memory === 'v2' ? (
+    <PlanLinkLinesV2 id={id} fulfils={fulfils} progress={progress} />
+  ) : (
+    <PlanLinkLinesV1 id={id} fulfils={fulfils} />
+  )
+}
+
+/**
+ * F-16.21 (story memory v2, decision 2): a planned scene shows the scene that fulfils it: the
+ * author's link with *Unlink*, or a link applied automatically with an AI mark, why, *Keep* and
+ * *Unlink*; with neither it reads *Not yet drafted*. A written scene shows the plans it fulfils.
+ */
+function PlanLinkLinesV2({
+  id,
+  fulfils,
+  progress
+}: {
+  id: string
+  fulfils: string[]
+  progress: SceneProgress | null
+}): React.JSX.Element {
+  const byId = useTreeStore((s) => s.byId)
+  const select = useTreeStore((s) => s.select)
+  const fulfilledBy = useSceneMetaStore((s) => s.docs[id]?.content?.fulfilledBy)
+  const aiLink = usePlanLinksStore((s) => s.aiLinks.find((link) => link.planId === id))
+  const aiLinks = usePlanLinksStore((s) => s.aiLinks)
+  const keep = usePlanLinksStore((s) => s.keep)
+  const unlink = usePlanLinksStore((s) => s.unlink)
+  const linkClass = 'rounded px-0.5 text-left underline-offset-2 hover:underline'
+  const actionClass =
+    'rounded border border-line px-1 text-[11px] text-fg-muted hover:bg-surface-raised hover:text-fg'
+  const mine = fulfilledBy !== undefined ? byId[fulfilledBy] : undefined
+  const auto = aiLink !== undefined && mine === undefined ? byId[aiLink.sceneId] : undefined
+  const by = mine ?? auto
+  const linkedId =
+    mine !== undefined ? fulfilledBy : auto !== undefined ? aiLink?.sceneId : undefined
+  return (
+    <>
+      {by !== undefined && linkedId !== undefined ? (
+        <p
+          data-testid="outline-fulfilled"
+          data-origin={mine !== undefined ? 'author' : aiLink?.origin}
+          className="m-0 flex flex-wrap items-center gap-1 pl-4 text-xs text-fg-muted"
+        >
+          Fulfilled by{' '}
+          <button type="button" className={linkClass} onClick={() => select(linkedId)}>
+            {by.title}
+          </button>
+          {mine === undefined ? (
+            <AiMark
+              title={
+                aiLink?.origin === 'ai'
+                  ? 'Linked by the AI (it chose between two close scenes)'
+                  : 'Linked by the app: the scene’s card matches this plan'
+              }
+            />
+          ) : null}
+          {mine === undefined && aiLink?.reason ? (
+            <span className="min-w-0 italic">{aiLink.reason}</span>
+          ) : null}
+          {mine === undefined ? (
+            <button type="button" className={actionClass} onClick={() => void keep(id)}>
+              Keep
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={actionClass}
+            onClick={() => void unlink({ kind: 'scene', nodeId: id })}
+          >
+            Unlink
+          </button>
+        </p>
+      ) : progress === 'planned' ? (
+        <p data-testid="outline-not-drafted" className="m-0 pl-4 text-xs text-fg-subtle">
+          Not yet drafted
+        </p>
+      ) : null}
+      {fulfils.map((planId) => (
+        <p
+          key={planId}
+          data-testid="outline-fulfils"
+          className="m-0 flex flex-wrap items-center gap-1 pl-4 text-xs text-fg-muted"
+        >
+          Fulfils plan{' '}
+          <button type="button" className={linkClass} onClick={() => select(planId)}>
+            {byId[planId]?.title ?? ''}
+          </button>
+          {aiLinks.some((link) => link.planId === planId && link.sceneId === id) ? (
+            <AiMark title="Linked automatically" />
+          ) : null}
+        </p>
+      ))}
+    </>
+  )
+}
+
+function PlanLinkLinesV1({ id, fulfils }: { id: string; fulfils: string[] }): React.JSX.Element {
   const byId = useTreeStore((s) => s.byId)
   const select = useTreeStore((s) => s.select)
   const fulfilledBy = useSceneMetaStore((s) => s.docs[id]?.content?.fulfilledBy)
@@ -402,10 +523,13 @@ function OutlineRow({
   const meta = useSceneMetaStore((s) => s.docs[id]?.content ?? null)
   const loadMeta = useSceneMetaStore((s) => s.load)
   const unloadMeta = useSceneMetaStore((s) => s.unload)
+  const memory = useStoryMemory()
   const aiSummary = useSummaryStore((s) => s.byNode[id]?.summary?.summary ?? null)
-  // F-9.14: the scene card under the synopsis or summary.
+  // F-9.14: the scene card under the synopsis or summary (v1's knowledge card).
   const card = useSummaryStore((s) => s.byNode[id]?.card ?? null)
   const loadSummary = useSummaryStore((s) => s.load)
+  // F-16.20: in v2 the card line of the reader's card stands in for an empty synopsis.
+  const cardLine = useMemoryStore((s) => s.cardLines[id] ?? null)
   const isDocument = node?.kind === 'document'
 
   useEffect(() => {
@@ -414,9 +538,10 @@ function OutlineRow({
   }, [id, loadMeta, unloadMeta])
 
   useEffect(() => {
-    // Only manuscript documents have summaries; a folder would only fetch "unavailable".
-    if (isDocument) void loadSummary(id)
-  }, [id, isDocument, loadSummary])
+    // Only manuscript documents have summaries; a folder would only fetch "unavailable". A v2
+    // project has none to read (`summary:get` is v1's).
+    if (isDocument && memory === 'v1') void loadSummary(id)
+  }, [id, isDocument, loadSummary, memory])
 
   if (!node) return null
   const synopsis = meta?.synopsis.trim() ?? ''
@@ -453,6 +578,15 @@ function OutlineRow({
         <p data-testid="outline-synopsis" className="m-0 line-clamp-2 pl-4 text-xs text-fg-muted">
           {synopsis}
         </p>
+      ) : memory === 'v2' ? (
+        cardLine !== null ? (
+          <AiSummaryLine
+            summary={cardLine}
+            kind="card"
+            testId="outline-card-line"
+            className="line-clamp-2 pl-4"
+          />
+        ) : null
       ) : aiSummary !== null ? (
         <AiSummaryLine
           summary={aiSummary}
@@ -460,8 +594,8 @@ function OutlineRow({
           className="line-clamp-2 pl-4"
         />
       ) : null}
-      {card !== null ? <SceneCardView card={card} compact /> : null}
-      {isDocument ? <PlanLinkLines id={id} fulfils={fulfils} /> : null}
+      {card !== null && memory === 'v1' ? <SceneCardView card={card} compact /> : null}
+      {isDocument ? <PlanLinkLines id={id} fulfils={fulfils} progress={progress} /> : null}
     </li>
   )
 }

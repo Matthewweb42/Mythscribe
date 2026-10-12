@@ -102,11 +102,30 @@ export function withKey(keys: readonly string[], key: string, present: boolean):
   return present ? withDismissed(keys, key) : keys.filter((each) => each !== key)
 }
 
-/** What the outline reads (`planLinks:get`): the open suggestions, and the links the AI applied itself. */
+/**
+ * F-16.21 (story memory v2, decision 2): a link applied automatically, stored apart from the
+ * scene metadata (`plan_link`): matched in code (`code`) or picked by `planLinks.v2` (`ai`). The
+ * Outline shows it with an AI mark, *Keep* (it becomes the author's `fulfilledBy`) and *Unlink*
+ * (it goes to Dismissed and is never made again).
+ */
+export const AiPlanLink = z.object({
+  planId: NodeId,
+  sceneId: NodeId,
+  origin: z.enum(['code', 'ai']),
+  reason: z.string().max(PLAN_LINKS_REASON_MAX)
+})
+export type AiPlanLink = z.infer<typeof AiPlanLink>
+
+/**
+ * What the outline reads (`planLinks:get`): in v1 the open suggestions and the links the AI
+ * applied itself (`aiLinks` empty); in v2 (F-16.21) the links applied automatically (`aiLinks`;
+ * no suggestions and no `aiApplied`: nothing waits for a confirm).
+ */
 export const PlanLinkView = z.object({
   suggestions: z.array(PlanLinkSuggestion),
   /** `planLinkKey`s of the links applied at chat mode Auto, which the outline marks as AI-made. */
-  aiApplied: z.array(z.string())
+  aiApplied: z.array(z.string()),
+  aiLinks: z.array(AiPlanLink)
 })
 export type PlanLinkView = z.infer<typeof PlanLinkView>
 
