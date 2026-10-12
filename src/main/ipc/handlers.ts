@@ -464,6 +464,7 @@ import {
 } from '../memory/nameIndexer'
 import { runAnchors } from '../memory/reading/anchors'
 import { createReaderService } from '../memory/reading/readerService'
+import { settleOwnedNames } from '../memory/reading/waiting'
 import { claimInfo, sceneMemory } from '../memory/reading/views'
 import {
   dropOwner,
@@ -4555,6 +4556,14 @@ export function registerHandlers({
    */
   const rosterChanged = (db: TreeDb, recordIds: readonly string[]): void => {
     emit(windows(), 'record:changed', { recordIds: [...recordIds], roster: true })
+    // F-16.17: a name the reader's facts wait on that a record now answers to settles them, by
+    // whatever path the name was given (a record made, a nickname added, a rename, a split).
+    if (memory() === 'v2') {
+      const settled = settleOwnedNames(db, new Date())
+      if (settled.nodeIds.length > 0) {
+        emit(windows(), 'memory:changed', { nodeIds: settled.nodeIds, recordIds: [...recordIds] })
+      }
+    }
     queueMemoryIndex(db)
     publishQuestions()
     void syncSpelling()

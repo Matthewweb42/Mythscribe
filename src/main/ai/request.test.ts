@@ -201,6 +201,15 @@ describe('runAiRequest (F-5.14)', () => {
     expect('temperature' in (f.complete.mock.calls[1]?.[0] ?? {})).toBe(false)
   })
 
+  it('F-16.17: does not cache an answer the caller’s cacheIf refuses, and logs it all the same', async () => {
+    const f = fakes()
+    await runAiRequest(f.deps, { ...input, cacheIf: () => false })
+    expect(f.cache.size).toBe(0)
+    expect(f.ledger).toHaveLength(1)
+    await runAiRequest(f.deps, { ...input, cacheIf: (text) => text.length > 0 })
+    expect(f.cache.size).toBe(1)
+  })
+
   it('clamps maxTokens to the feature budget instead of refusing', async () => {
     const f = fakes()
     await runAiRequest(f.deps, { ...input, maxTokens: 10_000 })

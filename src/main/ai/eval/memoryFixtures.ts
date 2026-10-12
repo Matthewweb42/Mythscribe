@@ -17,7 +17,8 @@ import {
   buildVerifyPrompt,
   VERIFY_BATCH_TOKENS,
   VERIFY_PROMPT_VERSION,
-  verifyItemText,
+  VERIFY_UNNAMED_MARK,
+  verifyBatches,
   type VerifyPromptItem
 } from '../prompts/verify.v1'
 import type { EvalCase, ReaderEvalLabel } from './fixtures'
@@ -193,14 +194,24 @@ function labelText(sceneId: string, p: number, quote: string, around = 1): strin
 const LINE = new Map(RECORDS.map((record, i) => [record.id, TEST_BOOK_ROSTER[i] ?? '']))
 const who = (...ids: string[]): string[] => ids.map((id) => LINE.get(id) ?? '')
 
-/** A claim item from a label, its candidates `candidates` (the label's record first). */
-function labelItem(id: string, candidates: string[] = []): VerifyPromptItem & { expect: boolean } {
+/**
+ * A claim item from a label, its candidates `candidates` (the label's record first, or last and
+ * marked `VERIFY_UNNAMED_MARK` when `unnamed`: a role the text gives, as the pipeline sends it).
+ */
+function labelItem(
+  id: string,
+  candidates: string[] = [],
+  options: { unnamed?: boolean } = {}
+): VerifyPromptItem & { expect: boolean } {
   const label = TEST_BOOK_LABELS.claims.find((claim) => claim.id === id)
   if (label === undefined) throw new Error(`No label ${id}`)
   const by = label.speaker === undefined ? '' : ` by ${short(label.speaker)}`
   return {
     kind: 'claim',
-    who: who(label.record, ...candidates),
+    who:
+      options.unnamed === true
+        ? [...who(...candidates), `${LINE.get(label.record) ?? ''}${VERIFY_UNNAMED_MARK}`]
+        : who(label.record, ...candidates),
     fact: `${label.slot}: ${label.value} (${label.voice}${by}, ${label.mode})`,
     text: labelText(label.scene, label.p, label.quote),
     expect: label.expect !== 'reject'
@@ -228,7 +239,8 @@ function verifyCase(
 }
 
 const TYPICAL_BATCH = [
-  labelItem('mrs-harrow-temper', ['harrow-mr']),
+  // "his wife": Mrs. Harrow is named nowhere in reach, so she is offered marked (2026-10-12).
+  labelItem('mrs-harrow-temper', ['harrow-mr'], { unnamed: true }),
   labelItem('liesel-disposition', ['varrow']),
   labelItem('captain-not-blue'),
   labelItem('captain-slate'),
@@ -251,20 +263,14 @@ const TYPICAL_BATCH = [
   }
 ]
 
-/** The worst batch: items until the batch reaches its 2,500-token cap. */
+/**
+ * The worst batch: the first batch `verifyBatches` makes of the labels' facts, over and over, so
+ * it stops at its 2,500-token cap or at the verdicts its output budget holds, whichever comes first.
+ */
 function worstBatch(): (VerifyPromptItem & { expect: boolean })[] {
   const pool = TEST_BOOK_LABELS.claims.map((claim) => labelItem(claim.id))
-  const items: (VerifyPromptItem & { expect: boolean })[] = []
-  let used = 0
-  for (let i = 0; ; i += 1) {
-    const item = pool[i % pool.length]
-    if (item === undefined) break
-    const cost = estimateTokens(verifyItemText(item, i + 1))
-    if (used + cost > VERIFY_BATCH_TOKENS) break
-    items.push(item)
-    used += cost
-  }
-  return items
+  const many = Array.from({ length: 4 }, () => pool).flat()
+  return verifyBatches(many)[0] ?? []
 }
 
 /** A strong spot check: one verified claim with three sentences either side. */
@@ -321,7 +327,7 @@ export const MEMORY_EVAL_CASES: readonly EvalCase[] = [
   ),
   verifyCase(
     'maxed',
-    `the worst batch: items up to its ${VERIFY_BATCH_TOKENS}-token cap`,
+    `the worst batch: items up to its ${VERIFY_BATCH_TOKENS}-token cap or its output budget`,
     worstBatch()
   ),
   verifyCase(

@@ -3363,6 +3363,15 @@ export const contract = {
   /** F-16.9: *Keep line*: the conflict is a `notProblem` dismissal until the page changes again. */
   'research:keepFiledLine': { input: z.object({ conflict: FiledConflict }), output: Dismissed },
   /** F-16.9: *Update line*: the author's own words for a filed line (its `aiFiled` mark goes). */
+  'research:updateFiledLine': {
+    input: z.object({
+      recordId: z.string(),
+      lineIndex: z.number().int().nonnegative(),
+      line: z.string(),
+      text: z.string().trim().min(1).max(FILING_LINE_MAX)
+    }),
+    output: StoryRecord
+  },
   /**
    * F-16.16, F-16.17: *Read now*: reads the scene's changed paragraphs (or the whole scene on its
    * first read) through `reader.v1` and `verify.v1` when the reading gate finds a finished sentence
@@ -3377,15 +3386,6 @@ export const contract = {
   'memory:scene': { input: z.object({ nodeId: z.string() }), output: SceneMemory },
   /** F-16.18: ⓘ on an AI line: its quote, scene, proof and reading; null once it is gone. */
   'memory:claim': { input: z.object({ claimId: z.string() }), output: ClaimInfo.nullable() },
-  'research:updateFiledLine': {
-    input: z.object({
-      recordId: z.string(),
-      lineIndex: z.number().int().nonnegative(),
-      line: z.string(),
-      text: z.string().trim().min(1).max(FILING_LINE_MAX)
-    }),
-    output: StoryRecord
-  },
   /**
    * F-16.15: whether this build offers the story-memory switch-over on a copy (Help › Try the
    * story-memory switch-over on a copy…): unpackaged builds only in P1 (decision P1-D12).

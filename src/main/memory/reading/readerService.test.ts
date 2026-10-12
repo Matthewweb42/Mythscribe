@@ -97,7 +97,7 @@ beforeEach(() => {
   session = createProject(projectFolderFor(tmp, 'Service'), 'Service', 'novel')
   db = session.connection.orm
   scene = manuscriptDocuments(db)[0]?.id ?? ''
-  saveDocument(db, scene, doc("Mara's eyes were grey.", 'Hesk rowed out, a boatman.'))
+  saveDocument(db, scene, doc("Mara's eyes were grey.", 'At dawn Hesk rowed out, a boatman.'))
   const made = createRecord(
     db,
     { name: 'Mara Vell', categoryId: 'character', aliases: [{ text: 'Mara' }] },

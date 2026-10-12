@@ -45,7 +45,8 @@ describe('verify.v1 prompt (F-16.17)', () => {
     expect(built.messages).toMatchSnapshot()
     expect(built.messages[0]?.content.startsWith(VERIFY_SENTINEL)).toBe(true)
     expect(built.messages[0]?.content).toBe(VERIFY_RULES)
-    expect(built.maxTokens).toBe(20 + 15 * items.length)
+    // Two facts at 28 tokens, a card and an on-page item at 12: the verdicts fit (2026-10-12 review).
+    expect(built.maxTokens).toBe(20 + 28 * 2 + 12 * 2)
   })
 
   it('a strong spot check is one claim at 40 tokens out', () => {
@@ -56,8 +57,11 @@ describe('verify.v1 prompt (F-16.17)', () => {
   })
 
   it('caps max_tokens at the budget and splits a batch over 2,500 tokens of items, in order', () => {
-    expect(verifyMaxTokens(1)).toBe(35)
-    expect(verifyMaxTokens(100)).toBe(outputBudget('verify'))
+    expect(verifyMaxTokens([{ kind: 'claim' }])).toBe(48)
+    expect(verifyMaxTokens([{ kind: 'present' }])).toBe(32)
+    expect(verifyMaxTokens(Array.from({ length: 100 }, () => ({ kind: 'claim' as const })))).toBe(
+      outputBudget('verify')
+    )
     const long: VerifyPromptItem[] = Array.from({ length: 60 }, (_, i) => ({
       kind: 'claim',
       who: [`r${i} Someone Number ${i} · character`],
@@ -75,5 +79,22 @@ describe('verify.v1 prompt (F-16.17)', () => {
       const total = estimateTokens(built.messages.map((m) => m.content).join('\n'))
       expect(total).toBeLessThanOrEqual(inputBudget('verify'))
     }
+  })
+
+  it('splits short items so every batch’s verdicts fit its output budget', () => {
+    const short: VerifyPromptItem[] = Array.from({ length: 40 }, (_, i) => ({
+      kind: 'claim',
+      who: [`r${i} Mara · character`],
+      fact: 'eyes: grey (narration, now)',
+      text: 'Her eyes were grey.'
+    }))
+    const batches = verifyBatches(short)
+    expect(batches.flat()).toEqual(short)
+    for (const batch of batches) {
+      // Every verdict has room: 20 + 28 per fact within the 400.
+      expect(20 + 28 * batch.length).toBeLessThanOrEqual(outputBudget('verify'))
+      expect(buildVerifyPrompt({ items: batch }).maxTokens).toBe(20 + 28 * batch.length)
+    }
+    expect(batches[0]).toHaveLength(13)
   })
 })

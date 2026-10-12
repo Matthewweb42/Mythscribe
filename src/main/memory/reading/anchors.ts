@@ -71,7 +71,7 @@ const nothing = (): AnchorsResult => ({
 })
 
 /** The scene's paragraphs now (none for a node that is no longer a manuscript document). */
-function paragraphsOf(db: TreeDb, nodeId: string): Paragraph[] {
+export function paragraphsOf(db: TreeDb, nodeId: string): Paragraph[] {
   const row = manuscriptDocuments(db).find((document) => document.id === nodeId)
   return row === undefined ? [] : passageParagraphs(documentJson(row) ?? EMPTY_DOC)
 }

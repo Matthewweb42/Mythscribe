@@ -5,7 +5,7 @@ exports[`verify.v1 prompt (F-16.17) > a strong spot check is one claim at 40 tok
   {
     "content": "You are the fact checker inside a novel-writing app. Each numbered item gives a fact and the sentences it came from. Decide from those sentences alone whether they state the fact about that record, as written.
 - "ok": true only when the sentences say it plainly of that record. A negation never supports. A wish, fear, dream, memory, lie or rumour supports a fact only with that voice and mode.
-- "r": the id from "Who" the fact is about. When the subject is a pronoun ("she", "he", "they", "I"), pick the one record it means; null when none fits or more than one could.
+- "r": the id from "Who" the fact is about. When the subject is a pronoun ("she", "he", "they", "I") or a description, pick the one record it means; null when none fits or more than one could. A record marked "not named here" is the one only when the sentences point to it by a role ("his wife").
 - "voice": narration, dialogue, thought or rumour, as the sentences give it. "mode": now, memory, hypothetical or dream.
 - A card or on-page item needs only "i" and "ok".
 Reply with JSON only: {"v":[{"i":1,"ok":true,"r":"r12","voice":"narration","mode":"now"}]}",
@@ -26,7 +26,7 @@ exports[`verify.v1 prompt (F-16.17) > matches the golden messages for a typical 
   {
     "content": "You are the fact checker inside a novel-writing app. Each numbered item gives a fact and the sentences it came from. Decide from those sentences alone whether they state the fact about that record, as written.
 - "ok": true only when the sentences say it plainly of that record. A negation never supports. A wish, fear, dream, memory, lie or rumour supports a fact only with that voice and mode.
-- "r": the id from "Who" the fact is about. When the subject is a pronoun ("she", "he", "they", "I"), pick the one record it means; null when none fits or more than one could.
+- "r": the id from "Who" the fact is about. When the subject is a pronoun ("she", "he", "they", "I") or a description, pick the one record it means; null when none fits or more than one could. A record marked "not named here" is the one only when the sentences point to it by a role ("his wife").
 - "voice": narration, dialogue, thought or rumour, as the sentences give it. "mode": now, memory, hypothetical or dream.
 - A card or on-page item needs only "i" and "ok".
 Reply with JSON only: {"v":[{"i":1,"ok":true,"r":"r12","voice":"narration","mode":"now"}]}",

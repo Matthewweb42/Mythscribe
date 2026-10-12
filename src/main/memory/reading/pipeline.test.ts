@@ -21,6 +21,7 @@ import { nameScanShared, scanNamesFor } from '../nameIndexer'
 import { answerNameQuestion, listNameQuestions, resetNameQuestionCache } from '../questions'
 import { createRecord } from '../recordStore'
 import { setSceneDetails } from '../sceneDetailStore'
+import { runAnchors } from './anchors'
 import { getCard } from './cardStore'
 import { sceneTexts } from './claimFixture'
 import { invariantClaims, sceneClaims } from './claimStore'
@@ -36,6 +37,7 @@ import {
   type FakeAnswer
 } from './readingFixture'
 import { getSceneRead } from './sceneReadStore'
+import { settleOwnedNames } from './waiting'
 
 let tmp: string
 let session: ProjectSession
@@ -560,7 +562,7 @@ describe('runReading (F-16.17)', () => {
   })
 
   it('keeps a new name’s proved facts waiting, asks about the name once, and attaches them on Yes', async () => {
-    saveDocument(db, one, doc(...SCENE, 'Hesk was a smuggler from the marsh.'))
+    saveDocument(db, one, doc(...SCENE, 'By then Hesk was a smuggler from the marsh.'))
     scanNamesFor(db, one, NOW)
     const ai = fakeAi((request) => {
       if (requestKind(request) === 'verify') return { text: verifyReply(request) }
@@ -615,7 +617,11 @@ describe('runReading (F-16.17)', () => {
   })
 
   it('attaches a waiting fact whose sentence changed stale, and deletes them all on No', async () => {
-    saveDocument(db, one, doc(...SCENE, 'Hesk was a smuggler from the marsh.', 'Ry was a boatman.'))
+    saveDocument(
+      db,
+      one,
+      doc(...SCENE, 'By then Hesk was a smuggler from the marsh.', 'By then Ry was a boatman.')
+    )
     scanNamesFor(db, one, NOW)
     const ai = fakeAi((request) => {
       if (requestKind(request) === 'verify') return { text: verifyReply(request) }
@@ -643,7 +649,11 @@ describe('runReading (F-16.17)', () => {
     saveDocument(
       db,
       one,
-      doc(...SCENE, 'Hesk was a smuggler from the marsh, once.', 'Ry was a boatman.')
+      doc(
+        ...SCENE,
+        'By then Hesk was a smuggler from the marsh, once.',
+        'By then Ry was a boatman.'
+      )
     )
     const yes = answerNameQuestion(
       db,
@@ -667,7 +677,7 @@ describe('runReading (F-16.17)', () => {
       },
       NOW
     )
-    saveDocument(db, one, doc(...SCENE, 'Hesk was a smuggler from the marsh.'))
+    saveDocument(db, one, doc(...SCENE, 'By then Hesk was a smuggler from the marsh.'))
     const ai = fakeAi((request) => {
       if (requestKind(request) === 'verify') return { text: verifyReply(request) }
       return {
@@ -758,5 +768,452 @@ describe('runReading (F-16.17)', () => {
       await runReading(db, { ai: ai.deps }, { nodeId: 'nope', caretPara: null, requestId: 'r-4' })
     ).toEqual({ read: false, reason: 'notReadable' })
     expect(ai.requests).toEqual([])
+  })
+})
+
+describe('runReading: what changes under it, and what it cannot read (F-16.17, review 2026-10-12)', () => {
+  it('stales what an edit saved while the checker was out leaves unproved, instead of storing it live', async () => {
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') {
+        // The author changes grey to brown mid-reading; the anchors job runs on that save.
+        saveDocument(
+          db,
+          one,
+          doc(SCENE[0] ?? '', "Mara's eyes were brown. She walked to the quay.", SCENE[2] ?? '')
+        )
+        runAnchors(db, one, NOW)
+        return { text: verifyReply(request) }
+      }
+      return { text: readerReply(request, PLAN) }
+    })
+    await read(ai)
+    expect(claimsNow().map((claim) => [claim.slot, claim.value, claim.state])).toEqual([
+      ['eyes', 'grey', 'stale'],
+      ['location', 'the quay', 'stale'],
+      ['clothing', 'a blue coat', 'live']
+    ])
+    expect(invariants()).toEqual([])
+  })
+
+  it('parks what it wrote when the scene became an Idea while the requests were out', async () => {
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') {
+        setSceneMeta(db, one, { ...parseStoredSceneMeta(null), status: 'idea' })
+        return { text: verifyReply(request) }
+      }
+      return { text: readerReply(request, PLAN) }
+    })
+    await read(ai)
+    expect(claimsNow().map((claim) => claim.state)).toEqual(['stale', 'stale', 'stale'])
+  })
+
+  it('reads nothing from a reply that does not parse: the scene stays unread and is read again', async () => {
+    const refusal = fakeAi(() => ({ text: 'Sorry, I cannot help with that.' }))
+    const outcome = await read(refusal)
+    expect(outcome).toMatchObject({ read: true, yields: { rejections: { unparsed: 1 } } })
+    // Not cached: the same request is asked again, not answered with the same refusal.
+    await read(refusal)
+    expect(refusal.requests).toHaveLength(2)
+    // The reading and its cost are kept; nothing counts as read.
+    expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toEqual({ unparsed: 1 })
+    expect(getSceneRead(db, one, activeDraftId(db))).toBeNull()
+    expect(claimsNow()).toEqual([])
+    const good = standard()
+    expect(await read(good)).toMatchObject({ read: true, purpose: 'first' })
+    expect(good.requests.map(requestKind)).toContain('reader')
+  })
+
+  it('keeps the stale claims of a window whose reply does not parse, and reads the window again', async () => {
+    await read(standard())
+    saveDocument(
+      db,
+      one,
+      doc(SCENE[0] ?? '', "Mara's eyes were brown. She walked to the quay.", SCENE[2] ?? '')
+    )
+    runAnchors(db, one, NOW)
+    expect(claimsNow().filter((claim) => claim.state === 'stale')).toHaveLength(2)
+    await read(fakeAi(() => ({ text: '' })))
+    expect(claimsNow().filter((claim) => claim.state === 'stale')).toHaveLength(2)
+    const again = standard()
+    expect(await read(again)).toMatchObject({ read: true, purpose: 'window' })
+    expect(again.requests.map(requestKind)).toContain('reader')
+  })
+
+  it('leaves the paragraphs of a retry that does not parse unread', async () => {
+    let calls = 0
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      calls += 1
+      if (calls === 1) {
+        const whole = readerReply(request, PLAN)
+        return { text: whole.slice(0, whole.indexOf('She walked') + 4), finishReason: 'length' }
+      }
+      return { text: 'I could not read that.' }
+    })
+    await read(ai)
+    expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes'])
+    // ¶2, the retry's, stays unread: not a whole read, and read again next time.
+    const reading = lastReading(db, one, activeDraftId(db))
+    expect(reading?.paras).toEqual([[0, 1]])
+    expect(getSceneRead(db, one, activeDraftId(db))?.partials).toBe(1)
+  })
+
+  it('reads a cut-off reply’s piece again whole when it listed facts out of paragraph order', async () => {
+    let calls = 0
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      calls += 1
+      const reordered = [PLAN[2], PLAN[0], PLAN[1]].flatMap((claim) =>
+        claim === undefined ? [] : [claim]
+      )
+      if (calls === 1) {
+        const whole = readerReply(request, reordered)
+        // Cut inside the third item: ¶2, then ¶1, salvaged.
+        return { text: whole.slice(0, whole.indexOf('She walked') + 4), finishReason: 'length' }
+      }
+      return { text: readerReply(request, PLAN) }
+    })
+    await read(ai)
+    const readers = ai.requests.filter((request) => requestKind(request) === 'reader')
+    expect(readers).toHaveLength(2)
+    expect([...sentParagraphs(nth(readers, 1)).keys()]).toEqual([0, 1, 2])
+    expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes', 'location', 'clothing'])
+  })
+
+  it('locates a card field and who is on the page from page 2 in page 2’s own text', async () => {
+    const filler = 'The tide ran out across the mudflats and the gulls followed it. '.repeat(20)
+    const long = [
+      ...SCENE,
+      ...Array.from({ length: 8 }, () => filler.trim()),
+      'Tomas waited at the harbour wall until dark.'
+    ]
+    saveDocument(db, one, doc(...long))
+    scanNamesFor(db, one, NOW)
+    const last = long.length - 1
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      const ids = rosterIds(request)
+      const second = sentParagraphs(request).has(last)
+      const card = second
+        ? {
+            ...CARD,
+            where: ['the harbour wall', last, 'Tomas waited at the harbour wall'],
+            present: [[ids.get('Tomas') ?? '', last, 'Tomas waited at the harbour wall']]
+          }
+        : { ...CARD, where: null }
+      return { text: readerReply(request, PLAN, { card }) }
+    })
+    await read(ai)
+    const readers = ai.requests.filter((request) => requestKind(request) === 'reader')
+    expect(readers.length).toBeGreaterThan(1)
+    const card = getCard(db, one, activeDraftId(db))
+    expect(card?.line).toBe('Mara walks to the quay.')
+    expect(card?.fields.where).toMatchObject({ value: 'the harbour wall', p: last })
+    expect(card?.present).toEqual([
+      { recordId: tomas, quote: 'Tomas waited at the harbour wall', p: last, verified: true }
+    ])
+    // The on-page check went in the batch of the page that gave it.
+    const checks = ai.requests
+      .filter((request) => requestKind(request) === 'verify')
+      .flatMap((request) => sentChecks(request))
+    expect(checks.find((check) => check.label === 'On the page')?.text).toContain('harbour wall')
+  })
+})
+
+describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', () => {
+  const TRAITS: PlannedClaim[] = [
+    { p: 1, r: 'Mara Vell', s: 'location', v: 'the quay', q: 'She walked to the quay' },
+    { p: 1, r: 'Mara Vell', s: 'traits', v: 'grey-eyed', q: "Mara's eyes were grey" },
+    { p: 2, r: 'Tomas', s: 'traits', v: 'blue-coated', q: 'Tomas wore a blue coat' }
+  ]
+
+  it('asks again for the verdicts a cut-off reply left out', async () => {
+    let calls = 0
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) !== 'verify') return { text: readerReply(request, TRAITS) }
+      calls += 1
+      if (calls === 1) {
+        const whole = verifyReply(request)
+        return { text: whole.slice(0, whole.indexOf('},{"i":2') + 1), finishReason: 'length' }
+      }
+      return { text: verifyReply(request) }
+    })
+    await read(ai)
+    const checks = ai.requests.filter((request) => requestKind(request) === 'verify')
+    expect(checks).toHaveLength(2)
+    expect(sentChecks(nth(checks, 1))).toHaveLength(2)
+    expect(claimsNow().map((claim) => [claim.slot, claim.state])).toEqual([
+      ['traits', 'live'],
+      ['location', 'live'],
+      ['traits', 'live']
+    ])
+    expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
+      finishReason: 'length',
+      yields: { cut: 1, verifySent: 3, verified: 3, rejected: 0 }
+    })
+  })
+
+  it('never counts a fact the checker did not answer against it, and reads its paragraph again', async () => {
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) !== 'verify') return { text: readerReply(request, TRAITS) }
+      const whole = verifyReply(request)
+      // Every reply stops after its first verdict.
+      return { text: whole.slice(0, whole.indexOf('},{"i":2') + 1), finishReason: 'length' }
+    })
+    await read(ai)
+    const reading = lastReading(db, one, activeDraftId(db))
+    expect(reading?.yields).toMatchObject({
+      verifySent: 2,
+      verified: 2,
+      rejections: { unanswered: 1 },
+      cut: 2
+    })
+    // ¶2 (Tomas) was not read through: it is read again.
+    expect(reading?.paras).toEqual([[0, 1]])
+    const again = standard()
+    await read(again)
+    const reader = again.requests.find((request) => requestKind(request) === 'reader')
+    expect([...sentParagraphs(nth(reader === undefined ? [] : [reader], 0)).keys()]).toContain(2)
+  })
+
+  it('refuses a fact only the checker’s refusal of that very fact, not a neighbour on its quote', async () => {
+    const dashing: PlannedClaim = {
+      p: 2,
+      r: 'Tomas',
+      s: 'traits',
+      v: 'dashing',
+      q: 'Tomas wore a blue coat'
+    }
+    await read(standard([dashing]))
+    expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([['dashing', 'live']])
+    // A rebuild: the reader proposes another value on the same quote and says to drop c1.
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') {
+        return { text: verifyReply(request, () => ({ ok: false })) }
+      }
+      const tail = request.messages.at(-1)?.content ?? ''
+      const short = /(c\d+) r\d+ traits “dashing”/.exec(tail)?.[1]
+      return {
+        text: readerReply(request, [{ ...dashing, v: 'shabby' }], {
+          drop: short === undefined ? [] : [short]
+        })
+      }
+    })
+    await runReading(
+      db,
+      { ai: ai.deps },
+      { nodeId: one, caretPara: null, requestId: 'r-5', purpose: 'rebuild' }
+    )
+    expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([['dashing', 'live']])
+  })
+
+  it('pins first person to a speaker only in what the checker confirms is their line', async () => {
+    saveDocument(db, one, doc('Tomas sat down.', '“I was born in Elsmere,” he said.'))
+    scanNamesFor(db, one, NOW)
+    const ai = fakeAi((request): FakeAnswer => {
+      // The checker reads the line as narration: first person then points to nobody.
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      return {
+        text: readerReply(request, [
+          {
+            p: 1,
+            r: 'Tomas',
+            s: 'born',
+            v: 'in Elsmere',
+            q: 'I was born in Elsmere',
+            voice: 'dialogue',
+            sp: 'Tomas'
+          }
+        ])
+      }
+    })
+    await read(ai)
+    expect(claimsNow()).toEqual([])
+    expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toEqual({ subject: 1 })
+  })
+
+  it('refuses a pronoun whose one candidate the checker says does not fit', async () => {
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') {
+        return { text: verifyReply(request, () => ({ r: null })) }
+      }
+      return { text: readerReply(request, [PLAN[1] ?? PLAN[0] ?? ({} as PlannedClaim)]) }
+    })
+    await read(ai)
+    expect(claimsNow()).toEqual([])
+    expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toEqual({ unconfirmed: 1 })
+  })
+})
+
+describe('runReading: who a pronoun may mean (F-16.17, review 2026-10-12)', () => {
+  it('offers every woman named before a man named last, so the checker can say both fit', async () => {
+    const clara = record('Clara Pell', ['Clara'])
+    saveDocument(
+      db,
+      one,
+      doc('Clara and Lise sat by the window. Tomas brought the tea. She had green eyes.')
+    )
+    scanNamesFor(db, one, NOW)
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') {
+        // An honest checker: two women fit "She".
+        return {
+          text: verifyReply(request, (check) =>
+            check.names.includes('Clara Pell') && check.names.includes('Lise') ? { r: null } : null
+          )
+        }
+      }
+      return {
+        text: readerReply(request, [
+          { p: 0, r: 'Clara Pell', s: 'eyes', v: 'green', q: 'She had green eyes' }
+        ])
+      }
+    })
+    await read(ai)
+    const [check] = sentChecks(nth(ai.requests, 1))
+    expect([...(check?.names ?? [])].sort()).toEqual(['Clara Pell', 'Lise', 'Tomas'])
+    expect(check?.unnamed).toEqual([])
+    const [claim] = claimsNow()
+    expect(claim).toMatchObject({ recordId: null, state: 'waiting' })
+    expect(claim?.pending).toEqual({ kind: 'subject', candidates: [tomas, clara, lise] })
+  })
+
+  it('refuses a fact whose sentence names someone the roster does not know (the twin rule)', async () => {
+    const rynna = record('Rynna Falsire', ['Rynna'])
+    saveDocument(db, one, doc('Rynna Falsire came in. Jem Falsire had green eyes.'))
+    scanNamesFor(db, one, NOW)
+    const ai = standard([
+      { p: 0, r: 'Rynna Falsire', s: 'eyes', v: 'green', q: 'Jem Falsire had green eyes' }
+    ])
+    await read(ai)
+    expect(ai.requests.map(requestKind)).toEqual(['reader'])
+    expect(claimsNow().filter((claim) => claim.recordId === rynna)).toEqual([])
+    expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toEqual({ subject: 1 })
+  })
+
+  it('offers a record the text points to only by a role, marked as not named there', async () => {
+    saveDocument(
+      db,
+      one,
+      doc('Tomas could never make his wife understand him. She had a quick temper.')
+    )
+    scanNamesFor(db, one, NOW)
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') {
+        // "his wife": the checker picks the marked record.
+        return {
+          text: verifyReply(request, (check) =>
+            check.unnamed.length === 1 ? { r: check.unnamed[0] } : null
+          )
+        }
+      }
+      return {
+        text: readerReply(request, [
+          { p: 0, r: 'Lise', s: 'traits', v: 'a quick temper', q: 'She had a quick temper' }
+        ])
+      }
+    })
+    await read(ai)
+    const [check] = sentChecks(nth(ai.requests, 1))
+    expect(check?.names).toEqual(['Tomas', 'Lise'])
+    expect(check?.unnamed).toHaveLength(1)
+    expect(claimsNow().map((claim) => [claim.recordId, claim.slot, claim.state])).toEqual([
+      [lise, 'traits', 'live']
+    ])
+    expect(invariants()).toEqual([])
+  })
+})
+
+describe('runReading: new names (F-16.17, review 2026-10-12)', () => {
+  /** A new name's item: the name, where it stands, and one role fact on the same quote. */
+  const nameItem = (n: string, p: number, q: string, fact: string): Record<string, unknown> => ({
+    n,
+    p,
+    q,
+    c: [{ p, s: 'role', v: fact, q }]
+  })
+  const named = (n: string, p: number, q: string, fact: string): string =>
+    JSON.stringify({ n: [nameItem(n, p, q, fact)] })
+
+  it('drops a name seen only opening a sentence, and a titled look-alike no question asks about', async () => {
+    saveDocument(
+      db,
+      one,
+      doc('Hesk was a smuggler from the marsh.', 'At dusk Captain Vell was a smuggler too.')
+    )
+    scanNamesFor(db, one, NOW)
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      return {
+        text: JSON.stringify({
+          n: [
+            nameItem('Hesk', 0, 'Hesk was a smuggler from the marsh', 'a smuggler'),
+            nameItem('Captain Vell', 1, 'Captain Vell was a smuggler too', 'a smuggler')
+          ]
+        })
+      }
+    })
+    await read(ai)
+    expect(claimsNow()).toEqual([])
+    expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toEqual({ name: 2 })
+  })
+
+  it('makes a name two records share wait on them, for the scan to settle', async () => {
+    const owners = ['Mr. Harrow', 'Mrs. Harrow'].map((name) => {
+      const made = createRecord(
+        db,
+        { name, categoryId: 'character', aliases: [{ text: 'Harrow', shared: true }], force: true },
+        NOW
+      )
+      if (!('record' in made)) throw new Error('blocked')
+      return made.record.id
+    })
+    saveDocument(db, one, doc('At noon Harrow was a magistrate again.'))
+    scanNamesFor(db, one, NOW)
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      return { text: named('Harrow', 0, 'Harrow was a magistrate again', 'a magistrate') }
+    })
+    await read(ai)
+    const [claim] = claimsNow()
+    expect(claim).toMatchObject({ recordId: null, state: 'waiting', subjectText: 'Harrow' })
+    expect(claim?.pending).toEqual({ kind: 'subject', candidates: [...owners].sort() })
+  })
+
+  it('settles facts waiting on a name once a record answers to it, however it was made', async () => {
+    saveDocument(db, one, doc(...SCENE, 'By then Hesk was a smuggler from the marsh.'))
+    scanNamesFor(db, one, NOW)
+    await read(
+      fakeAi((request): FakeAnswer => {
+        if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+        return { text: named('Hesk', 3, 'Hesk was a smuggler from the marsh', 'a smuggler') }
+      })
+    )
+    expect(claimsNow()).toMatchObject([{ state: 'waiting', pending: { kind: 'name' } }])
+    // Made in the Story bible, not through the question: the name is on the roster now.
+    const hesk = record('Hesk')
+    expect(listNameQuestions(db).map((question) => question.name)).not.toContain('Hesk')
+    const settled = settleOwnedNames(db, NOW)
+    expect(settled.attached).toHaveLength(1)
+    expect(claimsNow()).toMatchObject([{ recordId: hesk, state: 'live', pending: null }])
+  })
+
+  it('attaches a waiting fact stale when its scene is no longer readable', async () => {
+    saveDocument(db, one, doc(...SCENE, 'By then Hesk was a smuggler from the marsh.'))
+    scanNamesFor(db, one, NOW)
+    await read(
+      fakeAi((request): FakeAnswer => {
+        if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+        return { text: named('Hesk', 3, 'Hesk was a smuggler from the marsh', 'a smuggler') }
+      })
+    )
+    setSceneMeta(db, one, { ...parseStoredSceneMeta(null), status: 'idea' })
+    const { settled } = answerNameQuestion(
+      db,
+      { kind: 'addAs', name: 'Hesk', categoryId: 'character' },
+      NOW
+    )
+    expect(settled?.restaled).toHaveLength(1)
+    expect(claimsNow().map((claim) => claim.state)).toEqual(['stale'])
   })
 })

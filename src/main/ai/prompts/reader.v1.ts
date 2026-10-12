@@ -40,7 +40,7 @@ export const READER_SENTINEL = 'You are the story-memory reader inside a novel-w
 export const READER_RULES =
   `${READER_SENTINEL} Read the numbered paragraphs of one scene and list what the prose itself ` +
   'states about the records on the roster below: each fact once, with a quote copied word for ' +
-  'word.\n' +
+  'word, in paragraph order.\n' +
   'Rules:\n' +
   '- Only what the words say: no inference, no outside knowledge, no guesses. A negation states ' +
   'nothing ("her eyes were not blue" is no fact). Skip anything not said plainly.\n' +

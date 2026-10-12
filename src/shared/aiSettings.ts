@@ -690,8 +690,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       'Story memory v2 only: for each fact a reading proposed that code could not prove, the ' +
       'fact, the records it might be about (name, nicknames and kind), and its sentence with ' +
-      "one either side (and the sentences back to the one that names whoever a 'she' or 'he' " +
-      "points to); the scene card's point of view, year and flashback, and who is on the page, " +
+      "one either side (and, for a 'she' or 'he', up to eight sentences back to the first that " +
+      "names someone it could mean); the scene card's point of view, year and flashback, and who " +
+      'is on the page, ' +
       'each with its sentence; for spot checks, a fact with three sentences either side.',
     minDial: 1
   }
@@ -719,11 +720,13 @@ export const AI_FEATURES_BY_LEVEL: readonly AiFeatureId[] = [...AI_FEATURE_IDS].
 
 /**
  * F-16.17 (P2a-D24): the features only one story memory runs. A v2 project's toggle list hides the
- * v1-only ones (tags, summaries, the consistency check, Organise, To do, sheet sync), and a v1
- * project's hides the reader and its checker; the data-sharing table keeps one row per id.
+ * v1-only ones (tags, the consistency check, Organise, To do, sheet sync), and a v1 project's
+ * hides the reader and its checker; the data-sharing table keeps one row per id. Scene summaries
+ * still run in v2 until P2a slice 3 turns `summary.v5` off there, so their toggle stays shown in
+ * both (AI rule 3: a feature that sends text keeps its switch); slice 3 adds `summary` here.
  */
 export const MEMORY_ONLY_FEATURES: Readonly<Record<StoryMemoryVersion, readonly AiFeatureId[]>> = {
-  v1: ['tags', 'summary', 'continuity', 'organise', 'todo', 'sheetSync'],
+  v1: ['tags', 'continuity', 'organise', 'todo', 'sheetSync'],
   v2: ['reader', 'verify']
 }
 
@@ -745,8 +748,7 @@ export const FEATURE_GROUPS: readonly FeatureGroup[] = [
 
 /** One row of a project's feature toggles: a feature, or a group in its first member's place. */
 export type FeatureToggleItem =
-  | { kind: 'feature'; id: AiFeatureId }
-  | { kind: 'group'; group: FeatureGroup }
+  { kind: 'feature'; id: AiFeatureId } | { kind: 'group'; group: FeatureGroup }
 
 /**
  * The toggles a project with story memory `memory` shows, in display order (`AI_FEATURES_BY_LEVEL`):

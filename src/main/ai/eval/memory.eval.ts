@@ -515,7 +515,9 @@ export const PLANTED_PASS_BARS = {
   quotesFound: 0.9,
   verifierPass: 0.8,
   attribution: 0.95,
-  literalPrecision: 0.98
+  literalPrecision: 0.98,
+  /** Verified claims on a labelled sentence, with the label's record (2026-10-12 review). */
+  supportPrecision: 0.9
 } as const
 
 /** The live run stops reading once its reported cost passes this. */
@@ -574,7 +576,6 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
         (event, scene) => events.push({ ...event, scene }),
         () => spent() > LIVE_STOP_USD
       )
-      const stopped = spent() > LIVE_STOP_USD
 
       // The spot checks: up to 50 literal claims on the fast tier (batches of 10), up to 20
       // verified ones on the strong tier, one per call with three sentences either side.
@@ -597,6 +598,12 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
         }
       }
       const spot = { fastAgree: 0, fastChecked: 0, strongAgree: 0, strongChecked: 0 }
+      // The 50¢ stop holds through the spot checks too: checked before every request.
+      let stopped = spent() > LIVE_STOP_USD
+      const over = (): boolean => {
+        stopped ||= spent() > LIVE_STOP_USD
+        return stopped
+      }
       if (!stopped) {
         const literal = claims
           .filter((claim) => claim.proof === 'literal')
@@ -605,6 +612,7 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
         const batches: VerifyPromptItem[][] = []
         for (let i = 0; i < literal.length; i += 10) batches.push(literal.slice(i, i + 10))
         for (const batch of batches) {
+          if (over()) break
           const prompt = buildVerifyPrompt({ items: batch })
           const result = await runAiRequest(ai, {
             feature: 'verify',
@@ -620,6 +628,7 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
           spot.fastAgree += batch.filter((_, i) => verdicts.get(i + 1) === true).length
         }
         for (const claim of claims.filter((each) => each.proof === 'verified').slice(0, 20)) {
+          if (over()) break
           const prompt = buildVerifyPrompt({ items: [item(claim, 3)], strong: true })
           const result = await runAiRequest(ai, {
             feature: 'verify',
@@ -745,10 +754,26 @@ function scoreLive(
         book.records.get(entry.label.record) === claim.recordId
     )
   ).length
+  // Support: verified claims on a labelled sentence that the label proves, about its record.
   const verified = claims.filter((claim) => claim.proof === 'verified')
-  const verifiedRight = verified.filter((claim) =>
-    matched.some((entry) => entry.claim === claim && entry.label.expect !== 'reject')
+  const verifiedMatched = verified.filter((claim) => matched.some((entry) => entry.claim === claim))
+  const verifiedRight = verifiedMatched.filter((claim) =>
+    matched.some(
+      (entry) =>
+        entry.claim === claim &&
+        entry.label.expect !== 'reject' &&
+        book.records.get(entry.label.record) === claim.recordId
+    )
   ).length
+  // Stored claims on no labelled sentence: no bar can judge them, so each is listed for review.
+  const nameOfRecord = new Map([...book.records].map(([labelId, id]) => [id, nameOf.get(labelId)]))
+  const unreviewed = claims
+    .filter((claim) => !matched.some((entry) => entry.claim === claim))
+    .map(
+      (claim) =>
+        `${sceneOf(book, claim.nodeId)} ¶${claim.para} ${nameOfRecord.get(claim.recordId ?? '') ?? '?'} ` +
+        `${claim.slot} “${claim.value}” (${claim.proof}, ${claim.voice}, ${claim.mode}) ← “${claim.quote}”`
+    )
 
   // Names: proposed, and those the twin gate ties to a record (a twin it caught).
   const names = [...new Set(events.flatMap((event) => (event.name === null ? [] : [event.name])))]
@@ -783,6 +808,12 @@ function scoreLive(
   bar('verifier pass', passed, sentToVerifier, PLANTED_PASS_BARS.verifierPass)
   bar('attribution precision', attributed, matched.length, PLANTED_PASS_BARS.attribution)
   bar('literal precision', literalRight, literal.length, PLANTED_PASS_BARS.literalPrecision)
+  bar(
+    'support precision',
+    verifiedRight,
+    verifiedMatched.length,
+    PLANTED_PASS_BARS.supportPrecision
+  )
   if (strays.length > 0) failures.push(`${strays.length} claims from never-read scenes`)
   if (falseAlarms.length > 0) failures.push(`${falseAlarms.length} negatives stored live`)
 
@@ -799,7 +830,8 @@ function scoreLive(
     `- Verifier pass: ${percent(passed, sentToVerifier)} (bar ${PLANTED_PASS_BARS.verifierPass * 100} %)`,
     `- Attribution precision: ${percent(attributed, matched.length)} (bar ${PLANTED_PASS_BARS.attribution * 100} %)`,
     `- Literal precision: ${percent(literalRight, literal.length)} (bar ${PLANTED_PASS_BARS.literalPrecision * 100} %)`,
-    `- Support precision: ${percent(verifiedRight, verified.length)} (reported)`,
+    `- Support precision: ${percent(verifiedRight, verifiedMatched.length)} (bar ${PLANTED_PASS_BARS.supportPrecision * 100} %; verified claims on labelled sentences, the label's record)`,
+    `- Stored on no labelled sentence (unreviewed, listed below): ${unreviewed.length} of ${claims.length}`,
     `- Claims from never-read scenes: ${strays.length} (bar 0)`,
     `- Negatives stored live (false alarms): ${falseAlarms.length} (bar 0)${falseAlarms.length > 0 ? `: ${falseAlarms.join('; ')}` : ''}`,
     `- Cut off at the cap (finish_reason length): ${percent(cutReadings, readCount)} of readings`,
@@ -823,6 +855,13 @@ function scoreLive(
           } | ${entry.recalled}/${entry.labels} |`
       ),
     '',
+    '## Unreviewed: stored on no labelled sentence',
+    '',
+    'No bar judges these: read each against its quote (a wrong person or an unsupported value is a',
+    'failure of the run even when every bar passed).',
+    '',
+    ...(unreviewed.length === 0 ? ['None.'] : unreviewed.map((line) => `- ${line}`)),
+    '',
     'Recall has no bar: sheets may be thinner than the labels. No prompt text and no key are written here.'
   ]
   return {
@@ -837,7 +876,8 @@ function scoreLive(
       verifierPass: { passed, sent: sentToVerifier },
       attribution: { right: attributed, matched: matched.length },
       literalPrecision: { right: literalRight, literal: literal.length },
-      supportPrecision: { right: verifiedRight, verified: verified.length },
+      supportPrecision: { right: verifiedRight, matched: verifiedMatched.length },
+      unreviewed,
       neverRead: strays.length,
       falseAlarms,
       cutReadings,

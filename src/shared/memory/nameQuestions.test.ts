@@ -71,9 +71,15 @@ describe('nameQuestions (F-16.4)', () => {
     ).toEqual([])
   })
 
-  it('F-16.17: asks about a name seen once when the reader proposed it with a proved fact', () => {
-    const once = 'The rain fell. Hesk took the oars.'
+  it('F-16.17: asks about a name seen once mid-sentence when the reader proposed it with a proved fact', () => {
+    const once = 'The rain fell. Then old Hesk took the oars.'
     expect(nameQuestions(docs(once), ROSTER, NONE)).toEqual([])
+    // Identity rule 6: a name seen only opening a sentence is never asked about ("Hope filled…").
+    expect(
+      nameQuestions(docs('The rain fell. Hesk took the oars.'), ROSTER, NONE, {
+        proved: new Set(['hesk'])
+      })
+    ).toEqual([])
     expect(
       nameQuestions(docs(once), ROSTER, NONE, { proved: new Set(['hesk']) }).map((q) => [
         q.kind,

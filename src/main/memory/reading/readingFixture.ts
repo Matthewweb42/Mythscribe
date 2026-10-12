@@ -1,7 +1,7 @@
 import { priceFor, type AiProviderId } from '@shared/ai'
 import { defaultAiRouting, autoTable } from '@shared/aiRouting'
 import { READER_SENTINEL } from '../../ai/prompts/reader.v1'
-import { VERIFY_SENTINEL } from '../../ai/prompts/verify.v1'
+import { VERIFY_SENTINEL, VERIFY_UNNAMED_MARK } from '../../ai/prompts/verify.v1'
 import type { CachedResponse } from '../../ai/cacheStore'
 import { dayOf, defaultAiUsageState } from '../../ai/dailyCap'
 import type { AiRequestDeps } from '../../ai/request'
@@ -65,6 +65,8 @@ export function rosterIds(request: Pick<CompletionRequest, 'messages'>): Map<str
 export interface SentCheck {
   i: number
   who: string[]
+  /** The ids of "Who" marked as named nowhere in reach (`VERIFY_UNNAMED_MARK`). */
+  unnamed: string[]
   /** The names of "Who", in the same order. */
   names: string[]
   label: string
@@ -86,7 +88,11 @@ export function sentChecks(request: Pick<CompletionRequest, 'messages'>): SentCh
       if (head === null || fact === null || text === null) return []
       const entries = (head[2] ?? '')
         .split(' | ')
-        .map((entry) => /^([rn]\d+) (.+?)(?: \(.*\))? · [a-z ]+$|^([rn]\d+) (.+)$/.exec(entry))
+        .map((entry) =>
+          /^([rn]\d+) (.+?)(?: \(.*\))? · [a-z ]+?(?: · not named here)?$|^([rn]\d+) (.+)$/.exec(
+            entry
+          )
+        )
         .flatMap((match) =>
           match === null
             ? []
@@ -94,10 +100,15 @@ export function sentChecks(request: Pick<CompletionRequest, 'messages'>): SentCh
         )
       const who = entries.map((entry) => entry.id)
       const names = entries.map((entry) => entry.name)
+      const unnamed = (head[2] ?? '')
+        .split(' | ')
+        .filter((entry) => entry.endsWith(VERIFY_UNNAMED_MARK))
+        .map((entry) => entry.split(' ')[0] ?? '')
       return [
         {
           i: Number(head[1]),
           who,
+          unnamed,
           names,
           label: fact[1] ?? '',
           fact: fact[2] ?? '',

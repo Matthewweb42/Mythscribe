@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { nameInSentence, pronounPerson, resolveSubject, type LadderSentence } from './ladder'
+import {
+  nameInSentence,
+  pronounPerson,
+  resolveSubject,
+  unknownName,
+  type LadderSentence
+} from './ladder'
 import type { LiteralName } from './literal'
 
 const name = (recordId: string, start: number, end: number, ambiguous = false): LiteralName => ({
@@ -63,7 +69,7 @@ describe('the ladder’s subject step (F-16.17)', () => {
     ).toEqual({ kind: 'shared', candidates: ['mr', 'mrs'], text: 'Harrow' })
   })
 
-  it('sends a pronoun or a description to the checker with the characters back to the naming sentence', () => {
+  it('sends a pronoun or a description to the checker with every character named in reach', () => {
     const before = [
       sentence(2, 'The two women sat by the window.'),
       sentence(1, 'Clara and Lise came in.', [name('clara', 0, 5), name('lise', 10, 14)])
@@ -75,20 +81,106 @@ describe('the ladder’s subject step (F-16.17)', () => {
         before,
         quote: [sentence(3, 'She had green eyes.')]
       })
-    ).toEqual({ kind: 'antecedent', candidates: ['clara', 'lise'], naming: 1 })
-    // A description with no pronoun goes the same way; the proposed record is always a candidate.
+    ).toEqual({
+      kind: 'antecedent',
+      candidates: ['clara', 'lise'],
+      naming: 1,
+      namedAt: { clara: 1, lise: 1 },
+      unnamed: null
+    })
+    // A description with no pronoun goes the same way.
     expect(
       resolveSubject({
         ...base,
         recordId: 'ashby',
-        before: [sentence(0, 'Mara met him.', [name('mara', 0, 4)])],
-        quote: [sentence(1, 'A single man of large fortune.')]
+        before: [
+          sentence(1, 'His name is Ashby.', [name('ashby', 12, 17)]),
+          sentence(0, 'Mara met him.', [name('mara', 0, 4)])
+        ],
+        quote: [sentence(2, 'A single man of large fortune.')]
       })
-    ).toEqual({ kind: 'antecedent', candidates: ['ashby', 'mara'], naming: 0 })
+    ).toEqual({
+      kind: 'antecedent',
+      candidates: ['ashby', 'mara'],
+      naming: 0,
+      namedAt: { ashby: 1, mara: 0 },
+      unnamed: null
+    })
     // No one named within reach: refused.
     expect(resolveSubject({ ...base, quote: [sentence(0, 'She walked to the quay.')] })).toEqual({
       kind: 'none'
     })
+  })
+
+  it('offers the women named before a man named last, so a forced choice cannot happen', () => {
+    // "Clara and Lise sat by the window. Tomas brought the tea. She had green eyes."
+    expect(
+      resolveSubject({
+        ...base,
+        recordId: 'clara',
+        before: [
+          sentence(1, 'Tomas brought the tea.', [name('tomas', 0, 5)]),
+          sentence(0, 'Clara and Lise sat by the window.', [
+            name('clara', 0, 5),
+            name('lise', 10, 14)
+          ])
+        ],
+        quote: [sentence(2, 'She had green eyes.')]
+      })
+    ).toEqual({
+      kind: 'antecedent',
+      candidates: ['tomas', 'clara', 'lise'],
+      naming: 0,
+      namedAt: { tomas: 1, clara: 0, lise: 0 },
+      unnamed: null
+    })
+  })
+
+  it('marks a proposed record nothing in reach names, for a role the text gives', () => {
+    // "Mr. Harrow … his wife … She was a woman of mean understanding."
+    expect(
+      resolveSubject({
+        ...base,
+        recordId: 'mrs',
+        before: [
+          sentence(1, 'Her mind was less difficult to develop.'),
+          sentence(0, 'Mr. Harrow could not make his wife understand him.', [name('mr', 0, 10)])
+        ],
+        quote: [sentence(2, 'She was a woman of mean understanding.')]
+      })
+    ).toEqual({
+      kind: 'antecedent',
+      candidates: ['mr', 'mrs'],
+      naming: 0,
+      namedAt: { mr: 0 },
+      unnamed: 'mrs'
+    })
+  })
+
+  it('refuses a sentence that names someone the scan does not know and points to nobody', () => {
+    const before = [sentence(0, 'Rynna Falsire came in.', [name('rynna', 0, 13)])]
+    expect(
+      resolveSubject({
+        ...base,
+        recordId: 'rynna',
+        before,
+        quote: [sentence(1, 'Jem Falsire had green eyes.')]
+      })
+    ).toEqual({ kind: 'none' })
+    expect(unknownName(sentence(1, 'Jem Falsire had green eyes.'))).toBe(true)
+    expect(unknownName(sentence(1, 'They met Hesk at the quay.'))).toBe(true)
+    // A capitalised word opening a sentence may be any word; a known name is no unknown one.
+    expect(unknownName(sentence(1, 'Hope filled the room.'))).toBe(false)
+    expect(unknownName(sentence(1, 'They met Mara.', [name('mara', 9, 13)]))).toBe(false)
+    // A pronoun still points back: the unknown name is the checker's to weigh.
+    expect(
+      resolveSubject({
+        ...base,
+        recordId: 'rynna',
+        before,
+        quote: [sentence(1, 'She looked at Jem Falsire.')]
+      })
+    ).toMatchObject({ kind: 'antecedent', candidates: ['rynna'] })
   })
 
   it('pins first person to a speaker, or to the typed POV, and to no one else', () => {

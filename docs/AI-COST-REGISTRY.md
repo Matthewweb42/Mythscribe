@@ -43,8 +43,8 @@ git history of this file is the log of each feature's cost over time (author req
 | `organise` | Organise | on request | organise.v2 | strong | 2571 / 6323 | 1200 / 6000 | $0.00865 · $0.0319 | $0.0108 | $0.0244 | 4 | $0.0346 |
 | `todo` | To do list: gaps and suggestions | on request | todo.v1 | fast | 415 / 9965 | 600 / 1200 | $0.000226 · $0.00173 | $0.000283 | $0.00301 | 1 | $0.000226 |
 | `sheetSync` | Sheet write-ups: Structured and Blank page kept in step | background | sheetWriteUp.v1 | fast | 308 / 4743 | 350 / 1200 | $0.000141 · $0.00100 | $0.000176 | $0.00181 | 1 | $0.000141 |
-| `reader` | Story memory reading | background | reader.v1 | fast | 1351 / 5410 | 300 / 720 | $0.000273 · $0.000959 | $0.000341 | $0.00236 | 1 | $0.000273 |
-| `verify` | Story memory check | background | verify.v1 | fast | 1085 / 2654 | 110 / 400 | $0.000183 · $0.000484 | $0.000228 | $0.00131 | 1 | $0.000183 |
+| `reader` | Story memory reading | background | reader.v1 | fast | 1356 / 5415 | 300 / 720 | $0.000274 · $0.000960 | $0.000342 | $0.00237 | 1 | $0.000274 |
+| `verify` | Story memory check | background | verify.v1 | fast | 1119 / 1890 | 110 / 400 | $0.000187 · $0.000377 | $0.000234 | $0.00133 | 1 | $0.000187 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -190,7 +190,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `verify` — Story memory check
 
-- **When:** Story memory v2 (F-16.17): verify.v1, fast tier, reasoning off. One batch per reading page, only for the facts code could not prove (each with its sentences ±1, and the sentence a she or he points back to), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 15 × items). From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). Design figures: about 1,300 tokens in and 110 out per batch.
+- **When:** Story memory v2 (F-16.17): verify.v1, fast tier, reasoning off. Batches per reading page (at most 13 facts each, so every verdict fits), only for the facts code could not prove (each with its sentences ±1, and for a she or he up to eight sentences back to those naming whoever it could mean), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 28 per fact + 12 per card or on-page check); a batch cut off at its cap asks its unanswered items once more. From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). Design figures: about 1,300 tokens in and 110 out per batch.
 - **Ideas:** Prove more in code (literal patterns per slot) so fewer items are sent; fold presence checks into the reader once the live run shows they agree; the strong spot check only while the proof agreement is new.
 
 ## Planned: story memory (F-16)

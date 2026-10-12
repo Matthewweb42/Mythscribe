@@ -1,6 +1,7 @@
 import { straightenQuotes } from '../critique'
 import type { ClaimVoice } from './claims'
 import type { LiteralName } from './literal'
+import { nameSpans } from './nameQuestions'
 import type { QuoteMissReason } from './quote'
 
 /**
@@ -11,9 +12,13 @@ import type { QuoteMissReason } from './quote'
  *   the scan could not settle (a shared alias with more than one owner here) makes it wait on
  *   those owners (`shared`), and the name scan attaches it once the span settles (P2a-D22).
  * - A third-person pronoun ("she", "his", "they"), or a description with no name ("a single man
- *   of large fortune"), is resolved by the checker from its antecedent span: the sentences back to
- *   the last one that names a character, whose characters (and the proposed record) are the
- *   candidates. More than one fitting makes it wait (`antecedent`).
+ *   of large fortune"), is resolved by the checker from its antecedent span: every character
+ *   named in the quote and in the `ANTECEDENT_SENTENCES` sentences before it is a candidate, so
+ *   the checker always sees each rival the pronoun could mean, and more than one fitting makes it
+ *   wait (`antecedent`). The proposed record joins them, marked as not named there, only for a
+ *   role the text gives ("his wife"); the checker picks it only then. A sentence that holds a
+ *   capitalised name the scan does not know and no pronoun is about that new name, never a
+ *   description of a roster record (the twin rule: "Jem Falsire" is not Rynna).
  * - First person resolves to the speaker of a dialogue or thought fact, or to the typed POV, and
  *   then only when the card's verified POV agrees (the pipeline checks that after the checker).
  * - Anything else is refused: a fact whose sentence neither names its subject nor points to one.
@@ -32,6 +37,12 @@ export type LadderReject =
   | 'subject'
   /** The checker did not support it. */
   | 'unsupported'
+  /**
+   * The checker gave it no verdict (a reply cut off at its cap, once retried, or one that skipped
+   * it): not the checker's refusal, so neither a rejected quote nor a check that failed; its
+   * paragraph stays unread.
+   */
+  | 'unanswered'
   /** The checker supported it without confirming its subject, voice and mode. */
   | 'unconfirmed'
   /** A new name that is not a name the manuscript writes there, or one the author dismissed. */
@@ -51,7 +62,17 @@ export interface LadderSentence {
 export type SubjectResult =
   | { kind: 'named'; text: string }
   | { kind: 'shared'; candidates: string[]; text: string }
-  | { kind: 'antecedent'; candidates: string[]; naming: number }
+  | {
+      kind: 'antecedent'
+      /** The characters named in the quote and the sentences before it, nearest first, then `unnamed`. */
+      candidates: string[]
+      /** The earliest sentence that names a candidate: the checker's text starts there. */
+      naming: number
+      /** Each candidate named before the quote, at its nearest naming sentence. */
+      namedAt: Readonly<Record<string, number>>
+      /** The proposed record when nothing in reach names it (a role, "his wife"); null otherwise. */
+      unnamed: string | null
+    }
   | { kind: 'firstPerson'; via: 'speaker' | 'pov'; recordId: string }
   | { kind: 'none' }
 
@@ -140,22 +161,51 @@ export function resolveSubject(input: SubjectInput): SubjectResult {
     return { kind: 'none' }
   }
 
+  // A name the scan does not know, and no pronoun: the fact is that new name's (the twin rule).
+  if (person === null && input.quote.some(unknownName)) return { kind: 'none' }
+
+  // The characters a sentence names (and the proposed record, whatever its kind).
   const characters = (sentence: LadderSentence): string[] =>
     sentence.names
-      .filter((name) => !name.ambiguous && input.isCharacter(name.recordId))
+      .filter(
+        (name) =>
+          !name.ambiguous && (input.isCharacter(name.recordId) || name.recordId === input.recordId)
+      )
       .map((name) => name.recordId)
-  const inQuote = input.quote.flatMap(characters)
-  const span: string[] = []
+  const namedAt: Record<string, number> = {}
+  const order: string[] = []
+  let naming = -1
   for (const sentence of input.before.slice(0, ANTECEDENT_SENTENCES)) {
     const named = characters(sentence)
-    span.push(...named)
-    if (named.length > 0) {
-      return {
-        kind: 'antecedent',
-        candidates: unique([input.recordId, ...span, ...inQuote]),
-        naming: sentence.position
-      }
+    if (named.length === 0) continue
+    naming = sentence.position
+    for (const id of named) {
+      if (namedAt[id] !== undefined) continue
+      namedAt[id] = sentence.position
+      order.push(id)
     }
   }
-  return { kind: 'none' }
+  if (naming === -1) return { kind: 'none' }
+  const candidates = unique([...order, ...input.quote.flatMap(characters)])
+  const unnamed = candidates.includes(input.recordId) ? null : input.recordId
+  return {
+    kind: 'antecedent',
+    candidates: unnamed === null ? candidates : [...candidates, unnamed],
+    naming,
+    namedAt,
+    unnamed
+  }
+}
+
+/**
+ * Whether a sentence holds a capitalised name the scan did not find there (`nameSpans`): one
+ * standing mid-sentence, or one of two words or more opening it ("Jem Falsire had green eyes").
+ * A single capitalised word opening a sentence may be any word, and is not counted.
+ */
+export function unknownName(sentence: LadderSentence): boolean {
+  return nameSpans(sentence.text).some(
+    (span) =>
+      (!span.sentenceStart || span.words.length >= 2) &&
+      !sentence.names.some((name) => name.start < span.end && span.start < name.end)
+  )
 }

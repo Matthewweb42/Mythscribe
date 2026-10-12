@@ -114,6 +114,12 @@ export interface AiRequestInput {
    * one the request cannot be stopped.
    */
   requestId?: string
+  /**
+   * The caller's own test of a usable answer (F-16.17): one it refuses is not cached, so the
+   * same request is asked again rather than answered with the same unreadable text. Absent, every
+   * answer `cacheable` allows is cached, as before.
+   */
+  cacheIf?: (text: string) => boolean
 }
 
 export interface AiRequestResult {
@@ -333,15 +339,16 @@ function serveCached(
 /**
  * Whether an answer may be served again from the cache (2026-10-07): never an empty one (a
  * reasoning model that spent its whole cap thinking answers '', and caching that kept the same
- * caret context returning nothing), and never a JSON answer the output cap cut off (it does not
- * parse, so it is a failure, not an answer).
+ * caret context returning nothing), never a JSON answer the output cap cut off (it does not
+ * parse, so it is a failure, not an answer), and never one the caller's `cacheIf` refuses.
  */
 export function cacheable(
-  input: Pick<AiRequestInput, 'json'>,
+  input: Pick<AiRequestInput, 'json' | 'cacheIf'>,
   answer: { text: string; finishReason: string | null }
 ): boolean {
   if (answer.text.trim() === '') return false
-  return !(input.json === true && answer.finishReason === 'length')
+  if (input.json === true && answer.finishReason === 'length') return false
+  return input.cacheIf?.(answer.text) ?? true
 }
 
 /**

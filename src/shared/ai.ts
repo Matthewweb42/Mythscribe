@@ -450,7 +450,8 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-16.17: a first or full-read page asks 720 (600 for the claims, 120 for the card); a window
   // min(600, 120 + 0.3 × its prose tokens), plus 120 when a card is due (`outputCap`).
   reader: 720,
-  // F-16.17: one batch per page, min(400, 20 + 15 × items); a strong spot check asks 40.
+  // F-16.17: batches per page, min(400, 20 + 28 per fact + 12 per card or on-page item); a
+  // strong spot check asks 40.
   verify: 400
 }
 

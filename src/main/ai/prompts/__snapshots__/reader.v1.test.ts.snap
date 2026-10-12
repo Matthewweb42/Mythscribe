@@ -3,7 +3,7 @@
 exports[`reader.v1 prompt (F-16.17) > matches the golden messages for a first read and a window read 1`] = `
 [
   {
-    "content": "You are the story-memory reader inside a novel-writing app. Read the numbered paragraphs of one scene and list what the prose itself states about the records on the roster below: each fact once, with a quote copied word for word.
+    "content": "You are the story-memory reader inside a novel-writing app. Read the numbered paragraphs of one scene and list what the prose itself states about the records on the roster below: each fact once, with a quote copied word for word, in paragraph order.
 Rules:
 - Only what the words say: no inference, no outside knowledge, no guesses. A negation states nothing ("her eyes were not blue" is no fact). Skip anything not said plainly.
 - "q": 3 to 25 consecutive words copied exactly from paragraph "p", the fewest that state the fact; never join words from two places.
@@ -42,7 +42,7 @@ Card: yes",
 exports[`reader.v1 prompt (F-16.17) > matches the golden messages for a first read and a window read 2`] = `
 [
   {
-    "content": "You are the story-memory reader inside a novel-writing app. Read the numbered paragraphs of one scene and list what the prose itself states about the records on the roster below: each fact once, with a quote copied word for word.
+    "content": "You are the story-memory reader inside a novel-writing app. Read the numbered paragraphs of one scene and list what the prose itself states about the records on the roster below: each fact once, with a quote copied word for word, in paragraph order.
 Rules:
 - Only what the words say: no inference, no outside knowledge, no guesses. A negation states nothing ("her eyes were not blue" is no fact). Skip anything not said plainly.
 - "q": 3 to 25 consecutive words copied exactly from paragraph "p", the fewest that state the fact; never join words from two places.

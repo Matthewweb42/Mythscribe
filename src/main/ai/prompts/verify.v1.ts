@@ -24,7 +24,9 @@ export const VERIFY_RULES =
   'supports. A wish, fear, dream, memory, lie or rumour supports a fact only with that voice and ' +
   'mode.\n' +
   '- "r": the id from "Who" the fact is about. When the subject is a pronoun ("she", "he", ' +
-  '"they", "I"), pick the one record it means; null when none fits or more than one could.\n' +
+  '"they", "I") or a description, pick the one record it means; null when none fits or more ' +
+  'than one could. A record marked "not named here" is the one only when the sentences point ' +
+  'to it by a role ("his wife").\n' +
   '- "voice": narration, dialogue, thought or rumour, as the sentences give it. "mode": now, ' +
   'memory, hypothetical or dream.\n' +
   '- A card or on-page item needs only "i" and "ok".\n' +
@@ -32,10 +34,18 @@ export const VERIFY_RULES =
 
 /** Most tokens of items in one batch before it is split (plan P2a §2.3). */
 export const VERIFY_BATCH_TOKENS = 2_500
-/** A batch's `max_tokens`: min(400, 20 + 15 × items); a strong spot check asks 40. */
+/**
+ * A batch's `max_tokens`: min(400, 20 + 28 per fact + 12 per card or on-page item). A fact's
+ * verdict (`{"i":12,"ok":true,"r":"r12","voice":"narration","mode":"now"},`) is about 23 tokens
+ * in a real tokenizer, more with spaces; a card or on-page one (`{"i":3,"ok":true},`) about 9.
+ * A batch is also split so its verdicts fit the 400 (about 13 facts). A strong spot check asks 40.
+ */
 export const VERIFY_BASE_TOKENS = 20
-export const VERIFY_ITEM_TOKENS = 15
+export const VERIFY_CLAIM_TOKENS = 28
+export const VERIFY_CHECK_TOKENS = 12
 export const VERIFY_STRONG_TOKENS = 40
+/** The Who line's mark on a record nothing in reach names (a role the text gives, "his wife"). */
+export const VERIFY_UNNAMED_MARK = ' · not named here'
 
 export const VERIFY_ITEM_KINDS = ['claim', 'pov', 'year', 'flashback', 'present'] as const
 export type VerifyItemKind = (typeof VERIFY_ITEM_KINDS)[number]
@@ -43,7 +53,10 @@ export type VerifyItemKind = (typeof VERIFY_ITEM_KINDS)[number]
 /** One item as the prompt shows it; the pipeline builds the lines. */
 export interface VerifyPromptItem {
   kind: VerifyItemKind
-  /** The records it may be about, as roster lines ("r12 Mara Vell (Mara) · character"). */
+  /**
+   * The records it may be about, as roster lines ("r12 Mara Vell (Mara) · character"); one that
+   * nothing in reach names carries `VERIFY_UNNAMED_MARK`.
+   */
   who: readonly string[]
   /** The fact ("location: the quay (narration, now)", "the point of view is r12's"). */
   fact: string
@@ -63,10 +76,18 @@ export interface BuiltVerifyPrompt {
   maxTokens: number
 }
 
+/** The output tokens one item's verdict needs. */
+export const verifyItemOutput = (item: Pick<VerifyPromptItem, 'kind'>): number =>
+  item.kind === 'claim' ? VERIFY_CLAIM_TOKENS : VERIFY_CHECK_TOKENS
+
 /** The `max_tokens` of a batch of `items` (the strong spot check's own cap aside). */
-export function verifyMaxTokens(items: number, strong = false): number {
+export function verifyMaxTokens(
+  items: readonly Pick<VerifyPromptItem, 'kind'>[],
+  strong = false
+): number {
   if (strong) return VERIFY_STRONG_TOKENS
-  return Math.min(outputBudget('verify'), VERIFY_BASE_TOKENS + VERIFY_ITEM_TOKENS * items)
+  const wanted = items.reduce((sum, item) => sum + verifyItemOutput(item), VERIFY_BASE_TOKENS)
+  return Math.min(outputBudget('verify'), wanted)
 }
 
 /** One item as its lines in the user turn, numbered from 1. */
@@ -84,20 +105,28 @@ export function verifyItemText(item: VerifyPromptItem, n: number): string {
   ].join('\n')
 }
 
-/** Splits items into batches of at most `VERIFY_BATCH_TOKENS` tokens of item text, in order. */
+/**
+ * Splits items into batches, in order: at most `VERIFY_BATCH_TOKENS` tokens of item text, and no
+ * more verdicts than the output budget holds (so a reply is not cut off at its cap).
+ */
 export function verifyBatches<T extends VerifyPromptItem>(items: readonly T[]): T[][] {
   const batches: T[][] = []
+  const most = outputBudget('verify')
   let current: T[] = []
   let used = 0
+  let out = VERIFY_BASE_TOKENS
   for (const item of items) {
     const cost = estimateTokens(verifyItemText(item, current.length + 1))
-    if (current.length > 0 && used + cost > VERIFY_BATCH_TOKENS) {
+    const answer = verifyItemOutput(item)
+    if (current.length > 0 && (used + cost > VERIFY_BATCH_TOKENS || out + answer > most)) {
       batches.push(current)
       current = []
       used = 0
+      out = VERIFY_BASE_TOKENS
     }
     current.push(item)
     used += cost
+    out += answer
   }
   if (current.length > 0) batches.push(current)
   return batches
@@ -115,6 +144,6 @@ export function buildVerifyPrompt(input: BuildVerifyPromptInput): BuiltVerifyPro
         content: `Items:\n${items.map((item, i) => verifyItemText(item, i + 1)).join('\n\n')}`
       }
     ],
-    maxTokens: verifyMaxTokens(items.length, strong)
+    maxTokens: verifyMaxTokens(items, strong)
   }
 }

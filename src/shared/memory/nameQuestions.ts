@@ -67,24 +67,33 @@ function lowerUses(text: string, words: readonly string[]): number {
 /** A word in full capitals (an acronym, a shout), which cannot say whether it is a name. */
 const isShout = (word: string): boolean => word.length >= 2 && word === word.toUpperCase()
 
+/** One counted name span of a text: what `countNameSpans` counts, with where it stands. */
+export interface CountedNameSpan {
+  /** The span as written, a common sentence opener taken off its front. */
+  display: string
+  /** `normName(display)`. */
+  key: string
+  start: number
+  end: number
+  sentenceStart: boolean
+  /** Its words as written, link words included. */
+  words: string[]
+}
+
 /**
- * Counts the names of one document's text as the name scan reads them: every capitalised span
- * (`capitalisedSpans`; possessive stripped, link words inside), keyed by its `normName`, with a
- * common sentence opener taken off its front ("Then Hesk Varn" counts as "Hesk Varn"). Per span:
- * how often it stands mid-sentence, how often it opens one, and how often the same words occur in
- * lower case ("the Trial" beside "a fair trial"). A span of one letter, in full capitals, or made
- * only of titles, days, months and the like is not counted.
+ * The name spans of one text as the name scan reads them: every capitalised span
+ * (`capitalisedSpans`; possessive stripped, link words inside), with a common sentence opener
+ * taken off its front ("Then Hesk Varn" is "Hesk Varn"). A span of one letter, in full capitals,
+ * or made only of titles, days, months and the like is left out.
  */
-export function countNameSpans(text: string): Map<string, WordCount> {
-  const counts = new Map<string, WordCount>()
-  const spoken = new Map<string, string[]>()
+export function nameSpans(text: string): CountedNameSpan[] {
+  const out: CountedNameSpan[] = []
   for (const span of capitalisedSpans(text)) {
     const [first, ...rest] = span.words
     if (first === undefined) continue
-    const words =
+    const opener =
       span.sentenceStart && rest.length > 0 && SENTENCE_OPENERS.has(first.text.toLowerCase())
-        ? rest
-        : span.words
+    const words = opener ? rest : span.words
     const head = words[0]
     const tail = words[words.length - 1]
     if (head === undefined || tail === undefined) continue
@@ -101,15 +110,32 @@ export function countNameSpans(text: string): Map<string, WordCount> {
     const display = text.slice(head.start, tail.end)
     const key = normName(display)
     if (key.length === 0) continue
-    const entry = counts.get(key) ?? { display, mid: 0, start: 0, lower: 0 }
+    out.push({
+      display,
+      key,
+      start: head.start,
+      end: tail.end,
+      sentenceStart: span.sentenceStart,
+      words: words.map((word) => word.text)
+    })
+  }
+  return out
+}
+
+/**
+ * Counts the names of one document's text (`nameSpans`), keyed by `normName`. Per span: how often
+ * it stands mid-sentence, how often it opens one, and how often the same words occur in lower case
+ * ("the Trial" beside "a fair trial").
+ */
+export function countNameSpans(text: string): Map<string, WordCount> {
+  const counts = new Map<string, WordCount>()
+  const spoken = new Map<string, string[]>()
+  for (const span of nameSpans(text)) {
+    const entry = counts.get(span.key) ?? { display: span.display, mid: 0, start: 0, lower: 0 }
     if (span.sentenceStart) entry.start += 1
     else entry.mid += 1
-    counts.set(key, entry)
-    if (!spoken.has(key))
-      spoken.set(
-        key,
-        words.map((word) => word.text)
-      )
+    counts.set(span.key, entry)
+    if (!spoken.has(span.key)) spoken.set(span.key, span.words)
   }
   for (const [key, words] of spoken) {
     const entry = counts.get(key)
@@ -118,14 +144,56 @@ export function countNameSpans(text: string): Map<string, WordCount> {
   return counts
 }
 
+/** What the questions make of a name: asked as a new name, or as a nickname of one record. */
+export type NameQuestionFor =
+  { kind: 'newName'; recordId: null } | { kind: 'nickname'; recordId: string }
+
+/**
+ * The questions' rule for one name that has been seen often enough (F-16.4, F-16.17): a question
+ * of the kind it answers, or null when no question will ever ask about it: the scan already finds
+ * it (a record's name, with its "the" or as its plural), the author said it is not a name, the
+ * twin gate ties it to no one record, it carries a title (identity rule 2: the author adds those
+ * herself), or she said No to it for that record. The reading pipeline keeps a proved fact waiting
+ * on a new name only when this answers a question, so no wait is left that nothing can settle.
+ */
+export function nameAsker(
+  roster: readonly TwinRosterRecord[],
+  dismissed: NameQuestionDismissals
+): (display: string) => NameQuestionFor | null {
+  const known = new Set(roster.flatMap((record) => record.names.map(normName)))
+  const scanned = (key: string): boolean =>
+    known.has(key) ||
+    known.has(`the ${key}`) ||
+    (key.endsWith('s') && known.has(key.slice(0, -1))) ||
+    (key.endsWith('es') && known.has(key.slice(0, -2)))
+  const notNames = new Set(dismissed.names.map((name) => gateWords(name).join(' ')))
+  return (display) => {
+    const key = normName(display)
+    if (key.length === 0 || scanned(key)) return null
+    const words = gateWords(display)
+    // Dismissed first: a Not a name stays silent even once a record near it exists.
+    if (notNames.has(words.join(' '))) return null
+    const gate = twinGate(display, roster, dismissed.names)
+    if (gate.outcome === 'clear') return { kind: 'newName', recordId: null }
+    if (gate.recordId === null || words.some(isTitle)) return null
+    if (
+      dismissed.aliasKeys.has(dismissedKey({ kind: 'alias', recordId: gate.recordId, alias: key }))
+    ) {
+      return null
+    }
+    return { kind: 'nickname', recordId: gate.recordId }
+  }
+}
+
 /**
  * The questions to ask, most named first, at most `NAME_QUESTIONS_MAX`. A name qualifies when it
  * stands capitalised mid-sentence at least `NAME_QUESTION_MIN_MID` times (words the manuscript
  * also writes in lower case, `PROPOSED_ORDINARY_MIN_MENTIONS` times, as F-4.12b counts them), or
- * once anywhere when the reader proposed it with a proved fact (`proved`, F-16.17), and
- * the scan would not already find it: it is no record's name, nor one with its "the" ("the
- * Wanderer"), nor its plural ("the Harrows"). A name of a record used alone ("Rynna" for Rynna
- * Falsire) is asked about as a nickname, since the scan matches whole names only.
+ * once mid-sentence when the reader proposed it with a proved fact (`proved`, F-16.17), and
+ * `nameAsker` asks about it: the scan would not already find it (no record's name, nor one with
+ * its "the" ("the Wanderer"), nor its plural ("the Harrows")). A name of a record used alone
+ * ("Rynna" for Rynna Falsire) is asked about as a nickname, since the scan matches whole names
+ * only.
  */
 export function nameQuestions(
   perDocument: readonly DocumentWordCounts[],
@@ -134,18 +202,12 @@ export function nameQuestions(
   options: {
     /**
      * F-16.17 (P2a-D7): norms of names the reader proposed with a proved fact (facts waiting on
-     * the name): such a name is asked about once it is seen once, anywhere in a sentence.
+     * the name): such a name is asked about once it is seen once mid-sentence.
      */
     proved?: ReadonlySet<string>
   } = {}
 ): NameQuestion[] {
-  const known = new Set(roster.flatMap((record) => record.names.map(normName)))
-  const scanned = (key: string): boolean =>
-    known.has(key) ||
-    known.has(`the ${key}`) ||
-    (key.endsWith('s') && known.has(key.slice(0, -1))) ||
-    (key.endsWith('es') && known.has(key.slice(0, -2)))
-  const notNames = new Set(dismissed.names.map((name) => gateWords(name).join(' ')))
+  const ask = nameAsker(roster, dismissed)
   const totals = new Map<
     string,
     { display: string; mid: number; start: number; lower: number; nodeIds: string[] }
@@ -169,34 +231,25 @@ export function nameQuestions(
   const nameOf = new Map(roster.map((record) => [record.id, record.names[0] ?? '']))
   const questions: NameQuestion[] = []
   for (const [key, entry] of totals) {
-    const needed = entry.lower > 0 ? PROPOSED_ORDINARY_MIN_MENTIONS : NAME_QUESTION_MIN_MID
-    const seen = options.proved?.has(key) === true ? entry.mid + entry.start >= 1 : entry.mid >= needed
-    if (!seen || scanned(key)) continue
-    const words = gateWords(entry.display)
-    // Dismissed first: a Not a name stays silent even once a record near it exists.
-    if (notNames.has(words.join(' '))) continue
-    const gate = twinGate(entry.display, roster, dismissed.names)
-    const base = {
+    // Identity rule 6: capitalised mid-sentence, twice (more for an ordinary word), or once with
+    // a proved fact; a name seen only opening sentences is never asked about.
+    const needed =
+      options.proved?.has(key) === true
+        ? 1
+        : entry.lower > 0
+          ? PROPOSED_ORDINARY_MIN_MENTIONS
+          : NAME_QUESTION_MIN_MID
+    if (entry.mid < needed) continue
+    const asked = ask(entry.display)
+    if (asked === null) continue
+    questions.push({
+      kind: asked.kind,
       name: entry.display,
       norm: key,
       count: entry.mid + entry.start,
-      nodeIds: entry.nodeIds
-    }
-    if (gate.outcome === 'clear') {
-      questions.push({ ...base, kind: 'newName', recordId: null, recordName: null })
-      continue
-    }
-    if (gate.recordId === null || words.some(isTitle)) continue
-    if (
-      dismissed.aliasKeys.has(dismissedKey({ kind: 'alias', recordId: gate.recordId, alias: key }))
-    ) {
-      continue
-    }
-    questions.push({
-      ...base,
-      kind: 'nickname',
-      recordId: gate.recordId,
-      recordName: nameOf.get(gate.recordId) ?? null
+      nodeIds: entry.nodeIds,
+      recordId: asked.recordId,
+      recordName: asked.recordId === null ? null : (nameOf.get(asked.recordId) ?? null)
     })
   }
   return questions

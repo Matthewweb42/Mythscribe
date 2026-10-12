@@ -318,23 +318,41 @@ export function claimsWaitingOnName(db: TreeDb, norm: string): Claim[] {
   )
 }
 
-/** The new names the active draft's claims wait on (their norms): each is asked about once seen. */
-export function waitingNameNorms(db: TreeDb, draftId: string): Set<string> {
+/**
+ * The new names a draft's claims wait on (their norms): each is asked about once seen. Without a
+ * draft, every draft's.
+ */
+export function waitingNameNorms(db: TreeDb, draftId?: string): Set<string> {
+  const waiting = and(
+    eq(claim.state, 'waiting'),
+    sql`json_extract(${claim.pending}, '$.kind') = 'name'`
+  )
   return new Set(
     db
       .select({ norm: sql<string>`json_extract(${claim.pending}, '$.norm')` })
       .from(claim)
-      .where(
-        and(
-          eq(claim.draftId, draftId),
-          eq(claim.state, 'waiting'),
-          sql`json_extract(${claim.pending}, '$.kind') = 'name'`
-        )
-      )
+      .where(draftId === undefined ? waiting : and(eq(claim.draftId, draftId), waiting))
       .all()
       .map((row) => row.norm)
       .filter((norm): norm is string => typeof norm === 'string')
   )
+}
+
+/**
+ * Claims waiting on a new name that two or more records now share (P2a-D22): they wait on those
+ * records instead, by the name as their span, so the anchors job attaches each once the scan
+ * settles the span in its sentence.
+ */
+export function waitOnSubject(
+  db: TreeDb,
+  ids: readonly string[],
+  candidates: readonly string[]
+): void {
+  if (ids.length === 0) return
+  db.update(claim)
+    .set({ pending: JSON.stringify({ kind: 'subject', candidates: [...candidates] }) })
+    .where(and(inArray(claim.id, [...ids]), eq(claim.state, 'waiting')))
+    .run()
 }
 
 /** Writes a claim row as it is (Rename in book's rewrite, and its undo). */

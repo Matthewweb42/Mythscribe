@@ -234,7 +234,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   verify: {
     trigger: 'background',
-    when: 'Story memory v2 (F-16.17): verify.v1, fast tier, reasoning off. One batch per reading page, only for the facts code could not prove (each with its sentences ±1, and the sentence a she or he points back to), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 15 × items). From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). Design figures: about 1,300 tokens in and 110 out per batch.',
+    when: 'Story memory v2 (F-16.17): verify.v1, fast tier, reasoning off. Batches per reading page (at most 13 facts each, so every verdict fits), only for the facts code could not prove (each with its sentences ±1, and for a she or he up to eight sentences back to those naming whoever it could mean), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 28 per fact + 12 per card or on-page check); a batch cut off at its cap asks its unanswered items once more. From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). Design figures: about 1,300 tokens in and 110 out per batch.',
     callsPerUse: 1,
     typicalOutTokens: 110,
     ideas:
