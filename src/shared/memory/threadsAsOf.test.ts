@@ -101,7 +101,8 @@ describe('threadsAsOf (F-16.23, P2b-D22)', () => {
     ])
   })
 
-  it('opens a thread at its verified reveal, before any step', () => {
+  it('shows a reveal as the thread’s quote but never opens it on one (a supposed sentence)', () => {
+    // The test book's h07 ¶6: "If Mr. Ashby came back tomorrow" (hypothetical) as the reveal.
     const reveal: TopicQuoteInput = {
       id: 'q1',
       recordId: 'heir',
@@ -109,14 +110,18 @@ describe('threadsAsOf (F-16.23, P2b-D22)', () => {
       para: 0,
       role: 'defining',
       label: 'the missing heir',
-      quote: 'Somewhere an heir was waiting.',
+      quote: 'If the heir came back tomorrow, all would change.',
       state: 'live'
     }
     const [thread] = threadsAsOf(input({ quotes: [reveal], atId: 's3' }))
-    expect(thread?.status).toBe('open')
-    expect(thread?.opened).toEqual({ nodeId: 's2', ref: '2.2' })
-    expect(thread?.defining?.quote).toBe('Somewhere an heir was waiting.')
-    expect(threadsAsOf(input({ quotes: [reveal], atId: 's1' }))[0]?.status).toBe('notYet')
+    expect(thread?.status).toBe('notYet')
+    expect(thread?.opened).toBeNull()
+    expect(thread?.defining?.quote).toBe('If the heir came back tomorrow, all would change.')
+    // Its first counted step opens it.
+    const [opened] = threadsAsOf(
+      input({ quotes: [reveal], claims: [step({ nodeId: 's3', how: 'opens' })], atId: 's3' })
+    )
+    expect([opened?.status, opened?.opened?.ref]).toEqual(['open', '2.3'])
   })
 
   it('reads an author’s thread with no step as not yet, and skips waiting, unknown and other lines', () => {

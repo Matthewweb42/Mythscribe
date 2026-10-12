@@ -502,7 +502,8 @@ import {
   savePage,
   setAliases,
   splitRecord,
-  updateRecord
+  updateRecord,
+  withTopicRelabels
 } from '../memory/recordStore'
 import { getSceneDetails, setSceneDetails } from '../memory/sceneDetailStore'
 
@@ -2225,7 +2226,17 @@ export function registerHandlers({
     renameDraft(manager.require().connection.orm, id, name)
   )
 
-  register('drafts:delete', ({ id }) => deleteDraft(manager.require().connection.orm, id))
+  register('drafts:delete', ({ id }) => {
+    const db = manager.require().connection.orm
+    const list = deleteDraft(db, id)
+    // P2b-D12: the draft's reveals and claims went with it (cascade); a secret or thread the AI
+    // made that only that draft backed goes too.
+    if (memory() === 'v2') {
+      const pruned = pruneTopics(db)
+      if (pruned.length > 0) emit(windows(), 'record:changed', { recordIds: pruned, roster: false })
+    }
+    return list
+  })
 
   register('drafts:compare', ({ fromId, toId }) =>
     compareDrafts(manager.require().connection.orm, fromId, toId)
@@ -4716,9 +4727,12 @@ export function registerHandlers({
 
   register('record:create', ({ name, categoryId, aliases, force }) => {
     const db = manager.require().connection.orm
-    const made = createRecord(db, { name, categoryId, aliases, force }, new Date())
+    // P2b-D2: a secret's or thread's label the name takes yields (" (thread)" added).
+    const { result: made, relabeled } = withTopicRelabels(db, () =>
+      createRecord(db, { name, categoryId, aliases, force }, new Date())
+    )
     if ('record' in made) {
-      rosterChanged(db, [made.record.id])
+      rosterChanged(db, [made.record.id, ...relabeled])
       // F-16.17: scenes read before it that name it are read back (the lazy back-fill).
       reader.namesAdded(made.record.id, namesOf(made.record))
     }
@@ -4766,8 +4780,10 @@ export function registerHandlers({
   register('record:setAliases', ({ id, name, aliases }) => {
     const db = manager.require().connection.orm
     const before = new Set(namesOf(requireRecord(db, id)).map(normName))
-    const updated = setAliases(db, id, { name, aliases }, new Date())
-    rosterChanged(db, [id])
+    const { result: updated, relabeled } = withTopicRelabels(db, () =>
+      setAliases(db, id, { name, aliases }, new Date())
+    )
+    rosterChanged(db, [id, ...relabeled])
     // F-16.17: a nickname added after scenes naming it were read: the lazy back-fill.
     reader.namesAdded(
       id,
@@ -4783,10 +4799,11 @@ export function registerHandlers({
   register('record:delete', ({ id }) => {
     const session = manager.require()
     const db = session.connection.orm
-    const gone = deleteRecord(db, id)
+    const { record: gone, pruned } = deleteRecord(db, id)
     dropOwner(db, 'record', id)
     if (gone.image !== null) removeImageAsset(session.folder, ENTITY_IMAGES_DIR, gone.image)
-    rosterChanged(db, [id])
+    // P2b-D12: the AI-made secrets and threads only it backed went too.
+    rosterChanged(db, [id, ...pruned])
     return null
   })
 
@@ -4932,9 +4949,12 @@ export function registerHandlers({
   register('names:answer', ({ answer }) => {
     const db = manager.require().connection.orm
     // F-16.17: the reader's facts waiting on the name attach on a Yes and go on a No.
-    const { result, settled } = answerNameQuestion(db, answer, new Date())
+    const {
+      result: { result, settled },
+      relabeled
+    } = withTopicRelabels(db, () => answerNameQuestion(db, answer, new Date()))
     if (result.kind === 'record') {
-      rosterChanged(db, [result.record.id])
+      rosterChanged(db, [result.record.id, ...relabeled])
       // F-16.17: the name (a new record, or a nickname) is read back where it was read before.
       reader.namesAdded(result.record.id, [answer.name])
     } else publishQuestions()
@@ -4954,27 +4974,28 @@ export function registerHandlers({
 
   register('rename:apply', (request) => {
     const db = manager.require().connection.orm
-    const result = applyRename(db, request, new Date())
+    const { result, relabeled } = withTopicRelabels(db, () => applyRename(db, request, new Date()))
     clearSearchCache()
     documentsWritten(
       db,
       result.written.map((each) => each.id),
       'bulk'
     )
-    rosterChanged(db, [request.recordId])
+    // P2b: AI-made topics' labels that named the record, and any label the new name took.
+    rosterChanged(db, [request.recordId, ...relabeled])
     return result
   })
 
   register('rename:undo', () => {
     const db = manager.require().connection.orm
-    const result = undoRename(db, new Date())
+    const { result, relabeled } = withTopicRelabels(db, () => undoRename(db, new Date()))
     clearSearchCache()
     documentsWritten(
       db,
       result.restored.map((each) => each.id),
       'bulk'
     )
-    if (result.record !== null) rosterChanged(db, [result.record.id])
+    if (result.record !== null) rosterChanged(db, [result.record.id, ...relabeled])
     return result
   })
 

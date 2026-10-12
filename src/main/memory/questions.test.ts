@@ -48,6 +48,26 @@ afterEach(() => {
 const rynna = (): string => listRecords(db)[0]?.id ?? ''
 
 describe('name questions and topics (P2b-D2)', () => {
+  it('never asks about a thread’s own label written in the prose, and Add as still works', () => {
+    const thread = createRecord(db, { name: 'Crimson Pact', categoryId: 'thread' }, NOW)
+    if (!('record' in thread)) throw new Error('blocked')
+    saveDocument(
+      db,
+      scenes[0] ?? '',
+      doc('They signed the Crimson Pact at noon, and the Crimson Pact held.')
+    )
+    saveDocument(db, scenes[1] ?? '', doc('Later the Crimson Pact broke.'))
+    expect(listNameQuestions(db)).toEqual([])
+    // The author may still make a name of it herself: the label yields, never blocks it.
+    const made = answerQuestion(
+      db,
+      { kind: 'addAs', name: 'Crimson Pact', categoryId: 'faction' },
+      NOW
+    )
+    expect(made.kind).toBe('record')
+    expect(requireRecord(db, thread.record.id).name).toBe('Crimson Pact (thread)')
+  })
+
   it('asks nothing about a secret or a thread, nor takes their labels as known names', () => {
     const thread = createRecord(db, { name: "Ashby's Return", categoryId: 'thread' }, NOW)
     const secret = createRecord(db, { name: 'the sold map', categoryId: 'secret' }, NOW)

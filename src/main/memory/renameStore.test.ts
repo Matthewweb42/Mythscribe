@@ -532,6 +532,8 @@ describe('Rename in book over the evidence (F-16.17, plan P2a §1.4)', () => {
       },
       NOW
     )
+    const mine = createRecord(db, { name: 'Hesk’s debt', categoryId: 'secret' }, NOW)
+    if (!('record' in mine)) throw new Error('blocked')
     const before = getTopicQuote(db, topic.topicQuoteId)
     applyRename(db, applying(), NOW)
     expect(getTopicQuote(db, topic.topicQuoteId)).toMatchObject({
@@ -540,10 +542,14 @@ describe('Rename in book over the evidence (F-16.17, plan P2a §1.4)', () => {
       // The gate texts fold names: the Dismissed key's input never moves.
       stating: before?.stating
     })
+    // The AI-made secret's label follows; the author's own label is hers.
+    expect(requireRecord(db, topic.recordId).name).toBe('waiting for Haskel')
+    expect(requireRecord(db, mine.record.id).name).toBe('Hesk’s debt')
     expect(runAnchors(db, scenes[1] ?? '', NOW).topicQuotes).toEqual([])
     expect(getTopicQuote(db, topic.topicQuoteId)?.state).toBe('live')
     undoRename(db, NOW)
     expect(getTopicQuote(db, topic.topicQuoteId)).toEqual(before)
+    expect(requireRecord(db, topic.recordId).name).toBe('waiting for Hesk')
     // The secret's own label is renamed on its sheet, never in the book.
     const label = requireRecord(db, topic.recordId).aliases[0]?.id ?? ''
     expect(() =>

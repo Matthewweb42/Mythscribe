@@ -62,6 +62,14 @@ describe('knowsCounts (P2b-D7)', () => {
     }
   })
 
+  it('counts a thought only for its thinker: "Orrin knew, Mara thought" is not Orrin knowing', () => {
+    const thought = { voice: 'thought' as const, recordId: 'orrin', fromId: null }
+    expect(knowsLine(line({ ...thought, how: 'knewBefore', speakerId: 'mara' }))).toBe('other')
+    expect(knowsLine(line({ ...thought, how: 'suspects', speakerId: 'mara' }))).toBe('other')
+    expect(knowsLine(line({ ...thought, how: 'knewBefore', speakerId: 'orrin' }))).toBe('counts')
+    expect(knowsLine(line({ ...thought, how: 'suspects', speakerId: 'orrin' }))).toBe('partial')
+  })
+
   it('never counts a rumour, a hypothetical or a dream', () => {
     for (const how of KNOWS_HOWS) {
       for (const voice of CLAIM_VOICES) {

@@ -9,7 +9,7 @@ import { checkMemoryInvariants } from '@shared/memory/invariants'
 import { knowsAsOf } from '@shared/memory/whoKnows'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../../document/documentStore'
-import { activeDraftId } from '../../draft/draftStore'
+import { activeDraftId, duplicateDraft } from '../../draft/draftStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { projectNameWords } from '../../spellcheck/projectWords'
 import { createNode, deleteNode, getNode, type TreeDb } from '../../tree/treeStore'
@@ -482,9 +482,14 @@ describe('Same as… with topics (P2b, F-16.4)', () => {
 
     sameAs(db, map.recordId, sale.recordId, NOW)
     expect(getClaim(db, lines.orrin)?.objectId).toBe(map.recordId)
-    expect(recordTopicQuotes(db, map.recordId).map((quote) => quote.role)).toEqual([
-      'defining',
-      'defining'
+    // One defining reveal; the merged topic's reveal is a merged one, labelled as it was read.
+    expect(recordTopicQuotes(db, map.recordId).map((quote) => [quote.role, quote.label])).toEqual([
+      ['defining', 'the sold map'],
+      ['merged', 'the map sale']
+    ])
+    // The kept topic keeps its one label.
+    expect(requireRecord(db, map.recordId).aliases.map((entry) => entry.text)).toEqual([
+      'the sold map'
     ])
     expect(listKnewBefore(db).map((row) => [row.secretId, row.recordId])).toEqual([
       [map.recordId, mara],
@@ -499,6 +504,13 @@ describe('Same as… with topics (P2b, F-16.4)', () => {
     })
     expect(getDismissedByKey(db, 'notRight', moved)).not.toBeNull()
     expect(getDismissedByKey(db, 'notRight', key)).toBeNull()
+    expect(invariants()).toEqual([])
+    // Both reveals stay visible, and the merged one splits off again.
+    const merged = recordTopicQuotes(db, map.recordId).find((quote) => quote.role === 'merged')
+    if (merged === undefined) throw new Error('no merged reveal')
+    const split = splitTopic(db, merged.id, NOW)
+    expect(requireRecord(db, split.recordId).name).toBe('the map sale')
+    expect(recordTopicQuotes(db, map.recordId).map((quote) => quote.role)).toEqual(['defining'])
     expect(invariants()).toEqual([])
   })
 
@@ -665,6 +677,21 @@ describe('the topics part of the roster (P2b-D10)', () => {
     expect(after.lines).toEqual(before.lines)
     expect(after.topicLines).toEqual(["t1 Ashby's return · thread", 's1 the map sale · secret'])
     expect(after.topicShortOf(sale.recordId)).toBe('s1')
+  })
+
+  it('lists an AI-made topic only while the active draft backs it; the author’s always', () => {
+    const first = activeDraftId(db)
+    const second = duplicateDraft(db, first, 'Two').drafts.find((each) => each.id !== first)?.id
+    if (second === undefined) throw new Error('no second draft')
+    const reveal = revealIn(db, one, { para: 1, quote: 'Tomas sold the map', label: 'x' })
+    createTopic(
+      db,
+      { kind: 'secret', label: 'the sold map', quote: { ...reveal, draftId: second } },
+      NOW
+    )
+    const own = createRecord(db, { name: 'the vow', categoryId: 'thread' }, LATER)
+    expect('record' in own).toBe(true)
+    expect(readerRoster(db).topicLines).toEqual(['t1 the vow · thread'])
   })
 
   it('never drops a topic: past its budget every label shortens to 4 words', () => {

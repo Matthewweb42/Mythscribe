@@ -19,8 +19,10 @@ import {
   readerRosterAddition,
   readerRosterLine
 } from '../../ai/prompts/reader.v1'
+import { currentDraftId } from '../../draft/draftStore'
 import { namedInCounts } from '../nameIndexer'
 import { listRecords } from '../recordStore'
+import { topicsInDraft } from './recordEvidence'
 import { MEMORY_ROSTER_KEY } from './roster'
 
 /**
@@ -302,8 +304,13 @@ function namedTotals(db: TreeDb): Map<string, number> {
 export function readerRoster(db: TreeDb): ReaderRoster {
   const all = listRecords(db)
   const records = all.filter((record) => READ_KINDS.has(record.kind))
+  // The author's secrets and threads, and the AI's while the active draft backs them (one only an
+  // inactive draft revealed was never read as real, P2b-D10's "never drops" holds within a draft).
+  const draftId = currentDraftId(db)
+  const backed = draftId === null ? new Set<string>() : topicsInDraft(db, draftId)
   const topics: RosterTopic[] = all.flatMap((record) =>
-    record.kind === 'secret' || record.kind === 'thread'
+    (record.kind === 'secret' || record.kind === 'thread') &&
+    (record.origin !== 'ai' || backed.has(record.id))
       ? [{ recordId: record.id, kind: record.kind, label: record.name, created: record.created }]
       : []
   )

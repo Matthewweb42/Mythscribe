@@ -9,6 +9,7 @@ import type {
   SceneSecrets,
   SceneSecretView,
   SecretView,
+  SinceView,
   TensionLine,
   TopicQuoteView
 } from './views'
@@ -81,12 +82,15 @@ const refOf = (reading: ReadingOrder, nodeId: string): SceneRefView => ({
  * "Checked up to" (P2b-D9): the last scene of the longest run of readable scenes, from the start
  * of the book in reading order up to `atId` (null: the end of the book; an Idea scene: the
  * readable scene before it), that a reader of knows and threads read whole with nothing finished
- * left unread (`topicsRead` and `settled`). Null when the first scene is not ("not checked yet").
+ * left unread (`topicsRead` and `settled`). A readable scene with no words yet (`empty`, from the
+ * caller's word counts) has nothing to read, so it is checked as it stands (no reading ever writes
+ * its flags). Null when the first scene is not ("not checked yet").
  */
 export function checkedUpTo(
   reading: ReadingOrder,
   flags: ReadonlyMap<string, SceneFlags>,
-  atId: string | null
+  atId: string | null,
+  empty: ReadonlySet<string> = new Set()
 ): SceneRefView | null {
   const at = atId === null ? Infinity : (reading.at.get(atId) ?? -1)
   const scenes = [...reading.order].sort((a, b) => a[1] - b[1])
@@ -94,7 +98,8 @@ export function checkedUpTo(
   for (const [nodeId, order] of scenes) {
     if (order > at) break
     const flag = flags.get(nodeId)
-    if (flag?.topicsRead !== true || !flag.settled) break
+    const checked = flag === undefined ? empty.has(nodeId) : flag.topicsRead && flag.settled
+    if (!checked) break
     last = refOf(reading, nodeId)
   }
   return last
@@ -129,17 +134,20 @@ const linesOf = (claims: readonly KnowsClaim[], secretId: string): KnowsClaim[] 
       parseHow(claim.how) !== null
   )
 
-/**
- * "Readers have known since" (P2b-D7): the scene of the secret's earliest reveal (live or
- * re-checking) or earliest counted line (a learning or holding line; suspects and believes
- * otherwise never set it). Null when there is none.
- */
-export function readersSince(
+/** What shows readers a secret: each reveal and counted line, where, and whether it is re-checked. */
+interface Evidence {
+  nodeId: string
+  order: number
+  stale: boolean
+}
+
+/** A secret's reveals (any role) and counted lines (P2b-D7), in reading order. */
+function evidenceOf(
   secretId: string,
   claims: readonly KnowsClaim[],
   quotes: readonly TopicQuoteInput[],
   reading: ReadingOrder
-): SceneRefView | null {
+): Evidence[] {
   const reveals = placed(
     quotes.filter((quote) => quote.recordId === secretId),
     reading
@@ -148,10 +156,39 @@ export function readersSince(
     linesOf(claims, secretId).filter((claim) => knowsLine(claim) === 'counts'),
     reading
   )
-  const first = [...reveals, ...counted].sort(
-    (a, b) => a.order - b.order || a.item.para - b.item.para
-  )[0]
-  return first === undefined ? null : refOf(reading, first.item.nodeId)
+  return [...reveals, ...counted]
+    .sort((a, b) => a.order - b.order || a.item.para - b.item.para)
+    .map((entry) => ({
+      nodeId: entry.item.nodeId,
+      order: entry.order,
+      stale: entry.item.state === 'stale'
+    }))
+}
+
+/** The earliest scene of the evidence; `stale` when every piece of it there is re-checked. */
+function sinceOf(evidence: readonly Evidence[], reading: ReadingOrder): SinceView | null {
+  const first = evidence[0]
+  if (first === undefined) return null
+  return {
+    ...refOf(reading, first.nodeId),
+    stale: !evidence.some((each) => each.order === first.order && !each.stale)
+  }
+}
+
+/**
+ * "Readers have known since" (P2b-D7): the scene of the secret's earliest reveal or earliest
+ * counted line (a learning or holding line; suspects and believes otherwise never set it), live
+ * or re-checking (QUESTIONS 2026-10-12 #1: an edit never makes a secret vanish for a moment);
+ * `stale` when only re-checked evidence stands in that scene (shown dimmed). Null when there is
+ * none.
+ */
+export function readersSince(
+  secretId: string,
+  claims: readonly KnowsClaim[],
+  quotes: readonly TopicQuoteInput[],
+  reading: ReadingOrder
+): SinceView | null {
+  return sinceOf(evidenceOf(secretId, claims, quotes, reading), reading)
 }
 
 const quoteView = (quote: TopicQuoteInput, reading: ReadingOrder): TopicQuoteView => ({
@@ -233,6 +270,8 @@ export interface KnowsAsOfInput {
   knewBefore: readonly KnewBeforeInput[]
   reading: ReadingOrder
   flags: ReadonlyMap<string, SceneFlags>
+  /** Readable scenes with no words yet: checked as they stand (`checkedUpTo`). */
+  empty?: ReadonlySet<string>
   /** The scene it is read as of; null for the end of the book. */
   atId: string | null
 }
@@ -278,8 +317,19 @@ export function knowsAsOf(input: KnowsAsOfInput): KnowsAsOf {
     const others = lines
       .filter((entry) => entry.order <= at && knowsLine(entry.item) === 'other')
       .map((entry) => cellOf(entry.item, id, reading, false))
-    const since = readersSince(id, input.claims, input.quotes, reading)
+    const evidence = evidenceOf(id, input.claims, input.quotes, reading)
+    const since = sinceOf(evidence, reading)
     const sinceOrder = since === null ? Infinity : orderOf(since.nodeId)
+    // The scenes that touch it: a counted or partial line, or a reveal of any role (P2b-D21).
+    const touchedIn = [
+      ...lines.filter((entry) => knowsLine(entry.item) !== 'other'),
+      ...placed(
+        input.quotes.filter((quote) => quote.recordId === id),
+        reading
+      )
+    ]
+      .sort((a, b) => a.order - b.order)
+      .map((entry) => entry.item.nodeId)
     // Cells in the order their knowers first appear in the book (the author's marks first).
     const firstSeen = new Map<string, number>()
     for (const [i, entry] of lines.entries()) {
@@ -297,10 +347,15 @@ export function knowsAsOf(input: KnowsAsOfInput): KnowsAsOf {
       origin: secret.origin,
       readersSince: since,
       known: since !== null && sinceOrder <= at,
+      knownStale:
+        since !== null &&
+        sinceOrder <= at &&
+        !evidence.some((each) => each.order <= at && !each.stale),
       ...topicQuotesOf(id, input.quotes, reading),
       cells: orderedCells,
       others,
       knewBefore: knew,
+      touchedIn: [...new Set(touchedIn)],
       sinceOrder
     }
   })
@@ -313,7 +368,7 @@ export function knowsAsOf(input: KnowsAsOfInput): KnowsAsOf {
   return {
     asOf: atId,
     asOfRef: atId === null || !reading.at.has(atId) ? null : (reading.refs.get(atId) ?? null),
-    checkedUpTo: checkedUpTo(reading, input.flags, atId),
+    checkedUpTo: checkedUpTo(reading, input.flags, atId, input.empty),
     secrets: secrets.map(({ sinceOrder: _, ...secret }) => secret)
   }
 }
@@ -365,11 +420,13 @@ export const TENSION_MAX = 3
 
 /**
  * This scene's Who knows what (P2b-D21), from `knowsAsOf` read as of the scene: every secret
- * touched in it (a counted or partial line there, or a reveal there), each with the Here
- * characters that have no counted line for it; then at most `TENSION_MAX` tension lines, first
- * "readers know and the POV has none", then "someone Here holds it and another Here has none",
- * newest secret first; and how many of the grid's other rows "+ N more in Book" opens. `here` is
- * the scene's Here records (the POV among them). Every "has none" is scoped by `checkedUpTo`.
+ * touched in it (any counted or partial line there, a holder's repeat included, or any reveal
+ * there: `touchedIn`), each with the Here characters that have no counted line for it; then at
+ * most `TENSION_MAX` tension lines, first "readers know and the POV has none", then "someone Here
+ * holds it and another Here has none", newest secret first, each `stale` when it rests on a line
+ * or reveal being re-checked; and how many of the grid's other rows "+ N more in Book" opens.
+ * `here` is the scene's Here records (the POV among them). Every "has none" is scoped by
+ * `checkedUpTo`.
  */
 export function sceneSecrets(
   knows: KnowsAsOf,
@@ -377,9 +434,7 @@ export function sceneSecrets(
   here: readonly string[],
   pov: string | null
 ): SceneSecrets {
-  const inScene = (secret: SecretView): boolean =>
-    secret.cells.some((cell) => !cell.later && cell.nodeId === sceneId) ||
-    [secret.defining, ...secret.merged].some((quote) => quote?.nodeId === sceneId)
+  const inScene = (secret: SecretView): boolean => secret.touchedIn.includes(sceneId)
   const holders = (secret: SecretView): Set<string> =>
     new Set(secret.cells.filter(holds).map((cell) => cell.knowerId))
   const touched: SceneSecretView[] = knows.secrets.filter(inScene).map((secret) => {
@@ -392,7 +447,12 @@ export function sceneSecrets(
   if (pov !== null) {
     for (const secret of known) {
       if (!holders(secret).has(pov)) {
-        tension.push({ kind: 'readersKnow', secretId: secret.recordId, recordId: pov })
+        tension.push({
+          kind: 'readersKnow',
+          secretId: secret.recordId,
+          recordId: pov,
+          stale: secret.knownStale
+        })
       }
     }
   }
@@ -408,11 +468,13 @@ export function sceneSecrets(
         )
     )
     if (holder !== undefined && without !== undefined) {
+      const cell = secret.cells.find((each) => each.knowerId === holder)
       tension.push({
         kind: 'hereKnows',
         secretId: secret.recordId,
         holderId: holder,
-        recordId: without
+        recordId: without,
+        stale: secret.knownStale || cell?.stale === true
       })
     }
   }

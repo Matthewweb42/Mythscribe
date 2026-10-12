@@ -19,18 +19,21 @@ import { dismiss, isDismissed, listDismissed } from './dismissedStore'
 import { scanNamesFor } from './nameIndexer'
 import {
   addAlias,
+  checkAliasRename,
   createRecord,
   deleteRecord,
   gateName,
   getRecord,
   invariantAliases,
   listRecords,
+  renameAlias,
   requireRecord,
   sameAs,
   savePage,
   setAliases,
   splitRecord,
-  updateRecord
+  updateRecord,
+  withTopicRelabels
 } from './recordStore'
 import { getCard, upsertCard } from './reading/cardStore'
 import { sceneTexts, seedClaims } from './reading/claimFixture'
@@ -135,6 +138,57 @@ describe('createRecord (F-16.4)', () => {
       true
     )
     clean()
+  })
+
+  it('lets a name take a topic label’s very norm: the label yields, never blocks (P2b-D2)', () => {
+    const topic = (name: string, categoryId: 'secret' | 'thread'): string => {
+      const made = createRecord(db, { name, categoryId }, NOW)
+      if (!('record' in made)) throw new Error('blocked')
+      return made.record.id
+    }
+    const heir = topic('the heir', 'thread')
+    const pact = topic('Crimson Pact', 'secret')
+    const ledger = topic('Black Ledger', 'secret')
+    const vow = topic('the vow', 'thread')
+    // A new record: no warning, no refusal; the thread's label gets " (thread)".
+    const made = withTopicRelabels(db, () =>
+      createRecord(db, { name: 'The Heir', categoryId: 'character' }, NOW)
+    )
+    expect(made.result).toHaveProperty('record')
+    expect(made.relabeled).toEqual([heir])
+    expect(requireRecord(db, heir).name).toBe('the heir (thread)')
+    // A nickname, a full names list, and Rename in book.
+    const mara = make('Mara')
+    addAlias(db, mara, { text: 'Crimson Pact' }, NOW)
+    expect(requireRecord(db, pact).name).toBe('Crimson Pact (secret)')
+    const orrin = make('Orrin')
+    setAliases(db, orrin, { name: { text: 'Orrin' }, aliases: [{ text: 'the vow' }] }, NOW)
+    expect(requireRecord(db, vow).name).toBe('the vow (thread)')
+    const tomas = make('Tomas')
+    const main = requireRecord(db, tomas).aliases[0]?.id ?? ''
+    expect(checkAliasRename(db, tomas, main, 'Black Ledger').norm).toBe('black ledger')
+    renameAlias(db, tomas, main, 'Black Ledger', NOW)
+    expect(requireRecord(db, ledger).name).toBe('Black Ledger (secret)')
+    // Names still clash with names, and a label with a label of its kind is warned about.
+    expect(() => make('Mara')).toThrow(/already a name of Mara/)
+    expect(
+      createRecord(db, { name: 'the heir (thread)', categoryId: 'thread' }, NOW)
+    ).toHaveProperty('gate')
+    clean()
+  })
+
+  it('keeps a secret or thread to one label: no nickname added (QUESTIONS 2026-10-12 #6)', () => {
+    const made = createRecord(db, { name: 'the sold map', categoryId: 'secret' }, NOW)
+    if (!('record' in made)) throw new Error('blocked')
+    const id = made.record.id
+    expect(() => addAlias(db, id, { text: 'the map sale' }, NOW)).toThrow(/one label/)
+    expect(() =>
+      setAliases(db, id, { name: { text: 'the sold map' }, aliases: [{ text: 'map sale' }] }, NOW)
+    ).toThrow(/one label/)
+    // Its label is renamed on its sheet.
+    expect(setAliases(db, id, { name: { text: 'the map sold' }, aliases: [] }, NOW).name).toBe(
+      'the map sold'
+    )
   })
 
   it('blocks a dismissed name silently in the gate', () => {

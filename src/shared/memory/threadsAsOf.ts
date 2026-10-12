@@ -10,8 +10,10 @@ import { topicQuotesOf, type TopicQuoteInput } from './whoKnows'
  * (P2b-D22). A step (`opens`, `advances`, `resolves`; a claim of slot `thread` whose record is the
  * thread) counts only in mode `now` and not as a rumour; the rest are listed muted. Within one
  * scene the text's order holds, except that a resolve comes last (`stepRank`), so a scene that
- * advances a thread and resolves it reads as resolved. A thread's verified reveal (its defining
- * quote) opens it too. Pure: the views of slice 5 and P3's navigator call it.
+ * advances a thread and resolves it reads as resolved. A thread's reveal (its defining quote) is
+ * shown as its quote, never as a status change: a reveal carries no voice or mode, so a supposed
+ * or rumoured sentence ("If Mr. Ashby came back tomorrow") must not open it (P2b-D22). Pure: the
+ * views of slice 5 and P3's navigator call it.
  */
 
 /** A thread step claim as the rules read it. */
@@ -58,8 +60,8 @@ export interface ThreadsAsOfInput {
 }
 
 /**
- * Every thread as of a scene (F-16.23): status (`notYet` before its first counted step or reveal,
- * `open` after an opening or an advance, `resolved` after a resolve), where it opened, its last
+ * Every thread as of a scene (F-16.23): status (`notYet` before its first counted step, `open`
+ * after an opening or an advance, `resolved` after a resolve), where it opened, its last
  * counted step, where it resolved, its steps as of the scene (counted and muted), how many steps
  * come later, and its reveals. An author's thread with no step reads `notYet` (the view scopes it
  * with `checkedUpTo`).
@@ -96,19 +98,8 @@ export function threadsAsOf(input: ThreadsAsOfInput): ThreadMemoryView[] {
     const asOf = steps.filter((entry) => entry.order <= at)
     const counted = asOf.filter((entry) => stepCounts(entry.claim))
     const reveals = topicQuotesOf(thread.recordId, input.quotes, reading)
-    const firstReveal = [reveals.defining, ...reveals.merged]
-      .filter((quote) => quote !== null)
-      .map((quote) => ({ quote, order: reading.order.get(quote.nodeId) ?? Infinity }))
-      .filter((entry) => entry.order <= at)
-      .sort((a, b) => a.order - b.order || a.quote.para - b.quote.para)[0]
     const firstStep = counted[0]
-    const opened =
-      firstStep === undefined && firstReveal === undefined
-        ? null
-        : firstReveal !== undefined &&
-            (firstStep === undefined || firstReveal.order <= firstStep.order)
-          ? refOf(firstReveal.quote.nodeId)
-          : refOf(firstStep?.claim.nodeId ?? '')
+    const opened = firstStep === undefined ? null : refOf(firstStep.claim.nodeId)
     const lastStep = counted[counted.length - 1]
     const resolved = lastStep?.step === 'resolves' ? refOf(lastStep.claim.nodeId) : null
     const view: ThreadStepView[] = asOf.map((entry) => ({

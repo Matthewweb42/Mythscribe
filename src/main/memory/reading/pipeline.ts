@@ -70,7 +70,7 @@ import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from '
 import { AiCancelledError, type AiMessage } from '../../ai/providers/types'
 import type { TreeDb } from '../../tree/treeStore'
 import { dismissedKeys } from '../dismissedStore'
-import { dismissedNames, rosterOf } from '../recordStore'
+import { dismissedNames, rosterOf, topicLabels } from '../recordStore'
 import { paragraphsOf, runAnchors } from './anchors'
 import { getCard, upsertCard } from './cardStore'
 import {
@@ -786,10 +786,11 @@ export async function runReading(
 
     // 5. The ladder.
     const twinRoster = rosterOf(db)
-    const askAbout = nameAsker(twinRoster, {
-      names: dismissedNames(db),
-      aliasKeys: dismissedKeys(db, 'alias')
-    })
+    const askAbout = nameAsker(
+      twinRoster,
+      { names: dismissedNames(db), aliasKeys: dismissedKeys(db, 'alias') },
+      topicLabels(db)
+    )
     const isCharacter = (id: string): boolean => scene.kindOf(id) === 'character'
     const items: Item[] = []
     const waitingNames = new Set<string>()

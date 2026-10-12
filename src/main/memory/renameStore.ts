@@ -35,9 +35,12 @@ import {
   checkAliasRename,
   getRecord,
   renameAlias,
+  renameInTopicLabels,
   requireRecord,
   restoreAliasText,
-  type AliasText
+  restoreTopicLabels,
+  type AliasText,
+  type TopicLabelRename
 } from './recordStore'
 import { restoreEvidence, rewriteEvidence, type EvidenceUndo } from './reading/renameEvidence'
 import { povOf } from './sceneDetailStore'
@@ -95,6 +98,8 @@ interface RenameUndo {
   recordId: string
   aliasId: string
   name: { before: AliasText; after: AliasText }
+  /** P2b: AI-made topics' labels that named the record. */
+  labels: TopicLabelRename[]
   docs: DocUndo[]
   drafts: DraftUndo[]
   dismissed: DismissedUndo
@@ -324,11 +329,20 @@ export function applyRename(db: TreeDb, request: RenameApplyRequest, now: Date):
     for (const { draftId, nodeId, text } of draftWrites) follow(nodeId, draftId, text, false)
 
     const name = renameAlias(tx, request.recordId, request.aliasId, scope.to, now)
+    // P2b: an AI-made secret's or thread's label that names the record follows, in every spelling
+    // the rewrite met ("Ashby's" too) and the name itself.
+    const spellings = [...sceneWrites, ...draftWrites].flatMap(({ text }) => text.edits)
+    const labels = renameInTopicLabels(
+      tx,
+      [...spellings, { text: scope.from, replacement: scope.to }],
+      now
+    )
     return {
       undo: {
         recordId: request.recordId,
         aliasId: request.aliasId,
         name,
+        labels,
         docs: docUndo,
         drafts: draftUndo,
         dismissed: moveNotMentions(tx, moves, now),
@@ -481,6 +495,7 @@ export function undoRename(db: TreeDb, now: Date): RenameUndoResult {
       entry.name.before,
       now
     )
+    restoreTopicLabels(tx, entry.labels, now)
     for (const row of entry.dismissed.added) {
       const current = tx.select().from(dismissed).where(eq(dismissed.id, row.id)).get()
       if (current?.key === row.key) tx.delete(dismissed).where(eq(dismissed.id, row.id)).run()

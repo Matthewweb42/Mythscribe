@@ -14,7 +14,8 @@ import type { AgeView, BornView, ElapsedHintView, KnownYearView, YearView } from
  * has passed. Nothing here is sent to a model.
  */
 
-const NUMBER_WORDS: Readonly<Record<string, number>> = {
+/** Counts written as words, one to nineteen (and "a", "an", "dozen"). */
+const UNITS: Readonly<Record<string, number>> = {
   a: 1,
   an: 1,
   one: 1,
@@ -29,10 +30,63 @@ const NUMBER_WORDS: Readonly<Record<string, number>> = {
   ten: 10,
   eleven: 11,
   twelve: 12,
+  dozen: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
   eighteen: 18,
+  nineteen: 19
+}
+
+/** The tens written as words; "twenty-four" and "twenty four" add a unit to them. */
+const TENS: Readonly<Record<string, number>> = {
   twenty: 20,
-  several: 6,
-  many: 12
+  thirty: 30,
+  forty: 40,
+  fifty: 50,
+  sixty: 60,
+  seventy: 70,
+  eighty: 80,
+  ninety: 90,
+  hundred: 100
+}
+
+/** A count in one word: digits, a unit, a tens word, or a hyphenated "twenty-four"; else null. */
+function countWord(word: string): number | null {
+  if (/^\d+$/.test(word)) return Number(word)
+  const unit = UNITS[word]
+  if (unit !== undefined) return unit
+  const tens = TENS[word]
+  if (tens !== undefined) return tens
+  const [head = '', tail = '', ...rest] = word.split('-')
+  const compound = TENS[head]
+  const ones = UNITS[tail]
+  return rest.length === 0 && compound !== undefined && ones !== undefined && ones < 10
+    ? compound + ones
+    : null
+}
+
+/**
+ * The count of months a span names, from the words before "month(s)": a number in digits or words
+ * ("18", "fifteen", "twenty-four", "twenty four", "an eighteen-month"); `few` for "a few" or "a
+ * couple of" (under six); `vague` for none or a vague one ("Months later", "some", "several",
+ * "many", "the months that followed").
+ */
+function monthCount(before: string): number | 'few' | 'vague' {
+  const words = before
+    .split(/[^a-z0-9-]+/)
+    .map((word) => word.replace(/^-+|-+$/g, ''))
+    .filter((word) => word !== '')
+  if (words.at(-1) === 'of') words.pop()
+  const last = words.at(-1)
+  if (last === undefined) return 'vague'
+  if (last === 'few' || last === 'couple') return 'few'
+  const count = countWord(last)
+  if (count === null) return 'vague'
+  const tens = TENS[words.at(-2) ?? '']
+  return tens !== undefined && count < 10 ? tens + count : count
 }
 
 /** Units that cross a year whatever their count: years, seasons, decades, generations. */
@@ -42,23 +96,26 @@ const YEAR_UNITS =
 /** A long span with no number: "long after", "much later", "long afterwards". */
 const LONG_VAGUE = /\b(?:long after(?:wards?)?|much later|long years|ages later)\b/
 
-/** "<count> months": a number in digits or words. */
-const MONTHS = /\b(\d+|[a-z]+)[\s-]+months?\b/g
+/** A month span: "month" (counted only) or "months". */
+const MONTHS = /\bmonth(s?)\b/g
 
 /**
  * Whether an elapsed hint can cross a year (P2b-D14), so it ends the year carry and is listed for
  * ages: years, winters, summers, springs, autumns, seasons, decades or generations ("Three winters
- * later", "a year later", "years later"), six months or more ("six months", "18 months later"),
- * or a long vague span ("long after", "much later"). Hours, days, weeks, a few months, "the next
- * morning" or "that evening" do not.
+ * later", "a year later", "years later"), six months or more in digits or words ("six months",
+ * "18 months later", "Fifteen months later", "twenty-four months"), a month span with no count or
+ * a vague one ("Months later", "some months": unknown is safe, a false carry is not), or a long
+ * vague span ("long after", "much later"). Hours, days, weeks, fewer than six months ("a few
+ * months", "two months"), "that month", "the next morning" or "that evening" do not.
  */
 export function elapsedBreaks(hint: string): boolean {
   const text = hint.toLowerCase().replace(/[‘’]/g, "'")
   if (YEAR_UNITS.test(text) || LONG_VAGUE.test(text)) return true
   for (const match of text.matchAll(MONTHS)) {
-    const word = match[1] ?? ''
-    const count = /^\d+$/.test(word) ? Number(word) : (NUMBER_WORDS[word] ?? 0)
-    if (count >= 6) return true
+    const count = monthCount(text.slice(0, match.index))
+    if (typeof count === 'number' ? count >= 6 : count === 'vague' && match[1] === 's') {
+      return true
+    }
   }
   return false
 }
@@ -166,8 +223,11 @@ function upTo(claims: readonly AgeClaim[], reading: ReadingOrder, atId: string |
     .map((entry) => entry.claim)
 }
 
-/** A Pinned line giving a birth year: "Born: 1792", "Born (story year): 1792". */
-const BORN_LINE = /^\s*born\b[^:\n]*:\s*(.+)$/i
+/**
+ * A Pinned line giving a birth year: "Born: 1792", "Born (story year): 1792" (the switch-over's
+ * form of the v1 field); never a canon sentence that merely opens with "Born".
+ */
+const BORN_LINE = /^\s*born(?:\s*\([^)\n]*\))?\s*:\s*(.+)$/i
 
 /**
  * A record's birth year as of a scene (P2b-D15): the latest live narration-now `born` claim up to
@@ -261,7 +321,10 @@ export function ageAsOf(input: {
 /**
  * One record's age as of a scene, from its `born` and `age` claims, its canon Pinned paragraphs,
  * the book's story years (`storyYears`) and the reading order: what the Timeline, a sheet and
- * P3's navigator read. `atId` null: the end of the book.
+ * P3's navigator read. `atId` null: the end of the book. "The last stated age" is in story time:
+ * outside a flashback, an age stated in a flashback (earlier in story time) is left out; in a
+ * flashback, only an age stated in that scene stands (else nothing, unless its own year computes
+ * one).
  */
 export function recordAge(input: {
   born: readonly AgeClaim[]
@@ -275,7 +338,12 @@ export function recordAge(input: {
   const at = atId === null ? Infinity : (reading.at.get(atId) ?? -1)
   // The scene's own year: an Idea scene or one left out of compile reads as the one before it.
   const row = years.filter((each) => (reading.order.get(each.nodeId) ?? Infinity) <= at).at(-1)
-  const stated = statedAge(input.ages, reading, atId)
+  const flashbacks = new Set(years.flatMap((each) => (each.flashback ? [each.nodeId] : [])))
+  const ages =
+    row?.flashback === true
+      ? input.ages.filter((claim) => claim.nodeId === row.nodeId)
+      : input.ages.filter((claim) => !flashbacks.has(claim.nodeId))
+  const stated = statedAge(ages, reading, atId)
   return ageAsOf({
     born: birthYear(input.born, input.pinned, reading, atId),
     year: row?.year ?? null,

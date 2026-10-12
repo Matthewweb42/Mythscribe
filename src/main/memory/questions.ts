@@ -14,7 +14,7 @@ import { documentText, manuscriptDocuments } from '../voice/profile'
 import { dismiss, dismissedKeys } from './dismissedStore'
 import { waitingNameNorms } from './reading/claimStore'
 import { settleWaitingName, type SettledName } from './reading/waiting'
-import { addAlias, createRecord, requireRecord, rosterOf } from './recordStore'
+import { addAlias, createRecord, requireRecord, rosterOf, topicLabels } from './recordStore'
 
 /**
  * Name questions in Needs a look (F-16.4): computed, never stored, from the manuscript's
@@ -48,7 +48,10 @@ export function listNameQuestions(db: TreeDb): NameQuestion[] {
     perDocument,
     rosterOf(db),
     { names: [...dismissedKeys(db, 'name')], aliasKeys: dismissedKeys(db, 'alias') },
-    { proved: draftId === null ? new Set() : waitingNameNorms(db, draftId) }
+    {
+      proved: draftId === null ? new Set() : waitingNameNorms(db, draftId),
+      labels: topicLabels(db)
+    }
   )
 }
 

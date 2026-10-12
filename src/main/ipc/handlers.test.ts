@@ -99,7 +99,8 @@ import {
   setVoiceNotes
 } from '../project/settingsStore'
 import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
-import { cardAnchorOf, seedClaims } from '../memory/reading/claimFixture'
+import { cardAnchorOf, revealIn, seedClaims } from '../memory/reading/claimFixture'
+import { createTopic, deleteTopicQuotes } from '../memory/reading/topicStore'
 import { upsertCard } from '../memory/reading/cardStore'
 import { emptyCardFields } from '@shared/memory/claims'
 import { getClaim } from '../memory/reading/claimStore'
@@ -8811,6 +8812,59 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     // Reads of v1's memory and the shared channels still answer.
     expect(await invoke('tag:list', undefined)).toEqual([])
     expect((await invoke('tree:list', undefined)).length).toBeGreaterThan(0)
+  })
+
+  it('prunes the AI-made secrets only a deleted draft or record backed, and says so (P2b-D12)', async () => {
+    const scene = await openV2()
+    const db = manager.require().connection.orm
+    await invoke('document:save', { id: scene, content: paragraphs('Tomas sold the map.') })
+    const tomas = await invoke('record:create', { name: 'Tomas', categoryId: 'character' })
+    if (!('record' in tomas)) throw new Error('blocked')
+    const first = (await invoke('drafts:list', undefined)).activeId
+    const list = await invoke('drafts:duplicate', { id: first, name: 'Two' })
+    const second = list.drafts.find((each) => each.id !== first)?.id ?? ''
+    const reveal = revealIn(db, scene, { para: 0, quote: 'Tomas sold the map', label: 'x' })
+    // A secret only the inactive draft reveals, and one backed only by Tomas's line.
+    const inactive = createTopic(
+      db,
+      { kind: 'secret', label: 'the sold map', quote: { ...reveal, draftId: second } },
+      new Date()
+    )
+    const held = createTopic(db, { kind: 'secret', label: 'the sale', quote: reveal }, new Date())
+    seedClaims(
+      db,
+      scene,
+      [
+        {
+          recordId: tomas.record.id,
+          slot: 'knows',
+          value: 'knewBefore',
+          how: 'knewBefore',
+          objectId: held.recordId,
+          quote: 'Tomas sold the map',
+          para: 0,
+          proof: 'verified'
+        }
+      ],
+      new Date()
+    )
+    deleteTopicQuotes(db, [held.topicQuoteId])
+    vi.mocked(fakeWin.webContents.send).mockClear()
+
+    await invoke('drafts:delete', { id: second })
+    const ids = (): string[] => listRecords(db).map((each) => each.id)
+    expect(ids()).not.toContain(inactive.recordId)
+    expect(sentOf('record:changed')).toContainEqual({
+      recordIds: [inactive.recordId],
+      roster: false
+    })
+
+    await invoke('record:delete', { id: tomas.record.id })
+    expect(ids()).not.toContain(held.recordId)
+    expect(sentOf('record:changed')).toContainEqual({
+      recordIds: [tomas.record.id, held.recordId],
+      roster: true
+    })
   })
 
   it('opens without v1’s steps: no tag proposals, and the name questions are published instead', async () => {

@@ -37,7 +37,17 @@ describe('elapsedBreaks (P2b-D14)', () => {
       'The next spring',
       'two decades on',
       'a generation later',
-      'Half a year had passed'
+      'Half a year had passed',
+      'Fifteen months later',
+      'twenty-four months later',
+      'twenty four months on',
+      'thirteen months on',
+      'nineteen months after',
+      'an eighteen-month voyage later',
+      'Months later',
+      'Some months later',
+      'after several months',
+      'In the months that followed'
     ]) {
       expect(elapsedBreaks(hint), hint).toBe(true)
     }
@@ -51,7 +61,13 @@ describe('elapsedBreaks (P2b-D14)', () => {
       'three days later',
       'an hour later',
       'two months later',
-      'a fortnight on'
+      'a fortnight on',
+      'a few months later',
+      'a couple of months on',
+      'five months later',
+      'That month',
+      'a month later',
+      'the next month'
     ]) {
       expect(elapsedBreaks(hint), hint).toBe(false)
     }
@@ -184,6 +200,10 @@ describe('birthYear (P2b-D15)', () => {
     })
     expect(birthYear([], ['Born (story year): 1790'], READING, null)?.year).toBe(1790)
     expect(birthYear([], ['Born at sea, raised inland'], READING, null)).toBeNull()
+    // A canon sentence that merely opens with "Born" is not a birth-year line.
+    expect(
+      birthYear([], ['Born and raised in Thornmere: she left in 1801.'], READING, null)
+    ).toBeNull()
   })
 })
 
@@ -255,5 +275,28 @@ describe('ageAsOf (decision 5)', () => {
     expect(
       recordAge({ born: [], ages, pinned: ['Born: 1792'], years, reading: READING, atId: 'idea' })
     ).toMatchObject({ kind: 'computed', age: 19, year: { from: { ref: '1.1' } } })
+  })
+
+  it('never takes an age stated in a flashback as the age after it (story time)', () => {
+    const years = storyYears([row('s1'), row('s2'), row('s3', { flashback: true }), row('s4')])
+    const ages = [
+      claim({ nodeId: 's1', value: 'nineteen' }),
+      claim({ nodeId: 's3', value: 'nine' })
+    ]
+    const at = (atId: string): ReturnType<typeof recordAge> =>
+      recordAge({ born: [], ages, pinned: [], years, reading: READING, atId })
+    expect(at('s4')).toMatchObject({ kind: 'stated', value: 'nineteen', ref: '1.1' })
+    // In the flashback, its own stated age stands; a flashback with none shows none.
+    expect(at('s3')).toMatchObject({ kind: 'stated', value: 'nine', ref: '1.3', since: [] })
+    expect(
+      recordAge({
+        born: [],
+        ages: ages.slice(0, 1),
+        pinned: [],
+        years,
+        reading: READING,
+        atId: 's3'
+      })
+    ).toBeNull()
   })
 })

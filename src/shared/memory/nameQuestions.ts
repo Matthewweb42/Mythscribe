@@ -153,14 +153,20 @@ export type NameQuestionFor =
  * of the kind it answers, or null when no question will ever ask about it: the scan already finds
  * it (a record's name, with its "the" or as its plural), the author said it is not a name, the
  * twin gate ties it to no one record, it carries a title (identity rule 2: the author adds those
- * herself), or she said No to it for that record. The reading pipeline keeps a proved fact waiting
- * on a new name only when this answers a question, so no wait is left that nothing can settle.
+ * herself), or she said No to it for that record. A secret's or thread's label (`labels`, P2b-D2)
+ * is not a name and never a question either: the scan does not find it, and the author already
+ * said what it is. The reading pipeline keeps a proved fact waiting on a new name only when this
+ * answers a question, so no wait is left that nothing can settle.
  */
 export function nameAsker(
   roster: readonly TwinRosterRecord[],
-  dismissed: NameQuestionDismissals
+  dismissed: NameQuestionDismissals,
+  labels: readonly string[] = []
 ): (display: string) => NameQuestionFor | null {
-  const known = new Set(roster.flatMap((record) => record.names.map(normName)))
+  const known = new Set([
+    ...roster.flatMap((record) => record.names.map(normName)),
+    ...labels.map(normName)
+  ])
   const scanned = (key: string): boolean =>
     known.has(key) ||
     known.has(`the ${key}`) ||
@@ -205,9 +211,11 @@ export function nameQuestions(
      * the name): such a name is asked about once it is seen once mid-sentence.
      */
     proved?: ReadonlySet<string>
+    /** P2b-D2: the secrets' and threads' labels, never asked about (`nameAsker`). */
+    labels?: readonly string[]
   } = {}
 ): NameQuestion[] {
-  const ask = nameAsker(roster, dismissed)
+  const ask = nameAsker(roster, dismissed, options.labels)
   const totals = new Map<
     string,
     { display: string; mid: number; start: number; lower: number; nodeIds: string[] }

@@ -79,13 +79,15 @@ export interface KnowsLineInput {
 
 /**
  * What a knows line is (P2b-D7):
- * - `counts`: it shows the knower knowing. Mode `now` or `memory`; the narration or a thought, or
- *   dialogue the knower speaks while holding it (tells, refers, knew before), or dialogue spoken by
- *   the `from` of a told, overheard or read line (the learner heard it);
+ * - `counts`: it shows the knower knowing. Mode `now` or `memory`; the narration, or the knower's
+ *   own thought (a thought keeps its thinker as `speakerId`: "Orrin knew, Mara thought" is Mara's
+ *   belief about Orrin, not Orrin knowing; a thought with no thinker stored reads as the
+ *   knower's), or dialogue the knower speaks while holding it (tells, refers, knew before), or
+ *   dialogue spoken by the `from` of a told, overheard or read line (the learner heard it);
  * - `partial`: the same, with a how of `PARTIAL` (suspects, believes otherwise; in dialogue, the
  *   knower's own words): shown as such, never counted as knowing;
- * - `other`: never counted: a rumour, a hypothetical, a dream, dialogue by anyone else, or a how
- *   the rules do not know.
+ * - `other`: never counted: a rumour, a hypothetical, a dream, dialogue or a thought by anyone
+ *   else, or a how the rules do not know.
  */
 export function knowsLine(line: KnowsLineInput): 'counts' | 'partial' | 'other' {
   const how = parseHow(line.how)
@@ -94,8 +96,10 @@ export function knowsLine(line: KnowsLineInput): 'counts' | 'partial' | 'other' 
   let shows = false
   switch (line.voice) {
     case 'narration':
-    case 'thought':
       shows = true
+      break
+    case 'thought':
+      shows = line.speakerId === null || line.speakerId === line.recordId
       break
     case 'dialogue':
       shows =

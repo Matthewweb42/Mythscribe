@@ -491,6 +491,13 @@ export const SceneRefView = z.object({ nodeId: z.string(), ref: z.string() })
 export type SceneRefView = z.infer<typeof SceneRefView>
 
 /**
+ * "Readers have known since" (P2b-D7): the scene, and whether it rests only on reveals or lines
+ * whose sentences changed since they were read (`stale`: shown dimmed, re-checking).
+ */
+export const SinceView = SceneRefView.extend({ stale: z.boolean() })
+export type SinceView = z.infer<typeof SinceView>
+
+/**
  * A secret's or thread's reveal (`topic_quote`): the sentence that revealed or opened it
  * (`defining`), or one merged into it as the same (`merged`, with the label it was read as).
  */
@@ -535,22 +542,26 @@ export type KnowsCellView = z.infer<typeof KnowsCellView>
 
 /**
  * One secret as of a scene: its label, who made it, the scene readers have known it since (the
- * earliest reveal or counted line, P2b-D7; null when none), whether readers know it as of the
- * scene, its reveals, one cell per knower (the strongest line as of the scene, the author's
- * knew-before, or the first later line flagged `later`), the lines that do not count, and the
- * author's knew-before marks. Never a "doesn't know" cell.
+ * earliest reveal or counted line, P2b-D7; null when none; dimmed when it rests only on re-checked
+ * evidence), whether readers know it as of the scene (`knownStale`: only through re-checked
+ * evidence), its reveals, one cell per knower (the strongest line as of the scene, the author's
+ * knew-before, or the first later line flagged `later`), the lines that do not count, the author's
+ * knew-before marks, and the scenes that touch it (`touchedIn`: a counted or partial line, or a
+ * reveal, there; in reading order). Never a "doesn't know" cell.
  */
 export const SecretView = z.object({
   recordId: z.string(),
   label: z.string(),
   origin: RecordOrigin,
-  readersSince: SceneRefView.nullable(),
+  readersSince: SinceView.nullable(),
   known: z.boolean(),
+  knownStale: z.boolean(),
   defining: TopicQuoteView.nullable(),
   merged: z.array(TopicQuoteView),
   cells: z.array(KnowsCellView),
   others: z.array(KnowsCellView),
-  knewBefore: z.array(z.string())
+  knewBefore: z.array(z.string()),
+  touchedIn: z.array(z.string())
 })
 export type SecretView = z.infer<typeof SecretView>
 
@@ -574,15 +585,22 @@ export type KnowsGrid = z.infer<typeof KnowsGrid>
 /**
  * A tension line in This scene (P2b-D21): readers know a secret and the POV has no counted line
  * (`readersKnow`), or someone Here holds it and another Here has none (`hereKnows`). The "has
- * none" is scoped by `SceneSecrets.checkedUpTo`; never a fact.
+ * none" is scoped by `SceneSecrets.checkedUpTo`; never a fact. `stale`: it rests on a reveal or
+ * line being re-checked (shown dimmed).
  */
 export const TensionLine = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('readersKnow'), secretId: z.string(), recordId: z.string() }),
+  z.object({
+    kind: z.literal('readersKnow'),
+    secretId: z.string(),
+    recordId: z.string(),
+    stale: z.boolean()
+  }),
   z.object({
     kind: z.literal('hereKnows'),
     secretId: z.string(),
     holderId: z.string(),
-    recordId: z.string()
+    recordId: z.string(),
+    stale: z.boolean()
   })
 ])
 export type TensionLine = z.infer<typeof TensionLine>

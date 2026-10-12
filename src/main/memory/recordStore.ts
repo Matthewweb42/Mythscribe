@@ -4,6 +4,7 @@ import { docToText } from '@shared/docText'
 import { dismissedKey } from '@shared/memory/dismissed'
 import type { InvariantAlias } from '@shared/memory/invariants'
 import { gateWords, normName } from '@shared/memory/names'
+import { rewriteWords } from '@shared/memory/renameEvidence'
 import {
   isNamedKind,
   isTopicCategory,
@@ -45,6 +46,7 @@ import { dismiss, dismissedKeys, forgetDismissed } from './dismissedStore'
 import {
   deleteKnowsAbout,
   emptyTopics,
+  isTopicRecord,
   mergeEvidence,
   splitEvidence
 } from './reading/recordEvidence'
@@ -61,7 +63,9 @@ import { markRosterForRebuild } from './reading/roster'
  * P2b: secrets and threads are records too (categories `secret` and `thread`, fixed: no record
  * moves into or out of them, P2b-D1), but their labels are not names (P2b-D2): the twin gate,
  * the name scan's roster and its hash read `NAMED_KINDS` only, and a label another record holds
- * gets " (secret)" / " (thread)" added rather than being refused.
+ * gets " (secret)" / " (thread)" added rather than being refused; a name given later that takes a
+ * label's norm makes the label yield the same way (`yieldTopicLabels`), so a label never blocks a
+ * name and no norm is held twice (the `alias_norm_unshared_uq` index).
  */
 
 export type BlockedGate = Extract<TwinGateResult, { outcome: 'blocked' }>
@@ -170,6 +174,20 @@ export function rosterOf(
     }))
 }
 
+/**
+ * Every secret's and thread's label (and any name a P1 thread kept): not names (P2b-D2), so the
+ * name questions never ask about a span that is one, though the name scan never finds it.
+ */
+export function topicLabels(db: TreeDb): string[] {
+  return db
+    .select({ text: alias.text, categoryId: record.categoryId })
+    .from(alias)
+    .innerJoin(record, eq(record.id, alias.recordId))
+    .all()
+    .filter((row) => isTopicCategory(row.categoryId))
+    .map((row) => row.text)
+}
+
 /** The names the gate blocks silently: every `name` dismissal's key. */
 export function dismissedNames(db: TreeDb): string[] {
   return [...dismissedKeys(db, 'name')]
@@ -224,29 +242,45 @@ export function invariantAliases(db: TreeDb): InvariantAlias[] {
     .all()
 }
 
-/** The display name of the record holding `norm` other than `recordId`, when that would clash. */
+/**
+ * The display name of the record holding `norm` other than `recordId`, when that would clash. A
+ * name given to a named record (`named`) never clashes with a secret's or thread's label: the label
+ * yields instead (`yieldTopicLabels`; P2b-D2, a label never blocks a name), unless the switch-over
+ * marked it shared. A topic's label clashes with every other name and label.
+ */
 function clashOwner(
   db: TreeDb,
   recordId: string | null,
   norm: string,
-  shared: boolean
+  shared: boolean,
+  named: boolean
 ): string | null {
   const others = db
-    .select({ recordId: alias.recordId, shared: alias.shared })
+    .select({ recordId: alias.recordId, shared: alias.shared, categoryId: record.categoryId })
     .from(alias)
+    .innerJoin(record, eq(record.id, alias.recordId))
     .where(
       recordId === null
         ? eq(alias.norm, norm)
         : and(eq(alias.norm, norm), ne(alias.recordId, recordId))
     )
     .all()
-  const clash = others.find((other) => !(shared && other.shared))
+  const clash = others.find(
+    (other) =>
+      !(named && isTopicCategory(other.categoryId) && !other.shared) && !(shared && other.shared)
+  )
   if (clash === undefined) return null
   return getRecord(db, clash.recordId)?.name ?? 'another record'
 }
 
-function refuseClash(db: TreeDb, recordId: string | null, text: string, shared: boolean): void {
-  const owner = clashOwner(db, recordId, normName(text), shared)
+function refuseClash(
+  db: TreeDb,
+  recordId: string | null,
+  text: string,
+  shared: boolean,
+  named: boolean
+): void {
+  const owner = clashOwner(db, recordId, normName(text), shared, named)
   if (owner !== null) {
     throw new AppError(
       'VALIDATION',
@@ -254,6 +288,87 @@ function refuseClash(db: TreeDb, recordId: string | null, text: string, shared: 
       { text, owner }
     )
   }
+}
+
+/**
+ * P2b-D1, D2: a name given to a named record takes its norm from any secret or thread whose label
+ * holds it. That label gets " (secret)" / " (thread)" added (`uniqueTopicLabel`), as a topic made
+ * after the name would, so a label never blocks a name and no norm is held twice. `norms` are the
+ * norms the write gives (taken for the new labels too). The caller holds the transaction and runs
+ * this before writing the names. Answers the topics relabelled.
+ */
+function yieldTopicLabels(db: TreeDb, norms: readonly string[], now: Date): string[] {
+  const giving = new Set(norms.filter((norm) => norm !== ''))
+  if (giving.size === 0) return []
+  // A label the switch-over marked shared with a name of the same words stays as it is.
+  const labels = db
+    .select({
+      id: alias.id,
+      recordId: alias.recordId,
+      text: alias.text,
+      shared: alias.shared,
+      categoryId: record.categoryId
+    })
+    .from(alias)
+    .innerJoin(record, eq(record.id, alias.recordId))
+    .where(inArray(alias.norm, [...giving]))
+    .all()
+    .filter((row) => isTopicCategory(row.categoryId) && !row.shared)
+  if (labels.length === 0) return []
+  const held = takenNorms(db)
+  const given = new Set(giving)
+  const taken = (norm: string): boolean => held(norm) || given.has(norm)
+  const relabeled: string[] = []
+  for (const row of labels) {
+    const kind = recordKindOf(row.categoryId)
+    if (!isTopicKind(kind)) continue
+    const text = uniqueTopicLabel(row.text, kind, null, taken)
+    const norm = normName(text)
+    given.add(norm)
+    db.update(alias)
+      .set({ text, norm, caseRule: defaultCaseRule(text) })
+      .where(eq(alias.id, row.id))
+      .run()
+    db.update(record).set({ modified: now.toISOString() }).where(eq(record.id, row.recordId)).run()
+    if (!relabeled.includes(row.recordId)) relabeled.push(row.recordId)
+  }
+  return relabeled
+}
+
+/** Every secret's and thread's label by alias row (what `withTopicRelabels` compares). */
+function topicLabelTexts(db: TreeDb): Map<string, { recordId: string; text: string }> {
+  return new Map(
+    db
+      .select({
+        id: alias.id,
+        recordId: alias.recordId,
+        text: alias.text,
+        categoryId: record.categoryId
+      })
+      .from(alias)
+      .innerJoin(record, eq(record.id, alias.recordId))
+      .all()
+      .filter((row) => isTopicCategory(row.categoryId))
+      .map((row) => [row.id, { recordId: row.recordId, text: row.text }])
+  )
+}
+
+/**
+ * Runs a write that may give names (create, nicknames, a rename and its undo) and answers what it
+ * answered with the secrets and threads whose label yielded to a name (`yieldTopicLabels`), so the
+ * caller tells the windows about them too.
+ */
+export function withTopicRelabels<T>(
+  db: TreeDb,
+  write: () => T
+): { result: T; relabeled: string[] } {
+  const before = topicLabelTexts(db)
+  const result = write()
+  const relabeled = new Set<string>()
+  for (const [id, after] of topicLabelTexts(db)) {
+    if (before.get(id)?.text !== after.text) relabeled.add(after.recordId)
+  }
+  return { result, relabeled: [...relabeled] }
 }
 
 function requireCategoryId(db: TreeDb, categoryId: string): void {
@@ -353,8 +468,9 @@ export function createRecord(db: TreeDb, input: CreateRecordInput, now: Date): C
   }
   const id = randomUUID()
   db.transaction((tx) => {
-    refuseClash(tx, null, input.name, false)
-    for (const entry of extra) refuseClash(tx, null, entry.text, entry.shared ?? false)
+    refuseClash(tx, null, input.name, false, true)
+    for (const entry of extra) refuseClash(tx, null, entry.text, entry.shared ?? false, true)
+    yieldTopicLabels(tx, norms, now)
     const at = now.toISOString()
     tx.insert(record)
       .values({
@@ -506,8 +622,16 @@ export function insertConvertedRecord(db: TreeDb, input: ConvertedRecordInput, n
   requireCategoryId(db, input.categoryId)
   const id = randomUUID()
   const at = now.toISOString()
-  refuseClash(db, null, input.name, input.mainShared)
-  for (const entry of input.aliases) refuseClash(db, null, entry.text, entry.shared)
+  const named = !isTopicCategory(input.categoryId)
+  refuseClash(db, null, input.name, input.mainShared, named)
+  for (const entry of input.aliases) refuseClash(db, null, entry.text, entry.shared, named)
+  if (named) {
+    yieldTopicLabels(
+      db,
+      [input.name, ...input.aliases.map((entry) => entry.text)].map(normName),
+      now
+    )
+  }
   db.insert(record)
     .values({
       id,
@@ -607,6 +731,14 @@ export interface AliasesInput {
  */
 export function setAliases(db: TreeDb, id: string, input: AliasesInput, now: Date): StoryRecord {
   const current = requireRecord(db, id)
+  // P2b (QUESTIONS 2026-10-12 #6): a secret or thread has one label; a P1 thread keeps the other
+  // names it already had, and gains none.
+  if (isTopicKind(current.kind)) {
+    const had = new Set(current.aliases.map((entry) => entry.norm))
+    if (input.aliases.some((entry) => !had.has(normName(entry.text)))) {
+      throw new AppError('VALIDATION', 'A secret or thread has one label and no other names')
+    }
+  }
   const wanted = [
     { ...input.name, isMain: true },
     ...input.aliases.map((entry) => ({ ...entry, isMain: false }))
@@ -619,7 +751,9 @@ export function setAliases(db: TreeDb, id: string, input: AliasesInput, now: Dat
     throw new AppError('VALIDATION', 'The same name is listed twice')
   }
   db.transaction((tx) => {
-    for (const entry of wanted) refuseClash(tx, id, entry.text, entry.shared ?? false)
+    const named = !isTopicKind(current.kind)
+    for (const entry of wanted) refuseClash(tx, id, entry.text, entry.shared ?? false, named)
+    if (named) yieldTopicLabels(tx, norms, now)
     const byNorm = new Map(current.aliases.map((entry) => [entry.norm, entry]))
     // The main flag moves first, so the one-main index never sees two.
     tx.update(alias).set({ isMain: false }).where(eq(alias.recordId, id)).run()
@@ -682,9 +816,13 @@ export function addAlias(db: TreeDb, id: string, entry: NewAlias, now: Date): St
   if (norm.length === 0)
     throw new AppError('VALIDATION', 'A name needs at least one letter or digit')
   if (current.aliases.some((existing) => existing.norm === norm)) return current
+  if (isTopicKind(current.kind)) {
+    throw new AppError('VALIDATION', 'A secret or thread has one label and no other names')
+  }
   requireAliasRoom(current.name, otherNames(current.aliases) + 1)
   db.transaction((tx) => {
-    refuseClash(tx, id, entry.text, entry.shared ?? false)
+    refuseClash(tx, id, entry.text, entry.shared ?? false, true)
+    yieldTopicLabels(tx, [norm], now)
     insertAlias(tx, id, { ...entry, isMain: false }, now)
     forgetDismissed(tx, 'alias', dismissedKey({ kind: 'alias', recordId: id, alias: entry.text }))
     tx.update(record).set({ modified: now.toISOString() }).where(eq(record.id, id)).run()
@@ -781,7 +919,7 @@ export function checkAliasRename(
       )
     }
   }
-  refuseClash(db, recordId, text, current.shared)
+  refuseClash(db, recordId, text, current.shared, true)
   return { current, text, norm }
 }
 
@@ -804,6 +942,7 @@ export function renameAlias(
     current.caseRule === defaultCaseRule(current.text) ? defaultCaseRule(text) : current.caseRule
   forgetNotAName(db, text)
   forgetDismissed(db, 'alias', dismissedKey({ kind: 'alias', recordId, alias: text }))
+  yieldTopicLabels(db, [norm], now)
   db.update(alias).set({ text, norm, caseRule }).where(eq(alias.id, aliasId)).run()
   db.update(record).set({ modified: now.toISOString() }).where(eq(record.id, recordId)).run()
   // F-16.17: a renamed name rebuilds the reader's roster.
@@ -827,7 +966,8 @@ export function restoreAliasText(
 ): boolean {
   const row = db.select().from(alias).where(eq(alias.id, aliasId)).get()
   if (row?.text !== expected) return false
-  if (clashOwner(db, row.recordId, before.norm, row.shared) !== null) return false
+  const named = !isTopicRecord(db, row.recordId)
+  if (clashOwner(db, row.recordId, before.norm, row.shared, named) !== null) return false
   const sibling = db
     .select({ id: alias.id })
     .from(alias)
@@ -836,6 +976,7 @@ export function restoreAliasText(
     )
     .get()
   if (sibling !== undefined) return false
+  if (named) yieldTopicLabels(db, [before.norm], now)
   db.update(alias)
     .set({ text: before.text, norm: before.norm, caseRule: before.caseRule })
     .where(eq(alias.id, aliasId))
@@ -843,6 +984,56 @@ export function restoreAliasText(
   db.update(record).set({ modified: now.toISOString() }).where(eq(record.id, row.recordId)).run()
   markRosterForRebuild(db)
   return true
+}
+
+/** An AI-made topic's label as Rename in book changed it, for its undo. */
+export interface TopicLabelRename {
+  aliasId: string
+  before: AliasText
+  after: AliasText
+}
+
+/**
+ * Rename in book's rewrite of AI-made secrets' and threads' labels (P2b): a label the reader gave
+ * that names the renamed person ("Ashby's return") follows the rename like the reveal's label
+ * (`pairs`: each old spelling and its replacement, on word boundaries). The author's own labels
+ * are hers and change only on their sheets; a label that would take another topic's is left as it
+ * is. The caller holds the rename's transaction. Answers what the undo needs.
+ */
+export function renameInTopicLabels(
+  db: TreeDb,
+  pairs: readonly { text: string; replacement: string }[],
+  now: Date
+): TopicLabelRename[] {
+  const edits = pairs.map((pair) => ({ start: 0, end: 0, ...pair }))
+  const done: TopicLabelRename[] = []
+  for (const topic of listRecords(db)) {
+    if (!isTopicKind(topic.kind) || topic.origin !== 'ai') continue
+    const main = topic.aliases.find((entry) => entry.isMain)
+    if (main === undefined) continue
+    const text = rewriteWords(main.text, edits)
+    const norm = normName(text)
+    if (text === main.text || norm === '') continue
+    if (clashOwner(db, topic.id, norm, false, false) !== null) continue
+    const after: AliasText = { text, norm, caseRule: defaultCaseRule(text) }
+    db.update(alias).set(after).where(eq(alias.id, main.id)).run()
+    db.update(record).set({ modified: now.toISOString() }).where(eq(record.id, topic.id)).run()
+    done.push({
+      aliasId: main.id,
+      before: { text: main.text, norm: main.norm, caseRule: main.caseRule },
+      after
+    })
+  }
+  return done
+}
+
+/** Puts renamed topic labels back (the rename's undo), each only while it still reads as left. */
+export function restoreTopicLabels(
+  db: TreeDb,
+  renamed: readonly TopicLabelRename[],
+  now: Date
+): void {
+  for (const each of renamed) restoreAliasText(db, each.aliasId, each.after.text, each.before, now)
 }
 
 /** Whether a page holds any text; an empty one is stored as null. */
@@ -874,19 +1065,21 @@ export function savePage(
  * Deletes a record; its names, mentions, dismissals and claims (F-16.17) go with it, and the
  * reader's roster is rebuilt. P2b: a secret takes the knows claims about it (their object would be
  * cleared, leaving orphans) and its reveals and knew-before rows (cascaded); an AI-made topic left
- * with nothing behind it goes too (`pruneTopics`). Answers what it was.
+ * with nothing behind it goes too (`pruneTopics`). Answers what it was and the topics pruned with
+ * it (the caller tells the windows about both).
  */
-export function deleteRecord(db: TreeDb, id: string): StoryRecord {
+export function deleteRecord(db: TreeDb, id: string): { record: StoryRecord; pruned: string[] } {
   const gone = requireRecord(db, id)
+  let pruned: string[] = []
   db.transaction((tx) => {
     removeFromAlsoHere(tx, id, null)
     if (gone.kind === 'secret') deleteKnowsAbout(tx, id)
     tx.delete(record).where(eq(record.id, id)).run()
-    pruneTopics(tx)
+    pruned = pruneTopics(tx)
     // A topic is not in the roster's record lines: its own part follows by comparing (P2b-D10).
     if (!isTopicKind(gone.kind)) markRosterForRebuild(tx)
   })
-  return gone
+  return { record: gone, pruned }
 }
 
 /** Replaces `from` with `to` (or drops it, when `to` is null) in every scene's "+ also here". */
@@ -967,7 +1160,8 @@ export interface SameAsResult {
  * (`mergeEvidence`), with the reader's roster marked for a rebuild. The merged record is then
  * deleted. Refused when the kept record would end with more than `RECORD_ALIASES_MAX` other names.
  * P2b: the knows claims' sources, the knew-before marks and the topics' reveals follow too, and a
- * knows line's Not right key names the kept secret; a topic merges only with its own kind.
+ * knows line's Not right key names the kept secret; a topic merges only with its own kind, keeps
+ * its one label, and takes the merged topic's defining reveal as a `merged` one (*Split* undoes it).
  */
 export function sameAs(db: TreeDb, keepId: string, mergeId: string, now: Date): SameAsResult {
   if (keepId === mergeId) throw new AppError('VALIDATION', 'A record cannot be merged into itself')
@@ -978,14 +1172,19 @@ export function sameAs(db: TreeDb, keepId: string, mergeId: string, now: Date): 
   if ((isTopicKind(keep.kind) || isTopicKind(merge.kind)) && keep.kind !== merge.kind) {
     throw new AppError('VALIDATION', 'Only two secrets, or two threads, can be the same')
   }
+  // A topic keeps its one label (QUESTIONS 2026-10-12 #6): the merged label lives on as the label
+  // of its reveal, now a `merged` one, and goes with the merged record.
+  const topics = isTopicKind(keep.kind)
   const have = new Set(keep.aliases.map((entry) => entry.norm))
-  requireAliasRoom(
-    keep.name,
-    otherNames(keep.aliases) + merge.aliases.filter((entry) => !have.has(entry.norm)).length
-  )
+  if (!topics) {
+    requireAliasRoom(
+      keep.name,
+      otherNames(keep.aliases) + merge.aliases.filter((entry) => !have.has(entry.norm)).length
+    )
+  }
   let droppedImage: string | null = null
   db.transaction((tx) => {
-    for (const entry of merge.aliases) {
+    for (const entry of topics ? [] : merge.aliases) {
       if (have.has(entry.norm)) continue
       tx.update(alias).set({ recordId: keepId, isMain: false }).where(eq(alias.id, entry.id)).run()
     }
@@ -1020,8 +1219,8 @@ export function sameAs(db: TreeDb, keepId: string, mergeId: string, now: Date): 
       .run()
     removeFromAlsoHere(tx, mergeId, keepId)
     tx.update(authorTodo).set({ recordId: keepId }).where(eq(authorTodo.recordId, mergeId)).run()
-    mergeEvidence(tx, keepId, mergeId)
-    if (!isTopicKind(keep.kind)) markRosterForRebuild(tx)
+    mergeEvidence(tx, keepId, mergeId, { topics })
+    if (!topics) markRosterForRebuild(tx)
     const tombstones = tx
       .select()
       .from(dismissed)

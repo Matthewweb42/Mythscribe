@@ -130,6 +130,34 @@ describe('NameCheck (F-3.14)', () => {
     ])
   })
 
+  it('never takes a secret’s or a thread’s label as a story name (P2b-D2)', () => {
+    useRecordStore.setState({
+      byId: {
+        'r-mara': recordFixture('r-mara', 'character', ['Mara Voss']),
+        's-debts': recordFixture('s-debts', 'secret', ["the Captain's debts"]),
+        't-match': recordFixture('t-match', 'thread', ['Lottie match'])
+      },
+      ids: ['r-mara', 's-debts', 't-match'],
+      loaded: true
+    })
+    useProjectStore.setState({
+      current: {
+        id: 'p-2',
+        name: 'Memory',
+        format: 'novel',
+        path: '/books/Memory.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 36,
+        storyMemory: 'v2'
+      }
+    })
+    misspelled.add('Lotie').add('Captan')
+    build('Marra saw Lotie and the Captan.')
+    expect(nearMisses()).toEqual([['Marra', 'Mara']])
+  })
+
   it('waits until the caret has left the word being typed', () => {
     setEntityNames('Mara')
     build('She saw ')

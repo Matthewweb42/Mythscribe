@@ -4,6 +4,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { create } from 'zustand'
 import type { Entity, Tag } from '@shared/ipc/contract'
 import type { StoryRecordSummary } from '@shared/memory/records'
+import { isNamedKind } from '@shared/memory/topics'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { buildNameIndex, nearName, wordsIn, type NameIndex } from '@shared/storyNames'
 import type { TagCategory } from '@shared/tags'
@@ -112,7 +113,10 @@ function currentIndex(): IndexCache {
   const accepted: string[] = [...(words ?? []), ...(notNames ?? [])]
   let names: string[]
   if (memory === 'v2') {
-    names = Object.values(records).flatMap((record) => record.aliases.map((entry) => entry.text))
+    // P2b-D2: a secret's or thread's label is not a story name (as main's spellcheck words).
+    names = Object.values(records)
+      .filter((record) => isNamedKind(record.kind))
+      .flatMap((record) => record.aliases.map((entry) => entry.text))
   } else {
     names = Object.values(entities).map((entity) => entity.name)
     for (const tag of Object.values(tags)) {

@@ -63,8 +63,18 @@ function quoteWords(quote: string): string {
   return ` ${words.join(' ')} `
 }
 
-/** Re-points the evidence of `mergeId` to `keepId` (the caller holds the transaction). */
-export function mergeEvidence(db: TreeDb, keepId: string, mergeId: string): void {
+/**
+ * Re-points the evidence of `mergeId` to `keepId` (the caller holds the transaction). Two secrets
+ * or two threads (`topics`, the author's *Same as…*): the merged one's defining reveal becomes a
+ * `merged` reveal of the kept one, labelled as it was read, so the kept topic keeps one defining
+ * quote and ⓘ lists the other with *Split* (no claim is tagged: Split brings back the reveal).
+ */
+export function mergeEvidence(
+  db: TreeDb,
+  keepId: string,
+  mergeId: string,
+  options: { topics?: boolean } = {}
+): void {
   db.update(claim).set({ recordId: keepId }).where(eq(claim.recordId, mergeId)).run()
   db.update(claim).set({ objectId: keepId }).where(eq(claim.objectId, mergeId)).run()
   db.update(claim).set({ speakerId: keepId }).where(eq(claim.speakerId, mergeId)).run()
@@ -112,6 +122,12 @@ export function mergeEvidence(db: TreeDb, keepId: string, mergeId: string): void
   }
 
   // P2b: the secrets' and threads' reveals, and the author's knew-before marks (both ends).
+  if (options.topics === true) {
+    db.update(topicQuote)
+      .set({ role: 'merged' })
+      .where(and(eq(topicQuote.recordId, mergeId), eq(topicQuote.role, 'defining')))
+      .run()
+  }
   db.update(topicQuote).set({ recordId: keepId }).where(eq(topicQuote.recordId, mergeId)).run()
   for (const column of ['secretId', 'recordId'] as const) {
     for (const row of db.select().from(knewBefore).where(eq(knewBefore[column], mergeId)).all()) {
@@ -298,6 +314,31 @@ export function topicBackings(db: TreeDb): TopicBacking[] {
     claims: (asObject.get(row.id) ?? 0) + (asRecord.get(row.id) ?? 0),
     authorTouched: marked.has(row.id) || hasText(row.pinned) || hasText(row.ideas)
   }))
+}
+
+/**
+ * The secrets and threads with a reveal or a claim in one draft (the reader's topics roster lists
+ * the AI-made ones only while the active draft backs them: an inactive draft is never read).
+ */
+export function topicsInDraft(db: TreeDb, draftId: string): Set<string> {
+  const quoted = db
+    .selectDistinct({ id: topicQuote.recordId })
+    .from(topicQuote)
+    .where(eq(topicQuote.draftId, draftId))
+    .all()
+  const known = db
+    .selectDistinct({ id: claim.objectId })
+    .from(claim)
+    .where(and(eq(claim.draftId, draftId), eq(claim.slot, 'knows')))
+    .all()
+  const stepped = db
+    .selectDistinct({ id: claim.recordId })
+    .from(claim)
+    .where(and(eq(claim.draftId, draftId), eq(claim.slot, 'thread')))
+    .all()
+  return new Set(
+    [...quoted, ...known, ...stepped].flatMap((row) => (row.id === null ? [] : [row.id]))
+  )
 }
 
 /**

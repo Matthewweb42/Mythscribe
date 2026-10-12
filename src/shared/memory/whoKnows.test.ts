@@ -88,6 +88,20 @@ describe('checkedUpTo (P2b-D9)', () => {
   it('skips an Idea scene (it is not in the reading order) and reads it as of the scene before', () => {
     expect(checkedUpTo(READING, ALL_CHECKED, 'idea')).toEqual({ nodeId: 's2', ref: '1.2' })
   })
+
+  it('passes a readable scene with no words yet (never read, no flags), not one with words', () => {
+    const planned = new Map(ALL_CHECKED)
+    planned.delete('s2')
+    expect(checkedUpTo(READING, planned, 's5')).toEqual({ nodeId: 's1', ref: '1.1' })
+    expect(checkedUpTo(READING, planned, 's5', new Set(['s2']))).toEqual({
+      nodeId: 's5',
+      ref: '1.5'
+    })
+    // A scene with flags is judged by them, empty or not.
+    const unsettled = new Map(planned)
+    unsettled.set('s2', { topicsRead: true, settled: false })
+    expect(checkedUpTo(READING, unsettled, 's5', new Set(['s2']))?.ref).toBe('1.1')
+  })
 })
 
 describe('readersSince (P2b-D7)', () => {
@@ -96,11 +110,27 @@ describe('readersSince (P2b-D7)', () => {
       knows({ nodeId: 's1', recordId: 'johanna', how: 'suspects' }),
       knows({ nodeId: 's3', recordId: 'orrin', how: 'overheard', fromId: 'tomas' })
     ]
-    expect(readersSince('map', claims, [], READING)).toEqual({ nodeId: 's3', ref: '1.3' })
+    expect(readersSince('map', claims, [], READING)).toEqual({
+      nodeId: 's3',
+      ref: '1.3',
+      stale: false
+    })
     expect(readersSince('map', claims, [reveal({ nodeId: 's2' })], READING)).toEqual({
       nodeId: 's2',
-      ref: '1.2'
+      ref: '1.2',
+      stale: false
     })
+  })
+
+  it('keeps a re-checked reveal, marked stale, unless live evidence stands in the same scene', () => {
+    const stale = reveal({ nodeId: 's1', state: 'stale' })
+    expect(readersSince('map', [], [stale], READING)).toEqual({
+      nodeId: 's1',
+      ref: '1.1',
+      stale: true
+    })
+    const line = knows({ nodeId: 's1', recordId: 'orrin', how: 'overheard', fromId: 'tomas' })
+    expect(readersSince('map', [line], [stale], READING)?.stale).toBe(false)
   })
 
   it('ignores rumours, dreams, waiting lines and other secrets; null when nothing shows it', () => {
@@ -134,8 +164,12 @@ describe('knowsAsOf (F-16.22)', () => {
     const [secret] = view.secrets
     expect(view.asOfRef).toBe('1.3')
     expect(view.checkedUpTo).toEqual({ nodeId: 's3', ref: '1.3' })
-    expect(secret?.readersSince).toEqual({ nodeId: 's1', ref: '1.1' })
+    expect(secret?.readersSince).toEqual({ nodeId: 's1', ref: '1.1', stale: false })
     expect(secret?.known).toBe(true)
+    expect(secret?.knownStale).toBe(false)
+    // Every scene with a counted or partial line or a reveal; the rumour's scene only by its
+    // suspicion.
+    expect(secret?.touchedIn).toEqual(['s1', 's2', 's3', 's4', 's5'])
     expect(secret?.defining?.quote).toBe('Tomas sold the map.')
     expect(
       secret?.cells.map((cell) => [cell.knowerId, cell.how, cell.line, cell.ref, cell.later])
@@ -270,15 +304,59 @@ describe('sceneSecrets (P2b-D21)', () => {
     expect(scene.touched.map((each) => each.secret.recordId)).toEqual(['debts'])
     expect(scene.tension.length).toBe(3)
     expect(scene.tension.slice(0, 3).every((line) => line.kind === 'readersKnow')).toBe(true)
-    expect(scene.tension[0]).toEqual({ kind: 'readersKnow', secretId: 'debts', recordId: 'mara' })
+    expect(scene.tension[0]).toEqual({
+      kind: 'readersKnow',
+      secretId: 'debts',
+      recordId: 'mara',
+      stale: false
+    })
     expect(scene.more).toBe(2)
+  })
+
+  it('shows a secret a holder only repeats here: tells, refers, knew before (P2b §1.2)', () => {
+    const repeat = [
+      knows({ nodeId: 's1', recordId: 'tomas', how: 'knewBefore' }),
+      knows({ nodeId: 's1', recordId: 'orrin', how: 'overheard', fromId: 'tomas' }),
+      knows({ nodeId: 's3', recordId: 'tomas', how: 'refers' }),
+      knows({
+        nodeId: 's4',
+        recordId: 'orrin',
+        how: 'tells',
+        voice: 'dialogue',
+        speakerId: 'orrin'
+      })
+    ]
+    const asOf = (atId: string): ReturnType<typeof knowsAsOf> =>
+      knowsAsOf(input({ claims: repeat, quotes: [reveal({ nodeId: 's1' })], atId }))
+    const three = sceneSecrets(asOf('s3'), 's3', ['tomas', 'mara'], 'mara')
+    expect(three.touched.map((each) => [each.secret.recordId, each.without])).toEqual([
+      ['map', ['mara']]
+    ])
+    expect(sceneSecrets(asOf('s4'), 's4', ['orrin'], 'orrin').touched).toHaveLength(1)
+    // A scene with no line and no reveal of it is not touched.
+    expect(sceneSecrets(asOf('s2'), 's2', ['mara'], 'mara').touched).toEqual([])
+  })
+
+  it('dims a tension line that rests only on a reveal or a line being re-checked', () => {
+    const view = knowsAsOf(
+      input({
+        claims: [knows({ nodeId: 's1', recordId: 'orrin', how: 'saw', state: 'stale' })],
+        quotes: [reveal({ nodeId: 's1', state: 'stale' })],
+        atId: 's2'
+      })
+    )
+    expect([view.secrets[0]?.known, view.secrets[0]?.knownStale]).toEqual([true, true])
+    expect(sceneSecrets(view, 's2', ['mara', 'orrin', 'lise'], 'mara').tension).toEqual([
+      { kind: 'readersKnow', secretId: 'map', recordId: 'mara', stale: true },
+      { kind: 'hereKnows', secretId: 'map', holderId: 'orrin', recordId: 'lise', stale: true }
+    ])
   })
 
   it('names someone Here who holds it and another Here who has none', () => {
     const view = knowsAsOf(input({ secrets: secrets.slice(0, 1), claims, quotes, atId: 's2' }))
     const scene = sceneSecrets(view, 's2', ['lise', 'orrin'], null)
     expect(scene.tension).toEqual([
-      { kind: 'hereKnows', secretId: 'map', holderId: 'orrin', recordId: 'lise' }
+      { kind: 'hereKnows', secretId: 'map', holderId: 'orrin', recordId: 'lise', stale: false }
     ])
   })
 
