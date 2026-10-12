@@ -27,7 +27,7 @@ import { useRewriteStore } from '@renderer/features/editor/rewriteStore'
 import { useSceneSuggestStore } from '@renderer/features/editor/sceneSuggestStore'
 import { useSummaryStore } from '@renderer/features/editor/summaryStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
-import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { isManuscriptDocument, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useContinuityStore } from './continuityStore'
 
@@ -188,13 +188,6 @@ export function openSceneNow(): OpenScene {
       editor !== null && nodeId !== null && isManuscriptDocument(useTreeStore.getState(), nodeId),
     length: editor ? editor.state.doc.textContent.length : 0
   }
-}
-
-function isManuscriptDocument(
-  tree: { byId: Record<string, { kind: string } | undefined>; sectionOf: Record<string, string> },
-  nodeId: string
-): boolean {
-  return tree.byId[nodeId]?.kind === 'document' && tree.sectionOf[nodeId] === 'manuscript'
 }
 
 /** What keeps a scene action from starting now (a run already on screen or on its way), or null. */

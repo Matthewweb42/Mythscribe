@@ -69,8 +69,13 @@ export interface FreshClaim {
 
 export interface ReconcileInput {
   stored: readonly StoredClaim[]
-  /** The paragraphs the reading sent, and whether it was a full read. */
-  window: { paras: ReadonlySet<number>; full: boolean }
+  /**
+   * The paragraphs the reading sent, and whether it was a full read. `replace` (a *Rebuild
+   * memory* read, P2a-D25): every stored claim the reading did not state again, revive or confirm
+   * (`same`) goes, but for claims waiting on the author (a new name) or on the name scan (a shared
+   * alias).
+   */
+  window: { paras: ReadonlySet<number>; full: boolean; replace?: boolean }
   /** The scene's current sentence hashes, in reading order (`sceneSentences`). */
   hashes: readonly string[]
   same: readonly string[]
@@ -258,6 +263,12 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
     const pronoun = claim.pending?.kind === 'subject' && claim.subjectText === null
     if (input.window.full && claim.state === 'waiting' && pronoun) {
       deleted.add(claim.id)
+    }
+    if (input.window.replace === true && !result.kept.includes(claim.id)) {
+      const waitsOnOthers =
+        claim.pending?.kind === 'name' ||
+        (claim.pending?.kind === 'subject' && claim.subjectText !== null)
+      if (!waitsOnOthers) deleted.add(claim.id)
     }
   }
   result.deletes = [...deleted]

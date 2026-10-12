@@ -81,10 +81,12 @@ import {
 import { RESEARCH_TITLE_MAX, ResearchDoc } from '../research'
 import {
   InlineTagReplacement,
+  RebuildEstimate,
   SwitchoverConsent,
   SwitchoverPlan,
   SwitchoverResult
 } from '../memory/switchover'
+import { CloudCapState, CloudCapUsd } from '../memory/cloudCap'
 import { ContinuityFinding } from '../continuity'
 import { REVIEW_CHAT_MESSAGE_MAX, ReviewChatResult, ReviewChatTurn } from '../reviewChat'
 import {
@@ -256,7 +258,19 @@ import {
   FilingUndoResult
 } from '../filing'
 import { TwinGateBlocked, TwinGateVerdict } from '../memory/twinGate'
-import { ClaimInfo, ReadNowResult, SceneMemory } from '../memory/views'
+import {
+  ClaimInfo,
+  MemoryHealthReport,
+  MemoryNotice,
+  MemoryNoticeAction,
+  MemoryStatus,
+  ReadNowResult,
+  RebuildAction,
+  RebuildStartResult,
+  RebuildSummary,
+  SceneMemory,
+  SettleResult
+} from '../memory/views'
 import { Label, LabelColour, LabelKind, LabelLink, LabelName } from '../storyLabels'
 
 /**
@@ -3387,6 +3401,50 @@ export const contract = {
   /** F-16.18: ⓘ on an AI line: its quote, scene, proof and reading; null once it is gone. */
   'memory:claim': { input: z.object({ claimId: z.string() }), output: ClaimInfo.nullable() },
   /**
+   * F-16.16: the renderer's leave and idle triggers (`readerTriggers.ts`, v2 only): the scene was
+   * left for another manuscript scene, or its last save is `idleMinutes` old (with the caret's
+   * paragraph, which the gate skips while it has no closing punctuation, P2a-D6). The renderer
+   * flushes pending saves first. Main applies the gate and queues a read when one is due; nothing
+   * is sent here.
+   */
+  'memory:settle': {
+    input: z.object({
+      nodeId: z.string(),
+      reason: z.enum(['leave', 'idle']),
+      caretPara: z.number().int().nonnegative().nullable()
+    }),
+    output: SettleResult
+  },
+  /** F-16.16, F-16.19: the footer's reading status (last read, pause reason, spend). */
+  'memory:status': { input: z.undefined(), output: MemoryStatus },
+  /** F-16.16, F-16.19: Needs a look's reading notices (backlog, back-fill, health, Cloud cap). */
+  'memory:notices': { input: z.undefined(), output: z.array(MemoryNotice) },
+  /** A notice's button (`MemoryNoticeAction`); answers the notices as they then stand. */
+  'memory:answerNotice': {
+    input: z.object({ id: z.string(), action: MemoryNoticeAction }),
+    output: z.array(MemoryNotice)
+  },
+  /** F-16.17: health per model, the spot checks so far, and the cut-off rate (*Details*). */
+  'memory:health': { input: z.undefined(), output: MemoryHealthReport },
+  /** F-16.19: *Rebuild memory*'s price over the active draft's readable scenes; nothing is sent. */
+  'memory:rebuildEstimate': { input: z.undefined(), output: RebuildEstimate },
+  /**
+   * F-16.19: *Rebuild memory*, confirmed with its price: one full read per readable scene of the
+   * active draft (each replaces that scene's claims it did not prove again), then the spot checks.
+   * Resumes after a close. AI failures (Use AI or the reading switch off, no provider) as data.
+   */
+  'memory:rebuild': { input: z.object({ requestId: z.string() }), output: RebuildStartResult },
+  /** F-16.19: what the last rebuild changed, grouped by sheet; null before any rebuild. */
+  'memory:rebuildSummary': { input: z.undefined(), output: RebuildSummary.nullable() },
+  /** F-16.19: the summary's bulk actions (*Not right* for a sheet's new lines, *Not names*). */
+  'memory:rebuildAction': {
+    input: RebuildAction,
+    output: z.object({ changed: z.number().int().nonnegative() })
+  },
+  /** F-16.19: the Cloud monthly cap for background reading and this month's spend (app-wide). */
+  'cloudCap:get': { input: z.undefined(), output: CloudCapState },
+  'cloudCap:set': { input: z.object({ capUsd: CloudCapUsd }), output: CloudCapState },
+  /**
    * F-16.15: whether this build offers the story-memory switch-over on a copy (Help › Try the
    * story-memory switch-over on a copy…): unpackaged builds only in P1 (decision P1-D12).
    */
@@ -3539,7 +3597,11 @@ export const events = {
    * F-16.17 (v2): a reading (or an answer settling facts waiting on a name) changed what the memory
    * holds for these scenes and records; the renderer reads them again.
    */
-  'memory:changed': z.object({ nodeIds: z.array(z.string()), recordIds: z.array(z.string()) })
+  'memory:changed': z.object({ nodeIds: z.array(z.string()), recordIds: z.array(z.string()) }),
+  /** F-16.16 (v2): the reading status moved (a reading, a pause, spend). */
+  'memory:statusChanged': MemoryStatus,
+  /** F-16.16 (v2): the reading notices changed; the whole list. */
+  'memory:noticesChanged': z.array(MemoryNotice)
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

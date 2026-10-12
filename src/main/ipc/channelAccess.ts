@@ -375,6 +375,21 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'memory:readNow': 'ai',
   'memory:scene': 'read',
   'memory:claim': 'read',
+  // F-16.16, F-16.19: settling a scene queues a reading (sent by the queue, gated there); the
+  // notices' buttons may queue reading too; Rebuild memory sends. The rest only read, and the
+  // rebuild summary's bulk actions write Dismissed rows as P1's Dismissed writes do.
+  'memory:settle': 'ai',
+  'memory:status': 'read',
+  'memory:notices': 'read',
+  'memory:answerNotice': 'ai',
+  'memory:health': 'read',
+  'memory:rebuildEstimate': 'read',
+  'memory:rebuild': 'ai',
+  'memory:rebuildSummary': 'read',
+  'memory:rebuildAction': 'write',
+  // App-wide settings, like the daily cap.
+  'cloudCap:get': 'read',
+  'cloudCap:set': 'read',
   'switchover:available': 'read',
   'switchover:trialCopy': 'write',
   'switchover:plan': 'read',
@@ -752,6 +767,18 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'memory:readNow': 'v2',
   'memory:scene': 'v2',
   'memory:claim': 'v2',
+  'memory:settle': 'v2',
+  'memory:status': 'v2',
+  'memory:notices': 'v2',
+  'memory:answerNotice': 'v2',
+  'memory:health': 'v2',
+  'memory:rebuildEstimate': 'v2',
+  'memory:rebuild': 'v2',
+  'memory:rebuildSummary': 'v2',
+  'memory:rebuildAction': 'v2',
+  // F-16.19: the Cloud cap is app-wide (Settings shows it whatever the open project runs).
+  'cloudCap:get': 'any',
+  'cloudCap:set': 'any',
   // F-16.15: the switch-over runs on a v1 project (a second run is refused in v2).
   'switchover:available': 'any',
   'switchover:trialCopy': 'v1',

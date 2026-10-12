@@ -6,7 +6,9 @@ import {
   valueKey,
   type Claim,
   type ClaimProof,
-  type ClaimState
+  type ClaimState,
+  type SpotTier,
+  type SpotVerdict
 } from '@shared/memory/claims'
 import type { InvariantClaim } from '@shared/memory/invariants'
 import { parseSlot, type Slot } from '@shared/memory/slots'
@@ -257,6 +259,20 @@ export function reanchorClaim(
       state: 'live',
       proved: now.toISOString()
     })
+    .where(eq(claim.id, id))
+    .run()
+}
+
+/** A spot check's verdict on a claim (F-16.17, P2a-D8): what ⓘ and Settings' agreement count. */
+export function setClaimSpot(
+  db: TreeDb,
+  id: string,
+  verdict: SpotVerdict,
+  tier: SpotTier,
+  now: Date
+): void {
+  db.update(claim)
+    .set({ spot: verdict, spotTier: tier, spotAt: now.toISOString() })
     .where(eq(claim.id, id))
     .run()
 }

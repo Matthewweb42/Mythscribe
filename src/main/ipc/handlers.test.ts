@@ -102,6 +102,7 @@ import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
 import { seedClaims } from '../memory/reading/claimFixture'
 import { getClaim } from '../memory/reading/claimStore'
 import { listRecords } from '../memory/recordStore'
+import { enqueueJob, listJobs } from '../jobs/jobStore'
 import { NOT_A_TRIAL } from '../memory/switchover/trial'
 import { createTag } from '../tag/tagStore'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
@@ -8957,7 +8958,8 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     }
   })
 
-  it('never opens the v1 conversion dialog from Summarize all scenes, and keeps the held scene held', async () => {
+  // F-16.17 (plan P2a §3.7): nothing is summarised in v2, so the v1 conversion never comes up.
+  it('never summarises in v2, and never opens the v1 conversion dialog', async () => {
     const scene = await openV2()
     await invoke('document:save', {
       id: scene,
@@ -8967,19 +8969,14 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     })
     await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
     await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
-    complete.mockResolvedValue({
-      text: JSON.stringify({ summary: 'Mara waits.', keyPoints: [], characters: [] }),
-      model: 'gpt-fake',
-      usage: { inputTokens: 400, outputTokens: 60 }
-    })
-    await invoke('ai:summarize', { nodeId: scene, requestId: 'v2-1' })
-    const db = manager.require().connection.orm
-    const stored = getSummary(db, scene)
-    if (!stored) throw new Error('no summary')
-    upsertSummary(db, { ...stored, promptVersion: 'summary.v3' })
-    expect((await invoke('knowledge:conversion', undefined)).state).toBe('pending')
     vi.mocked(fakeWin.webContents.send).mockClear()
-    expect(await invoke('jobs:indexAll', undefined)).toMatchObject({ ok: true, queued: 0 })
+    expect(await invoke('ai:summarize', { nodeId: scene, requestId: 'v2-1' })).toMatchObject({
+      ok: false,
+      code: 'DISABLED'
+    })
+    expect(await invoke('jobs:indexAll', undefined)).toMatchObject({ ok: false, code: 'DISABLED' })
+    expect(complete).not.toHaveBeenCalled()
+    expect(getSummary(manager.require().connection.orm, scene)).toBeNull()
     expect(sentOf('knowledge:conversionChanged')).toEqual([])
   })
 
@@ -9085,6 +9082,64 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       paragraphs('Maybe a twin.')
     )
     expect(await invoke('recovery:list', undefined)).toEqual([])
+  })
+
+  // F-16.16, F-16.17 (plan P2a §3.2, §3.7): `summary.v5` is off in v2, and the reader's queue
+  // owns jobs:* there; a v1 project keeps its summary queue as it was.
+  it('drops summary jobs on a v2 open, never queues one there, and gives jobs:* to the reader', async () => {
+    vi.useFakeTimers()
+    try {
+      const plain = await invoke('project:create', { name: 'Plain', format: 'novel', directory: tmp })
+      const v1Scene = manuscriptReadingOrder(await invoke('tree:list', undefined))[0] ?? ''
+      enqueueJob(manager.require().connection.orm, 'summary', v1Scene, new Date())
+      await invoke('project:close', undefined)
+      await invoke('project:open', { path: plain?.path ?? '' })
+      expect(listJobs(manager.require().connection.orm, 'summary')).toHaveLength(1)
+      await invoke('project:close', undefined)
+
+      const created = await invoke('project:create', {
+        name: 'Memory',
+        format: 'novel',
+        directory: tmp
+      })
+      const scene = manuscriptReadingOrder(await invoke('tree:list', undefined))[0] ?? ''
+      enqueueJob(manager.require().connection.orm, 'summary', scene, new Date())
+      setStoryMemory(manager.require().connection.orm, 'v2', new Date())
+      await invoke('project:close', undefined)
+      vi.mocked(fakeWin.webContents.send).mockClear()
+      await invoke('project:open', { path: created?.path ?? '' })
+      const db = manager.require().connection.orm
+      expect(listJobs(db, 'summary')).toEqual([])
+      await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs('Mara walked the long quay at dusk, counting the boats. '.repeat(20))
+      })
+      await vi.advanceTimersByTimeAsync(SUMMARY_BACKFILL_DELAY_MS + 10_000)
+      expect(listJobs(db, 'summary')).toEqual([])
+      expect(await invoke('jobs:indexAll', undefined)).toMatchObject({ ok: false, code: 'DISABLED' })
+      expect(await invoke('ai:summarize', { nodeId: scene, requestId: 'sum-1' })).toMatchObject({
+        ok: false,
+        code: 'DISABLED'
+      })
+      // The reader's queue answers jobs:*; with no key, reading says it has no provider.
+      expect(await invoke('jobs:status', undefined)).toMatchObject({ queued: 0, running: null })
+      expect(await invoke('memory:status', undefined)).toMatchObject({ paused: 'noProvider' })
+      expect(
+        await invoke('memory:settle', { nodeId: scene, reason: 'leave', caretPara: null })
+      ).toEqual({ queued: false, reason: 'off' })
+      expect(await invoke('cloudCap:get', undefined)).toMatchObject({ capUsd: 1, reached: false })
+      expect(await invoke('cloudCap:set', { capUsd: 2.5 })).toMatchObject({ capUsd: 2.5 })
+      expect(await invoke('memory:rebuildEstimate', undefined)).toMatchObject({ scenes: 1 })
+      expect(await invoke('memory:rebuild', { requestId: 'rebuild-1' })).toMatchObject({
+        ok: false,
+        code: 'NO_KEY'
+      })
+      expect(await invoke('memory:rebuildSummary', undefined)).toBeNull()
+      expect(await invoke('memory:notices', undefined)).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   // F-16.8 (plan P1 slice 2): the Research section is made on the v2 open only.

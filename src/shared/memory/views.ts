@@ -11,6 +11,7 @@ import {
   SpotVerdict
 } from './claims'
 import { SlotSchema } from './slots'
+import { RebuildEstimate } from './switchover'
 import { TYPED_FIELDS } from './typedVsText'
 
 /**
@@ -269,7 +270,9 @@ export const MemoryNotice = z.discriminatedUnion('kind', [
     kind: z.literal('health'),
     model: z.string(),
     quotes: z.number().min(0).max(1),
-    verified: z.number().min(0).max(1)
+    verified: z.number().min(0).max(1),
+    /** "Switch to DeepSeek V4 Flash" applies: OpenRouter or Cloud, on another fast model. */
+    switchable: z.boolean()
   }),
   z.object({
     id: z.string(),
@@ -289,3 +292,112 @@ export const MemoryNotice = z.discriminatedUnion('kind', [
   })
 ])
 export type MemoryNotice = z.infer<typeof MemoryNotice>
+
+/**
+ * What a notice's buttons do (`memory:answerNotice`, F-16.16, F-16.19): *Read them* / *Read*
+ * (`read`: the work is queued as asked, spent on the author's say-so), *Later* / *Not now*
+ * (`later`), *Keep reading anyway* (`keepReading`, remembered per model; also lifts a local
+ * cut-off pause), *Switch to DeepSeek V4 Flash* (`switchModel`), *Allow another $1 this month*
+ * (`allowMore`), and closing it (`dismiss`: the pause, if any, stays).
+ */
+export const MEMORY_NOTICE_ACTIONS = [
+  'read',
+  'later',
+  'keepReading',
+  'switchModel',
+  'allowMore',
+  'dismiss'
+] as const
+export const MemoryNoticeAction = z.enum(MEMORY_NOTICE_ACTIONS)
+export type MemoryNoticeAction = z.infer<typeof MemoryNoticeAction>
+
+/** Why `memory:settle` queued nothing: the gate's answers, reading off, or reading paused. */
+export const SETTLE_SKIPS = [
+  'upToDate',
+  'cosmetic',
+  'empty',
+  'notReadable',
+  'off',
+  'paused'
+] as const
+export const SettleSkip = z.enum(SETTLE_SKIPS)
+export type SettleSkip = z.infer<typeof SettleSkip>
+
+/** What `memory:settle` answers (F-16.16): the scene was queued for reading, or why not. */
+export const SettleResult = z.object({ queued: z.boolean(), reason: SettleSkip.nullable() })
+export type SettleResult = z.infer<typeof SettleResult>
+
+/** Spot checks counted (F-16.17): "proof agreement: 48 of 50 checked", never "accuracy". */
+export const SpotCount = z.object({
+  checked: z.number().int().nonnegative(),
+  agreed: z.number().int().nonnegative()
+})
+export type SpotCount = z.infer<typeof SpotCount>
+
+/** One model's health over its last 20 readings (`health.ts`), as *Details* shows it. */
+export const ModelHealthView = z.object({
+  model: z.string(),
+  judged: z.boolean(),
+  readings: z.number().int().nonnegative(),
+  items: z.number().int().nonnegative(),
+  quotes: z.number().min(0).max(1),
+  verified: z.number().min(0).max(1),
+  paused: z.boolean(),
+  /** The author chose *Keep reading anyway* for this model in this project. */
+  keepReading: z.boolean()
+})
+export type ModelHealthView = z.infer<typeof ModelHealthView>
+
+/** `memory:health`: per model, the spot checks so far, and the cut-off rate of recent readings. */
+export const MemoryHealthReport = z.object({
+  models: z.array(ModelHealthView),
+  spot: z.object({ fast: SpotCount, strong: SpotCount }),
+  /** Share of the last 100 readings cut off at their cap (`finish_reason: length`). */
+  cutRate: z.number().min(0).max(1)
+})
+export type MemoryHealthReport = z.infer<typeof MemoryHealthReport>
+
+/** *Rebuild memory* in progress or done (the `memoryRebuild` settings row). */
+export const RebuildProgress = z.object({
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  draftId: z.string(),
+  total: z.number().int().nonnegative(),
+  done: z.number().int().nonnegative()
+})
+export type RebuildProgress = z.infer<typeof RebuildProgress>
+
+/**
+ * What a rebuild changed, grouped by sheet (`memory:rebuildSummary`): the new live lines per
+ * record (each can go at once with *Not right*), and the names whose lines wait on a question
+ * (*Not names* answers them all).
+ */
+export const RebuildSummary = z.object({
+  progress: RebuildProgress,
+  sheets: z.array(
+    z.object({
+      recordId: z.string(),
+      name: z.string(),
+      lines: z.number().int().nonnegative(),
+      claimIds: z.array(z.string())
+    })
+  ),
+  waiting: z.array(
+    z.object({ norm: z.string(), text: z.string(), lines: z.number().int().nonnegative() })
+  )
+})
+export type RebuildSummary = z.infer<typeof RebuildSummary>
+
+/** What `memory:rebuild` answers: the scenes queued with the price shown, or an AI failure. */
+export const RebuildStartResult = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), queued: z.number().int().nonnegative(), estimate: RebuildEstimate }),
+  z.object({ ok: z.literal(false), code: AiErrorCode, message: z.string(), nextStep: z.string() })
+])
+export type RebuildStartResult = z.infer<typeof RebuildStartResult>
+
+/** The rebuild summary's bulk actions (`memory:rebuildAction`). */
+export const RebuildAction = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('notRightAll'), recordId: z.string() }),
+  z.object({ action: z.literal('notNames') })
+])
+export type RebuildAction = z.infer<typeof RebuildAction>

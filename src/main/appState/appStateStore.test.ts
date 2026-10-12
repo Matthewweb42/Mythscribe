@@ -19,6 +19,7 @@ import { defaultWindowState } from '@shared/windowState'
 import { defaultViewSettings } from '@shared/zoom'
 import { defaultAiUsageState } from '../ai/dailyCap'
 import { defaultAiRouting } from '@shared/aiRouting'
+import { defaultMemoryCloudState } from '../ai/cloudTally'
 import { AppStateStore, EMPTY_APP_STATE } from './appStateStore'
 
 let tmp: string
@@ -55,6 +56,7 @@ describe('AppStateStore', () => {
       layout: defaultLayout(),
       models: defaultAiModels(),
       aiUsage: defaultAiUsageState(),
+      memoryCloud: defaultMemoryCloudState(),
       updates: defaultUpdateSettings(),
       diagnostics: defaultDiagnosticsSettings(),
       supporter: defaultSupporterSettings(),
@@ -309,6 +311,21 @@ describe('AppStateStore', () => {
     fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
     expect(new AppStateStore(file).get().aiUsage).toEqual(defaultAiUsageState())
     expect(EMPTY_APP_STATE.aiUsage).toEqual(defaultAiUsageState())
+  })
+
+  it('parses a file written before F-16.19 (no memoryCloud) to the $1 cap; a bad tally resets alone', () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ version: 1, recents: [entry] }), 'utf8')
+    expect(new AppStateStore(file).get().memoryCloud).toEqual(defaultMemoryCloudState())
+    expect(EMPTY_APP_STATE.memoryCloud).toEqual(defaultMemoryCloudState())
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ version: 1, recents: [entry], memoryCloud: { capUsd: 'lots' } }),
+      'utf8'
+    )
+    const read = new AppStateStore(file).get()
+    expect(read.memoryCloud).toEqual(defaultMemoryCloudState())
+    expect(read.recents).toEqual([entry])
   })
 
   it('round-trips the daily cap and tally and refuses a cap outside 0–500', () => {

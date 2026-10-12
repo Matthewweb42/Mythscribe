@@ -264,4 +264,34 @@ describe('reconcile (F-16.17, design §2.3 Reconciliation)', () => {
     )
     expect(result.deletes.sort()).toEqual(['pronoun', 'stale'])
   })
+
+  it('replaces on a rebuild read every claim it did not state, revive or confirm (P2a-D25)', () => {
+    const result = reconcile(
+      input({
+        stored: [
+          stored({ id: 'restated' }),
+          stored({ id: 'confirmed', slot: 'hair', valueKey: 'red', quote: "Mara's hair was red" }),
+          stored({ id: 'unproved', slot: 'age', valueKey: '30', quote: 'Mara was thirty' }),
+          stored({
+            id: 'shared',
+            state: 'waiting',
+            recordId: null,
+            subjectText: 'Harrow',
+            pending: { kind: 'subject', candidates: ['a', 'b'] }
+          }),
+          stored({
+            id: 'name',
+            state: 'waiting',
+            recordId: null,
+            pending: { kind: 'name', norm: 'hesk', text: 'Hesk' }
+          })
+        ],
+        fresh: [fresh()],
+        same: ['confirmed'],
+        window: { paras: new Set([0, 1, 2]), full: true, replace: true }
+      })
+    )
+    expect(result.deletes).toEqual(['unproved'])
+    expect(result.inserts).toEqual([])
+  })
 })

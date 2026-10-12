@@ -986,7 +986,9 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
     }
     await read(standard([dashing]))
     expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([['dashing', 'live']])
-    // A rebuild: the reader proposes another value on the same quote and says to drop c1.
+    // An edit two paragraphs up (its anchor holds): the window read proposes another value on the
+    // same quote and says to drop c1.
+    saveDocument(db, one, doc(SCENE[0] ?? '', "Mara's eyes were green. She walked to the quay.", SCENE[2] ?? ''))
     const ai = fakeAi((request): FakeAnswer => {
       if (requestKind(request) === 'verify') {
         return { text: verifyReply(request, () => ({ ok: false })) }
@@ -999,12 +1001,12 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
         })
       }
     })
-    await runReading(
-      db,
-      { ai: ai.deps },
-      { nodeId: one, caretPara: null, requestId: 'r-5', purpose: 'rebuild' }
-    )
-    expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([['dashing', 'live']])
+    await runReading(db, { ai: ai.deps }, { nodeId: one, caretPara: null, requestId: 'r-5' })
+    expect(
+      claimsNow()
+        .filter((claim) => claim.slot === 'traits')
+        .map((claim) => [claim.value, claim.state])
+    ).toEqual([['dashing', 'live']])
   })
 
   it('pins first person to a speaker only in what the checker confirms is their line', async () => {
@@ -1215,5 +1217,56 @@ describe('runReading: new names (F-16.17, review 2026-10-12)', () => {
     )
     expect(settled?.restaled).toHaveLength(1)
     expect(claimsNow().map((claim) => claim.state)).toEqual(['stale'])
+  })
+})
+
+describe('runReading: slice 3 purposes and spot checks (F-16.16, F-16.17)', () => {
+  it('rides a picked literal claim on the check batch as a fast spot check, counted only', async () => {
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') {
+        // The checker disagrees with code about the eyes: counted, the claim stays.
+        return {
+          text: verifyReply(request, (check) => (check.fact.startsWith('eyes') ? { ok: false } : null))
+        }
+      }
+      return { text: readerReply(request, PLAN) }
+    })
+    await runReading(
+      db,
+      { ai: ai.deps },
+      { nodeId: one, caretPara: null, requestId: 'r-spot', spotEvery: 1 }
+    )
+    const eyes = claimsNow().find((claim) => claim.slot === 'eyes')
+    expect(eyes).toMatchObject({ proof: 'literal', state: 'live', spot: 'disagree', spotTier: 'fast' })
+    const checked = ai.requests
+      .filter((request) => requestKind(request) === 'verify')
+      .flatMap((request) => sentChecks(request).map((check) => check.fact))
+    expect(checked.some((fact) => fact.startsWith('eyes'))).toBe(true)
+    // Its yields are the reader's: a spot check is neither sent nor verified.
+    expect(lastReading(db, one, activeDraftId(db))?.yields.literal).toBeGreaterThan(0)
+  })
+
+  it('replaces on a rebuild what it does not prove again, and reads a back-fill’s paragraphs whatever the gate says', async () => {
+    await read(standard())
+    expect(claimsNow().map((claim) => claim.slot).sort()).toEqual(['clothing', 'eyes', 'location'])
+    // A rebuild that finds only the eyes: the rest goes (P2a-D25).
+    const rebuilt = await runReading(
+      db,
+      { ai: standard(PLAN.slice(0, 1)).deps },
+      { nodeId: one, caretPara: null, requestId: 'r-rebuild', purpose: 'rebuild' }
+    )
+    expect(rebuilt).toMatchObject({ read: true, purpose: 'rebuild' })
+    expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes'])
+    // Up to date for the gate, yet a back-fill reads ¶2 ±2.
+    const backfill = standard()
+    const outcome = await runReading(
+      db,
+      { ai: backfill.deps },
+      { nodeId: one, caretPara: null, requestId: 'r-backfill', purpose: 'backfill', paras: [2] }
+    )
+    expect(outcome).toMatchObject({ read: true, purpose: 'backfill' })
+    const sent = backfill.requests.find((request) => requestKind(request) === 'reader')
+    expect([...sentParagraphs(nth(sent === undefined ? [] : [sent], 0)).keys()]).toEqual([0, 1, 2])
+    expect(claimsNow().map((claim) => claim.slot).sort()).toEqual(['clothing', 'eyes', 'location'])
   })
 })

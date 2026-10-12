@@ -20,6 +20,7 @@ import { CustomTagTemplate } from '@shared/tagTemplates'
 import { UpdateSettings, defaultUpdateSettings } from '@shared/updates'
 import { WindowState, defaultWindowState } from '@shared/windowState'
 import { ViewSettings, defaultViewSettings } from '@shared/zoom'
+import { MemoryCloudState, defaultMemoryCloudState } from '../ai/cloudTally'
 import { AiUsageState, defaultAiUsageState } from '../ai/dailyCap'
 
 /** Persistent, app-wide state (not project state) kept as one JSON file in userData. */
@@ -35,6 +36,11 @@ export const AppState = z.object({
   models: AiModels.default(defaultAiModels),
   /** F-5.14: the app-wide daily spend cap and the day's tally; defaulted for older files. */
   aiUsage: AiUsageState.default(defaultAiUsageState),
+  /**
+   * F-16.19: story memory v2's Cloud monthly tally and cap ($1); defaulted for older files and read
+   * leniently, so a bad value resets only the tally, never the file.
+   */
+  memoryCloud: MemoryCloudState.default(defaultMemoryCloudState).catch(defaultMemoryCloudState),
   /** F-15.7: the update channel, the automatic check, and the notes of the last download. */
   updates: UpdateSettings.default(defaultUpdateSettings),
   /**
@@ -109,6 +115,7 @@ export const EMPTY_APP_STATE: AppState = {
   layout: defaultLayout(),
   models: defaultAiModels(),
   aiUsage: defaultAiUsageState(),
+  memoryCloud: defaultMemoryCloudState(),
   updates: defaultUpdateSettings(),
   diagnostics: defaultDiagnosticsSettings(),
   supporter: defaultSupporterSettings(),

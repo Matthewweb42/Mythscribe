@@ -217,6 +217,8 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
   /** When the last real provider request started, for the rate limit. */
   let lastRequestAt: number | null = null
   let pumping = false
+  /** A kick arrived while a pump was running: it runs once more when that one ends. */
+  let again = false
   let retryTimer: ReturnType<typeof setTimeout> | null = null
   /** The serial lane: one job at a time, foreground and background alike. */
   let chain: Promise<unknown> = Promise.resolve()
@@ -312,11 +314,18 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
   }
 
   function kick(): void {
-    if (pumping || paused !== null) return
+    if (paused !== null) return
+    if (pumping) {
+      // A pump that is just finishing may have looked before this job was queued: look again.
+      again = true
+      return
+    }
     pumping = true
+    again = false
     const at = generation
     void pump(at).finally(() => {
       pumping = false
+      if (again) kick()
     })
   }
 

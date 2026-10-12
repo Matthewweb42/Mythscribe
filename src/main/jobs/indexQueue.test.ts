@@ -448,6 +448,17 @@ describe('createIndexQueue (F-5.13)', () => {
     expect(nodesRun()).toEqual([a, b, c])
   })
 
+  it('runs a job queued while a pump that found nothing is still winding down', async () => {
+    const [a] = scenes
+    if (a === undefined) throw new Error('no scenes')
+    // `resume` starts a pump that finds nothing; a job queued in the same tick must still run.
+    queue.resume()
+    expect(queue.indexAll('summary', [a])).toBe(1)
+    await settle()
+    expect(nodesRun()).toEqual([a])
+    expect(queue.status()).toEqual(IDLE_INDEX_QUEUE)
+  })
+
   it('queues only what is not queued already, and answers how many were new', async () => {
     const [a, b] = scenes
     if (a === undefined || b === undefined) throw new Error('no scenes')

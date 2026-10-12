@@ -106,6 +106,7 @@ import { ResearchPage } from '@renderer/features/research/ResearchPage'
 import { useResearchStore } from '@renderer/features/research/researchStore'
 import { useFilingStore } from '@renderer/features/research/filingStore'
 import { useFiledConflictStore } from '@renderer/features/thisScene/filedConflictStore'
+import { startReaderTriggers, stopReaderTriggers } from '@renderer/features/memory/readerTriggers'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { EditPassReport } from '@renderer/features/editPass/EditPassReport'
 import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
@@ -356,6 +357,8 @@ export function App(): React.JSX.Element {
       // F-16.9: and a filing under way and the filed-line conflicts.
       useFilingStore.getState().clear()
       useFiledConflictStore.getState().clear()
+      // F-16.16: the leave and idle triggers belong to the project that closed.
+      stopReaderTriggers()
       useFactStore.getState().clear()
       // F-9.13: the Changes log belongs to the project that closed.
       useChangesStore.getState().clear()
@@ -458,6 +461,8 @@ export function App(): React.JSX.Element {
       useDismissedStore.getState().load().catch(failed)
       // F-16.9: the filed lines whose Research source changed.
       useFiledConflictStore.getState().load().catch(failed)
+      // F-16.16: a scene is read when it is left or the author pauses.
+      startReaderTriggers()
     }
     useEditorSettingsStore
       .getState()

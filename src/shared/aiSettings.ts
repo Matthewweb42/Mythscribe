@@ -115,6 +115,25 @@ export function defaultGhostTextSettings(): GhostTextSettings {
   return { enabled: false, idleMs: DEFAULT_GHOST_IDLE_MS }
 }
 
+/** Bounds of story memory v2's idle pause (F-16.16, P2a-D5): 2 to 5 minutes, 3 by default. */
+export const READING_IDLE_MINUTES_MIN = 2
+export const READING_IDLE_MINUTES_MAX = 5
+export const DEFAULT_READING_IDLE_MINUTES = 3
+
+/**
+ * Story memory v2's reading (F-16.16), per project: after how many minutes without a save of the
+ * open scene it is read (the VibeWrite idle pattern; the timer runs in the renderer). A v1 project
+ * stores it too and never reads it.
+ */
+export const ReadingSettings = z.object({
+  idleMinutes: z.number().int().min(READING_IDLE_MINUTES_MIN).max(READING_IDLE_MINUTES_MAX)
+})
+export type ReadingSettings = z.infer<typeof ReadingSettings>
+
+export function defaultReadingSettings(): ReadingSettings {
+  return { idleMinutes: DEFAULT_READING_IDLE_MINUTES }
+}
+
 /**
  * Where this project's AI requests go (F-15.4): straight to the provider with the author's own
  * key, or through the MythScribe Cloud proxy against the account's credits. Per project, so one
@@ -237,7 +256,9 @@ const AiSettingsFields = z.object({
   /** Defaulted likewise for a row stored before F-14.8. */
   critique: CritiqueSettings.default(defaultCritiqueSettings),
   /** Defaulted likewise for a row stored before F-15.4: an existing project keeps its own key. */
-  source: AiSource.default('ownKey')
+  source: AiSource.default('ownKey'),
+  /** F-16.16: defaulted (3 minutes) for a row stored before story memory v2's reading. */
+  reading: ReadingSettings.default(defaultReadingSettings)
 })
 
 type AiSettingsRow = z.output<typeof AiSettingsFields>
@@ -274,7 +295,8 @@ export function defaultAiSettings(): AiSettings {
     features: defaultFeatureToggles(),
     ghostText: defaultGhostTextSettings(),
     critique: defaultCritiqueSettings(),
-    source: 'ownKey'
+    source: 'ownKey',
+    reading: defaultReadingSettings()
   }
 }
 
@@ -722,11 +744,11 @@ export const AI_FEATURES_BY_LEVEL: readonly AiFeatureId[] = [...AI_FEATURE_IDS].
  * F-16.17 (P2a-D24): the features only one story memory runs. A v2 project's toggle list hides the
  * v1-only ones (tags, the consistency check, Organise, To do, sheet sync), and a v1 project's
  * hides the reader and its checker; the data-sharing table keeps one row per id. Scene summaries
- * still run in v2 until P2a slice 3 turns `summary.v5` off there, so their toggle stays shown in
- * both (AI rule 3: a feature that sends text keeps its switch); slice 3 adds `summary` here.
+ * (`summary.v5`) are v1's since P2a slice 3 turned them off in v2 (nothing summarises there), so
+ * their toggle hides in v2 too (AI rule 3 holds: a feature that sends nothing needs no switch).
  */
 export const MEMORY_ONLY_FEATURES: Readonly<Record<StoryMemoryVersion, readonly AiFeatureId[]>> = {
-  v1: ['tags', 'continuity', 'organise', 'todo', 'sheetSync'],
+  v1: ['tags', 'summary', 'continuity', 'organise', 'todo', 'sheetSync'],
   v2: ['reader', 'verify']
 }
 

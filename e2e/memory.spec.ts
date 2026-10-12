@@ -44,7 +44,11 @@ import { caretToEnd, clickIntoEditor } from './support'
  * P2a (F-16.16, F-16.17), still with the own key at the fake: a paragraph typed in Scene 1 sends
  * nothing; *Read now* sends one reader request (the whole scene, its first read) and one check;
  * the scene's memory holds Mara's eyes proved in code and where she walked proved by the checker
- * (the pronoun), with ⓘ's reading; a second *Read now* sends nothing.
+ * (the pronoun), with ⓘ's reading; a second *Read now* sends nothing. P2a slice 3 (F-16.16,
+ * F-16.19): an edit to the eyes goes stale once the save settles and typing sends nothing; opening
+ * the second scene reads Scene 1 back (one reader request, the eyes brown again); a Replace in
+ * project over 6 scenes nobody read raises the backlog notice with a price and sends nothing;
+ * `memory:rebuildEstimate` prices a rebuild; no request ever carried `summary.v5`'s opening.
  *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
@@ -94,6 +98,8 @@ const FILING_ANSWER = JSON.stringify({
 
 /** F-16.17: the openings of `reader.v1` and `verify.v1`, which the fake answers. */
 const READER_SENTINEL = 'You are the story-memory reader inside a novel-writing app.'
+/** F-5.6: `summary.v5`'s opening (version 1's, byte for byte); never sent in v2 (P2a slice 3). */
+const SUMMARY_SENTINEL = 'You are the scene-summary feature inside a novel-writing app.'
 const VERIFY_SENTINEL = 'You are the fact checker inside a novel-writing app.'
 /** The paragraph slice P2a types; the fake reads Mara's eyes and where she walked from it. */
 const READ_PARAGRAPH = "Mara's eyes were grey. She walked to the quay."
@@ -930,8 +936,11 @@ test('story memory v2: the Story notes block and filing into Pinned (P1 slice 5)
   await expect(filing.getByTestId('filing-summary')).toHaveText(
     'From “Bestiary”: 1 new record · 1 record added to'
   )
-  const filingBody = providerBodies.at(-1)
-  expect(filingBody?.messages[0]?.content.startsWith(FILING_SENTINEL)).toBe(true)
+  // By its sentinel: leaving a scene may have sent a reading since (P2a slice 3).
+  const filingBody = providerBodies
+    .filter((body) => body.messages[0]?.content.startsWith(FILING_SENTINEL) === true)
+    .at(-1)
+  expect(filingBody).toBeDefined()
   expect(filingBody?.messages.at(-1)?.content).toContain('Mara Vell keeps a fen-wight skull')
   // Everything starts accepted; Apply writes both cards.
   await filing.getByTestId('review-apply').click()
@@ -986,6 +995,9 @@ test('story memory v2: the evidence reader (P2a)', async () => {
     body.messages[0]?.content.startsWith(READER_SENTINEL) === true
   const isVerify = (body: (typeof providerBodies)[number]): boolean =>
     body.messages[0]?.content.startsWith(VERIFY_SENTINEL) === true
+  // Slice 5 left the second scene for the first with Use AI on, which read it (P2a slice 3).
+  const readsBefore = providerBodies.filter(isReader).length
+  const checksBefore = providerBodies.filter(isVerify).length
   const first = (await invoke<TreeNode[]>('tree:list', undefined)).find(
     (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
   )
@@ -1004,7 +1016,7 @@ test('story memory v2: the evidence reader (P2a)', async () => {
     .poll(async () => (await storedText(first.id)).replace(/’/g, "'"), { timeout: 15_000 })
     .toContain(READ_PARAGRAPH)
   // Nothing reaches the reader while the author types.
-  expect(providerBodies.some(isReader)).toBe(false)
+  expect(providerBodies.filter(isReader)).toHaveLength(readsBefore)
 
   // Read now: the whole scene on its first read, then the check of what code could not prove.
   const read = await invoke<{ ok: boolean; read?: boolean }>('memory:readNow', {
@@ -1012,12 +1024,12 @@ test('story memory v2: the evidence reader (P2a)', async () => {
     requestId: 'e2e-read-now'
   })
   expect(read).toMatchObject({ ok: true, read: true })
-  const reader = providerBodies.filter(isReader)
+  const reader = providerBodies.filter(isReader).slice(readsBefore)
   expect(reader).toHaveLength(1)
   expect(reader[0]?.json).toBe(true)
   expect(reader[0]?.messages[0]?.content).toMatch(/^r\d+ Mara Vell \(Mara/m)
   expect(reader[0]?.messages.at(-1)?.content.replace(/’/g, "'")).toContain(READ_PARAGRAPH)
-  expect(providerBodies.filter(isVerify)).toHaveLength(1)
+  expect(providerBodies.filter(isVerify).slice(checksBefore)).toHaveLength(1)
 
   // The eyes are proved in code; where she walked, through the checker (the pronoun).
   interface MemoryClaim {
@@ -1049,6 +1061,105 @@ test('story memory v2: the evidence reader (P2a)', async () => {
     await invoke('memory:readNow', { nodeId: first.id, requestId: 'e2e-read-now-2' })
   ).toMatchObject({ ok: true, read: false, reason: 'upToDate' })
   expect(providerBodies).toHaveLength(before)
+
+  // P2a slice 3 (F-16.16): an edit to the eyes makes the claim stale once the save settles (the
+  // anchors job), typing sends nothing, and opening the second scene reads Scene 1 again.
+  const eyesOf = async (): Promise<MemoryClaim | undefined> =>
+    (await invoke<{ claims: MemoryClaim[] }>('memory:scene', { nodeId: first.id })).claims.find(
+      (claim) => claim.slot === 'eyes'
+    )
+  await caretToEnd(editor)
+  // Back over "grey. She walked to the quay." (29 characters), then type it with brown.
+  for (let i = 0; i < 29; i += 1) await page.keyboard.press('Backspace')
+  await page.keyboard.type('brown. She walked to the quay.')
+  await expect
+    .poll(async () => (await storedText(first.id)).replace(/’/g, "'"), { timeout: 15_000 })
+    .toContain("Mara's eyes were brown. She walked to the quay.")
+  await expect.poll(async () => (await eyesOf())?.state, { timeout: 15_000 }).toBe('stale')
+  const readsTyped = providerBodies.filter(isReader).length
+  expect(readsTyped).toBe(readsBefore + 1)
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByRole('treeitem', { name: 'Two', exact: true })
+    .click()
+  await expect
+    .poll(() => providerBodies.filter(isReader).length, { timeout: 15_000 })
+    .toBe(readsTyped + 1)
+  const leaveRead = providerBodies.filter(isReader).at(-1)
+  expect(leaveRead?.messages.at(-1)?.content.replace(/’/g, "'")).toContain(
+    "Mara's eyes were brown."
+  )
+  await expect
+    .poll(async () => {
+      const eyes = await eyesOf()
+      return [eyes?.value, eyes?.state]
+    }, { timeout: 15_000 })
+    .toEqual(['brown', 'live'])
+
+  // A Replace in project across 6 scenes nobody has read yet: more than 5 to read, so main asks
+  // with the price and sends nothing (F-16.16, the backlog).
+  const chapter = first.parentId ?? ''
+  const added: string[] = []
+  for (let i = 1; i <= 6; i += 1) {
+    const node = await invoke<TreeNode>('tree:create', {
+      parentId: chapter,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: `Harbour ${i}`
+    })
+    await invoke('document:save', {
+      id: node.id,
+      content: {
+        type: 'doc',
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: `The lantern ${i} swung.` }] }
+        ]
+      }
+    })
+    added.push(node.id)
+  }
+  const readsBeforeReplace = providerBodies.filter(isReader).length
+  const replaced = await invoke<{ changed: unknown[] }>('replace:commit', {
+    query: 'lantern',
+    replacement: 'lamp',
+    matchCase: false,
+    wholeWord: true,
+    scopeId: null,
+    ids: added
+  })
+  expect(replaced.changed).toHaveLength(6)
+  interface Notice {
+    kind: string
+    scenes?: number
+    priceUsd?: number
+  }
+  await expect
+    .poll(
+      async () =>
+        (await invoke<Notice[]>('memory:notices', undefined)).find((n) => n.kind === 'backlog'),
+      { timeout: 15_000 }
+    )
+    .toMatchObject({ kind: 'backlog' })
+  const backlog = (await invoke<Notice[]>('memory:notices', undefined)).find(
+    (n) => n.kind === 'backlog'
+  )
+  expect(backlog?.scenes).toBeGreaterThanOrEqual(6)
+  expect(backlog?.priceUsd).toBeGreaterThan(0)
+  expect(providerBodies.filter(isReader)).toHaveLength(readsBeforeReplace)
+
+  // Rebuild memory is priced before anything is sent.
+  const estimate = await invoke<{ scenes: number; costUsd: number }>(
+    'memory:rebuildEstimate',
+    undefined
+  )
+  expect(estimate.scenes).toBeGreaterThanOrEqual(8)
+  expect(estimate.costUsd).toBeGreaterThan(0)
+  expect(providerBodies.filter(isReader)).toHaveLength(readsBeforeReplace)
+
+  // `summary.v5` is off in v2: no request ever carried its opening.
+  expect(
+    providerBodies.some((body) => body.messages[0]?.content.startsWith(SUMMARY_SENTINEL) === true)
+  ).toBe(false)
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

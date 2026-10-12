@@ -56,7 +56,10 @@ export const JobKind = z.enum([
   // a *Rebuild memory*, and a batch of spot checks, on the reader's provider-backed queue.
   'read',
   'rebuild',
-  'spotCheck'
+  'spotCheck',
+  // F-16.17 (story memory v2 only): the lazy back-fill of names added after their scenes were read
+  // (`memory_backfill`), one job per project keyed to the manuscript root, on the reader's queue.
+  'backfill'
 ])
 export type JobKind = z.infer<typeof JobKind>
 

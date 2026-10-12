@@ -2,6 +2,7 @@ import { PLANNED_COST_NOTES, SHIPPED_PLAN_ROWS, type PlannedCostNote } from '@sh
 import type { AiSource } from '@shared/aiSettings'
 import type { PricingResult } from '@shared/cloudApi'
 import { CONVERSION_SECONDS_PER_SCENE } from '@shared/knowledge'
+import { REBUILD_FAST_CHECKS, REBUILD_STRONG_CHECKS } from '@shared/memory/spot'
 import type {
   InlineTagReplacement,
   RebuildEstimate,
@@ -41,8 +42,7 @@ export function plannedRow(id: string): PlannedCostNote {
 /** The prose tokens a `reader.v1` first read takes per page (its `when`: pages of 2,500). */
 export const REBUILD_PAGE_TOKENS = 2_500
 /** Spot checks per rebuild (the `verify.v1:pro` and `verify.v1:spot` rows' `when`). */
-export const REBUILD_STRONG_CHECKS = 20
-export const REBUILD_FAST_CHECKS = 50
+export { REBUILD_FAST_CHECKS, REBUILD_STRONG_CHECKS }
 
 /**
  * The rebuild's price and time: each scene read whole once (`reader.v1:first`, one request per

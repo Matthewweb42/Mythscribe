@@ -5,15 +5,19 @@ import {
   emptyCardFields,
   emptyYields,
   valueKey,
+  type Card,
   type CardField,
   type CardFields,
   type CardPresent,
+  type Claim,
   type ClaimMode,
   type ClaimPending,
+  type ClaimProof,
   type ClaimVoice,
   type ParaRange,
   type ReadingPurpose,
-  type ReadingYields
+  type ReadingYields,
+  type SpotVerdict
 } from '@shared/memory/claims'
 import {
   gateSentences,
@@ -21,7 +25,10 @@ import {
   nextReadSet,
   readDecision,
   readSetOf,
-  type GateSentence
+  unreadSentences,
+  type GateSentence,
+  type ReadDecision,
+  type ReadSentence
 } from '@shared/memory/gate'
 import {
   nameInSentence,
@@ -46,6 +53,7 @@ import {
 import { reconcile, type FreshClaim } from '@shared/memory/reconcile'
 import { OBJECT_SLOTS, parseSlot, readerAccepts, type Slot } from '@shared/memory/slots'
 import { readerMayRead } from '@shared/memory/sources'
+import { spotPicked } from '@shared/memory/spot'
 import { cardDue, outputCap, planPages, planWindows, type ReadPiece } from '@shared/memory/windows'
 import { activeDraftId, currentDraftId } from '../../draft/draftStore'
 import { READER_PROMPT_VERSION, buildReaderPrompt } from '../../ai/prompts/reader.v1'
@@ -71,6 +79,7 @@ import {
   insertClaims,
   reviveClaim,
   sceneClaims,
+  setClaimSpot,
   type NewClaim
 } from './claimStore'
 import {
@@ -136,8 +145,20 @@ export interface RunReadingInput {
   /** The caller's id for `ai:cancel`; each request registers under `<requestId>:r<n>` / `:v<n>`. */
   requestId: string
   signal?: AbortSignal
-  /** A rebuild reads the whole scene whatever the gate says (slice 3). */
-  purpose?: Extract<ReadingPurpose, 'rebuild'>
+  /**
+   * Not a plain reading (slice 3): `rebuild` reads the whole scene whatever the gate says and
+   * replaces the claims it does not prove again (P2a-D25); `backfill` reads `paras` (the
+   * paragraphs naming a late name) ±2 whatever the gate says; `probe` is a reading the health gate
+   * let through (one per 10 due scenes while paused), read as the gate says.
+   */
+  purpose?: Extract<ReadingPurpose, 'rebuild' | 'backfill' | 'probe'>
+  /** A back-fill's paragraphs. */
+  paras?: readonly number[]
+  /**
+   * After a rebuild has run, one new literal claim in this many (`spotPicked`) rides the page's
+   * check batch as a fast spot check (P2a-D8); null (or absent) before any rebuild.
+   */
+  spotEvery?: number | null
   /** Told how each proposed fact ended (the eval's per-slot scoring); nothing in the app listens. */
   observe?: (event: ReadingItemEvent) => void
 }
@@ -175,6 +196,10 @@ export type ReadingOutcome =
       recordIds: string[]
       /** The new names (norms) this reading left facts waiting on. */
       names: string[]
+      /** The claims this reading stored (not the revived ones), for the spot checks. */
+      inserted: { id: string; proof: ClaimProof }[]
+      /** The model that read. */
+      model: string
     }
 
 /** A reading's running totals over its requests. */
@@ -262,6 +287,8 @@ interface Item {
   quote: LadderSentence[]
   subject: SubjectResult | { kind: 'newName'; text: string }
   proof: 'literal' | null
+  /** A literal claim picked for a fast spot check: its check's index. */
+  spotCheck: number | null
   value: string
   /** The verify item for it, when one was sent. */
   check: number | null
@@ -275,6 +302,8 @@ interface Check extends VerifyPromptItem {
     | { kind: 'item'; index: number; expect: string | null; candidates: string[] }
     | { kind: 'card'; field: 'pov' | 'year' | 'flashback' }
     | { kind: 'present'; index: number }
+    /** A literal claim's fast spot check (P2a-D8): counted, never refusing the claim. */
+    | { kind: 'spot'; index: number; expect: string }
   /** Short ids the checker may answer for a pronoun or a new name, to the record (or name) each means. */
   ids: Map<string, string>
 }
@@ -330,10 +359,19 @@ function locate(
   return whole.ok ? whole : 'repeated'
 }
 
-/** The sentences ±1 around positions `from`..`to` (and from `naming` when it stands earlier). */
-function contextText(scene: ReadingScene, from: number, to: number, naming?: number): string {
-  const start = Math.max(0, Math.min(from - 1, naming ?? from - 1))
-  const end = Math.min(scene.sentences.length - 1, to + 1)
+/**
+ * The sentences ±`around` (1 for the checker, 3 for a strong spot check) around positions
+ * `from`..`to` (and from `naming` when it stands earlier).
+ */
+function contextText(
+  scene: ReadingScene,
+  from: number,
+  to: number,
+  naming?: number,
+  around = 1
+): string {
+  const start = Math.max(0, Math.min(from - around, naming ?? from - around))
+  const end = Math.min(scene.sentences.length - 1, to + around)
   const out: string[] = []
   for (let position = start; position <= end; position += 1) {
     out.push(scene.ladderSentence(position).text)
@@ -349,6 +387,54 @@ function factText(item: Item, roster: ReaderRoster): string {
       ? ` by ${roster.shortOf(item.speakerId)}`
       : ''
   return `${item.slot}: ${item.claim.v}${object} (${item.claim.voice}${by}, ${item.claim.mode})`
+}
+
+/** A stored claim as a spot check sends it: the checker's item, and the record it must answer. */
+export interface ClaimCheck extends VerifyPromptItem {
+  expect: string
+}
+
+/**
+ * A stored claim as the checker reads it (the spot checks, F-16.17): its record's roster line,
+ * the fact, and its quote's sentences ±`around`; null when its quote is no longer in its
+ * paragraph (its anchor will say so) or it has no record yet.
+ */
+export function claimCheck(
+  scene: ReadingScene,
+  claim: Claim,
+  roster: ReaderRoster,
+  around: number
+): ClaimCheck | null {
+  if (claim.recordId === null) return null
+  const only = scene.texts.map((text, i) => (i === claim.para ? text : ''))
+  const location = locateQuote(only, claim.para, claim.quote)
+  if (!location.ok) return null
+  const quoted = location.sentences.map((i) => scene.position(claim.para, i))
+  const object = claim.objectId === null ? '' : ` (of ${roster.shortOf(claim.objectId)})`
+  const by =
+    claim.speakerId !== null && (claim.voice === 'dialogue' || claim.voice === 'thought')
+      ? ` by ${roster.shortOf(claim.speakerId)}`
+      : ''
+  return {
+    kind: 'claim',
+    who: [roster.whoLine(claim.recordId)],
+    fact: `${claim.slot}: ${claim.value}${object} (${claim.voice}${by}, ${claim.mode})`,
+    text: contextText(scene, Math.min(...quoted), Math.max(...quoted), undefined, around),
+    expect: roster.shortOf(claim.recordId)
+  }
+}
+
+/** Whether a verdict agrees with a fact as stated: supported, about that record, voice and mode. */
+export function agrees(
+  verdict: VerifyVerdict,
+  fact: { expect: string; voice: ClaimVoice; mode: ClaimMode }
+): boolean {
+  return (
+    verdict.ok &&
+    verdict.r === fact.expect &&
+    verdict.voice === fact.voice &&
+    verdict.mode === fact.mode
+  )
 }
 
 /** Merges two answers of one piece (a cut-off reply and its retry). */
@@ -398,6 +484,49 @@ function ranges(paras: readonly number[]): ParaRange[] {
   return out
 }
 
+/** One scene of the active draft as the reading gate reads it, and the gate's answer (F-16.16). */
+export interface SceneGate {
+  scene: ReadingScene
+  draftId: string
+  /** Its finished sentences now (the caret paragraph left out on the idle trigger). */
+  current: GateSentence[]
+  /** What was read before, under today's roster; null when it never was in this draft. */
+  readSet: ReadonlyMap<string, ReadSentence> | null
+  stored: Claim[]
+  card: Card | null
+  decision: ReadDecision
+}
+
+/**
+ * The reading gate over one scene (design §2.3 "When"): the pipeline's first step, and what the
+ * reader service asks before it queues a reading (leave, idle, the backlog). Local. Null when the
+ * reader may not read the scene (an Idea, left out of compile, not in the manuscript).
+ */
+export function gateScene(db: TreeDb, nodeId: string, caretPara: number | null): SceneGate | null {
+  if (!readerMayRead(claimSources(db)(nodeId))) return null
+  const scene = loadReadingScene(db, nodeId)
+  if (scene === null) return null
+  const draftId = activeDraftId(db)
+  const names = scene.shared.index
+  const current: GateSentence[] = gateSentences(scene.texts, { caretPara, names })
+  const previous = getSceneRead(db, nodeId, draftId)
+  const readSet = previous === null ? null : readSetOf(previous.entries, names)
+  const stored = sceneClaims(db, nodeId, draftId)
+  const card = getCard(db, nodeId, draftId)
+  const present = new Set(scene.hashes)
+  // The known words cost a pass over the manuscript: read only when an edit could be cosmetic.
+  const unread = readSet === null ? [] : unreadSentences(current, readSet)
+  const decision = readDecision({
+    sentences: current,
+    read: readSet,
+    partials: previous?.partials ?? 0,
+    staleParas: new Set(stored.filter((claim) => claim.state === 'stale').map((c) => c.para)),
+    cardStale: card?.anchor.some((hash) => !present.has(hash)) === true,
+    knownWords: unread.length > 0 ? knownWords(db, nodeId, scene.shared) : new Set<string>()
+  })
+  return { scene, draftId, current, readSet, stored, card, decision }
+}
+
 /** Reads one scene (see the module comment). */
 export async function runReading(
   db: TreeDb,
@@ -405,44 +534,43 @@ export async function runReading(
   input: RunReadingInput
 ): Promise<ReadingOutcome> {
   const now = (): Date => deps.ai.now()
-  if (!readerMayRead(claimSources(db)(input.nodeId))) return { read: false, reason: 'notReadable' }
-  const scene = loadReadingScene(db, input.nodeId)
-  if (scene === null) return { read: false, reason: 'notReadable' }
-  const draftId = activeDraftId(db)
-  const names = scene.shared.index
 
   // 1. The gate.
-  const current: GateSentence[] = gateSentences(scene.texts, { caretPara: input.caretPara, names })
-  const previous = getSceneRead(db, input.nodeId, draftId)
-  const readSet = previous === null ? null : readSetOf(previous.entries, names)
-  const stored = sceneClaims(db, input.nodeId, draftId)
-  const card = getCard(db, input.nodeId, draftId)
+  const gate = gateScene(db, input.nodeId, input.caretPara)
+  if (gate === null) return { read: false, reason: 'notReadable' }
+  const { scene, draftId, current, readSet, stored, card, decision } = gate
+  const names = scene.shared.index
   const present = new Set(scene.hashes)
-  const decision = readDecision({
-    sentences: current,
-    read: readSet,
-    partials: previous?.partials ?? 0,
-    staleParas: new Set(stored.filter((claim) => claim.state === 'stale').map((c) => c.para)),
-    cardStale: card?.anchor.some((hash) => !present.has(hash)) === true,
-    knownWords: knownWords(db, input.nodeId, scene.shared)
-  })
   const rebuild = input.purpose === 'rebuild'
-  if (decision.read === 'nothing' && !(rebuild && current.length > 0)) {
+  const backfill = input.purpose === 'backfill'
+  const backfillParas = backfill ? (input.paras ?? []).filter((p) => p < scene.texts.length) : []
+  if (backfill) {
+    if (current.length === 0 || backfillParas.length === 0) return { read: false, reason: 'empty' }
+  } else if (decision.read === 'nothing' && !(rebuild && current.length > 0)) {
     return { read: false, reason: decision.reason }
   }
-  const full = rebuild || decision.read === 'full'
+  const full = rebuild || (!backfill && decision.read === 'full')
   const purpose: ReadingPurpose = rebuild
     ? 'rebuild'
-    : decision.read === 'full'
-      ? decision.reason === 'first'
-        ? 'first'
-        : 'full'
-      : 'window'
+    : backfill
+      ? 'backfill'
+      : input.purpose === 'probe'
+        ? 'probe'
+        : decision.read === 'full'
+          ? decision.reason === 'first'
+            ? 'first'
+            : 'full'
+          : 'window'
 
   // 2. The plan.
+  const windowParas = backfill
+    ? backfillParas
+    : decision.read === 'window'
+      ? decision.paras
+      : []
   const pieces = full
     ? planPages(scene.texts)
-    : planWindows(scene.texts, decision.read === 'window' ? decision.paras : [], namingParas(scene))
+    : planWindows(scene.texts, windowParas, namingParas(scene))
   if (pieces.length === 0) return { read: false, reason: 'empty' }
   const due = cardDue({ card, full, present, finished: current.map((s) => s.hash) })
 
@@ -654,6 +782,7 @@ export async function runReading(
         quote,
         subject: { kind: 'none' },
         proof: null,
+        spotCheck: null,
         value: claim.v.trim(),
         check: null
       }
@@ -833,8 +962,24 @@ export async function runReading(
       const quoted = location.sentences.map((i) => scene.position(p, i))
       return contextText(scene, Math.min(...quoted), Math.max(...quoted), naming)
     }
+    const spotEvery = input.spotEvery ?? null
     for (const [index, item] of items.entries()) {
-      if (item.proof === 'literal') continue
+      if (item.proof === 'literal') {
+        // After a rebuild, one new literal claim in 20 rides its page's batch (P2a-D8).
+        const key = `${input.nodeId}|${item.claim.p}|${item.claim.q}|${item.slot}`
+        if (spotEvery === null || item.recordId === null || !spotPicked(key, spotEvery)) continue
+        item.spotCheck = checks.length
+        checks.push({
+          kind: 'claim',
+          who: [roster.whoLine(item.recordId)],
+          fact: factText(item, roster),
+          text: around(item.location, item.claim.p),
+          piece: item.piece,
+          target: { kind: 'spot', index, expect: roster.shortOf(item.recordId) },
+          ids: new Map()
+        })
+        continue
+      }
       const subject = item.subject
       let candidates: string[] = []
       let naming: number | undefined
@@ -997,6 +1142,8 @@ export async function runReading(
 
     // The claims' verdicts.
     const fresh: FreshClaim[] = []
+    /** The fast spot checks' verdicts on literal claims, set on the rows once they are stored. */
+    const spotOf = new Map<FreshClaim, SpotVerdict>()
     /** The facts the checker refused, as proposed: a stored claim stating the same is rejected. */
     const rejectedQuotes: {
       recordId: string | null
@@ -1059,16 +1206,29 @@ export async function runReading(
         )
       }
       if (item.proof === 'literal') {
-        keep(
-          proved(item, {
-            recordId: item.recordId,
-            pending: namePending,
-            subjectText,
-            voice: item.claim.voice,
-            mode: item.claim.mode,
-            proof: 'literal'
-          })
-        )
+        const fact = proved(item, {
+          recordId: item.recordId,
+          pending: namePending,
+          subjectText,
+          voice: item.claim.voice,
+          mode: item.claim.mode,
+          proof: 'literal'
+        })
+        keep(fact)
+        const spotCheck = item.spotCheck === null ? undefined : checks[item.spotCheck]
+        const spotVerdict = item.spotCheck === null ? undefined : verdicts.get(item.spotCheck)
+        if (spotCheck?.target.kind === 'spot' && spotVerdict !== undefined) {
+          spotOf.set(
+            fact,
+            agrees(spotVerdict, {
+              expect: spotCheck.target.expect,
+              voice: item.claim.voice,
+              mode: item.claim.mode
+            })
+              ? 'agree'
+              : 'disagree'
+          )
+        }
         continue
       }
       const verdict = item.check === null ? undefined : verdicts.get(item.check)
@@ -1193,6 +1353,7 @@ export async function runReading(
     const at0 = now()
     let readingId = ''
     const touched = new Set<string>()
+    const inserted: { id: string; proof: ClaimProof }[] = []
     db.transaction((tx) => {
       readingId = insertReading(
         tx,
@@ -1235,7 +1396,7 @@ export async function runReading(
       const stillStored = sceneClaims(tx, input.nodeId, draftId)
       const result = reconcile({
         stored: stillStored,
-        window: { paras: readParas, full: wholeRead },
+        window: { paras: readParas, full: wholeRead, replace: rebuild && wholeRead },
         hashes: hashesNow,
         same: mapIds(answers.flatMap(({ answer }) => answer.same)),
         drop: mapIds(answers.flatMap(({ answer }) => answer.drop)),
@@ -1243,14 +1404,13 @@ export async function runReading(
         fresh,
         dismissed: dismissedKeys(tx, 'notRight')
       })
-      const inserts: NewClaim[] = [...result.inserts]
-        .sort(
-          (a, b) =>
-            a.para - b.para ||
-            (scene.texts[a.para] ?? '').indexOf(a.quote) -
-              (scene.texts[b.para] ?? '').indexOf(b.quote)
-        )
-        .map((claim) => ({
+      const ordered = [...result.inserts].sort(
+        (a, b) =>
+          a.para - b.para ||
+          (scene.texts[a.para] ?? '').indexOf(a.quote) -
+            (scene.texts[b.para] ?? '').indexOf(b.quote)
+      )
+      const inserts: NewClaim[] = ordered.map((claim) => ({
           nodeId: input.nodeId,
           draftId,
           readingId,
@@ -1270,7 +1430,14 @@ export async function runReading(
           change: claim.change,
           state: claim.pending === null ? 'live' : 'waiting'
         }))
-      insertClaims(tx, inserts, at0)
+      const ids = insertClaims(tx, inserts, at0)
+      for (const [i, id] of ids.entries()) {
+        const fact = ordered[i]
+        if (fact === undefined) continue
+        inserted.push({ id, proof: fact.proof })
+        const verdict = spotOf.get(fact)
+        if (verdict !== undefined) setClaimSpot(tx, id, verdict, 'fast', at0)
+      }
       for (const claim of inserts) if (claim.recordId !== null) touched.add(claim.recordId)
       const byId = new Map(stillStored.map((claim) => [claim.id, claim]))
       for (const revival of result.revivals) {
@@ -1349,7 +1516,9 @@ export async function runReading(
       cut: yields.cut > 0,
       yields,
       recordIds: [...touched].sort(),
-      names: [...waitingNames].sort()
+      names: [...waitingNames].sort(),
+      inserted,
+      model: spend.model
     }
   } catch (err) {
     if (err instanceof LocalCutoff) {

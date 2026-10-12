@@ -5,6 +5,8 @@ import { app } from 'electron'
 import {
   aiFailure as aiFailureEnvelope,
   AiFeatureId,
+  HOSTED_DEFAULT_MODELS,
+  OPENROUTER_DEFAULT_MODELS,
   testConnectionFailure,
   type AiErrorCode,
   type AiStatus,
@@ -435,7 +437,8 @@ import { isWriteChannel } from './channelAccess'
 import { emit, register as registerChannel, type EmitTarget, type Handler } from './registry'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
-import type { RecordPage, StoryRecord } from '@shared/memory/records'
+import { normName } from '@shared/memory/names'
+import type { RecordPage, StoryRecord, StoryRecordSummary } from '@shared/memory/records'
 import {
   createAuthorTodo,
   deleteAuthorTodo,
@@ -463,7 +466,7 @@ import {
   staleNameScans
 } from '../memory/nameIndexer'
 import { runAnchors } from '../memory/reading/anchors'
-import { createReaderService } from '../memory/reading/readerService'
+import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
 import { settleOwnedNames } from '../memory/reading/waiting'
 import { claimInfo, sceneMemory } from '../memory/reading/views'
 import {
@@ -761,7 +764,10 @@ export function registerHandlers({
     },
     cancelRequest: (requestId) => void cancelInflight(requestId),
     debounceMs: SUMMARY_DEBOUNCE_MS,
-    onChange: (status) => emit(windows(), 'jobs:changed', status),
+    // F-16.16: in a v2 project the reader's queue owns `jobs:changed` (no summary runs there).
+    onChange: (status) => {
+      if (manager.current()?.storyMemory !== 'v2') emit(windows(), 'jobs:changed', status)
+    },
     onNodeStatus: (nodeId, status) => emit(windows(), 'ai:summaryChanged', { nodeId, status })
   })
 
@@ -961,6 +967,62 @@ export function registerHandlers({
       mentionQueue.indexAll('passages', [root])
     }
   }
+
+  /**
+   * F-16.16, F-16.17, F-16.19: story memory v2's reading. The reader service owns its
+   * provider-backed queue (read, rebuild, spot checks, back-fills), its gates and notices; the
+   * handlers only reach it. Its `jobs:changed` and status pushes go out only in a v2 project.
+   */
+  const reader = createReaderService({
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    memory: () => manager.current()?.storyMemory ?? null,
+    settings: (db) => getAiSettings(db),
+    requestDeps: (db) => requestDeps(db),
+    provider: (db) => {
+      if (!access.writable()) return null
+      const provider = ai.get(sourceOf(db))
+      if (!provider) return null
+      return {
+        id: provider.id,
+        fastModel: provider.resolveModel('fast'),
+        strongModel: provider.resolveModel('strong')
+      }
+    },
+    pricing: () => appState.get().cloudPricing?.pricing ?? null,
+    cloud: {
+      get: () => appState.get().memoryCloud,
+      update: (fn) =>
+        appState.update((s) => ({ ...s, memoryCloud: fn(s.memoryCloud) })).memoryCloud
+    },
+    credits: () => account.credits(),
+    // The health notice's *Switch to DeepSeek V4 Flash*: the fast tier of the provider in use.
+    useFlash: (provider) =>
+      void appState.update((s) => {
+        if (provider === 'openrouter') {
+          return {
+            ...s,
+            models: {
+              ...s.models,
+              openrouter: { ...s.models.openrouter, fast: OPENROUTER_DEFAULT_MODELS.fast }
+            }
+          }
+        }
+        if (provider === 'cloud') {
+          return {
+            ...s,
+            models: { ...s.models, cloud: { ...s.models.cloud, fast: HOSTED_DEFAULT_MODELS.fast } }
+          }
+        }
+        return s
+      }),
+    cancelRequest: (requestId) => void cancelInflight(requestId),
+    changed: (payload) => emit(windows(), 'memory:changed', payload),
+    questions: () => publishQuestions(),
+    status: (status) => emit(windows(), 'memory:statusChanged', status),
+    notices: (notices) => emit(windows(), 'memory:noticesChanged', notices),
+    jobs: (status) => emit(windows(), 'jobs:changed', status),
+    log: (message) => devtools.record('warn', 'ai', message, null)
+  })
 
   /**
    * F-14.14: automatic voice learning's own queue, one `voice` job per project keyed to the
@@ -1225,8 +1287,9 @@ export function registerHandlers({
     // gate is read here, not at run time: a save with summaries off must not show the pane
     // "Updating…" for a run that will never happen, nor leave a run queued for the moment the
     // toggle comes on (one settings row per save; the run gates again anyway).
-    const summaries = isFeatureAllowed(getAiSettings(db), 'summary')
     const v2 = memory() === 'v2'
+    // F-16.17 (plan P2a §3.7): `summary.v5` is off in v2; the reader reads the scenes instead.
+    const summaries = !v2 && isFeatureAllowed(getAiSettings(db), 'summary')
     for (const id of ids) {
       if (summaries) queue.touch('summary', id)
       if (v2) {
@@ -1242,7 +1305,11 @@ export function registerHandlers({
       // F-4.12b: a scan that read the document again republishes the proposed tags itself.
       mentionQueue.touch('mentions', id)
     }
-    if (v2 && origin === 'bulk') mentionQueue.indexAll('anchors', [...ids])
+    if (v2 && origin === 'bulk') {
+      mentionQueue.indexAll('anchors', [...ids])
+      // F-16.16: a write outside the editor: the backlog is checked once the burst settles.
+      reader.bulkWritten()
+    }
     // F-14.14: one debounced voice job per burst of saves, whichever documents they were.
     const root = manuscriptRootId(db)
     if (root !== null) voiceQueue.touch('voice', root)
@@ -1271,6 +1338,8 @@ export function registerHandlers({
       const db = manager.require().connection.orm
       // F-14.14: the voice job rides the same triggers; it checks its own gate and thresholds.
       queueVoice(db)
+      // F-16.17 (plan P2a §3.7): no summaries and no knowledge conversion in a v2 project.
+      if (memory() === 'v2') return
       // F-9.14: while the conversion waits for the author, the scenes an older prompt read are
       // held back, and the windows hear what it would cost (the dialog shows on `pending`).
       const hold = conversionPending(db)
@@ -1472,6 +1541,8 @@ export function registerHandlers({
   register('aiSettings:set', (value) => {
     const settings = setAiSettings(manager.require().connection.orm, value)
     backfillSummaries(true)
+    // F-16.16: a pause the change may have fixed (Use AI, the reading switch, the source) lifts.
+    reader.settingsChanged()
     return settings
   })
 
@@ -2865,7 +2936,12 @@ export function registerHandlers({
   register('account:refresh', () => account.refresh())
 
   // F-15.3: the Cloud credit balance, what each feature has spent, and the packs on sale.
-  register('account:getCredits', () => account.credits())
+  register('account:getCredits', async () => {
+    const credits = await account.credits()
+    // F-16.19 (P2a-D10): the Cloud tally is raised to the server's reading spend, never lowered.
+    reader.reconcileCloud(credits)
+    return credits
+  })
 
   // 2026-10-08: refund the unused balance of one purchase; the Worker holds it before Lemon
   // Squeezy is asked, so a repeat never refunds twice.
@@ -3084,6 +3160,7 @@ export function registerHandlers({
   register('ai:setKey', ({ key }) => {
     keyStore.setKey(ownKey(), key)
     backfillSummaries(true)
+    reader.settingsChanged()
     return aiStatus()
   })
 
@@ -3094,7 +3171,10 @@ export function registerHandlers({
 
   register('ai:setOwnKeyProvider', ({ provider }) => {
     appState.update((s) => ({ ...s, ownKeyProvider: provider }))
-    if (keyStore.hasKey(provider)) backfillSummaries(true)
+    if (keyStore.hasKey(provider)) {
+      backfillSummaries(true)
+      reader.settingsChanged()
+    }
     return aiStatus()
   })
 
@@ -3108,6 +3188,8 @@ export function registerHandlers({
 
   register('ai:setRouting', (routing) => {
     appState.update((s) => ({ ...s, routing }))
+    // F-16.17: another model may lift the health gate's pause.
+    reader.settingsChanged()
     return modelChoice()
   })
 
@@ -3115,12 +3197,15 @@ export function registerHandlers({
   register('ai:setLocalEndpoint', ({ baseUrl }) => {
     appState.update((s) => ({ ...s, localAi: { baseUrl: baseUrl.replace(/\/+$/, '') } }))
     backfillSummaries(true)
+    reader.settingsChanged()
     return aiStatus()
   })
 
   // F-5.11: the registry reads the mapping live, so no provider rebuild follows a change.
   register('ai:setModels', ({ provider, models }) => {
     appState.update((s) => ({ ...s, models: { ...s.models, [provider]: models } }))
+    // F-16.17: another model may lift the health gate's pause.
+    reader.settingsChanged()
     return aiStatus()
   })
 
@@ -4090,6 +4175,8 @@ export function registerHandlers({
   // event and this reply agree. VALIDATION (not a manuscript document, too little text) comes
   // back through the error envelope; the expected AI failures come back as data, like the rest.
   register('ai:summarize', async ({ nodeId, requestId }): Promise<AiSummarizeResult> => {
+    // F-16.17 (plan P2a §3.7): nothing is summarised in a v2 project (slice 5 makes it v1-only).
+    if (memory() === 'v2') return { ...aiFailure('DISABLED', SUMMARIES_OFF_V2), requestId }
     try {
       const result = await queue.runNow('summary', nodeId, requestId)
       return {
@@ -4111,11 +4198,12 @@ export function registerHandlers({
   // everything (the job in flight is aborted through the inflight registry), `resume` clears a
   // pause and puts the failed jobs back in the queue. Each answers the queue as it then stands,
   // and the same status goes to every window as `jobs:changed`.
-  register('jobs:status', () => queue.status())
+  // F-16.16: in a v2 project the indicator is the reader's queue (no summary runs there).
+  register('jobs:status', () => (memory() === 'v2' ? reader.queueStatus() : queue.status()))
 
-  register('jobs:cancel', () => queue.cancelAll())
+  register('jobs:cancel', () => (memory() === 'v2' ? reader.cancelAll() : queue.cancelAll()))
 
-  register('jobs:resume', () => queue.resume())
+  register('jobs:resume', () => (memory() === 'v2' ? reader.resume() : queue.resume()))
 
   // F-5.13: "Summarize all scenes". Only the scenes that would show "Out of date" are queued
   // (`staleSummaryNodeIds`), so a second click over an indexed manuscript queues nothing and
@@ -4123,6 +4211,7 @@ export function registerHandlers({
   // `ai:summarize`'s failures; the runs gate again anyway.
   register('jobs:indexAll', (): JobsIndexAllResult => {
     const db = manager.require().connection.orm
+    if (memory() === 'v2') return aiFailure('DISABLED', SUMMARIES_OFF_V2)
     try {
       assertFeatureAllowed(getAiSettings(db), 'summary')
     } catch (err) {
@@ -4326,6 +4415,8 @@ export function registerHandlers({
     mentionQueue.indexAll('mentions', staleMentionNodeIds(db))
     // F-16.5: in v2 the imported scenes are scanned for names and indexed (by hash).
     queueMemoryIndex(db)
+    // F-16.16: the imported scenes are unread: the backlog check reads up to 5 or asks.
+    if (memory() === 'v2') reader.bulkWritten()
     backfillSummaries(false)
     // A project in a cloud-synced folder gets the import copied back now, not in three minutes.
     cloudSync?.changed()
@@ -4576,7 +4667,11 @@ export function registerHandlers({
   register('record:create', ({ name, categoryId, aliases, force }) => {
     const db = manager.require().connection.orm
     const made = createRecord(db, { name, categoryId, aliases, force }, new Date())
-    if ('record' in made) rosterChanged(db, [made.record.id])
+    if ('record' in made) {
+      rosterChanged(db, [made.record.id])
+      // F-16.17: scenes read before it that name it are read back (the lazy back-fill).
+      reader.namesAdded(made.record.id, namesOf(made.record))
+    }
     return made
   })
 
@@ -4620,8 +4715,14 @@ export function registerHandlers({
 
   register('record:setAliases', ({ id, name, aliases }) => {
     const db = manager.require().connection.orm
+    const before = new Set(namesOf(requireRecord(db, id)).map(normName))
     const updated = setAliases(db, id, { name, aliases }, new Date())
     rosterChanged(db, [id])
+    // F-16.17: a nickname added after scenes naming it were read: the lazy back-fill.
+    reader.namesAdded(
+      id,
+      namesOf(updated).filter((text) => !before.has(normName(text)))
+    )
     return updated
   })
 
@@ -4749,8 +4850,11 @@ export function registerHandlers({
     const db = manager.require().connection.orm
     // F-16.17: the reader's facts waiting on the name attach on a Yes and go on a No.
     const { result, settled } = answerNameQuestion(db, answer, new Date())
-    if (result.kind === 'record') rosterChanged(db, [result.record.id])
-    else publishQuestions()
+    if (result.kind === 'record') {
+      rosterChanged(db, [result.record.id])
+      // F-16.17: the name (a new record, or a nickname) is read back where it was read before.
+      reader.namesAdded(result.record.id, [answer.name])
+    } else publishQuestions()
     if (settled !== null && settled.nodeIds.length > 0) {
       emit(windows(), 'memory:changed', {
         nodeIds: settled.nodeIds,
@@ -4874,16 +4978,30 @@ export function registerHandlers({
     return null
   })
 
-  // F-16.16, F-16.17: the reader service owns the reading pipeline; the handlers only reach it.
-  const reader = createReaderService({
-    db: () => manager.require().connection.orm,
-    settings: (db) => getAiSettings(db),
-    requestDeps: (db) => requestDeps(db),
-    changed: (payload) => emit(windows(), 'memory:changed', payload),
-    questions: () => publishQuestions()
-  })
-
+  // F-16.16, F-16.17, F-16.19: the reader service owns the reading; the handlers only reach it.
   register('memory:readNow', ({ nodeId, requestId }) => reader.readNow(nodeId, requestId))
+
+  register('memory:settle', (input) => reader.settle(input))
+
+  register('memory:status', () => reader.status())
+
+  register('memory:notices', () => reader.notices())
+
+  register('memory:answerNotice', ({ id, action }) => reader.answerNotice(id, action))
+
+  register('memory:health', () => reader.health())
+
+  register('memory:rebuildEstimate', () => reader.rebuildEstimate())
+
+  register('memory:rebuild', () => reader.rebuild())
+
+  register('memory:rebuildSummary', () => reader.rebuildSummary())
+
+  register('memory:rebuildAction', (action) => reader.rebuildAction(action))
+
+  register('cloudCap:get', () => reader.cloudCap())
+
+  register('cloudCap:set', ({ capUsd }) => reader.setCloudCap(capUsd))
 
   register('memory:scene', ({ nodeId }) => sceneMemory(manager.require().connection.orm, nodeId))
 
@@ -5060,6 +5178,8 @@ export function registerHandlers({
     // the rows stay in that project's database, so opening it again takes the work up where it
     // stopped (`load` on an empty table does nothing, which is what a create lands on).
     queue.clear()
+    // F-16.16: the reader's queue, pauses and notices too.
+    reader.clear()
     // F-13.4: what was last checked belongs to the project that left.
     continuityChecked.clear()
     // F-4.12: the same for the mention queue, and a project that was written before this feature
@@ -5129,7 +5249,6 @@ export function registerHandlers({
     void syncSpelling()
     cancelBackfill()
     if (info) {
-      queue.load()
       mentionQueue.load()
       const opened = manager.require().connection.orm
       if (info.storyMemory === 'v2') {
@@ -5138,7 +5257,17 @@ export function registerHandlers({
         queueMemoryIndex(opened)
         voiceQueue.load()
         publishQuestions()
+        // F-16.17 (plan P2a §3.7): `summary.v5` is off in v2: the summary jobs P1 left are dropped
+        // and the summary queue is not loaded. The reader takes up its own jobs, then the backlog
+        // (a scene left unread at the last close is read now, P2a-D4) and the back-fills.
+        try {
+          dropSummaryJobs(opened)
+        } catch (err) {
+          console.warn('Could not drop the summary jobs', err)
+        }
+        reader.opened()
       } else {
+        queue.load()
         mentionQueue.indexAll('mentions', staleMentionNodeIds(opened))
         voiceQueue.load()
         // F-9.16: the To do list is brought up to date on every open (local, free).
@@ -5178,6 +5307,15 @@ export function registerHandlers({
     })
     manager.onBeforeClose(() => cloudSync.projectClosing())
   }
+}
+
+/** What `ai:summarize` and "Summarize all scenes" answer in a story memory v2 project. */
+const SUMMARIES_OFF_V2 =
+  'Scene summaries are off in this project: story memory reads the scenes instead.'
+
+/** Every name a record answers to, its own first (the lazy back-fill's names, F-16.17). */
+function namesOf(record: StoryRecordSummary): string[] {
+  return record.aliases.map((alias) => alias.text)
 }
 
 /** A tag proposal's stored content (F-12.3): the names as JSON, or none when it is anything else. */

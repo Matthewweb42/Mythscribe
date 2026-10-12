@@ -339,6 +339,14 @@ export function descendantDocuments(
   return ids
 }
 
+/** Whether `id` is a document of the manuscript (a scene), not front or end matter or Research. */
+export function isManuscriptDocument(
+  index: Pick<TreeIndex, 'sectionOf'> & { byId: Record<string, { kind: string } | undefined> },
+  id: string
+): boolean {
+  return index.byId[id]?.kind === 'document' && index.sectionOf[id] === 'manuscript'
+}
+
 const emptyIndex = (): TreeIndex => ({
   byId: {},
   childrenOf: {},
