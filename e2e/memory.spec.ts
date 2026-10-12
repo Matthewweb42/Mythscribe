@@ -1536,6 +1536,27 @@ test('story memory v2: card lines, plan links, synopsis and beta reader on cards
   expect(betaUser).toContain('Mara walks to the quay.')
   expect(betaUser).toContain(duskText[1])
   expect(betaUser).not.toContain('Scenes read so far, in order (summaries)')
+
+  // F-16.21 (slice 5 review): Undo of the Unlink in Dismissed puts the AI's link back, pushed to
+  // the open Outline; Keep makes it the author's own link.
+  const unlinked = (
+    await invoke<{ items: { id: string; kind: string; label: string }[] }>(
+      'dismissed:list',
+      undefined
+    )
+  ).items.find((item) => item.kind === 'unlink')
+  if (!unlinked) throw new Error('the Unlink row is missing from Dismissed')
+  await invoke('dismissed:undo', { id: unlinked.id })
+  await expect(fulfilled).toContainText('Fulfilled by Quay at dusk', { timeout: 15_000 })
+  await expect(fulfilled).toHaveAttribute('data-origin', 'ai')
+  await expect(fulfilled).toContainText(PLAN_LINK_WHY)
+  expect((await invoke<{ count: number }>('dismissed:list', undefined)).count).toBe(dismissedBefore)
+  await fulfilled.getByRole('button', { name: 'Keep' }).click()
+  await expect(fulfilled).toHaveAttribute('data-origin', 'author', { timeout: 15_000 })
+  await expect(fulfilled.getByRole('button', { name: 'Keep' })).toHaveCount(0)
+  expect((await invoke<{ aiLinks: AiLink[] }>('planLinks:get', undefined)).aiLinks).toEqual([])
+  const kept = await invoke<{ meta: { fulfilledBy?: string } }>('sceneMeta:get', { id: plan.id })
+  expect(kept.meta.fulfilledBy).toBe(dusk.id)
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {
