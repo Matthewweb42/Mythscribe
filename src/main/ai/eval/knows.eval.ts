@@ -11,6 +11,7 @@ import { normName } from '@shared/memory/names'
 import { stepCounts, threadsAsOf } from '@shared/memory/threadsAsOf'
 import type { KnowsAsOf } from '@shared/memory/whoKnows'
 import type { ThreadStatus } from '@shared/memory/views'
+import { sinceNodeId } from '@shared/memory/years'
 import { activeDraftId } from '../../draft/draftStore'
 import { dismiss } from '../../memory/dismissedStore'
 import { nameScanShared } from '../../memory/nameIndexer'
@@ -652,7 +653,9 @@ for (const readOrder of ['book', 'reverse'] as const) {
           expect(stored, at).toBeDefined()
           expect(age, at).toMatchObject({ kind: 'stated', claimId: stored?.id })
           expect(
-            age?.kind === 'stated' ? age.since.map((hint) => sceneOf(book, hint.nodeId)) : null,
+            age?.kind === 'stated'
+              ? [...new Set(age.since.map((entry) => sceneOf(book, sinceNodeId(entry))))]
+              : null,
             at
           ).toEqual(expected.since)
         } else {

@@ -3,7 +3,7 @@ import type { ReadingOrder } from '@shared/memory/asOf'
 import type { Card } from '@shared/memory/claims'
 import { dismissedKey } from '@shared/memory/dismissed'
 import type { StoryRecordSummary } from '@shared/memory/records'
-import { holdingCard, type HeldCard } from '@shared/memory/reproof'
+import { cardStanding, withoutDismissed, type HeldCard } from '@shared/memory/reproof'
 import type { SceneDetails } from '@shared/memory/sceneDetails'
 import { sceneRefs } from '@shared/memory/sceneRef'
 import type { HereChip } from '@shared/memory/views'
@@ -80,7 +80,7 @@ export function readingOrder(db: TreeDb, all: NodeRow[] = listNodes(db)): Readin
 }
 
 /** A document's paragraph texts as stored now (none for a node that is no document). */
-function sceneTexts(db: TreeDb, nodeId: string): string[] {
+function sceneTexts(db: TreeDb, nodeId: string): readonly string[] {
   const row = getNode(db, nodeId)
   return row === undefined ? [] : rowTexts(row)
 }
@@ -101,14 +101,53 @@ export function heldCard(
   texts?: readonly string[]
 ): HeldCard {
   const paragraphs = readable ? (texts ?? sceneTexts(db, card.nodeId)) : null
-  return holdingCard(card, paragraphs, (field, value) =>
-    notRight.has(dismissedKey({ kind: 'notRight', card: { nodeId: card.nodeId, field, value } }))
+  return withoutDismissed(
+    paragraphs === null ? cardStanding(card, null) : standingOn(card, paragraphs),
+    (field, value) =>
+      notRight.has(dismissedKey({ kind: 'notRight', card: { nodeId: card.nodeId, field, value } }))
   )
 }
 
-/** A document row's paragraph texts as stored. */
-export function rowTexts(row: NodeRow): string[] {
-  return passageParagraphs(documentJson(row) ?? EMPTY_DOC).map((paragraph) => paragraph.text)
+/**
+ * What of each card stands on a scene's text, kept while that text is the same array: `rowTexts`
+ * answers the same array while the scene's stored content is unchanged, so the Timeline, the
+ * sheets and the panel hold an unchanged scene's card without locating its quotes again (F-16.23).
+ */
+const standingByTexts = new WeakMap<readonly string[], Map<string, HeldCard>>()
+/** Cards kept per text: a scene's card changes only with a reading. */
+const CARDS_PER_TEXT = 8
+
+function standingOn(card: Card, paragraphs: readonly string[]): HeldCard {
+  const key = JSON.stringify([card.fields, card.present, card.anchor])
+  let byCard = standingByTexts.get(paragraphs)
+  if (byCard === undefined) {
+    byCard = new Map()
+    standingByTexts.set(paragraphs, byCard)
+  }
+  const known = byCard.get(key)
+  if (known !== undefined) return known
+  const held = cardStanding(card, paragraphs)
+  if (byCard.size >= CARDS_PER_TEXT) byCard.clear()
+  byCard.set(key, held)
+  return held
+}
+
+/**
+ * Each document's paragraph texts while its stored content is the same string (F-16.23): the
+ * Timeline, the sheets' Age and the panel hold every card against its scene's text whenever a
+ * scene moved, so a scene is parsed again only after it changed. Bounded: cleared when full.
+ */
+const textsByNode = new Map<string, { content: string | null; texts: readonly string[] }>()
+const TEXTS_CACHE_CAP = 5000
+
+/** A document row's paragraph texts as stored (shared: never mutate them). */
+export function rowTexts(row: Pick<NodeRow, 'id' | 'content'>): readonly string[] {
+  const known = textsByNode.get(row.id)
+  if (known?.content === row.content) return known.texts
+  const texts = passageParagraphs(documentJson(row) ?? EMPTY_DOC).map((paragraph) => paragraph.text)
+  if (textsByNode.size >= TEXTS_CACHE_CAP) textsByNode.clear()
+  textsByNode.set(row.id, { content: row.content, texts })
+  return texts
 }
 
 /**

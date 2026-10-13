@@ -99,6 +99,7 @@ function ThreadList({ ids, filtered }: { ids: string[]; filtered: boolean }): Re
         ? ''
         : threadSummary(
             memory.threads.find((thread) => thread.recordId === id),
+            memory.checkedUpTo,
             byId[id]?.origin === 'ai'
           )
     ])

@@ -142,7 +142,7 @@ describe('the who-knows-what and time views (F-16.22, F-16.23)', () => {
         typedYear: null,
         quotedYear: null,
         flashback: false,
-        elapsed: 'A year later'
+        elapsed: { value: 'a year later', quote: 'A year later, Mara wept', para: 0 }
       }
     ])
     const age = recordAge({
@@ -163,7 +163,10 @@ describe('the who-knows-what and time views (F-16.22, F-16.23)', () => {
       reading,
       atId: 'b'
     })
-    expect(AgeView.parse(age)).toMatchObject({ kind: 'stated', since: [{ text: 'A year later' }] })
+    expect(AgeView.parse(age)).toMatchObject({
+      kind: 'stated',
+      since: [{ kind: 'hint', hint: { text: 'A year later', quote: 'A year later, Mara wept' } }]
+    })
     expect(
       TimelineRow.parse({
         nodeId: 'b',
@@ -173,7 +176,18 @@ describe('the who-knows-what and time views (F-16.22, F-16.23)', () => {
         flashback: false,
         elapsed: years[1]?.elapsed,
         time: '',
-        ages: age === null ? [] : [{ recordId: 'mara', age }]
+        ages: age === null ? [] : [{ recordId: 'mara', age }],
+        sources: [
+          {
+            field: 'elapsed',
+            entry: {
+              value: 'a year later',
+              quote: 'A year later, Mara wept',
+              p: 0,
+              verified: false
+            }
+          }
+        ]
       })
     ).toBeTruthy()
   })

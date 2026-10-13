@@ -3,15 +3,24 @@ import type { ReadingOrder } from './asOf'
 import {
   ageAsOf,
   birthYear,
+  changesSince,
   elapsedBreaks,
-  hintsSince,
+  hintWords,
   recordAge,
+  sinceNodeId,
   statedAge,
   storyYears,
   yearIn,
   type AgeClaim,
   type YearRow
 } from './years'
+
+/** A card's elapsed hint whose value is its own quote (the reader quoted the words exactly). */
+const elapsedHint = (words: string, para = 0): NonNullable<YearRow['elapsed']> => ({
+  value: words,
+  quote: words,
+  para
+})
 
 const row = (nodeId: string, over: Partial<YearRow> = {}): YearRow => ({
   nodeId,
@@ -104,7 +113,7 @@ describe('storyYears (decision 5)', () => {
   it('skips a flashback in both directions, and gives it its own year alone', () => {
     const years = storyYears([
       row('s1', { typedYear: 1811 }),
-      row('s2', { flashback: true, elapsed: 'Ten years earlier' }),
+      row('s2', { flashback: true, elapsed: elapsedHint('Ten years earlier') }),
       row('s3'),
       row('s4', { flashback: true, quotedYear: 'in 1798' }),
       row('s5')
@@ -119,29 +128,75 @@ describe('storyYears (decision 5)', () => {
   it('ends the carry at a breaking hint, and not at one that cannot cross a year', () => {
     const years = storyYears([
       row('s1', { typedYear: 1811 }),
-      row('s2', { elapsed: 'The next morning' }),
-      row('s3', { elapsed: 'Three winters later' }),
+      row('s2', { elapsed: elapsedHint('The next morning') }),
+      row('s3', { elapsed: elapsedHint('Three winters later') }),
       row('s4'),
       row('s5', { typedYear: 1815 })
     ])
     expect(years[1]?.year).toMatchObject({ kind: 'carried', value: 1811 })
     expect(years[1]?.elapsed).toMatchObject({ text: 'The next morning', breaks: false })
-    const hint = { text: 'Three winters later', nodeId: 's3', ref: '1.3', breaks: true }
-    expect(years[2]?.year).toEqual({ kind: 'unknown', hint })
-    expect(years[3]?.year).toEqual({ kind: 'unknown', hint })
+    const ended = {
+      text: 'Three winters later',
+      quote: 'Three winters later',
+      para: 0,
+      nodeId: 's3',
+      ref: '1.3',
+      breaks: true
+    }
+    expect(years[2]?.year).toEqual({ kind: 'unknown', hint: ended })
+    expect(years[3]?.year).toEqual({ kind: 'unknown', hint: ended })
     expect(years[4]?.year).toMatchObject({ kind: 'typed', value: 1815 })
   })
 
   it('applies a quoted year to its own scene only, and lets a typed year win over it', () => {
     const years = storyYears([
       row('s1', { typedYear: 1811 }),
-      row('s2', { quotedYear: '1813', elapsed: 'A year later' }),
+      row('s2', { quotedYear: '1813', elapsed: elapsedHint('A year later') }),
       row('s3'),
       row('s4', { typedYear: 1820, quotedYear: '1819' })
     ])
     expect(years[1]?.year).toMatchObject({ kind: 'quoted', value: 1813 })
     expect(years[2]?.year).toMatchObject({ kind: 'unknown', hint: { text: 'A year later' } })
     expect(years[3]?.year).toMatchObject({ kind: 'typed', value: 1820 })
+  })
+
+  it('shows a hint in the book’s words and ends the carry on its quote too (review of P2b slice 5)', () => {
+    const years = storyYears([
+      row('s1', { typedYear: 1811 }),
+      // The reader's vague value cannot keep a false carry over a quote that crosses years.
+      row('s2', {
+        elapsed: { value: 'some time', quote: 'Three winters later, Mara found the heir', para: 2 }
+      }),
+      // A value the quote holds is shown as the quote has it; one it does not, as the quote.
+      row('s3', {
+        elapsed: { value: 'a year later', quote: 'A year later, the quay burned', para: 0 }
+      }),
+      row('s4', {
+        typedYear: 1820,
+        elapsed: { value: 'three years', quote: 'The ice came again', para: 1 }
+      })
+    ])
+    expect(years[1]?.year).toMatchObject({ kind: 'unknown', hint: { nodeId: 's2' } })
+    expect(years[1]?.elapsed).toEqual({
+      text: 'Three winters later, Mara found the heir',
+      quote: 'Three winters later, Mara found the heir',
+      para: 2,
+      nodeId: 's2',
+      ref: '1.2',
+      breaks: true
+    })
+    expect(years[2]?.elapsed).toMatchObject({ text: 'A year later', breaks: true })
+    // "three years" is the reader's word, never shown; its value alone still ends a carry.
+    expect(years[3]?.elapsed).toMatchObject({ text: 'The ice came again', breaks: true })
+  })
+
+  it('finds the hint’s words in its quote', () => {
+    expect(
+      hintWords({ value: 'three winters later', quote: 'Three winters later, Mara wept', para: 0 })
+    ).toBe('Three winters later')
+    expect(hintWords({ value: 'some time', quote: 'Long after, Mara wept', para: 0 })).toBe(
+      'Long after, Mara wept'
+    )
   })
 
   it('knows no year before the first typed one', () => {
@@ -212,7 +267,7 @@ describe('ageAsOf (decision 5)', () => {
   const carried = { kind: 'carried' as const, value: 1811, from: { nodeId: 's1', ref: '1.1' } }
 
   it('computes about-ages from a birth year and the scene’s year', () => {
-    expect(ageAsOf({ born, year: carried, stated: null, hints: [] })).toEqual({
+    expect(ageAsOf({ born, year: carried, stated: null, since: [] })).toEqual({
       kind: 'computed',
       age: 19,
       born,
@@ -222,19 +277,31 @@ describe('ageAsOf (decision 5)', () => {
 
   it('says not born yet for a negative age', () => {
     expect(
-      ageAsOf({ born: { ...born, year: 1820 }, year: carried, stated: null, hints: [] })?.kind
+      ageAsOf({ born: { ...born, year: 1820 }, year: carried, stated: null, since: [] })?.kind
     ).toBe('notBorn')
   })
 
   it('falls back to the last stated age, listing the hints since and never adding them up', () => {
     const stated = claim({ nodeId: 's2', value: 'nineteen' })
-    const hints = [{ text: 'Three winters later', nodeId: 's3', ref: '1.3', breaks: true }]
+    const since = [
+      {
+        kind: 'hint' as const,
+        hint: {
+          text: 'Three winters later',
+          quote: 'Three winters later',
+          para: 0,
+          nodeId: 's3',
+          ref: '1.3',
+          breaks: true
+        }
+      }
+    ]
     expect(
       ageAsOf({
         born,
         year: { kind: 'unknown', hint: null },
         stated: { claim: stated, ref: '1.2' },
-        hints
+        since
       })
     ).toEqual({
       kind: 'stated',
@@ -242,30 +309,54 @@ describe('ageAsOf (decision 5)', () => {
       claimId: stated.id,
       nodeId: 's2',
       ref: '1.2',
-      since: hints
+      since
     })
-    expect(ageAsOf({ born: null, year: carried, stated: null, hints: [] })).toBeNull()
+    expect(ageAsOf({ born: null, year: carried, stated: null, since: [] })).toBeNull()
+  })
+
+  it('gives the birth year alone when the scene’s year is not known and no age is stated', () => {
+    const ended = {
+      text: 'Three winters later',
+      quote: 'Three winters later',
+      para: 0,
+      nodeId: 's3',
+      ref: '1.3',
+      breaks: true
+    }
+    expect(
+      ageAsOf({ born, year: { kind: 'unknown', hint: ended }, stated: null, since: [] })
+    ).toEqual({ kind: 'bornOnly', born, hint: ended })
+    // Before the first typed year: no hint to give.
+    expect(ageAsOf({ born, year: null, stated: null, since: [] })).toEqual({
+      kind: 'bornOnly',
+      born,
+      hint: null
+    })
   })
 
   it('reads the last stated age and the hints since through recordAge', () => {
     const years = storyYears([
       row('s1', { typedYear: 1811 }),
       row('s2'),
-      row('s3', { elapsed: 'Three winters later' }),
-      row('s4', { elapsed: 'A year later' })
+      row('s3', { elapsed: elapsedHint('Three winters later') }),
+      row('s4', { elapsed: elapsedHint('A year later') })
     ])
     const ages = [claim({ nodeId: 's2', value: 'nineteen' })]
     expect(statedAge(ages, READING, 's1')).toBeNull()
-    expect(hintsSince(years, 's2', 's4').map((hint) => hint.text)).toEqual([
-      'Three winters later',
-      'A year later'
-    ])
+    expect(
+      changesSince(years, 's2', 's4').map((entry) =>
+        entry.kind === 'hint' ? entry.hint.text : entry.value
+      )
+    ).toEqual(['Three winters later', 'A year later'])
     const at = (atId: string | null): ReturnType<typeof recordAge> =>
       recordAge({ born: [], ages, pinned: [], years, reading: READING, atId })
     expect(at('s2')).toMatchObject({ kind: 'stated', value: 'nineteen', ref: '1.2', since: [] })
     expect(at('s4')).toMatchObject({
       kind: 'stated',
-      since: [{ text: 'Three winters later' }, { text: 'A year later' }]
+      since: [
+        { kind: 'hint', hint: { text: 'Three winters later' } },
+        { kind: 'hint', hint: { text: 'A year later' } }
+      ]
     })
     // With a birth year on Pinned, the carried year computes the age where it is known.
     expect(
@@ -275,6 +366,50 @@ describe('ageAsOf (decision 5)', () => {
     expect(
       recordAge({ born: [], ages, pinned: ['Born: 1792'], years, reading: READING, atId: 'idea' })
     ).toMatchObject({ kind: 'computed', age: 19, year: { from: { ref: '1.1' } } })
+  })
+
+  it('lists a later typed or quoted year after a stated age, never adding it up', () => {
+    const years = storyYears([
+      row('s1', { typedYear: 1811 }),
+      row('s2'),
+      row('s3', { typedYear: 1820 }),
+      row('s4', { quotedYear: '1820' })
+    ])
+    const ages = [claim({ nodeId: 's2', value: 'nineteen' })]
+    const at = recordAge({ born: [], ages, pinned: [], years, reading: READING, atId: 's4' })
+    expect(at).toMatchObject({
+      kind: 'stated',
+      value: 'nineteen',
+      since: [{ kind: 'year', value: 1820, nodeId: 's3', ref: '1.3' }]
+    })
+    expect(at?.kind === 'stated' ? at.since.map(sinceNodeId) : null).toEqual(['s3'])
+  })
+
+  it('gives the birth year alone where the scene’s year is not known', () => {
+    const years = storyYears([
+      row('s1', { typedYear: 1811 }),
+      row('s2', { elapsed: elapsedHint('three years') })
+    ])
+    const born = [claim({ nodeId: 's1', value: '1792' })]
+    const at = (atId: string): ReturnType<typeof recordAge> =>
+      recordAge({ born, ages: [], pinned: [], years, reading: READING, atId })
+    expect(at('s1')).toMatchObject({ kind: 'computed', age: 19 })
+    expect(at('s2')).toMatchObject({
+      kind: 'bornOnly',
+      born: { year: 1792, ref: '1.1' },
+      hint: { text: 'three years', ref: '1.2' }
+    })
+    // Before any typed year, with only the author's Pinned line.
+    expect(
+      recordAge({
+        born: [],
+        ages: [],
+        pinned: ['Born: 1790'],
+        years: storyYears([row('s1'), row('s2')]),
+        reading: READING,
+        atId: 's2'
+      })
+    ).toMatchObject({ kind: 'bornOnly', born: { year: 1790, source: 'pinned' }, hint: null })
   })
 
   it('never takes an age stated in a flashback as the age after it (story time)', () => {

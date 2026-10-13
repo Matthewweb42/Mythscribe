@@ -1,7 +1,15 @@
 import type { ReadingOrder } from './asOf'
 import type { ClaimMode, ClaimState, ClaimVoice } from './claims'
 import { ageAt } from '../timeline'
-import type { AgeView, BornView, ElapsedHintView, KnownYearView, YearView } from './views'
+import { locateInText } from './quote'
+import type {
+  AgeSinceView,
+  AgeView,
+  BornView,
+  ElapsedHintView,
+  KnownYearView,
+  YearView
+} from './views'
 
 /**
  * Story years and ages (F-16.23; design §2.7 "Years and ages", decision 5), pure:
@@ -9,7 +17,10 @@ import type { AgeView, BornView, ElapsedHintView, KnownYearView, YearView } from
  *   elapsed hint that can cross a year (P2b-D14);
  * - a year the text states (the card's verified `year`) applies to its own scene only;
  * - an age is the birth year plus the scene's year ("about 19, year from 1.1"); otherwise the last
- *   stated age, with the year-crossing hints since listed and never added up.
+ *   stated age, with the year-crossing hints and the year changes since listed, never added up;
+ * - an elapsed hint is shown in the book's words (its quote), never the reader's value, and ends
+ *   the carry when either its value or its quote can cross a year (a vague value cannot keep a
+ *   false carry).
  * Ages always say "about" (P2b-D15): a birth year and a story year do not say whether the birthday
  * has passed. Nothing here is sent to a model.
  */
@@ -128,6 +139,29 @@ export function yearIn(text: string): number | null {
   return found.length === 1 ? (found[0] ?? null) : null
 }
 
+/** A card's elapsed hint as it stands on the text: the reader's value, its quote and paragraph. */
+export interface ElapsedSource {
+  value: string
+  quote: string
+  para: number
+}
+
+/**
+ * An elapsed hint's words as the book has them: the value where the quote contains it, in any
+ * case ("Three winters later" in "Three winters later, Mara found the heir."), else the whole
+ * quote. The reader's own words are never shown as the book's.
+ */
+export function hintWords(source: ElapsedSource): string {
+  const quote = source.quote.trim()
+  const lower = quote.toLowerCase()
+  // Lower case keeps the offsets only where it keeps the length (it does for nearly every text).
+  const at =
+    lower.length === quote.length
+      ? locateInText(lower, source.value.toLowerCase())
+      : locateInText(quote, source.value)
+  return at === null ? quote : quote.slice(at.start, at.end)
+}
+
 /** One readable scene as `storyYears` reads it, in reading order. */
 export interface YearRow {
   nodeId: string
@@ -139,7 +173,7 @@ export interface YearRow {
   /** The held card says (verified) the scene is a flashback. */
   flashback: boolean
   /** The held card's elapsed hint, when it stands on the text ("Three winters later"). */
-  elapsed: string | null
+  elapsed: ElapsedSource | null
 }
 
 /** A scene's year and its elapsed hint as `storyYears` answers them. */
@@ -165,10 +199,17 @@ export function storyYears(rows: readonly YearRow[]): StoryYear[] {
   let ended: ElapsedHintView | null = null
   return rows.map((row) => {
     const here = { nodeId: row.nodeId, ref: row.ref }
+    const source = row.elapsed
     const elapsed: ElapsedHintView | null =
-      row.elapsed === null || row.elapsed.trim() === ''
+      source === null || source.quote.trim() === ''
         ? null
-        : { text: row.elapsed.trim(), ...here, breaks: elapsedBreaks(row.elapsed) }
+        : {
+            text: hintWords(source),
+            quote: source.quote,
+            para: source.para,
+            ...here,
+            breaks: elapsedBreaks(source.value) || elapsedBreaks(source.quote)
+          }
     const quoted = row.quotedYear === null ? null : yearIn(row.quotedYear)
     let year: YearView
     if (row.flashback) {
@@ -229,6 +270,10 @@ function upTo(claims: readonly AgeClaim[], reading: ReadingOrder, atId: string |
  */
 const BORN_LINE = /^\s*born(?:\s*\([^)\n]*\))?\s*:\s*(.+)$/i
 
+/** The Pinned paragraphs that give a birth year ("Born: 1792"): what a Pinned save may move. */
+export const bornLines = (pinned: readonly string[]): string[] =>
+  pinned.filter((paragraph) => BORN_LINE.test(paragraph))
+
 /**
  * A record's birth year as of a scene (P2b-D15): the latest live narration-now `born` claim up to
  * the scene with exactly one year in its value; else a canon Pinned line "Born: 1792" (the
@@ -270,34 +315,50 @@ export function statedAge(
   return upTo(claims, reading, atId).filter(stands).at(-1) ?? null
 }
 
+/** The scene a "since then" entry is in. */
+export const sinceNodeId = (entry: AgeSinceView): string =>
+  entry.kind === 'hint' ? entry.hint.nodeId : entry.nodeId
+
 /**
- * The year-crossing hints in the scenes after `fromId` up to and including `atId` (null: the end
- * of the book), in reading order, flashbacks left out: what a stated age lists "since then" and
- * never adds up.
+ * What changed in the scenes after `fromId` up to and including `atId` (null: the end of the
+ * book), in reading order, flashbacks left out: each year-crossing hint, and each typed or quoted
+ * year that differs from the year before it ("1820 (1.3)"). What a stated age lists "since then"
+ * and never adds up.
  */
-export function hintsSince(
+export function changesSince(
   years: readonly StoryYear[],
   fromId: string,
   atId: string | null
-): ElapsedHintView[] {
+): AgeSinceView[] {
   const from = years.findIndex((row) => row.nodeId === fromId)
   const to = atId === null ? years.length - 1 : years.findIndex((row) => row.nodeId === atId)
   if (from === -1 || to === -1) return []
-  return years
-    .slice(from + 1, to + 1)
-    .flatMap((row) => (row.elapsed?.breaks === true && !row.flashback ? [row.elapsed] : []))
+  const start = years[from]?.year
+  let running: number | null = start === undefined || start.kind === 'unknown' ? null : start.value
+  const since: AgeSinceView[] = []
+  for (const row of years.slice(from + 1, to + 1)) {
+    if (row.flashback) continue
+    if (row.elapsed?.breaks === true) since.push({ kind: 'hint', hint: row.elapsed })
+    const { year } = row
+    if ((year.kind === 'typed' || year.kind === 'quoted') && year.value !== running) {
+      since.push({ kind: 'year', value: year.value, nodeId: row.nodeId, ref: row.ref })
+    }
+    running = year.kind === 'unknown' ? null : year.value
+  }
+  return since
 }
 
 /**
  * A character's age as of a scene (decision 5): with a birth year and the scene's known year, the
- * age (`ageAt`; negative is "not born yet"); else the last stated age with the hints since; else
- * null (nothing is shown).
+ * age (`ageAt`; negative is "not born yet"); else the last stated age with what changed since;
+ * else, with a birth year, the birth year alone and why the scene's year is not known
+ * (`bornOnly`); else null.
  */
 export function ageAsOf(input: {
   born: BornView | null
   year: YearView | null
   stated: { claim: AgeClaim; ref: string } | null
-  hints: readonly ElapsedHintView[]
+  since: readonly AgeSinceView[]
 }): AgeView | null {
   const { born, year, stated } = input
   if (born !== null && year !== null && year.kind !== 'unknown') {
@@ -307,15 +368,18 @@ export function ageAsOf(input: {
       ? { kind: 'notBorn', born, year: known }
       : { kind: 'computed', age, born, year: known }
   }
-  if (stated === null) return null
-  return {
-    kind: 'stated',
-    value: stated.claim.value,
-    claimId: stated.claim.id,
-    nodeId: stated.claim.nodeId,
-    ref: stated.ref,
-    since: [...input.hints]
+  if (stated !== null) {
+    return {
+      kind: 'stated',
+      value: stated.claim.value,
+      claimId: stated.claim.id,
+      nodeId: stated.claim.nodeId,
+      ref: stated.ref,
+      since: [...input.since]
+    }
   }
+  if (born === null) return null
+  return { kind: 'bornOnly', born, hint: year?.kind === 'unknown' ? year.hint : null }
 }
 
 /**
@@ -348,6 +412,6 @@ export function recordAge(input: {
     born: birthYear(input.born, input.pinned, reading, atId),
     year: row?.year ?? null,
     stated: stated === null ? null : { claim: stated, ref: reading.refs.get(stated.nodeId) ?? '' },
-    hints: stated === null ? [] : hintsSince(years, stated.nodeId, row?.nodeId ?? atId)
+    since: stated === null ? [] : changesSince(years, stated.nodeId, row?.nodeId ?? atId)
   })
 }

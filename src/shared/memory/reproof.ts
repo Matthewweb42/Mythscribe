@@ -2,7 +2,7 @@ import {
   anchorFor,
   anchorHolds,
   anchorInPlace,
-  sceneSentences,
+  paragraphSentences,
   type MemoryAnchor,
   type SceneSentence
 } from './anchor'
@@ -228,16 +228,35 @@ export function holdingCard(
   paragraphs: readonly string[] | null,
   dismissed: (field: CardFieldName | 'present', value: string) => boolean
 ): HeldCard {
+  return withoutDismissed(cardStanding(card, paragraphs), dismissed)
+}
+
+/**
+ * `holdingCard` with nothing dismissed: what depends on the text alone, so a caller may keep it
+ * while the scene's text and the card are unchanged (`heldCard` in main, F-16.23) and apply the
+ * author's dismissals each time (`withoutDismissed`).
+ */
+export function cardStanding(
+  card: { fields: CardFields; present: readonly CardPresent[]; anchor: MemoryAnchor },
+  paragraphs: readonly string[] | null
+): HeldCard {
   const anchor = new Set(card.anchor)
-  const sentences = paragraphs === null ? [] : sceneSentences(paragraphs)
+  // Only the paragraphs a quote sits in are split and hashed, each once (the Timeline and the
+  // sheets hold every scene's card, F-16.23).
+  const hashed = new Map<number, SceneSentence[]>()
+  const sentencesOf = (p: number): SceneSentence[] => {
+    const known = hashed.get(p)
+    if (known !== undefined) return known
+    const found = paragraphSentences(paragraphs?.[p] ?? '', p)
+    hashed.set(p, found)
+    return found
+  }
   const stands = (entry: { quote: string; p: number }): boolean => {
     if (paragraphs === null) return false
     const location = locateInScene(paragraphs, entry.p, entry.quote)
     if (location === null) return false
-    const hashes = sentences
-      .filter(
-        (sentence) => sentence.p === location.p && location.sentences.includes(sentence.index)
-      )
+    const hashes = sentencesOf(location.p)
+      .filter((sentence) => location.sentences.includes(sentence.index))
       .map((sentence) => sentence.hash)
     return hashes.length > 0 && hashes.every((hash) => anchor.has(hash))
   }
@@ -246,13 +265,32 @@ export function holdingCard(
   const stale: CardFieldName[] = []
   for (const name of CARD_FIELDS) {
     const entry = card.fields[name]
-    if (entry === null || dismissed(name, entry.value)) continue
+    if (entry === null) continue
     shown[name] = entry
     if (stands(entry)) fields[name] = entry
     else stale.push(name)
   }
-  const present = card.present.filter(
-    (entry) => !dismissed('present', entry.recordId) && stands(entry)
-  )
+  const present = card.present.filter((entry) => stands(entry))
   return { fields, present, shown, stale }
+}
+
+/** A held card without what the author said is not right (gone from every view). */
+export function withoutDismissed(
+  held: HeldCard,
+  dismissed: (field: CardFieldName | 'present', value: string) => boolean
+): HeldCard {
+  const fields = { ...held.fields }
+  const shown = { ...held.shown }
+  for (const name of CARD_FIELDS) {
+    const entry = shown[name]
+    if (entry === null || !dismissed(name, entry.value)) continue
+    fields[name] = null
+    shown[name] = null
+  }
+  return {
+    fields,
+    shown,
+    stale: held.stale.filter((name) => shown[name] !== null),
+    present: held.present.filter((entry) => !dismissed('present', entry.recordId))
+  }
 }

@@ -439,6 +439,8 @@ import type { StoryMemoryVersion } from '@shared/storyMemory'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
 import { normName } from '@shared/memory/names'
 import type { RecordPage, StoryRecord, StoryRecordSummary } from '@shared/memory/records'
+import { pinnedCanonLines } from '@shared/memory/storyNotes'
+import { bornLines } from '@shared/memory/years'
 import {
   createAuthorTodo,
   deleteAuthorTodo,
@@ -1247,15 +1249,29 @@ export function registerHandlers({
 
   register('tree:list', () => listNodes(manager.require().connection.orm).map(toTreeNode))
 
+  /**
+   * F-16.23 (review of P2b slice 5): the book's order, its scenes or their titles moved (a scene
+   * made, renamed, moved, copied or deleted; an Idea or a compile exclusion flipped). The Timeline's
+   * rows, the scene references, the year carry and the ages, the Threads' statuses and "checked up
+   * to" are all in reading order, so the renderer reads the views of the whole book again. v2 only.
+   */
+  const bookOrderMoved = (nodeIds: readonly string[]): void => {
+    if (memory() !== 'v2') return
+    emit(windows(), 'memory:changed', { nodeIds: [...nodeIds], recordIds: [] })
+  }
+
   register('tree:create', (input) => {
     const session = manager.require()
-    return toTreeNode(createNode(session.connection.orm, session.info.format, input))
+    const made = toTreeNode(createNode(session.connection.orm, session.info.format, input))
+    bookOrderMoved([made.id])
+    return made
   })
 
   register('tree:rename', ({ id, title }) => {
     const renamed = toTreeNode(renameNode(manager.require().connection.orm, id, title))
     // F-9.16: a scene's title is part of what the To do check sends.
     todoBookMoved()
+    bookOrderMoved([id])
     return renamed
   })
 
@@ -1267,6 +1283,7 @@ export function registerHandlers({
     const copies = rows.map(toTreeNode)
     // F-16.5: the copies are new manuscript scenes for the name scan and the passage index.
     queueMemoryIndex(db)
+    bookOrderMoved(copies.map((copy) => copy.id))
     return copies
   })
 
@@ -1284,6 +1301,7 @@ export function registerHandlers({
     }
     // F-9.16: the scene's items lose their passage; the rules count one scene fewer.
     queueTodo(db)
+    bookOrderMoved([id])
     return null
   })
 
@@ -1295,6 +1313,7 @@ export function registerHandlers({
     // F-16.5: a scene moved under an Idea or left-out folder is relabelled, one moved into the
     // manuscript is scanned and indexed (by hash: nothing else is read again).
     queueMemoryIndex(db)
+    bookOrderMoved([id])
     return moved
   })
 
@@ -1475,14 +1494,33 @@ export function registerHandlers({
     id: string,
     page: RecordPage,
     doc: TiptapNodeT | null
-  ): StoryRecord => saveRecordPageWith(db, (tx) => savePage(tx, id, page, doc, new Date()))
+  ): StoryRecord => saveRecordPageWith(db, id, (tx) => savePage(tx, id, page, doc, new Date()))
 
-  /** A record page written by `write`, then indexed like any page save (F-16.5). */
-  const saveRecordPageWith = (db: TreeDb, write: (db: TreeDb) => StoryRecord): StoryRecord => {
+  /** A record's canon Pinned "Born:" lines (P2b-D15), or none when it is gone. */
+  const pinnedBorn = (db: TreeDb, id: string): string[] => {
+    const record = getRecord(db, id)
+    return record === null ? [] : bornLines(pinnedCanonLines(record))
+  }
+
+  /**
+   * A record page written by `write`, then indexed like any page save (F-16.5). F-16.23 (review
+   * of P2b slice 5): a Pinned "Born: 1792" line is a birth year, so when the record's Born lines
+   * moved, its sheet's Age and the Timeline are read again (`memory:changed` naming it).
+   */
+  const saveRecordPageWith = (
+    db: TreeDb,
+    recordId: string,
+    write: (db: TreeDb) => StoryRecord
+  ): StoryRecord => {
+    const v2 = memory() === 'v2'
+    const before = v2 ? pinnedBorn(db, recordId) : []
     const saved = write(db)
     // F-16.5: Pinned and Ideas are passages; one root job indexes every page that changed.
     const root = manuscriptRootId(db)
     if (root !== null) mentionQueue.touch('passages', root)
+    if (v2 && JSON.stringify(pinnedBorn(db, recordId)) !== JSON.stringify(before)) {
+      emit(windows(), 'memory:changed', { nodeIds: [], recordIds: [recordId] })
+    }
     return saved
   }
 
@@ -1568,7 +1606,10 @@ export function registerHandlers({
     queueTodo(db)
     // F-16.5: the Idea status relabels the passages of the node and everything under it; the
     // synopsis, brief and beats autosave here too, and they change no label.
-    if (v2 && wasIdea !== (getSceneMeta(db, id).meta.status === 'idea')) queueMemoryIndex(db)
+    if (v2 && wasIdea !== (getSceneMeta(db, id).meta.status === 'idea')) {
+      queueMemoryIndex(db)
+      bookOrderMoved([id])
+    }
     return stored
   })
 
@@ -1788,9 +1829,16 @@ export function registerHandlers({
 
   register('compileState:set', (value) => {
     const db = manager.require().connection.orm
+    const before = new Set(getCompileState(db).excluded)
     const stored = setCompileState(db, value)
     // F-16.5: a scene left out of compile is relabelled in the passage index.
     queueMemoryIndex(db)
+    const after = new Set(stored.excluded)
+    const flipped = [
+      ...[...before].filter((id) => !after.has(id)),
+      ...[...after].filter((id) => !before.has(id))
+    ]
+    if (flipped.length > 0) bookOrderMoved(flipped)
     return stored
   })
 
@@ -5313,7 +5361,7 @@ export function registerHandlers({
   )
 
   register('research:updateFiledLine', ({ recordId, lineIndex, line, text }) =>
-    saveRecordPageWith(manager.require().connection.orm, (db) =>
+    saveRecordPageWith(manager.require().connection.orm, recordId, (db) =>
       updateFiledLine(db, { recordId, lineIndex, line, text }, new Date())
     )
   )

@@ -49,16 +49,19 @@ export interface SceneSentence {
   hash: string
 }
 
+/** The sentences of paragraph `p`, with their hashes (what `sceneSentences` gives for it). */
+export function paragraphSentences(paragraph: string, p: number): SceneSentence[] {
+  return splitSentences(paragraph).map((span, index) => ({
+    p,
+    index,
+    text: span.text,
+    hash: sentenceHash(span.text)
+  }))
+}
+
 /** Every sentence of a scene, paragraph by paragraph, with its hash. */
 export function sceneSentences(paragraphs: readonly string[]): SceneSentence[] {
-  return paragraphs.flatMap((paragraph, p) =>
-    splitSentences(paragraph).map((span, index) => ({
-      p,
-      index,
-      text: span.text,
-      hash: sentenceHash(span.text)
-    }))
-  )
+  return paragraphs.flatMap((paragraph, p) => paragraphSentences(paragraph, p))
 }
 
 /**

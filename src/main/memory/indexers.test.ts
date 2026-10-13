@@ -17,6 +17,7 @@ import {
   listNameMentions,
   markNotAMention,
   namedInCounts,
+  recordMentionParas,
   scanNamesFor,
   staleNameScans
 } from './nameIndexer'
@@ -182,6 +183,38 @@ describe('nameIndexer (F-16.5)', () => {
     expect(listNameMentions(db, scene()).map((m) => [m.recordId, m.ambiguous])).toEqual([
       [mrs, false]
     ])
+  })
+
+  it('gives the paragraphs that name a record for certain, never an ambiguous span (F-16.23)', () => {
+    const mr = record('Mr. Harrow')
+    const mrs = record('Mrs. Harrow')
+    for (const [id, name] of [
+      [mr, 'Mr. Harrow'],
+      [mrs, 'Mrs. Harrow']
+    ] as const) {
+      setAliases(
+        db,
+        id,
+        { name: { text: name }, aliases: [{ text: 'Harrow', shared: true }] },
+        at(1)
+      )
+    }
+    saveDocument(db, scene(), doc('The rain came.', 'Harrow sighed.'))
+    scanNamesFor(db, scene(), at(2))
+    expect(listNameMentions(db, scene()).map((m) => [m.para, m.ambiguous])).toEqual([
+      [1, true],
+      [1, true]
+    ])
+    // The shared "Harrow" names nobody yet: no sheet's Threads count it.
+    expect(recordMentionParas(db, mrs).size).toBe(0)
+    saveDocument(db, scene(), doc('Mrs. Harrow came in from the rain.', 'Harrow sighed.'))
+    scanNamesFor(db, scene(), at(3))
+    const certain = listNameMentions(db, scene()).filter((m) => m.recordId === mrs && !m.ambiguous)
+    expect([...recordMentionParas(db, mrs)].sort()).toEqual(
+      [...new Set(certain.map((m) => `${scene()}|${m.para}`))].sort()
+    )
+    expect([...recordMentionParas(db, mrs)]).toContain(`${scene()}|0`)
+    expect(recordMentionParas(db, 'missing').size).toBe(0)
   })
 
   it('marks a phrase Not a mention, rescans at once, and keeps the tombstone on Dismissed', () => {

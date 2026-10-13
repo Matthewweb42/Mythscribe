@@ -238,6 +238,43 @@ describe('useMemoryStore (F-16.18)', () => {
     expect(useMemoryStore.getState().timeline).toEqual({})
   })
 
+  it('F-16.23: reads the Threads and the Timeline again when the book’s order or a Pinned Born line moved', async () => {
+    renderHook(() => useThreads(null))
+    renderHook(() => useTimeline(null))
+    renderHook(() => useSheetMemory('r-mara', null))
+    await flush()
+    main.calls.length = 0
+    // Main says a scene was moved, renamed, made or deleted (or an Idea flipped): no record named.
+    act(() => main.emit('memory:changed', { nodeIds: ['sc-2'], recordIds: [] }))
+    await flush()
+    expect(main.sent('memory:threads')).toEqual([{ asOf: null }])
+    expect(main.sent('memory:timeline')).toEqual([{ recordId: null }])
+    main.calls.length = 0
+    // A Pinned "Born: 1792" saved on Mara's sheet: main names her and no scene.
+    act(() => main.emit('memory:changed', { nodeIds: [], recordIds: ['r-mara'] }))
+    await flush()
+    expect(main.sent('memory:sheet')).toEqual([{ recordId: 'r-mara', asOf: null }])
+    expect(main.sent('memory:timeline')).toEqual([{ recordId: null }])
+  })
+
+  it('F-16.23: reads a sheet’s Threads again when the name index moved (a nickname, Not a mention)', async () => {
+    renderHook(() => useSheetMemory('r-harbour', null))
+    renderHook(() => useSheetMemory('r-mara', null))
+    await flush()
+    main.calls.length = 0
+    act(() => main.emit('names:changed', { nodeIds: ['sc-4'] }))
+    await flush()
+    // The harbour's Threads are matched by name; Mara's sheet has no Threads in this fixture.
+    expect(main.sent('memory:sheet')).toEqual([{ recordId: 'r-harbour', asOf: null }])
+  })
+
+  it('F-16.23: keeps the Timeline’s Ages of choice until the project closes', () => {
+    useMemoryStore.getState().setAgesOf('r-mara')
+    expect(useMemoryStore.getState().agesOf).toBe('r-mara')
+    useMemoryStore.getState().clear()
+    expect(useMemoryStore.getState().agesOf).toBeNull()
+  })
+
   it('F-16.22: sends Knew before, Split and Not a secret, adding their Dismissed rows', async () => {
     expect(await useMemoryStore.getState().knewBefore('s-map', 'r-mara', true)).toBe(true)
     expect(main.sent('memory:knewBefore')).toEqual([

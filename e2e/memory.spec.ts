@@ -90,8 +90,10 @@ import { caretToEnd, clickIntoEditor } from './support'
  * the heir."; Book › Threads shows "the missing heir · resolved in 1.3" with its two steps; the
  * Timeline reads 1811, "1811 · from 1.1" and "year not known since “Three winters later” (1.3)"
  * with Mara about 19 in 1.1 and 1.2; her sheet's Age as of 1.2 is "about 19 · year from 1.1", as
- * of 1.3 "19, stated in 1.2 · since then: “Three winters later” (1.3)"; typing 1814 as 1.3's
- * story year makes its row 1814 with Mara about 22.
+ * of 1.3 "19, stated in 1.2 · since then: “Three winters later” (1.3)" (the reader's own value
+ * for the hint is "some time": only the book's words show); typing 1814 as 1.3's story year makes
+ * its row 1814 with Mara about 22; moving 1.3 before 1.2 with the Timeline open reorders its rows
+ * and carries 1814 into the moved-down scene.
  *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
@@ -160,6 +162,11 @@ const PLAN_LINK_WHY = 'She waits at the quay there.'
 const AGE_WORDS: Readonly<Record<string, number>> = { eighteen: 18, nineteen: 19, twenty: 20 }
 /** P2b slice 5: the elapsed hint a paragraph may open with (it crosses a year). */
 const ELAPSED_HINT = 'Three winters later'
+/**
+ * The fake reader's own value for that hint: vague, and not in the quote. The Timeline and the
+ * Age show the quote's words and end the year carry on them (review of P2b slice 5).
+ */
+const ELAPSED_VALUE = 'some time'
 /** The paragraph slice P2a types; the fake reads Mara's eyes and where she walked from it. */
 const READ_PARAGRAPH = "Mara's eyes were grey. She walked to the quay."
 
@@ -275,7 +282,7 @@ function readerAnswer(messages: { content: string }[]): string {
         q: `${stated[1] ?? ''} was ${stated[2] ?? ''}`
       })
     }
-    if (text.startsWith(ELAPSED_HINT)) elapsed = [ELAPSED_HINT, p, ELAPSED_HINT]
+    if (text.startsWith(ELAPSED_HINT)) elapsed = [ELAPSED_VALUE, p, ELAPSED_HINT]
     const sale = /The (\w+) had been sold by (\w+)\./.exec(text)
     if (sale !== null) {
       p2b = true
@@ -2153,17 +2160,12 @@ test('story memory v2: threads, the timeline and ages (P2b slice 5)', async () =
   await expect(row('1.3 Heir').getByTestId('timeline-year')).toHaveText(
     `year not known since “${ELAPSED_HINT}” (1.3)`
   )
-  await expect(row(`1.1 ${first.title}`).getByTestId('timeline-age')).toContainText(
-    'Mara about 19'
-  )
+  await expect(row(`1.1 ${first.title}`).getByTestId('timeline-age')).toContainText('Mara about 19')
   await expect(row('1.2 Nineteen').getByTestId('timeline-age')).toContainText('Mara about 19')
 
   // Mara's sheet: her Age as of 1.2 counts from the year; as of 1.3 the last stated age stands,
   // with the hint since listed and never added up.
-  await panel
-    .getByRole('region', { name: 'Cast' })
-    .getByRole('button', { name: /^Mara/ })
-    .click()
+  await panel.getByRole('region', { name: 'Cast' }).getByRole('button', { name: /^Mara/ }).click()
   const sheet = page.getByTestId('record-sheet')
   const age = sheet.getByRole('region', { name: 'Age' })
   await age.getByRole('combobox', { name: 'as of' }).selectOption(nineteen)
@@ -2203,6 +2205,15 @@ test('story memory v2: threads, the timeline and ages (P2b slice 5)', async () =
     timeout: 15_000
   })
   await expect(row('1.3 Heir').getByTestId('timeline-age')).toContainText('Mara about 22')
+  await expect(timeline).not.toContainText(ELAPSED_VALUE)
+
+  // Moving 1.3 before 1.2 with the Timeline open: the rows follow the book's new order at once,
+  // and the typed 1814 now carries into the scene after it.
+  await invoke<TreeNode>('tree:move', { id: heir, parentId: first.parentId, afterId: first.id })
+  await expect(row('1.2 Heir').getByTestId('timeline-year')).toHaveText('1814', {
+    timeout: 15_000
+  })
+  await expect(row('1.3 Nineteen').getByTestId('timeline-year')).toHaveText('1814 · from 1.2')
   // Nothing about years or threads was sent anywhere: all of it is local.
   expect(
     providerBodies.some((body) =>

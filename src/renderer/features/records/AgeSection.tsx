@@ -2,7 +2,12 @@ import type { AgeView } from '@shared/memory/views'
 import { ClaimLine } from '@renderer/features/memory/ClaimLine'
 import { useMemoryStore, useSheetMemory } from '@renderer/features/memory/memoryStore'
 import { staleNote } from '@renderer/features/memory/memoryView'
-import { ageText, bornText, statedText } from '@renderer/features/memory/timeline/timeView'
+import {
+  ageText,
+  bornText,
+  noAgeText,
+  statedText
+} from '@renderer/features/memory/timeline/timeView'
 import { AsOfPicker } from './AsOfPicker'
 import { useAsOf } from './asOf'
 
@@ -13,11 +18,15 @@ const HEADING = 'm-0 text-xs font-semibold tracking-wide text-fg-muted uppercase
  * P2b §5.2): "about 19 · year from 1.1" with the birth year it counts from ("Born: 1792", noted
  * "1.1", with ⓘ and *Not right*; or the author's Pinned line), or the last stated age with the
  * year-crossing hints since, listed and never added up ("19, stated in 2.1 · since then: “Three
- * winters later” (14.1)", its line with ⓘ). With neither, it says so for this scene only.
+ * winters later” (14.1)", its line with ⓘ), or, where the scene's year is not known, the birth
+ * year alone and why ("born 1792 · this scene’s year not known since “A year later” (1.3)"). With
+ * neither, it says so scoped to what was read: "No birth year or stated age read (checked up to
+ * 1.2)" (P2b rule 9).
  */
 export function AgeSection({ recordId }: { recordId: string }): React.JSX.Element {
   const { asOf, scenes, setAsOf } = useAsOf()
   const sheet = useSheetMemory(recordId, asOf)
+  const age = sheet?.age?.age ?? null
   return (
     <section aria-label="Age" className="flex flex-col gap-1" data-testid="age-section">
       <div className="flex flex-wrap items-center gap-2">
@@ -26,12 +35,12 @@ export function AgeSection({ recordId }: { recordId: string }): React.JSX.Elemen
       </div>
       {sheet === undefined ? (
         <p className="m-0 text-xs text-fg-muted">Reading…</p>
-      ) : sheet.age === null ? (
-        <p className="m-0 text-xs text-fg-muted" data-testid="age-none">
-          No birth year or stated age as of this scene.
+      ) : age === null ? (
+        <p className="m-0 text-xs text-fg-muted italic" data-testid="age-none">
+          {noAgeText(sheet.age?.checkedUpTo ?? null)}
         </p>
       ) : (
-        <AgeBody age={sheet.age} recordId={recordId} />
+        <AgeBody age={age} recordId={recordId} />
       )}
     </section>
   )

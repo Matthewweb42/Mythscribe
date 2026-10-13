@@ -14,6 +14,7 @@ import { locateText } from '@renderer/features/editor/locateText'
 import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import {
   computedAgeFixture,
+  elapsedHintFixture,
   knowsCellFixture,
   knowsGridFixture,
   secretViewFixture,
@@ -1092,17 +1093,20 @@ describe('sheets of threads, years and ages (F-16.23)', () => {
     installThreads((recordId, asOf) =>
       sheetMemoryFixture(recordId, {
         asOf,
-        age:
-          asOf === 'sc-3'
-            ? {
-                kind: 'stated',
-                value: '19',
-                claimId: 'c-age',
-                nodeId: 'sc-2',
-                ref: '1.2',
-                since: [{ text: 'Three winters later', nodeId: 'sc-3', ref: '1.3', breaks: true }]
-              }
-            : computedAgeFixture(19),
+        age: {
+          age:
+            asOf === 'sc-3'
+              ? {
+                  kind: 'stated',
+                  value: '19',
+                  claimId: 'c-age',
+                  nodeId: 'sc-2',
+                  ref: '1.2',
+                  since: [{ kind: 'hint', hint: elapsedHintFixture('sc-3') }]
+                }
+              : computedAgeFixture(19),
+          checkedUpTo: CHECKED
+        },
         threads: { threads: [heir], checkedUpTo: CHECKED }
       })
     )
@@ -1145,18 +1149,49 @@ describe('sheets of threads, years and ages (F-16.23)', () => {
 
   it('says when no age is known, and scopes a sheet with no thread step naming it', async () => {
     installThreads((recordId, asOf) =>
-      sheetMemoryFixture(recordId, { asOf, threads: { threads: [], checkedUpTo: CHECKED } })
+      sheetMemoryFixture(recordId, {
+        asOf,
+        age: { age: null, checkedUpTo: CHECKED },
+        threads: { threads: [], checkedUpTo: CHECKED }
+      })
     )
     await sheetOf('r-mara')
     const age = await screen.findByRole('region', { name: 'Age' })
     await waitFor(() =>
       expect(within(age).getByTestId('age-none')).toHaveTextContent(
-        'No birth year or stated age as of this scene.'
+        'No birth year or stated age read (checked up to 1.2)'
       )
     )
     expect(
       within(screen.getByRole('region', { name: 'Threads' })).getByTestId('threads-none')
     ).toHaveTextContent('No scene shows a thread step naming Mara Vell (checked up to 1.2)')
+  })
+
+  it('gives the birth year alone where the scene’s year is not known (never "no birth year")', async () => {
+    const born = computedAgeFixture(19)
+    if (born.kind !== 'computed') throw new Error('computed')
+    installThreads((recordId, asOf) =>
+      sheetMemoryFixture(recordId, {
+        asOf,
+        age: {
+          age: { kind: 'bornOnly', born: born.born, hint: elapsedHintFixture('sc-3') },
+          checkedUpTo: CHECKED
+        },
+        threads: { threads: [], checkedUpTo: CHECKED }
+      })
+    )
+    await sheetOf('r-mara')
+    const age = await screen.findByRole('region', { name: 'Age' })
+    await waitFor(() =>
+      expect(within(age).getByTestId('age-line')).toHaveTextContent(
+        'born 1792 · this scene’s year not known since “Three winters later” (1.3)'
+      )
+    )
+    expect(within(age).queryByTestId('age-none')).toBeNull()
+    // The birth year's line, with ⓘ and Not right.
+    const line = within(age).getByTestId('claim-line')
+    expect(line).toHaveTextContent('Born: 1792')
+    expect(within(line).getByRole('button', { name: 'Not right' })).toBeVisible()
   })
 
   it('gives a place Threads but no Age', async () => {
@@ -1232,7 +1267,7 @@ describe('sheets of threads, years and ages (F-16.23)', () => {
       )
     )
     expect(within(section).getByTestId('topic-thread-status')).toHaveTextContent(
-      'not yet in the book'
+      'not opened (checked up to 1.2)'
     )
     expect(within(section).queryByRole('button', { name: 'Not a thread' })).toBeNull()
     expect(within(section).getByTestId('topic-info')).toHaveTextContent('You made this thread.')
@@ -1249,7 +1284,7 @@ describe('sheets of threads, years and ages (F-16.23)', () => {
       )
     )
     expect(within(list).getByRole('button', { name: /^Ashby’s return/ })).toHaveTextContent(
-      'not yet in the book'
+      'not opened (checked up to 1.2)'
     )
     expect(sent('memory:threads')).toEqual([{ asOf: null }])
     fireEvent.click(screen.getByRole('button', { name: 'New thread…' }))

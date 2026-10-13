@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { AgeView } from '@shared/memory/views'
-import { computedAgeFixture } from '../memoryFixture'
-import { ageText, bornText, hintText, statedText, yearText } from './timeView'
+import { computedAgeFixture, elapsedHintFixture } from '../memoryFixture'
+import { ageText, bornText, hintText, noAgeText, statedText, yearText } from './timeView'
 
 const AT = { nodeId: 'sc-1', ref: '1.1' }
-const HINT = { text: 'Three winters later', nodeId: 'sc-3', ref: '1.3', breaks: true }
+const HINT = elapsedHintFixture('sc-3')
 
 /** F-16.23: the words of story years and ages (decision 5, plan P2b §5.2). */
 describe('years and ages, in words (F-16.23)', () => {
@@ -29,9 +29,19 @@ describe('years and ages, in words (F-16.23)', () => {
       claimId: 'c',
       nodeId: 'sc-2',
       ref: '1.2',
-      since: [HINT]
+      since: [{ kind: 'hint', hint: HINT }]
     }
     expect(ageText(stated)).toBe('19, stated in 1.2 · since then: “Three winters later” (1.3)')
+    // A later typed year is listed beside the hints, never added up.
+    expect(
+      ageText({
+        ...stated,
+        since: [
+          { kind: 'hint', hint: HINT },
+          { kind: 'year', value: 1820, nodeId: 'sc-4', ref: '1.4' }
+        ]
+      })
+    ).toBe('19, stated in 1.2 · since then: “Three winters later” (1.3), 1820 (1.4)')
     expect(ageText({ ...stated, since: [] })).toBe('19, stated in 1.2')
     expect(statedText(stated)).toBe('Age: 19')
     const fixture = computedAgeFixture(19)
@@ -43,5 +53,18 @@ describe('years and ages, in words (F-16.23)', () => {
     expect(bornText({ ...fixture.born, source: 'pinned', claimId: null })).toBe(
       'Born: 1792 (your Pinned line)'
     )
+  })
+
+  it('gives the birth year alone where the year is not known, and scopes no age at all', () => {
+    const fixture = computedAgeFixture(19)
+    if (fixture.kind !== 'computed') throw new Error('computed')
+    expect(ageText({ kind: 'bornOnly', born: fixture.born, hint: HINT })).toBe(
+      'born 1792 · this scene’s year not known since “Three winters later” (1.3)'
+    )
+    expect(ageText({ kind: 'bornOnly', born: fixture.born, hint: null })).toBe(
+      'born 1792 · no story year known as of this scene'
+    )
+    expect(noAgeText(AT)).toBe('No birth year or stated age read (checked up to 1.1)')
+    expect(noAgeText(null)).toBe('No birth year or stated age read (not checked yet)')
   })
 })

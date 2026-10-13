@@ -6,7 +6,13 @@ import { PARTIAL, knowsLine } from '@shared/memory/knows'
 import { locateQuote } from '@shared/memory/quote'
 import { readerMayRead } from '@shared/memory/sources'
 import type { ReadingOrder } from '@shared/memory/asOf'
-import { hintsSince, recordAge, storyYears, type AgeClaim } from '@shared/memory/years'
+import {
+  changesSince,
+  recordAge,
+  sinceNodeId,
+  storyYears,
+  type AgeClaim
+} from '@shared/memory/years'
 import { TEST_BOOK, TEST_BOOK_SOURCE, testBookScene } from './book'
 import { TEST_BOOK_LABELS } from './labels'
 import { TestBookLabels } from './labels.schema'
@@ -248,7 +254,10 @@ function bookYears(): ReturnType<typeof storyYears> {
         typedYear: scene.details?.year ?? null,
         quotedYear: label?.quotedYear?.value ?? null,
         flashback: label?.flashback ?? false,
-        elapsed: label?.elapsed?.quote ?? null
+        elapsed:
+          label?.elapsed === undefined
+            ? null
+            : { value: label.elapsed.quote, quote: label.elapsed.quote, para: label.elapsed.p }
       }
     })
   )
@@ -305,17 +314,20 @@ describe('the test book’s years and ages (P2b, decision 5)', () => {
           kind: 'stated',
           claimId: expected.claim
         })
-        expect(age?.kind === 'stated' ? age.since.map((hint) => hint.nodeId) : null).toEqual(
+        // The scenes where something changed since (a hint, a typed year), each once.
+        expect(age?.kind === 'stated' ? [...new Set(age.since.map(sinceNodeId))] : null).toEqual(
           expected.since
         )
       } else {
         expect(age).toMatchObject({ kind: 'computed', age: expected.age })
       }
     }
-    // Johanna's "two-and-twenty" in h08 is never moved on by the winters and the year since.
-    expect(hintsSince(years, 'h08', 'h14').map((hint) => hint.text)).toEqual([
-      'Three winters later',
-      'A year later'
-    ])
+    // Johanna's "two-and-twenty" in h08 is never moved on by the winters, the typed 1814 and
+    // the year since: they are listed, never added up.
+    expect(
+      changesSince(years, 'h08', 'h14').map((entry) =>
+        entry.kind === 'hint' ? entry.hint.text : entry.value
+      )
+    ).toEqual(['Three winters later', 1814, 'A year later'])
   })
 })

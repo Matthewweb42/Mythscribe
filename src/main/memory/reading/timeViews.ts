@@ -1,18 +1,22 @@
 import type { ReadingOrder } from '@shared/memory/asOf'
-import type { Claim } from '@shared/memory/claims'
-import type { RecordKind } from '@shared/memory/records'
+import { emptyCardFields, type Card, type Claim } from '@shared/memory/claims'
+import { pronounPerson } from '@shared/memory/ladder'
+import type { RecordKind, StoryRecordSummary } from '@shared/memory/records'
 import { pinnedCanonLines } from '@shared/memory/storyNotes'
 import { emptySceneDetails, type SceneDetails } from '@shared/memory/sceneDetails'
 import type { HeldCard } from '@shared/memory/reproof'
 import { threadsAsOf } from '@shared/memory/threadsAsOf'
-import type {
-  AgeView,
-  SceneRefView,
-  SheetThreadsView,
-  ThreadMemoryView,
-  ThreadsMemory,
-  TimelineMemory,
-  TimelineRow
+import {
+  TIMELINE_CARD_FIELDS,
+  type AgeView,
+  type SceneRefView,
+  type SheetAgeView,
+  type SheetThreadsView,
+  type ThreadMemoryView,
+  type ThreadsMemory,
+  type TimelineMemory,
+  type TimelineRow,
+  type TimelineSourceView
 } from '@shared/memory/views'
 import { checkedUpTo } from '@shared/memory/whoKnows'
 import { recordAge, storyYears, type AgeClaim, type StoryYear } from '@shared/memory/years'
@@ -38,7 +42,13 @@ import { heldCard, hereChips, readingOrder, rowTexts } from './readingFrame'
  * only what was proved plus `checkedUpTo`; "No scene shows this thread yet (checked up to …)" is
  * worded in the renderer alone, and nothing here reaches a prompt. A year is read from the typed
  * details and the held card (the verified `year` and `flashback`, the `elapsed` hint standing on
- * the text); the scenes' texts are read once per call, for the held cards only.
+ * the text).
+ *
+ * Cost (review of P2b slice 5): these run synchronously in Electron main whenever a scene moved,
+ * so a scene's text is read only when its card has a field the view needs (a year, a flashback or
+ * a hint; for Here also a POV or someone on the page), only the paragraphs those quotes sit in
+ * are hashed (`holdingCard`), and a scene's paragraphs are parsed again only after its content
+ * changed (`rowTexts`). `timeViews.perf.test.ts` holds the budget on a 90-scene book.
  */
 
 /** One readable scene as the Timeline reads it, in reading order. */
@@ -50,11 +60,34 @@ interface SceneTime {
   held: HeldCard | null
 }
 
+/** The card fields Here reads (beside who is on the page). */
+const HERE_FIELDS = ['pov'] as const
+
+/**
+ * The part of a card a view reads: the year fields, and with `here` the POV and who is on the
+ * page; null when the card has none of them (its scene's text is then never read).
+ */
+function cardFor(card: Card, here: boolean): Card | null {
+  const fields = emptyCardFields()
+  for (const name of here ? [...TIMELINE_CARD_FIELDS, ...HERE_FIELDS] : TIMELINE_CARD_FIELDS) {
+    fields[name] = card.fields[name]
+  }
+  const present = here ? card.present : []
+  const empty = Object.values(fields).every((entry) => entry === null) && present.length === 0
+  return empty ? null : { ...card, fields, present }
+}
+
 /**
  * The readable scenes (not Idea, not left out of compile) in reading order, each with its typed
- * details and its card as it stands on the text in the active draft.
+ * details and the part of its card the view reads (`cardFor`) as it stands on the text in the
+ * active draft.
  */
-function sceneTimes(db: TreeDb, reading: ReadingOrder, nodes: readonly NodeRow[]): SceneTime[] {
+function sceneTimes(
+  db: TreeDb,
+  reading: ReadingOrder,
+  nodes: readonly NodeRow[],
+  here: boolean
+): SceneTime[] {
   const draftId = currentDraftId(db)
   const cards = new Map(
     (draftId === null ? [] : draftCards(db, draftId)).map((card) => [card.nodeId, card])
@@ -67,14 +100,15 @@ function sceneTimes(db: TreeDb, reading: ReadingOrder, nodes: readonly NodeRow[]
     .flatMap(([nodeId]) => {
       const row = rows.get(nodeId)
       if (row === undefined) return []
-      const card = cards.get(nodeId)
+      const stored = cards.get(nodeId)
+      const card = stored === undefined ? null : cardFor(stored, here)
       return [
         {
           nodeId,
           ref: reading.refs.get(nodeId) ?? '',
           title: searchableText(row.title).trim() || 'Untitled scene',
           details: details.get(nodeId) ?? emptySceneDetails(),
-          held: card === undefined ? null : heldCard(db, card, true, notRight, rowTexts(row))
+          held: card === null ? null : heldCard(db, card, true, notRight, rowTexts(row))
         }
       ]
     })
@@ -82,23 +116,45 @@ function sceneTimes(db: TreeDb, reading: ReadingOrder, nodes: readonly NodeRow[]
 
 /**
  * Decision 5 over the scenes: the typed year, the held card's verified year (its own scene only)
- * and verified flashback, and its elapsed hint standing on the text.
+ * and verified flashback, and its elapsed hint standing on the text (its value and its quote).
  */
 function yearsOf(scenes: readonly SceneTime[]): StoryYear[] {
   return storyYears(
     scenes.map((scene) => {
       const year = scene.held?.fields.year ?? null
       const flashback = scene.held?.fields.flashback ?? null
+      const elapsed = scene.held?.fields.elapsed ?? null
       return {
         nodeId: scene.nodeId,
         ref: scene.ref,
         typedYear: scene.details.storyYear,
         quotedYear: year?.verified === true ? year.value : null,
         flashback: flashback?.verified === true && flashback.value === 'yes',
-        elapsed: scene.held?.fields.elapsed?.value ?? null
+        elapsed:
+          elapsed === null ? null : { value: elapsed.value, quote: elapsed.quote, para: elapsed.p }
       }
     })
   )
+}
+
+/**
+ * The card fields a row's year rests on, for ⓘ: the year the text states when it is the row's,
+ * the flashback, the hint.
+ */
+function sourcesOf(scene: SceneTime, year: StoryYear | undefined): TimelineSourceView[] {
+  const fields = scene.held?.fields
+  if (fields === undefined || year === undefined) return []
+  const sources: TimelineSourceView[] = []
+  if (year.year.kind === 'quoted' && fields.year !== null) {
+    sources.push({ field: 'year', entry: fields.year })
+  }
+  if (year.flashback && fields.flashback !== null) {
+    sources.push({ field: 'flashback', entry: fields.flashback })
+  }
+  if (year.elapsed !== null && fields.elapsed !== null) {
+    sources.push({ field: 'elapsed', entry: fields.elapsed })
+  }
+  return sources
 }
 
 /**
@@ -110,7 +166,7 @@ export function storedYears(
   reading: ReadingOrder = readingOrder(db),
   nodes: readonly NodeRow[] = listNodes(db)
 ): StoryYear[] {
-  return yearsOf(sceneTimes(db, reading, nodes))
+  return yearsOf(sceneTimes(db, reading, nodes, false))
 }
 
 /** What the age rules read for every record: its `born` and `age` claims and its Pinned page. */
@@ -175,8 +231,8 @@ function ageOf(
 
 /**
  * A character's age as of scene `atId` (null: the end of the book) over the stored book: born year
- * plus the scene's year ("about 19, year from 1.1"), else the last stated age with the
- * year-crossing hints since, listed and never added up; null when neither is known.
+ * plus the scene's year ("about 19, year from 1.1"), else the last stated age with what changed
+ * since, listed and never added up, else the birth year alone; null when the book gives neither.
  */
 export function storedAge(
   db: TreeDb,
@@ -198,7 +254,7 @@ export function storedAge(
 export function timelineMemory(db: TreeDb, recordId: string | null): TimelineMemory {
   const nodes = listNodes(db)
   const reading = readingOrder(db, nodes)
-  const scenes = sceneTimes(db, reading, nodes)
+  const scenes = sceneTimes(db, reading, nodes, recordId === null)
   const years = yearsOf(scenes)
   const sources = ageSources(db)
   const records = new Map(listRecords(db).map((each) => [each.id, each]))
@@ -218,10 +274,12 @@ export function timelineMemory(db: TreeDb, recordId: string | null): TimelineMem
       flashback: year?.flashback ?? false,
       elapsed: year?.elapsed ?? null,
       time: scene.details.time.text,
+      // A birth year with no year for the row says nothing the row's year does not already say.
       ages: who.flatMap((id) => {
         const age = ageOf(sources, id, years, reading, scene.nodeId)
-        return age === null ? [] : [{ recordId: id, age }]
-      })
+        return age === null || age.kind === 'bornOnly' ? [] : [{ recordId: id, age }]
+      }),
+      sources: sourcesOf(scene, year)
     }
   })
   return { recordId, rows }
@@ -231,6 +289,8 @@ export function timelineMemory(db: TreeDb, recordId: string | null): TimelineMem
 interface StoredThreads {
   threads: ThreadMemoryView[]
   checkedUpTo: SceneRefView | null
+  /** The step claims by id (their quotes and speakers: whom a first-person step is about). */
+  steps: ReadonlyMap<string, Claim>
 }
 
 /**
@@ -246,13 +306,14 @@ function storedThreads(
   nodes: readonly NodeRow[]
 ): StoredThreads {
   const draftId = currentDraftId(db)
+  const claims = draftId === null ? [] : slotClaims(db, 'thread', draftId)
   const views = threadsAsOf({
     threads: listTopics(db, 'thread').map(({ recordId, label, origin }) => ({
       recordId,
       label,
       origin
     })),
-    claims: draftId === null ? [] : slotClaims(db, 'thread', draftId),
+    claims,
     quotes: draftId === null ? [] : quotesWithReadings(db, draftId),
     reading,
     atId
@@ -278,7 +339,8 @@ function storedThreads(
       draftId === null ? new Map() : sceneReadFlags(db, draftId),
       atId,
       emptyScenes(nodes, reading)
-    )
+    ),
+    steps: new Map(claims.map((claim) => [claim.id, claim]))
   }
 }
 
@@ -298,15 +360,69 @@ export function threadsMemory(db: TreeDb, asOf: string | null): ThreadsMemory {
 /** What a sheet shows of threads and time (F-16.23), as of the sheet's scene. */
 export interface SheetTime {
   threads: SheetThreadsView | null
-  age: AgeView | null
+  age: SheetAgeView | null
   thread: { thread: ThreadMemoryView; checkedUpTo: SceneRefView | null } | null
 }
 
 /**
+ * Each scene's POV as Here takes it (`hereChips`: the card's verified POV standing on the text,
+ * else the typed one), read only for the scenes asked about.
+ */
+function scenePovs(
+  db: TreeDb,
+  nodeIds: ReadonlySet<string>,
+  nodes: readonly NodeRow[]
+): Map<string, string | null> {
+  const povs = new Map<string, string | null>()
+  if (nodeIds.size === 0) return povs
+  const draftId = currentDraftId(db)
+  const details = allSceneDetails(db)
+  const records = new Map<string, Pick<StoryRecordSummary, 'kind'>>(
+    listRecords(db).map((each) => [each.id, each])
+  )
+  const cards = new Map(
+    (draftId === null ? [] : draftCards(db, draftId)).map((card) => [card.nodeId, card])
+  )
+  const notRight = dismissedKeys(db, 'notRight')
+  for (const row of nodes) {
+    if (!nodeIds.has(row.id)) continue
+    const stored = cards.get(row.id)
+    const pov = stored?.fields.pov ?? null
+    const card =
+      stored === undefined || pov === null
+        ? null
+        : { ...stored, fields: { ...emptyCardFields(), pov }, present: [] }
+    const held = card === null ? null : heldCard(db, card, true, notRight, rowTexts(row))
+    const first = hereChips(details.get(row.id) ?? emptySceneDetails(), held, records)[0]
+    povs.set(row.id, first?.why === 'pov' ? first.recordId : null)
+  }
+  return povs
+}
+
+/**
+ * Whether a thread step is about `recordId` in the first person (review of P2b slice 5): its
+ * quote says "I" (or "we") and it is the narration (or a thought with no speaker) of a scene whose
+ * POV is the record, or the record's own dialogue or thought. A first-person book's POV never
+ * names herself.
+ */
+function firstPersonOf(
+  claim: Claim | undefined,
+  recordId: string,
+  pov: string | null | undefined
+): boolean {
+  if (claim === undefined || pronounPerson(claim.quote) !== 'first') return false
+  if (claim.voice === 'narration' || (claim.voice === 'thought' && claim.speakerId === null)) {
+    return pov === recordId
+  }
+  return (claim.voice === 'dialogue' || claim.voice === 'thought') && claim.speakerId === recordId
+}
+
+/**
  * A record's threads and age as of scene `atId` for its sheet: a named record's Threads (each
- * thread with a step as of the scene whose paragraph names it for certain, its steps narrowed to
- * those, its status its own), a character's Age, a thread's own view (status, steps, reveals,
- * "checked up to"). Nothing for a secret.
+ * thread with a step as of the scene whose paragraph names it for certain, or that is about it in
+ * the first person, its steps narrowed to those, its status its own), a character's Age with
+ * "checked up to", a thread's own view (status, steps, reveals, "checked up to"). Nothing for a
+ * secret.
  */
 export function sheetTime(
   db: TreeDb,
@@ -327,13 +443,30 @@ export function sheetTime(
     }
   }
   const named = recordMentionParas(db, recordId)
+  const unnamed = stored.threads.flatMap((thread) =>
+    thread.steps.filter((step) => !named.has(`${step.nodeId}|${step.para}`))
+  )
+  const firstPerson = unnamed.filter(
+    (step) => pronounPerson(stored.steps.get(step.claimId)?.quote ?? '') === 'first'
+  )
+  const povs = scenePovs(db, new Set(firstPerson.map((step) => step.nodeId)), nodes)
   const threads = stored.threads.flatMap((thread) => {
-    const steps = thread.steps.filter((step) => named.has(`${step.nodeId}|${step.para}`))
+    const steps = thread.steps.filter(
+      (step) =>
+        named.has(`${step.nodeId}|${step.para}`) ||
+        firstPersonOf(stored.steps.get(step.claimId), recordId, povs.get(step.nodeId))
+    )
     return steps.length === 0 ? [] : [{ ...thread, steps }]
   })
   return {
     threads: { threads, checkedUpTo: stored.checkedUpTo },
-    age: kind === 'character' ? storedAge(db, recordId, atId, reading, nodes) : null,
+    age:
+      kind === 'character'
+        ? {
+            age: storedAge(db, recordId, atId, reading, nodes),
+            checkedUpTo: stored.checkedUpTo
+          }
+        : null,
     thread: null
   }
 }

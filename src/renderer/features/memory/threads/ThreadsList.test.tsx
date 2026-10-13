@@ -62,6 +62,19 @@ beforeEach(async () => {
             last: null,
             steps: [],
             defining: null
+          }),
+          // An AI-made thread made from its reveal alone, and one with only a remembered step.
+          threadViewFixture('t-map', 'the sold map', {
+            status: 'notYet',
+            opened: null,
+            last: null,
+            steps: []
+          }),
+          threadViewFixture('t-ring', 'the lost ring', {
+            status: 'notYet',
+            opened: null,
+            last: null,
+            steps: [threadStepFixture('st-ring', { counted: false, mode: 'memory' })]
           })
         ]
       }),
@@ -95,12 +108,33 @@ describe('ThreadsList (F-16.23)', () => {
     // The author's thread with no step: scoped, never a fact.
     const ashby = screen.getByRole('group', { name: 'Thread: Ashby’s return' })
     expect(within(ashby).getByTestId('thread-head')).toHaveTextContent(
-      'Ashby’s return · not yet in the book'
+      'Ashby’s return · not opened (checked up to 1.2)'
     )
     expect(within(ashby).getByTestId('thread-no-steps')).toHaveTextContent(
       'No scene shows this thread yet (checked up to 1.2)'
     )
     expect(within(ashby).queryByTitle('Found by the AI in your book')).toBeNull()
+    // A thread its reveal stands for never reads as absent from the book.
+    const map = screen.getByRole('group', { name: 'Thread: the sold map' })
+    expect(within(map).getByTestId('thread-head')).toHaveTextContent(
+      'the sold map · revealed in 1.1 · no opening step read yet'
+    )
+    expect(within(map).queryByTestId('thread-no-steps')).toBeNull()
+    const ring = screen.getByRole('group', { name: 'Thread: the lost ring' })
+    expect(within(ring).getByTestId('thread-head')).toHaveTextContent(
+      'the lost ring · revealed in 1.1 · none of its steps counts yet'
+    )
+    expect(within(ring).getByTestId('claim-line')).toHaveTextContent('remembered')
+  })
+
+  it('scopes an empty list to what was read', async () => {
+    main = installFakeMain({
+      'memory:threads': () => threadsMemoryFixture({ checkedUpTo: { nodeId: 'sc-2', ref: '1.2' } })
+    })
+    render(<ThreadsList asOf={null} />)
+    expect(await screen.findByTestId('threads-none')).toHaveTextContent(
+      'No plot thread found (checked up to 1.2)'
+    )
   })
 
   it('opens ⓘ with Not a thread on an AI-made one, a thread’s sheet, and New thread', async () => {
@@ -110,9 +144,7 @@ describe('ThreadsList (F-16.23)', () => {
       within(heir).getByRole('button', { name: 'Where this comes from: the missing heir' })
     )
     fireEvent.click(within(heir).getByRole('button', { name: 'Not a thread' }))
-    await waitFor(() =>
-      expect(main.sent('memory:topicNotRight')).toEqual([{ recordId: 't-heir' }])
-    )
+    await waitFor(() => expect(main.sent('memory:topicNotRight')).toEqual([{ recordId: 't-heir' }]))
     fireEvent.click(within(heir).getByRole('button', { name: 'the missing heir' }))
     expect(useRecordStore.getState().selectedId).toBe('t-heir')
     fireEvent.click(screen.getByRole('button', { name: 'New thread' }))

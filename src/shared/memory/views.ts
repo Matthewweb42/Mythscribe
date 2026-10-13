@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { AiErrorCode } from '../ai'
 import {
   CARD_FIELDS,
+  CardField,
   CardFields,
   CLAIM_PROOFS,
   ClaimMode,
@@ -370,9 +371,15 @@ export const KnowsSheetView = z.object({
 })
 export type KnowsSheetView = z.infer<typeof KnowsSheetView>
 
-/** An elapsed hint the card quoted ("Three winters later"), where, and whether it crosses a year. */
+/**
+ * An elapsed hint the card quoted, where, and whether it crosses a year. `text` is the book's own
+ * words, never the reader's value: the value as it stands in the quote ("Three winters later"),
+ * else the whole quote; `quote` and `para` are the card field's (ⓘ, *Go there*).
+ */
 export const ElapsedHintView = z.object({
   text: z.string(),
+  quote: z.string(),
+  para: z.number().int(),
   nodeId: z.string(),
   ref: z.string(),
   breaks: z.boolean()
@@ -406,10 +413,27 @@ export const BornView = z.object({
 export type BornView = z.infer<typeof BornView>
 
 /**
+ * What a stated age lists "since then" (decision 5), in reading order and never added up: an
+ * elapsed hint that can cross a year, or a story year typed or quoted later that differs from the
+ * one before it ("1820 (1.3)").
+ */
+export const AgeSinceView = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('hint'), hint: ElapsedHintView }),
+  z.object({
+    kind: z.literal('year'),
+    value: z.number().int(),
+    nodeId: z.string(),
+    ref: z.string()
+  })
+])
+export type AgeSinceView = z.infer<typeof AgeSinceView>
+
+/**
  * A character's age as of a scene (decision 5, P2b-D15): computed from a birth year and the
- * scene's year ("about 19 · year from 1.1"), not born yet, or the last stated age with the
- * year-crossing hints since listed and never added up ("19, stated in 2.1 · since then: 'Three
- * winters later' (14.1)").
+ * scene's year ("about 19 · year from 1.1"), not born yet, the last stated age with what changed
+ * since listed and never added up ("19, stated in 2.1 · since then: 'Three winters later'
+ * (14.1)"), or, with a birth year but no year for the scene and no stated age, the birth year
+ * alone with why the year is not known (`bornOnly`).
  */
 export const AgeView = z.discriminatedUnion('kind', [
   z.object({
@@ -437,10 +461,26 @@ export const AgeView = z.discriminatedUnion('kind', [
     claimId: z.string(),
     nodeId: z.string(),
     ref: z.string(),
-    since: z.array(ElapsedHintView)
+    since: z.array(AgeSinceView)
+  }),
+  z.object({
+    kind: z.literal('bornOnly'),
+    born: BornView,
+    /** The hint that ended the year carry; null before the first typed year. */
+    hint: ElapsedHintView.nullable()
   })
 ])
 export type AgeView = z.infer<typeof AgeView>
+
+/**
+ * A character's **Age, as of [scene]** (F-16.23): the age (null when the book gives no birth year
+ * and no stated age up to the scene) and `checkedUpTo`, which scopes that empty state (P2b rule 9).
+ */
+export const SheetAgeView = z.object({
+  age: AgeView.nullable(),
+  checkedUpTo: SceneRefView.nullable()
+})
+export type SheetAgeView = z.infer<typeof SheetAgeView>
 
 export const SceneMemory = z.object({
   nodeId: z.string(),
@@ -570,8 +610,8 @@ export const SheetMemory = z.object({
   knows: KnowsSheetView.nullable(),
   /** F-16.23: a named record's Threads as of the scene; null for a secret or a thread. */
   threads: SheetThreadsView.nullable(),
-  /** F-16.23: a character's age as of the scene (decision 5); null when none is known or for any other record. */
-  age: AgeView.nullable(),
+  /** F-16.23: a character's Age as of the scene (decision 5); null for any other record. */
+  age: SheetAgeView.nullable(),
   /** F-16.22, F-16.23: a secret's or a thread's own view as of the scene; null for a named record. */
   topic: TopicView.nullable()
 })
@@ -849,9 +889,19 @@ export type SplitTopicResult = z.infer<typeof SplitTopicResult>
 export const TopicNotRightResult = z.object({ dismissed: z.array(Dismissed) })
 export type TopicNotRightResult = z.infer<typeof TopicNotRightResult>
 
+/** The card fields a Timeline row's year rests on (ⓘ: the quote, *Go there*, *Not right*). */
+export const TIMELINE_CARD_FIELDS = ['year', 'flashback', 'elapsed'] as const
+export const TimelineSourceView = z.object({
+  field: z.enum(TIMELINE_CARD_FIELDS),
+  entry: CardField
+})
+export type TimelineSourceView = z.infer<typeof TimelineSourceView>
+
 /**
  * One row of the Book's Timeline (decision 5): a readable scene with its year, whether it is a
- * flashback, its elapsed hint, the typed time, and ages (who is Here, or one record).
+ * flashback, its elapsed hint, the typed time, ages (who is Here, or one record), and the card
+ * fields the AI read that its year rests on (`sources`: the year the text states when it is the
+ * row's, the flashback, the hint).
  */
 export const TimelineRow = z.object({
   nodeId: z.string(),
@@ -861,7 +911,8 @@ export const TimelineRow = z.object({
   flashback: z.boolean(),
   elapsed: ElapsedHintView.nullable(),
   time: z.string(),
-  ages: z.array(z.object({ recordId: z.string(), age: AgeView }))
+  ages: z.array(z.object({ recordId: z.string(), age: AgeView })),
+  sources: z.array(TimelineSourceView)
 })
 export type TimelineRow = z.infer<typeof TimelineRow>
 

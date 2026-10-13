@@ -9039,18 +9039,59 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     })
     expect((await invoke('memory:timeline', { recordId: heir })).rows[0]?.ages).toEqual([])
     const sheet = await invoke('memory:sheet', { recordId: mara, asOf: scene })
-    expect(sheet.age).toMatchObject({ kind: 'computed', age: 19 })
+    expect(sheet.age).toMatchObject({ age: { kind: 'computed', age: 19 } })
     expect(sheet.threads?.threads.map((each) => each.recordId)).toEqual([heir])
     expect((await invoke('memory:sheet', { recordId: heir, asOf: null })).topic).toMatchObject({
       kind: 'thread',
       thread: { status: 'open' }
     })
 
+    // Review of P2b slice 5: a Pinned "Born:" line is a birth year; saving one names the record,
+    // so its sheet's Age and the Timeline are read again. Saving the same lines again moves none.
+    const other = await invoke('record:create', { name: 'Orrin', categoryId: 'character' })
+    if (!('record' in other)) throw new Error('blocked')
+    const orrin = other.record.id
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    await invoke('record:savePage', { id: orrin, page: 'pinned', doc: paragraphs('Born: 1790') })
+    expect(sentOf('memory:changed')).toEqual([{ nodeIds: [], recordIds: [orrin] }])
+    expect((await invoke('memory:sheet', { recordId: orrin, asOf: scene })).age).toMatchObject({
+      age: { kind: 'computed', age: 21, born: { source: 'pinned' } }
+    })
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    await invoke('record:savePage', {
+      id: orrin,
+      page: 'pinned',
+      doc: paragraphs('Born: 1790', 'Grey eyes.')
+    })
+    expect(sentOf('memory:changed')).toEqual([])
+
+    // The book's order and its scenes are what the Timeline and the Threads are read in: a
+    // rename, a move or a new scene says so, naming the scene and no record.
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    await invoke('tree:rename', { id: scene, title: 'Dawn' })
+    const parentId =
+      (await invoke('tree:list', undefined)).find((row) => row.id === scene)?.parentId ?? ''
+    const second = await invoke('tree:create', {
+      parentId,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'Later'
+    })
+    await invoke('tree:move', { id: second.id, parentId, afterId: null })
+    expect(sentOf('memory:changed')).toEqual([
+      { nodeIds: [scene], recordIds: [] },
+      { nodeIds: [second.id], recordIds: [] },
+      { nodeIds: [second.id], recordIds: [] }
+    ])
+    expect(
+      (await invoke('memory:timeline', { recordId: null })).rows.map((row) => row.title)
+    ).toEqual(['Later', 'Dawn'])
+
     // After the trial both still read.
     accessNow += 31 * 24 * 60 * 60_000
     access.refresh()
     expect((await invoke('memory:threads', { asOf: null })).threads).toHaveLength(1)
-    expect((await invoke('memory:timeline', { recordId: mara })).rows).toHaveLength(1)
+    expect((await invoke('memory:timeline', { recordId: mara })).rows).toHaveLength(2)
   })
 
   it('opens without v1’s steps: no tag proposals, and the name questions are published instead', async () => {

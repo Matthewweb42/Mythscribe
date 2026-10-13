@@ -428,6 +428,58 @@ describe('the anchors job (F-16.17, P2a-D19, P2a-D22)', () => {
     expect(invariants()).toEqual([])
   })
 
+  it('reports the card only when what of it stands on the text moved (review of P2b slice 5)', () => {
+    upsertCard(
+      db,
+      {
+        nodeId: one,
+        draftId: activeDraftId(db),
+        readingId: null,
+        line: 'A line.',
+        gist: 'A gist.',
+        fields: {
+          ...emptyCardFields(),
+          where: { value: 'the Quay', quote: 'She waited by the Quay', p: 1, verified: true }
+        },
+        present: [{ recordId: mara, quote: 'Mara wore a blue coat', p: 2, verified: true }],
+        mood: null,
+        theme: null,
+        anchor: cardAnchorOf(db, one),
+        seen: []
+      },
+      NOW
+    )
+    // The first check after the app starts knows no earlier standing.
+    expect(runAnchors(db, one, LATER).card).toBe(true)
+    // A pause in typing elsewhere leaves the card as it stood: nothing to read again.
+    saveDocument(db, one, doc('The ridge was colder now.', ...SCENE_ONE.slice(1)))
+    expect(runAnchors(db, one, LATER).card).toBe(false)
+    // An edit to the sentence the place rests on: it no longer stands.
+    saveDocument(
+      db,
+      one,
+      doc(
+        'The ridge was colder now.',
+        "Mara's eyes were grey. She waited by the dock.",
+        SCENE_ONE[2] ?? ''
+      )
+    )
+    expect(runAnchors(db, one, LATER).card).toBe(true)
+    // A paragraph above moves the quotes: the card follows them, and the views are read again.
+    saveDocument(
+      db,
+      one,
+      doc(
+        'A new first line.',
+        'The ridge was colder now.',
+        "Mara's eyes were grey. She waited by the dock.",
+        SCENE_ONE[2] ?? ''
+      )
+    )
+    expect(runAnchors(db, one, LATER).card).toBe(true)
+    expect(runAnchors(db, one, LATER).card).toBe(false)
+  })
+
   it('stales a literal claim when a marker word comes in beside it', () => {
     const [id] = seedClaims(
       db,

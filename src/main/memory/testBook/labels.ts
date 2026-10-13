@@ -1047,9 +1047,10 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       expect: { kind: 'stated', claim: 'johanna-age', since: ['h09', 'h14'] }
     },
     {
+      // h08's typed 1812 and h09's winters and 1814 are listed since her age in 1811.
       record: 'clara',
       scene: 'h09',
-      expect: { kind: 'stated', claim: 'clara-age', since: ['h09'] }
+      expect: { kind: 'stated', claim: 'clara-age', since: ['h08', 'h09'] }
     },
     { record: 'lottie', scene: 'h09', expect: { kind: 'stated', claim: 'lottie-age', since: [] } },
     { record: 'lottie', scene: 'h13', expect: { kind: 'stated', claim: 'lottie-age', since: [] } },

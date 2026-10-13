@@ -81,7 +81,7 @@ function ThreadBody({
   return (
     <>
       <p className="m-0 text-xs text-fg-muted" data-testid="topic-thread-status">
-        {threadStatusText(thread)}
+        {threadStatusText(thread, checkedUpTo)}
       </p>
       <TopicInfoCard topic={thread} kind="thread" />
       <div role="group" aria-label="Steps">

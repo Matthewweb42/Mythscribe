@@ -1,12 +1,12 @@
 import { passageParagraphs, type Paragraph } from '@shared/mentions'
 import { anchorInPlace, sceneSentences } from '@shared/memory/anchor'
-import type { Claim } from '@shared/memory/claims'
+import { CARD_FIELDS, type Card, type Claim } from '@shared/memory/claims'
 import { gateSentences, readSetOf, unreadSentences } from '@shared/memory/gate'
 import { checkMemoryInvariants, type InvariantViolation } from '@shared/memory/invariants'
 import { sentenceNames, type LiteralName } from '@shared/memory/literal'
 import { scanNames, type NameMention } from '@shared/memory/nameScan'
 import { normName } from '@shared/memory/names'
-import { cardParas, checkAnchors, type ReproofClaim } from '@shared/memory/reproof'
+import { cardParas, cardStanding, checkAnchors, type ReproofClaim } from '@shared/memory/reproof'
 import { splitSentences } from '@shared/memory/sentences'
 import { readerMayRead } from '@shared/memory/sources'
 import { EMPTY_DOC } from '@shared/tiptap'
@@ -79,10 +79,38 @@ export interface AnchorsResult {
   /** P2b-D9: the save left a finished sentence unread, so the scene is no longer settled. */
   unsettled: boolean
   /**
-   * The scene has a card: the views read its fields against the text as it is now, so a shown
-   * scene is read again after every check (`heldCard`), whether or not a claim moved.
+   * What of the scene's card stands on the text changed since the scene was last checked (a field
+   * or someone on the page went stale or came back, or its quotes moved paragraph): the views read
+   * its fields against the text as it is now (`heldCard`), so they are read again. An edit that
+   * leaves the card as it stood moves nothing (review of P2b slice 5: the Timeline and the sheets
+   * are not read again after every pause in typing).
    */
   card: boolean
+}
+
+/** Each scene's card as it last stood on the text (`standingKey`), by project, draft and scene. */
+const lastStanding = new WeakMap<TreeDb, Map<string, string>>()
+
+/** What of a card stands on the text: its fields and who is on the page; "parked" when unreadable. */
+function standingKey(card: Card, texts: readonly string[] | null): string {
+  if (texts === null) return 'parked'
+  const held = cardStanding(card, texts)
+  return JSON.stringify([
+    CARD_FIELDS.filter((name) => held.fields[name] !== null),
+    held.present.map((entry) => entry.recordId)
+  ])
+}
+
+/** Records the card's standing and answers whether it moved since the scene was last checked. */
+function standingMoved(db: TreeDb, key: string, standing: string): boolean {
+  let known = lastStanding.get(db)
+  if (known === undefined) {
+    known = new Map()
+    lastStanding.set(db, known)
+  }
+  const was = known.get(key)
+  known.set(key, standing)
+  return was !== standing
 }
 
 const nothing = (): AnchorsResult => ({
@@ -181,7 +209,7 @@ export function runAnchors(
   }
 
   const result = nothing()
-  result.card = card !== null
+  const standingAt = `${draftId}|${nodeId}`
   const recordsOf = (ids: readonly string[]): string[] => {
     const wanted = new Set(ids)
     return claims.flatMap((each) => {
@@ -195,6 +223,7 @@ export function runAnchors(
   const topicsOf = (ids: readonly string[]): string[] =>
     quotes.filter((quote) => ids.includes(quote.id)).map((quote) => quote.recordId)
   if (!readerMayRead(claimSources(db)(nodeId))) {
+    result.card = card !== null && standingMoved(db, standingAt, standingKey(card, null))
     result.parked = claims.filter((each) => each.state === 'live').map((each) => each.id)
     setClaimsState(db, result.parked, 'stale')
     result.topicQuotes = quotes.filter((quote) => quote.state === 'live').map((quote) => quote.id)
@@ -279,6 +308,8 @@ export function runAnchors(
     if (card !== null) {
       const moved = cardParas(card, texts)
       if (moved !== null) moveCardParas(tx, nodeId, draftId, moved)
+      const standing = standingMoved(db, standingAt, standingKey(card, texts))
+      result.card = standing || moved !== null
     }
 
     // P2b: the reveals follow their sentences like claims, with no free re-proof.

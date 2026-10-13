@@ -9,6 +9,7 @@ import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import {
   computedAgeFixture,
+  elapsedHintFixture,
   installFakeMain,
   timelineFixture,
   timelineRowFixture,
@@ -26,8 +27,13 @@ import { TimelineView } from './TimelineView'
 const MARA = recordFixture('r-mara', 'character', ['Mara Vell'])
 const ORRIN = recordFixture('r-orrin', 'character', ['Orrin'])
 const QUAY = recordFixture('r-quay', 'setting', ['North Quay'])
-const HINT = { text: 'Three winters later', nodeId: 'sc-3', ref: '1.3', breaks: true }
-const WEEK = { text: 'A week later', nodeId: 'sc-2', ref: '1.2', breaks: false }
+const HINT = elapsedHintFixture('sc-3')
+const WEEK = elapsedHintFixture('sc-2', {
+  text: 'A week later',
+  quote: 'A week later, the quay was empty',
+  ref: '1.2',
+  breaks: false
+})
 
 let main: FakeMain
 
@@ -69,8 +75,14 @@ beforeEach(async () => {
                   claimId: 'c',
                   nodeId: 'sc-2',
                   ref: '1.2',
-                  since: [HINT]
+                  since: [{ kind: 'hint', hint: HINT }]
                 }
+              }
+            ],
+            sources: [
+              {
+                field: 'elapsed',
+                entry: { value: 'some time', quote: HINT.quote, p: 0, verified: false }
               }
             ]
           }),
@@ -78,7 +90,22 @@ beforeEach(async () => {
             ref: '1.4',
             title: 'Winter',
             year: { kind: 'quoted', value: 1798, from: { nodeId: 'sc-4', ref: '1.4' } },
-            flashback: true
+            flashback: true,
+            sources: [
+              {
+                field: 'year',
+                entry: { value: '1798', quote: 'the winter of 1798', p: 0, verified: true }
+              },
+              {
+                field: 'flashback',
+                entry: {
+                  value: 'yes',
+                  quote: 'Mara remembered the winter of 1798',
+                  p: 0,
+                  verified: true
+                }
+              }
+            ]
           })
         ]
       })
@@ -131,8 +158,51 @@ describe('TimelineView (F-16.23)', () => {
     await waitFor(() =>
       expect(main.sent('memory:timeline')).toEqual([{ recordId: null }, { recordId: 'r-orrin' }])
     )
-    fireEvent.click(within(screen.getByRole('listitem', { name: '1.2 The quay' })).getByRole('button'))
+    fireEvent.click(
+      within(screen.getByRole('listitem', { name: '1.2 The quay' })).getAllByRole('button')[0]!
+    )
     expect(useTreeStore.getState().selectedId).toBe('sc-2')
+  })
+
+  it('keeps the Ages of choice while the Book tab is remounted for the next scene', async () => {
+    const first = render(<TimelineView />)
+    await screen.findAllByTestId('timeline-row')
+    fireEvent.change(screen.getByRole('combobox', { name: 'Ages of' }), {
+      target: { value: 'r-mara' }
+    })
+    await waitFor(() => expect(main.sent('memory:timeline')).toContainEqual({ recordId: 'r-mara' }))
+    // A row opens its scene; the panel's Book tab is keyed by the open scene and mounts again.
+    fireEvent.click(
+      within(screen.getByRole('listitem', { name: '1.2 The quay' })).getAllByRole('button')[0]!
+    )
+    first.unmount()
+    render(<TimelineView />)
+    await screen.findAllByTestId('timeline-row')
+    expect(screen.getByRole('combobox', { name: 'Ages of' })).toHaveValue('r-mara')
+    expect(main.sent('memory:timeline').at(-1)).toEqual({ recordId: 'r-mara' })
+  })
+
+  it('opens ⓘ on what the AI read that a row’s year rests on, in the book’s words', async () => {
+    render(<TimelineView />)
+    await screen.findAllByTestId('timeline-row')
+    // No AI source, no ⓘ.
+    expect(
+      within(screen.getByRole('listitem', { name: '1.1 The stair' })).queryByRole('button', {
+        name: /comes from/
+      })
+    ).toBeNull()
+    const heir = screen.getByRole('listitem', { name: '1.3 The heir' })
+    // The hint is the book's words, never the reader's value ("some time").
+    expect(within(heir).getByTestId('timeline-year')).toHaveTextContent('“Three winters later”')
+    expect(heir).not.toHaveTextContent('some time')
+    fireEvent.click(within(heir).getByRole('button', { name: 'Where 1.3’s year comes from' }))
+    const info = within(heir).getByTestId('card-value-info')
+    expect(info).toHaveTextContent('Three winters later, Mara found the heir')
+    expect(info).toHaveTextContent('quote checked in code')
+    expect(within(info).getByRole('button', { name: 'Not right' })).toBeVisible()
+    const winter = screen.getByRole('listitem', { name: '1.4 Winter' })
+    fireEvent.click(within(winter).getByRole('button', { name: 'Where 1.4’s year comes from' }))
+    expect(within(winter).getAllByTestId('card-value-info')).toHaveLength(2)
   })
 
   it('reads again when typed details or a reading move anything', async () => {

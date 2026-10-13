@@ -10,7 +10,14 @@ import { ClaimLine } from '../ClaimLine'
 import { TopicInfoButton } from '../knows/TopicInfo'
 import { useMemoryStore, useThreads } from '../memoryStore'
 import { staleNote } from '../memoryView'
-import { mutedStepNote, noStepsText, stepText, threadStatusText } from './threadsView'
+import {
+  mutedStepNote,
+  noStepsText,
+  noThreadsText,
+  showsNoSteps,
+  stepText,
+  threadStatusText
+} from './threadsView'
 
 const HEADING = 'm-0 mt-3 mb-1 text-xs font-medium tracking-wide text-fg-muted uppercase'
 const SMALL =
@@ -22,11 +29,12 @@ const NO_OTHER_RECORD: readonly RecordKind[] = []
 /**
  * The Book's **Threads** (F-16.23; design §2.5 and §2.7, plan P2b §5.2) as of the scene the Book tab
  * is read as of: each thread the author made and each one the reader found (the AI mark), its
- * status ("open since 2.1 · last 7.3", "resolved in 20.1", "not yet in the book"), ⓘ (its reveals,
- * *Split*, *Not a thread* when the AI made it), and its steps as lines with ⓘ and *Not right*
- * ("advances 7.3: Johanna writes to Ashby"; remembered or rumoured ones muted: they move no status);
- * a thread with no step reads, muted and scoped, "No scene shows this thread yet (checked up to
- * 14.2)". *New thread* makes one of the author's.
+ * status ("open since 2.1 · last 7.3", "resolved in 20.1"; before a step that counts, "revealed in
+ * 1.1 · no opening step read yet" or "not opened (checked up to 14.2)", never an absence as fact),
+ * ⓘ (its reveals, *Split*, *Not a thread* when the AI made it), and its steps as lines with ⓘ and
+ * *Not right* ("advances 7.3: Johanna writes to Ashby"; remembered or rumoured ones muted: they
+ * move no status); a thread no scene touches (no reveal, no step) reads, muted and scoped, "No
+ * scene shows this thread yet (checked up to 14.2)". *New thread* makes one of the author's.
  */
 export function ThreadsList({ asOf }: { asOf: string | null }): React.JSX.Element {
   const headingId = useId()
@@ -39,7 +47,9 @@ export function ThreadsList({ asOf }: { asOf: string | null }): React.JSX.Elemen
       {memory === undefined ? (
         <p className="m-0 text-xs text-fg-muted">Reading…</p>
       ) : memory.threads.length === 0 ? (
-        <p className="m-0 text-xs text-fg-muted">No plot thread found in the book yet.</p>
+        <p className="m-0 text-xs text-fg-muted italic" data-testid="threads-none">
+          {noThreadsText(memory.checkedUpTo)}
+        </p>
       ) : (
         <ul className="m-0 list-none p-0">
           {memory.threads.map((thread) => (
@@ -72,7 +82,12 @@ export function ThreadItem({
   checkedUpTo: SceneRefView | null
 }): React.JSX.Element {
   return (
-    <div role="group" aria-label={`Thread: ${thread.label}`} className="py-0.5" data-testid="thread">
+    <div
+      role="group"
+      aria-label={`Thread: ${thread.label}`}
+      className="py-0.5"
+      data-testid="thread"
+    >
       <div className="flex flex-wrap items-baseline gap-1">
         <p className="m-0 min-w-0 flex-1 text-sm" data-testid="thread-head">
           <button
@@ -82,7 +97,7 @@ export function ThreadItem({
           >
             {thread.label}
           </button>
-          <span className="text-fg-muted"> · {threadStatusText(thread)}</span>
+          <span className="text-fg-muted"> · {threadStatusText(thread, checkedUpTo)}</span>
         </p>
         {thread.origin === 'ai' ? <AiMark title="Found by the AI in your book" /> : null}
         <TopicInfoButton topic={thread} kind="thread" />
@@ -94,8 +109,8 @@ export function ThreadItem({
 
 /**
  * A thread's steps as of a scene, each a line with ⓘ and *Not right* (muted, with why, when it
- * moves no status); with none at all, the scoped "No scene shows this thread yet (checked up to
- * 1.2)" (P2b rule 9).
+ * moves no status); with none and none later, nothing when a reveal stands for it (its status says
+ * where), else the scoped "No scene shows this thread yet (checked up to 1.2)" (P2b rule 9).
  */
 export function ThreadSteps({
   thread,
@@ -103,14 +118,21 @@ export function ThreadSteps({
 }: {
   thread: ThreadMemoryView
   checkedUpTo: SceneRefView | null
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const paused = useMemoryStore((s) => s.status?.paused ?? null)
   if (thread.steps.length === 0) {
-    return (
+    if (thread.later > 0) {
+      return (
+        <p className="m-0 text-xs text-fg-muted italic" data-testid="thread-no-steps">
+          Its first step comes later in the book.
+        </p>
+      )
+    }
+    return showsNoSteps(thread) ? (
       <p className="m-0 text-xs text-fg-muted italic" data-testid="thread-no-steps">
-        {thread.later === 0 ? noStepsText(checkedUpTo) : 'Its first step comes later in the book.'}
+        {noStepsText(checkedUpTo)}
       </p>
-    )
+    ) : null
   }
   return (
     <ul className="m-0 list-none p-0 pl-2" aria-label={`Steps of ${thread.label}`}>

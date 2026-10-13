@@ -56,7 +56,7 @@ function asOfClaims(db: TreeDb, claims: readonly Claim[]): AsOfClaim[] {
     counts.set(key, (counts.get(key) ?? 0) + 1)
   }
   const shared = claims.filter((each) => (counts.get(`${each.nodeId}|${each.para}`) ?? 0) > 1)
-  const texts = new Map<string, string[]>()
+  const texts = new Map<string, readonly string[]>()
   if (shared.length > 0) {
     const wanted = new Set(shared.map((each) => each.nodeId))
     for (const row of manuscriptDocuments(db)) {

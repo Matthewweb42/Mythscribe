@@ -1,27 +1,34 @@
 import { useId, useState } from 'react'
+import { Info } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import type { TimelineRow } from '@shared/memory/views'
+import type { TimelineRow, TimelineSourceView } from '@shared/memory/views'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useRecordStore } from '@renderer/features/records/recordStore'
+import { CardValueInfo } from '../CardValue'
 import { useNameOf } from '../knows/useNameOf'
-import { useTimeline } from '../memoryStore'
-import { ageText, hintText, yearText } from './timeView'
+import { useMemoryStore, useTimeline } from '../memoryStore'
+import { ageText, hintText, sourceLabel, yearText } from './timeView'
 
 const HEADING = 'm-0 mt-3 mb-1 text-xs font-medium tracking-wide text-fg-muted uppercase'
+const SMALL =
+  'flex items-center rounded px-1 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg aria-expanded:bg-surface-raised'
 
 /**
  * The Book's **Timeline** (F-16.23; design §2.7 "Years and ages", decision 5, plan P2b §5.2): one
  * row per readable scene in reading order (Idea scenes and scenes left out of compile are not
  * rows), with its reference and title, its story year ("1811" typed, "1811 · from 1.1" carried,
  * "1812 · stated here", "flashback · 1798", "year not known since “A year later” (18.1)"), the
- * elapsed hint the scene quotes, the typed time, and the ages of who is Here ("Mara about 19");
- * *Ages of [record ▾]* shows one character's age in every row instead. A row opens its scene. Local
- * and free: computed from typed details and what the reader proved.
+ * elapsed hint in the book's own words, the typed time, and the ages of who is Here ("Mara about
+ * 19"); *Ages of [record ▾]* shows one character's age in every row instead, and stays chosen while
+ * the author opens scene after scene (it lives in the memory store, outside the Book tab that each
+ * scene remounts). A row opens its scene; its ⓘ shows what the AI read that its year rests on (the
+ * year the text states, the flashback, the hint), each with its quote, *Go there* and *Not right*.
+ * Local and free: computed from typed details and what the reader proved.
  */
 export function TimelineView(): React.JSX.Element {
   const headingId = useId()
   const pickId = useId()
-  const [recordId, setRecordId] = useState<string | null>(null)
+  const recordId = useMemoryStore((s) => s.agesOf)
   const characters = useRecordStore(
     useShallow((s) =>
       s.ids
@@ -30,7 +37,8 @@ export function TimelineView(): React.JSX.Element {
         .sort((a, b) => a.name.localeCompare(b.name))
     )
   )
-  const picked = recordId !== null && characters.some((each) => each.id === recordId) ? recordId : null
+  const picked =
+    recordId !== null && characters.some((each) => each.id === recordId) ? recordId : null
   const timeline = useTimeline(picked)
   return (
     <section aria-labelledby={headingId} data-testid="timeline">
@@ -44,7 +52,11 @@ export function TimelineView(): React.JSX.Element {
         <select
           id={pickId}
           value={picked ?? ''}
-          onChange={(event) => setRecordId(event.target.value === '' ? null : event.target.value)}
+          onChange={(event) =>
+            useMemoryStore
+              .getState()
+              .setAgesOf(event.target.value === '' ? null : event.target.value)
+          }
           className="max-w-40 min-w-0 rounded-md border border-line bg-bg px-1 py-0.5 text-xs"
         >
           <option value="">who is Here</option>
@@ -70,8 +82,16 @@ export function TimelineView(): React.JSX.Element {
   )
 }
 
+/** A source's value as the author reads it: the year, "flashback", the hint's words. */
+function shownValue(source: TimelineSourceView, row: TimelineRow): string {
+  if (source.field === 'flashback') return 'a flashback'
+  if (source.field === 'elapsed') return row.elapsed?.text ?? source.entry.quote
+  return source.entry.value
+}
+
 function Row({ row }: { row: TimelineRow }): React.JSX.Element {
   const nameOf = useNameOf()
+  const [info, setInfo] = useState(false)
   // The scene's own hint is already in "year not known since …".
   const ownHint = row.year.kind === 'unknown' && row.year.hint?.nodeId === row.nodeId
   return (
@@ -80,38 +100,69 @@ function Row({ row }: { row: TimelineRow }): React.JSX.Element {
       data-testid="timeline-row"
       className="border-b border-line py-1 last:border-b-0"
     >
-      <button
-        type="button"
-        onClick={() => useTreeStore.getState().select(row.nodeId)}
-        className="flex w-full min-w-0 flex-col items-start gap-0.5 rounded-md px-1 text-left hover:bg-surface-raised"
-      >
-        <span className="flex w-full min-w-0 items-baseline gap-2 text-sm">
-          <span className="shrink-0 text-xs text-fg-muted">{row.ref}</span>
-          <span className="min-w-0 flex-1 truncate">{row.title}</span>
-          <span className="shrink-0 text-xs" data-testid="timeline-year">
-            {yearText(row.year, row.flashback)}
+      <div className="flex min-w-0 items-start gap-1">
+        <button
+          type="button"
+          onClick={() => useTreeStore.getState().select(row.nodeId)}
+          className="flex min-w-0 flex-1 flex-col items-start gap-0.5 rounded-md px-1 text-left hover:bg-surface-raised"
+        >
+          <span className="flex w-full min-w-0 items-baseline gap-2 text-sm">
+            <span className="shrink-0 text-xs text-fg-muted">{row.ref}</span>
+            <span className="min-w-0 flex-1 truncate">{row.title}</span>
+            <span className="shrink-0 text-xs" data-testid="timeline-year">
+              {yearText(row.year, row.flashback)}
+            </span>
           </span>
-        </span>
-        {row.elapsed === null || ownHint ? null : (
-          <span className="text-xs text-fg-muted" data-testid="timeline-hint">
-            {hintText(row.elapsed)}
-          </span>
+          {row.elapsed === null || ownHint ? null : (
+            <span className="text-xs text-fg-muted" data-testid="timeline-hint">
+              {hintText(row.elapsed)}
+            </span>
+          )}
+          {row.time === '' ? null : (
+            <span className="text-xs text-fg-muted" data-testid="timeline-time">
+              {row.time}
+            </span>
+          )}
+          {row.ages.length === 0 ? null : (
+            <span className="flex flex-wrap gap-x-2 text-xs">
+              {row.ages.map((entry) => (
+                <span key={entry.recordId} data-testid="timeline-age">
+                  {nameOf(entry.recordId)} {ageText(entry.age)}
+                </span>
+              ))}
+            </span>
+          )}
+        </button>
+        {row.sources.length === 0 ? null : (
+          <button
+            type="button"
+            aria-label={`Where ${row.ref}’s year comes from`}
+            aria-expanded={info}
+            onClick={() => setInfo(!info)}
+            className={SMALL}
+          >
+            <Info size={11} aria-hidden="true" />
+          </button>
         )}
-        {row.time === '' ? null : (
-          <span className="text-xs text-fg-muted" data-testid="timeline-time">
-            {row.time}
-          </span>
-        )}
-        {row.ages.length === 0 ? null : (
-          <span className="flex flex-wrap gap-x-2 text-xs">
-            {row.ages.map((entry) => (
-              <span key={entry.recordId} data-testid="timeline-age">
-                {nameOf(entry.recordId)} {ageText(entry.age)}
-              </span>
-            ))}
-          </span>
-        )}
-      </button>
+      </div>
+      {info ? (
+        <ul className="m-0 mt-1 flex list-none flex-col gap-1 p-0 pl-1">
+          {row.sources.map((source) => (
+            <li key={source.field} className="flex flex-col gap-0.5 text-xs">
+              <span className="text-fg-muted">{sourceLabel(source)}</span>
+              <CardValueInfo
+                nodeId={row.nodeId}
+                field={source.field}
+                value={source.entry.value}
+                shown={shownValue(source, row)}
+                quote={source.entry.quote}
+                p={source.entry.p}
+                checked={source.entry.verified ? 'verified' : 'code'}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </li>
   )
 }

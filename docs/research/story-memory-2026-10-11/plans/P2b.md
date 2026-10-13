@@ -340,6 +340,12 @@ Full gates on the last commit (typecheck, lint per folder, test, `eval:ai`, `tes
 - e2e: `memory.spec.ts` "threads, the timeline and ages (P2b slice 5)" passed first time; `newV2Project` and `reopenProject` are shared with slice 4's test.
 - Final verification: full gates on the last commit (see the commit message). Not ticked: the run's instructions said not to tick boxes; F-16.22, F-16.23, the M8 row and `CLAUDE.md` 1b record the author's development-build checks and, before the switch-over, the live knows run and live fidelity for `reader.v2`/`verify.v2` (`OPENROUTER_API_KEY`). `docs/OPERATOR-SETUP.md`: nothing to deploy.
 
+**Slice 5 review fixes (2026-10-13; calls in `QUESTIONS.md`, P2b slice 5 review):**
+- §5.1's "no text read; about 1 ms" was not met: every whole-book view held every card against its whole scene text (about 220 ms on 90 scenes, after each typing pause). Now a scene's text is read only for the card fields a view needs, its paragraphs and its card's standing are kept until they change (`rowTexts`, `heldCard`), only the quote's paragraph is hashed (`cardStanding`), and the anchors job reports a card only when what of it stands moved: about 10 ms, held by `timeViews.perf.test.ts` (budget 50 ms). Age stays in the sheet's one read.
+- An elapsed hint shows the book's words (the value inside its quote, else the quote) and ends the carry on its value or its quote; a birth year with no year for the scene shows alone (`bornOnly`); a stated age lists later typed or quoted years as well as hints (`changesSince`; the test book's Clara label gains h08); the Age's empty line and the Threads' empty list are scoped; a thread its reveal stands for reads "revealed in 1.1 · no opening step read yet", never "not yet in the book"; the Timeline's rows carry the card fields they rest on (ⓘ, *Go there*, *Not right*).
+- Main pushes `memory:changed` when the book's order or its scenes move and when a Pinned "Born:" line changes; `names:changed` reads sheets with Threads again; *Ages of* lives in the memory store; a first-person step is listed on the POV's sheet. e2e: the fake reader's hint value is now "some time" (only the quote shows) and a reorder with the Timeline open moves the rows and the carry.
+- Not built: a typed Flashback switch (an additive column), left to the author. Ticked after these fixes: F-16.22 and F-16.23 (P2a-D18's rule).
+
 ---
 
 ## 6. Costs (own key, list prices: V4 Flash $0.14 in / $0.28 out per million tokens; Cloud × 1.25)

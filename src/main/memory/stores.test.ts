@@ -30,7 +30,7 @@ import {
   updateLabel
 } from './labelStore'
 import { createRecord, deleteRecord } from './recordStore'
-import { getSceneDetails, setSceneDetails } from './sceneDetailStore'
+import { allSceneDetails, getSceneDetails, setSceneDetails } from './sceneDetailStore'
 
 let tmp: string
 let session: ProjectSession
@@ -227,6 +227,30 @@ describe('sceneDetailStore (F-16.11)', () => {
       place: { text: 'the harbour' },
       time: { text: '' },
       storyYear: 1811
+    })
+  })
+
+  it('reads every stored node’s details in one query, and no node without any (F-16.23)', () => {
+    const mara = record('Mara')
+    expect(allSceneDetails(db).size).toBe(0)
+    setSceneDetails(
+      db,
+      scene,
+      {
+        povRecordId: mara,
+        place: { recordId: null, text: '' },
+        time: { text: 'dawn' },
+        storyYear: 1811,
+        alsoHere: []
+      },
+      at(0)
+    )
+    const all = allSceneDetails(db)
+    expect([...all.keys()]).toEqual([scene])
+    expect(all.get(scene)).toMatchObject({
+      povRecordId: mara,
+      storyYear: 1811,
+      time: { text: 'dawn' }
     })
   })
 

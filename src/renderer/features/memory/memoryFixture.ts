@@ -2,6 +2,7 @@ import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ip
 import type {
   AgeView,
   ClaimView,
+  ElapsedHintView,
   KnowsCellView,
   KnowsGrid,
   MemoryStatus,
@@ -230,6 +231,23 @@ export function timelineRowFixture(nodeId: string, over: Partial<TimelineRow> = 
     elapsed: null,
     time: '',
     ages: [],
+    sources: [],
+    ...over
+  }
+}
+
+/** F-16.23: an elapsed hint the card quoted, standing on the text (its words as the book has them). */
+export function elapsedHintFixture(
+  nodeId: string,
+  over: Partial<ElapsedHintView> = {}
+): ElapsedHintView {
+  return {
+    text: 'Three winters later',
+    quote: 'Three winters later, Mara found the heir',
+    para: 0,
+    nodeId,
+    ref: '1.3',
+    breaks: true,
     ...over
   }
 }

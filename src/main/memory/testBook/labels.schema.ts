@@ -142,7 +142,9 @@ export const LabelYear = z.object({
 
 /**
  * A character's age as of a scene (decision 5): computed from a birth year, or the last stated
- * age (the claim label) with the year-crossing hints since (their scenes), listed, never added.
+ * age (the claim label) with what changed since, listed, never added: the scenes of the
+ * year-crossing hints and of the typed or quoted years that differ from the year before (each
+ * scene once).
  */
 export const LabelAge = z.object({
   record: Id,

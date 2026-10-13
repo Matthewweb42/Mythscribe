@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { emptyCardFields, type CardFields } from '@shared/memory/claims'
 import { SheetMemory, ThreadsMemory, TimelineMemory, type AgeView } from '@shared/memory/views'
+import { sinceNodeId } from '@shared/memory/years'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../../document/documentStore'
 import { setSceneMeta } from '../../document/sceneMetaStore'
@@ -251,14 +252,18 @@ afterEach(() => {
 const yearText = (row: TimelineMemory['rows'][number]): string => {
   const { year } = row
   if (year.kind === 'unknown') return `unknown since ${year.hint?.text ?? '-'}`
-  return year.kind === 'carried' ? `${year.value} from ${year.from.ref}` : `${year.value} ${year.kind}`
+  return year.kind === 'carried'
+    ? `${year.value} from ${year.from.ref}`
+    : `${year.value} ${year.kind}`
 }
 
 const ageText = (age: AgeView | null | undefined): string => {
   if (age === null || age === undefined) return '-'
   if (age.kind === 'computed') return `about ${age.age} (${age.year.from.ref})`
   if (age.kind === 'notBorn') return 'not born'
-  return `${age.value} stated ${age.ref}; since ${age.since.map((hint) => hint.ref).join(',')}`
+  if (age.kind === 'bornOnly') return `born ${age.born.year}; year unknown`
+  const since = age.since.map((entry) => (entry.kind === 'hint' ? entry.hint.ref : entry.ref))
+  return `${age.value} stated ${age.ref}; since ${since.join(',')}`
 }
 
 describe('the Timeline (F-16.23, decision 5)', () => {
@@ -314,7 +319,8 @@ describe('the Timeline (F-16.23, decision 5)', () => {
     // No year since "Three winters later": the last stated age, the hint listed, never added.
     expect(ages('1.4')).toEqual(['Mara nineteen stated 1.2; since 1.4'])
     expect(ages('1.5')).toEqual(['Mara about 23 (1.5)'])
-    expect(ages('1.6')).toEqual(['Mara nineteen stated 1.2; since 1.4'])
+    // 1.5's own 1815 is listed too, never added up.
+    expect(ages('1.6')).toEqual(['Mara nineteen stated 1.2; since 1.4,1.5'])
 
     // The next typed year restarts the carry.
     details(five, 1820)
@@ -349,11 +355,71 @@ describe('the Timeline (F-16.23, decision 5)', () => {
     expect(storedAge(db, mara, three)).toMatchObject({
       kind: 'stated',
       claimId: stated,
-      since: [{ text: 'Three winters later', nodeId: three }]
+      since: [{ kind: 'hint', hint: { text: 'Three winters later', nodeId: three } }]
     })
     // As of the Idea scene: the readable scene before it (1.5, 1815).
     expect(storedAge(db, mara, idea)).toMatchObject({ kind: 'computed', age: 23 })
-    expect(storedAge(db, mara, null)).toMatchObject({ kind: 'stated', since: [{ ref: '1.4' }] })
+    // 1.5's quoted 1815 is listed beside the hint since 1.2, never added up.
+    expect(storedAge(db, mara, null)).toMatchObject({
+      kind: 'stated',
+      since: [
+        { kind: 'hint', hint: { ref: '1.4' } },
+        { kind: 'year', value: 1815, ref: '1.5' }
+      ]
+    })
+  })
+})
+
+describe('the Timeline’s words and sources (review of P2b slice 5)', () => {
+  it('shows a hint in the book’s words, ends the carry on its quote, and gives each row its sources', () => {
+    // The reader's value is vague; the quote crosses years: the carry ends, and the quote shows.
+    card(three, {
+      elapsed: field('some time', 'Three winters later, Mara found the heir', 0, false)
+    })
+    const rows = timelineMemory(db, null).rows
+    const hint = {
+      text: 'Three winters later, Mara found the heir',
+      quote: 'Three winters later, Mara found the heir',
+      para: 0,
+      nodeId: three,
+      ref: '1.4',
+      breaks: true
+    }
+    expect(rows[3]?.elapsed).toEqual(hint)
+    expect(rows[3]?.year).toEqual({ kind: 'unknown', hint })
+    expect(rows[5]?.year).toEqual({ kind: 'unknown', hint })
+    expect(rows.map((row) => row.sources.map((source) => source.field))).toEqual([
+      [],
+      [],
+      ['year', 'flashback'],
+      ['elapsed'],
+      ['year'],
+      []
+    ])
+    expect(rows[3]?.sources[0]?.entry).toMatchObject({ value: 'some time', p: 0 })
+    // A typed year stands over the quoted one: the card's year is no source of the row's.
+    details(four, 1816)
+    expect(timelineMemory(db, null).rows[4]?.sources).toEqual([])
+  })
+
+  it('gives a character’s sheet the birth year alone where the scene’s year is not known', () => {
+    seedClaims(
+      db,
+      one,
+      [{ recordId: mara, slot: 'born', value: '1792', quote: 'Mara was born in 1792', para: 0 }],
+      NOW
+    )
+    checked(one)
+    expect(SheetMemory.parse(sheetMemory(db, mara, three)).age).toMatchObject({
+      age: {
+        kind: 'bornOnly',
+        born: { year: 1792, source: 'text', ref: '1.1' },
+        hint: { text: 'Three winters later', ref: '1.4' }
+      },
+      checkedUpTo: { nodeId: one, ref: '1.1' }
+    })
+    // The Timeline says nothing more than the row's year does.
+    expect(timelineMemory(db, mara).rows[3]?.ages).toEqual([])
   })
 })
 
@@ -410,22 +476,26 @@ describe('a sheet’s Threads, Age and The thread (F-16.23)', () => {
     const sheet = SheetMemory.parse(sheetMemory(db, mara, two))
     expect(
       sheet.threads?.threads.map((each) => [each.label, each.status, each.steps.length])
-    ).toEqual([
-      ['the missing heir', 'open', 1]
-    ])
+    ).toEqual([['the missing heir', 'open', 1]])
     expect(sheet.age).toMatchObject({
-      kind: 'computed',
-      age: 19,
-      born: { year: 1792, source: 'text', ref: '1.1' },
-      year: { kind: 'carried', value: 1811, from: { ref: '1.1' } }
+      age: {
+        kind: 'computed',
+        age: 19,
+        born: { year: 1792, source: 'text', ref: '1.1' },
+        year: { kind: 'carried', value: 1811, from: { ref: '1.1' } }
+      },
+      checkedUpTo: null
     })
     const end = SheetMemory.parse(sheetMemory(db, mara, three))
     expect(end.threads?.threads[0]?.steps.map((step) => step.step)).toEqual(['opens', 'resolves'])
-    expect(end.age).toMatchObject({ kind: 'stated', value: 'nineteen', ref: '1.2' })
+    expect(end.age?.age).toMatchObject({ kind: 'stated', value: 'nineteen', ref: '1.2' })
 
-    // Orrin is named in 1.1, but in no step's paragraph.
+    // Orrin is named in 1.1, but in no step's paragraph; the book gives him no age.
     const other = SheetMemory.parse(sheetMemory(db, orrin, null))
-    expect([other.threads, other.age]).toEqual([{ threads: [], checkedUpTo: null }, null])
+    expect([other.threads, other.age]).toEqual([
+      { threads: [], checkedUpTo: null },
+      { age: null, checkedUpTo: null }
+    ])
     // A place has Threads but no age.
     expect(SheetMemory.parse(sheetMemory(db, quay, null)).age).toBeNull()
 
@@ -436,6 +506,52 @@ describe('a sheet’s Threads, Age and The thread (F-16.23)', () => {
       thread: { recordId: thread, status: 'open' },
       checkedUpTo: null
     })
+  })
+
+  it('lists a first-person step on the POV’s sheet though it never names her', () => {
+    const thread = heir()
+    const chapter = getNode(db, one)?.parentId ?? ''
+    const six = scene('Six', chapter, 'I found the heir at last, and Orrin wept.')
+    scanNamesFor(db, six, NOW)
+    details(six, null)
+    seedClaims(
+      db,
+      six,
+      [
+        {
+          recordId: thread,
+          slot: 'thread',
+          value: 'finds the heir again',
+          how: 'advances',
+          quote: 'I found the heir at last',
+          para: 0,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    const steps = (recordId: string): string[] =>
+      (SheetMemory.parse(sheetMemory(db, recordId, null)).threads?.threads ?? []).flatMap((each) =>
+        each.steps.map((step) => `${step.step} ${step.ref}`)
+      )
+    // Mara is the typed POV of 1.7 (Six); its "I" is hers.
+    expect(steps(mara)).toEqual(['opens 1.1', 'resolves 1.4', 'advances 1.7'])
+    // Orrin is named in that paragraph: it is his too.
+    expect(steps(orrin)).toEqual(['advances 1.7'])
+    // With another POV typed, the "I" is not Mara's.
+    setSceneDetails(
+      db,
+      six,
+      {
+        povRecordId: orrin,
+        place: { recordId: null, text: '' },
+        time: { text: '' },
+        storyYear: null,
+        alsoHere: []
+      },
+      NOW
+    )
+    expect(steps(mara)).toEqual(['opens 1.1', 'resolves 1.4'])
   })
 
   it('gives an author’s thread with no step its scoped view, and a secret no time', () => {
@@ -574,7 +690,9 @@ describe('the test book’s years and ages through the stores (decision 5)', () 
       const claim = TEST_BOOK_LABELS.claims.find((each) => each.id === expected.claim)
       expect(age, at).toMatchObject({ kind: 'stated', value: claim?.value })
       expect(
-        age?.kind === 'stated' ? age.since.map((hint) => sceneOf.get(hint.nodeId)) : null,
+        age?.kind === 'stated'
+          ? [...new Set(age.since.map((entry) => sceneOf.get(sinceNodeId(entry))))]
+          : null,
         at
       ).toEqual(expected.since)
       // The Timeline's row for that scene, read through `memory:timeline`'s "Ages of".

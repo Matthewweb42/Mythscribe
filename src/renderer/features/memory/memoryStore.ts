@@ -46,7 +46,10 @@ import { ipc } from '@renderer/lib/ipc'
  * F-16.23: the Book's Threads by as-of scene (`threads`, `useThreads`; the sidebar's Threads list
  * reads them as of the end of the book) and the Timeline by "Ages of" record (`timeline`,
  * `useTimeline`), read while shown and again on any `memory:changed` (a reading, typed details:
- * a story year moves every later row) or roster change, as the grids are.
+ * a story year moves every later row; main also sends it when the book's order or its scenes
+ * moved and when a Pinned "Born:" line changed) or roster change, as the grids are. A name-index
+ * change reads again the sheets with Threads (their steps are matched by name). The Timeline's
+ * *Ages of* choice (`agesOf`) lives here, so it outlives the Book tab each scene remounts.
  */
 
 /** A scene's memory as stored here: its lines by id. */
@@ -63,6 +66,9 @@ interface MemoryState {
   threads: Record<string, ThreadsMemory>
   /** F-16.23: the Timeline, by `timelineKey(recordId)` ("Ages of" a record, or who is Here). */
   timeline: Record<string, TimelineMemory>
+  /** F-16.23: the Timeline's *Ages of* record; null for who is Here in each row. */
+  agesOf: string | null
+  setAgesOf: (recordId: string | null) => void
   status: MemoryStatus | null
   notices: MemoryNotice[]
   /** F-16.20: each scene's card line (the AI's one-line map of it), by node. */
@@ -226,10 +232,15 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
     knows: {},
     threads: {},
     timeline: {},
+    agesOf: null,
     status: null,
     notices: [],
     cardLines: {},
     rebuildOpen: null,
+
+    setAgesOf(recordId) {
+      if (get().agesOf !== recordId) set({ agesOf: recordId })
+    },
 
     setRebuildOpen(open) {
       if (get().rebuildOpen !== open) set({ rebuildOpen: open })
@@ -518,9 +529,11 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         }),
         ipc().on('names:changed', ({ nodeIds }) => {
           const nodes = new Set(nodeIds)
+          // A sheet's Threads are the steps whose paragraph names the record: a new nickname or
+          // *Not a mention* moves them.
           refresh(
             (nodeId) => nodes.has(nodeId),
-            () => false
+            (_, sheet) => sheet !== undefined && sheet.threads !== null
           )
         }),
         ipc().on('record:changed', ({ roster }) => {
@@ -549,6 +562,7 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         knows: {},
         threads: {},
         timeline: {},
+        agesOf: null,
         status: null,
         notices: [],
         cardLines: {},
