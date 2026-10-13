@@ -1,5 +1,5 @@
 import { estimateTokens } from './ai'
-import { namesInQuestion, type AskIndex } from './memory/askParse'
+import { namesInQuestion, SCENE_REF, type AskIndex } from './memory/askParse'
 import { splitSentences } from './memory/sentences'
 import { SCRIBE_HISTORY_TOKENS, type SearchScope, type TextSpan } from './scribe'
 
@@ -134,9 +134,6 @@ export function stripCitationMarkup(raw: string): string {
   const held = raw.replace(UNFINISHED, '')
   return strip(held, markersOf(held)).text
 }
-
-/** A scene reference a sentence may name: "14.2", "chapter 9", "scene 3", "ch 9". */
-const SCENE_REF = /\b\d{1,3}\.\d{1,3}\b|\b(?:chapter|ch|scene)\.?\s+(?:\d+|[ivxlc]+)\b/iu
 
 /** How advice and replies to the author open: they need no citation (P3-D13). */
 const ADVICE =

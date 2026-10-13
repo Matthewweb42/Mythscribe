@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { ProjectSession } from '../../project/projectStore'
 import type { TreeDb } from '../../tree/treeStore'
-import { buildPerfBook, PERF_SCENES as SCENES } from './perfFixture'
+import { buildPerfBook, fastest, PERF_SCENES as SCENES } from './perfFixture'
 import { storedYears, threadsMemory, timelineMemory } from './timeViews'
 import { sheetMemory } from './views'
 
@@ -23,17 +23,6 @@ let tmp: string
 let session: ProjectSession
 let db: TreeDb
 let mara: string
-
-/** Milliseconds of the fastest of `runs` calls (the first, cold one is left out by the caller). */
-function fastest(runs: number, call: () => unknown): number {
-  let best = Infinity
-  for (let i = 0; i < runs; i += 1) {
-    const start = performance.now()
-    call()
-    best = Math.min(best, performance.now() - start)
-  }
-  return best
-}
 
 beforeAll(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-time-perf-'))

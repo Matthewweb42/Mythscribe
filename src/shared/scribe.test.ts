@@ -61,6 +61,13 @@ describe('evidence labels (design §2.2, §2.6)', () => {
     expect(labelOf('excludedScene', 'never')).toBe('cutScene')
     expect(labelOf('notCanon', 'never')).toBe('notCanon')
     expect(labelOf('card', 'map')).toBe('map')
+    // The page's marks: Not canon wins on notes, Pinned, Research and plans; an upload is a source.
+    expect(labelOf('pinned', 'canon', { filed: true, notCanon: true })).toBe('notCanon')
+    expect(labelOf('note', 'canon', { notCanon: true })).toBe('notCanon')
+    expect(labelOf('research', 'canon', { upload: false })).toBe('notes')
+    expect(labelOf('note', 'canon', { upload: true })).toBe('research')
+    expect(labelOf('sceneNote', 'plan', { notCanon: true })).toBe('notCanon')
+    expect(labelOf('idea', 'never', { notCanon: true })).toBe('idea')
     for (const source of MEMORY_SOURCES) {
       expect(EVIDENCE_LABELS).toContain(labelOf(source, meaningOf(source, at(1))))
     }

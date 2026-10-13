@@ -97,23 +97,27 @@ describe('namesInQuestion (F-16.24)', () => {
 
   it('finds secrets and threads by name, or by half their label’s words with a content word', () => {
     expect(namesInQuestion('Does Orrin know about the sold map?', BOOK).topics).toEqual([
-      { recordId: 'map', kind: 'secret', by: 'name' }
+      { recordId: 'map', kind: 'secret', by: 'name', whole: true }
     ])
+    // Half the label's words name it, but not whole: no instant card rests on it.
     expect(namesInQuestion('Who knows about the map sale?', BOOK).topics).toEqual([
-      { recordId: 'map', kind: 'secret', by: 'terms' }
+      { recordId: 'map', kind: 'secret', by: 'terms', whole: false }
+    ])
+    expect(namesInQuestion('Who knows the map was sold?', BOOK).topics).toEqual([
+      { recordId: 'map', kind: 'secret', by: 'terms', whole: true }
     ])
     expect(namesInQuestion('Is the heir still missing?', BOOK).topics).toEqual([
-      { recordId: 'heir', kind: 'thread', by: 'terms' }
+      { recordId: 'heir', kind: 'thread', by: 'terms', whole: true }
     ])
     // A record's name alone is no content word: "Where is Orrin?" is not about his return.
     expect(namesInQuestion('Where is Orrin?', BOOK).topics).toEqual([])
     expect(namesInQuestion('Who knows of Orrin’s return?', BOOK).topics).toEqual([
-      { recordId: 'return', kind: 'secret', by: 'name' }
+      { recordId: 'return', kind: 'secret', by: 'name', whole: true }
     ])
     expect(namesInQuestion('Who knows Orrin returned home?', BOOK).topics).toEqual([])
     expect(namesInQuestion('Who knows of the return of Orrin?', BOOK)).toMatchObject({
       records: [{ recordId: 'orrin' }],
-      topics: [{ recordId: 'return', kind: 'secret', by: 'terms' }]
+      topics: [{ recordId: 'return', kind: 'secret', by: 'terms', whole: true }]
     })
     // Secrets and threads are never records.
     expect(named('the sold map')).toEqual([])
@@ -162,10 +166,20 @@ describe('SLOT_QUESTION_CUES (P3-D2)', () => {
     expect(SLOT_QUESTION_CUES.some((row) => row.slot === 'kinship')).toBe(false)
     expect(holdsSlotCue('Her grey eyes found him.', 'eyes')).toBe(true)
     expect(holdsSlotCue('She looked away.', 'eyes')).toBe(false)
+    // Prose bears on a slot by its own words too (read-first, P3-D4; a Pinned line).
+    expect(holdsSlotCue('Mara died on the cold stones.', 'alive')).toBe(true)
+    expect(holdsSlotCue('Mara rode north to Vell.', 'location')).toBe(true)
+    expect(holdsSlotCue('Home: Vell', 'location')).toBe(true)
+    expect(holdsSlotCue('She wore the grey cloak.', 'clothing')).toBe(true)
+    expect(holdsSlotCue('The blue-eyed girl laughed.', 'eyes')).toBe(true)
+    expect(holdsSlotCue('Mara laughed at the joke.', 'alive')).toBe(false)
   })
 })
 
 describe('questionCues', () => {
+  const cues = (text: string): ReturnType<typeof questionCues> =>
+    questionCues(text, namesInQuestion(text, BOOK))
+
   it('reads ordinal, knows, idea, sheet-write, change and whole-book cues', () => {
     expect(questionCues('When does Lise first suspect the Captain?')).toMatchObject({
       scopeAll: true,
@@ -173,33 +187,68 @@ describe('questionCues', () => {
     })
     expect(questionCues('Does Mara never cry?').scopeAll).toBe(true)
     expect(questionCues('How many times does Orrin lie?').scopeAll).toBe(true)
-    expect(questionCues('Does Orrin know about the map?').knows).toBe(true)
-    expect(questionCues('When does Tomas find out?').knows).toBe(true)
-    expect(questionCues('Has Mara heard?').knows).toBe(true)
+    expect(questionCues('Does Orrin know about the map?')).toMatchObject({
+      knows: true,
+      learns: false
+    })
+    expect(questionCues('When does Tomas find out?')).toMatchObject({ knows: true, learns: true })
+    expect(questionCues('Has Mara heard?').learns).toBe(true)
     expect(questionCues('What was my idea about the Captain?').idea).toBe(true)
     expect(questionCues('what did I want for chapter 3').idea).toBe(true)
-    expect(questionCues('Add to Mara’s sheet that she hates the sea.')).toMatchObject({
+    expect(cues('Add to Mara’s sheet that she hates the sea.')).toMatchObject({
       sheetWrite: true,
       change: true
     })
-    expect(questionCues('Save this for Mara: a scar from the fire.').sheetWrite).toBe(true)
-    expect(questionCues('pin that on the Bell').sheetWrite).toBe(true)
-    expect(questionCues('Brainstorm: Lottie had a twin; save it').sheetWrite).toBe(true)
-    expect(questionCues('Add a line where Mara laughs.')).toMatchObject({
+    expect(cues('Save this for Mara: a scar from the fire.').sheetWrite).toBe(true)
+    expect(cues('pin that on the Bell').sheetWrite).toBe(true)
+    expect(cues('Brainstorm: Lottie had a twin; save it').sheetWrite).toBe(true)
+    expect(cues('Could you put this on Mara’s Pinned?').sheetWrite).toBe(true)
+    expect(cues('Add a line where Mara laughs.')).toMatchObject({
       sheetWrite: false,
       change: true
     })
     expect(questionCues('Rewrite the opening.').change).toBe(true)
+    expect(questionCues('Great, now polish the paragraph about her eyes.').change).toBe(true)
+    expect(questionCues('Can you tighten this scene?').change).toBe(true)
     expect(questionCues('Who dies by the end?').wholeBook).toBe(true)
     expect(questionCues('Does Mara ever cry in the book?').wholeBook).toBe(true)
     expect(questionCues('Where is Mara?')).toEqual({
       scopeAll: false,
       knows: false,
+      learns: false,
       idea: false,
       sheetWrite: false,
       change: false,
       wholeBook: false
     })
+  })
+
+  it('takes "first name", "last name" and "last seen" as about now, not over the book', () => {
+    expect(questionCues('What is Mara’s first name?').scopeAll).toBe(false)
+    expect(questionCues('What is Mara’s last name?').scopeAll).toBe(false)
+    expect(questionCues('Where was Mara last seen?').scopeAll).toBe(false)
+    expect(questionCues('Where was Mara first seen?').scopeAll).toBe(true)
+    expect(questionCues('When did Mara last see Tomas?').scopeAll).toBe(true)
+  })
+
+  it('counts an edit only when the request opens with its verb, a sheet only when one is named', () => {
+    // Read questions with an edit verb in them ask about the story, not for an edit.
+    expect(questionCues('Who cut the rope?').change).toBe(false)
+    expect(questionCues('Where did Mara write the letter?').change).toBe(false)
+    // Manuscript edits that name a chapter, a scene or a record for whom: never a sheet line.
+    for (const text of [
+      'Add a line of dialogue for Tomas',
+      'Add a scene to Chapter 3',
+      'Put a storm in Chapter 2',
+      'Add a scene in Chapter 3 where Mara meets Tomas'
+    ]) {
+      expect(cues(text), text).toMatchObject({ sheetWrite: false, change: true })
+    }
+    // "pin" as a noun, and a sheet word in a question.
+    expect(cues('Where is the pin Mara lost?').sheetWrite).toBe(false)
+    expect(cues('Is the pin on Mara’s sheet?').sheetWrite).toBe(false)
+    // Without the names, a record is never a target.
+    expect(questionCues('Save this for Mara: a scar from the fire.').sheetWrite).toBe(false)
   })
 })
 
@@ -220,13 +269,34 @@ describe('instantShape (P3-D2)', () => {
       knowerId: 'orrin',
       secretId: 'map'
     })
-    expect(shape('Who knows about the map sale?')).toEqual({ kind: 'whoKnows', secretId: 'map' })
+    expect(shape('Who knows the map was sold?')).toEqual({ kind: 'whoKnows', secretId: 'map' })
     // The secret's own name is not a second record.
     expect(shape('Who knows of Orrin’s return?')).toEqual({ kind: 'whoKnows', secretId: 'return' })
     expect(shape('Who knows of the return of Orrin?')).toEqual({
       kind: 'whoKnows',
       secretId: 'return'
     })
+  })
+
+  it('binds the cue to the record: next to it, through "is", "still", "now" or "of"', () => {
+    const asked: [string, string][] = [
+      ['What colour are Mara’s eyes?', 'eyes'],
+      ['Mara’s eye colour?', 'eyes'],
+      ['What eye colour has Mara?', 'eyes'],
+      ['How old is Mara now?', 'age'],
+      ['What is the age of Mara?', 'age'],
+      ['When was Mara born?', 'born'],
+      ['Where is Mara Vell now?', 'location'],
+      ['Where was Mara last seen?', 'location'],
+      ['Is Mara still alive?', 'alive'],
+      ['What job does Mara have?', 'role'],
+      ['Does Mara have scars?', 'scars'],
+      ['What is Mara wearing?', 'clothing'],
+      ['Can you tell me Mara’s height?', 'detail:height']
+    ]
+    for (const [text, slot] of asked) {
+      expect(shape(text), text).toEqual({ kind: 'slot', recordId: 'mara', slot })
+    }
   })
 
   it('answers null for why, a change, an accumulating slot, a long question, two records or a shared name', () => {
@@ -247,5 +317,65 @@ describe('instantShape (P3-D2)', () => {
     expect(shape('Does Orrin know Tomas sold the map?')).toBeNull()
     expect(shape('Who knows?')).toBeNull()
     expect(shape('')).toBeNull()
+  })
+
+  it('answers null for an edit request, so F-5.26’s passes keep it', () => {
+    for (const text of [
+      'Fix Mara’s eye colour',
+      'Rewrite the bit about Mara’s hair',
+      'Remove Mara’s scar',
+      'Delete the line about Mara’s hair',
+      'Polish the paragraph about Mara’s eyes',
+      'Set Mara’s age to 40',
+      'Cut the line about Mara’s hair',
+      'Tighten the bit where Mara is hurt',
+      'Can you update Mara’s role?',
+      'Who cut Mara’s hair?'
+    ]) {
+      expect(shape(text), text).toBeNull()
+    }
+  })
+
+  it('answers null for first, last, ever, never, another time, a scene or a negation (P3-D8)', () => {
+    for (const text of [
+      'Where was Mara first seen?',
+      'What was Mara’s first job?',
+      'What was Mara’s last role?',
+      'Was Mara ever hurt?',
+      'Was Mara ever injured before the war?',
+      'What was Mara first wearing?',
+      'Where was Mara in 1.1?',
+      'How old was Mara in chapter 1?',
+      'How old was Mara in Chapter Two?',
+      'Where was Mara when the bell rang?',
+      'Where was Mara then?',
+      'Was Mara alive at the start?',
+      'When did Mara lose her job?',
+      'Did Orrin know about the sold map before 1.2?',
+      'When does Orrin know about the sold map?',
+      'Who never heard about the sold map?',
+      'Does Orrin not know about the sold map?',
+      'Who doesn’t know about the sold map?',
+      'Who knows nothing of the sold map?',
+      'Is Mara not alive?'
+    ]) {
+      expect(shape(text), text).toBeNull()
+    }
+  })
+
+  it('answers null when the cue asks about another thing of the record, or the secret is half named', () => {
+    for (const text of [
+      'What colour are Mara’s mother’s eyes?',
+      'Where is Mara’s sword?',
+      'How old is Orrin’s daughter?',
+      'How old is the daughter of Orrin?',
+      'Where is the ship Mara sails?',
+      'Does Orrin’s sister know about the sold map?',
+      'Does Orrin know where the map is?',
+      'Who knows the map is hidden?',
+      'Who knows about the map sale?'
+    ]) {
+      expect(shape(text), text).toBeNull()
+    }
   })
 })

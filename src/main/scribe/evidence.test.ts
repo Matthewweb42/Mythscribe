@@ -165,9 +165,7 @@ describe('resolveEvidence', () => {
       '¶1 Tomas sold the map to a stranger.\n¶2 Orrin overheard Tomas from the yard.'
     )
     expect(items[4]?.doc).toBe('Harbour notes')
-    expect(text('E10')).toBe(
-      'Mara · eyes: grey (narration)\nMara watched the quay with her grey eyes.'
-    )
+    expect(text('E10')).toBe('Mara · eyes: grey\nMara watched the quay with her grey eyes.')
     expect(text('E12')).toBe(
       'Revealed in 1.1: “Tomas sold the map”\nOrrin: overheard from Tomas (1.1): “Orrin overheard Tomas”'
     )
@@ -235,5 +233,68 @@ describe('renderEvidence', () => {
     const tight = renderEvidence(items, 20)
     expect(tight.kept).toEqual(['E1'])
     expect(tight.dropped).toBe(1)
+  })
+
+  it('leaves out an item too long for the budget and still sends the ones after it', () => {
+    const item = (id: string, words: number): Parameters<typeof renderEvidence>[0][number] => ({
+      id,
+      key: { kind: 'outline' },
+      label: 'happened',
+      ref: '1.1',
+      title: id,
+      text: Array.from({ length: words }, () => 'word').join(' '),
+      citable: true,
+      open: null,
+      doc: null
+    })
+    const sent = renderEvidence([item('E1', 1_400), item('E2', 40), item('E3', 40)], 1_200)
+    expect(sent.kept).toEqual(['E2', 'E3'])
+    expect(sent.dropped).toBe(1)
+  })
+})
+
+describe('a claim’s fact line (design §2.2: only narration in now mode sets state)', () => {
+  it('says who says it and in what mode, never a bare value for speech or a dream', () => {
+    const ids = seedClaims(
+      book.db,
+      book.two,
+      [
+        {
+          recordId: book.mara,
+          slot: 'alive',
+          value: 'dead',
+          quote: 'Mara waited at the harbour',
+          para: 0,
+          mode: 'dream'
+        },
+        {
+          recordId: book.mara,
+          slot: 'eyes',
+          value: 'green',
+          quote: 'Mara suspected the map was gone',
+          para: 1,
+          voice: 'dialogue',
+          speakerId: book.orrin
+        },
+        {
+          recordId: book.mara,
+          slot: 'hair',
+          value: 'short',
+          quote: 'her hair cut short',
+          para: 0
+        }
+      ],
+      SCRIBE_NOW
+    )
+    const { items } = resolveEvidence(
+      book.db,
+      ids.map((claimId): EvidenceKey => ({ kind: 'claim', claimId })),
+      book.three
+    )
+    expect(items.map((item) => item.text.split('\n')[0])).toEqual([
+      'In a dream: Mara · alive: dead',
+      'Orrin says: Mara · eyes: green',
+      'Mara · hair: short'
+    ])
   })
 })

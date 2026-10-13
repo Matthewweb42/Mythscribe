@@ -125,3 +125,17 @@ export function buildPerfBook(dir: string): PerfBook {
   )
   return { session, db, mara, ids }
 }
+
+/**
+ * Milliseconds of the fastest of `runs` calls (the first, cold one is left out by the caller): what
+ * the code costs, not what other test workers sharing the machine cost it.
+ */
+export function fastest(runs: number, call: () => unknown): number {
+  let best = Infinity
+  for (let i = 0; i < runs; i += 1) {
+    const start = performance.now()
+    call()
+    best = Math.min(best, performance.now() - start)
+  }
+  return best
+}

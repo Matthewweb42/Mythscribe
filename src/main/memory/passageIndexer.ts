@@ -422,7 +422,18 @@ export function searchMemoryPassages(
   const max = Math.min(Math.max(0, Math.floor(options.limit ?? 10)), MEMORY_PASSAGE_SEARCH_MAX)
   if (match === null || max === 0) return []
   const live = liveOwners(db, options.nodes)
-  const filter = sourceFilter(options.sources)
+  // Without the manuscript's scenes (most rows), the few rows of those sources are picked from
+  // FTS5's content table first, so the match never reads every scene row to filter it out.
+  const narrow =
+    options.sources !== undefined &&
+    options.sources.length > 0 &&
+    !options.sources.includes('scene')
+  const filter = narrow
+    ? sql` AND rowid IN (SELECT id FROM memory_passage_fts_content WHERE 1${sourceFilter(
+        options.sources,
+        sql`c0`
+      )})`
+    : sourceFilter(options.sources)
   const rows = db.all<{
     source: PassageSource
     owner_id: string
@@ -452,95 +463,196 @@ export function searchMemoryPassages(
 }
 
 /** The SQL filter for `sources` (none: every source but the card lines, a map, F-16.18). */
-function sourceFilter(sources: readonly PassageSource[] | undefined): SQL {
+function sourceFilter(sources: readonly PassageSource[] | undefined, column = sql`source`): SQL {
   const wanted = sources === undefined || sources.length === 0 ? DEFAULT_PASSAGE_SOURCES : sources
-  return sql` AND source IN (${sql.join(
+  return sql` AND ${column} IN (${sql.join(
     wanted.map((source) => sql`${source}`),
     sql`, `
   )})`
 }
 
-/** The most matches `searchMemoryPassagesInOrder` reads before ordering them. */
+/** The most matches `searchMemoryPassagesInOrder` reads per word before ranking them. */
 export const MEMORY_PASSAGE_PLACES_MAX = 20_000
 
-/**
- * Every match of `query` placed by the caller (F-16.25, P3-D8: a first / last / ever question reads
- * the earliest matches in reading order, not bm25's best): `orderOf` answers a scene's place, or
- * undefined to leave it out (after now, not readable); the first `max` by (place, paragraph) come
- * back with their snippets. Snippets are made only for those, in a second pass over the match.
- */
-export function searchMemoryPassagesInOrder(
-  db: TreeDb,
-  query: string,
-  options: {
-    sources?: readonly PassageSource[]
-    max: number
-    orderOf: (ownerId: string) => number | undefined
-    nodes?: NodeRow[]
-  }
-): MemoryPassageHit[] {
-  const match = ftsQuery(query)
-  if (match === null || options.max <= 0) return []
-  const live = liveOwners(db, options.nodes)
-  const filter = sourceFilter(options.sources)
-  const places = db.all<{
-    id: number
-    source: PassageSource
-    owner_id: string
-    para: number
-    canon: PassageCanon
-  }>(
-    sql`SELECT rowid AS id, source, owner_id, para, canon
-        FROM memory_passage_fts WHERE memory_passage_fts MATCH ${match}${filter}
-        LIMIT ${MEMORY_PASSAGE_PLACES_MAX}`
-  )
-  const picked = places
-    .flatMap((row) => {
-      if (!isAlive(live, ownerKindOf(row.source), row.owner_id)) return []
-      const order = options.orderOf(row.owner_id)
-      return order === undefined ? [] : [{ row, order, para: Number(row.para) }]
-    })
-    .sort((a, b) => a.order - b.order || a.para - b.para)
-    .slice(0, options.max)
-  if (picked.length === 0) return []
-  // The picked rows' text by rowid (no second MATCH: making FTS snippets re-reads every match).
-  const texts = new Map(
-    db
-      .all<{ id: number; text: string }>(
-        sql`SELECT rowid AS id, text FROM memory_passage_fts WHERE rowid IN (${sql.join(
-          picked.map((each) => sql`${each.row.id}`),
-          sql`, `
-        )})`
-      )
-      .map((row) => [Number(row.id), row.text])
-  )
-  const words =
-    query
-      .normalize('NFC')
-      .toLowerCase()
-      .match(/[\p{L}\p{N}]+/gu) ?? []
-  return picked.map(({ row, para, order }) => ({
-    source: row.source,
-    ownerId: row.owner_id,
-    para,
-    canon: row.canon,
-    label: passageLabel(row.source, row.canon),
-    snippet: snippetAround(texts.get(Number(row.id)) ?? '', words),
-    // Reading order, not relevance: the earliest place scores highest.
-    score: -order
-  }))
+/** What `searchMemoryPassagesInOrder` found. */
+export interface OrderedPassages {
+  /** The kept paragraphs, one per owner (its best), in the caller's order, with snippets. */
+  hits: MemoryPassageHit[]
+  /** Every matching owner's best paragraph, the kept first: what the search returned. */
+  matched: { ownerId: string; para: number }[]
+  /** The first and last place of the matching owners that were not kept; null when none was cut. */
+  cut: { first: number; last: number } | null
+}
+
+interface Placed {
+  row: { id: number; source: PassageSource; owner_id: string; para: number }
+  order: number
+  para: number
+  /** Distinct `terms` the paragraph holds. */
+  terms: number
+  /** Distinct name groups it names. */
+  names: number
 }
 
 /**
- * About `SNIPPET_TOKENS` words of `text` around the first word one of `terms` starts (or that
- * starts one of them: the index stems words, "counted" for "count"), `…` where it was cut.
+ * Every paragraph matching `terms` placed by the caller (F-16.25, P3-D8: a first / last / ever
+ * question reads every earlier scene, not bm25's best): `orderOf` answers an owner's place, or
+ * undefined to leave it out (after now, not readable). Each paragraph is ranked by how many of
+ * `terms` it holds, then by whether it names any of `names` (one word list per record); with no
+ * terms, by how many of the records it names. Each owner keeps its best paragraph (the earliest among equals); the
+ * best `max` owners are kept, the earliest first (`latest`: the latest first), and come back in
+ * the caller's order with snippets made from their text (no FTS snippets: they re-read every
+ * match). `cut` says which places a full answer would also have held.
+ */
+export function searchMemoryPassagesInOrder(
+  db: TreeDb,
+  terms: readonly string[],
+  options: {
+    names?: readonly (readonly string[])[]
+    sources?: readonly PassageSource[]
+    max: number
+    orderOf: (ownerId: string) => number | undefined
+    latest?: boolean
+    nodes?: NodeRow[]
+  }
+): OrderedPassages {
+  const empty: OrderedPassages = { hits: [], matched: [], cut: null }
+  const groups = (options.names ?? []).filter((group) => ftsQuery(group.join(' ')) !== null)
+  const words = terms.filter((term) => ftsQuery(term) !== null)
+  if (options.max <= 0 || (words.length === 0 && groups.length === 0)) return empty
+  const live = liveOwners(db, options.nodes)
+  const filter = sourceFilter(options.sources, sql`c0`)
+  const places = new Map<number, Placed>()
+  // One match of every word (or, with none, every name) places the paragraphs; then one rowid
+  // pass per word and per record counts what each holds (rowids only: no column is read).
+  const placing = words.length > 0 ? words : groups.flat()
+  const first = ftsQuery(placing.join(' '))
+  if (first === null) return empty
+  const owners = new Map<string, number | undefined>()
+  const placeOf = (row: Placed['row']): number | undefined => {
+    const key = `${row.source}:${row.owner_id}`
+    if (!owners.has(key)) {
+      owners.set(
+        key,
+        isAlive(live, ownerKindOf(row.source), row.owner_id)
+          ? options.orderOf(row.owner_id)
+          : undefined
+      )
+    }
+    return owners.get(key)
+  }
+  // The matches' places from FTS5's content table (`<table>_content`: id, then c0… in the
+  // columns' order: source, owner_id, para, canon, text; documented as FTS5's shadow tables), so
+  // the text is never read for a match that is only placed (half the cost of FTS's own columns).
+  for (const row of db.all<Placed['row']>(
+    sql`SELECT id, c0 AS source, c1 AS owner_id, c2 AS para FROM memory_passage_fts_content
+        WHERE id IN (SELECT rowid FROM memory_passage_fts WHERE memory_passage_fts MATCH ${first}
+          LIMIT ${MEMORY_PASSAGE_PLACES_MAX})${filter}`
+  )) {
+    const order = placeOf(row)
+    if (order === undefined) continue
+    places.set(Number(row.id), { row, order, para: Number(row.para), terms: 0, names: 0 })
+  }
+  const count = (query: string, add: (placed: Placed) => void): void => {
+    const match = ftsQuery(query)
+    if (match === null) return
+    for (const { id } of db.all<{ id: number }>(
+      sql`SELECT rowid AS id FROM memory_passage_fts WHERE memory_passage_fts MATCH ${match}
+          LIMIT ${MEMORY_PASSAGE_PLACES_MAX}`
+    )) {
+      const placed = places.get(Number(id))
+      if (placed !== undefined) add(placed)
+    }
+  }
+  if (words.length === 1) for (const placed of places.values()) placed.terms = 1
+  else for (const word of words) count(word, (placed) => void (placed.terms += 1))
+  // With words, a name only breaks a tie (one pass: does it name any of them); with none, the
+  // names are the ranking (one pass per record: how many it names).
+  if (words.length > 0 && groups.length > 0) {
+    count(groups.flat().join(' '), (placed) => void (placed.names = 1))
+  } else {
+    for (const group of groups) count(group.join(' '), (placed) => void (placed.names += 1))
+  }
+  // Each owner's best paragraph: the most terms, then names, then the earliest.
+  const better = (a: Placed, b: Placed): number =>
+    b.terms - a.terms || b.names - a.names || a.para - b.para
+  const best = new Map<string, Placed>()
+  for (const placed of places.values()) {
+    const held = best.get(placed.row.owner_id)
+    if (held === undefined || better(placed, held) < 0) best.set(placed.row.owner_id, placed)
+  }
+  const ranked = [...best.values()].sort(
+    (a, b) =>
+      b.terms - a.terms ||
+      b.names - a.names ||
+      (options.latest === true ? b.order - a.order : a.order - b.order)
+  )
+  const kept = ranked.slice(0, options.max).sort((a, b) => a.order - b.order || a.para - b.para)
+  const left = ranked.slice(options.max).map((placed) => placed.order)
+  if (kept.length === 0) return empty
+  // The kept rows' text and canon by rowid (no second MATCH: FTS snippets re-read every match).
+  const texts = new Map(
+    db
+      .all<{ id: number; text: string; canon: PassageCanon }>(
+        sql`SELECT rowid AS id, text, canon FROM memory_passage_fts WHERE rowid IN (${sql.join(
+          kept.map((each) => sql`${each.row.id}`),
+          sql`, `
+        )})`
+      )
+      .map((row) => [Number(row.id), row])
+  )
+  const around = placing.flatMap(
+    (word) =>
+      word
+        .normalize('NFC')
+        .toLowerCase()
+        .match(/[\p{L}\p{N}]+/gu) ?? []
+  )
+  return {
+    hits: kept.flatMap(({ row, para, order }) => {
+      const stored = texts.get(Number(row.id))
+      if (stored === undefined) return []
+      return [
+        {
+          source: row.source,
+          ownerId: row.owner_id,
+          para,
+          canon: stored.canon,
+          label: passageLabel(row.source, stored.canon),
+          snippet: snippetAround(stored.text, around),
+          // Reading order, not relevance: the earliest place scores highest.
+          score: -order
+        }
+      ]
+    }),
+    matched: [...kept, ...ranked.slice(options.max)].map((placed) => ({
+      ownerId: placed.row.owner_id,
+      para: placed.para
+    })),
+    cut: left.length === 0 ? null : { first: Math.min(...left), last: Math.max(...left) }
+  }
+}
+
+/**
+ * About `SNIPPET_TOKENS` words of `text` around the first word one of `terms` starts ("counted"
+ * for "count"), or that starts one of them as a stem does (the index stems words: "count" for
+ * "counted"; four letters at least and at most three fewer, so "to" is no hit for "tomas"), `…`
+ * where it was cut.
  */
 export function snippetAround(text: string, terms: readonly string[]): string {
   const tokens = [...text.matchAll(/\S+/gu)]
   if (tokens.length <= SNIPPET_TOKENS) return text.replace(/\s+/g, ' ').trim()
   const hit = tokens.findIndex((token) => {
     const word = token[0].toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
-    return word !== '' && terms.some((term) => word.startsWith(term) || term.startsWith(word))
+    // The index stems words ("counted" for "count"): a shorter word is a hit only as a stem.
+    return (
+      word !== '' &&
+      terms.some(
+        (term) =>
+          word.startsWith(term) ||
+          (word.length >= 4 && term.length - word.length <= 3 && term.startsWith(word))
+      )
+    )
   })
   const from = Math.max(
     0,

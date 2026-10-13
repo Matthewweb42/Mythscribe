@@ -1,14 +1,22 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { listRecords, savePage } from '../memory/recordStore'
 import { seedClaims } from '../memory/reading/claimFixture'
 import { TEST_BOOK } from '../memory/testBook/book'
 import { buildTestBookProject, type TestBookProject } from '../memory/testBook/project'
-import { indexBook } from './scribeFixture'
-import { gatherStep0, type Step0 } from './step0'
+import { evidenceFrame } from './evidence'
+import {
+  closeScribeBook,
+  doc as scribeDoc,
+  indexBook,
+  SCRIBE_NOW,
+  scribeBook,
+  type ScribeBook
+} from './scribeFixture'
+import { gatherStep0, ordinalScope, type Step0 } from './step0'
 
 /**
  * Step 0 over the test book (F-16.24; plan P3 §1.6): E0 is the open scene whole; the records the
@@ -145,7 +153,8 @@ describe('Step 0 (F-16.24)', () => {
     )
   })
 
-  it('reads every earlier scene’s hits in reading order for a first / ever question', () => {
+  it('reads every earlier scene’s best paragraph in reading order for a first / ever question', () => {
+    // "appear" only asks where Varrow is in the book: the search ranks by his names.
     const step = ask('When does Varrow first appear?', 'h09')
     expect(step.cues.scopeAll).toBe(true)
     expect(step.scope).toEqual({
@@ -153,11 +162,12 @@ describe('Step 0 (F-16.24)', () => {
       to: '14.1',
       allEarlier: true,
       wholeBook: false,
-      terms: ['varrow', 'first', 'appear']
+      terms: ['callum', 'varrow']
     })
-    const order = step.menu
-      .filter((item) => item.key.kind === 'passage')
-      .map((item) => item.ref.split(' ')[0] ?? '')
+    const scenes = step.menu.filter(
+      (item) => item.key.kind === 'passage' && item.key.source === 'scene'
+    )
+    const order = scenes.map((item) => item.ref.split(' ')[0] ?? '')
     const sorted = [...order].sort((a, b) => {
       const [ca, sa] = a.split('.').map(Number)
       const [cb, sb] = b.split('.').map(Number)
@@ -165,13 +175,136 @@ describe('Step 0 (F-16.24)', () => {
     })
     expect(order.length).toBeGreaterThan(1)
     expect(order).toEqual(sorted)
-    // Nothing after now, and nothing from an Idea or cut scene: the book's own scenes only.
+    // One paragraph per scene, nothing after now, and the book's own scenes only.
+    expect(new Set(order).size).toBe(order.length)
     expect(order.every((ref) => Number(ref.split('.')[0]) <= 14)).toBe(true)
-    expect(step.menu.every((item) => item.label === 'happened')).toBe(true)
+    expect(scenes.every((item) => item.label === 'happened')).toBe(true)
+    // The other sources' best stand beside them, labelled: Varrow's Ideas and Not canon line.
+    expect(step.menu.map((item) => item.label)).toEqual(
+      expect.arrayContaining(['idea', 'notCanon'])
+    )
     // "In the book": the whole book.
     expect(ask('Does Varrow ever smile in the book?', 'h09').scope).toMatchObject({
       wholeBook: true,
-      allEarlier: false
+      allEarlier: false,
+      terms: ['smile']
     })
+  })
+
+  it('searches the content words, not the names or the cue words, so early mentions never crowd out the answer', () => {
+    const step = ask('When does Liesel first accept a dance with Varrow?', 'h09')
+    expect(step.terms).toEqual(['accept', 'dance'])
+    expect(step.scope).toMatchObject({ allEarlier: true, terms: ['accept', 'dance'] })
+    // 5.1, where she accepts him and they dance, is reached (once early, every name mention filled
+    // the twenty places and it never was); the navigator reads the scene from there.
+    const refs = step.menu.map((item) => item.ref)
+    expect(refs.some((ref) => ref.startsWith('5.1 ¶'))).toBe(true)
+    expect(step.hits.some((hit) => hit.nodeId === node('s05'))).toBe(true)
+    // The earliest paragraph holding both words comes first among the scenes.
+    expect(refs).toContain(`3.1 ¶${paraOf('s03', 'obliged to accept')}`)
+    // Nothing to search for: no scope, never "searched every scene".
+    expect(ask('Did she ever?', 'h09')).toMatchObject({ scope: null, terms: [] })
+  })
+
+  it('keeps the Ideas page for an idea question and a general "what do we know" question', () => {
+    const first = ask('What was my first idea about Varrow and a sister?', 'h09')
+    const passages = first.menu.filter((item) => item.key.kind === 'passage')
+    expect(passages[0]?.label).toBe('idea')
+    const known = ask('What do we know about Varrow’s sister?', 'h09')
+    expect(known.scope).toBeNull()
+    expect(known.menu.map((item) => item.label)).toContain('idea')
+  })
+
+  it('labels E0 by what the open scene is: an Idea scene is never real', () => {
+    expect(ask('Varrow’s eyes?', 'h09').e0?.label).toBe('happened')
+    expect(ask('Varrow’s eyes?', 'h11').e0).toMatchObject({
+      nodeId: node('h11'),
+      label: 'ideaScene'
+    })
+  })
+})
+
+describe('the ordinal search’s scope (P3-D8)', () => {
+  it('claims only the stretch whose every match is in the menu when the cap cut some', () => {
+    const frame = evidenceFrame(book.db, node('s05'))
+    const asked = { wholeBook: false, latest: false }
+    expect(ordinalScope(frame, ['dance'], { ...asked, cut: null })).toEqual({
+      from: '1.1',
+      to: '5.1',
+      allEarlier: true,
+      wholeBook: false,
+      terms: ['dance']
+    })
+    // Scenes 3.1 and 4.1 matched but were cut: only 1.1 to 2.1 is claimed, and not every scene.
+    expect(ordinalScope(frame, ['dance'], { ...asked, cut: { first: 2, last: 3 } })).toEqual({
+      from: '1.1',
+      to: '2.1',
+      allEarlier: false,
+      wholeBook: false,
+      terms: ['dance']
+    })
+    // A "last" question keeps the latest: the claim starts after the last cut scene.
+    expect(
+      ordinalScope(frame, ['dance'], { ...asked, latest: true, cut: { first: 0, last: 1 } })
+    ).toMatchObject({ from: '3.1', to: '5.1', allEarlier: false })
+    expect(ordinalScope(frame, ['dance'], { ...asked, cut: { first: 0, last: 3 } })).toBeNull()
+    expect(ordinalScope(frame, [], { ...asked, cut: null })).toBeNull()
+  })
+})
+
+describe('a record’s digest (P2b-D7, decision 5)', () => {
+  let small: ScribeBook
+  beforeEach(() => {
+    small = scribeBook()
+  })
+  afterEach(() => closeScribeBook(small))
+
+  it('words a half-knowing line as such, never as knowing', () => {
+    seedClaims(
+      small.db,
+      small.two,
+      [
+        {
+          recordId: small.mara,
+          slot: 'knows',
+          value: 'suspects',
+          how: 'suspects',
+          objectId: small.map,
+          quote: 'Mara suspected the map was gone',
+          para: 1,
+          proof: 'verified'
+        }
+      ],
+      SCRIBE_NOW
+    )
+    const step = gatherStep0(small.db, {
+      nodeId: small.two,
+      question: 'What does Mara think about the map?',
+      focus: { caretPara: null, selection: null }
+    })
+    const lines = step.records[0]?.lines.map((line) => line.text) ?? []
+    expect(lines).toContain('Suspects the sold map (1.2)')
+    expect(lines.some((line) => line.startsWith('Knows'))).toBe(false)
+    expect(step.menu.some((item) => item.snippet.includes('Knows'))).toBe(false)
+  })
+
+  it('gives a stated age with the age as of now, never a bare "since"', () => {
+    savePage(small.db, small.mara, 'pinned', scribeDoc('Born: 1790'), SCRIBE_NOW)
+    seedClaims(
+      small.db,
+      small.one,
+      [
+        { recordId: small.mara, slot: 'age', value: 'ten', quote: 'Mara watched the quay', para: 0 }
+      ],
+      SCRIBE_NOW
+    )
+    const step = gatherStep0(small.db, {
+      nodeId: small.three,
+      question: 'Tell me about Mara',
+      focus: { caretPara: null, selection: null }
+    })
+    const lines = step.records[0]?.lines.map((line) => line.text) ?? []
+    expect(lines.filter((line) => line.startsWith('Age:'))).toHaveLength(1)
+    expect(lines.some((line) => line.includes('since 1.1'))).toBe(false)
   })
 })

@@ -261,27 +261,72 @@ describe('nameIndexer (F-16.5)', () => {
 })
 
 describe('passageIndexer (F-16.5)', () => {
-  it('F-16.25: places every match in the caller’s order and makes snippets for the first only', () => {
-    saveDocument(db, scene(0), doc('The rope was frayed.', 'Ropes everywhere on the quay.'))
-    indexScene(db, scene(0), at(1))
-    const hits = searchMemoryPassagesInOrder(db, 'rope', {
+  it('F-16.25: ranks paragraphs by the words they hold, keeps one per scene, and says what it cut', () => {
+    const more = (title: string): string =>
+      createNode(db, 'novel', {
+        parentId: getNode(db, scene(0))?.parentId ?? '',
+        kind: 'document',
+        hierarchyLevel: 'scene',
+        title
+      }).id
+    const ids = [scene(0), more('Two'), more('Three')]
+    saveDocument(db, ids[0] ?? '', doc('The rope was frayed.', 'Rynna tied the rope to the mast.'))
+    saveDocument(db, ids[1] ?? '', doc('Rynna walked on.', 'The mast creaked.'))
+    saveDocument(db, ids[2] ?? '', doc('Ropes everywhere on the quay.'))
+    for (const id of ids) indexScene(db, id, at(1))
+    const orderOf = (ownerId: string): number | undefined => {
+      const i = ids.indexOf(ownerId)
+      return i < 0 ? undefined : i
+    }
+    const places = (found: ReturnType<typeof searchMemoryPassagesInOrder>): [number, number][] =>
+      found.hits.map((hit) => [ids.indexOf(hit.ownerId), hit.para])
+    const all = searchMemoryPassagesInOrder(db, ['rope', 'mast'], {
       sources: ['scene'],
       max: 5,
-      // Paragraph order within the one scene; a scene left out answers undefined.
-      orderOf: (ownerId) => (ownerId === scene(0) ? 0 : undefined)
+      orderOf
     })
-    expect(hits.map((hit) => [hit.para, hit.snippet])).toEqual([
-      [0, 'The rope was frayed.'],
-      [1, 'Ropes everywhere on the quay.']
+    // Each scene's best paragraph (the one holding both words in the first), in reading order.
+    expect(places(all)).toEqual([
+      [0, 1],
+      [1, 1],
+      [2, 0]
     ])
-    expect(searchMemoryPassagesInOrder(db, 'rope', { max: 5, orderOf: () => undefined })).toEqual(
-      []
+    expect(all.hits[2]?.snippet).toBe('Ropes everywhere on the quay.')
+    expect(all.cut).toBeNull()
+    // Capped: the paragraph holding both words is kept first; the cut is said, never hidden.
+    const one = searchMemoryPassagesInOrder(db, ['rope', 'mast'], { max: 1, orderOf })
+    expect(places(one)).toEqual([[0, 1]])
+    expect(one.cut).toEqual({ first: 1, last: 2 })
+    expect(one.matched.map((each) => ids.indexOf(each.ownerId))).toEqual([0, 1, 2])
+    // Among equals the earliest, or the latest for a "last" question.
+    expect(places(searchMemoryPassagesInOrder(db, ['rope'], { max: 1, orderOf }))).toEqual([[0, 0]])
+    expect(
+      places(searchMemoryPassagesInOrder(db, ['rope'], { max: 1, orderOf, latest: true }))
+    ).toEqual([[2, 0]])
+    // With no words, the names alone; with words, a name breaks the tie.
+    expect(
+      places(searchMemoryPassagesInOrder(db, [], { names: [['rynna']], max: 5, orderOf }))
+    ).toEqual([
+      [0, 1],
+      [1, 0]
+    ])
+    expect(
+      places(searchMemoryPassagesInOrder(db, ['mast'], { names: [['rynna']], max: 1, orderOf }))
+    ).toEqual([[0, 1]])
+    expect(searchMemoryPassagesInOrder(db, ['rope'], { max: 5, orderOf: () => undefined })).toEqual(
+      { hits: [], matched: [], cut: null }
     )
-    expect(searchMemoryPassagesInOrder(db, 'rope', { max: 1, orderOf: () => 0 })).toHaveLength(1)
+    expect(searchMemoryPassagesInOrder(db, [], { max: 5, orderOf }).hits).toEqual([])
     const long = Array.from({ length: 40 }, (_, i) => `w${i}`)
     long[30] = 'Counted'
     expect(snippetAround(long.join(' '), ['count'])).toBe(`…${long.slice(22, 38).join(' ')}…`)
     expect(snippetAround(long.join(' '), ['zzz'])).toBe(`${long.slice(0, 16).join(' ')}…`)
+    // A short word is no hit for a longer term ("to" for "tomas"); a stem is ("count" for "counted").
+    const harbour =
+      'She went to the harbour in the grey rain of the morning and waited by the wall until at last Tomas came down the steps.'
+    expect(snippetAround(harbour, ['tomas'])).toContain('Tomas')
+    long[30] = 'count'
+    expect(snippetAround(long.join(' '), ['counted'])).toBe(`…${long.slice(22, 38).join(' ')}…`)
   })
 
   it('labels scene, Idea scene, excluded scene and note paragraphs, and skips an unchanged owner', () => {

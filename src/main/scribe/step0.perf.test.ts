@@ -5,15 +5,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { scanNamesFor } from '../memory/nameIndexer'
 import { indexOwner, indexScene } from '../memory/passageIndexer'
 import { seedClaims } from '../memory/reading/claimFixture'
-import { buildPerfBook, PERF_NOW, type PerfBook } from '../memory/reading/perfFixture'
+import { buildPerfBook, fastest, PERF_NOW, type PerfBook } from '../memory/reading/perfFixture'
 import { createRecord } from '../memory/recordStore'
 import { gatherStep0 } from './step0'
 
 /**
  * Step 0 at novel size (F-16.24; design §2.6 "local, <50 ms"; plan P3 §1.6): the 90-scene perf
  * book with three records the question names, every scene indexed for the passage search, the
- * question asked from a scene in the middle of the book. The median of five warm calls stays under
- * 50 ms (the first, cold call reads every scene's text once, as the app's views already have).
+ * question asked from a scene in the middle of the book. The fastest of five warm calls stays under
+ * 50 ms (the first, cold call reads every scene's text once, as the app's views already have; the
+ * fastest, as `timeViews.perf.test.ts` measures, so other test workers on the machine do not count).
  */
 
 const BUDGET_MS = 50
@@ -57,11 +58,6 @@ afterAll(() => {
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
-const median = (values: number[]): number => {
-  const sorted = [...values].sort((a, b) => a - b)
-  return sorted[Math.floor(sorted.length / 2)] ?? Infinity
-}
-
 describe('Step 0 at novel size (F-16.24)', () => {
   it('answers a question naming three records in under 50 ms, and an ordinal one too', () => {
     const open = book.ids[45] ?? ''
@@ -75,13 +71,7 @@ describe('Step 0 at novel size (F-16.24)', () => {
       expect(first.records.map((each) => each.name)).toEqual(['Mara', 'Orrin', 'Tomas'])
       expect(first.e0?.paragraphs).toHaveLength(40)
       expect(first.menu.length).toBeGreaterThan(0)
-      const times: number[] = []
-      for (let i = 0; i < 5; i += 1) {
-        const start = performance.now()
-        ask()
-        times.push(performance.now() - start)
-      }
-      const ms = median(times)
+      const ms = fastest(5, ask)
       expect(ms, `${question}: ${ms.toFixed(1)} ms`).toBeLessThan(BUDGET_MS)
     }
   })

@@ -30,6 +30,24 @@ const rows = (): number[] =>
   [claim, card, reading].map((table) => book.db.select().from(table).all().length)
 
 describe('addSheetLine and removeSheetLine (F-16.26)', () => {
+  it('names the Pinned line a new line contradicts (same label, another value); Ideas may disagree', () => {
+    savePage(book.db, book.mara, 'pinned', doc('Eyes: grey', 'Born: 1790'), SCRIBE_NOW)
+    const added = addSheetLine(
+      book.db,
+      { id: book.mara, page: 'pinned', text: 'Eyes: green', turn: 'm1' },
+      SCRIBE_NOW
+    )
+    expect(added).toMatchObject({ index: 2, conflict: { index: 0, text: 'Eyes: grey' } })
+    savePage(book.db, book.mara, 'ideas', doc('Eyes: grey'), SCRIBE_NOW)
+    expect(
+      addSheetLine(
+        book.db,
+        { id: book.mara, page: 'ideas', text: 'Eyes: violet', turn: 'm2' },
+        SCRIBE_NOW
+      ).conflict
+    ).toBeNull()
+  })
+
   it('appends a marked line to Pinned, refuses one Pinned says already, and indexes it', () => {
     const before = rows()
     savePage(book.db, book.mara, 'pinned', doc('Born: 1790'), SCRIBE_NOW)
@@ -38,7 +56,7 @@ describe('addSheetLine and removeSheetLine (F-16.26)', () => {
       { id: book.mara, page: 'pinned', text: '  Hates   the sea. ', turn: 'm7' },
       SCRIBE_NOW
     )
-    expect(added).toMatchObject({ index: 1, text: 'Hates the sea.' })
+    expect(added).toMatchObject({ index: 1, text: 'Hates the sea.', conflict: null })
     expect(blocksOf('pinned').map((block) => [block.text, aiWrittenOf(block.block)])).toEqual([
       ['Born: 1790', null],
       ['Hates the sea.', { turn: 'm7', date: '2026-10-13' }]

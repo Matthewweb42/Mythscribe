@@ -19,7 +19,8 @@ import type { TreeDb } from '../tree/treeStore'
  * Sheet lines from the chat (F-16.26; decision 3 as the author changed it, plan P3 §1.3): when
  * the author asks Ms Scribe to put something on a record's sheet, one paragraph is added at the
  * end of its Pinned or Ideas page, marked `aiWritten` (the chat turn and the day) until the
- * author edits its words (P1's rule, `clearAiMarks`). A line the page already says is refused.
+ * author edits its words (P1's rule, `clearAiMarks`). A line the page already says is refused; a
+ * Pinned line that contradicts one under the same label is added and the line it contradicts named.
  * The Undo takes the line out only while it still reads as written and carries the turn's mark.
  * Each write re-indexes the record's passages, so the line is found at once (an Ideas line as the
  * author's idea). Only these pages are written: never a claim, a card or a reading (P3 rule 6).
@@ -53,7 +54,8 @@ function sheetRecord(db: TreeDb, id: string): StoryRecord {
 /**
  * Adds one line at the end of a record's Pinned or Ideas page, marked `aiWritten { turn, date }`,
  * and re-indexes the record. ALREADY_EXISTS when the page says it already (`relateLine`: the
- * same words, or a labelled line the page covers).
+ * same words, or a labelled line the page covers); `conflict` is the Pinned line under the same
+ * label with another value ("Eyes: grey" for "Eyes: green"), else null.
  */
 export function addSheetLine(db: TreeDb, input: SheetLineAdd, now: Date): SheetLineResult {
   const text = input.text.replace(/\s+/gu, ' ').trim()
@@ -62,13 +64,18 @@ export function addSheetLine(db: TreeDb, input: SheetLineAdd, now: Date): SheetL
   const page = pageOf(record, input.page)
   const blocks = page === null ? [] : pageTextBlocks(page)
   const said = blocks.map((block) => ({ index: block.index, text: block.text }))
-  if (relateLine(text, said) === 'duplicate') {
+  const relation = relateLine(text, said)
+  if (relation === 'duplicate') {
     throw new AppError(
       'ALREADY_EXISTS',
       `${record.name}’s ${input.page === 'pinned' ? 'Pinned' : 'Ideas'} already says that.`,
       { id: input.id }
     )
   }
+  // A Pinned line under the same label with another value: added as asked, and named back, so
+  // the chat's confirmation says what it contradicts. Ideas may disagree with one another.
+  const conflict =
+    input.page === 'pinned' && relation.kind === 'conflict' ? relation.replaces : null
   const doc: TiptapNodeT = page ?? { type: 'doc', content: [] }
   const block = writtenBlock(text, { turn: input.turn, date: dayOf(now) })
   const saved = db.transaction((tx) => {
@@ -82,7 +89,7 @@ export function addSheetLine(db: TreeDb, input: SheetLineAdd, now: Date): SheetL
     indexOwner(tx, 'record', input.id, now)
     return written
   })
-  return { record: saved, index: blocks.length, text }
+  return { record: saved, index: blocks.length, text, conflict }
 }
 
 /**

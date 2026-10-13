@@ -428,6 +428,14 @@ export const AgeSinceView = z.discriminatedUnion('kind', [
 ])
 export type AgeSinceView = z.infer<typeof AgeSinceView>
 
+/** The story year an age is computed against: typed, quoted, or carried from an earlier scene. */
+export const AgeYearView = z.object({
+  kind: z.enum(['typed', 'quoted', 'carried']),
+  value: z.number().int(),
+  from: SceneRefView
+})
+export type AgeYearView = z.infer<typeof AgeYearView>
+
 /**
  * A character's age as of a scene (decision 5, P2b-D15): computed from a birth year and the
  * scene's year ("about 19 · year from 1.1"), not born yet, the last stated age with what changed
@@ -440,20 +448,12 @@ export const AgeView = z.discriminatedUnion('kind', [
     kind: z.literal('computed'),
     age: z.number().int().nonnegative(),
     born: BornView,
-    year: z.object({
-      kind: z.enum(['typed', 'quoted', 'carried']),
-      value: z.number().int(),
-      from: SceneRefView
-    })
+    year: AgeYearView
   }),
   z.object({
     kind: z.literal('notBorn'),
     born: BornView,
-    year: z.object({
-      kind: z.enum(['typed', 'quoted', 'carried']),
-      value: z.number().int(),
-      from: SceneRefView
-    })
+    year: AgeYearView
   }),
   z.object({
     kind: z.literal('stated'),

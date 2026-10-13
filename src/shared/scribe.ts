@@ -5,7 +5,7 @@ import { PassageSource } from './memory/passages'
 import { RecordPage, StoryRecord } from './memory/records'
 import { SlotSchema } from './memory/slots'
 import type { MemoryMeaning, MemorySource } from './memory/sources'
-import { KnowsCellView, SceneRefView } from './memory/views'
+import { AgeYearView, BornView, KnowsCellView, SceneRefView } from './memory/views'
 
 /**
  * Ms Scribe on story memory v2 (F-16.24, F-16.25, F-16.26; plan P3, design §2.6): the shapes the
@@ -176,31 +176,44 @@ export function evidenceTag(
   return where.trim() === '' ? words : `${words}, ${where}`
 }
 
+/** What a paragraph's page says of it beyond its source (`labelOf`). */
+export interface LabelMarks {
+  /** A Pinned paragraph filed from a document. */
+  filed?: boolean
+  /** The author marked it, or its page, Not canon. */
+  notCanon?: boolean
+  /** A Research page that is an uploaded source document (the default for `research`). */
+  upload?: boolean
+}
+
 /**
- * The label of text from `source` (P0's taxonomy) whose meaning from the open scene is `meaning`
- * (`meaningOf`): a manuscript scene by where it sits; a Pinned paragraph filed from a document is
- * `filed`; anything never real keeps its own place (Ideas, an Idea scene, a cut scene) or reads
- * `notCanon`; plans are `planned`; a card is a map.
+ * The one labelling rule (design §2.2 "Meaning by place"; `evidence.ts` labels every item with
+ * it): text from `source` (P0's taxonomy) whose meaning from the open scene is `meaning`
+ * (`meaningOf`). A manuscript scene by where it sits; a Not canon mark wins over the rest on notes,
+ * Pinned, Research and plans; a Pinned paragraph filed from a document is `filed`; a Research page
+ * is a source document when uploaded, else the author's notes; anything never real keeps its own
+ * place (Ideas, an Idea scene, a cut scene) or reads `notCanon`; plans are `planned`; a card is a
+ * map.
  */
 export function labelOf(
   source: MemorySource,
   meaning: MemoryMeaning,
-  marks: { filed: boolean } = { filed: false }
+  marks: LabelMarks = {}
 ): EvidenceLabel {
   switch (source) {
     case 'scene':
       return meaning === 'later' ? 'later' : 'happened'
     case 'pinned':
-      return marks.filed ? 'filed' : 'notes'
+      return marks.notCanon === true ? 'notCanon' : marks.filed === true ? 'filed' : 'notes'
     case 'note':
-      return 'notes'
     case 'research':
-      return 'research'
+      if (marks.notCanon === true) return 'notCanon'
+      return (marks.upload ?? source === 'research') ? 'research' : 'notes'
     case 'synopsis':
     case 'brief':
     case 'sceneNote':
     case 'plannedCard':
-      return 'planned'
+      return marks.notCanon === true ? 'notCanon' : 'planned'
     case 'idea':
       return 'idea'
     case 'ideaScene':
@@ -250,10 +263,12 @@ export type Navigation = z.infer<typeof Navigation>
 /**
  * An instant card (F-16.24): a question the memory answers with no AI call, from a live and
  * uncontested claim (design §2.6). `slot`: a record's value as of now (a lasting one "since 12.1",
- * a transient one "last stated in 13.4"), with `readFirst` when the latest change was read first.
- * `knows`: "does A know X", only ever yes (`source` `author` for her *Knew before the book*).
- * `whoKnows`: the counted holders as of now, readers-since, and `checkedUpTo`, from which the
- * renderer alone words the scoped absence line (P2b rule 9).
+ * a transient one "last stated in 13.4"; a stated age only with no time passed since), with
+ * `readFirst` when the latest change was read first. `age`: a character's age as of now computed
+ * from a birth year and the scene's story year (decision 5, P2b-D15), labelled "computed from your
+ * book". `knows`: "does A know X", only ever yes (`source` `author` for her *Knew before the
+ * book*). `whoKnows`: the counted holders as of now, readers-since, and `checkedUpTo`, from which
+ * the renderer alone words the scoped absence line (P2b rule 9).
  */
 export const InstantCard = z.discriminatedUnion('kind', [
   z.object({
@@ -270,6 +285,16 @@ export const InstantCard = z.discriminatedUnion('kind', [
     para: Para,
     since: z.string().nullable(),
     lastStated: z.boolean(),
+    asOfRef: z.string().nullable(),
+    readFirst: z.object({ costUsd: z.number().nonnegative() }).nullable()
+  }),
+  z.object({
+    kind: z.literal('age'),
+    recordId: z.string(),
+    name: z.string(),
+    age: z.number().int().nonnegative(),
+    born: BornView,
+    year: AgeYearView,
     asOfRef: z.string().nullable(),
     readFirst: z.object({ costUsd: z.number().nonnegative() }).nullable()
   }),
@@ -401,11 +426,15 @@ export const SheetLineAdd = z.object({
 })
 export type SheetLineAdd = z.infer<typeof SheetLineAdd>
 
-/** What `record:addLine` wrote: the record as it is now, and the line's paragraph and words. */
+/**
+ * What `record:addLine` wrote: the record as it is now, the line's paragraph and words, and the
+ * Pinned line it contradicts (the same label, another value), so the chat's confirmation names it.
+ */
 export const SheetLineResult = z.object({
   record: StoryRecord,
   index: z.number().int().nonnegative(),
-  text: z.string()
+  text: z.string(),
+  conflict: z.object({ index: z.number().int().nonnegative(), text: z.string() }).nullable()
 })
 export type SheetLineResult = z.infer<typeof SheetLineResult>
 

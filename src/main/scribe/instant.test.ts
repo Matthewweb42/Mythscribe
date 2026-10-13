@@ -6,6 +6,7 @@ import { seedClaims } from '../memory/reading/claimFixture'
 import { setKnewBefore } from '../memory/reading/knewBeforeStore'
 import { setSceneSettled } from '../memory/reading/sceneReadStore'
 import { savePage } from '../memory/recordStore'
+import { setSceneDetails } from '../memory/sceneDetailStore'
 import { contested, instantCard } from './instant'
 import {
   closeScribeBook,
@@ -181,6 +182,98 @@ describe('a record’s slot (P3-D2, P3-D3)', () => {
     expect(eyes(book.three)).toMatchObject({ card: { value: 'grey' } })
     setSceneSettled(book.db, book.one, activeDraftId(book.db), false)
     expect(eyes(book.three)).toEqual({ readFirst: [book.one] })
+  })
+})
+
+describe('read-first by the prose that bears on the slot (P3-D4)', () => {
+  const ask = (slot: 'location' | 'alive' | 'eyes', caretPara: number | null = null) =>
+    instantCard(book.db, { kind: 'slot', recordId: book.mara, slot }, book.three, { caretPara })
+  const seed = (slot: 'location' | 'alive', value: string, quote: string): void =>
+    void seedClaims(
+      book.db,
+      book.one,
+      [{ recordId: book.mara, slot, value, quote, para: 0 }],
+      SCRIBE_NOW
+    )
+
+  it('reads an unread sentence that moves the record before a location card', () => {
+    seed('location', 'the quay', 'watched the quay')
+    expect(ask('location')).toMatchObject({ card: { value: 'the quay' } })
+    saveDocument(
+      book.db,
+      book.three,
+      doc('Mara’s eyes were brown in the lamplight.', 'Mara rode north to Vell and stayed there.')
+    )
+    expect(ask('location')).toEqual({ readFirst: [book.three] })
+    saveDocument(book.db, book.three, doc('Mara went back to the harbour.'))
+    expect(ask('location')).toEqual({ readFirst: [book.three] })
+  })
+
+  it('reads an unread death before an alive card, but not an unrelated sentence', () => {
+    seed('alive', 'alive', 'Mara watched the quay')
+    saveDocument(book.db, book.three, doc('Mara laughed at the joke.'))
+    expect(ask('alive')).toMatchObject({ card: { value: 'alive' } })
+    saveDocument(book.db, book.three, doc('Mara died on the cold stones.'))
+    expect(ask('alive')).toEqual({ readFirst: [book.three] })
+  })
+
+  it('never reads the paragraph still being written at the caret', () => {
+    grey()
+    saveDocument(book.db, book.three, doc('Mara sat down.', 'Mara’s eyes were'))
+    // Without the caret, the half sentence reads as finished; at the caret it is still typed.
+    expect(ask('eyes')).toEqual({ readFirst: [book.three] })
+    expect(ask('eyes', 1)).toMatchObject({ card: { value: 'grey' } })
+  })
+})
+
+describe('an age as of now (decision 5, P2b-D15)', () => {
+  const age = (): ReturnType<typeof instantCard> =>
+    instantCard(book.db, { kind: 'slot', recordId: book.mara, slot: 'age' }, book.three)
+  const years = (...values: (number | null)[]): void => {
+    ;[book.one, book.two, book.three].forEach((id, i) =>
+      setSceneDetails(
+        book.db,
+        id,
+        {
+          povRecordId: book.mara,
+          place: { recordId: null, text: '' },
+          time: { text: '' },
+          storyYear: values[i] ?? null,
+          alsoHere: []
+        },
+        SCRIBE_NOW
+      )
+    )
+  }
+  const ten = (): void =>
+    void seedClaims(
+      book.db,
+      book.one,
+      [{ recordId: book.mara, slot: 'age', value: 'ten', quote: 'Mara watched the quay', para: 0 }],
+      SCRIBE_NOW
+    )
+
+  it('answers a birth year and the story year with a computed card, over an older stated age', () => {
+    savePage(book.db, book.mara, 'pinned', doc('Born: 1790'), SCRIBE_NOW)
+    years(1800, 1805, 1810)
+    ten()
+    const outcome = age()
+    expect(outcome).toMatchObject({
+      card: { kind: 'age', recordId: book.mara, age: 20, asOfRef: '1.3', readFirst: null }
+    })
+    expect(InstantCard.safeParse('card' in outcome ? outcome.card : null).success).toBe(true)
+  })
+
+  it('hands a stated age over once time has passed since, and gives it while none has', () => {
+    ten()
+    expect(age()).toMatchObject({ card: { kind: 'slot', value: 'ten', since: '1.1' } })
+    years(1800, 1800, 1805)
+    const outcome = age()
+    expect(outcome).toMatchObject({ handover: 'stale' })
+    expect('keys' in outcome ? outcome.keys : []).toContainEqual({
+      kind: 'timeline',
+      recordId: book.mara
+    })
   })
 })
 

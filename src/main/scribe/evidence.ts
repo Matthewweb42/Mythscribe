@@ -5,10 +5,13 @@ import { aiFiledOf, markedParagraphs, pageTextBlocks } from '@shared/memory/page
 import type { PassageSource } from '@shared/memory/passages'
 import type { StoryRecord } from '@shared/memory/records'
 import { slotLabel } from '@shared/memory/slots'
+import { meaningOf } from '@shared/memory/sources'
 import type { AgeView, YearView } from '@shared/memory/views'
+import type { Claim } from '@shared/memory/claims'
 import {
   citableLabel,
   evidenceTag,
+  labelOf,
   type CitationTarget,
   type EvidenceKey,
   type EvidenceLabel
@@ -103,15 +106,15 @@ export const sceneRefOf = (frame: EvidenceFrame, nodeId: string): string =>
   frame.reading.refs.get(nodeId) ?? ''
 
 /**
- * A manuscript scene's label from where it is now: an Idea scene, a scene left out of the book,
- * else the manuscript before or at now (`happened`) or after it (`later`).
+ * A manuscript scene's label from where it is now (`labelOf`): an Idea scene, a scene left out of
+ * the book, else the manuscript before or at now (`happened`) or after it (`later`).
  */
 export function sceneLabel(frame: EvidenceFrame, nodeId: string): EvidenceLabel {
-  if (frame.statuses.idea.has(nodeId)) return 'ideaScene'
-  if (frame.statuses.excluded.has(nodeId)) return 'cutScene'
-  const order = frame.reading.order.get(nodeId)
+  if (frame.statuses.idea.has(nodeId)) return labelOf('ideaScene', 'never')
+  if (frame.statuses.excluded.has(nodeId)) return labelOf('excludedScene', 'never')
+  const order = frame.reading.order.get(nodeId) ?? Infinity
   const now = frame.nowId === null ? -1 : (frame.reading.at.get(frame.nowId) ?? -1)
-  return order !== undefined && order <= now ? 'happened' : 'later'
+  return labelOf('scene', meaningOf('scene', { order, openOrder: now }))
 }
 
 function parseDoc(raw: string | null): TiptapNodeT | null {
@@ -166,7 +169,7 @@ export function passageNow(
       const paragraph = doc === null ? undefined : markedParagraphs(doc)[para]
       if (row === undefined || paragraph === undefined) return null
       return {
-        label: paragraph.notCanon ? 'notCanon' : 'planned',
+        label: labelOf('sceneNote', 'plan', { notCanon: paragraph.notCanon }),
         ref: `${sceneRefOf(frame, ownerId)} notes ¶${para}`,
         title: titleOf(row),
         text: paragraph.text,
@@ -183,14 +186,10 @@ export function passageNow(
       if (record === null || block === undefined) return null
       const filed = source === 'pinned' ? aiFiledOf(block.block) : null
       const filedFrom = filed === null ? undefined : frame.nodes.find((row) => row.id === filed.doc)
-      const label: EvidenceLabel =
+      const label =
         source === 'idea'
-          ? 'idea'
-          : block.notCanon
-            ? 'notCanon'
-            : filed !== null
-              ? 'filed'
-              : 'notes'
+          ? labelOf('idea', 'never')
+          : labelOf('pinned', 'canon', { notCanon: block.notCanon, filed: filed !== null })
       const pageName = source === 'pinned' ? 'Pinned' : 'Ideas'
       return {
         label,
@@ -208,8 +207,10 @@ export function passageNow(
       const doc = page === null ? null : parseDoc(page.row.content)
       const paragraph = doc === null ? undefined : markedParagraphs(doc)[para]
       if (page === null || paragraph === undefined) return null
-      const label: EvidenceLabel =
-        page.notCanon || paragraph.notCanon ? 'notCanon' : page.upload ? 'research' : 'notes'
+      const label = labelOf(source, 'canon', {
+        notCanon: page.notCanon || paragraph.notCanon,
+        upload: page.upload
+      })
       return {
         label,
         ref: `Research “${titleOf(page.row)}” ¶${para}`,
@@ -231,7 +232,7 @@ function cardNow(frame: EvidenceFrame, nodeId: string): Omit<EvidenceItem, 'id' 
   const card = frame.draftId === null ? null : getCard(frame.db, nodeId, frame.draftId)
   if (row === undefined || card === null) return null
   return {
-    label: 'map',
+    label: labelOf('card', 'map'),
     ref: sceneRefOf(frame, nodeId),
     title: titleOf(row),
     text: [card.line, card.gist].filter((line) => line.trim() !== '').join('\n'),
@@ -244,7 +245,44 @@ function cardNow(frame: EvidenceFrame, nodeId: string): Omit<EvidenceItem, 'id' 
 const nameOf = (frame: EvidenceFrame, id: string | null): string =>
   id === null ? '' : (frameRecord(frame, id)?.name ?? '')
 
-/** A claim with its paragraph as it reads now, the fact line above it ("Mara · eyes: grey (narration)"). */
+/** How a claim's mode reads in its fact line: only `now` is the story's present (design §2.2). */
+const MODE_WORDS: Readonly<Record<Exclude<Claim['mode'], 'now'>, string>> = {
+  memory: 'remembered',
+  hypothetical: 'supposed, not real',
+  dream: 'in a dream'
+}
+
+/**
+ * A claim's fact line: who says it and in what mode when it is not the narration's present ("Orrin
+ * says, in a dream: Mara · eyes: green"), since only narration in `now` mode sets state; never a
+ * bare value for speech, thought or rumour.
+ */
+export function claimFact(
+  claim: Pick<
+    Claim,
+    'slot' | 'value' | 'voice' | 'mode' | 'speakerId' | 'recordId' | 'subjectText' | 'objectId'
+  >,
+  nameOf: (id: string | null) => string
+): string {
+  const named = nameOf(claim.recordId)
+  const subject = named !== '' ? named : (claim.subjectText ?? 'someone')
+  const object = claim.objectId === null ? '' : ` (${nameOf(claim.objectId)})`
+  const fact = `${subject} · ${slotLabel(claim.slot).toLowerCase()}: ${claim.value}${object}`
+  const speaker = nameOf(claim.speakerId) || 'someone'
+  const who =
+    claim.voice === 'dialogue'
+      ? `${speaker} says`
+      : claim.voice === 'thought'
+        ? `${speaker} thinks`
+        : claim.voice === 'rumour'
+          ? 'Rumour'
+          : ''
+  const how = claim.mode === 'now' ? '' : MODE_WORDS[claim.mode]
+  const lead = [who, how].filter((part) => part !== '').join(', ')
+  return lead === '' ? fact : `${lead.charAt(0).toUpperCase()}${lead.slice(1)}: ${fact}`
+}
+
+/** A claim with its paragraph as it reads now, the fact line above it ("Mara · eyes: grey"). */
 function claimNow(frame: EvidenceFrame, claimId: string): Omit<EvidenceItem, 'id' | 'key'> | null {
   const claim = getClaim(frame.db, claimId)
   if (claim === null) return null
@@ -252,11 +290,8 @@ function claimNow(frame: EvidenceFrame, claimId: string): Omit<EvidenceItem, 'id
   const row = frame.documents.get(claim.nodeId)
   const paragraph = row === undefined ? undefined : rowTexts(row)[claim.para]
   if (row === undefined || paragraph === undefined) return null
-  const named = nameOf(frame, claim.recordId)
-  const subject = named !== '' ? named : (claim.subjectText ?? 'someone')
-  const object = claim.objectId === null ? '' : ` (${nameOf(frame, claim.objectId)})`
   const fact =
-    `${subject} · ${slotLabel(claim.slot).toLowerCase()}: ${claim.value}${object} (${claim.voice})` +
+    claimFact(claim, (id) => nameOf(frame, id)) +
     (claim.state === 'stale' ? ' · re-checking: the sentence changed since it was read' : '')
   const label = sceneLabel(frame, claim.nodeId)
   return {
@@ -541,8 +576,9 @@ export function renderEvidenceItem(item: EvidenceItem): string {
 }
 
 /**
- * The labelled evidence within `budget` tokens, in the given order (the menu's rank): the far
- * items, at the end, are dropped first. Answers the text, the ids kept and how many were dropped.
+ * The labelled evidence within `budget` tokens, in the given order (the menu's rank): an item that
+ * does not fit is left out and the ones after it still go in, so the far items are dropped first
+ * and one long item never drops the rest. Answers the text, the ids kept and how many were dropped.
  */
 export function renderEvidence(
   items: readonly EvidenceItem[],
@@ -554,7 +590,7 @@ export function renderEvidence(
   for (const item of items) {
     const block = renderEvidenceItem(item)
     const cost = estimateTokens(block)
-    if (used + cost > budget) break
+    if (used + cost > budget) continue
     blocks.push(block)
     kept.push(item.id)
     used += cost

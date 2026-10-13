@@ -29,7 +29,10 @@ import { askIndexOf } from './step0'
  * Read-only: nothing here writes.
  */
 
-/** Why a question goes to Ms Scribe instead: a stale claim, incompatible values, nothing, or not yes. */
+/**
+ * Why a question goes to Ms Scribe instead: a stale claim (or a stated age with time passed
+ * since), incompatible values, nothing, or not yes.
+ */
 export type Handover = 'stale' | 'contested' | 'none' | 'no'
 
 export type InstantOutcome =
@@ -61,13 +64,16 @@ const namedIn = (gate: string): Set<string> =>
 /**
  * The scenes whose unread finished sentences bear on a question (P3-D4): the open scene and at
  * most two earlier scenes the reader left unsettled, where a sentence not in the read set
- * (`unreadSentences`) names the record (when there is one) and holds the cue.
+ * (`unreadSentences`) names the record (when there is one) and holds the cue. `caretPara` is the
+ * open scene's caret paragraph: while it has no closing punctuation it is still being written, and
+ * is no reason to read.
  */
 export function unreadNaming(
   db: TreeDb,
   frame: EvidenceFrame,
   recordId: string | null,
-  cue: (sentence: string) => boolean
+  cue: (sentence: string) => boolean,
+  caretPara: number | null = null
 ): string[] {
   if (frame.draftId === null || frame.nowId === null) return []
   const draftId = frame.draftId
@@ -85,7 +91,10 @@ export function unreadNaming(
   for (const nodeId of [frame.nowId, ...unsettled]) {
     const row = frame.documents.get(nodeId)
     if (row === undefined || !frame.reading.order.has(nodeId)) continue
-    const current = gateSentences(rowTexts(row), { caretPara: null, names })
+    const current = gateSentences(rowTexts(row), {
+      caretPara: nodeId === frame.nowId ? caretPara : null,
+      names
+    })
     const read = getSceneRead(db, nodeId, draftId)
     const unread =
       read === null ? current : unreadSentences(current, readSetOf(read.entries, names))
@@ -107,7 +116,8 @@ const orderOf = (frame: EvidenceFrame, nodeId: string): number =>
 
 /**
  * The evidence a slot lookup hands Ms Scribe (P3-D5): the slot's claims as of now, live and stale
- * (their paragraphs as they read now), and the record's Pinned paragraphs that hold a slot cue.
+ * (their paragraphs as they read now, each worded with its voice and mode), and the record's
+ * Pinned paragraphs that bear on the slot (`holdsSlotCue`: "Home: Vell" for where she is).
  */
 function slotKeys(
   frame: EvidenceFrame,
@@ -139,18 +149,38 @@ const holdsWords =
   }
 
 /**
+ * Whether an unread sentence naming the record bears on `slot` (P3-D4): any such sentence for a
+ * transient slot (where she is, what she wears or carries, how she is hurt: prose moves her
+ * without naming the slot, "Mara rode north to Vell"); else one with the slot's words in prose
+ * ("died", "eyes", "promoted"; `holdsSlotCue`).
+ */
+export const bearsOnSlot =
+  (slot: Slot) =>
+  (sentence: string): boolean =>
+    slotGroup(slot) === 'transient' || holdsSlotCue(sentence, slot)
+
+/**
  * The instant answer to a question of `shape` as of now (`nowId`: the open scene, else the latest
  * written): a card, the scenes to read first, or a handover with its evidence. `checkUnread`
- * false skips read-first (after the read ran, so a window it could not read never loops).
+ * false skips read-first (after the read ran, so a window it could not read never loops);
+ * `caretPara` is the open scene's caret paragraph (an unfinished one is not read first). An age
+ * is answered from the age as of now (decision 5): computed from a birth year and the story year
+ * is a card; a stated age only when no time has passed since; otherwise Ms Scribe words it.
  */
 export function instantCard(
   db: TreeDb,
   shape: InstantShape,
   nowId: string | null,
-  options: { ask?: AskIndex; checkUnread?: boolean; frame?: EvidenceFrame } = {}
+  options: {
+    ask?: AskIndex
+    checkUnread?: boolean
+    frame?: EvidenceFrame
+    caretPara?: number | null
+  } = {}
 ): InstantOutcome {
   const frame = options.frame ?? evidenceFrame(db, nowId)
   const checkUnread = options.checkUnread ?? true
+  const caretPara = options.caretPara ?? null
   const asOfRef = nowId === null ? null : (frame.reading.refs.get(nowId) ?? null)
   const now = nowId === null ? Infinity : (frame.reading.at.get(nowId) ?? -1)
 
@@ -158,7 +188,7 @@ export function instantCard(
     const record = frameRecord(frame, shape.recordId)
     if (record === null) return { handover: 'none', keys: [] }
     if (checkUnread) {
-      const due = unreadNaming(db, frame, shape.recordId, (text) => holdsSlotCue(text, shape.slot))
+      const due = unreadNaming(db, frame, shape.recordId, bearsOnSlot(shape.slot), caretPara)
       if (due.length > 0) return { readFirst: due }
     }
     const claims =
@@ -172,6 +202,41 @@ export function instantCard(
           )
     const keys = slotKeys(frame, shape.recordId, shape.slot, claims)
     const sheet = sheetMemory(db, shape.recordId, nowId)
+    const age = shape.slot === 'age' ? (sheet.age?.age ?? null) : null
+    if (age !== null) {
+      const timeline: EvidenceKey = { kind: 'timeline', recordId: shape.recordId }
+      switch (age.kind) {
+        case 'computed': {
+          // A birth year read from a sentence that changed since is re-checking: no card.
+          const born = age.born.claimId === null ? null : getClaim(db, age.born.claimId)
+          if (born?.state === 'stale') {
+            return {
+              handover: 'stale',
+              keys: [...keys, { kind: 'claim', claimId: born.id }, timeline]
+            }
+          }
+          return {
+            card: {
+              kind: 'age',
+              recordId: record.id,
+              name: record.name,
+              age: age.age,
+              born: age.born,
+              year: age.year,
+              asOfRef,
+              readFirst: null
+            }
+          }
+        }
+        case 'notBorn':
+        case 'bornOnly':
+          return { handover: 'none', keys: [...keys, timeline] }
+        case 'stated':
+          // Time has passed since it was stated: never shown as current (decision 5).
+          if (age.since.length > 0) return { handover: 'stale', keys: [...keys, timeline] }
+          break
+      }
+    }
     const group = slotGroup(shape.slot)
     const lines =
       group === 'fixed'
@@ -218,7 +283,7 @@ export function instantCard(
     const knower = frameRecord(frame, shape.knowerId)
     if (knower === null || !KNOWER_KINDS.includes(knower.kind)) return { handover: 'none', keys }
     if (checkUnread && words.length > 0) {
-      const due = unreadNaming(db, frame, shape.knowerId, holdsWords(words))
+      const due = unreadNaming(db, frame, shape.knowerId, holdsWords(words), caretPara)
       if (due.length > 0) return { readFirst: due }
     }
     const knows = storedKnows(db, nowId, frame.reading, frame.nodes)
@@ -252,7 +317,7 @@ export function instantCard(
   }
 
   if (checkUnread && words.length > 0) {
-    const due = unreadNaming(db, frame, null, holdsWords(words))
+    const due = unreadNaming(db, frame, null, holdsWords(words), caretPara)
     if (due.length > 0) return { readFirst: due }
   }
   const knows = storedKnows(db, nowId, frame.reading, frame.nodes)
