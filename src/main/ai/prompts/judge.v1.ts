@@ -55,7 +55,7 @@ export const JUDGE_RULES =
 /** The stronger check's rules (*Check the book*): one pair, a reason for every verdict. */
 export const JUDGE_CONFIRM_RULES =
   JUDGE_RULES_CORE +
-  'Reply with JSON only: {"r":"c","w":"grey eyes against brown, no change shown"}: "w" (at most ' +
+  'Reply with JSON only: {"r":"c","w":"grey eyes in one passage, brown in the other"}: "w" (at most ' +
   '20 words) with every verdict.'
 
 /** The most pairs one call carries, and the tokens of pairs (the rest of the 3,000 is the rules'). */
@@ -90,7 +90,10 @@ export function judgeMaxTokens(pairs: number): number {
 
 /**
  * What the app found, by rule, as the item's question: order-neutral, so the swapped call reads
- * true, and positive (it names what each passage says, never an absence).
+ * true, and positive (it names what each passage says, never an absence). C2's body question does
+ * not say that no change is shown (P4 slice 2 review): code only infers that from a change claim
+ * the reader did not find, and the rules already tell the judge to allow a change the story shows
+ * or allows over the time between.
  */
 export type JudgeQuestion =
   | { rule: 'C1' | 'C7'; name: string; slot: string }
@@ -122,7 +125,7 @@ export function judgeQuestion(question: JudgeQuestion): string {
     case 'C2':
       return question.variant === 'dead'
         ? `One passage has ${question.name} die; the other has ${question.name} present. Can both be true?`
-        : `${possessive(question.name)} ${question.slot} differs between these two appearances with no change shown. Can both be true?`
+        : `${possessive(question.name)} ${question.slot} differs between these two appearances. Can both be true?`
     case 'C3':
       return `In one passage ${question.name} passes on ${question.secret}; in the other ${question.name} learns it. Can both be true?`
     case 'C4':

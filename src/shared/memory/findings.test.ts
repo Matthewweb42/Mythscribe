@@ -134,7 +134,8 @@ describe('findings vocabulary (F-16.27)', () => {
       shownAt: null,
       created: 'x',
       judgedAt: null,
-      confirmedAt: null
+      confirmedAt: null,
+      rendered: { inputs: 'stamp', keys: { ab: 'k-ab', ba: 'k-ba' } }
     }
     expect(Finding.parse(row)).toEqual(row)
   })

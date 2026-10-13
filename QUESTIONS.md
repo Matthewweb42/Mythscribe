@@ -12,6 +12,23 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-13 · F-16.27 · P4 slice 2 review: calls made while fixing it
+- Question: The review of slice 2 found verdicts kept for words the judge never saw (a time skip added between two scenes, a story year typed, a context sentence or a note sentence changed), a verdict written onto a pair that changed while its call was out, a half-answered pair that could spend the day's background judging in one burst, a recompute four times over its 50 ms budget, judging shown as "Reading 1 of 1 scenes", counts sent while the Contradiction check is off, and a question that told the judge no change was shown. Fixing them needed these calls.
+- Chosen (decided by Claude, unconfirmed):
+  1. **What the verdicts were given for is kept on the finding** (migration 0039, an added column): a cheap stamp of everything the judge's words rest on (the two passages' scenes, their cards, the story years you typed, the scenes between them, the note paragraph, the names) and the remembered-verdict keys of the words. A change anywhere in those has the pair read again; if its words moved, its verdicts go and the pair is judged again (free when the same words were judged before). An edit elsewhere in the scene keeps them.
+  2. **A verdict lands only on the pair it was given for:** if the pair changed while its call was out, the verdict is not written (it is remembered under its own words) and the swapped call is not sent for it.
+  3. **A run that settles nothing pushes nothing:** only a pair that became open, unclear or fine moves the views; a pair left with one order answered waits for the next change, a reopen or a settings change, and never queues another run by itself. The recompute hands pairs to the judge only when it moved something.
+  4. **A background run cut short** (today's cap, a provider failure) still counts the pairs it sent toward the 30 a day and shows what it settled; a rate limit or network failure in the background goes quietly (never a "could not be read" row); Check the book shows it.
+  5. **Judging is not reading:** the header's indicator counts scenes only.
+  6. **The counts follow the switch:** with the Contradiction check off, `memory:findingsChanged` says none, as `memory:findings` does; a settings change sends them again.
+  7. **C2's body question no longer says "with no change shown"** ("Mara's hair differs between these two appearances. Can both be true?"), unlike the plan's wording (P4 §2.2): code only infers that from a change line the reader did not find, and the rules already tell the judge to allow a change the story shows or allows. The stronger check's example reason is "grey eyes in one passage, brown in the other". judge.v1 was edited in place (never released; the remembered verdicts are keyed by the words, so old ones are never reused).
+  8. **Costs:** the judge.v1 row's out figure is a ten-pair batch's cap (280), not the design's 300, which cannot occur; the in figure stays the design's 1,500 (slice 2's item 11). The judge's note says a background call of 1–4 pairs is about 1,200 in and 120 out.
+  9. **Data sharing** names what a pair carries beside the name: a secret's or plot thread's label and the title of the note or Research page.
+  10. **A reply that leaves a sent pair unanswered is not kept** in the request cache, so the next run asks again.
+- Alternatives: keep the stamp in the `extra` column (no migration); re-render every finding on every recompute (correct, but past the budget on a long book); hash only the claims' sentences (misses time skips, years and notes); retry a half-answered order once a day.
+- To change it: `src/main/memory/findings/judge.ts` (`pairInputs`, `readPair`, `judgeFindings`), `src/main/memory/findings/findingStore.ts` (`upsertFindings`, `setVerdicts`), `src/main/memory/findings/findingsService.ts` (3, 4), `src/main/jobs/indexQueue.ts` `uncounted` and `src/main/memory/reading/readerService.ts` (5), `src/main/memory/findings/findingsJob.ts` `findingCounts` (6), `src/main/ai/prompts/judge.v1.ts` (7), `src/shared/aiCostNotes.ts` (8), `src/shared/aiSettings.ts` (9).
+- Not run: live fidelity for `judge.v1` (8 cases, `MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=… npm run eval:ai`) still needs your key.
+
 ## 2026-10-13 · F-16.27 · P4 slice 2 (judge.v1, both orders, the verdict cache, background judging): calls made while building it
 - Question: Building slice 2 (feature `judge`, the Contradiction check switch, `judge.v1`, the two-call batches, the verdict cache keys, the background judge on the reader's queue, `memory:findings`; no UI) needed calls the plan left to the build.
 - Chosen (decided by Claude, unconfirmed):

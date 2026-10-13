@@ -4,6 +4,7 @@ import type { Candidate } from '@shared/memory/candidates'
 import {
   type Finding,
   FindingExtra,
+  FindingRendered,
   FindingSide,
   findingState,
   type FindingCloseReason,
@@ -57,9 +58,26 @@ export function toFinding(row: FindingRow): Finding | null {
     shownAt: row.shownAt,
     created: row.created,
     judgedAt: row.judgedAt,
-    confirmedAt: row.confirmedAt
+    confirmedAt: row.confirmedAt,
+    rendered: renderedOf(row.rendered)
   }
 }
+
+/** A row's stored rendering; null when none was stored or it no longer parses. */
+function renderedOf(raw: string | null): FindingRendered | null {
+  if (raw === null) return null
+  const parsed = FindingRendered.safeParse(parseJson(raw))
+  return parsed.success ? parsed.data : null
+}
+
+/** A rendering as stored, its keys in one order whatever built it. */
+const renderedJson = (rendered: FindingRendered | null): string | null =>
+  rendered === null
+    ? null
+    : JSON.stringify({
+        inputs: rendered.inputs,
+        keys: rendered.keys === null ? null : { ab: rendered.keys.ab, ba: rendered.keys.ba }
+      })
 
 /** A draft's finding rows, optionally only in some states. */
 export function findingRows(
@@ -101,11 +119,22 @@ export function findingsOf(
   })
 }
 
-/** Both orders' verdicts, as the cache remembers them for a candidate (slice 2 renders the pair). */
+/** Both orders' verdicts, as the cache remembers them for a pair's keys. */
 export interface PairVerdicts {
   ab: JudgeVerdict | null
   ba: JudgeVerdict | null
   why: string | null
+}
+
+/**
+ * How the recompute reads a candidate's pair as the judge would (`judge.ts`, through
+ * `runFindingsJob`): `read` answers `stored` itself while the stamp of what its rendering reads
+ * still holds (nothing is rendered), else a fresh rendering (its keys null when a side cannot be
+ * rendered); `cached` the verdicts the cache holds under a rendering's keys.
+ */
+export interface PairReader {
+  read(candidate: Candidate, stored: FindingRendered | null): FindingRendered
+  cached(keys: NonNullable<FindingRendered['keys']>): PairVerdicts | null
 }
 
 /** What an upsert did. */
@@ -114,7 +143,12 @@ export interface UpsertResult {
   opened: string[]
   /** Rows written (inserted or changed). */
   written: number
+  /** Of those, rows whose only change was their stored rendering (nothing a view shows moved). */
+  restamped: number
 }
+
+const sameKeys = (x: FindingRendered['keys'], y: FindingRendered['keys']): boolean =>
+  x !== null && y !== null && x.ab === y.ab && x.ba === y.ba
 
 /**
  * Whether a kept row's verdicts no longer fit its candidate, so the pair must be judged again
@@ -134,23 +168,25 @@ function judgedPairMoved(
 }
 
 /**
- * Writes the candidates as findings of `draftId`, by key: a new key is inserted, its verdicts taken
- * from the cache for both orders when `cached` knows them (at no cost), else `unjudged`; a kept key
- * keeps its verdicts while the pair the judge saw is unchanged (`judgedPairMoved`), else they are
- * cleared (the stronger check's too) and the cache asked again, so an unchanged rendering is free
- * and a changed one is judged afresh; a row still missing a verdict asks the cache again. It takes
- * the candidate's sides and its held or hidden state. Nothing is written for a row unchanged.
- * `rows` is the draft's rows as they stand, when the caller has just read them.
+ * Writes the candidates as findings of `draftId`, by key: a new key is inserted, `unjudged` unless
+ * the cache knows its pair's verdicts; a kept key keeps its verdicts while its sides are unchanged
+ * (`judgedPairMoved`) and the words the judge reads of them are too, else they are cleared (the
+ * stronger check's too) and the cache asked for the new words, so an unchanged rendering is free and
+ * a changed one is judged afresh. With `pairs`, a row is rendered again only when the stamp of what
+ * its rendering reads moved (`PairReader.read`), and only a fresh rendering asks the cache: an
+ * unchanged unjudged row costs nothing here (the judge asks the cache itself before sending). It
+ * takes the candidate's sides and its held or hidden state. Nothing is written for a row
+ * unchanged. `rows` is the draft's rows as they stand, when the caller has just read them.
  */
 export function upsertFindings(
   db: TreeDb,
   draftId: string,
   candidates: readonly Candidate[],
   now: Date,
-  cached: (candidate: Candidate) => PairVerdicts | null = () => null,
+  pairs?: PairReader,
   rows: readonly FindingRow[] = findingRows(db, draftId)
 ): UpsertResult {
-  const result: UpsertResult = { opened: [], written: 0 }
+  const result: UpsertResult = { opened: [], written: 0, restamped: 0 }
   if (candidates.length === 0) return result
   const existing = new Map(rows.map((row) => [row.key, row]))
   db.transaction((tx) => {
@@ -159,7 +195,23 @@ export function upsertFindings(
       const a = JSON.stringify(each.a)
       const b = JSON.stringify(each.b)
       const extra = each.extra === null ? null : JSON.stringify(each.extra)
-      const kept = row !== undefined && !judgedPairMoved(row, each, { a, b, extra }) ? row : null
+      const moved = row !== undefined && judgedPairMoved(row, each, { a, b, extra })
+      // What the verdicts were given for, as stored: nothing once the sides moved.
+      let renderedText = row === undefined || moved ? null : row.rendered
+      let kept = row !== undefined && !moved ? row : null
+      let fresh: NonNullable<FindingRendered['keys']> | null = null
+      if (pairs !== undefined) {
+        const stored = renderedOf(renderedText)
+        const read = pairs.read(each, stored)
+        if (read !== stored) {
+          renderedText = renderedJson(read)
+          // Rendered anew: the verdicts stand only for the very words they were given for.
+          if (read.keys !== null && !sameKeys(stored?.keys ?? null, read.keys)) {
+            kept = null
+            fresh = read.keys
+          }
+        }
+      }
       let verdictAb = kept?.verdictAb ?? null
       let verdictBa = kept?.verdictBa ?? null
       let why = kept?.why ?? null
@@ -167,12 +219,12 @@ export function upsertFindings(
       const confirm = kept?.confirm ?? null
       const confirmWhy = kept?.confirmWhy ?? null
       const confirmedAt = kept?.confirmedAt ?? null
-      if (verdictAb === null || verdictBa === null) {
-        const known = cached(each)
+      if (fresh !== null && pairs !== undefined) {
+        const known = pairs.cached(fresh)
         if (known !== null && (known.ab !== null || known.ba !== null)) {
-          verdictAb = verdictAb ?? known.ab
-          verdictBa = verdictBa ?? known.ba
-          why = why ?? known.why
+          verdictAb = known.ab
+          verdictBa = known.ba
+          why = known.why
           judgedAt = now.toISOString()
         }
       }
@@ -203,14 +255,15 @@ export function upsertFindings(
             why,
             state,
             created: now.toISOString(),
-            judgedAt
+            judgedAt,
+            rendered: renderedText
           })
           .run()
         result.written += 1
         if (state === 'open') result.opened.push(id)
         continue
       }
-      const same =
+      const unmoved =
         row.a === a &&
         row.b === b &&
         row.extra === extra &&
@@ -218,7 +271,7 @@ export function upsertFindings(
         row.verdictAb === verdictAb &&
         row.verdictBa === verdictBa &&
         row.confirm === confirm
-      if (same) continue
+      if (unmoved && row.rendered === renderedText) continue
       tx.update(finding)
         .set({
           a,
@@ -231,11 +284,13 @@ export function upsertFindings(
           judgedAt,
           confirm,
           confirmWhy,
-          confirmedAt
+          confirmedAt,
+          rendered: renderedText
         })
         .where(eq(finding.id, row.id))
         .run()
       result.written += 1
+      if (unmoved) result.restamped += 1
       if (state === 'open' && row.state !== 'open') result.opened.push(row.id)
     }
   })
@@ -276,7 +331,40 @@ export function closeFindings(
   })
 }
 
-/** Stores a finding's verdicts in both orders, the judge's reason, its cost share and its state. */
+/** A finding as it stood when its pair was rendered: what `setVerdicts` writes onto, and only onto. */
+export interface FindingAsRendered {
+  a: FindingSide
+  b: FindingSide
+  extra: FindingExtra | null
+  rendered: FindingRendered | null
+}
+
+/** Whether a row still holds the finding as it was rendered (its sides, extra and rendering). */
+function stillAsRendered(row: FindingRow, at: FindingAsRendered): boolean {
+  const parsed = toFinding(row)
+  return (
+    parsed !== null &&
+    JSON.stringify(parsed.a) === JSON.stringify(FindingSide.parse(at.a)) &&
+    JSON.stringify(parsed.b) === JSON.stringify(FindingSide.parse(at.b)) &&
+    JSON.stringify(parsed.extra) ===
+      JSON.stringify(at.extra === null ? null : FindingExtra.parse(at.extra)) &&
+    renderedJson(parsed.rendered) === renderedJson(at.rendered)
+  )
+}
+
+/** A finding's state before and after `setVerdicts` wrote it. */
+export interface VerdictsWritten {
+  before: FindingState
+  after: FindingState
+}
+
+/**
+ * Stores a finding's verdicts in both orders, the judge's reason, its cost share and its state, and
+ * (`rendered`) what they were given for. With `expect`, nothing but the cost share is written when
+ * the row no longer holds the finding as it was rendered (a recompute re-stated it while the call
+ * was out: its verdicts are for words the row no longer has; they stay in the verdict cache under
+ * their own keys). Answers the states before and after, or null when nothing was written.
+ */
 export function setVerdicts(
   db: TreeDb,
   id: string,
@@ -286,10 +374,31 @@ export function setVerdicts(
     why: string | null
     costUsd: number
     now: Date
+    rendered?: FindingRendered | null
+    expect?: FindingAsRendered
   }
-): void {
+): VerdictsWritten | null {
   const row = db.select().from(finding).where(eq(finding.id, id)).get()
-  if (row === undefined) return
+  if (row === undefined) return null
+  if (input.expect !== undefined && !stillAsRendered(row, input.expect)) {
+    if (input.costUsd > 0) {
+      db.update(finding)
+        .set({ costUsd: row.costUsd + input.costUsd })
+        .where(eq(finding.id, id))
+        .run()
+    }
+    return null
+  }
+  const state =
+    row.state === 'held' || row.state === 'hidden'
+      ? row.state
+      : findingState({
+          held: false,
+          hidden: false,
+          verdictAb: input.ab,
+          verdictBa: input.ba,
+          confirm: row.confirm
+        })
   db.update(finding)
     .set({
       verdictAb: input.ab,
@@ -297,19 +406,12 @@ export function setVerdicts(
       why: input.why,
       costUsd: row.costUsd + input.costUsd,
       judgedAt: input.now.toISOString(),
-      state:
-        row.state === 'held' || row.state === 'hidden'
-          ? row.state
-          : findingState({
-              held: false,
-              hidden: false,
-              verdictAb: input.ab,
-              verdictBa: input.ba,
-              confirm: row.confirm
-            })
+      state,
+      ...(input.rendered === undefined ? {} : { rendered: renderedJson(input.rendered) })
     })
     .where(eq(finding.id, id))
     .run()
+  return { before: row.state, after: state }
 }
 
 /** Stores the stronger check's verdict on an open finding (*Check the book*). */

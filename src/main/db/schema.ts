@@ -1468,6 +1468,7 @@ export type SearchMissInsert = typeof searchMiss.$inferInsert
  * and what judging it cost. `key` is its lifecycle identity (rule, variant and the *Not a problem*
  * key `np_key`), unique per draft; only the active draft's rows are live (design §2.2). The record
  * is the subject (the knower for C3, the thread for C5): its rows go with it, and with the draft.
+ * `rendered` (0039) is what the verdicts were given for.
  */
 export const finding = sqliteTable(
   'finding',
@@ -1499,7 +1500,15 @@ export const finding = sqliteTable(
     shownAt: text('shown_at'),
     created: text('created').notNull(),
     judgedAt: text('judged_at'),
-    confirmedAt: text('confirmed_at')
+    confirmedAt: text('confirmed_at'),
+    /**
+     * JSON `FindingRendered` (migration `0039_finding_rendered`, additive; P4 slice 2 review): the
+     * pair as the judge reads it when last rendered, a stamp of what its rendering reads and its
+     * verdict-cache keys in both orders, so a change of words around unchanged sides (a time-skip
+     * hint, a story year, a context sentence) is judged afresh and an unchanged pair is never
+     * rendered again. Null until first rendered.
+     */
+    rendered: text('rendered')
   },
   (t) => [
     uniqueIndex('finding_draft_key_uq').on(t.draftId, t.key),

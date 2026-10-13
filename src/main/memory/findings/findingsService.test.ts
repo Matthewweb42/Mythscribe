@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { JUDGE_SENTINEL } from '../../ai/prompts/judge.v1'
-import type { CompletionRequest } from '../../ai/providers/types'
+import { AiRateLimitError, type CompletionRequest } from '../../ai/providers/types'
 import { saveDocument } from '../../document/documentStore'
 import { activeDraftId } from '../../draft/draftStore'
 import { JobSkippedError } from '../../jobs/indexQueue'
@@ -270,5 +270,85 @@ describe('background judging (F-16.27, P4-D12)', () => {
     await service.judge(db, 'first')
     const firstItem = (ai.requests.find(isJudge)?.messages.at(-1)?.content ?? '').split('\n')[1]
     expect(firstItem).toBe('1. Late · eyes. Can both be true?')
+  })
+})
+
+describe('runs cut short or half answered (P4 slice 2 review)', () => {
+  it('a pair left half answered pushes nothing and never queues itself again', async () => {
+    seed(1)
+    let calls = 0
+    // The A,B call answers; the B,A call answers nothing.
+    const ai = fakeAi(
+      (request) => {
+        if (!isJudge(request)) return { text: '{}' }
+        calls += 1
+        return { text: calls === 1 ? '{"v":[{"i":1,"r":"c","w":"values differ"}]}' : '{"v":[]}' }
+      },
+      { now: NOW }
+    )
+    const service = createFindingsService(deps(ai))
+    const run = await service.judge(db, 'half')
+    expect(ai.requests.filter(isJudge)).toHaveLength(2)
+    expect(run.again).toBe(false)
+    expect(run.run).toMatchObject({ sent: 1, unanswered: 1, settled: [] })
+    // Nothing a view shows moved: no memory:changed (which would queue the recompute and, through
+    // it, this job again) and no counts.
+    expect(changed).toEqual([])
+    expect(counts).toEqual([])
+    expect(findingsOf(db, activeDraftId(db))[0]).toMatchObject({
+      state: 'unjudged',
+      verdictAb: 'c',
+      verdictBa: null
+    })
+    expect(judgeDay(db, '2026-10-13').pairs).toBe(1)
+  })
+
+  it('the daily cap reached mid-run keeps, counts and pushes what was judged', async () => {
+    seed(12)
+    const ai = allC()
+    const today = ai.deps.dailyCap.get()
+    // Under the cap for the first batch's two calls, over it for the second batch.
+    ai.deps.dailyCap.get = () =>
+      ai.requests.filter(isJudge).length >= 2
+        ? { ...today, dailyCapUsd: 0.5, spentTodayUsd: 0.5, spentDate: '2026-10-13' }
+        : { ...today, dailyCapUsd: 0.5, spentTodayUsd: 0, spentDate: '2026-10-13' }
+    const service = createFindingsService(deps(ai))
+    await expect(service.checkBook(db, 'capped-mid')).rejects.toThrow(HOLD.dailyCap)
+    expect(ai.requests.filter(isJudge)).toHaveLength(2)
+    expect(state().filter((each) => each === 'open')).toHaveLength(10)
+    expect(counts.at(-1)).toEqual({ open: 10, unclear: 0, waiting: 2 })
+    expect(changed.at(-1)?.nodeIds).toEqual([one, two].sort())
+  })
+
+  it('counts the pairs a background run sent before the cap stopped it', async () => {
+    seed(12)
+    const ai = allC()
+    const today = ai.deps.dailyCap.get()
+    ai.deps.dailyCap.get = () =>
+      ai.requests.filter(isJudge).length >= 1
+        ? { ...today, dailyCapUsd: 0.5, spentTodayUsd: 0.5, spentDate: '2026-10-13' }
+        : { ...today, dailyCapUsd: 0.5, spentTodayUsd: 0, spentDate: '2026-10-13' }
+    const service = createFindingsService(deps(ai))
+    // The A,B call goes; the B,A call is refused: ten pairs went out, none is settled yet.
+    await expect(service.judge(db, 'capped-bg')).rejects.toThrow(HOLD.dailyCap)
+    expect(ai.requests.filter(isJudge)).toHaveLength(1)
+    expect(judgeDay(db, '2026-10-13').pairs).toBe(10)
+    expect(changed).toEqual([])
+  })
+
+  it('a background run’s transient failure goes quietly; Check the book’s is the author’s to see', async () => {
+    seed(1)
+    const ai = fakeAi(
+      (request) => {
+        if (isJudge(request)) throw new AiRateLimitError('Too many requests')
+        return { text: '{}' }
+      },
+      { now: NOW }
+    )
+    const service = createFindingsService(deps(ai))
+    await expect(service.judge(db, 'busy')).rejects.toThrow(JobSkippedError)
+    await expect(service.judge(db, 'busy-2')).rejects.toThrow(HOLD.transient)
+    await expect(service.checkBook(db, 'busy-3')).rejects.toThrow(AiRateLimitError)
+    expect(state()).toEqual(['unjudged'])
   })
 })

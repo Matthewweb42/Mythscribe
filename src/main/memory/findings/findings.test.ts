@@ -24,7 +24,13 @@ import { anchoredClaim, cardAnchorOf, seedClaims } from '../reading/claimFixture
 import { deleteClaims, reviveClaim, setClaimsState } from '../reading/claimStore'
 import { readingOrder } from '../reading/readingFrame'
 import { candidateInputs } from './candidateInputs'
-import { findingRows, findingsOf, invariantFindings, upsertFindings } from './findingStore'
+import {
+  findingRows,
+  findingsOf,
+  invariantFindings,
+  upsertFindings,
+  type PairReader
+} from './findingStore'
 import { findingCounts, runFindingsJob } from './findingsJob'
 import { recomputeFindings } from './recompute'
 import { cachedVerdict, cacheVerdict, verdictKey } from './verdictCache'
@@ -92,7 +98,19 @@ function findingViolations(): ReturnType<typeof checkMemoryInvariants> {
 }
 
 /** Both orders called a contradiction for every candidate (what slice 2's cache would hold). */
-const bothC = (): { ab: 'c'; ba: 'c'; why: string } => ({ ab: 'c', ba: 'c', why: 'values differ' })
+/**
+ * A reader whose cache remembers both orders of any pair as a contradiction; a pair's stamp is its
+ * sides, so it is rendered again only when they move.
+ */
+const bothC: PairReader = {
+  read: (candidate, stored) => {
+    const inputs = `${candidate.key}|${JSON.stringify(candidate.a)}|${JSON.stringify(candidate.b)}`
+    return stored?.inputs === inputs
+      ? stored
+      : { inputs, keys: { ab: `ab|${inputs}`, ba: `ba|${inputs}` } }
+  },
+  cached: () => ({ ab: 'c', ba: 'c', why: 'values differ' })
+}
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-findings-'))
@@ -227,7 +245,7 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
     expect(row).toMatchObject({ rule: 'C1', state: 'unjudged', recordId: mara, slot: 'eyes' })
     // Nothing moved: nothing is written.
     expect(recomputeFindings(db, NOW).changed).toBe(false)
-    const second = recomputeFindings(db, NOW, { cached: bothC })
+    const second = recomputeFindings(db, NOW, { pairs: bothC })
     expect(second.opened).toHaveLength(1)
     expect(findingsOf(db, activeDraftId(db))[0]).toMatchObject({
       state: 'open',
@@ -239,7 +257,7 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
   })
 
   it('closes a finding its rule no longer produces, with the reason', () => {
-    recomputeFindings(db, NOW, { cached: bothC })
+    recomputeFindings(db, NOW, { pairs: bothC })
     const brown = findingsOf(db, activeDraftId(db))[0]?.b
     if (brown?.kind !== 'claim') throw new Error('no claim side')
     deleteClaims(db, [brown.claimId])
@@ -250,7 +268,7 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
   })
 
   it('closes a finding the author said is not a problem, and it never comes back', () => {
-    recomputeFindings(db, NOW, { cached: bothC })
+    recomputeFindings(db, NOW, { pairs: bothC })
     const [row] = findingsOf(db, activeDraftId(db))
     if (row === undefined) throw new Error('no finding')
     dismiss(
@@ -265,7 +283,7 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
   })
 
   it('holds a finding while a side is re-checked, never closing it, and keeps its verdicts when the very sentences come back', () => {
-    recomputeFindings(db, NOW, { cached: bothC })
+    recomputeFindings(db, NOW, { pairs: bothC })
     const brown = findingsOf(db, activeDraftId(db))[0]?.b
     if (brown?.kind !== 'claim') throw new Error('no claim side')
     setClaimsState(db, [brown.claimId], 'stale')
@@ -280,7 +298,7 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
   })
 
   it('judges a revived side again: its new words were never judged', () => {
-    recomputeFindings(db, NOW, { cached: bothC })
+    recomputeFindings(db, NOW, { pairs: bothC })
     const brown = findingsOf(db, activeDraftId(db))[0]?.b
     if (brown?.kind !== 'claim') throw new Error('no claim side')
     setClaimsState(db, [brown.claimId], 'stale')
@@ -314,11 +332,11 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
     })
     expect(findingViolations()).toEqual([])
     // The cache, keyed on the pair as rendered, decides at no cost when it knows the new words.
-    expect(recomputeFindings(db, NOW, { cached: bothC }).opened).toHaveLength(1)
+    expect(recomputeFindings(db, NOW, { pairs: bothC }).opened).toHaveLength(1)
   })
 
   it('judges a side read again in another mode afresh (same scene, same value, same key)', () => {
-    recomputeFindings(db, NOW, { cached: bothC })
+    recomputeFindings(db, NOW, { pairs: bothC })
     const draft = activeDraftId(db)
     const [row] = findingsOf(db, draft)
     if (row?.b.kind !== 'claim') throw new Error('no claim side')
@@ -349,7 +367,7 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
   })
 
   it('closes a held row its rule no longer produces once no side is stale', () => {
-    recomputeFindings(db, NOW, { cached: bothC })
+    recomputeFindings(db, NOW, { pairs: bothC })
     const draft = activeDraftId(db)
     const [row] = findingsOf(db, draft)
     if (row?.b.kind !== 'claim') throw new Error('no claim side')
@@ -374,7 +392,7 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
   })
 
   it('keeps the key through a rename (names are not in it)', () => {
-    recomputeFindings(db, NOW, { cached: bothC })
+    recomputeFindings(db, NOW, { pairs: bothC })
     const before = findingsOf(db, activeDraftId(db))[0]?.key
     const main = requireRecord(db, mara).aliases.find((alias) => alias.isMain)
     if (main === undefined) throw new Error('no name')
@@ -505,8 +523,36 @@ describe('the findings job', () => {
     const first = runFindingsJob(db, NOW)
     expect(first.counts).toEqual({ open: 0, unclear: 0, waiting: 1 })
     expect(runFindingsJob(db, NOW).counts).toBeNull()
-    runFindingsJob(db, NOW, { cached: bothC })
+    runFindingsJob(db, NOW, { pairs: bothC })
     expect(findingCounts(db)).toEqual({ open: 1, unclear: 0, waiting: 0 })
+  })
+
+  it('answers no counts while the Contradiction check is off (as memory:findings answers then)', () => {
+    expect(runFindingsJob(db, NOW, { pairs: bothC, shown: false }).counts).toEqual({
+      open: 0,
+      unclear: 0,
+      waiting: 0
+    })
+    expect(findingCounts(db, false)).toEqual({ open: 0, unclear: 0, waiting: 0 })
+    expect(findingCounts(db)).toEqual({ open: 1, unclear: 0, waiting: 0 })
+  })
+
+  it('a row whose only change is its stamp moves nothing a view shows', () => {
+    runFindingsJob(db, NOW, { pairs: bothC })
+    const draft = activeDraftId(db)
+    const before = findingsOf(db, draft)[0]
+    // The same keys under a new stamp (an edit elsewhere in the scene): written, not "changed".
+    const restamping: PairReader = {
+      read: (_candidate, stored) => ({ inputs: 'moved', keys: stored?.keys ?? null }),
+      cached: () => null
+    }
+    const result = runFindingsJob(db, NOW, { pairs: restamping })
+    expect(result).toMatchObject({ changed: false, counts: null })
+    expect(findingsOf(db, draft)[0]).toMatchObject({
+      state: before?.state,
+      verdictAb: 'c',
+      rendered: { inputs: 'moved' }
+    })
   })
 })
 
@@ -543,7 +589,7 @@ describe('upsert by key', () => {
   it('writes each key once and keeps a row’s verdicts only while the judged pair is unchanged', () => {
     const inputs = candidateInputs(db, activeDraftId(db))
     const draft = activeDraftId(db)
-    recomputeFindings(db, NOW, { inputs, cached: bothC })
+    recomputeFindings(db, NOW, { inputs, pairs: bothC })
     const [row] = findingsOf(db, draft)
     if (row === undefined) throw new Error('no finding')
     const again: Candidate = {

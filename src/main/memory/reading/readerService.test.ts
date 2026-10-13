@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import type { MemoryNotice, MemoryStatus } from '@shared/memory/views'
+import type { IndexQueueStatus } from '@shared/jobs'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { defaultMemoryCloudState, type MemoryCloudState } from '../../ai/cloudTally'
 import { cancelInflight, resetInflight } from '../../ai/inflight'
@@ -117,9 +118,13 @@ async function until(ready: () => boolean, what = 'the condition'): Promise<void
 
 /** Waits for the queue to finish everything it can run. */
 async function drained(reader: ReaderService): Promise<void> {
+  // The judge's runs are left out of the queue's counts (F-16.27): `judging` says when they are done.
   await until(() => {
     const status = reader.queueStatus()
-    return status.running === null && (status.queued === 0 || status.paused !== null)
+    return (
+      status.running === null &&
+      (status.paused !== null || (status.queued === 0 && !reader.judging()))
+    )
   }, 'the reader queue')
   await new Promise((resolve) => setTimeout(resolve, 5))
 }
@@ -1370,6 +1375,39 @@ describe('the contradiction judge on the reader’s queue (F-16.27, P4 slice 2)'
     reader.settingsChanged()
     await drained(reader)
     expect(judgeRequests(ai)).toHaveLength(2)
+  })
+
+  it('never counts a judge run as a scene being read (the indicator counts scenes only)', async () => {
+    const statuses: IndexQueueStatus[] = []
+    const ai = reading()
+    const reader = service(ai, { jobs: (status) => void statuses.push(status) })
+    await twoReadings(reader)
+    await drained(reader)
+    statuses.length = 0
+    reader.queueJudge()
+    expect(reader.judging()).toBe(true)
+    expect(reader.queueStatus()).toMatchObject({ queued: 0, running: null, failed: 0 })
+    await drained(reader)
+    expect(judgeRequests(ai)).toHaveLength(2)
+    // Every status pushed while the judge ran read as an idle queue.
+    expect(statuses.length).toBeGreaterThan(0)
+    expect(statuses.every((status) => status.queued === 0 && status.running === null)).toBe(true)
+    expect(statuses.every((status) => status.done === 0 && status.failed === 0)).toBe(true)
+  })
+
+  it('pushes the counts when the settings change, none while the Contradiction check is off', async () => {
+    const counts: unknown[] = []
+    const ai = reading()
+    const reader = service(ai, { findingsChanged: (each) => void counts.push(each) })
+    await twoReadings(reader)
+    reader.queueJudge()
+    await drained(reader)
+    settings = { ...settings, features: { ...settings.features, judge: false } }
+    reader.settingsChanged()
+    expect(counts.at(-1)).toEqual({ open: 0, unclear: 0, waiting: 0 })
+    settings = { ...settings, features: { ...settings.features, judge: true } }
+    reader.settingsChanged()
+    expect(counts.at(-1)).toEqual({ open: 1, unclear: 0, waiting: 0 })
   })
 
   it('never judges in the background while a rebuild runs', async () => {

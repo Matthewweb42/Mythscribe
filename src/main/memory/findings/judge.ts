@@ -1,8 +1,10 @@
+import { quickHash } from '@shared/memory/anchor'
 import type { CandidateClaim, CandidateInputs } from '@shared/memory/candidates'
 import type { Card, ClaimMode, ClaimVoice } from '@shared/memory/claims'
 import {
   type Finding,
   type FindingExtra,
+  type FindingRendered,
   type FindingRule,
   type FindingSide,
   type FindingVariant,
@@ -40,8 +42,18 @@ import { dismissedKeys } from '../dismissedStore'
 import { nameScanShared } from '../nameIndexer'
 import { draftCards } from '../reading/cardStore'
 import { heldCard, rowTexts } from '../reading/readingFrame'
-import { candidateInputs, findingsFrame, type FindingsFrame } from './candidateInputs'
-import { setVerdicts, type PairVerdicts } from './findingStore'
+import {
+  candidateInputs,
+  findingsFrame,
+  type FindingsFrame,
+  type StoredInputs
+} from './candidateInputs'
+import {
+  setVerdicts,
+  type FindingAsRendered,
+  type PairReader,
+  type PairVerdicts
+} from './findingStore'
 import { cacheVerdict, cachedVerdict, verdictKey } from './verdictCache'
 
 /**
@@ -56,10 +68,19 @@ import { cacheVerdict, cachedVerdict, verdictKey } from './verdictCache'
  *   its number and scene places masked and every name folded to its record token (`gateText`), so a
  *   scene move or a Rename in book costs no new verdict, while a changed word, context sentence,
  *   relative order, voice, mode, flashback, story year or time-skip hint does.
+ * - **Stamps** (`pairInputs`, P4 slice 2 review): a cheap hash of everything a pair's rendering
+ *   reads (its sides, their scenes' text, cards, typed details and places, the scenes between them,
+ *   the notes, the names, the Not right list). The recompute renders a pair again only when its
+ *   stamp moved (`readPair`), so a book of unjudged findings costs no rendering per change, and a
+ *   pair whose words moved around unchanged sides (a time-skip hint, a story year, a context
+ *   sentence) has its verdicts cleared and the cache asked for the new words.
  * - **Runs**: pairs answered in both orders by the cache are settled at no cost; the rest go in
  *   batches (`judgeBatches`: ≤ 10 pairs, ≤ 2,500 tokens), the A,B call then the B,A call, each with
  *   only the pairs that order still lacks. A reply cut off is read to its last whole verdict; the
  *   rest stay unjudged for the next run. Each call's cost is shared out to its pairs' findings.
+ *   Verdicts land only on a row that still holds the pair as it was rendered (a recompute while the
+ *   call was out re-states it; the verdict stays cached under its own words), and a pair whose row
+ *   moved is not sent in its second order.
  */
 
 /** A finding or a candidate: what a pair is rendered from. */
@@ -88,6 +109,17 @@ export interface JudgeContext {
   /** Readable scenes in reading order. */
   scenes: () => readonly string[]
   notRight: () => ReadonlySet<string>
+  /** A scene's stamp: its text, its stored card and its typed year (`pairInputs`). */
+  sceneStamp: (nodeId: string) => string
+  /**
+   * The stamp of the scenes after reading-order place `from` up to and including `to` whose stored
+   * card has a time skip that can cross a year (what `between` may quote), in constant time.
+   */
+  betweenStamp: (from: number, to: number) => string
+  /** One side's stamp (`pairInputs`), once per side. */
+  sideStamp: (side: FindingSide) => string
+  /** The Not right list's stamp (a held card's fields leave out what it dismissed). */
+  notRightStamp: () => string
 }
 
 const noteKey = (ownerKind: string, ownerId: string, para: number): string =>
@@ -101,36 +133,125 @@ function lazy<T>(make: () => T): () => T {
   }
 }
 
+/**
+ * A scene text's hash, once per text: `rowTexts` answers the very same array while a scene's
+ * content is unchanged, so an unchanged scene is never hashed again.
+ */
+const textHashes = new WeakMap<readonly string[], string>()
+function textsHash(texts: readonly string[]): string {
+  let hash = textHashes.get(texts)
+  if (hash === undefined) {
+    hash = sha256(texts.join('\n'))
+    textHashes.set(texts, hash)
+  }
+  return hash
+}
+
 /** The judge's context over the active draft `draftId` (the rules' inputs when the caller has them). */
 export function judgeContext(
   db: TreeDb,
   draftId: string,
   frame: FindingsFrame = findingsFrame(db),
-  inputs: CandidateInputs = candidateInputs(db, draftId, frame)
+  inputs: CandidateInputs | StoredInputs = candidateInputs(db, draftId, frame)
 ): JudgeContext {
-  return {
-    db,
-    draftId,
-    inputs,
-    claims: new Map(inputs.claims.map((each) => [each.id, each])),
-    rows: new Map(frame.nodes.map((row) => [row.id, row])),
-    notes: new Map(
-      inputs.notes.map((note) => [noteKey(note.ownerKind, note.ownerId, note.para), note])
-    ),
-    names: lazy(() => nameScanShared(db).index),
-    cards: lazy(
-      () =>
-        new Map(
+  const rows = new Map(frame.nodes.map((row) => [row.id, row]))
+  // The cards the rules' inputs read already, when they came from `candidateInputs`.
+  const cards = lazy((): ReadonlyMap<string, Card> =>
+    'cards' in inputs
+      ? inputs.cards
+      : new Map(
           draftCards(db, draftId)
             .filter((card) => inputs.reading.order.has(card.nodeId))
             .map((card) => [card.nodeId, card])
         )
+  )
+  const scenes = lazy(() =>
+    [...inputs.reading.order.entries()].sort((x, y) => x[1] - y[1]).map(([id]) => id)
+  )
+  const notRight = lazy(() => dismissedKeys(db, 'notRight'))
+  const stamps = new Map<string, string>()
+  const sides = new Map<string, string>()
+  const ctx: JudgeContext = {
+    db,
+    draftId,
+    inputs,
+    claims: new Map(inputs.claims.map((each) => [each.id, each])),
+    rows,
+    notes: new Map(
+      inputs.notes.map((note) => [noteKey(note.ownerKind, note.ownerId, note.para), note])
     ),
-    scenes: lazy(() =>
-      [...inputs.reading.order.entries()].sort((x, y) => x[1] - y[1]).map(([id]) => id)
-    ),
-    notRight: lazy(() => dismissedKeys(db, 'notRight'))
+    names: lazy(() => nameScanShared(db).index),
+    cards,
+    scenes,
+    notRight,
+    sceneStamp: (nodeId) => {
+      let stamp = stamps.get(nodeId)
+      if (stamp === undefined) {
+        const row = rows.get(nodeId)
+        const card = cards().get(nodeId)
+        // What a held card rests on (`heldCard`): its fields, who is present, its anchor.
+        stamp = quickHash(
+          [
+            row === undefined ? '∅' : textsHash(rowTexts(row)),
+            card === undefined ? '∅' : JSON.stringify([card.fields, card.present, card.anchor]),
+            String(inputs.typed.get(nodeId)?.year ?? '')
+          ].join('\u0000')
+        )
+        stamps.set(nodeId, stamp)
+      }
+      return stamp
+    },
+    betweenStamp: (from, to) => {
+      const sums = breakSums()
+      const i = firstAfter(sums.at, from)
+      const j = firstAfter(sums.at, to)
+      if (j <= i) return ''
+      const lo = ((sums.lo[j] ?? 0) - (sums.lo[i] ?? 0)) >>> 0
+      const hi = ((sums.hi[j] ?? 0) - (sums.hi[i] ?? 0)) >>> 0
+      return `${j - i}.${lo}.${hi}`
+    },
+    sideStamp: (side) => {
+      const ref = sideRef(side)
+      let stamp = sides.get(ref)
+      if (stamp === undefined) {
+        stamp = sideInputs(ctx, side)
+        sides.set(ref, stamp)
+      }
+      return stamp
+    },
+    notRightStamp: lazy(() => sha256([...notRight()].sort().join('\n')))
   }
+  /**
+   * The year-crossing time skips' places, with prefix sums of a 53-bit hash of each place and its
+   * scene's stamp in two 32-bit halves (a range's sums differ when any scene in it changed).
+   */
+  const breakSums = lazy(() => {
+    const at: number[] = []
+    const lo: number[] = [0]
+    const hi: number[] = [0]
+    scenes().forEach((nodeId, place) => {
+      const elapsed = cards().get(nodeId)?.fields.elapsed ?? null
+      if (elapsed === null || !elapsedBreaks(elapsed.value)) return
+      const hash = parseInt(quickHash(`${place}\u0000${ctx.sceneStamp(nodeId)}`), 16)
+      at.push(place)
+      lo.push(((lo.at(-1) ?? 0) + (hash >>> 0)) >>> 0)
+      hi.push(((hi.at(-1) ?? 0) + Math.floor(hash / 4294967296)) >>> 0)
+    })
+    return { at, lo, hi }
+  })
+  return ctx
+}
+
+/** The index of the first place in `sorted` greater than `place`. */
+function firstAfter(sorted: readonly number[], place: number): number {
+  let low = 0
+  let high = sorted.length
+  while (low < high) {
+    const mid = (low + high) >>> 1
+    if ((sorted[mid] ?? 0) <= place) low = mid + 1
+    else high = mid
+  }
+  return low
 }
 
 /** One side as it stands now: where it is, its words and what it says. */
@@ -437,21 +558,120 @@ export function pairItem(ctx: JudgeContext, core: FindingCore): PairItem | null 
   }
 }
 
+/** A side's reference as one string, whatever key order built it. */
+function sideRef(side: FindingSide): string {
+  switch (side.kind) {
+    case 'claim':
+      return ['claim', side.claimId, side.nodeId, side.valueKey, side.seen].join('|')
+    case 'presence':
+      return ['presence', side.nodeId, side.recordId].join('|')
+    case 'note':
+      return [
+        'note',
+        side.ownerKind,
+        side.ownerId,
+        side.page ?? '',
+        side.para,
+        side.sentence,
+        side.value,
+        side.datedNodeId ?? ''
+      ].join('|')
+  }
+}
+
 /**
- * Both orders' remembered verdicts for a candidate, for the recompute (`upsertFindings`'s
- * `cached`): a new or reset finding takes them at no cost. Null when neither order is remembered.
+ * A stamp of everything `judgePair` reads of a finding, cheap to compute (no quote is located, no
+ * card held, no name folded): the finding's identity and sides, the record's name and the slot's
+ * words, each note side's paragraph and owner, each book side's place in reading order, its scene's
+ * stamp (text, stored card, typed year) and its claim as stored, the stamps of the scenes between
+ * two book sides that may give a time skip, and the Not right list. It over-reaches on purpose
+ * (any edit in a side's scene moves it): a moved stamp only costs a rendering, and the verdicts
+ * stay while the rendered keys are the same.
  */
-export function cachedPairVerdicts(
+export function pairInputs(ctx: JudgeContext, core: FindingCore): string {
+  const year = core.extra?.year
+  const parts: string[] = [
+    core.rule,
+    core.variant ?? '',
+    core.recordId,
+    core.slot,
+    recordName(ctx, core.recordId),
+    slotWords(ctx, core.slot),
+    year === undefined ? '' : [year.value, year.source, year.nodeId].join('|'),
+    ctx.sideStamp(core.a),
+    ctx.sideStamp(core.b)
+  ]
+  const orders = [core.a, core.b].flatMap((side) => {
+    const order = side.kind === 'note' ? undefined : ctx.inputs.reading.order.get(side.nodeId)
+    return order === undefined ? [] : [order]
+  })
+  if (orders.length === 2) {
+    parts.push(ctx.betweenStamp(Math.min(...orders), Math.max(...orders)))
+  }
+  if (core.a.kind !== 'note' || core.b.kind !== 'note') parts.push(ctx.notRightStamp())
+  // Only ever compared with the last stamp of the same pair: a cheap hash is enough.
+  return quickHash(parts.join('\u0000'))
+}
+
+/**
+ * One side's part of a pair's stamp: its reference; a note's paragraph and owner's name; a book
+ * side's place in reading order, its scene's stamp and its claim as stored.
+ */
+function sideInputs(ctx: JudgeContext, side: FindingSide): string {
+  const parts = [sideRef(side)]
+  if (side.kind === 'note') {
+    const note = ctx.notes.get(noteKey(side.ownerKind, side.ownerId, side.para))
+    parts.push(
+      note === undefined ? '∅' : JSON.stringify(note),
+      side.ownerKind === 'record'
+        ? recordName(ctx, side.ownerId)
+        : (ctx.rows.get(side.ownerId)?.title ?? '')
+    )
+  } else {
+    const order = ctx.inputs.reading.order.get(side.nodeId)
+    parts.push(order === undefined ? '∅' : String(order), ctx.sceneStamp(side.nodeId))
+    if (side.kind === 'claim') {
+      const claim = ctx.claims.get(side.claimId)
+      parts.push(claim === undefined ? '∅' : JSON.stringify(claim))
+    }
+  }
+  return quickHash(parts.join('\u0000'))
+}
+
+/**
+ * A finding's pair as the judge would read it now, against `stored` (what its verdicts were given
+ * for): `stored` itself while its stamp holds, else rendered again (the keys kept from `stored`
+ * when a side cannot be rendered now, so a held side's verdicts wait for its re-read).
+ */
+export function readPair(
   ctx: JudgeContext,
   core: FindingCore,
+  stored: FindingRendered | null
+): FindingRendered {
+  const inputs = pairInputs(ctx, core)
+  if (stored?.inputs === inputs) return stored
+  const pair = pairItem(ctx, core)
+  return { inputs, keys: pair?.keys ?? stored?.keys ?? null }
+}
+
+/** Both orders' remembered verdicts under a pair's keys; null when neither order is remembered. */
+export function cachedPairVerdicts(
+  db: TreeDb,
+  keys: PairItem['keys'],
   now: Date
 ): PairVerdicts | null {
-  const pair = pairItem(ctx, core)
-  if (pair === null) return null
-  const ab = cachedVerdict(ctx.db, pair.keys.ab, now)
-  const ba = cachedVerdict(ctx.db, pair.keys.ba, now)
+  const ab = cachedVerdict(db, keys.ab, now)
+  const ba = cachedVerdict(db, keys.ba, now)
   if (ab === null && ba === null) return null
   return { ab: ab?.verdict ?? null, ba: ba?.verdict ?? null, why: whyOf(ab, ba) }
+}
+
+/** The recompute's reader of pairs (`upsertFindings`), over one context. */
+export function pairReader(ctx: JudgeContext, now: Date): PairReader {
+  return {
+    read: (candidate, stored) => readPair(ctx, candidate, stored),
+    cached: (keys) => cachedPairVerdicts(ctx.db, keys, now)
+  }
 }
 
 const whyOf = (
@@ -475,47 +695,70 @@ export interface JudgeRunInput {
 export interface JudgeRunResult {
   /** A request left. */
   requested: boolean
-  /** Pairs sent to the judge (in either order). */
+  /** Pairs sent to the judge in a call that answered (in either order), each counted once. */
   sent: number
   /** Findings whose verdicts were stored (from the cache or the judge). */
   judged: Finding[]
+  /** Of those, findings whose state moved (an unjudged pair now open, unclear or fine). */
+  settled: Finding[]
   /** Pair-orders sent and not answered (cut off or dropped by the judge). */
   unanswered: number
   /** Unjudged findings left for a later run (past `maxPairs`). */
   left: number
   /** Findings not sent because a side is gone (the next recompute closes them). */
   dropped: number
+  /** Pairs whose row a recompute re-stated while their call was out (their verdicts stay cached). */
+  moved: number
   costUsd: number
+}
+
+/** A run that has done nothing yet; `judgeFindings` fills it as its calls return. */
+export function emptyJudgeRun(): JudgeRunResult {
+  return {
+    requested: false,
+    sent: 0,
+    judged: [],
+    settled: [],
+    unanswered: 0,
+    left: 0,
+    dropped: 0,
+    moved: 0,
+    costUsd: 0
+  }
 }
 
 interface Pending {
   finding: Finding
   pair: PairItem
+  /** What this run judges: the pair's stamp and keys now. */
+  rendered: FindingRendered
+  /** The row as this run last saw or wrote it; null once a recompute re-stated it. */
+  at: FindingAsRendered | null
   ab: { verdict: JudgeVerdict; why: string | null } | null
   ba: { verdict: JudgeVerdict; why: string | null } | null
+}
+
+/** Whether a reply answers every one of the first `sent` items (only such a reply is cached). */
+const answersAll = (text: string, sent: number): boolean => {
+  const rulings = parseJudgeAnswer(text)
+  for (let i = 1; i <= sent; i += 1) if (!rulings.has(i)) return false
+  return true
 }
 
 /**
  * Judges `findings`: pairs both orders of which the cache remembers are settled at no cost; up to
  * `maxPairs` others go in batches, the A,B call then the B,A call (each with the pairs that order
- * lacks), every answered pair-order cached, every finding's verdicts and cost share stored as its
- * calls return (a Stop keeps what was judged). Throws `AiCancelledError` on a Stop, and a provider
- * failure as the request path raised it.
+ * lacks, and none whose row moved meanwhile), every answered pair-order cached, every finding's
+ * verdicts, rendering and cost share stored as its calls return (a Stop keeps what was judged).
+ * `result` is filled as the run goes, so a caller still holds what was done when it throws:
+ * `AiCancelledError` on a Stop, and a provider failure as the request path raised it.
  */
 export async function judgeFindings(
   ctx: JudgeContext,
   deps: { ai: AiRequestDeps },
-  input: JudgeRunInput
+  input: JudgeRunInput,
+  result: JudgeRunResult = emptyJudgeRun()
 ): Promise<JudgeRunResult> {
-  const result: JudgeRunResult = {
-    requested: false,
-    sent: 0,
-    judged: [],
-    unanswered: 0,
-    left: 0,
-    dropped: 0,
-    costUsd: 0
-  }
   const toSend: Pending[] = []
   for (const finding of input.findings) {
     const pair = pairItem(ctx, finding)
@@ -526,10 +769,16 @@ export async function judgeFindings(
     const at = input.now()
     const ab = cachedVerdict(ctx.db, pair.keys.ab, at)
     const ba = cachedVerdict(ctx.db, pair.keys.ba, at)
-    const pending: Pending = { finding, pair, ab, ba }
+    const pending: Pending = {
+      finding,
+      pair,
+      rendered: { inputs: pairInputs(ctx, finding), keys: pair.keys },
+      at: { a: finding.a, b: finding.b, extra: finding.extra, rendered: finding.rendered },
+      ab,
+      ba
+    }
     if (ab !== null && ba !== null) {
-      store(ctx, pending, 0, input.now())
-      result.judged.push(finding)
+      store(ctx, pending, 0, input.now(), result)
       continue
     }
     if (toSend.length >= input.maxPairs) {
@@ -539,8 +788,8 @@ export async function judgeFindings(
     toSend.push(pending)
   }
   if (toSend.length === 0) return result
-  result.sent = toSend.length
 
+  const sentIds = new Set<string>()
   let calls = 0
   let inFlight: string | null = null
   const onAbort = (): void => {
@@ -550,11 +799,17 @@ export async function judgeFindings(
   try {
     for (const batch of judgeBatches(toSend.map((each) => ({ ...each, item: each.pair.item })))) {
       for (const order of ['ab', 'ba'] as const) {
-        const lacking = batch.filter((each) => each[order] === null)
+        // The pending entry itself: the A,B call's verdicts and a moved row show on it.
+        const lacking = batch
+          .map((each) => toSend.find((candidate) => candidate.finding.id === each.finding.id))
+          .filter(
+            (each): each is Pending =>
+              each !== undefined && each.at !== null && each[order] === null
+          )
         if (lacking.length === 0) continue
         if (input.signal?.aborted === true) throw new AiCancelledError('Judging was stopped.')
         const prompt = buildJudgePrompt(
-          lacking.map((each) => each.item),
+          lacking.map((each) => each.pair.item),
           order
         )
         calls += 1
@@ -568,7 +823,8 @@ export async function judgeFindings(
           contextHash: sha256(JSON.stringify(prompt.messages)),
           promptVersion: JUDGE_PROMPT_VERSION,
           requestId: inFlight,
-          cacheIf: (text) => parseJudgeAnswer(text).size > 0
+          // A reply that leaves a pair unanswered is not kept: the same call next time asks again.
+          cacheIf: (text) => answersAll(text, prompt.sent)
         })
         inFlight = null
         result.requested ||= !reply.cached
@@ -576,20 +832,19 @@ export async function judgeFindings(
         input.onSpend?.(reply.costUsd)
         const rulings = parseJudgeAnswer(reply.text)
         const sent = lacking.slice(0, prompt.sent)
+        for (const each of sent) sentIds.add(each.finding.id)
+        result.sent = sentIds.size
         const share = sent.length === 0 ? 0 : reply.costUsd / sent.length
         const now = input.now()
         result.unanswered += lacking.length - prompt.sent
-        for (const [i, each] of sent.entries()) {
-          const pending = toSend.find((candidate) => candidate.finding.id === each.finding.id)
-          if (pending === undefined) continue
+        for (const [i, pending] of sent.entries()) {
           const ruling = rulings.get(i + 1)
           if (ruling === undefined) {
             result.unanswered += 1
-            store(ctx, pending, share, now)
+            store(ctx, pending, share, now, result)
             continue
           }
-          const verdict = { verdict: ruling.r, why: ruling.w }
-          pending[order] = verdict
+          pending[order] = { verdict: ruling.r, why: ruling.w }
           cacheVerdict(
             ctx.db,
             {
@@ -603,26 +858,48 @@ export async function judgeFindings(
             },
             now
           )
-          store(ctx, pending, share, now)
+          store(ctx, pending, share, now, result)
         }
       }
     }
   } finally {
     input.signal?.removeEventListener('abort', onAbort)
   }
-  for (const each of toSend) {
-    if (each.ab !== null || each.ba !== null) result.judged.push(each.finding)
-  }
   return result
 }
 
-/** Stores a pending pair's verdicts as they stand, with this call's cost share. */
-function store(ctx: JudgeContext, pending: Pending, share: number, now: Date): void {
-  setVerdicts(ctx.db, pending.finding.id, {
+/**
+ * Stores a pending pair's verdicts as they stand, with this call's cost share and what they were
+ * given for, onto its row only while the row still holds the pair as rendered (else the pair is
+ * marked moved: nothing more is written or sent for it in this run).
+ */
+function store(
+  ctx: JudgeContext,
+  pending: Pending,
+  share: number,
+  now: Date,
+  result: JudgeRunResult
+): void {
+  if (pending.at === null) return
+  const written = setVerdicts(ctx.db, pending.finding.id, {
     ab: pending.ab?.verdict ?? null,
     ba: pending.ba?.verdict ?? null,
     why: whyOf(pending.ab, pending.ba),
     costUsd: share,
-    now
+    now,
+    rendered: pending.rendered,
+    expect: pending.at
   })
+  if (written === null) {
+    pending.at = null
+    result.moved += 1
+    return
+  }
+  pending.at = { ...pending.at, rendered: pending.rendered }
+  const id = pending.finding.id
+  if (pending.ab === null && pending.ba === null) return
+  if (!result.judged.some((each) => each.id === id)) result.judged.push(pending.finding)
+  if (written.before !== written.after && !result.settled.some((each) => each.id === id)) {
+    result.settled.push(pending.finding)
+  }
 }

@@ -458,7 +458,10 @@ describe('the toggle list per story memory (F-16.17, P2a-D24)', () => {
       'at most 10 pairs',
       'Check the book',
       'up to 20 pairs with three sentences either side to the strong model',
-      'your notes or a Research page'
+      'your notes or a Research page',
+      // P4 slice 2 review: what a pair names beside the record (AI rule 3).
+      'the label of the secret or plot thread',
+      'the title of the note or Research page'
     ]) {
       expect(AI_DATA_SHARING.judge.sends).toContain(part)
     }

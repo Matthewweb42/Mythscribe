@@ -34,6 +34,14 @@ function cyrb53(text: string): number {
   return 4294967296 * (2097151 & h2) + (h1 >>> 0)
 }
 
+/**
+ * A text's cyrb53 as 14 hex characters, as written: a cheap stamp for code that only needs to
+ * notice a change (F-16.27's pair stamps), never for anything a collision could make wrong.
+ */
+export function quickHash(text: string): string {
+  return cyrb53(text).toString(16).padStart(SENTENCE_HASH_LENGTH, '0')
+}
+
 /** A sentence's hash: `normalizeForMatch`, then cyrb53, as 14 hex characters. */
 export function sentenceHash(text: string): string {
   return cyrb53(normalizeForMatch(text)).toString(16).padStart(SENTENCE_HASH_LENGTH, '0')

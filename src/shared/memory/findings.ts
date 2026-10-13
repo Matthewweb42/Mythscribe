@@ -118,6 +118,20 @@ export const FindingExtra = z.object({
 })
 export type FindingExtra = z.infer<typeof FindingExtra>
 
+/**
+ * The pair as the judge reads it, as last rendered (P4 slice 2 review, migration 0039): `inputs` is
+ * a stamp of everything its rendering reads (its sides' words and scenes, their cards and typed
+ * details, the scenes between them, the notes and names), cheap to compute; `keys` are its
+ * verdict-cache keys in both orders (null while it could not be rendered). The verdicts on a row
+ * are for these keys: while `inputs` holds the pair is not rendered again, and when the keys move
+ * the verdicts are cleared and the cache asked for the new words.
+ */
+export const FindingRendered = z.object({
+  inputs: z.string(),
+  keys: z.object({ ab: z.string(), ba: z.string() }).nullable()
+})
+export type FindingRendered = z.infer<typeof FindingRendered>
+
 /** A stored finding (`finding` row). */
 export const Finding = z.object({
   id: z.string(),
@@ -149,7 +163,9 @@ export const Finding = z.object({
   shownAt: z.string().nullable(),
   created: z.string(),
   judgedAt: z.string().nullable(),
-  confirmedAt: z.string().nullable()
+  confirmedAt: z.string().nullable(),
+  /** What the verdicts were given for (null until the pair was first rendered). */
+  rendered: FindingRendered.nullable()
 })
 export type Finding = z.infer<typeof Finding>
 

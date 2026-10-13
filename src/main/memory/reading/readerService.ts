@@ -91,7 +91,7 @@ import { markRebuilt, pickStrongDue, runSpotChecks } from './spotChecks'
 import { detailConflicts, keepMine } from './detailConflicts'
 import { notAbout, wrongValue } from './notRight'
 import { createFindingsService } from '../findings/findingsService'
-import type { FindingCounts } from '../findings/findingsJob'
+import { findingCounts, type FindingCounts } from '../findings/findingsJob'
 import type { RebuildContext } from '../switchover/plan'
 
 /**
@@ -305,8 +305,13 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
   let lastNotices: string | null = null
   let lastReconcile = 0
 
+  /** A judge or check job is running (the queue's status leaves them out of its counts). */
+  let judgeRunning = false
+
   const queue = createIndexQueue<ReaderValue>({
     kind: READER_KINDS,
+    // F-16.27: judging is not reading; the indicator counts scenes only.
+    uncounted: JUDGE_KINDS,
     db: v2Db,
     run: (job, requestId) => runJob(job.kind, job.nodeId, requestId),
     cancelRequest: deps.cancelRequest,
@@ -979,12 +984,17 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       case 'judge':
       case 'checkBook': {
         // F-16.27, F-16.30: the findings service owns both; a background run queues itself again.
-        const result =
-          kind === 'judge'
-            ? await findings.judge(db, requestId)
-            : await findings.checkBook(db, requestId)
-        if (result.again) queue.indexAll('judge', [nodeId], { afterRunning: true })
-        return { requested: result.requested, value: { outcome: null } }
+        judgeRunning = true
+        try {
+          const result =
+            kind === 'judge'
+              ? await findings.judge(db, requestId)
+              : await findings.checkBook(db, requestId)
+          if (result.again) queue.indexAll('judge', [nodeId], { afterRunning: true })
+          return { requested: result.requested, value: { outcome: null } }
+        } finally {
+          judgeRunning = false
+        }
       }
       default:
         // Not the reader's: never queued here (the queue sees only its own kinds).
@@ -1065,8 +1075,10 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       const db = v2Db()
       if (db === null) return
       if (queue.status().paused !== null && readingAllowed(db)) queue.resume()
-      // F-16.27: the Contradiction check switched on (or a provider set up): judging resumes.
+      // F-16.27: the Contradiction check switched on (or a provider set up): judging resumes, and
+      // the counts follow the switch (off, none are shown).
       queueJudge()
+      deps.findingsChanged?.(findingCounts(db, deps.settings(db).features.judge))
       publish()
     },
 
@@ -1302,11 +1314,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     judging() {
       const db = v2Db()
       if (db === null) return false
-      const running = queue.status().running?.kind
-      return (
-        (running !== undefined && JUDGE_KINDS.includes(running)) ||
-        listJobs(db, [...JUDGE_KINDS]).some((job) => job.status === 'queued')
-      )
+      return judgeRunning || listJobs(db, [...JUDGE_KINDS]).some((job) => job.status === 'queued')
     },
 
     queueStatus: () => queue.status(),

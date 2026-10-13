@@ -948,12 +948,17 @@ export function registerHandlers({
       }
       if (job.kind === 'findings') {
         // F-16.27: the local recompute of the contradiction candidates (no AI, nothing sent); a
-        // pair both of whose orders the verdict cache remembers is settled at no cost, and the
-        // ones still unjudged are handed to the judge on the reader's queue (when the gates allow).
+        // pair both of whose orders the verdict cache remembers is settled at no cost, and when
+        // findings moved the ones still unjudged are handed to the judge on the reader's queue
+        // (when the gates allow). Nothing moved, nothing is queued: a judge run's own pushes come
+        // back here, and must not queue it again. The counts follow the switch (off, none).
         if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
-        const result = runFindingsJob(db, now, { cachedVerdicts: true })
+        const result = runFindingsJob(db, now, {
+          cachedVerdicts: true,
+          shown: getAiSettings(db).features.judge
+        })
         if (result.counts !== null) emit(windows(), 'memory:findingsChanged', result.counts)
-        reader.queueJudge()
+        if (result.changed) reader.queueJudge()
         return Promise.resolve({
           requested: false,
           value: { changed: result.changed, scanned: result.changed }

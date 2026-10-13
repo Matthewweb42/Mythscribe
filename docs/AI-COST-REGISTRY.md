@@ -47,7 +47,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `verify` | Story memory check | background | verify.v2 | fast | 1111 / 1742 | 140 / 400 | $0.000195 · $0.000356 | $0.000243 | $0.00146 | 1 | $0.000195 |
 | `cite` | Ms Scribe’s quote check | every chat message | cite.v1 | fast | 432 / 2435 | 60 / 200 | $0.0000773 · $0.000397 | $0.0000966 | $0.000594 | 1 | $0.0000773 |
 | `navigator` | Ms Scribe’s search | every chat message | navigator.v1 | fast | 1184 / 5585 | 150 / 150 | $0.000208 · $0.000824 | $0.000260 | $0.00156 | 2 | $0.000416 |
-| `judge` | Contradiction check | background | judge.v1 | fast | 777 / 2683 | 120 / 300 | $0.000142 · $0.000460 | $0.000178 | $0.00112 | 2 | $0.000285 |
+| `judge` | Contradiction check | background | judge.v1 | fast | 775 / 2683 | 120 / 300 | $0.000142 · $0.000460 | $0.000178 | $0.00112 | 2 | $0.000284 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -208,7 +208,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `judge` — Contradiction check
 
-- **When:** Story memory v2 (F-16.27): judge.v1, fast tier, JSON, reasoning off (lowest effort on a direct key), only for the candidate pairs code found under rules C1–C6 (two values for one fixed thing, a death then a presence, a secret passed on before it is learned, a stated age against a birth year and that scene’s story year, a thread advancing after its resolve, the book against a canon note) that no remembered verdict covers. Each batch of at most 10 pairs (≤ 2,500 tokens of pairs) goes twice, as two separate requests, the second with every pair’s passages swapped; only two "contradiction" verdicts make a finding. In the background (the Contradiction check switch on, Use AI on, a provider, under the daily cap and, on Cloud, the monthly cap): after a reading or a note save, at most 10 pairs a run, the scene just read first, at most 30 pairs a day; never during a rebuild; the rest wait for Check the book (F-16.30), which judges every uncached pair and has the strong model confirm at most 20 (one pair at ±3 sentences, 90 out). max_tokens min(300, 20 + 26 per pair); a reply cut off is read up to its last whole verdict and the rest wait for the next run. Every pair-order’s verdict is remembered (`verdict_cache`, scene numbers masked and names folded), so an unchanged pair, a scene move or a Rename in book costs nothing. Figures (plan P4 §7): about 1,200 tokens in and 120 out per call, two calls per batch.
+- **When:** Story memory v2 (F-16.27): judge.v1, fast tier, JSON, reasoning off (lowest effort on a direct key), only for the candidate pairs code found under rules C1–C6 (two values for one fixed thing, a death then a presence, a secret passed on before it is learned, a stated age against a birth year and that scene’s story year, a thread advancing after its resolve, the book against a canon note) that no remembered verdict covers. Each batch of at most 10 pairs (≤ 2,500 tokens of pairs) goes twice, as two separate requests, the second with every pair’s passages swapped; only two "contradiction" verdicts make a finding. In the background (the Contradiction check switch on, Use AI on, a provider, under the daily cap and, on Cloud, the monthly cap): after a reading or a note save, at most 10 pairs a run, the scene just read first, at most 30 pairs a day; never during a rebuild; the rest wait for Check the book (F-16.30), which judges every uncached pair and has the strong model confirm at most 20 (one pair at ±3 sentences, 90 out). max_tokens min(300, 20 + 26 per pair); a reply cut off is read up to its last whole verdict and the rest wait for the next run. Every pair-order’s verdict is remembered (`verdict_cache`, scene numbers masked and names folded), so an unchanged pair, a scene move or a Rename in book costs nothing. Figures (plan P4 §7): about 1,200 tokens in and 120 out per call for a background run of 1–4 pairs, two calls per batch; a full ten-pair batch (Check the book) is priced at 1,500 in and at most 280 out (the judge.v1 row).
 - **Ideas:** Skip the second order when the first says ok, once the live run shows how often the two orders disagree; drop the context sentences for pairs whose quotes alone settle it (the live run’s unclear rate says when); judge C6 note pairs only on a note save.
 
 ## Planned: story memory (F-16)
@@ -228,12 +228,12 @@ table above when its feature ships. Cached input is not discounted; task totals 
 
 | Task | Requests | Own key (OpenRouter) | Hosted | OpenAI key |
 | --- | --- | --- | --- | --- |
-| Index the book once (= Rebuild memory; 90 scenes) | 262 | $0.128 | $0.160 | $0.794 |
-| A 2-hour writing session (3 card refreshes, about one needing a read) | 31 | $0.0144 | $0.0181 | $0.100 |
+| Index the book once (= Rebuild memory; 90 scenes) | 262 | $0.128 | $0.160 | $0.793 |
+| A 2-hour writing session (3 card refreshes, about one needing a read) | 31 | $0.0144 | $0.0180 | $0.0998 |
 | A lookup through Ms Scribe | 2 | $0.00882 | $0.0110 | $0.0148 |
 | An open question | 4 | $0.0152 | $0.0190 | $0.0345 |
 | An open question, widened (about one in five) | 6 | $0.0401 | $0.0501 | $0.0752 |
-| Check the book | 40 | $0.0347 | $0.0433 | $0.112 |
+| Check the book | 40 | $0.0346 | $0.0432 | $0.110 |
 | File a 20,000-word upload, once | 14 | $0.159 | $0.198 | $0.448 |
 | A what-if (P5): 5 Try turns and 1 Version | 16 | $0.104 | $0.130 | $0.243 |
-| A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions with 10 widened, 2 checks, 1 what-if) | 982 | $1.65 | $2.06 | $4.93 |
+| A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions with 10 widened, 2 checks, 1 what-if) | 982 | $1.65 | $2.06 | $4.92 |

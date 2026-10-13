@@ -7,12 +7,18 @@ import { registerInflight, releaseInflight } from '../../ai/inflight'
 import { AiBudgetError } from '../../ai/providers/types'
 import type { AiRequestDeps } from '../../ai/request'
 import { currentDraftId } from '../../draft/draftStore'
-import { JobSkippedError } from '../../jobs/indexQueue'
+import { JobSkippedError, jobOutcome } from '../../jobs/indexQueue'
 import type { TreeDb } from '../../tree/treeStore'
 import { readRow, writeRow } from '../reading/readerRows'
 import { countFindings, findingsOf } from './findingStore'
 import { findingCounts, type FindingCounts } from './findingsJob'
-import { judgeContext, judgeFindings, type JudgeContext, type JudgeRunResult } from './judge'
+import {
+  emptyJudgeRun,
+  judgeContext,
+  judgeFindings,
+  type JudgeContext,
+  type JudgeRunResult
+} from './judge'
 
 /**
  * The contradiction judge's jobs (F-16.27, F-16.30; plan P4 §2.3, P4-D12), on the reader's
@@ -31,8 +37,13 @@ import { judgeContext, judgeFindings, type JudgeContext, type JudgeRunResult } f
  *   and the report.
  *
  * Every call's cost goes to the Cloud tally as it returns (`spend`), and is shared out to the
- * findings it judged (`judge.ts`). After a run that stored verdicts, `memory:findingsChanged` and
- * `memory:changed` (the judged findings' scenes and records) are pushed.
+ * findings it judged (`judge.ts`). After a run that moved a finding's state (an unjudged pair now
+ * open, unclear or fine), `memory:findingsChanged` and `memory:changed` (those findings' scenes and
+ * records) are pushed; a run that only stored half a pair pushes nothing, so it never queues
+ * itself again through the recompute. A run cut short (the daily cap, a provider failure, a Stop)
+ * still counts the pairs it sent and pushes what it settled. A background run's transient provider
+ * failure (a rate limit, the network) goes quietly: the next change that moves a finding queues it
+ * again, and it never shows as a scene that could not be read.
  */
 
 /** Pairs at most per background run (two calls: both orders). */
@@ -64,8 +75,11 @@ export const HOLD = {
   dayPairs:
     'The contradiction check reached today’s background limit; Check the book judges the rest.',
   dailyCap: 'The contradiction check waits: today’s AI spend reached its cap.',
-  cloudCap: 'Background checks reached your Cloud cap for this month.'
+  cloudCap: 'Background checks reached your Cloud cap for this month.',
+  transient: 'The contradiction check will try again after the next change:'
 } as const
+
+const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 export interface FindingsServiceDeps {
   settings: (db: TreeDb) => AiSettings
@@ -157,13 +171,13 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
     return null
   }
 
-  /** Pushes what a run moved: the counts, and the judged findings' scenes and records. */
+  /** Pushes what a run moved: the counts, and the settled findings' scenes and records. */
   const pushed = (db: TreeDb, run: JudgeRunResult): void => {
-    if (run.judged.length === 0) return
-    deps.findingsChanged?.(findingCounts(db))
+    if (run.settled.length === 0) return
+    deps.findingsChanged?.(findingCounts(db, deps.settings(db).features.judge))
     const nodeIds = new Set<string>()
     const recordIds = new Set<string>()
-    for (const finding of run.judged) {
+    for (const finding of run.settled) {
       recordIds.add(finding.recordId)
       for (const side of [finding.a, finding.b]) {
         const nodeId = sideNode(side)
@@ -186,9 +200,11 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
     const ctx = judgeContext(db, draftId)
     const findings = judgeOrder(findingsOf(db, draftId, ['unjudged']), ctx, lastRead)
     const controller = registerInflight(requestId)
-    let result: JudgeRunResult
+    // Filled as the calls return, so a run cut short still counts and pushes what it did.
+    const result = emptyJudgeRun()
+    let failed: { err: unknown } | null = null
     try {
-      result = await judgeFindings(
+      await judgeFindings(
         ctx,
         { ai: deps.requestDeps(db) },
         {
@@ -198,17 +214,24 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
           signal: controller.signal,
           onSpend: (usd) => deps.spend(db, usd, asked),
           now: deps.now
-        }
+        },
+        result
       )
     } catch (err) {
-      // The daily cap reached mid-run: what was judged stays; the rest waits, quietly.
-      if (err instanceof AiBudgetError) throw new JobSkippedError(HOLD.dailyCap)
-      throw err
+      failed = { err }
     } finally {
       releaseInflight(requestId)
     }
     if (!asked) addJudgeDay(db, today(), result.sent)
     pushed(db, result)
+    if (failed !== null) {
+      // The daily cap reached mid-run: what was judged stays; the rest waits, quietly.
+      if (failed.err instanceof AiBudgetError) throw new JobSkippedError(HOLD.dailyCap)
+      if (!asked && jobOutcome(failed.err) === 'transient') {
+        throw new JobSkippedError(`${HOLD.transient} ${errorText(failed.err)}`)
+      }
+      throw failed.err
+    }
     const again =
       !asked && result.sent > 0 && result.left > 0 && judgeDay(db, today()).pairs < JUDGE_DAY_PAIRS
     return { requested: result.requested, again, run: result }

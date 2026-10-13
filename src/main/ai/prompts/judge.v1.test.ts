@@ -82,7 +82,7 @@ const QUESTIONS: [JudgeQuestion, string][] = [
   ],
   [
     { rule: 'C2', variant: 'body', name: 'Mara', slot: 'hair' },
-    'Mara’s hair differs between these two appearances with no change shown. Can both be true?'
+    'Mara’s hair differs between these two appearances. Can both be true?'
   ],
   [
     { rule: 'C3', name: 'Bel', secret: 'the secret engagement' },
@@ -152,6 +152,10 @@ describe('judge.v1 prompt (F-16.27)', () => {
     }
     expect(JUDGE_RULES).toContain('"w" (at most 8 words) only with "c"')
     expect(JUDGE_CONFIRM_RULES).toContain('"w" (at most 20 words) with every verdict')
+    // The examples model no absence reason either (P4 rule 5).
+    for (const rules of [JUDGE_RULES, JUDGE_CONFIRM_RULES]) {
+      expect(rules.toLowerCase()).not.toContain('no change')
+    }
   })
 
   it.each(QUESTIONS)('words the %o question order-neutrally and positively', (question, text) => {
@@ -159,7 +163,14 @@ describe('judge.v1 prompt (F-16.27)', () => {
     const item = judgeItemText({ ...eyes, question }, 1, 'ab')
     expect(item.startsWith(`1. ${text}\n`)).toBe(true)
     // Plan P4 rule 5: no item states an absence.
-    for (const words of ['does not know', "doesn't know", 'never', 'no scene', 'not learn']) {
+    for (const words of [
+      'does not know',
+      "doesn't know",
+      'never',
+      'no scene',
+      'not learn',
+      'no change'
+    ]) {
       expect(item.toLowerCase()).not.toContain(words)
     }
   })

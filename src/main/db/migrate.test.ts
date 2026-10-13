@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(39)
+    expect(result.version).toBe(40)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1858,5 +1858,41 @@ describe('contradictions (0038, F-16.27) leave every older row and column', () =
     expect(db.prepare("SELECT cost_usd FROM verdict_cache WHERE key = 'h1'").get()).toEqual({
       cost_usd: 0
     })
+  })
+})
+
+describe('the judged rendering (0039, F-16.27, P4 slice 2 review) leaves every older row and column', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, loadMigrations().slice(0, 39))
+    fillEveryTable(db)
+  })
+  afterEach(() => db.close())
+
+  it('adds a nullable rendered column to finding and changes nothing else', () => {
+    const tables = tableNamesOf(db).filter((table) => table !== 'schema_migrations')
+    const objectsBefore = schemaOf(db)
+    const rowsBefore = dumpOf(db, tables)
+    expect(rowsBefore.finding).toHaveLength(1)
+
+    expect(migrate(db, loadMigrations().slice(0, 40)).applied).toEqual(['0039_finding_rendered'])
+
+    expect(tableNamesOf(db).filter((table) => table !== 'schema_migrations')).toEqual(tables)
+    const others = (objects: ReturnType<typeof schemaOf>): ReturnType<typeof schemaOf> =>
+      objects.filter((object) => !(object.type === 'table' && object.name === 'finding'))
+    expect(JSON.stringify(others(schemaOf(db)))).toBe(JSON.stringify(others(objectsBefore)))
+    const columns = (
+      db.prepare('PRAGMA table_info(finding)').all() as { name: string; notnull: number }[]
+    ).map((column) => [column.name, column.notnull])
+    expect(columns.at(-1)).toEqual(['rendered', 0])
+    const rowsAfter = dumpOf(db, tables)
+    expect(rowsAfter.finding).toEqual(
+      (rowsBefore.finding ?? []).map((row) => ({ ...(row as object), rendered: null }))
+    )
+    const { finding: _finding, ...restAfter } = rowsAfter
+    const { finding: _before, ...restBefore } = rowsBefore
+    expect(JSON.stringify(restAfter)).toBe(JSON.stringify(restBefore))
   })
 })

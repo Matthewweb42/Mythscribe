@@ -93,6 +93,12 @@ export interface IndexQueueOptions<T> {
    * `passages` beside `mentions`).
    */
   kind?: JobKind | readonly JobKind[]
+  /**
+   * Kinds this instance runs but leaves out of its status (F-16.27: the contradiction judge on the
+   * reader's queue): never counted as queued, running, failed or done, so the indicator's "Reading
+   * 1 of 3 scenes" counts scenes only.
+   */
+  uncounted?: readonly JobKind[]
   /** Runs one job. `requestId` is registered in flight, so the run can be aborted. */
   run: (job: QueuedJob, requestId: string) => Promise<JobRun<T>>
   /** Aborts the request in flight under that id (the inflight registry, F-5.10). */
@@ -160,7 +166,16 @@ const HARD_CODES: ReadonlySet<AiErrorCode> = new Set<AiErrorCode>([
   'TRIAL_ENDED'
 ])
 
-type Outcome = 'quiet' | 'cancelled' | 'transient' | 'hard'
+export type JobOutcome = 'quiet' | 'cancelled' | 'transient' | 'hard'
+type Outcome = JobOutcome
+
+/**
+ * What went wrong, from the queue's point of view (a run that treats some failures its own way
+ * asks the same question: F-16.27's background judge makes a transient one quiet).
+ */
+export function jobOutcome(err: unknown): JobOutcome {
+  return classify(err)
+}
 
 /** What went wrong, from the queue's point of view. */
 function classify(err: unknown): Outcome {
@@ -195,6 +210,7 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
   const {
     db: database,
     kind: only,
+    uncounted = [],
     run,
     cancelRequest,
     now = () => new Date(),
@@ -285,12 +301,13 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
   function currentStatus(): IndexQueueStatus {
     const db = database()
     if (db === null) return IDLE_INDEX_QUEUE
-    const jobs = listJobs(db, only)
+    const jobs = listJobs(db, only).filter((job) => !uncounted.includes(job.kind))
     const queued = jobs.filter((job) => job.status === 'queued' && job.id !== running?.id).length
     const failed = jobs.filter((job) => job.status === 'failed').length
+    const shown = running === null || uncounted.includes(running.job.kind) ? null : running
     // Idle again: the "3 of 12" counter starts over with the next burst.
-    if (queued === 0 && failed === 0 && running === null && paused === null) done = 0
-    return { queued, running: running === null ? null : { ...running.job }, failed, done, paused }
+    if (queued === 0 && failed === 0 && shown === null && paused === null) done = 0
+    return { queued, running: shown === null ? null : { ...shown.job }, failed, done, paused }
   }
 
   const emit = (): void => onChange?.(currentStatus())
@@ -416,7 +433,7 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
       if (outcome.requested) lastRequestAt = startedAt
       if (at === generation) {
         retryAt.delete(fresh.id)
-        done += 1
+        if (!uncounted.includes(fresh.kind)) done += 1
         if (dirty.delete(fresh.id)) {
           // The scene was saved again while this job ran: its row waits for one more run.
           announce(fresh.nodeId, 'pending', null)

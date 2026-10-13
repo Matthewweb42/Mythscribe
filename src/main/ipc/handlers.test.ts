@@ -9377,9 +9377,12 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
         features: { ...settings.features, judge: false }
       })
       expect((await invoke('memory:findings', { nodeId: null })).open).toEqual([])
+      // The counts agree with the view: none while the switch is off.
+      expect(sentOf('memory:findingsChanged').at(-1)).toEqual({ open: 0, unclear: 0, waiting: 0 })
       // Use AI off with the switch on: judged findings stay visible.
       await invoke('aiSettings:set', { ...settings, dial: 0 })
       expect((await invoke('memory:findings', { nodeId: null })).open).toHaveLength(1)
+      expect(sentOf('memory:findingsChanged').at(-1)).toEqual({ open: 1, unclear: 0, waiting: 0 })
     } finally {
       vi.useRealTimers()
     }

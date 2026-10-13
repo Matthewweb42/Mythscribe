@@ -1,8 +1,8 @@
 import { currentDraftId } from '../../draft/draftStore'
 import type { TreeDb } from '../../tree/treeStore'
 import { candidateInputs, findingsFrame } from './candidateInputs'
-import { findingRows } from './findingStore'
-import { cachedPairVerdicts, judgeContext, type JudgeContext } from './judge'
+import { findingRows, type PairReader } from './findingStore'
+import { judgeContext, pairReader } from './judge'
 import { recomputeFindings, type RecomputeOptions, type RecomputeResult } from './recompute'
 
 /**
@@ -20,10 +20,15 @@ export interface FindingCounts {
   waiting: number
 }
 
-/** The active draft's finding counts. */
-export function findingCounts(db: TreeDb): FindingCounts {
+const NO_COUNTS: FindingCounts = { open: 0, unclear: 0, waiting: 0 }
+
+/**
+ * The active draft's finding counts; none while findings are hidden (`shown` false: the
+ * Contradiction check is off, as `memory:findings` answers then, P4-D21).
+ */
+export function findingCounts(db: TreeDb, shown = true): FindingCounts {
   const draftId = currentDraftId(db)
-  if (draftId === null) return { open: 0, unclear: 0, waiting: 0 }
+  if (!shown || draftId === null) return { ...NO_COUNTS }
   const rows = findingRows(db, draftId, ['open', 'unclear', 'unjudged'])
   return {
     open: rows.filter((row) => row.state === 'open').length,
@@ -33,27 +38,33 @@ export function findingCounts(db: TreeDb): FindingCounts {
 }
 
 /**
- * One run of the job: the recompute, and the counts when anything moved. `cachedVerdicts` (slice
- * 2): a new or reset finding takes both orders' remembered verdicts from `verdict_cache` at no cost
- * (its pair rendered as the judge reads it, `judge.ts`), so an unchanged pair is never judged twice.
+ * One run of the job: the recompute, and the counts when anything a view shows moved.
+ * `cachedVerdicts` (slice 2): pairs are read as the judge reads them (`judge.ts`), rendered again
+ * only when the stamp of what they read moved, so a pair whose words changed is judged afresh and a
+ * new or re-rendered one takes both orders' remembered verdicts from `verdict_cache` at no cost.
+ * `shown` (the Contradiction check switch): off, the counts are none.
  */
 export function runFindingsJob(
   db: TreeDb,
   now: Date,
-  options: RecomputeOptions & { cachedVerdicts?: boolean } = {}
+  options: RecomputeOptions & { cachedVerdicts?: boolean; shown?: boolean } = {}
 ): RecomputeResult & { counts: FindingCounts | null } {
-  const { cachedVerdicts, ...recompute } = options
+  const { cachedVerdicts, shown = true, ...recompute } = options
   const draftId = currentDraftId(db)
-  if (cachedVerdicts === true && draftId !== null && recompute.cached === undefined) {
+  if (cachedVerdicts === true && draftId !== null && recompute.pairs === undefined) {
     const frame = findingsFrame(db)
     const inputs = recompute.inputs ?? candidateInputs(db, draftId, frame)
-    let ctx: JudgeContext | null = null
+    let reader: PairReader | null = null
+    const lazily = (): PairReader => {
+      reader ??= pairReader(judgeContext(db, draftId, frame, inputs), now)
+      return reader
+    }
     recompute.inputs = inputs
-    recompute.cached = (candidate) => {
-      ctx ??= judgeContext(db, draftId, frame, inputs)
-      return cachedPairVerdicts(ctx, candidate, now)
+    recompute.pairs = {
+      read: (candidate, stored) => lazily().read(candidate, stored),
+      cached: (keys) => lazily().cached(keys)
     }
   }
   const result = recomputeFindings(db, now, recompute)
-  return { ...result, counts: result.changed ? findingCounts(db) : null }
+  return { ...result, counts: result.changed ? findingCounts(db, shown) : null }
 }

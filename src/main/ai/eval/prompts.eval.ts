@@ -1616,7 +1616,7 @@ describe('judge scoring (F-16.27): what the owed live run checks', () => {
       confirm: true
     }
     expect(
-      scoreJudge(confirm, '{"r":"c","w":"grey in 1.1, brown in 1.2, no change shown"}')
+      scoreJudge(confirm, '{"r":"c","w":"grey in 1.1, brown in 1.2, the same years"}')
     ).toEqual({
       kind: 'json',
       ok: true,

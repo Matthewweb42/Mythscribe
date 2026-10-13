@@ -2,7 +2,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Finding } from '@shared/memory/findings'
+import { emptyCardFields } from '@shared/memory/claims'
+import type { Finding, FindingState } from '@shared/memory/findings'
+import { emptySceneDetails } from '@shared/memory/sceneDetails'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { JUDGE_SENTINEL } from '../../ai/prompts/judge.v1'
 import type { CompletionRequest } from '../../ai/providers/types'
@@ -11,13 +13,17 @@ import { activeDraftId } from '../../draft/draftStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { createNode, getNode, moveNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
-import { createRecord, renameAlias, requireRecord } from '../recordStore'
-import { seedClaims } from '../reading/claimFixture'
+import { indexStaleRecords } from '../passageIndexer'
+import { createRecord, renameAlias, requireRecord, savePage } from '../recordStore'
+import { setSceneDetails } from '../sceneDetailStore'
+import { upsertCard } from '../reading/cardStore'
+import { cardAnchorOf, seedClaims } from '../reading/claimFixture'
 import { deleteClaims, draftClaims } from '../reading/claimStore'
 import { fakeAi, type FakeAnswer } from '../reading/readingFixture'
 import { findingsOf, setVerdicts } from './findingStore'
 import { runFindingsJob } from './findingsJob'
 import { judgeContext, judgeFindings, pairItem } from './judge'
+import { cachedVerdict } from './verdictCache'
 
 /**
  * The contradiction judge's runs (F-16.27; plan P4 §2.3, §2.6) over a stored book and the shared
@@ -106,6 +112,14 @@ function judgeWith(
 }
 
 const unjudged = (): Finding[] => findingsOf(db, activeDraftId(db), ['unjudged'])
+
+/** The C1 finding's state (the book's grey against brown). */
+const state = (): FindingState | undefined =>
+  findingsOf(db, activeDraftId(db)).find((each) => each.rule === 'C1')?.state
+
+/** The judge requests a fake received. */
+const judgeCalls = (ai: ReturnType<typeof fakeAi>): CompletionRequest[] =>
+  ai.requests.filter(isJudge)
 
 async function judge(
   ai: ReturnType<typeof fakeAi>,
@@ -326,16 +340,18 @@ describe('judging a pair in both orders (F-16.27, P4-D11)', () => {
     expect(findingsOf(db, activeDraftId(db))[0]?.state).toBe('open')
   })
 
-  it('a changed context sentence is judged again', async () => {
-    await judge(judgeWith(() => 'c'))
-    const [finding] = findingsOf(db, activeDraftId(db))
-    if (finding === undefined) throw new Error('no finding')
-    setVerdicts(db, finding.id, { ab: null, ba: null, why: null, costUsd: 0, now: NOW })
-    saveDocument(db, one, doc('Mara climbed the ridge.', "Mara's eyes were grey. The snow fell."))
-    const again = judgeWith(() => 'ok')
-    await judge(again)
-    expect(again.requests.filter(isJudge)).toHaveLength(2)
-    expect(findingsOf(db, activeDraftId(db))[0]?.state).toBe('fine')
+  it('never keeps a reply that leaves a pair unanswered: the next run asks the provider again', async () => {
+    // One pair sent; the reply answers an item that was never sent.
+    const wrong = fakeAi((request) =>
+      isJudge(request) ? { text: '{"v":[{"i":2,"r":"c","w":"values differ"}]}' } : { text: '{}' }
+    )
+    const first = await judge(wrong)
+    expect(first.unanswered).toBe(2)
+    expect(wrong.requests.filter(isJudge)).toHaveLength(2)
+    // The same two calls again: neither reply was cached, so both reach the provider.
+    await judge(wrong)
+    expect(wrong.requests.filter(isJudge)).toHaveLength(4)
+    expect(state()).toBe('unjudged')
   })
 
   it('shares each call’s cost out to the pairs it carried, and sends at most maxPairs', async () => {
@@ -376,5 +392,167 @@ describe('judging a pair in both orders (F-16.27, P4-D11)', () => {
     const run = await judge(ai)
     expect(ai.requests).toHaveLength(0)
     expect(run.dropped).toBe(1)
+  })
+})
+
+describe('the words the judge read, as the book moves (P4 slice 2 review)', () => {
+  const recompute = (): void => void runFindingsJob(db, NOW, { cachedVerdicts: true })
+
+  it('judges a changed context sentence afresh through the recompute, and keeps an unchanged one', async () => {
+    await judge(judgeWith(() => 'c'))
+    expect(state()).toBe('open')
+    // An edit in another paragraph of the scene: the words the judge read are the same.
+    saveDocument(
+      db,
+      one,
+      doc('Mara climbed the high ridge.', "Mara's eyes were grey. The wind rose.")
+    )
+    recompute()
+    expect(state()).toBe('open')
+    // The sentence after the quote changed: the pair's words moved, so its verdicts go.
+    saveDocument(
+      db,
+      one,
+      doc('Mara climbed the high ridge.', "Mara's eyes were grey. The snow fell.")
+    )
+    recompute()
+    expect(findingsOf(db, activeDraftId(db))[0]).toMatchObject({
+      state: 'unjudged',
+      verdictAb: null,
+      verdictBa: null
+    })
+    const again = judgeWith(() => 'ok')
+    await judge(again)
+    expect(judgeCalls(again)).toHaveLength(2)
+    expect(judgeCalls(again)[0]?.messages.at(-1)?.content).toContain('The snow fell')
+    expect(state()).toBe('fine')
+    // Nothing moved since: the recompute keeps the verdicts and nothing more is sent.
+    recompute()
+    const idle = judgeWith(() => 'c')
+    await judge(idle)
+    expect(judgeCalls(idle)).toHaveLength(0)
+    expect(state()).toBe('fine')
+  })
+
+  it('judges a pair afresh when a story year is typed for one of its scenes', async () => {
+    await judge(judgeWith(() => 'c'))
+    setSceneDetails(db, two, { ...emptySceneDetails(), storyYear: 1820 }, NOW)
+    recompute()
+    expect(state()).toBe('unjudged')
+    const again = judgeWith(() => 'ok')
+    await judge(again)
+    expect(judgeCalls(again)).toHaveLength(2)
+    expect(judgeCalls(again)[0]?.messages.at(-1)?.content).toContain('story year 1820')
+    expect(state()).toBe('fine')
+  })
+
+  it('judges a pair afresh when a time skip appears between its scenes', async () => {
+    await judge(judgeWith(() => 'c'))
+    // A scene placed between the two: no new words for the judge (scene places are masked).
+    const mid = scene('Mid', 'Ten years later, the war ended.')
+    moveNode(db, mid, chapter, one)
+    recompute()
+    expect(state()).toBe('open')
+    // Its reading finds a time skip that crosses a year: the judge now reads it between them.
+    upsertCard(
+      db,
+      {
+        nodeId: mid,
+        draftId: activeDraftId(db),
+        readingId: null,
+        line: 'The war ends.',
+        gist: 'The war ends.',
+        fields: {
+          ...emptyCardFields(),
+          elapsed: { value: 'ten years', quote: 'Ten years later', p: 0, verified: true }
+        },
+        present: [],
+        mood: null,
+        theme: null,
+        anchor: cardAnchorOf(db, mid),
+        seen: cardAnchorOf(db, mid)
+      },
+      NOW
+    )
+    recompute()
+    expect(state()).toBe('unjudged')
+    const again = judgeWith(() => 'ok')
+    await judge(again)
+    expect(judgeCalls(again)).toHaveLength(2)
+    expect(judgeCalls(again)[0]?.messages.at(-1)?.content).toContain('Between: “Ten years”')
+    expect(state()).toBe('fine')
+  })
+
+  it('judges a note pair afresh when the note sentence’s context changes (C6)', async () => {
+    savePage(db, mara, 'pinned', doc('Eyes: green.'), NOW)
+    indexStaleRecords(db, NOW)
+    recompute()
+    const notes = (): Finding[] =>
+      findingsOf(db, activeDraftId(db)).filter((each) => each.rule === 'C6')
+    expect(notes().length).toBeGreaterThan(0)
+    await judge(judgeWith(() => 'c'))
+    expect(notes().every((each) => each.state === 'open')).toBe(true)
+    // The same line, a new sentence after it: the note side is the same, its words are not.
+    savePage(db, mara, 'pinned', doc('Eyes: green. She hides them behind smoked glass.'), NOW)
+    indexStaleRecords(db, NOW)
+    recompute()
+    expect(notes().every((each) => each.state === 'unjudged')).toBe(true)
+    expect(state()).toBe('open')
+    const again = judgeWith(() => 'c')
+    await judge(again)
+    // Only the note pairs, in one batch, both orders.
+    expect(judgeCalls(again)).toHaveLength(2)
+    expect(judgeCalls(again)[0]?.messages.at(-1)?.content).toContain('smoked glass')
+    expect(notes().every((each) => each.state === 'open')).toBe(true)
+  })
+
+  it('never lands a verdict on a pair a recompute re-stated while the call was out', async () => {
+    const before = findingsOf(db, activeDraftId(db))[0]
+    if (before === undefined) throw new Error('no finding')
+    const first = pairItem(judgeContext(db, activeDraftId(db)), before)
+    let restated: FindingState | undefined
+    const ai = judgeWith(
+      () => 'c',
+      (call) => {
+        if (call === 1) {
+          // While the A,B call is out, scene two is rewritten and read again: a new brown claim.
+          saveDocument(db, two, doc('The rain came.', "Mara's eyes were brown as peat."))
+          const brown = draftClaims(db, activeDraftId(db)).find((each) => each.value === 'brown')
+          deleteClaims(db, [brown?.id ?? ''])
+          seedClaims(
+            db,
+            two,
+            [
+              {
+                recordId: mara,
+                slot: 'eyes',
+                value: 'brown',
+                quote: "Mara's eyes were brown as peat",
+                para: 1
+              }
+            ],
+            NOW
+          )
+          recompute()
+          restated = state()
+        }
+        return {}
+      }
+    )
+    const run = await judge(ai)
+    expect(restated).toBe('unjudged')
+    // The A,B verdict was for words the row no longer has: not written, and no B,A call for them.
+    expect(judgeCalls(ai)).toHaveLength(1)
+    expect(run).toMatchObject({ moved: 1, judged: [], settled: [] })
+    const [after] = findingsOf(db, activeDraftId(db))
+    expect(after).toMatchObject({ state: 'unjudged', verdictAb: null, verdictBa: null })
+    // It is remembered under the words it was given for.
+    expect(cachedVerdict(db, first?.keys.ab ?? '', NOW)).toMatchObject({ verdict: 'c' })
+    // The next run judges the new words, both orders.
+    const next = judgeWith(() => 'c')
+    await judge(next)
+    expect(judgeCalls(next)).toHaveLength(2)
+    expect(judgeCalls(next)[0]?.messages.at(-1)?.content).toContain('brown as peat')
+    expect(state()).toBe('open')
   })
 })

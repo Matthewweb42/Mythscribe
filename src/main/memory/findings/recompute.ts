@@ -16,7 +16,7 @@ import {
   toFinding,
   upsertFindings,
   type ClosedFinding,
-  type PairVerdicts
+  type PairReader
 } from './findingStore'
 
 /**
@@ -38,13 +38,19 @@ export interface RecomputeResult {
   closed: ClosedFinding[]
   /** Findings waiting for a verdict. */
   unjudged: number
-  /** Anything written or closed. */
+  /**
+   * Anything a view shows moved: a finding written or closed (a row whose only change was its
+   * stored rendering does not count).
+   */
   changed: boolean
 }
 
 export interface RecomputeOptions {
-  /** Both orders' verdicts the cache holds for a candidate (slice 2 renders the pair to key it). */
-  cached?: (candidate: Candidate) => PairVerdicts | null
+  /**
+   * The pairs as the judge reads them (slice 2, `judge.ts`): a pair whose words moved is judged
+   * afresh, and a new or re-rendered one takes the cache's verdicts at no cost.
+   */
+  pairs?: PairReader
   /** The rules' inputs, when the caller built them. */
   inputs?: CandidateInputs
 }
@@ -112,12 +118,12 @@ export function recomputeFindings(
     if (row.rule === 'C7' || again.held) kept.push(again)
     else closing.push({ key: row.key, reason: 'gone' })
   }
-  const upsert = upsertFindings(db, draftId, [...candidates, ...kept], now, options.cached, rows)
+  const upsert = upsertFindings(db, draftId, [...candidates, ...kept], now, options.pairs, rows)
   const closed = closeFindings(db, draftId, closing)
   return {
     opened: upsert.opened,
     closed,
     unjudged: countFindings(db, draftId, 'unjudged'),
-    changed: upsert.written > 0 || closed.length > 0
+    changed: upsert.written > upsert.restamped || closed.length > 0
   }
 }

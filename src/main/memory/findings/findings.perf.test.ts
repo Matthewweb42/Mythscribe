@@ -16,6 +16,7 @@ import { getCard, upsertCard } from '../reading/cardStore'
 import { seedClaims } from '../reading/claimFixture'
 import { buildPerfBook, fastest, PERF_NOW, PERF_SCENES } from '../reading/perfFixture'
 import { findingRows } from './findingStore'
+import { runFindingsJob } from './findingsJob'
 import { recomputeFindings } from './recompute'
 
 /**
@@ -26,10 +27,23 @@ import { recomputeFindings } from './recompute'
  * 30 more with their claims and sheets, and a 2,000-paragraph canon Research upload (C6 indexes the
  * notes once a run, never once per record and slot). The job runs synchronously in Electron main
  * after every change, so a warm run (nothing moved, the scenes' texts read once) stays under 50 ms,
- * the fastest of five as `timeViews.perf.test.ts` measures.
+ * the fastest of five as `timeViews.perf.test.ts` measures. So does the job as the app runs it
+ * (`cachedVerdicts`, slice 2): every finding unjudged (the background judges 30 pairs a day, so a
+ * backlog is the normal state), each pair's stamp checked and none rendered again.
  */
 
+/** The findings job as the app runs it, warm: every pair rendered once, then only stamped. */
+function warmJob(): number {
+  runFindingsJob(db, PERF_NOW, { cachedVerdicts: true })
+  const rows = findingRows(db, activeDraftId(db))
+  expect(rows.every((row) => row.state === 'unjudged' && row.rendered !== null)).toBe(true)
+  expect(runFindingsJob(db, PERF_NOW, { cachedVerdicts: true }).changed).toBe(false)
+  return fastest(5, () => runFindingsJob(db, PERF_NOW, { cachedVerdicts: true }))
+}
+
 const BUDGET_MS = 50
+/** What the job's pair stamps may add to the recompute on the cast book (about 6 ms measured). */
+const STAMPS_MS = 15
 const CAST = 30
 const RESEARCH_PARAGRAPHS = 2000
 
@@ -116,6 +130,8 @@ describe('the findings recompute at novel size (F-16.27)', () => {
     expect(recomputeFindings(db, PERF_NOW).changed).toBe(false)
     const ms = fastest(5, () => recomputeFindings(db, PERF_NOW))
     expect(ms, `recompute: ${ms.toFixed(1)} ms`).toBeLessThan(BUDGET_MS)
+    const job = warmJob()
+    expect(job, `the job with cached verdicts: ${job.toFixed(1)} ms`).toBeLessThan(BUDGET_MS)
   })
 
   it('stays within budget with a cast, their sheets and a long canon Research upload', () => {
@@ -187,6 +203,10 @@ describe('the findings recompute at novel size (F-16.27)', () => {
     expect(notes.filter((row) => cast.includes(row.recordId))).toHaveLength(CAST + 20)
     const ms = fastest(5, () => recomputeFindings(db, PERF_NOW))
     expect(ms, `recompute with the cast: ${ms.toFixed(1)} ms`).toBeLessThan(BUDGET_MS)
+    // The job as the app runs it adds only the pairs' stamps to the recompute (none rendered).
+    const job = warmJob()
+    const plain = fastest(5, () => recomputeFindings(db, PERF_NOW))
+    expect(job - plain, `the job's stamps: ${(job - plain).toFixed(1)} ms`).toBeLessThan(STAMPS_MS)
     // The budget is the recompute's; seeding 900 claims and indexing the upload takes about 4 s
     // alone and more under the full suite's load, past Vitest's 5 s default.
   }, 30_000)

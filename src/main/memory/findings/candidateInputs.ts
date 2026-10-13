@@ -238,12 +238,17 @@ function readableCards(db: TreeDb, draftId: string, reading: ReadingOrder): Map<
   )
 }
 
+/** The rules' inputs as main reads them: with the readable scenes' stored cards, for the judge. */
+export interface StoredInputs extends CandidateInputs {
+  cards: ReadonlyMap<string, Card>
+}
+
 /** The rules' inputs over the active draft `draftId`. */
 export function candidateInputs(
   db: TreeDb,
   draftId: string,
   frame: FindingsFrame = findingsFrame(db)
-): CandidateInputs {
+): StoredInputs {
   const { nodes, reading } = frame
   const rows = new Map(nodes.map((row) => [row.id, row]))
   const cards = readableCards(db, draftId, reading)
@@ -263,6 +268,7 @@ export function candidateInputs(
   }
   const records = listRecords(db)
   return {
+    cards,
     reading,
     claims: readableClaims(db, draftId, reading).map(toCandidateClaim),
     onPage,
