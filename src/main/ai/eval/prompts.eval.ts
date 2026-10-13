@@ -2,7 +2,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { inputBudget, outputBudget, priceFor } from '@shared/ai'
+import {
+  OPENROUTER_BASE_URL,
+  OPENROUTER_DEFAULT_MODELS,
+  inputBudget,
+  outputBudget
+} from '@shared/ai'
 import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote, normalizeForMatch } from '@shared/critique'
 import type { EditPassType } from '@shared/editPass'
@@ -23,7 +28,6 @@ import { parseBetaReaderAnswerV2 } from '../betaReader'
 import { parsePlanLinksV2Answer } from '../../memory/reading/planLinks'
 import { checkChatFidelity, postProcessChatText } from '../chat'
 import { postProcessGhostText } from '../ghostText'
-import { buildOpenAiProvider } from '../providers/openai'
 import { PROMPT_CATALOGUE, PROMPT_VERSIONS } from '../prompts/catalogue'
 import { parseEditChanges, parseEditNotes } from '../editPass'
 import { parseProofreadAnswer } from '../proofread'
@@ -38,17 +42,24 @@ import { parseWhatNextAnswer } from '../whatNext'
 import { parseTodoAnswer, parseTodoSuggestAnswer } from '../todoPass'
 import { EVAL_CASES, FIXTURE_PROFILE, STORY_NOTES_GHOST_CASE, type EvalCase } from './fixtures'
 import { STORY_NOTES_IDEA_TEXT, STORY_NOTES_NOT_CANON_TEXT } from './storyNotesFixture'
+import { runAiRequest, sha256 } from '../request'
+import { fakeChatServer } from './fakeChatServer'
+import { liveProviderFromEnv, liveRequestDeps, type LiveProvider } from './liveProvider'
 import { renderLiveReport, renderTokenReport, tokenRows, type LiveResult } from './report'
 
 /**
  * The prompt eval harness (F-5.12), `npm run eval:ai`. Offline (always, part of `npm run
  * test`): every catalogued version has cases, every case fits its budgets, and the token
  * report matches the committed `token-report.md` (accept a change with `-u`; the file's diff
- * is the token delta a prompt change reports). Live (`MYTHSCRIBE_EVAL_LIVE=1` with an
- * `OPENAI_API_KEY`, optionally `OPENAI_BASE_URL`): every case goes to the provider once, the
- * answers are post-processed and scored as the features score them, and the report is printed
- * and written under `test-results/eval-ai/`. The live run never touches the key store, the
- * ledger, or a project: it is a developer tool, not the app.
+ * is the token delta a prompt change reports). Live (`MYTHSCRIBE_EVAL_LIVE=1` with
+ * `OPENROUTER_API_KEY`, or `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL`: `liveProvider.ts`):
+ * every case goes to the provider once through the request path, as the app sends it (its tier,
+ * its reasoning mode, the cost OpenRouter reports), the answers are post-processed and scored as
+ * the features score them, and the report is printed and written under `test-results/eval-ai/`.
+ * The live run never touches the key store, the app's ledger, or a project: it is a developer
+ * tool, not the app.
+ *
+ *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- prompts
  */
 
 const LIVE = process.env.MYTHSCRIBE_EVAL_LIVE === '1'
@@ -927,293 +938,329 @@ function scoreVerify(
     : { kind: 'json', ok: false, problem: wrong.join(', ') }
 }
 
-describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
-  it('sends every case once, scores the answers, and writes the fidelity report', async () => {
-    const key = process.env.OPENAI_API_KEY
-    if (!key) throw new Error('The live eval needs OPENAI_API_KEY in the environment.')
-    const provider = buildOpenAiProvider(key)
-    const results: LiveResult[] = []
-    for (const c of EVAL_CASES) {
-      const entry = PROMPT_CATALOGUE[c.version]
-      const estimatedIn = tokenRows([c])[0]?.total ?? 0
-      const reply = await provider.complete({
-        tier: entry.tier,
-        messages: c.messages,
-        maxTokens: c.maxTokens,
-        json: entry.output === 'json',
-        ...(c.temperature === undefined ? {} : { temperature: c.temperature })
-      })
-      const { costUsd } = priceFor(reply.model, reply.usage.inputTokens, reply.usage.outputTokens)
-      const base = {
-        version: c.version,
-        name: c.name,
-        model: reply.model,
-        estimatedIn,
-        usage: reply.usage,
-        costUsd
-      }
-      if (c.scoring.kind === 'json') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreJson({ ...c, scoring: c.scoring }, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'critique') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreCritique(c.scoring.sceneText, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'brief') {
-        results.push({ ...base, answer: reply.text, verdict: scoreBrief(reply.text) })
-        continue
-      }
-      if (c.scoring.kind === 'summary') {
-        results.push({ ...base, answer: reply.text, verdict: scoreSummary(reply.text) })
-        continue
-      }
-      if (c.scoring.kind === 'summaryFacts') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreSummaryFacts(c.scoring.sceneText, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'betaReader') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreBetaReader(c.scoring.texts, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'query') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreQuery(c.scoring.texts, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'continuity') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreContinuity(c.scoring.sceneText, c.scoring.references, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'proofread') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreProofread(c.scoring.text, c.scoring.keepWords, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'editPass') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreEditPass(c.scoring.type, c.scoring.text, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'whatNext') {
-        results.push({ ...base, answer: reply.text, verdict: scoreWhatNext(reply.text) })
-        continue
-      }
-      if (c.scoring.kind === 'route') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreRoute(c.scoring.expected, c.scoring.edit, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'agent') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreAgent(c.scoring.expected, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'agentEdit') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreAgentEdit(c.scoring.expected, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'storyTime') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreStoryTime(c.scoring.forbidden, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'betaReaderV2') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreBetaReaderV2(c.scoring.sceneText, c.scoring.earlier, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'planLinksPick') {
-        const pick = parsePlanLinksV2Answer(reply.text)
-        const expected = c.scoring.expected
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict:
-            pick === null
-              ? { kind: 'json', ok: false, problem: 'not { pick: S1 | S2 | none }' }
-              : expected !== null && pick.pick !== expected
-                ? { kind: 'json', ok: false, problem: `picked ${pick.pick}, expected ${expected}` }
-                : { kind: 'json', ok: true, problem: null }
-        })
-        continue
-      }
-      if (c.scoring.kind === 'planLinks') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scorePlanLinks(c.scoring.plans, c.scoring.scenes, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'todo') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreTodo(c.scoring.scenes, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'todoSuggest') {
-        results.push({ ...base, answer: reply.text, verdict: scoreTodoSuggest(reply.text) })
-        continue
-      }
-      if (c.scoring.kind === 'synopsis') {
-        results.push({ ...base, answer: reply.text, verdict: scoreSynopsis(reply.text) })
-        continue
-      }
-      if (c.scoring.kind === 'notesSuggest') {
-        results.push({ ...base, answer: reply.text, verdict: scoreNotesSuggest(reply.text) })
-        continue
-      }
-      if (c.scoring.kind === 'sheetWriteUp') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreSheetWriteUp(c.scoring.headings, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'sheetRefile') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreSheetRefile(c.scoring.fields, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'voiceNotes') {
-        results.push({ ...base, answer: reply.text, verdict: scoreVoiceNotes(reply.text) })
-        continue
-      }
-      if (c.scoring.kind === 'contextImport') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreContextImport(c.scoring.expected, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'filing') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreFiling(c.scoring.expected, c.scoring.document, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'organise') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreOrganise(c.scoring.expected, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'reviewChat') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreReviewChat(c.scoring.expected, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'reader') {
-        results.push({ ...base, answer: reply.text, verdict: scoreReader(c.scoring, reply.text) })
-        continue
-      }
-      if (c.scoring.kind === 'verify') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreVerify(c.scoring.expected, reply.text)
-        })
-        continue
-      }
-      if (c.scoring.kind === 'structure') {
-        results.push({
-          ...base,
-          answer: reply.text,
-          verdict: scoreStructure({ ...c, scoring: c.scoring }, reply.text)
-        })
-        continue
-      }
-      const answer =
-        c.scoring.kind === 'chat'
-          ? postProcessChatText(reply.text)
-          : postProcessGhostText(reply.text, c.scoring.before, c.scoring.after)
-      const profile = c.scoring.profile
-      if (profile === null || answer === '') {
-        results.push({ ...base, answer, verdict: { kind: 'unscored' } })
-        continue
-      }
-      // The features score against the author's banned phrases too (F-14.2); every case that
-      // carries a voice block carries the fixture's author rules with it.
-      const banned = FIXTURE_PROFILE.authorRules.bannedPhrases
-      const violations =
-        c.scoring.kind === 'chat'
-          ? checkChatFidelity(profile, answer, banned)
-          : checkGhostTextFidelity(profile, answer, banned).violations
+/**
+ * The live fidelity run through `live` (F-5.12; one key, F-16.22): every case once through the
+ * request path, as the app sends it, each answer post-processed and scored as its feature scores
+ * it.
+ */
+export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> {
+  const run = liveRequestDeps(live.provider)
+  const results: LiveResult[] = []
+  for (const c of EVAL_CASES) {
+    const entry = PROMPT_CATALOGUE[c.version]
+    const estimatedIn = tokenRows([c])[0]?.total ?? 0
+    const reply = await runAiRequest(run.deps, {
+      feature: entry.feature,
+      tier: entry.tier,
+      messages: c.messages,
+      maxTokens: c.maxTokens,
+      json: entry.output === 'json',
+      ...(c.temperature === undefined ? {} : { temperature: c.temperature }),
+      contextHash: sha256(JSON.stringify(c.messages)),
+      promptVersion: c.version
+    })
+    // The cost OpenRouter reported when it did, else the price table's (the request path's).
+    const { costUsd } = reply
+    const base = {
+      version: c.version,
+      name: c.name,
+      model: reply.model,
+      estimatedIn,
+      usage: reply.usage,
+      costUsd
+    }
+    if (c.scoring.kind === 'json') {
       results.push({
         ...base,
-        answer,
-        verdict: {
-          kind: 'fidelity',
-          ok: violations.length === 0,
-          violations: violations.map((v) => v.message)
-        }
+        answer: reply.text,
+        verdict: scoreJson({ ...c, scoring: c.scoring }, reply.text)
       })
+      continue
     }
-    const report = renderLiveReport(results, new Date())
+    if (c.scoring.kind === 'critique') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreCritique(c.scoring.sceneText, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'brief') {
+      results.push({ ...base, answer: reply.text, verdict: scoreBrief(reply.text) })
+      continue
+    }
+    if (c.scoring.kind === 'summary') {
+      results.push({ ...base, answer: reply.text, verdict: scoreSummary(reply.text) })
+      continue
+    }
+    if (c.scoring.kind === 'summaryFacts') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreSummaryFacts(c.scoring.sceneText, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'betaReader') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreBetaReader(c.scoring.texts, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'query') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreQuery(c.scoring.texts, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'continuity') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreContinuity(c.scoring.sceneText, c.scoring.references, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'proofread') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreProofread(c.scoring.text, c.scoring.keepWords, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'editPass') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreEditPass(c.scoring.type, c.scoring.text, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'whatNext') {
+      results.push({ ...base, answer: reply.text, verdict: scoreWhatNext(reply.text) })
+      continue
+    }
+    if (c.scoring.kind === 'route') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreRoute(c.scoring.expected, c.scoring.edit, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'agent') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreAgent(c.scoring.expected, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'agentEdit') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreAgentEdit(c.scoring.expected, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'storyTime') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreStoryTime(c.scoring.forbidden, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'betaReaderV2') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreBetaReaderV2(c.scoring.sceneText, c.scoring.earlier, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'planLinksPick') {
+      const pick = parsePlanLinksV2Answer(reply.text)
+      const expected = c.scoring.expected
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict:
+          pick === null
+            ? { kind: 'json', ok: false, problem: 'not { pick: S1 | S2 | none }' }
+            : expected !== null && pick.pick !== expected
+              ? { kind: 'json', ok: false, problem: `picked ${pick.pick}, expected ${expected}` }
+              : { kind: 'json', ok: true, problem: null }
+      })
+      continue
+    }
+    if (c.scoring.kind === 'planLinks') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scorePlanLinks(c.scoring.plans, c.scoring.scenes, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'todo') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreTodo(c.scoring.scenes, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'todoSuggest') {
+      results.push({ ...base, answer: reply.text, verdict: scoreTodoSuggest(reply.text) })
+      continue
+    }
+    if (c.scoring.kind === 'synopsis') {
+      results.push({ ...base, answer: reply.text, verdict: scoreSynopsis(reply.text) })
+      continue
+    }
+    if (c.scoring.kind === 'notesSuggest') {
+      results.push({ ...base, answer: reply.text, verdict: scoreNotesSuggest(reply.text) })
+      continue
+    }
+    if (c.scoring.kind === 'sheetWriteUp') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreSheetWriteUp(c.scoring.headings, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'sheetRefile') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreSheetRefile(c.scoring.fields, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'voiceNotes') {
+      results.push({ ...base, answer: reply.text, verdict: scoreVoiceNotes(reply.text) })
+      continue
+    }
+    if (c.scoring.kind === 'contextImport') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreContextImport(c.scoring.expected, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'filing') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreFiling(c.scoring.expected, c.scoring.document, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'organise') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreOrganise(c.scoring.expected, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'reviewChat') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreReviewChat(c.scoring.expected, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'reader') {
+      results.push({ ...base, answer: reply.text, verdict: scoreReader(c.scoring, reply.text) })
+      continue
+    }
+    if (c.scoring.kind === 'verify') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreVerify(c.scoring.expected, reply.text)
+      })
+      continue
+    }
+    if (c.scoring.kind === 'structure') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreStructure({ ...c, scoring: c.scoring }, reply.text)
+      })
+      continue
+    }
+    const answer =
+      c.scoring.kind === 'chat'
+        ? postProcessChatText(reply.text)
+        : postProcessGhostText(reply.text, c.scoring.before, c.scoring.after)
+    const profile = c.scoring.profile
+    if (profile === null || answer === '') {
+      results.push({ ...base, answer, verdict: { kind: 'unscored' } })
+      continue
+    }
+    // The features score against the author's banned phrases too (F-14.2); every case that
+    // carries a voice block carries the fixture's author rules with it.
+    const banned = FIXTURE_PROFILE.authorRules.bannedPhrases
+    const violations =
+      c.scoring.kind === 'chat'
+        ? checkChatFidelity(profile, answer, banned)
+        : checkGhostTextFidelity(profile, answer, banned).violations
+    results.push({
+      ...base,
+      answer,
+      verdict: {
+        kind: 'fidelity',
+        ok: violations.length === 0,
+        violations: violations.map((v) => v.message)
+      }
+    })
+  }
+  return results
+}
+
+describe('the live prompt eval, end to end against a fake OpenRouter (F-16.22; nothing spent)', () => {
+  it('starts from OPENROUTER_API_KEY alone and sends every case as the app does', async () => {
+    const server = fakeChatServer(() => ({ text: '{}' }))
+    const live = liveProviderFromEnv({ OPENROUTER_API_KEY: 'sk-or-fake' }, { fetch: server.fetch })
+    const results = await runLivePrompts(live)
+    expect(results).toHaveLength(EVAL_CASES.length)
+    // Identical cases answer from the run's cache; every other one reached OpenRouter once.
+    expect(server.calls.length).toBeGreaterThan(EVAL_CASES.length / 2)
+    for (const call of server.calls) {
+      expect(call.url).toBe(`${OPENROUTER_BASE_URL}/chat/completions`)
+      expect(call.headers.get('authorization')).toBe('Bearer sk-or-fake')
+      expect(Object.values(OPENROUTER_DEFAULT_MODELS)).toContain(call.body.model)
+    }
+    // The story-memory reader and checker ask for no reasoning, as the app sends them.
+    const memory = server.calls.filter((call) =>
+      /^You are the (story-memory reader|fact checker)/.test(call.messages[0]?.content ?? '')
+    )
+    expect(memory.length).toBeGreaterThan(0)
+    for (const call of memory) expect(call.body.reasoning).toEqual({ enabled: false })
+    expect(results.every((result) => result.costUsd === 0.0001 || result.costUsd === 0)).toBe(true)
+  }, 120_000)
+})
+
+describe.skipIf(!LIVE)('live prompt eval (MYTHSCRIBE_EVAL_LIVE=1)', () => {
+  it('sends every case once, scores the answers, and writes the fidelity report', async () => {
+    const live = liveProviderFromEnv()
+    const results = await runLivePrompts(live)
+    const report = renderLiveReport(results, new Date(), live.describe)
     const dir = path.resolve('test-results/eval-ai')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'live-report.md'), report)
     process.stdout.write(`\n${report}\n`)
     expect(results).toHaveLength(EVAL_CASES.length)
-  }, 120_000)
+  }, 1_800_000)
 })

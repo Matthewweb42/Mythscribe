@@ -838,7 +838,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       from: 'bel',
       scene: 'h04',
       p: 2,
-      quote: 'Lottie is to marry Mr. Dunmore'
+      quote: 'Lottie is to marry Mr. Dunmore',
+      voice: 'dialogue',
+      speaker: 'bel'
     },
     {
       secret: 'secret-engagement',
@@ -847,7 +849,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       from: null,
       scene: 'h04',
       p: 2,
-      quote: 'Lottie is to marry Mr. Dunmore'
+      quote: 'Lottie is to marry Mr. Dunmore',
+      voice: 'dialogue',
+      speaker: 'bel'
     },
     {
       secret: 'secret-engagement',
@@ -856,7 +860,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       from: null,
       scene: 'h05',
       p: 2,
-      quote: 'Mr. Dunmore and I are engaged'
+      quote: 'Mr. Dunmore and I are engaged',
+      voice: 'dialogue',
+      speaker: 'lottie'
     },
     {
       secret: 'secret-engagement',
@@ -865,7 +871,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       from: 'lottie',
       scene: 'h05',
       p: 2,
-      quote: 'Mr. Dunmore and I are engaged'
+      quote: 'Mr. Dunmore and I are engaged',
+      voice: 'dialogue',
+      speaker: 'lottie'
     },
     {
       secret: 'secret-engagement',
@@ -883,7 +891,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       from: 'lottie',
       scene: 'h08',
       p: 3,
-      quote: 'We are engaged, and have been since before Christmas'
+      quote: 'We are engaged, and have been since before Christmas',
+      voice: 'dialogue',
+      speaker: 'lottie'
     },
     {
       // A group learner, named in its sentence (P2b-D8).
@@ -903,7 +913,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       from: null,
       scene: 'h13',
       p: 5,
-      quote: 'Engaged since before Christmas, and not a word to her own mother'
+      quote: 'Engaged since before Christmas, and not a word to her own mother',
+      voice: 'dialogue',
+      speaker: 'pocock'
     },
     {
       secret: 'secret-engagement',

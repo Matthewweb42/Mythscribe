@@ -76,6 +76,8 @@ export interface SentCheck {
   names: string[]
   /** A knows item's source candidates (short ids). */
   from: string[]
+  /** The names of "From", in the same order. */
+  fromNames: string[]
   /** A knows item's secret, a step's thread, a reveals or same item's topics, as sent. */
   topic: string
   /** The fact line's label ("Fact", "On the page", "Card POV"), or "Reveals" / "Same". */
@@ -127,6 +129,7 @@ export function sentChecks(request: Pick<CompletionRequest, 'messages'>): SentCh
             unnamed: [],
             names: [],
             from: [],
+            fromNames: [],
             topic: head2,
             label: head[2],
             fact: '',
@@ -143,6 +146,7 @@ export function sentChecks(request: Pick<CompletionRequest, 'messages'>): SentCh
             unnamed: [],
             names: [],
             from: [],
+            fromNames: [],
             topic: head2,
             label,
             fact: rest.get(label) ?? '',
@@ -162,6 +166,7 @@ export function sentChecks(request: Pick<CompletionRequest, 'messages'>): SentCh
           : label === 'On the page'
             ? 'present'
             : 'card'
+      const from = entriesOf(rest.get('From') ?? '')
       return [
         {
           i,
@@ -169,7 +174,8 @@ export function sentChecks(request: Pick<CompletionRequest, 'messages'>): SentCh
           who: entries.map((entry) => entry.id),
           unnamed,
           names: entries.map((entry) => entry.name),
-          from: entriesOf(rest.get('From') ?? '').map((entry) => entry.id),
+          from: from.map((entry) => entry.id),
+          fromNames: from.map((entry) => entry.name),
           topic: rest.get('Secret') ?? '',
           label,
           fact: rest.get(label) ?? '',

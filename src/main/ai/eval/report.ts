@@ -109,8 +109,11 @@ export interface LiveResult {
     | { kind: 'json'; ok: boolean; problem: string | null }
 }
 
-/** The live report: one row per answer, then the pass rate, the estimate's accuracy, and the spend. */
-export function renderLiveReport(results: LiveResult[], at: Date): string {
+/**
+ * The live report: the route it ran on (F-16.22: "OpenRouter (OPENROUTER_API_KEY)", never the key),
+ * one row per answer, then the pass rate, the estimate's accuracy, and the spend.
+ */
+export function renderLiveReport(results: LiveResult[], at: Date, route?: string): string {
   const header = ['Prompt', 'Case', 'Model', 'Verdict', 'In (est.)', 'Out', 'Cost USD', 'Answer']
   const cells = results.map((r) => [
     r.version,
@@ -131,6 +134,7 @@ export function renderLiveReport(results: LiveResult[], at: Date): string {
   return `${[
     `# Live prompt eval (${at.toISOString()})`,
     '',
+    ...(route === undefined ? [] : [`Route: ${route}.`, '']),
     ...markdownTable(header, cells),
     '',
     `Scored ${passed} of ${scored.length} answers clean (${results.length - scored.length} unscored).`,

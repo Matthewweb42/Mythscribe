@@ -20,8 +20,8 @@ import { TEST_BOOK_LABELS } from './labels'
  * names (shared surnames shared, the Captain matched in exact case), the Dismissed names, one
  * chapter per book chapter with its scenes and typed details, the Idea scene (h11) with the Idea
  * status, the cut scene (h12) left out of compile, and the earlier draft of chapter 14 (h10) as an
- * inactive draft of h09's scene. Built for the offline replays and the live planted-error run
- * (`ai/eval/memory.eval.ts`); test data only.
+ * inactive draft of h09's scene. Built for the offline replays and the live runs
+ * (`ai/eval/memory.eval.ts`, `ai/eval/knows.eval.ts`); test data only.
  */
 
 export interface TestBookProject {

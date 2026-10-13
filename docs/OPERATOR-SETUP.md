@@ -98,6 +98,23 @@ hits billed lower than the listed price. Then run `npm run eval:ai -- -u` and up
 Without `-u` the same run only compares: it passes when the prices match and fails showing the differences. To accept those
 afterwards without spending again, replay the saved numbers:
 `AI_PROBE_REPLAY=docs/research/story-memory-2026-10-11/probe/ai-probe-<date>.json npm run ai:probe -- -u` (no calls).
+The probe also takes `OPENAI_API_KEY` when `OPENAI_BASE_URL=https://openrouter.ai/api/v1` (the older form).
+
+**One key for every live run (F-16.22).** The same `OPENROUTER_API_KEY` drives every live check; none of them touches the
+app, its key store or a project, and none writes a key or prompt text to its report:
+```bash
+OPENROUTER_API_KEY=sk-or-… npm run ai:probe -- -u                              # prices (about 5¢)
+MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- prompts   # live fidelity of every prompt version
+MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- memory    # story memory's planted errors (stops at 50¢)
+MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- knows     # who knows what, two passes (stops at 50¢)
+```
+`MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai` runs the three eval runs together. They use V4 Flash
+and V4 Pro unless `MYTHSCRIBE_EVAL_FAST_MODEL` / `MYTHSCRIBE_EVAL_STRONG_MODEL` name others; `OPENAI_API_KEY` (with
+`OPENAI_BASE_URL` for OpenRouter or another OpenAI-compatible server) still works when `OPENROUTER_API_KEY` is not set.
+Reports: `test-results/eval-ai/live-report.md`, `test-results/eval-memory/planted-<date>.md` and
+`test-results/eval-knows/knows-<date>.md` (each with a `.json`); copy the story-memory ones into
+`docs/research/story-memory-2026-10-11/eval/` and commit them. In a cloud session the key is an environment secret, and
+`openrouter.ai` must be allowed in the environment's network access.
 
 Prices move. To check today's prices without logging in:
 ```bash

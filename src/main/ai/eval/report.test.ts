@@ -134,6 +134,11 @@ describe('eval report (F-5.12)', () => {
     expect(report).toContain('Scored 1 of 2 answers clean (1 unscored).')
     expect(report).toContain('Actual input tokens over the estimate: 1.07 (750 of 700 estimated).')
     expect(report).toContain('Spent 0.00022 USD over 3 requests.')
+    expect(report).not.toContain('Route:')
+    // F-16.22: the route the run took, named by its variable, never its key.
+    expect(
+      renderLiveReport(results, new Date(0), 'OpenRouter (OPENROUTER_API_KEY)').split('\n')[2]
+    ).toBe('Route: OpenRouter (OPENROUTER_API_KEY).')
   })
 
   it('markdownTable pads every column to its widest cell and fills a short row', () => {

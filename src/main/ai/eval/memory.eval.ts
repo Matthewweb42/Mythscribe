@@ -2,30 +2,20 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { DEFAULT_MODELS, OPENROUTER_DEFAULT_MODELS, priceFor, type Tier } from '@shared/ai'
-import { autoTable, defaultAiRouting } from '@shared/aiRouting'
-import { sceneSentences } from '@shared/memory/anchor'
-import { setsState, valueKey, type Claim } from '@shared/memory/claims'
+import { OPENROUTER_BASE_URL, OPENROUTER_DEFAULT_MODELS, type Tier } from '@shared/ai'
+import { valueKey, type Claim } from '@shared/memory/claims'
 import { normalizeForMatch } from '@shared/critique'
-import { checkMemoryInvariants } from '@shared/memory/invariants'
 import { parseVerifyAnswer, type VerifyVerdict } from '@shared/memory/readerAnswer'
-import { containsValue } from '@shared/memory/reconcile'
 import { SPOT_STRONG_AROUND } from '@shared/memory/spot'
 import { dismissedNames, rosterOf } from '../../memory/recordStore'
 import { twinGate } from '@shared/memory/twinGate'
-import type { CachedResponse } from '../cacheStore'
-import { dayOf, defaultAiUsageState } from '../dailyCap'
 import { buildVerifyV2Prompt } from '../prompts/verify.v2'
-import { buildOpenAiProvider } from '../providers/openai'
 import type { CompletionRequest } from '../providers/types'
-import { runAiRequest, sha256, type AiRequestDeps } from '../request'
-import type { UsageEntry } from '../usageStore'
+import { runAiRequest, sha256 } from '../request'
 import { activeDraftId } from '../../draft/draftStore'
-import { draftClaims, invariantClaims } from '../../memory/reading/claimStore'
 import {
   agrees,
   claimCheck,
-  runReading,
   type ClaimCheck,
   type ReadingItemEvent
 } from '../../memory/reading/pipeline'
@@ -37,25 +27,46 @@ import {
   fakeAi,
   requestKind,
   rosterIds,
-  sentChecks,
   sentParagraphs,
   type FakeAi,
   type FakeAnswer
 } from '../../memory/reading/readingFixture'
-import { sceneTexts } from '../../memory/reading/claimFixture'
 import { TEST_BOOK } from '../../memory/testBook/book'
 import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
 import { buildTestBookProject, type TestBookProject } from '../../memory/testBook/project'
+import { liveProviderFromEnv, liveRequestDeps, type LiveProvider } from './liveProvider'
+import {
+  invariants,
+  liveClaims,
+  liveFacts,
+  negativesStored,
+  neverRead,
+  oracleChatServer,
+  oracleRead,
+  oracleVerify,
+  overlaps,
+  proposal,
+  readBook,
+  sceneOf,
+  sentLabels,
+  slotOf,
+  storedFor,
+  wantsCard,
+  oracleCard,
+  nameOf,
+  type ClaimLabel
+} from './memoryOracle'
 
 /**
  * Story memory's reading pipeline over the test book (F-16.17; plan P2a §2.7), `npm run eval:ai`
  * (and so `npm run test`):
  *
  * - The **oracle replay**: a provider that reads exactly what the labels say (their rejected facts
- *   included) and checks every item by its label's `expect`. Every `literal` label must be stored
- *   literal, every `verified` one verified, no `reject` label and no negative may be stored live,
- *   nothing may come from the Idea scene, the scene left out of compile or the inactive draft, and
- *   the memory invariants must hold.
+ *   included) and checks every item by its label's `expect` (`memoryOracle.ts`, shared with the
+ *   knows replays of `knows.eval.ts`, which score its knows lines, steps and topics). Every
+ *   `literal` label must be stored literal, every `verified` one verified, no `reject` label and
+ *   no negative may be stored live, nothing may come from the Idea scene, the scene left out of
+ *   compile or the inactive draft, and the memory invariants must hold.
  * - The **adversarial replay**: the same honest checker behind a reader that plants errors (a quote
  *   not in the text, one in another paragraph, a repeated one, the pronoun trap answered as one
  *   woman, a negation as a literal fact, the dream death as now, the lie as narration, a value with
@@ -64,11 +75,11 @@ import { buildTestBookProject, type TestBookProject } from '../../memory/testBoo
  * - The **live planted-error run** (`MYTHSCRIBE_EVAL_LIVE=1`, the merge condition of P2a, design
  *   §2.3 point 4; owed by the author before the switch-over): the same pipeline with the real
  *   provider over every readable scene, then the spot checks, scored per slot with pass bars, and a
- *   report under `test-results/eval-memory/`. One command:
+ *   report under `test-results/eval-memory/`. One command, one key (`liveProvider.ts`):
  *
- *       MYTHSCRIBE_EVAL_LIVE=1 OPENAI_API_KEY=sk-or-… OPENAI_BASE_URL=https://openrouter.ai/api/v1 \
- *         npm run eval:ai -- memory
+ *       MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- memory
  *
+ *   (`OPENAI_API_KEY` still works, with `OPENAI_BASE_URL` for OpenRouter or another server.)
  *   Models: `MYTHSCRIBE_EVAL_FAST_MODEL` / `MYTHSCRIBE_EVAL_STRONG_MODEL`, else the OpenRouter
  *   defaults (V4 Flash, V4 Pro) on OpenRouter and `DEFAULT_MODELS` elsewhere. It stops reading once
  *   the reported cost passes 50¢ (about 5¢ expected on V4 Flash and Pro).
@@ -76,111 +87,6 @@ import { buildTestBookProject, type TestBookProject } from '../../memory/testBoo
 
 const LIVE = process.env.MYTHSCRIBE_EVAL_LIVE === '1'
 const NOW = new Date(Date.UTC(2026, 9, 12, 12, 0, 0))
-
-type Label = (typeof TEST_BOOK_LABELS.claims)[number]
-
-const nameOf = new Map(TEST_BOOK_LABELS.records.map((record) => [record.id, record.name]))
-
-/** A label's slot as the pipeline stores it (`relation:<record>` is `relation` with an object). */
-const slotOf = (label: { slot: string }): string =>
-  label.slot.startsWith('relation:') ? 'relation' : label.slot
-
-/** Whether two quotes overlap once normalised (one holds the other). */
-function overlaps(a: string, b: string): boolean {
-  const x = normalizeForMatch(a)
-  const y = normalizeForMatch(b)
-  return x.includes(y) || y.includes(x)
-}
-
-/** A label as the reader would propose it, ids the request's roster ids. */
-function proposal(label: Label, ids: ReadonlyMap<string, string>): Record<string, unknown> {
-  const relation = label.slot.startsWith('relation:')
-  return {
-    p: label.p,
-    r: ids.get(nameOf.get(label.record) ?? '') ?? null,
-    s: relation ? 'relation' : label.slot,
-    v: label.value,
-    q: label.quote,
-    voice: label.voice,
-    sp: label.speaker === undefined ? null : (ids.get(nameOf.get(label.speaker) ?? '') ?? null),
-    mode: label.mode,
-    o: relation ? (ids.get(nameOf.get(label.slot.slice('relation:'.length)) ?? '') ?? null) : null,
-    chg: false
-  }
-}
-
-/** The labels whose quote the request sent, in the paragraph they name. */
-function sentLabels(request: CompletionRequest): Label[] {
-  const sent = sentParagraphs(request)
-  return TEST_BOOK_LABELS.claims.filter((label) => {
-    const text = sent.get(label.p)
-    return text !== undefined && normalizeForMatch(text).includes(normalizeForMatch(label.quote))
-  })
-}
-
-const CARD = {
-  line: 'A scene of the test book.',
-  gist: 'A scene of the test book, read by the oracle.',
-  where: null,
-  when: null,
-  year: null,
-  elapsed: null,
-  pov: null,
-  flash: null,
-  present: [],
-  mood: null,
-  theme: null
-}
-
-const wantsCard = (request: CompletionRequest): boolean =>
-  request.messages.at(-1)?.content.endsWith('Card: yes') === true
-
-/** The honest checker: each item by its label (quote, slot and value), else not supported. */
-function oracleVerify(request: CompletionRequest): string {
-  const verdicts = sentChecks(request).map((check) => {
-    if (check.label !== 'Fact') return { i: check.i, ok: false }
-    const fact = /^(\S+): (.*?)(?: \(of [rn]\d+\))? \([a-z]+(?: by [rn]\d+)?, [a-z]+\)$/.exec(
-      check.fact
-    )
-    const slot = fact?.[1] ?? ''
-    const value = fact?.[2] ?? ''
-    const label = TEST_BOOK_LABELS.claims.find(
-      (candidate) =>
-        slotOf(candidate) === slot &&
-        normalizeForMatch(check.text).includes(normalizeForMatch(candidate.quote).slice(0, 40)) &&
-        (containsValue(valueKey(candidate.value), valueKey(value)) ||
-          containsValue(valueKey(value), valueKey(candidate.value)))
-    )
-    if (label === undefined) return { i: check.i, ok: false }
-    if (label.expect === 'reject') {
-      // A pronoun more than one person fits: supported, but nobody in particular.
-      return check.who.length > 1
-        ? { i: check.i, ok: true, r: null, voice: label.voice, mode: label.mode }
-        : { i: check.i, ok: false }
-    }
-    const at = check.names.indexOf(nameOf.get(label.record) ?? '')
-    return {
-      i: check.i,
-      ok: true,
-      r: at === -1 ? null : (check.who[at] ?? null),
-      voice: label.voice,
-      mode: label.mode
-    }
-  })
-  return JSON.stringify({ v: verdicts })
-}
-
-/** The oracle reader: exactly the labels' facts for the paragraphs sent. */
-function oracleRead(request: CompletionRequest): string {
-  const ids = rosterIds(request)
-  return JSON.stringify({
-    c: sentLabels(request).map((label) => proposal(label, ids)),
-    n: [],
-    same: [],
-    drop: [],
-    ...(wantsCard(request) ? { card: CARD } : {})
-  })
-}
 
 /** Three words that stand twice in the paragraphs sent, with the paragraph of the first. */
 function repeatedTrigram(request: CompletionRequest): { p: number; q: string } | null {
@@ -198,7 +104,7 @@ function repeatedTrigram(request: CompletionRequest): { p: number; q: string } |
   return null
 }
 
-const label = (id: string): Label => {
+const label = (id: string): ClaimLabel => {
   const found = TEST_BOOK_LABELS.claims.find((claim) => claim.id === id)
   if (found === undefined) throw new Error(`No label ${id}`)
   return found
@@ -243,131 +149,13 @@ function adversarialRead(request: CompletionRequest, state: { cut: boolean }): F
   const text = JSON.stringify({
     c: [...sent.map((claim) => proposal(claim, ids)), ...planted],
     n: [],
-    ...(wantsCard(request) ? { card: CARD } : {})
+    ...(wantsCard(request) ? { card: oracleCard(request) } : {})
   })
   if (!state.cut && sent.some((claim) => claim.scene === 's01')) {
     state.cut = true
     return { text: text.slice(0, Math.floor(text.length / 2)), finishReason: 'length' }
   }
   return { text }
-}
-
-/** Reads every scene of the book (the inactive draft's h10 is h09's node: read once). */
-async function readBook(
-  book: TestBookProject,
-  ai: AiRequestDeps,
-  observe?: (event: ReadingItemEvent, sceneId: string) => void,
-  stopAt?: () => boolean
-): Promise<Map<string, string>> {
-  const outcomes = new Map<string, string>()
-  for (const scene of TEST_BOOK) {
-    if (scene.source === 'inactiveDraft') continue
-    if (stopAt?.() === true) break
-    const nodeId = book.scenes.get(scene.id) ?? ''
-    const outcome = await runReading(
-      book.db,
-      { ai },
-      {
-        nodeId,
-        caretPara: null,
-        requestId: `eval-${scene.id}`,
-        ...(observe === undefined
-          ? {}
-          : { observe: (event: ReadingItemEvent) => observe(event, scene.id) })
-      }
-    )
-    outcomes.set(scene.id, outcome.read ? 'read' : outcome.reason)
-  }
-  return outcomes
-}
-
-const liveClaims = (book: TestBookProject): Claim[] =>
-  draftClaims(book.db, activeDraftId(book.db)).filter((claim) => claim.state === 'live')
-
-const sceneOf = (book: TestBookProject, nodeId: string): string =>
-  [...book.scenes].find(([id, node]) => node === nodeId && id !== 'h10')?.[0] ?? ''
-
-/** The stored claim a label names (by scene, record, slot and quote), when there is one. */
-function storedFor(
-  book: TestBookProject,
-  claims: readonly Claim[],
-  wanted: Label
-): Claim | undefined {
-  const recordId = book.records.get(wanted.record)
-  return claims.find(
-    (claim) =>
-      sceneOf(book, claim.nodeId) === wanted.scene &&
-      claim.recordId === recordId &&
-      claim.slot === slotOf(wanted) &&
-      overlaps(claim.quote, wanted.quote)
-  )
-}
-
-function invariants(book: TestBookProject): ReturnType<typeof checkMemoryInvariants> {
-  const scenes = new Map(
-    [...new Set(book.scenes.values())].map((node) => [
-      node,
-      new Set(sceneSentences(sceneTexts(book.db, node)).map((sentence) => sentence.hash))
-    ])
-  )
-  return checkMemoryInvariants({
-    claims: invariantClaims(book.db),
-    sceneHashes: scenes,
-    aliases: [],
-    citations: []
-  })
-}
-
-/** Nothing from the scenes that are never read: the Idea scene, the cut scene, the inactive draft. */
-function neverRead(book: TestBookProject): Claim[] {
-  const idea = book.scenes.get('h11')
-  const cut = book.scenes.get('h12')
-  const earlier = TEST_BOOK.find((scene) => scene.id === 'h10')?.paragraphs ?? []
-  const all = [
-    ...draftClaims(book.db, activeDraftId(book.db)),
-    ...draftClaims(book.db, book.inactiveDraftId)
-  ]
-  return all.filter(
-    (claim) =>
-      claim.nodeId === idea ||
-      claim.nodeId === cut ||
-      claim.draftId === book.inactiveDraftId ||
-      earlier.some((paragraph) =>
-        normalizeForMatch(paragraph).includes(normalizeForMatch(claim.quote))
-      )
-  )
-}
-
-/**
- * Negatives stored live: a claim or a state the labels say must not come out of a scene. A claim
- * the labels expect proved (the Captain's slate-grey eyes beside the negated blue) is no negative.
- */
-function negativesStored(book: TestBookProject, claims: readonly Claim[]): string[] {
-  const proved = TEST_BOOK_LABELS.claims.filter((label) => label.expect !== 'reject')
-  const labelled = (claim: Claim): boolean =>
-    proved.some(
-      (label) =>
-        label.scene === sceneOf(book, claim.nodeId) &&
-        book.records.get(label.record) === claim.recordId &&
-        slotOf(label) === claim.slot &&
-        overlaps(label.quote, claim.quote)
-    )
-  return TEST_BOOK_LABELS.negatives.flatMap((negative) => {
-    if (negative.kind !== 'claim' && negative.kind !== 'state') return []
-    if (negative.record === undefined) return []
-    const recordId = book.records.get(negative.record)
-    const hits = claims.filter(
-      (claim) =>
-        sceneOf(book, claim.nodeId) === negative.scene &&
-        claim.recordId === recordId &&
-        (negative.slot === undefined || claim.slot === negative.slot) &&
-        (negative.kind === 'claim' || setsState(claim)) &&
-        !labelled(claim)
-    )
-    return hits.map(
-      (claim) => `${negative.scene} ${negative.record} ${claim.slot} “${claim.value}”`
-    )
-  })
 }
 
 describe('the reading pipeline over the test book: the oracle replay (F-16.17)', () => {
@@ -399,7 +187,7 @@ describe('the reading pipeline over the test book: the oracle replay (F-16.17)',
   })
 
   it('stores every literal label literal and every verified one verified, as labelled', () => {
-    const claims = liveClaims(book)
+    const claims = liveFacts(book)
     for (const wanted of TEST_BOOK_LABELS.claims.filter((claim) => claim.expect !== 'reject')) {
       const stored = storedFor(book, claims, wanted)
       expect(stored, wanted.id).toBeDefined()
@@ -409,7 +197,7 @@ describe('the reading pipeline over the test book: the oracle replay (F-16.17)',
   })
 
   it('stores exactly those: no reject label and no negative is live, and nothing else', () => {
-    const claims = liveClaims(book)
+    const claims = liveFacts(book)
     for (const wanted of TEST_BOOK_LABELS.claims.filter((claim) => claim.expect === 'reject')) {
       expect(storedFor(book, claims, wanted), wanted.id).toBeUndefined()
     }
@@ -461,7 +249,7 @@ describe('the reading pipeline over the test book: the adversarial replay (F-16.
     const labelled = TEST_BOOK_LABELS.claims.filter(
       (claim) => claim.expect !== 'reject' && claim.voice === 'narration' && claim.mode === 'now'
     )
-    const strays = liveClaims(book).filter(
+    const strays = liveFacts(book).filter(
       (claim) =>
         claim.voice === 'narration' &&
         claim.mode === 'now' &&
@@ -474,7 +262,7 @@ describe('the reading pipeline over the test book: the adversarial replay (F-16.
         )
     )
     expect(strays.map((claim) => `${claim.slot} “${claim.value}” ← ${claim.quote}`)).toEqual([])
-    expect(negativesStored(book, liveClaims(book))).toEqual([])
+    expect(negativesStored(book, liveFacts(book))).toEqual([])
     expect(neverRead(book)).toEqual([])
     expect(invariants(book)).toEqual([])
   })
@@ -489,7 +277,7 @@ describe('the reading pipeline over the test book: the adversarial replay (F-16.
   })
 
   it('keeps the honest facts beside the planted ones, the lie stored as his own words', () => {
-    const claims = liveClaims(book)
+    const claims = liveFacts(book)
     const lie = storedFor(book, claims, label('dunmore-clergyman'))
     expect([lie?.voice, lie?.mode]).toEqual(['dialogue', 'now'])
     expect(storedFor(book, claims, label('varrow-eyes-grey'))?.proof).toBe('literal')
@@ -533,156 +321,146 @@ export const PLANTED_PASS_BARS = {
 /** The live run stops reading once its reported cost passes this. */
 const LIVE_STOP_USD = 0.5
 
-function liveModels(openRouter: boolean): Record<Tier, string> {
-  const base = openRouter ? OPENROUTER_DEFAULT_MODELS : DEFAULT_MODELS
-  return {
-    fast: process.env.MYTHSCRIBE_EVAL_FAST_MODEL ?? base.fast,
-    strong: process.env.MYTHSCRIBE_EVAL_STRONG_MODEL ?? base.strong
+/**
+ * The live planted-error run (P2a §2.7) through `live`: every readable scene with the real reader
+ * and checker, then the spot checks, scored per slot; answers the report. Every request leaves as
+ * the app sends it (the reader and the checker with no reasoning).
+ */
+export async function runLivePlanted(
+  live: LiveProvider
+): Promise<{ markdown: string; json: unknown; failures: string[] }> {
+  const { models, openRouter } = live
+  const { deps: ai, ledger, spent } = liveRequestDeps(live.provider)
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-memory-live-'))
+  const book = buildTestBookProject(tmp, NOW)
+  try {
+    const events: (ReadingItemEvent & { scene: string })[] = []
+    const outcomes = await readBook(book, ai, {
+      observe: (event, scene) => events.push({ ...event, scene }),
+      stopAt: () => spent() > LIVE_STOP_USD
+    })
+
+    // The spot checks: up to 50 literal claims on the fast tier (batches of 10), up to 20
+    // verified ones on the strong tier, one per call with three sentences either side. Each is
+    // built and scored as the app's spot checks do (`claimCheck`, `agrees`): a knows line as a
+    // knows item with its secret and sources, a thread step as a step item, the how agreed too.
+    const claims = liveClaims(book)
+    const roster = readerRoster(book.db)
+    const topicLines = topicItemLines(book.db, roster, activeDraftId(book.db))
+    const readable = readerBook(book.db)
+    const check = (claim: Claim, around: number): { claim: Claim; check: ClaimCheck } | null => {
+      const scene = loadReadingScene(book.db, claim.nodeId, readable)
+      const built = scene === null ? null : claimCheck(scene, claim, roster, around, topicLines)
+      return built === null ? null : { claim, check: built }
+    }
+    const agreed = (
+      entry: { claim: Claim; check: ClaimCheck },
+      verdict: VerifyVerdict | undefined
+    ): boolean =>
+      verdict !== undefined &&
+      agrees(verdict, {
+        expect: entry.check.expect,
+        voice: entry.claim.voice,
+        mode: entry.claim.mode,
+        how: entry.check.how
+      })
+    const spot = { fastAgree: 0, fastChecked: 0, strongAgree: 0, strongChecked: 0 }
+    // The 50¢ stop holds through the spot checks too: checked before every request.
+    let stopped = spent() > LIVE_STOP_USD
+    const over = (): boolean => {
+      stopped ||= spent() > LIVE_STOP_USD
+      return stopped
+    }
+    if (!stopped) {
+      const literal = claims
+        .filter((claim) => claim.proof === 'literal')
+        .flatMap((claim) => check(claim, 1) ?? [])
+        .slice(0, 50)
+      const batches: (typeof literal)[] = []
+      for (let i = 0; i < literal.length; i += 10) batches.push(literal.slice(i, i + 10))
+      for (const batch of batches) {
+        if (over()) break
+        const prompt = buildVerifyV2Prompt({ items: batch.map((entry) => entry.check) })
+        const result = await runAiRequest(ai, {
+          feature: 'verify',
+          tier: 'fast',
+          messages: prompt.messages,
+          maxTokens: prompt.maxTokens,
+          json: true,
+          contextHash: sha256(JSON.stringify(prompt.messages)),
+          promptVersion: prompt.version
+        })
+        const verdicts = parseVerifyAnswer(result.text)
+        spot.fastChecked += batch.length
+        spot.fastAgree += batch.filter((entry, i) => agreed(entry, verdicts.get(i + 1))).length
+      }
+      const strong = claims
+        .filter((each) => each.proof === 'verified')
+        .flatMap((claim) => check(claim, SPOT_STRONG_AROUND) ?? [])
+        .slice(0, 20)
+      for (const entry of strong) {
+        if (over()) break
+        const prompt = buildVerifyV2Prompt({ items: [entry.check], strong: true })
+        const result = await runAiRequest(ai, {
+          feature: 'verify',
+          tier: 'strong',
+          messages: prompt.messages,
+          maxTokens: prompt.maxTokens,
+          json: true,
+          contextHash: sha256(JSON.stringify(prompt.messages)),
+          promptVersion: prompt.version
+        })
+        spot.strongChecked += 1
+        if (agreed(entry, parseVerifyAnswer(result.text).get(1))) spot.strongAgree += 1
+      }
+    }
+
+    return scoreLive(book, events, outcomes, spot, {
+      models,
+      costUsd: spent(),
+      stopped,
+      requests: ledger.length,
+      openRouter,
+      route: live.describe
+    })
+  } finally {
+    book.session.close()
+    fs.rmSync(tmp, { recursive: true, force: true })
   }
 }
 
+describe('the live planted-error run, end to end against a fake OpenRouter (F-16.22; nothing spent)', () => {
+  it('starts from OPENROUTER_API_KEY alone, sends as the app does, and scores the book', async () => {
+    const server = oracleChatServer()
+    const live = liveProviderFromEnv({ OPENROUTER_API_KEY: 'sk-or-fake' }, { fetch: server.fetch })
+    const report = await runLivePlanted(live)
+    expect(report.failures).toEqual([])
+    expect(report.markdown).toContain('on OpenRouter (OPENROUTER_API_KEY)')
+    expect(report.markdown).not.toContain('sk-or-fake')
+    expect(server.calls.length).toBeGreaterThan(0)
+    for (const call of server.calls) {
+      expect(call.url).toBe(`${OPENROUTER_BASE_URL}/chat/completions`)
+      expect(call.headers.get('authorization')).toBe('Bearer sk-or-fake')
+      expect(call.body).toMatchObject({ reasoning: { enabled: false }, usage: { include: true } })
+    }
+    // The strong spot checks go to V4 Pro, everything else to V4 Flash.
+    expect(new Set(server.calls.map((call) => call.body.model))).toEqual(
+      new Set([OPENROUTER_DEFAULT_MODELS.fast, OPENROUTER_DEFAULT_MODELS.strong])
+    )
+  }, 120_000)
+})
+
 describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', () => {
   it('reads the test book with the real provider, scores it per slot, and writes the report', async () => {
-    const key = process.env.OPENAI_API_KEY
-    if (!key) throw new Error('The live planted-error run needs OPENAI_API_KEY in the environment.')
-    const baseURL = process.env.OPENAI_BASE_URL
-    const openRouter = baseURL?.includes('openrouter.ai') === true
-    const models = liveModels(openRouter)
-    const provider = buildOpenAiProvider(key, {
-      ...(baseURL === undefined ? {} : { baseURL }),
-      openRouter,
-      id: openRouter ? 'openrouter' : 'openai',
-      label: openRouter ? 'OpenRouter' : 'OpenAI',
-      resolveModel: (tier) => models[tier]
-    })
-    const ledger: UsageEntry[] = []
-    const cache = new Map<string, CachedResponse>()
-    const ai: AiRequestDeps = {
-      providers: { get: () => provider },
-      ledger: { insert: (entry) => void ledger.push(entry) },
-      cache: {
-        get: (cacheKey) => cache.get(cacheKey),
-        put: (entry) => void cache.set(entry.key, { text: entry.text, usage: entry.usage })
-      },
-      dailyCap: {
-        get: () => ({ ...defaultAiUsageState(), dailyCapUsd: 500, spentDate: dayOf(new Date()) }),
-        spend: () => {}
-      },
-      session: { spend: () => {} },
-      now: () => new Date(),
-      price: priceFor,
-      // Auto routing, so the reader and the checker ask for no reasoning as the app does.
-      routing: () => ({ routing: defaultAiRouting(), table: autoTable(null) })
-    }
-    const spent = (): number => ledger.reduce((sum, entry) => sum + entry.costUsd, 0)
-
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-memory-live-'))
-    const book = buildTestBookProject(tmp, NOW)
-    try {
-      const events: (ReadingItemEvent & { scene: string })[] = []
-      const outcomes = await readBook(
-        book,
-        ai,
-        (event, scene) => events.push({ ...event, scene }),
-        () => spent() > LIVE_STOP_USD
-      )
-
-      // The spot checks: up to 50 literal claims on the fast tier (batches of 10), up to 20
-      // verified ones on the strong tier, one per call with three sentences either side. Each is
-      // built and scored as the app's spot checks do (`claimCheck`, `agrees`): a knows line as a
-      // knows item with its secret and sources, a thread step as a step item, the how agreed too.
-      const claims = liveClaims(book)
-      const roster = readerRoster(book.db)
-      const topicLines = topicItemLines(book.db, roster, activeDraftId(book.db))
-      const readable = readerBook(book.db)
-      const check = (claim: Claim, around: number): { claim: Claim; check: ClaimCheck } | null => {
-        const scene = loadReadingScene(book.db, claim.nodeId, readable)
-        const built = scene === null ? null : claimCheck(scene, claim, roster, around, topicLines)
-        return built === null ? null : { claim, check: built }
-      }
-      const agreed = (
-        entry: { claim: Claim; check: ClaimCheck },
-        verdict: VerifyVerdict | undefined
-      ): boolean =>
-        verdict !== undefined &&
-        agrees(verdict, {
-          expect: entry.check.expect,
-          voice: entry.claim.voice,
-          mode: entry.claim.mode,
-          how: entry.check.how
-        })
-      const spot = { fastAgree: 0, fastChecked: 0, strongAgree: 0, strongChecked: 0 }
-      // The 50¢ stop holds through the spot checks too: checked before every request.
-      let stopped = spent() > LIVE_STOP_USD
-      const over = (): boolean => {
-        stopped ||= spent() > LIVE_STOP_USD
-        return stopped
-      }
-      if (!stopped) {
-        const literal = claims
-          .filter((claim) => claim.proof === 'literal')
-          .flatMap((claim) => check(claim, 1) ?? [])
-          .slice(0, 50)
-        const batches: (typeof literal)[] = []
-        for (let i = 0; i < literal.length; i += 10) batches.push(literal.slice(i, i + 10))
-        for (const batch of batches) {
-          if (over()) break
-          const prompt = buildVerifyV2Prompt({ items: batch.map((entry) => entry.check) })
-          const result = await runAiRequest(ai, {
-            feature: 'verify',
-            tier: 'fast',
-            messages: prompt.messages,
-            maxTokens: prompt.maxTokens,
-            json: true,
-            contextHash: sha256(JSON.stringify(prompt.messages)),
-            promptVersion: prompt.version
-          })
-          const verdicts = parseVerifyAnswer(result.text)
-          spot.fastChecked += batch.length
-          spot.fastAgree += batch.filter((entry, i) => agreed(entry, verdicts.get(i + 1))).length
-        }
-        const strong = claims
-          .filter((each) => each.proof === 'verified')
-          .flatMap((claim) => check(claim, SPOT_STRONG_AROUND) ?? [])
-          .slice(0, 20)
-        for (const entry of strong) {
-          if (over()) break
-          const prompt = buildVerifyV2Prompt({ items: [entry.check], strong: true })
-          const result = await runAiRequest(ai, {
-            feature: 'verify',
-            tier: 'strong',
-            messages: prompt.messages,
-            maxTokens: prompt.maxTokens,
-            json: true,
-            contextHash: sha256(JSON.stringify(prompt.messages)),
-            promptVersion: prompt.version
-          })
-          spot.strongChecked += 1
-          if (agreed(entry, parseVerifyAnswer(result.text).get(1))) spot.strongAgree += 1
-        }
-      }
-
-      const report = scoreLive(book, events, outcomes, spot, {
-        models,
-        costUsd: spent(),
-        stopped,
-        requests: ledger.length,
-        openRouter
-      })
-      const dir = path.resolve('test-results/eval-memory')
-      fs.mkdirSync(dir, { recursive: true })
-      const stamp = new Date().toISOString().slice(0, 10)
-      fs.writeFileSync(path.join(dir, `planted-${stamp}.md`), report.markdown)
-      fs.writeFileSync(
-        path.join(dir, `planted-${stamp}.json`),
-        JSON.stringify(report.json, null, 2)
-      )
-      process.stdout.write(`\n${report.markdown}\n`)
-      expect(report.failures).toEqual([])
-    } finally {
-      book.session.close()
-      fs.rmSync(tmp, { recursive: true, force: true })
-    }
+    // One key (F-16.22): OPENROUTER_API_KEY, else OPENAI_API_KEY (and OPENAI_BASE_URL).
+    const report = await runLivePlanted(liveProviderFromEnv())
+    const dir = path.resolve('test-results/eval-memory')
+    fs.mkdirSync(dir, { recursive: true })
+    const stamp = new Date().toISOString().slice(0, 10)
+    fs.writeFileSync(path.join(dir, `planted-${stamp}.md`), report.markdown)
+    fs.writeFileSync(path.join(dir, `planted-${stamp}.json`), JSON.stringify(report.json, null, 2))
+    process.stdout.write(`\n${report.markdown}\n`)
+    expect(report.failures).toEqual([])
   }, 900_000)
 })
 
@@ -701,9 +479,11 @@ function scoreLive(
     stopped: boolean
     requests: number
     openRouter: boolean
+    /** The route and the key's variable (`LiveProvider.describe`), never the key. */
+    route: string
   }
 ): { markdown: string; json: unknown; failures: string[] } {
-  const claims = liveClaims(book)
+  const claims = liveFacts(book)
   const wanted = TEST_BOOK_LABELS.claims.filter((claim) => claim.expect !== 'reject')
   const slots = new Map<string, SlotScore>()
   const score = (slot: string): SlotScore => {
@@ -823,7 +603,7 @@ function scoreLive(
   const lines = [
     `# Story memory: the live planted-error run (${new Date().toISOString()})`,
     '',
-    `Models: fast \`${run.models.fast}\`, strong \`${run.models.strong}\`${run.openRouter ? ' (OpenRouter)' : ''}. ` +
+    `Models: fast \`${run.models.fast}\`, strong \`${run.models.strong}\`, on ${run.route}. ` +
       `Scenes read: ${readCount}; requests: ${run.requests}; reported cost: ${run.costUsd.toFixed(4)} USD` +
       `${run.stopped ? ` (stopped at the ${LIVE_STOP_USD} USD cap)` : ''}.`,
     '',

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { OPENROUTER_BASE_URL, type ReasoningMode } from '@shared/ai'
 import { OPENROUTER_PROBED_PRICES, type ProbedModelId } from '@shared/modelPrices'
 import { testBookScene } from '../../memory/testBook/book'
+import { openRouterKeyFromEnv } from '../eval/liveProvider'
 import { buildOpenAiProvider } from '../providers/openai'
 import type { AiMessage, Provider } from '../providers/types'
 import {
@@ -24,20 +25,21 @@ import {
 
 /**
  * `npm run ai:probe` (F-16.1): the live price probe. It runs only from that script with
- * `OPENROUTER_API_KEY` set, so `npm run test` never spends. Per model (V4 Flash, then V4 Pro):
- * four requests sharing a ~2,000-token prefix (rules plus one test-book scene) with a varying
- * tail, `max_tokens` 16, reasoning off, two seconds apart; then one short JSON extraction over a
- * test-book passage, three times each with reasoning default, off and low. 26 calls, about 5¢; it
- * stops once the cost passes $0.25 (the reported cost, or the table estimate for a run that
- * reported none). It writes the dated report and its numbers (no prompt text, no key) next to
- * the design, and compares the proposed price module with the committed one: a plain run passes
- * when the prices match and fails showing the differences when they do not; with `-- -u` the
- * same single run writes them. `AI_PROBE_REPLAY=<a saved ai-probe-<date>.json> npm run ai:probe
- * -- -u` writes the module from a saved run without calling anything, so a plain run that found
- * differences never has to be paid for twice.
+ * `OPENROUTER_API_KEY` set (or, F-16.22, `OPENAI_API_KEY` with `OPENAI_BASE_URL` at OpenRouter:
+ * `openRouterKeyFromEnv`, the one key every live path reads), so `npm run test` never spends.
+ * Per model (V4 Flash, then V4 Pro): four requests sharing a ~2,000-token prefix (rules plus one
+ * test-book scene) with a varying tail, `max_tokens` 16, reasoning off, two seconds apart; then
+ * one short JSON extraction over a test-book passage, three times each with reasoning default,
+ * off and low. 26 calls, about 5¢; it stops once the cost passes $0.25 (the reported cost, or
+ * the table estimate for a run that reported none). It writes the dated report and its numbers
+ * (no prompt text, no key) next to the design, and compares the proposed price module with the
+ * committed one: a plain run passes when the prices match and fails showing the differences when
+ * they do not; with `-- -u` the same single run writes them. `AI_PROBE_REPLAY=<a saved
+ * ai-probe-<date>.json> npm run ai:probe -- -u` writes the module from a saved run without calling
+ * anything, so a plain run that found differences never has to be paid for twice.
  */
 
-const KEY = process.env.OPENROUTER_API_KEY ?? ''
+const KEY = openRouterKeyFromEnv() ?? ''
 const REPLAY = process.env.AI_PROBE_REPLAY ?? ''
 const PROBING = process.env.npm_lifecycle_event === 'ai:probe'
 const REPLAYING = PROBING && REPLAY !== ''
@@ -125,7 +127,10 @@ function propose(
 
 describe.runIf(PROBING && !LIVE && !REPLAYING)('the price probe without a key', () => {
   it('needs an OpenRouter key', () => {
-    throw new Error('Set OPENROUTER_API_KEY=sk-or-… to run the probe (about 5¢).')
+    throw new Error(
+      'Set OPENROUTER_API_KEY=sk-or-… to run the probe (about 5¢), or OPENAI_API_KEY with ' +
+        'OPENAI_BASE_URL=https://openrouter.ai/api/v1.'
+    )
   })
 })
 

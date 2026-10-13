@@ -1504,6 +1504,10 @@ export async function runReading(
         check: null
       }
       let literalNames: (sentence: LadderSentence) => readonly LiteralName[] = (s) => s.names
+      // A told, overheard or read line quoting its source's words: their first person is the
+      // source's, and the learner is found in reach (P2b slice 3, the knows replays).
+      const knowsHow = line.kind === 'knows' ? parseHow(line.how) : null
+      const sourceId = knowsHow !== null && keepsFrom(knowsHow) ? item.fromId : null
       const resolve = (recordId: string): SubjectResult =>
         resolveSubject({
           recordId,
@@ -1512,7 +1516,8 @@ export async function runReading(
           quote,
           before,
           typedPov: scene.details.povRecordId,
-          isCharacter
+          isCharacter,
+          sourceId
         })
       if ('thread' in about) {
         item.subject = { kind: 'topic' }

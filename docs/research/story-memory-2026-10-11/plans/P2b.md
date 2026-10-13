@@ -1,6 +1,6 @@
 # P2b Who knows what, threads and time: implementation plan
 
-**Features:** F-16.22 and F-16.23 (`FEATURES.md` §2.16). Phase P2b of the story memory redesign, approved by the author on 2026-10-11 (`../design.md` §2.1–2.3, §2.5, §2.6 (the prose block and data sharing), §2.7 (Book view, sheets, "Years and ages"), Part 4, Part 5; `../author-answers.md` answers 1, 8, 12, 19, 20, 21, 22; decision 5). **Size:** M, about 1.5 weeks, in five slices. **Status:** planned 2026-10-12; slices 1 and 2 built 2026-10-12.
+**Features:** F-16.22 and F-16.23 (`FEATURES.md` §2.16). Phase P2b of the story memory redesign, approved by the author on 2026-10-11 (`../design.md` §2.1–2.3, §2.5, §2.6 (the prose block and data sharing), §2.7 (Book view, sheets, "Years and ages"), Part 4, Part 5; `../author-answers.md` answers 1, 8, 12, 19, 20, 21, 22; decision 5). **Size:** M, about 1.5 weeks, in five slices. **Status:** planned 2026-10-12; slices 1 and 2 built 2026-10-12; slice 3 built 2026-10-13.
 
 **Goal:** the reader learns who knows what and where the plot threads stand, and code turns that into time. `reader.v2` adds knows claims (who learned which secret, how, and from whom; the learner must be Here or the POV) and thread claims (opens, advances, resolves). A secret or thread is created silently whenever a proved claim backs one, with a defining quote; a likely duplicate is judged in the same `verify.v2` batch ("same as s3?") on both defining quotes and merged on its own, with *Split* to undo it. Code computes "readers have known since", the who-knows-what grid, thread status, the story year of each scene (decision 5) and ages. Absence is only ever shown as a scoped, muted line ("No scene shows Mara learning this (checked up to 14.2)") and never reaches a prompt. The This scene panel shows the secrets touched in the scene and tension lines; the Book tab gains the grid, Threads and the Timeline with ages; sheets gain Knows, Threads and Age.
 
@@ -235,6 +235,14 @@ Steps: create Mara Vell, Orrin and Tomas; Scene 1 "Tomas sold the map. Orrin ove
 - Output: `test-results/eval-knows/knows-<date>.md` and `.json` (no prompt text, no key); the author copies the report into `docs/research/story-memory-2026-10-11/eval/` and commits it.
 
 **e2e:** none. **Ticks:** none; F-16.22 names the command as owed.
+
+**Slice 3 notes (built 2026-10-13; calls in `QUESTIONS.md`, P2b slice 3):**
+- `liveProvider.ts` also owns `liveRequestDeps` (the one request-deps every live run uses, the Auto routing and the reported cost) and `openRouterKeyFromEnv` (the probe); `prompts.eval.ts`'s live run now goes through `runAiRequest` (tier and reasoning as the app sends them).
+- Every live path is a function (`runLivePrompts`, `runLivePlanted`, `runLiveKnows`) driven end to end offline against `fakeChatServer.ts` from `OPENROUTER_API_KEY` alone (the knows and planted runs with the oracle behind it, `oracleChatServer`), so "starts from one key" is tested without spending; the knows run passes every bar there, and its 50¢ stop is tested with a costly fake.
+- The oracle moved to `memoryOracle.ts` (P2a's replays read it too, their assertions on facts only, `liveFacts`): knows lines with the labels' new `voice`/`speaker`, steps, topics (new with the scene's sentence when unlisted; re-proposed under the alias at the defining sentence, merged by Same), the card's elapsed hint and the scene's learners on the page; the checker ranks a knows label by the fact's own how (the text runs from the antecedent and may hold another learner's line) and answers Reveals only for a labelled topic or a plant's `OracleTruth`.
+- The replays found one pipeline gap, fixed in the ladder: a told, overheard or read line quoting its source's first person (h05 Bel, h08 Johanna) was refused as `subject`; `SubjectInput.sourceId` now resolves its learner in reach, the source left out (`ladder.test.ts`, `pipelineKnows.test.ts`).
+- Book order merges 2 reveals (h05's engagement, h08's Ashby's return); reverse order 3 (h05, h08, h04's Lottie's match); both make 4 topics, duplicate rate 1.0. The adversarial plants are refused or kept uncounted (`notHere`, `group`, `record`, `slot`, `topicCap`, `topicNotCounted`, a dismissed reveal dropped silently, a rumoured line in `others`, a duplicate merged).
+- Owed by the author (no key here): `MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- knows` (F-16.22's merge condition) and live fidelity for `reader.v2`/`verify.v2`.
 
 ---
 

@@ -206,6 +206,46 @@ describe('the ladder’s subject step (F-16.17)', () => {
     })
     expect(resolveSubject({ ...base, typedPov: 'tomas', quote: told })).toEqual({ kind: 'none' })
   })
+
+  it('reads a source’s own words to the learner as the source’s first person (P2b, slice 3)', () => {
+    // "“Bel, you must swear not to tell,” said Lottie. “Mr. Dunmore and I are engaged.”"
+    const before = [
+      sentence(0, '“Bel, you must swear not to tell,” said Lottie.', [
+        name('bel', 1, 4),
+        name('lottie', 41, 47)
+      ])
+    ]
+    const quote = [sentence(1, '“Mr. Dunmore and I are engaged.”', [name('dunmore', 1, 12)])]
+    const told = {
+      ...base,
+      recordId: 'bel',
+      voice: 'dialogue' as const,
+      speakerId: 'lottie',
+      before,
+      quote
+    }
+    // Bel told from Lottie: the learner is found in reach, the source left out.
+    expect(resolveSubject({ ...told, sourceId: 'lottie' })).toEqual({
+      kind: 'antecedent',
+      candidates: ['bel', 'dunmore'],
+      naming: 0,
+      namedAt: { bel: 0 },
+      unnamed: null
+    })
+    // Without a source (a holding line), or when the speaker is not the source, as before.
+    expect(resolveSubject(told)).toEqual({ kind: 'none' })
+    expect(resolveSubject({ ...told, sourceId: 'dunmore' })).toEqual({ kind: 'none' })
+    // The speaker's own line stays theirs.
+    expect(resolveSubject({ ...told, recordId: 'lottie', sourceId: 'lottie' })).toEqual({
+      kind: 'firstPerson',
+      via: 'speaker',
+      recordId: 'lottie'
+    })
+    // Narration is never a source's words.
+    expect(resolveSubject({ ...told, voice: 'narration', sourceId: 'lottie' })).toEqual({
+      kind: 'none'
+    })
+  })
 })
 
 describe('a group named by its head noun (P2b-D8, amended in review)', () => {

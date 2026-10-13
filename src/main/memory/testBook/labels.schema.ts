@@ -96,7 +96,13 @@ export const LabelKnows = z.object({
   from: Id.nullable(),
   scene: SceneId,
   p: z.number().int().min(0),
-  quote: z.string().min(1)
+  quote: z.string().min(1),
+  /**
+   * How the text gives it (P2b-D7; added for the slice 3 replays): narration, or dialogue with its
+   * `speaker` (the learner's own words for tells and refers, the source's for told and read).
+   */
+  voice: z.enum(['narration', 'dialogue', 'thought']).default('narration'),
+  speaker: Id.optional()
 })
 
 /**

@@ -427,6 +427,60 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
     expect(knowsOf().map((line) => line[0])).toEqual([tomas, orrin])
   })
 
+  it('keeps a told line in its source’s own words for the learner in reach (P2b slice 3)', async () => {
+    // "I" is Tomas, the source: Orrin, named the sentence before, is the learner.
+    saveDocument(db, one, doc('Tomas found Orrin by the nets.', '“I sold the map,” said Tomas.'))
+    scanNamesFor(db, one, NOW)
+    const topics: NewTopic[] = [
+      { n: 'the sold map', kind: 'secret', id: 'x1', p: 1, q: 'I sold the map' }
+    ]
+    const told: Line = {
+      p: 1,
+      r: 'Orrin',
+      s: 'knows',
+      o: 'x1',
+      how: 'told',
+      fr: 'Tomas',
+      q: 'I sold the map',
+      voice: 'dialogue',
+      sp: 'Tomas'
+    }
+    const ai = fake({ topics, lines: [told], present: ['Orrin'] })
+    await read(ai)
+    const map = topicNamed('the sold map')
+    expect(knowsOf()).toEqual([[orrin, map, 'told', tomas]])
+    // The checker chose among those in reach, never the source.
+    const check = checksOf(ai).find((each) => each.kind === 'knows')
+    expect(check?.names).toEqual(['Orrin'])
+    expect(invariants()).toEqual([])
+  })
+
+  it('refuses a learner whose sentence is someone else’s first person with no source', async () => {
+    saveDocument(db, one, doc('Tomas found Orrin by the nets.', '“I sold the map,” said Tomas.'))
+    scanNamesFor(db, one, NOW)
+    const ai = fake({
+      topics: [{ n: 'the sold map', kind: 'secret', id: 'x1', p: 1, q: 'I sold the map' }],
+      lines: [
+        {
+          p: 1,
+          r: 'Orrin',
+          s: 'knows',
+          o: 'x1',
+          how: 'saw',
+          q: 'I sold the map',
+          voice: 'dialogue',
+          sp: 'Tomas'
+        }
+      ],
+      present: ['Orrin']
+    })
+    await read(ai)
+    expect(knowsOf()).toEqual([])
+    expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toMatchObject({
+      subject: 1
+    })
+  })
+
   it('takes a first-person learner as the typed POV once the text’s POV agrees', async () => {
     saveDocument(db, one, doc('Tomas sold the map on the quay.', 'I watched him from the stair.'))
     scanNamesFor(db, one, NOW)

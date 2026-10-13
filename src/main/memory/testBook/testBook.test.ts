@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { estimateTokens } from '@shared/ai'
 import { anchorFor, anchorHolds, sceneSentences } from '@shared/memory/anchor'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
+import { PARTIAL, knowsLine } from '@shared/memory/knows'
 import { locateQuote } from '@shared/memory/quote'
 import { readerMayRead } from '@shared/memory/sources'
 import type { ReadingOrder } from '@shared/memory/asOf'
@@ -204,6 +205,20 @@ describe('the test book (F-16.3)', () => {
       expect(['character', 'group'], line.quote).toContain(kind.get(line.learner))
       // Only told, overheard and read keep a source (P2b-D6).
       if (line.from !== null) expect(['told', 'overheard', 'read']).toContain(line.how)
+      // As the text gives it, every learning or holding line counts and the rest are partial
+      // (P2b-D7): a dialogue line is the learner's own words or its source's.
+      if (line.voice === 'dialogue') expect(line.speaker, line.quote).toBeDefined()
+      expect(
+        knowsLine({
+          how: line.how,
+          voice: line.voice,
+          mode: 'now',
+          recordId: line.learner,
+          speakerId: line.speaker ?? null,
+          fromId: line.from
+        }),
+        line.quote
+      ).toBe(PARTIAL.includes(line.how) ? 'partial' : 'counts')
     }
     for (const step of LABELS.threads) expect(kind.get(step.thread), step.quote).toBe('thread')
     for (const record of LABELS.records) {

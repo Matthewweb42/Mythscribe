@@ -21,6 +21,10 @@ import type { QuoteMissReason } from './quote'
  *   description of a roster record (the twin rule: "Jem Falsire" is not Rynna).
  * - First person resolves to the speaker of a dialogue or thought fact, or to the typed POV, and
  *   then only when the card's verified POV agrees (the pipeline checks that after the checker).
+ *   P2b (slice 3's replays): a told, overheard or read line quoting its source's own words ("Mr.
+ *   Dunmore and I are engaged," Lottie tells Bel) is the exception: the first person is the
+ *   source's, so the learner is settled from the names in reach as a pronoun's would be, the
+ *   source left out of the candidates.
  * - Anything else is refused: a fact whose sentence neither names its subject nor points to one.
  *
  * Pure: the pipeline passes each sentence with the names the scan found in it.
@@ -98,6 +102,11 @@ export interface SubjectInput {
   before: readonly LadderSentence[]
   typedPov: string | null
   isCharacter: (recordId: string) => boolean
+  /**
+   * P2b: a knows line's source when its how keeps one (told, overheard, read); when the quote is
+   * that source's dialogue, its first person is the source's, not the learner's.
+   */
+  sourceId?: string | null
 }
 
 /** Most sentences back a pronoun's antecedent is looked for. */
@@ -178,7 +187,13 @@ export function resolveSubject(input: SubjectInput): SubjectResult {
 
   const text = input.quote.map((sentence) => sentence.text).join(' ')
   const person = pronounPerson(text)
-  if (person === 'first') {
+  // The source speaking to the learner: "I" is the source, and the learner is found in reach.
+  const sourceSpeaks =
+    input.voice === 'dialogue' &&
+    input.sourceId != null &&
+    input.speakerId === input.sourceId &&
+    input.sourceId !== input.recordId
+  if (person === 'first' && !sourceSpeaks) {
     const spoken = input.voice === 'dialogue' || input.voice === 'thought'
     if (spoken && input.speakerId === input.recordId) {
       return { kind: 'firstPerson', via: 'speaker', recordId: input.recordId }
@@ -192,12 +207,15 @@ export function resolveSubject(input: SubjectInput): SubjectResult {
   // A name the scan does not know, and no pronoun: the fact is that new name's (the twin rule).
   if (person === null && input.quote.some(unknownName)) return { kind: 'none' }
 
-  // The characters a sentence names (and the proposed record, whatever its kind).
+  // The characters a sentence names (and the proposed record, whatever its kind); never the
+  // source whose words the quote is.
   const characters = (sentence: LadderSentence): string[] =>
     sentence.names
       .filter(
         (name) =>
-          !name.ambiguous && (input.isCharacter(name.recordId) || name.recordId === input.recordId)
+          !name.ambiguous &&
+          (input.isCharacter(name.recordId) || name.recordId === input.recordId) &&
+          !(sourceSpeaks && name.recordId === input.sourceId)
       )
       .map((name) => name.recordId)
   const namedAt: Record<string, number> = {}
