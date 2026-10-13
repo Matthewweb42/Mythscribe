@@ -90,6 +90,9 @@ let renames: Input<'tree:rename'>[]
 /** F-9.15: what the chat logged in Changes, and the log's undos it asked for. */
 let recorded: Input<'changes:record'>[]
 let logUndos: string[]
+/** F-16.26: the sheet lines the chat added and took back. */
+let addedLines: Input<'record:addLine'>[]
+let removedLines: Input<'record:removeLine'>[]
 
 /**
  * `conversations:get` answers with `stored`; `ai:route` picks `routeAction` locally at once;
@@ -184,6 +187,20 @@ function deferredClient(stored: Conversations): IpcClient {
           tags: []
         } as Output<C>
       }
+      if (channel === 'record:addLine') {
+        const line = input as Input<'record:addLine'>
+        addedLines.push(line)
+        return {
+          record: storyRecord(),
+          index: addedLines.length - 1,
+          text: line.text,
+          conflict: null
+        } as Output<C>
+      }
+      if (channel === 'record:removeLine') {
+        removedLines.push(input as Input<'record:removeLine'>)
+        return storyRecord() as Output<C>
+      }
       if (channel === 'ai:cancel') {
         cancels.push((input as Input<'ai:cancel'>).requestId)
         return { cancelled: true } as Output<C>
@@ -216,6 +233,21 @@ function deferredClient(stored: Conversations): IpcClient {
     }
   }
 }
+
+/** F-16.26: the record a sheet line lands on, as `record:addLine` answers it. */
+const storyRecord = (): Output<'record:removeLine'> => ({
+  id: 'r-mara',
+  categoryId: 'character',
+  kind: 'character',
+  name: 'Mara',
+  image: null,
+  origin: 'author',
+  aliases: [],
+  created: '2026-10-13T09:00:00.000Z',
+  modified: '2026-10-13T09:00:00.000Z',
+  pinned: null,
+  ideas: null
+})
 
 const conversation = (over: Partial<Conversation> = {}): Conversation => ({
   id: 'c-1',
@@ -277,6 +309,7 @@ const ok = (requestId: string, answer: string, over: Partial<AgentOk> = {}): AiA
   steps: [],
   changes: [],
   organise: null,
+  scribe: null,
   dropped: 0,
   usage: { inputTokens: 200, outputTokens: 40 },
   costUsd: 0.0003,
@@ -327,6 +360,8 @@ beforeEach(() => {
   renames = []
   recorded = []
   logUndos = []
+  addedLines = []
+  removedLines = []
   resetChangesStore()
   resetEntityStore()
   resetAssistantStore()
@@ -815,6 +850,7 @@ describe("useAssistantStore send, a cited lookup (F-5.7; the router's query pick
     steps: [{ tool: 'search', label: 'Searching “storm”…' }],
     changes: [],
     organise: null,
+    scribe: null,
     dropped: 1,
     usage: { inputTokens: 900, outputTokens: 60 },
     costUsd: 0.0009,
@@ -970,6 +1006,7 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
       { edit: DELETE, violation: null }
     ],
     organise: null,
+    scribe: null,
     dropped: 0,
     usage: { inputTokens: 900, outputTokens: 60 },
     costUsd: 0.0009,
@@ -1464,5 +1501,109 @@ describe('useAssistantStore quick actions (F-5.17)', () => {
     await store().writeDirection(DIRECTIONS[0]!)
     expect(queries).toHaveLength(1)
     expect(toasts()).toEqual([PLAN_NO_EDITS_MESSAGE])
+  })
+})
+
+describe('useAssistantStore sheet lines (F-16.26, decision 3 as the author changed it)', () => {
+  const line = (place: 'pinned' | 'ideas' | null) =>
+    ({
+      kind: 'sheetLine',
+      recordId: 'r-mara',
+      name: 'Mara',
+      place,
+      text: 'Hates the sea',
+      turn: 'r-turn'
+    }) as const
+
+  /** A turn whose answer offers `edits`, in chat mode `mode`. */
+  async function answerWith(
+    mode: 'auto' | 'ask' | 'plan',
+    edits: ReturnType<typeof line>[]
+  ): Promise<string> {
+    inMode(mode)
+    await store().load()
+    const asking = store().send('Add to Mara’s sheet that she hates the sea.')
+    await settle()
+    const request = queries[0]
+    if (!request) throw new Error('nothing was asked')
+    request.resolve(
+      ok(request.input.requestId, 'Done.', {
+        changes: edits.map((edit) => ({ edit, violation: null }))
+      })
+    )
+    await asking
+    await settle()
+    return active().messages.at(-1)?.id ?? ''
+  }
+
+  const statuses = (): string[] =>
+    (active().messages.at(-1)?.agent?.changes ?? []).map((change) => change.status)
+
+  it('in Auto a pinned line lands at once, and its Undo takes it back', async () => {
+    const messageId = await answerWith('auto', [line('pinned')])
+    expect(statuses()).toEqual(['applied'])
+    expect(addedLines).toEqual([
+      { id: 'r-mara', page: 'pinned', text: 'Hates the sea', turn: 'r-turn' }
+    ])
+    const change = active().messages.at(-1)?.agent?.changes[0]
+    await store().undoChange(messageId, change?.id ?? '')
+    expect(removedLines).toEqual([
+      { id: 'r-mara', page: 'pinned', index: 0, text: 'Hates the sea', turn: 'r-turn' }
+    ])
+    expect(statuses()).toEqual(['undone'])
+  })
+
+  it('in Ask the line waits; Apply is the one click', async () => {
+    const messageId = await answerWith('ask', [line('ideas')])
+    expect(statuses()).toEqual(['pending'])
+    expect(addedLines).toEqual([])
+    const change = active().messages.at(-1)?.agent?.changes[0]
+    await store().applyChange(messageId, change?.id ?? '')
+    expect(addedLines.map((added) => added.page)).toEqual(['ideas'])
+    expect(statuses()).toEqual(['applied'])
+  })
+
+  it('a line Ms Scribe could not place waits for Idea or Canon, in Auto too, and never in Apply all', async () => {
+    const messageId = await answerWith('auto', [line(null)])
+    expect(statuses()).toEqual(['pending'])
+    await store().applyAll(messageId)
+    await store().applyChange(messageId, active().messages.at(-1)?.agent?.changes[0]?.id ?? '')
+    expect(addedLines).toEqual([])
+    const change = active().messages.at(-1)?.agent?.changes[0]
+    await store().pickSheetPlace(messageId, change?.id ?? '', 'ideas')
+    expect(addedLines.map((added) => added.page)).toEqual(['ideas'])
+    expect(statuses()).toEqual(['applied'])
+    expect(active().messages.at(-1)?.agent?.changes[0]?.edit).toMatchObject({ place: 'ideas' })
+  })
+
+  it('Plan never writes a line: the choice says why', async () => {
+    const messageId = await answerWith('plan', [line(null)])
+    const change = active().messages.at(-1)?.agent?.changes[0]
+    await store().pickSheetPlace(messageId, change?.id ?? '', 'pinned')
+    expect(addedLines).toEqual([])
+    expect(toasts()).toEqual([PLAN_NO_EDITS_MESSAGE])
+  })
+
+  it('keeps the Ms Scribe parts of the answer on the turn', async () => {
+    inMode('ask')
+    await store().load()
+    const asking = store().send('What did Orrin hear?')
+    await settle()
+    const request = queries[0]
+    if (!request) throw new Error('nothing was asked')
+    const scribe = {
+      turn: 'answer' as const,
+      citations: [],
+      notChecked: [[0, 4] as [number, number]],
+      unsupported: [],
+      scope: null,
+      notFound: false,
+      retried: false,
+      widened: null,
+      misses: 0
+    }
+    request.resolve(ok(request.input.requestId, 'Orrin heard it.', { scribe }))
+    await asking
+    expect(active().messages.at(-1)?.scribe).toEqual(scribe)
   })
 })

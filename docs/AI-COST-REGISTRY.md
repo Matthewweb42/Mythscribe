@@ -36,7 +36,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `notesSuggest` | Notes suggestions | on request | notesSuggest.v4 | fast | 1003 / 4892 | 300 / 600 | $0.000224 · $0.000853 | $0.000281 | $0.00210 | 1 | $0.000224 |
 | `voiceNotes` | Learned style notes | background | voiceNotes.v1 | fast | 1190 / 1866 | 250 / 400 | $0.000237 · $0.000373 | $0.000296 | $0.00202 | 1 | $0.000237 |
 | `editPass` | Edit passes | on request | editPass.v3 | strong | 2186 / 5161 | 1500 / 4000 | $0.00902 · $0.0229 | $0.0113 | $0.0280 | 60 | $0.541 |
-| `agent` | Assistant lookups and edits | every chat message | agent.v8 | strong | 2487 / 10684 | 300 / 3000 | $0.00537 · $0.0290 | $0.00671 | $0.0107 | 3 | $0.0161 |
+| `agent` | Assistant lookups and edits | every chat message | agent.v9 | strong | 1431 / 23971 | 300 / 3000 | $0.00353 · $0.0521 | $0.00442 | $0.00808 | 3 | $0.0106 |
 | `contextImport` | Context library sorting | on request | contextImport.v3 | strong | 2416 / 4185 | 1500 / 6000 | $0.00942 · $0.0282 | $0.0118 | $0.0285 | 10 | $0.0942 |
 | `reviewChat` | Upload review chat | on request | reviewChat.v3 | strong | 2245 / 3909 | 300 / 3000 | $0.00495 · $0.0172 | $0.00619 | $0.0101 | 1 | $0.00495 |
 | `planLinks` | Plan links | background | planLinks.v2 | fast | 216 / 872 | 150 / 400 | $0.0000722 · $0.000234 | $0.0000903 | $0.000837 | 1 | $0.0000722 |
@@ -150,7 +150,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `agent` — Assistant lookups and edits
 
-- **When:** Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately. Since agent.v7 (F-5.25) a bulk delete is one clear edit answered without lookups (the clear itself runs locally, no AI); the bulk rules, the organise rule, and the bulk and story-bible edits add ~250 input tokens to a read request and ~470 to a write request (a cached prefix). Since agent.v8 (F-5.25 fixes 5, 7, 8) the write edit list gains status, To do settle, notes clearing, undo, summaries, and open: ~110 more input tokens on a write request, none on a read request; the todo tool prints a short ref per item (~2 tokens each). The actions themselves run locally (summaries queue the existing summary jobs).
+- **When:** Story memory v2 (F-16.25, F-16.26): Ms Scribe answers in one strong-tier call (agent.v9), no lookups: the rules, the edit list on a write run and the roster of names (about 1,000 tokens, cached), then the earlier turns (≤ 1,500), the voice block on edit and draft turns, the whole open scene (≤ 12,000, typically 3,000–4,000), the labelled evidence (≤ 3,000; 1,200 for a lookup) and the question; input cap 24,000. Reasoning off and 700 out for answer, idea and to-do turns (300 for a lookup), low with 2,500 out for edit, draft and what-if turns; one retry at 3,000 after a cut-off reply; one Self-Route a turn ({"need":…}, about 20 out) asks again with up to 8,000 tokens of one chapter. Sheet lines the author asks for land locally (record:addLine), no AI. Story memory v1: Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately. Since agent.v7 (F-5.25) a bulk delete is one clear edit answered without lookups (the clear itself runs locally, no AI); the bulk rules, the organise rule, and the bulk and story-bible edits add ~250 input tokens to a read request and ~470 to a write request (a cached prefix). Since agent.v8 (F-5.25 fixes 5, 7, 8) the write edit list gains status, To do settle, notes clearing, undo, summaries, and open: ~110 more input tokens on a write request, none on a read request; the todo tool prints a short ref per item (~2 tokens each). The actions themselves run locally (summaries queue the existing summary jobs).
 - **Ideas:** Check the agent.v6 ladder against the ledger (fixtures: a fact question: the answer step 44 % less input than v5, the whole three-request run 25 % less); fast tier for lookup steps, strong only for the answer; answer a lookup-only question in one step.
 
 ### `contextImport` — Context library sorting
@@ -204,9 +204,6 @@ table above when its feature ships. Cached input is not discounted; task totals 
 | Request | Feature | Phase | Tier | Trigger | In / out | Own key (OpenRouter) | Hosted | OpenAI key | When |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `navigator.v1` | `navigator` | P3 | fast | every chat message | 6000 / 150 | $0.000882 | $0.00110 | $0.00517 | An open question: up to two steps choosing which passages Ms Scribe reads. |
-| `agent.v9:open` | `agent` (existing) | P3 | strong | every chat message | 6500 / 350 | $0.0125 | $0.0157 | $0.0215 | Ms Scribe answers an open question from the passages the navigator found. |
-| `agent.v9:widened` | `agent` (existing) | P3 | strong | every chat message | 13000 / 400 | $0.0240 | $0.0300 | $0.0385 | An open question the first passages could not answer, widened to more passages (about one question in five). |
-| `agent.v9:lookup` | `agent` (existing) | P3 | strong | every chat message | 4500 / 120 | $0.00825 | $0.0103 | $0.0131 | Ms Scribe answers a lookup that the instant answers (F-16.24) could not. |
 | `cite.v1` | `cite` | P3 | fast | every chat message | 1000 / 60 | $0.000157 | $0.000196 | $0.00102 | After each answer: checks every citation against its passage. |
 | `judge.v1` | `judge` | P4 | fast | background | 1500 / 300 | $0.000294 | $0.000368 | $0.00248 | Up to 10 contradiction pairs per call, each judged twice with the quotes swapped. |
 | `judge.v1:pro` | `judge` | P4 | strong | on request | 600 / 90 | $0.00136 | $0.00170 | $0.00285 | Check the book: the strong model confirms up to 20 pairs called a contradiction both ways. |
@@ -221,8 +218,8 @@ table above when its feature ships. Cached input is not discounted; task totals 
 | A 2-hour writing session (3 card refreshes, about one needing a read) | 31 | $0.0144 | $0.0181 | $0.100 |
 | A lookup through Ms Scribe | 2 | $0.00882 | $0.0110 | $0.0148 |
 | An open question | 4 | $0.0152 | $0.0190 | $0.0345 |
-| An open question, widened (about one in five) | 5 | $0.0282 | $0.0352 | $0.0578 |
+| An open question, widened (about one in five) | 6 | $0.0401 | $0.0501 | $0.0752 |
 | Check the book | 40 | $0.0347 | $0.0433 | $0.112 |
 | File a 20,000-word upload, once | 14 | $0.159 | $0.198 | $0.448 |
 | A what-if (P5): 5 Try turns and 1 Version | 16 | $0.104 | $0.130 | $0.243 |
-| A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions with 10 widened, 2 checks, 1 what-if) | 972 | $1.53 | $1.91 | $4.75 |
+| A heavy month (20 sessions, 30 cards, 20 lookups, 50 open questions with 10 widened, 2 checks, 1 what-if) | 982 | $1.65 | $2.06 | $4.93 |

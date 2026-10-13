@@ -66,6 +66,7 @@ import {
 } from '@shared/voice'
 import { voiceBlock } from '../../voice/voiceBlock'
 import { MEMORY_EVAL_CASES, MEMORY_V2_EVAL_CASES } from './memoryFixtures'
+import { scribeEvalCases } from './scribeFixtures'
 import { CARD_GIST_MAX_WORDS, CARD_LINE_MAX_WORDS } from '@shared/memory/claims'
 import type { PromptCard } from '@shared/memory/cardText'
 import {
@@ -737,6 +738,19 @@ const MAXED_STEER = renderSceneSteer(
   )
 )
 
+/**
+ * What a Ms Scribe answer case expects (F-16.25, F-16.26): `found` as given, or a Self-Route
+ * `need`; an edit of `kind` (`pin` with its place: `ask` is a pin Ms Scribe left to the author);
+ * no edits at all; and phrases the answer must hold.
+ */
+export interface ScribeExpect {
+  found?: boolean
+  need?: boolean
+  edit?: { kind: string; place?: 'pinned' | 'ideas' | 'ask' }
+  noEdits?: boolean
+  required?: string[]
+}
+
 export interface EvalCase {
   version: PromptVersion
   name: string
@@ -745,6 +759,8 @@ export interface EvalCase {
   messages: AiMessage[]
   maxTokens: number
   temperature?: number
+  /** F-16.25 (P3-D11): the request's own reasoning, as the feature sends it (Ms Scribe's turns). */
+  reasoning?: 'off' | 'low'
   /**
    * How a live answer is scored: a prose case is post-processed like ghost text and checked
    * against the profile (only when a voice block went out, as `generateGhostText` does); a JSON
@@ -909,6 +925,13 @@ export interface EvalCase {
      * with a rumour voice or a hypothetical or dream mode: the pipeline then makes no secret.
      */
     | { kind: 'verify'; expected: (boolean | 'notCounted')[] }
+    /**
+     * Ms Scribe's answer (F-16.25, `agent.v9`): the reply parses (`readScribeReply`); every
+     * citation names an item that was sent (`sent`, by id: the text as sent) and its quote is in
+     * that text, never a map (`maps`); `found` or a `need` as `expect` says; the expected edit and
+     * place, or none; no absence stated as fact without "searched"; the required phrases.
+     */
+    | { kind: 'scribe'; sent: Record<string, string>; maps: string[]; expect: ScribeExpect }
 }
 
 /** A test-book label as a reader case scores against it. */
@@ -6681,5 +6704,7 @@ export const EVAL_CASES: EvalCase[] = [
   // F-16.20, F-16.21: the summary readers re-pointed to the v2 card, and the plan-link pick.
   ...CARD_READER_CASES,
   // F-16.22, F-16.23: reader.v2 and verify.v2, after P2a's last catalogued versions.
-  ...MEMORY_V2_EVAL_CASES
+  ...MEMORY_V2_EVAL_CASES,
+  // F-16.25, F-16.26: Ms Scribe's one answer call (agent.v9), story memory v2 only.
+  ...scribeEvalCases(voiceBlock(FIXTURE_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' }) ?? '')
 ]

@@ -23,12 +23,9 @@ import {
   type QuerySheetRef,
   type QueryTurn
 } from '@shared/query'
-import { cardMapText } from '@shared/memory/cardText'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
-import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { STORY_MAP_TOKEN_BUDGET } from '@shared/storyTime'
 import { getSummary } from '../document/summaryStore'
-import { promptCard } from '../memory/reading/cardContext'
 import { getAiSettings } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, documentText, type VoiceProfile } from '../voice/profile'
@@ -64,12 +61,6 @@ export interface AgentInput {
   focus: AgentFocus
   /** The caller's id for `ai:cancel` (F-5.10); optional so tests can run without one. */
   requestId?: string
-  /**
-   * F-16.4: the project's story memory. In v2 the tag and sheet tools are refused, lookup,
-   * find_passages, todo and cards read the v2 records (`agentToolsV2.ts`), and an organise
-   * request is dropped and counted, the answer saying so (`AGENT_V2_NO_ORGANISE`; Organise is v1's).
-   */
-  memory: StoryMemoryVersion
 }
 
 /** An edit the answer proposes, with the voice check's complaint about its prose, if any. */
@@ -113,10 +104,6 @@ export interface AgentHooks {
 export const AGENT_OUT_OF_STEPS =
   'I ran out of lookups before I could answer. Ask again, a little more narrowly.'
 /** What an older tool result becomes when the step would go over the input budget. */
-/** What a v2 answer that asked for an Organise run says instead (F-16.4: Organise is v1's). */
-export const AGENT_V2_NO_ORGANISE =
-  "(Organise is not part of this project's story memory, so no plan follows. Tidy names on the record sheets with Same as or Split.)"
-
 export const AGENT_DROPPED_RESULT = '(Result dropped to save space; look again if you need it.)'
 
 /** The request id of step `n` of run `requestId`, so `ai:cancel` on the run stops the step in flight. */
@@ -161,6 +148,18 @@ const unfence = (text: string): string =>
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '')
+
+/** A reply's JSON object (a fence taken off), or null when it is not one. */
+export function replyObject(text: string): Record<string, unknown> | null {
+  try {
+    const json: unknown = JSON.parse(unfence(text))
+    return typeof json === 'object' && json !== null && !Array.isArray(json)
+      ? (json as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
 
 /**
  * The model's reply, leniently: a fenced or bare JSON object with `tool` is a call, one with
@@ -305,11 +304,12 @@ export async function runAgent(
   hooks: AgentHooks = {}
 ): Promise<AgentResult> {
   assertFeatureAllowed(getAiSettings(db), 'agent')
-  const project = loadAgentProject(db, input.nodeId, input.memory)
+  // F-16.25: a story memory v2 project's chat is Ms Scribe (`runScribe`); this run is v1's.
+  const project = loadAgentProject(db, input.nodeId, 'v1')
   // F-5.23: the story map, with now at the open scene (or the latest written one).
   const map = buildStoryMap(db, project.time, {
     maxTokens: STORY_MAP_TOKEN_BUDGET,
-    memory: input.memory,
+    memory: 'v1',
     refOf: project.refOf
   })
   const active = input.nodeId === null ? undefined : project.byId.get(input.nodeId)
@@ -324,8 +324,7 @@ export async function runAgent(
         level: active.hierarchyLevel ?? active.kind,
         synopsis: parseStoredSceneMeta(active.sceneMeta).synopsis.trim(),
         notes: headTruncate(notesText(active.notes, active.id), AGENT_NOTES_CHARS),
-        // F-16.20: in v2 the open scene's card (its line and gist, a map) in the summary's place.
-        summary: focusSummary(db, active.id, input.memory),
+        summary: getSummary(db, active.id)?.summary ?? '',
         beforeCaret: input.focus.beforeCaret.trim(),
         selection: input.focus.selection.trim()
       })
@@ -465,8 +464,8 @@ export async function runAgent(
   }
 }
 
-/** The developer tools' note on a step whose reply could not be used. */
-function brokenNote(
+/** The developer tools' note on a step whose reply could not be used (Ms Scribe's too). */
+export function brokenNote(
   reason: BrokenReply['reason'],
   reply: AiRequestResult,
   retrying: boolean
@@ -601,41 +600,35 @@ function finishAnswer(
   const changes: AgentProposal[] = []
   if (access === 'write') {
     for (const raw of reply.edits.slice(0, AGENT_MAX_EDITS)) {
-      const resolved = resolveAgentEdit(project, raw)
-      if ('error' in resolved) {
-        dropped++
-        continue
-      }
-      const prose = editProse(resolved.edit)
-      const violation =
-        profile === null || prose === ''
-          ? null
-          : (checkChatFidelity(profile.stats, prose, profile.authorRules.bannedPhrases)[0]
-              ?.message ?? null)
-      changes.push({ edit: resolved.edit, violation })
+      const offered = offerEdit(project, raw, profile)
+      if ('error' in offered) dropped++
+      else changes.push(offered)
     }
     dropped += Math.max(0, reply.edits.length - AGENT_MAX_EDITS)
   } else {
     dropped += reply.edits.length
   }
-  // F-16.4: Organise is v1's. A v2 answer carries no organise run; the request is counted and
-  // the answer says no plan follows (agent.v8 asks the model to promise one).
-  const organise = readOrganiseRequest(reply.organise)
-  if (project.memory === 'v2' && organise !== null) {
-    return {
-      answer: `${answer}${answer === '' ? '' : '\n\n'}${AGENT_V2_NO_ORGANISE}`,
-      query,
-      changes,
-      dropped: dropped + 1,
-      organise: null
-    }
-  }
-  return { answer, query, changes, dropped, organise }
+  return { answer, query, changes, dropped, organise: readOrganiseRequest(reply.organise) }
 }
 
-/** The open document's summary line in the agent's focus block: v1's stored summary, v2's card. */
-function focusSummary(db: TreeDb, nodeId: string, memory: StoryMemoryVersion): string {
-  if (memory === 'v1') return getSummary(db, nodeId)?.summary ?? ''
-  const card = promptCard(db, nodeId)
-  return card === null ? '' : cardMapText(card)
+/**
+ * One edit the model wrote, as the chat offers it: resolved against the project as it is
+ * (`resolveAgentEdit`; a v2 project refuses the kinds it never offers), and its prose, if any,
+ * voice-checked against the profile (F-14.7), so an off-voice edit is offered flagged, never
+ * applied on its own. Shared by `runAgent` (v1) and Ms Scribe (`runScribe`, v2).
+ */
+export function offerEdit(
+  project: AgentProject,
+  raw: unknown,
+  profile: VoiceProfile | null
+): AgentProposal | { error: string } {
+  const resolved = resolveAgentEdit(project, raw)
+  if ('error' in resolved) return resolved
+  const prose = editProse(resolved.edit)
+  const violation =
+    profile === null || prose === ''
+      ? null
+      : (checkChatFidelity(profile.stats, prose, profile.authorRules.bannedPhrases)[0]?.message ??
+        null)
+  return { edit: resolved.edit, violation }
 }

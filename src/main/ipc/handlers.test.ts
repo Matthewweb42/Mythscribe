@@ -3387,6 +3387,8 @@ describe('ai:agent (F-5.22)', () => {
     expect(result.steps).toHaveLength(1)
     expect(result.usage).toEqual({ inputTokens: 800, outputTokens: 60 })
     expect(result.dropped).toBe(0)
+    // A v1 turn is the agent's: no Ms Scribe parts.
+    expect(result.scribe).toBeNull()
     expect(result.changes).toEqual([
       {
         edit: {
@@ -9371,6 +9373,67 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // F-16.25, F-16.26 (plan P3 §2.1): in v2 the chat is Ms Scribe's one answer call.
+  it('F-16.25: ai:agent runs Ms Scribe in v2: one agent.v9 request with E0, a checked citation, a sheet line', async () => {
+    const scene = await openV2()
+    await invoke('document:save', {
+      id: scene,
+      content: paragraphs('Mara watched the quay.', 'Orrin overheard Tomas.')
+    })
+    const mara = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+    if (!('record' in mara)) throw new Error('blocked')
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
+    const reply = JSON.stringify({
+      answer: 'Orrin overheard Tomas. [E0 "Orrin overheard Tomas"]',
+      found: true,
+      edits: [{ edit: 'pin', name: 'Mara', text: 'Hates the sea', place: 'pinned' }]
+    })
+    complete.mockResolvedValueOnce({
+      text: reply,
+      model: 'gpt-fake',
+      usage: { inputTokens: 900, outputTokens: 40 }
+    })
+    streamChunks = [
+      (request) => complete(request).then((done) => ({ delta: done.text, usage: done.usage }))
+    ]
+    const result = await invoke('ai:agent', {
+      nodeId: scene,
+      message: 'What did Orrin hear? Add to Mara’s sheet that she hates the sea.',
+      history: [],
+      access: 'write',
+      focus: { beforeCaret: '', selection: '' },
+      requestId: 'sc-1'
+    })
+    if (!result.ok) throw new Error(result.message)
+    expect(complete).toHaveBeenCalledTimes(1)
+    const sent = complete.mock.calls[0]?.[0]
+    expect(sent?.messages[0]?.content.startsWith('You are the story assistant')).toBe(true)
+    expect(sent?.messages.at(-1)?.content).toContain('¶1 Orrin overheard Tomas.')
+    expect(result.answer).toBe('Orrin overheard Tomas.[1]')
+    expect(result.scribe?.citations.map((citation) => citation.quote)).toEqual([
+      'Orrin overheard Tomas'
+    ])
+    expect(result.steps).toEqual([])
+    expect(result.changes.map((change) => change.edit)).toEqual([
+      {
+        kind: 'sheetLine',
+        recordId: mara.record.id,
+        name: 'Mara',
+        place: 'pinned',
+        text: 'Hates the sea',
+        turn: 'sc-1'
+      }
+    ])
+    // Offered, not written: the sheet is as it was until the chat lands the line.
+    expect((await invoke('record:get', { id: mara.record.id })).pinned).toBeNull()
+    expect(getProposal(manager.require().connection.orm, result.proposalId)).toMatchObject({
+      feature: 'agent',
+      promptVersion: 'agent.v9',
+      status: 'pending'
+    })
   })
 
   // F-16.17 (plan P2a §3.7): nothing is summarised in v2, so the v1 conversion never comes up.

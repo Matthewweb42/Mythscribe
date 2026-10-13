@@ -2,6 +2,8 @@ import { z } from 'zod'
 import { CLEAR_OPTIONS_MAX, ClearOption, describeClearCounts, tickedCounts } from './bibleClear'
 import { ENTITY_NAME_MAX, EntityFieldId, EntityKind } from './entities'
 import { FactStatus } from './facts'
+import { RecordPage } from './memory/records'
+import { SHEET_LINE_MAX, SheetLineTurn } from './scribe'
 import { TAG_NAME_MAX } from './tags'
 import { SCENE_SYNOPSIS_MAX } from './sceneMeta'
 
@@ -336,7 +338,22 @@ export const AgentEdit = z.discriminatedUnion('kind', [
    */
   z.object({ kind: z.literal('undoTurn') }),
   z.object({ kind: z.literal('summaries') }),
-  z.object({ kind: z.literal('open'), dialog: z.enum(['upload', 'library']) })
+  z.object({ kind: z.literal('open'), dialog: z.enum(['upload', 'library']) }),
+  /**
+   * F-16.26 (agent.v9; decision 3 as the author changed it, P3-D16): one line the author asked Ms
+   * Scribe to put on a record's sheet, at the end of its Pinned or Ideas page, marked `aiWritten`
+   * with `turn` (the answer's request id) until she edits it. `place` null: Ms Scribe could not
+   * tell canon from an idea, so the chat asks "Is this an idea or canon?" and the author's choice
+   * is the click. Written through `record:addLine`; its Undo is `record:removeLine`.
+   */
+  z.object({
+    kind: z.literal('sheetLine'),
+    recordId: z.string(),
+    name: z.string(),
+    place: RecordPage.nullable(),
+    text: z.string().trim().min(1).max(SHEET_LINE_MAX),
+    turn: SheetLineTurn
+  })
 ])
 export type AgentEdit = z.infer<typeof AgentEdit>
 export type AgentEditKind = AgentEdit['kind']
@@ -419,6 +436,33 @@ export function isDeletion(edit: AgentEdit): boolean {
     edit.kind === 'notesClear' ||
     edit.kind === 'undoTurn'
   )
+}
+
+/**
+ * F-16.26: a sheet line whose place Ms Scribe left to the author ("Is this an idea or canon?"):
+ * it waits for her choice in Ask and in Auto, and is never part of Apply all.
+ */
+export function isSheetQuestion(edit: AgentEdit): boolean {
+  return edit.kind === 'sheetLine' && edit.place === null
+}
+
+/** How much of a sheet line a heading quotes. */
+const SHEET_LINE_SHOWN = 80
+
+const shownLine = (text: string): string => {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > SHEET_LINE_SHOWN ? `${flat.slice(0, SHEET_LINE_SHOWN - 1).trimEnd()}…` : flat
+}
+
+/**
+ * F-16.26: the confirmation a sheet line leaves once it landed ("Pinned on Mara’s sheet: “hates
+ * the sea”"), the chat's log line beside its Undo.
+ */
+export function sheetLineDone(edit: Extract<AgentEdit, { kind: 'sheetLine' }>): string {
+  const line = `“${shownLine(edit.text)}”`
+  return edit.place === 'ideas'
+    ? `Added to ${edit.name}’s Ideas: ${line}`
+    : `Pinned on ${edit.name}’s sheet: ${line}`
 }
 
 /** F-5.25 (agent.v8): an edit that only opens a place in the app; it runs at once in Ask too. */
@@ -519,6 +563,12 @@ export function describeEdit(edit: AgentEdit): string {
       return 'Re-read the scenes whose summaries are missing or stale'
     case 'open':
       return edit.dialog === 'library' ? 'Opened the Library' : 'Opened the upload'
+    case 'sheetLine':
+      return edit.place === null
+        ? `${edit.name}’s sheet: an idea or canon?`
+        : edit.place === 'ideas'
+          ? `Add to ${edit.name}’s Ideas: “${shownLine(edit.text)}”`
+          : `Pin on ${edit.name}’s sheet: “${shownLine(edit.text)}”`
   }
 }
 

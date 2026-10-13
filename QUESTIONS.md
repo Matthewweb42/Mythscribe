@@ -12,6 +12,24 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-13 · F-16.25, F-16.26 · P3 slice 2 (agent.v9, the one answer call; code quote checks; Self-Route and search misses; sheet writes): calls made while building it
+- Question: Wiring Ms Scribe's answer call into the chat (story memory v2 only; v1's chat is unchanged) needed these calls beyond the plan's P3-D1 to P3-D23. No live run was possible here (no key): the 14 new `agent.v9` eval cases wait for your `OPENROUTER_API_KEY` run.
+- Chosen (decided by Claude, unconfirmed):
+  1. **Self-Route is in this slice** (the plan allowed moving it to slice 3): "I need chapter 9" reads that chapter (shown as "Reading chapter 9…") and asks once more; a second ask, or a chapter or scene that does not exist, ends "Not found in the manuscript (I looked in …)". The cost cap is checked before the second call.
+  2. **The cost of a widened question is about 3.8¢, not 3¢:** the call that asks to widen is counted now (`agent.v9:need`, P3-D22), which the design's Part 5 left out; the other sizes stay the design's. The registry's "about 3 calls per use" for the chat is unchanged.
+  3. **Scene ids go to the AI only when it may edit** (Ask and Auto): the open scene reads "id n5 in n4" and each scene-opening passage its own id, so "move this scene after 1.3" resolves; a Plan question never sees ids.
+  4. **What counts as a search miss** before the navigator exists (slice 4): a kept citation into the widened chapter at a paragraph Step 0's own word search did not return. A question with no words to search for logs no miss.
+  5. **When Ms Scribe answers "found": false**, the chat shows the app's own Not found line with what it looked in, not her wording (her wording could claim an absence the scope does not support).
+  6. **"Not checked" marks are for answers only:** on an edit or "Write this" turn the reply describes the change, so nothing in it is marked; on an answer, the first sentence without a kept citation is marked too (P3-D14; slice 3 retries it).
+  7. **Which turns think:** a Plan question is always an answer; in Ask or Auto a "Write this" choice is a draft, a message that opens with an edit verb or asks for a sheet line is an edit (reasoning low, the voice profile sent), and everything else an answer (reasoning off).
+  8. **Sheet lines she cannot place** never become a question you have to answer: an unknown name ("make the record first"), a secret or thread ("has no sheet") or a line the page already holds ("already says that") is said in the answer and nothing is offered. "Is this an idea or canon?" waits in the chat even in Auto; Apply all skips it.
+  9. **A Pinned line that contradicts the sheet** (Eyes: green under Eyes: grey) still goes on, and the chat says "It contradicts “Eyes: grey” on the sheet; both lines are there now."
+  10. **The line's mark** reads "Written from the chat, 13 Oct" beside it on the sheet, and its chat turn is the request's id.
+  11. **The chat history** goes as earlier user turns, each starting "[earlier turn, not a source]", so the cached opening never changes between questions.
+  12. **A long open scene** names the left-out paragraphs by their numbers as sent (¶0 is the first): "(¶0–14 and ¶61–79 not shown)".
+- Alternatives: Self-Route in slice 3 with a Not found reply meanwhile; the design's 3¢ widened figure; ids always sent; the model's own not-found wording; marks on edit turns too; a pin of an unknown name asking to make the record.
+- To change it: `src/main/scribe/runScribe.ts` (1, 4–8), `src/main/scribe/selfRoute.ts` (1), `src/shared/aiCostNotes.ts` and `src/main/ai/eval/report.test.ts` (2), `src/main/scribe/evidence.ts` and `src/main/ai/prompts/agent.v9.ts` (3, 11, 12), `src/renderer/features/ai/agentApply.ts` (9), `src/renderer/features/editor/filedFrom.ts` (10).
+
 ## 2026-10-13 · F-16.24–16.26 · P3 slice 1 (Step 0, instant rules, evidence, sheet lines, search misses, reasoning per request): calls made while building it
 - Question: Building the local half of Ms Scribe (no prompt, no UI, nothing wired into the chat yet) needed these calls beyond the plan's P3-D1 to P3-D23. Nothing changes in v1; no request changed (token report unchanged).
 - Chosen (decided by Claude, unconfirmed):

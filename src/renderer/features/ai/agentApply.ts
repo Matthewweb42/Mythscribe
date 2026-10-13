@@ -39,6 +39,7 @@ import { useTagStore } from '@renderer/features/tags/tagStore'
 import { useFactStore } from '@renderer/features/entities/factStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
+import { pageKey, usePageStore } from '@renderer/features/research/pageStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useTodoStore } from '@renderer/features/todo/todoStore'
@@ -61,7 +62,8 @@ import { ipc } from '@renderer/lib/ipc'
 export async function applyAgentEdit(
   edit: AgentEdit,
   proposalId: string,
-  run: ChangeRun
+  run: ChangeRun,
+  onNotice: (notice: string) => void = () => undefined
 ): Promise<(() => Promise<void>) | null> {
   const label = changeLabel(describeEdit(edit))
   switch (edit.kind) {
@@ -401,6 +403,50 @@ export async function applyAgentEdit(
     case 'undoTurn':
       // The chat's own turns are the assistant store's; it takes this edit back there.
       throw new AgentEditError('Undo the last turn from the chat')
+    case 'sheetLine':
+      return applySheetLine(edit, onNotice)
+  }
+}
+
+/** What a sheet line whose place the author has not picked says when it is applied. */
+export const SHEET_PLACE_FIRST = 'Pick Idea or Canon first'
+
+/**
+ * F-16.26 (decision 3 as the author changed it): one line on a record's Pinned or Ideas page,
+ * through `record:addLine` (main marks it `aiWritten` with the turn). The page store is flushed
+ * first, so the author's unsaved typing is written before the line lands after it, and an open
+ * page is read again, so the sheet shows the line. A Pinned line that contradicts one the sheet
+ * already holds lands as asked, and the change says which. The Undo takes the line out through
+ * `record:removeLine` while it still reads as written (main refuses it once she edited it).
+ */
+async function applySheetLine(
+  edit: Extract<AgentEdit, { kind: 'sheetLine' }>,
+  onNotice: (notice: string) => void
+): Promise<() => Promise<void>> {
+  const place = edit.place
+  if (place === null) throw new AgentEditError(SHEET_PLACE_FIRST)
+  const key = pageKey({ kind: place, id: edit.recordId })
+  await usePageStore.getState().flush()
+  const added = await ipc().invoke('record:addLine', {
+    id: edit.recordId,
+    page: place,
+    text: edit.text,
+    turn: edit.turn
+  })
+  await usePageStore.getState().reload([key])
+  if (added.conflict !== null) {
+    onNotice(`It contradicts “${added.conflict.text}” on the sheet; both lines are there now.`)
+  }
+  return async () => {
+    await usePageStore.getState().flush()
+    await ipc().invoke('record:removeLine', {
+      id: edit.recordId,
+      page: place,
+      index: added.index,
+      text: added.text,
+      turn: edit.turn
+    })
+    await usePageStore.getState().reload([key])
   }
 }
 

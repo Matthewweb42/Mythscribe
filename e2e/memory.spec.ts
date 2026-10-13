@@ -170,6 +170,50 @@ const ELAPSED_VALUE = 'some time'
 /** The paragraph slice P2a types; the fake reads Mara's eyes and where she walked from it. */
 const READ_PARAGRAPH = "Mara's eyes were grey. She walked to the quay."
 
+/** F-16.25: `agent.v9`'s opening (`AGENT_V9_SENTINEL`); the fake answers Ms Scribe for it. */
+const SCRIBE_SENTINEL =
+  "You are the story assistant inside a novel-writing app, answering the book's author from the evidence below."
+/** F-16.25: the opening of `agent.v9`'s edit list, sent on write runs (Ask, Auto) only. */
+const SCRIBE_EDITS_OPENING = 'Edits: only when the message asks for a change'
+/** F-5.19: `route.v2`'s opening; the fake answers it `{}`, which routes to chat. */
+const ROUTE_V2_SENTINEL = "You are the router inside a novel-writing app's assistant."
+
+/**
+ * The fake Ms Scribe (F-16.25, F-16.26), answering from the question at the end of the last user
+ * turn: a question naming Orrin cites E0 ("Orrin overheard Tomas"); "Add to <Name>'s sheet that
+ * she <words>." pins "<Words>" on that sheet; "Save this for <Name>: <words>." asks idea or canon
+ * (place `ask`); anything else is a plain found answer.
+ */
+function scribeAnswer(messages: { content: string }[]): string {
+  const last = messages.at(-1)?.content ?? ''
+  const question = last.slice(last.lastIndexOf('Question: ') + 'Question: '.length).trim()
+  const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
+  const pin = /^Add to (\w+)['’]s sheet that she (.+)\.$/u.exec(question)
+  if (pin !== null) {
+    return JSON.stringify({
+      answer: `I put that on ${pin[1] ?? ''}'s sheet.`,
+      found: true,
+      edits: [{ edit: 'pin', name: pin[1], text: capital(pin[2] ?? ''), place: 'pinned' }]
+    })
+  }
+  const save = /^Save this for (\w+): (.+)\.$/u.exec(question)
+  if (save !== null) {
+    return JSON.stringify({
+      answer: 'Is this an idea or canon?',
+      found: true,
+      edits: [{ edit: 'pin', name: save[1], text: capital(save[2] ?? ''), place: 'ask' }]
+    })
+  }
+  if (/\bOrrin\b/u.test(question)) {
+    return JSON.stringify({
+      answer: 'Orrin overheard Tomas. [E0 "Orrin overheard Tomas"]',
+      found: true,
+      edits: []
+    })
+  }
+  return JSON.stringify({ answer: 'The book does not say yet.', found: true, edits: [] })
+}
+
 /**
  * The fake reader (F-16.17): in the numbered paragraphs it finds `Mara's eyes were <colour>.` and
  * `She walked to <place>.`, and answers those two facts about Mara Vell (by her roster id) with
@@ -453,9 +497,11 @@ function startFakeProvider(): Promise<string> {
                 ? JSON.stringify({ synopsis: 'Mara walks to the quay and waits.' })
                 : system.startsWith(BETA_READER_OPENING)
                   ? JSON.stringify({ items: [] })
-                  : json
-                    ? '{}'
-                    : GHOST_ANSWER
+                  : system.startsWith(SCRIBE_SENTINEL)
+                    ? scribeAnswer(request.messages)
+                    : json
+                      ? '{}'
+                      : GHOST_ANSWER
       const usage = { prompt_tokens: 400, completion_tokens: 40, total_tokens: 440 }
       const base = { id: 'chatcmpl-fake', created: 0, model: request.model }
       if (request.stream === true) {
@@ -2218,6 +2264,163 @@ test('story memory v2: threads, the timeline and ages (P2b slice 5)', async () =
   expect(
     providerBodies.some((body) =>
       body.messages.some((message) => message.content.includes('year not known'))
+    )
+  ).toBe(false)
+})
+
+/** A record's page paragraphs as stored, each with its `aiWritten` mark (F-16.26). */
+async function pageLines(
+  id: string,
+  page: 'pinned' | 'ideas'
+): Promise<{ text: string; written: boolean }[]> {
+  const record = await invoke<{ pinned: TiptapNodeT | null; ideas: TiptapNodeT | null }>(
+    'record:get',
+    { id }
+  )
+  return ((page === 'pinned' ? record.pinned : record.ideas)?.content ?? []).map((block) => ({
+    text: (block.content ?? []).map((child) => child.text ?? '').join(''),
+    written: block.attrs?.aiWritten !== null && block.attrs?.aiWritten !== undefined
+  }))
+}
+
+test('story memory v2: Ms Scribe v9 answers and writes sheet lines (P3 slice 2)', async () => {
+  // A new project (Use AI on, chat in Ask, the own key at the fake): Mara, Orrin and Tomas, and
+  // scene 1.1 read once.
+  const first = await newV2Project('Scribe Novel')
+  const ids: Record<string, string> = {}
+  for (const name of ['Mara', 'Orrin', 'Tomas']) {
+    const result = await invoke<{ record?: { id: string } }>('record:create', {
+      name,
+      categoryId: 'character',
+      aliases: [],
+      force: true
+    })
+    ids[name] = result.record?.id ?? ''
+  }
+  const mara = ids.Mara ?? ''
+  await invoke('document:save', {
+    id: first.id,
+    content: {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: 'Mara watched the quay. Tomas sold the map. Orrin overheard Tomas.'
+            }
+          ]
+        }
+      ]
+    }
+  })
+  expect(await invoke('memory:readNow', { nodeId: first.id, requestId: 'e2e-p3-1' })).toMatchObject(
+    { ok: true }
+  )
+  await reopenProject('Scribe Novel')
+  await showSection('Manuscript')
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByRole('treeitem', { name: first.title })
+    .first()
+    .click()
+  await expect(page.getByRole('textbox', { name: 'Document' })).toContainText('Orrin overheard')
+
+  const scribeButton = page.getByRole('button', { name: 'Ms Scribe', exact: true })
+  if ((await scribeButton.getAttribute('aria-pressed')) !== 'true') await scribeButton.click()
+  const assistant = page.getByTestId('assistant-panel')
+  await expect(assistant).toBeVisible()
+  const messageBox = assistant.getByRole('textbox', { name: 'Message' })
+  const turns = assistant.locator('[data-testid="chat-turn"]')
+  const scribeBodies = (): typeof providerBodies =>
+    providerBodies.filter((body) => body.messages[0]?.content.startsWith(SCRIBE_SENTINEL) === true)
+  const send = async (mode: 'Auto' | 'Ask' | 'Plan', message: string): Promise<void> => {
+    await assistant.getByRole('radio', { name: mode, exact: true }).click()
+    await messageBox.fill(message)
+    await messageBox.press('Enter')
+  }
+
+  // Ask, a question: one agent.v9 request (after the router's), the whole open scene as E0
+  // numbered, no tool protocol; the kept citation's quote is the one E0 holds.
+  const before = scribeBodies().length
+  await send('Ask', 'What did Orrin hear?')
+  await expect(turns).toHaveCount(2)
+  await expect(turns.nth(1)).toContainText('Orrin overheard Tomas.', { timeout: 15_000 })
+  expect(scribeBodies()).toHaveLength(before + 1)
+  const asked = scribeBodies().at(-1)
+  const tail = asked?.messages.at(-1)?.content ?? ''
+  expect(tail).toContain('E0 [happened, the open scene 1.1, id ')
+  expect(tail).toContain('¶0 Mara watched the quay. Tomas sold the map. Orrin overheard Tomas.')
+  expect(tail.endsWith('Question: What did Orrin hear?')).toBe(true)
+  expect(tail).not.toContain('"tool"')
+  expect(asked?.json).toBe(true)
+  expect(
+    providerBodies
+      .slice(-2)
+      .map((body) => body.messages[0]?.content.startsWith(ROUTE_V2_SENTINEL) === true)
+  ).toEqual([true, false])
+  const stored = async (): Promise<
+    { role: string; scribe: { citations: { quote: string; evidence: string }[] } | null }[]
+  > => {
+    const value = await invoke<{
+      active: string | null
+      items: {
+        id: string
+        messages: {
+          role: string
+          scribe: { citations: { quote: string; evidence: string }[] } | null
+        }[]
+      }[]
+    }>('conversations:get', undefined)
+    return value.items.find((item) => item.id === value.active)?.messages ?? []
+  }
+  await expect
+    .poll(async () => (await stored()).at(-1)?.scribe?.citations ?? [])
+    .toEqual([expect.objectContaining({ evidence: 'E0', quote: 'Orrin overheard Tomas' })])
+
+  // Auto, an explicit sheet write: the line lands on Mara's Pinned with the chat's mark, the
+  // turn says so with Undo, and Undo takes it out.
+  await send('Auto', "Add to Mara's sheet that she hates the sea.")
+  await expect(turns).toHaveCount(4)
+  const pinned = turns.nth(3).getByTestId('agent-change')
+  await expect(pinned).toHaveAttribute('data-status', 'applied', { timeout: 15_000 })
+  await expect(pinned).toContainText('Pinned on Mara’s sheet: “Hates the sea”')
+  await expect
+    .poll(() => pageLines(mara, 'pinned'))
+    .toEqual([{ text: 'Hates the sea', written: true }])
+  await pinned.getByTestId('agent-change-undo').click()
+  await expect(pinned).toHaveAttribute('data-status', 'undone')
+  await expect.poll(() => pageLines(mara, 'pinned')).toEqual([])
+
+  // Ask, a save Ms Scribe cannot place: "Is this an idea or canon?"; Idea files it in Ideas.
+  await send('Ask', 'Save this for Mara: a scar from the fire.')
+  await expect(turns).toHaveCount(6)
+  const question = turns.nth(5).getByTestId('agent-change')
+  await expect(question).toContainText('Is this an idea or canon?', { timeout: 15_000 })
+  await question.getByRole('button', { name: 'Idea' }).click()
+  await expect(question).toHaveAttribute('data-status', 'applied')
+  await expect(question).toContainText('Added to Mara’s Ideas: “A scar from the fire”')
+  await expect
+    .poll(() => pageLines(mara, 'ideas'))
+    .toEqual([{ text: 'A scar from the fire', written: true }])
+
+  // Plan: the same request goes out without the edit list, and nothing is written.
+  const planBefore = scribeBodies().length
+  await send('Plan', "Add to Mara's sheet that she hates the sea.")
+  await expect(turns).toHaveCount(8)
+  await expect(turns.nth(7)).toContainText('I put that on Mara', { timeout: 15_000 })
+  expect(scribeBodies()).toHaveLength(planBefore + 1)
+  expect(scribeBodies().at(-1)?.messages[0]?.content).not.toContain(SCRIBE_EDITS_OPENING)
+  await expect(turns.nth(7).getByTestId('agent-change')).toHaveCount(0)
+  expect(await pageLines(mara, 'pinned')).toEqual([])
+  // The write runs carried the edit list; no request ever stated an absence.
+  expect(
+    scribeBodies().some((body) => body.messages[0]?.content.includes(SCRIBE_EDITS_OPENING))
+  ).toBe(true)
+  expect(
+    providerBodies.some((body) =>
+      body.messages.some((message) => message.content.includes('No scene shows'))
     )
   ).toBe(false)
 })

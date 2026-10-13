@@ -227,7 +227,9 @@ import { CustomThemeId, CustomThemeInput, ThemeId } from '../themes'
 import { AssistantNameInput } from '../assistantName'
 import { StoryMemoryVersion } from '../storyMemory'
 import {
+  Navigation,
   SEARCH_MISSES_LIST_MAX,
+  ScribeTurn,
   SearchMisses,
   SheetLineAdd,
   SheetLineRemove,
@@ -605,6 +607,12 @@ export const AiAgentResult = z.discriminatedUnion('ok', [
      * this request, which follows the chat mode. Null for a turn that did not ask.
      */
     organise: OrganiseRequest.nullable().default(null),
+    /**
+     * F-16.25 (story memory v2, `agent.v9`): what Ms Scribe's answer kept: its checked citations
+     * behind the `[n]` markers, the sentences marked not checked, the scope, Not found, a widened
+     * chapter and the search misses it logged. Null for a v1 turn.
+     */
+    scribe: ScribeTurn.nullable().default(null),
     dropped: z.number().int().nonnegative(),
     usage: AiUsage,
     costUsd: z.number(),
@@ -2573,7 +2581,9 @@ export const contract = {
    * arrives first as an `ai:agentStep` event for `requestId`), then answers. `nodeId` is the open
    * document and `focus` its caret window and selection; `access: 'read'` answers only (Query),
    * `'write'` may propose edits (Auto), which come back unapplied. Expected AI failures come
-   * back as data.
+   * back as data. In story memory v2 (F-16.25) the turn is Ms Scribe's one answer call
+   * (`agent.v9`, `runScribe`): no lookups, the open scene and the labelled evidence in one request,
+   * citations checked in code, and sheet lines (F-16.26) among the edits.
    */
   'ai:agent': {
     input: z.object({
@@ -2584,7 +2594,13 @@ export const contract = {
         .max(CHAT_HISTORY_TURNS),
       access: AgentAccess,
       focus: AgentFocus,
-      requestId: z.string()
+      requestId: z.string(),
+      /**
+       * F-16.25 (story memory v2; P3-D1): what `ai:navigate` found for this turn (its kind, the
+       * evidence keys, the scope, the search terms and hits), re-resolved against the book as it
+       * is; null before the navigator (slice 4) or for a turn it did not navigate. Ignored in v1.
+       */
+      navigation: Navigation.nullable().default(null)
     }),
     output: AiAgentResult
   },

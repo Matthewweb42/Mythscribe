@@ -60,6 +60,36 @@ export interface Step0Focus {
   selection: string | null
 }
 
+/**
+ * The paragraph the caret is in, from the caret window the chat sends (`AgentFocus.beforeCaret`:
+ * the text up to the caret, blocks joined by a blank line, its last 1,500 characters): the last
+ * paragraph that starts with the window's last block (or, with the caret at the start of an empty
+ * block, the one after the paragraph the block before it is). Null without a window or a match.
+ */
+export function caretParaOf(paragraphs: readonly string[], beforeCaret: string): number | null {
+  if (beforeCaret.trim() === '' || paragraphs.length === 0) return null
+  const blocks = beforeCaret.split('\n\n')
+  const last = (blocks.at(-1) ?? '').replace(/\s+/g, ' ').trimStart()
+  const flat = paragraphs.map((text) => text.replace(/\s+/g, ' ').trim())
+  if (last.trim() !== '') {
+    for (let i = flat.length - 1; i >= 0; i--) {
+      const text = flat[i] ?? ''
+      // A window cut inside one long paragraph holds its middle, not its start.
+      if (text.startsWith(last.trim()) || (blocks.length === 1 && text.includes(last.trim()))) {
+        return i
+      }
+    }
+    return null
+  }
+  const before = (blocks.at(-2) ?? '').replace(/\s+/g, ' ').trim()
+  if (before === '') return null
+  for (let i = flat.length - 1; i >= 0; i--) {
+    const text = flat[i] ?? ''
+    if (text === before || text.endsWith(before)) return Math.min(i + 1, flat.length - 1)
+  }
+  return null
+}
+
 /** E0: the open scene as it is saved (the renderer flushed it first). */
 export interface SceneE0 {
   nodeId: string

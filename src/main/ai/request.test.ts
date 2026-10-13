@@ -1149,13 +1149,34 @@ describe('a request’s own reasoning (F-16.25, P3-D11)', () => {
 })
 
 describe('per-version input budgets (F-16.25, P3-D10)', () => {
-  it('checks a request against its feature’s cap while no version has its own', async () => {
+  it('checks a request against its version’s cap, else its feature’s (agent.v9: 24,000)', async () => {
     expect(promptInputBudget('agent', 'agent.v8')).toBe(inputBudget('agent'))
     expect(promptInputBudget('agent', 'agent.v8', { 'agent.v8': 24_000 })).toBe(24_000)
     expect(promptInputBudget('agent', 'agent.v7', { 'agent.v8': 24_000 })).toBe(
       inputBudget('agent')
     )
-    expect(Object.keys(PROMPT_INPUT_BUDGETS)).toEqual([])
+    // Only Ms Scribe's answer carries its own cap; agent.v8 and every v1 request keep 12,000.
+    expect(PROMPT_INPUT_BUDGETS).toEqual({ 'agent.v9': 24_000 })
+    expect(promptInputBudget('agent', 'agent.v9')).toBe(24_000)
+    expect(inputBudget('agent')).toBe(12_000)
+    const v9 = fakes()
+    const long = 'x'.repeat(20_000 * 4)
+    await expect(
+      runAiRequest(v9.deps, {
+        ...input,
+        feature: 'agent',
+        promptVersion: 'agent.v9',
+        messages: [{ role: 'user', content: long }]
+      })
+    ).resolves.toMatchObject({ cached: false })
+    await expect(
+      runAiRequest(v9.deps, {
+        ...input,
+        feature: 'agent',
+        promptVersion: 'agent.v8',
+        messages: [{ role: 'user', content: long }]
+      })
+    ).rejects.toThrow(/over the agent budget/)
     const f = fakes()
     const over = 'x'.repeat((inputBudget('tags') + 10) * 4)
     await expect(

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
+import type { AgentStep } from '@shared/agent'
 import {
   aiFailure as aiFailureEnvelope,
   AiFeatureId,
@@ -154,7 +155,7 @@ import {
   NoKeyError
 } from '../ai/providers/types'
 import { runQuery } from '../ai/query'
-import { runAgent } from '../ai/agent'
+import { runAgent, type AgentHooks } from '../ai/agent'
 import { draftForAgent } from '../ai/agentDraft'
 import { runWhatNext } from '../ai/whatNext'
 import { runRoute } from '../ai/route'
@@ -515,6 +516,7 @@ import {
   updateRecord,
   withTopicRelabels
 } from '../memory/recordStore'
+import { runScribe } from '../scribe/runScribe'
 import { searchMisses } from '../scribe/searchMissStore'
 import { addSheetLine, removeSheetLine } from '../scribe/sheetLines'
 import { getSceneDetails, setSceneDetails } from '../memory/sceneDetailStore'
@@ -4075,23 +4077,58 @@ export function registerHandlers({
   // the renderer settles it with the edits' fate.
   register(
     'ai:agent',
-    async ({ nodeId, message, history, access, focus, requestId }): Promise<AiAgentResult> => {
+    async ({
+      nodeId,
+      message,
+      history,
+      access,
+      focus,
+      requestId,
+      navigation
+    }): Promise<AiAgentResult> => {
       try {
         const db = manager.require().connection.orm
         const deps = requestDeps(db)
-        const result = await runAgent(
-          db,
-          deps,
-          { nodeId, message, history, access, focus, requestId, memory: memory() },
-          (step) => emit(windows(), 'ai:agentStep', { requestId, step }),
-          {
-            answer: (delta) => emit(windows(), 'ai:agentDelta', { requestId, delta, reset: false }),
-            reset: () => emit(windows(), 'ai:agentDelta', { requestId, delta: '', reset: true }),
-            note: (stepId, note) => devtools.annotate(stepId, note)
-          }
-        )
-        const { answer, query, steps, changes, organise, dropped, usage, costUsd, cached, model } =
-          result
+        const onStep = (step: AgentStep): void =>
+          emit(windows(), 'ai:agentStep', { requestId, step })
+        const hooks: AgentHooks = {
+          answer: (delta) => emit(windows(), 'ai:agentDelta', { requestId, delta, reset: false }),
+          reset: () => emit(windows(), 'ai:agentDelta', { requestId, delta: '', reset: true }),
+          note: (stepId, note) => devtools.annotate(stepId, note)
+        }
+        // F-16.25: a story memory v2 project's chat is Ms Scribe's one answer call (`runScribe`).
+        const result =
+          memory() === 'v2'
+            ? await runScribe(
+                db,
+                deps,
+                { nodeId, message, history, access, focus, requestId, navigation },
+                onStep,
+                hooks
+              )
+            : {
+                ...(await runAgent(
+                  db,
+                  deps,
+                  { nodeId, message, history, access, focus, requestId },
+                  onStep,
+                  hooks
+                )),
+                scribe: null
+              }
+        const {
+          answer,
+          query,
+          steps,
+          changes,
+          organise,
+          scribe,
+          dropped,
+          usage,
+          costUsd,
+          cached,
+          model
+        } = result
         const proposal = createProposal(db, {
           feature: 'agent',
           nodeId,
@@ -4112,6 +4149,7 @@ export function registerHandlers({
           steps,
           changes,
           organise,
+          scribe,
           dropped,
           usage,
           costUsd,

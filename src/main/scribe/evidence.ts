@@ -570,9 +570,18 @@ function gone(frame: EvidenceFrame, key: EvidenceKey): boolean {
   }
 }
 
-/** One item as the prompt shows it: `E1 [happened, 9.3 ¶4] The quay` and its text. */
-export function renderEvidenceItem(item: EvidenceItem): string {
-  return `${item.id} [${evidenceTag(item.label, item.ref, item.doc)}] ${item.title}\n${item.text}`
+/** A scene's id as a write run's edits name it (`n7`), or undefined when it has none. */
+export type EvidenceIdOf = (nodeId: string) => string | undefined
+
+/**
+ * One item as the prompt shows it: `E1 [happened, 9.3 ¶4] The quay` and its text. With `idOf`
+ * (Ms Scribe's write runs, F-16.25), an item that opens a scene adds the scene's id, so an edit can
+ * name it: `E1 [happened, 9.3 ¶4, id n7] The quay`.
+ */
+export function renderEvidenceItem(item: EvidenceItem, idOf?: EvidenceIdOf): string {
+  const id = item.open?.kind === 'scene' ? idOf?.(item.open.id) : undefined
+  const tag = `${evidenceTag(item.label, item.ref, item.doc)}${id === undefined ? '' : `, id ${id}`}`
+  return `${item.id} [${tag}] ${item.title}\n${item.text}`
 }
 
 /**
@@ -582,13 +591,14 @@ export function renderEvidenceItem(item: EvidenceItem): string {
  */
 export function renderEvidence(
   items: readonly EvidenceItem[],
-  budget: number
+  budget: number,
+  idOf?: EvidenceIdOf
 ): { text: string; kept: string[]; dropped: number } {
   const blocks: string[] = []
   const kept: string[] = []
   let used = 0
   for (const item of items) {
-    const block = renderEvidenceItem(item)
+    const block = renderEvidenceItem(item, idOf)
     const cost = estimateTokens(block)
     if (used + cost > budget) continue
     blocks.push(block)

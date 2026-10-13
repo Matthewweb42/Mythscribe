@@ -16,7 +16,7 @@ import {
   scribeBook,
   type ScribeBook
 } from './scribeFixture'
-import { gatherStep0, ordinalScope, type Step0 } from './step0'
+import { caretParaOf, gatherStep0, ordinalScope, type Step0 } from './step0'
 
 /**
  * Step 0 over the test book (F-16.24; plan P3 §1.6): E0 is the open scene whole; the records the
@@ -306,5 +306,26 @@ describe('a record’s digest (P2b-D7, decision 5)', () => {
     const lines = step.records[0]?.lines.map((line) => line.text) ?? []
     expect(lines.filter((line) => line.startsWith('Age:'))).toHaveLength(1)
     expect(lines.some((line) => line.includes('since 1.1'))).toBe(false)
+  })
+})
+
+describe('caretParaOf (F-16.25: E0 notes where the caret is)', () => {
+  const paragraphs = ['Mara watched the quay.', 'Tomas sold the map.', 'Orrin overheard Tomas.']
+
+  it('finds the paragraph the caret window ends in', () => {
+    expect(caretParaOf(paragraphs, 'Mara watched the quay.\n\nTomas sold')).toBe(1)
+    expect(caretParaOf(paragraphs, 'Mara watched the quay.')).toBe(0)
+    // A window cut inside one long paragraph holds its middle.
+    expect(caretParaOf(paragraphs, 'overheard')).toBe(2)
+  })
+
+  it('places a caret at the start of an empty block after the paragraph before it', () => {
+    expect(caretParaOf(paragraphs, 'Tomas sold the map.\n\n')).toBe(2)
+  })
+
+  it('answers null with no window or no match', () => {
+    expect(caretParaOf(paragraphs, '')).toBeNull()
+    expect(caretParaOf(paragraphs, 'Nothing like it.\n\nNor this')).toBeNull()
+    expect(caretParaOf([], 'Mara')).toBeNull()
   })
 })

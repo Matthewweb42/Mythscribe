@@ -233,14 +233,7 @@ export function notFoundLine(
   if (refs.open !== null && refs.open !== '') places.push(`the open scene ${refs.open}`)
   const cited = [...new Set(refs.cited)].filter((ref) => ref !== '' && ref !== refs.open)
   if (cited.length > 0) places.push(`${cited.length === 1 ? 'scene' : 'scenes'} ${listed(cited)}`)
-  let searched: string | null = null
-  if (scope !== null) {
-    const words = scope.terms.length > 0 ? ` for ${scope.terms.join(', ')}` : ''
-    if (scope.wholeBook) searched = `the whole book${words}`
-    else if (scope.allEarlier) searched = `every scene up to ${scope.to}${words}`
-    else if (scope.from === scope.to) searched = `${scope.from}${words}`
-    else searched = `${scope.from}–${scope.to}${words}`
-  }
+  const searched = scope === null ? null : searchedPhrase(scope)
   if (places.length === 0 && searched === null) return 'Not found in the manuscript.'
   const looked = places.length === 0 ? null : `looked in ${places.join(', ')}`
   const said =
@@ -250,6 +243,24 @@ export function notFoundLine(
         ? looked
         : `${looked}, and searched ${searched}`
   return `Not found in the manuscript (I ${said})`
+}
+
+/** What a search covered, in words: "every scene up to 14.2 for distrust, suspicion". */
+export function searchedPhrase(scope: SearchScope): string {
+  const words = scope.terms.length > 0 ? ` for ${scope.terms.join(', ')}` : ''
+  if (scope.wholeBook) return `the whole book${words}`
+  if (scope.allEarlier) return `every scene up to ${scope.to}${words}`
+  if (scope.from === scope.to) return `${scope.from}${words}`
+  return `${scope.from}–${scope.to}${words}`
+}
+
+/**
+ * The scope line of an answer (P3-D8), from what code searched, never from `checkedUpTo`:
+ * "Searched every scene up to 14.2 for distrust, suspicion". Ms Scribe's prompt carries it, and
+ * the turn keeps it under the answer.
+ */
+export function scopeLine(scope: SearchScope): string {
+  return `Searched ${searchedPhrase(scope)}`
 }
 
 /** One earlier message of the conversation. */

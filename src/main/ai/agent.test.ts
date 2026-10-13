@@ -29,7 +29,6 @@ import { manuscriptDocuments } from '../voice/profile'
 import {
   AGENT_DROPPED_RESULT,
   AGENT_OUT_OF_STEPS,
-  AGENT_V2_NO_ORGANISE,
   AnswerStream,
   agentStepRequestId,
   fitAgentPrompt,
@@ -112,7 +111,6 @@ const run = (over: Partial<AgentInput> = {}): ReturnType<typeof runAgent> =>
       history: [],
       access: 'read',
       focus: { beforeCaret: '', selection: '' },
-      memory: 'v1',
       ...over
     },
     (step) => steps.push(step)
@@ -490,8 +488,7 @@ describe('runAgent, replies that cannot be used (2026-10-07)', () => {
         history: [],
         access: 'write',
         focus: { beforeCaret: '', selection: '' },
-        requestId: 'r-9',
-        memory: 'v1'
+        requestId: 'r-9'
       },
       () => undefined,
       {
@@ -539,8 +536,7 @@ describe('runAgent, replies that cannot be used (2026-10-07)', () => {
         message: 'Where?',
         history: [],
         access: 'read',
-        focus: { beforeCaret: '', selection: '' },
-        memory: 'v1'
+        focus: { beforeCaret: '', selection: '' }
       },
       () => undefined,
       { answer: (delta) => answers.push(delta) }
@@ -611,18 +607,6 @@ describe('the organise request (F-9.10, agent.v4)', () => {
       scope: ['sheets'],
       instruction: 'Merge the duplicate sheets.'
     })
-  })
-
-  it('is dropped in a story memory v2 project, which has no Organise (F-16.4)', async () => {
-    replies({
-      answer: 'I will plan a tidier story bible.',
-      found: true,
-      organise: { scope: ['sheets'], instruction: 'Merge the duplicate sheets.' }
-    })
-    const result = await run({ memory: 'v2' })
-    expect(result.organise).toBeNull()
-    expect(result.dropped).toBe(1)
-    expect(result.answer).toBe(`I will plan a tidier story bible.\n\n${AGENT_V2_NO_ORGANISE}`)
   })
 })
 

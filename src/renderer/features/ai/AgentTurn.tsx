@@ -4,6 +4,8 @@ import {
   isDeletion,
   isDraftIntent,
   isRewriteIntent,
+  isSheetQuestion,
+  sheetLineDone,
   type AgentChange,
   type AgentEdit,
   type AgentStep
@@ -24,6 +26,7 @@ import {
 import { AiWaitText } from './AiWaitText'
 import { AI_WAIT_PHRASES } from './aiWaitPhrases'
 import { canUndoChange, useAssistantStore } from './assistantStore'
+import { SheetLineCard } from './SheetLineCard'
 
 /** How much of a changed passage a log line quotes. */
 const EXCERPT_CHARS = 80
@@ -313,7 +316,8 @@ function logLine(change: AgentChange): string {
         : ''
   switch (change.status) {
     case 'applied':
-      return `${head}${detail}`
+      // F-16.26: a sheet line's confirmation ("Pinned on Mara’s sheet: “hates the sea”").
+      return edit.kind === 'sheetLine' ? sheetLineDone(edit) : `${head}${detail}`
     case 'skipped':
       return `Skipped: ${head}`
     case 'undone':
@@ -346,7 +350,8 @@ export function AgentChanges({
   const applyAll = useAssistantStore((s) => s.applyAll)
   if (changes.length === 0) return null
   const waiting = changes.filter(
-    (change) => change.status === 'pending' && !isDeletion(change.edit)
+    (change) =>
+      change.status === 'pending' && !isDeletion(change.edit) && !isSheetQuestion(change.edit)
   ).length
   return (
     <div className="flex flex-col gap-1.5">
@@ -396,6 +401,16 @@ export function AgentChanges({
                 </button>
               ) : null}
             </div>
+          )
+        }
+        if (change.edit.kind === 'sheetLine' && change.edit.place === null) {
+          return (
+            <SheetLineCard
+              key={change.id}
+              messageId={messageId}
+              change={{ ...change, edit: change.edit }}
+              busy={busy}
+            />
           )
         }
         if (change.edit.kind === 'clear') {

@@ -2,12 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import {
-  OPENROUTER_BASE_URL,
-  OPENROUTER_DEFAULT_MODELS,
-  inputBudget,
-  outputBudget
-} from '@shared/ai'
+import { OPENROUTER_BASE_URL, OPENROUTER_DEFAULT_MODELS, outputBudget } from '@shared/ai'
 import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote, normalizeForMatch } from '@shared/critique'
 import type { EditPassType } from '@shared/editPass'
@@ -24,11 +19,13 @@ import { checkGhostTextFidelity } from '@shared/voiceFidelity'
 import { renderCostRegistry } from './costRegistry'
 import { WHAT_NEXT_DIRECTIONS } from '@shared/whatNext'
 import { parseAgentReply } from '../agent'
+import { readScribeReply } from '../../scribe/runScribe'
+import { parseCitedAnswer } from '@shared/scribeAnswer'
 import { parseBetaReaderAnswerV2 } from '../betaReader'
 import { parsePlanLinksV2Answer } from '../../memory/reading/planLinks'
 import { checkChatFidelity, postProcessChatText } from '../chat'
 import { postProcessGhostText } from '../ghostText'
-import { PROMPT_CATALOGUE, PROMPT_VERSIONS } from '../prompts/catalogue'
+import { PROMPT_CATALOGUE, PROMPT_VERSIONS, promptInputBudget } from '../prompts/catalogue'
 import { parseEditChanges, parseEditNotes } from '../editPass'
 import { parseProofreadAnswer } from '../proofread'
 import { parseOrganiseAnswer } from '../organise'
@@ -93,8 +90,9 @@ describe('prompt eval harness (F-5.12)', () => {
   it('every case fits its feature input budget and never asks for more than the output cap', () => {
     for (const row of tokenRows(EVAL_CASES)) {
       const label = `${row.version} / ${row.name}`
+      // F-16.25 (P3-D10): a version with its own cap (agent.v9's 24,000) is held to it.
       expect(row.total, `${label} is over the ${row.version} input budget`).toBeLessThanOrEqual(
-        inputBudget(PROMPT_CATALOGUE[row.version].feature)
+        promptInputBudget(PROMPT_CATALOGUE[row.version].feature, row.version)
       )
       expect(row.maxTokens, `${label} asks for more than its output cap`).toBeLessThanOrEqual(
         outputBudget(PROMPT_CATALOGUE[row.version].feature)
@@ -938,6 +936,90 @@ function scoreVerify(
     : { kind: 'json', ok: false, problem: wrong.join(', ') }
 }
 
+/** Saying someone does not know something, which no answer may state as fact (P2b rule 9). */
+const ABSENCE =
+  /\b(?:doesn['’]t|does not|did not|didn['’]t|never) (?:know|knew|learns?|learned|learnt|find out|found out)\b/iu
+
+/**
+ * Ms Scribe's answer (F-16.25, `agent.v9`): the reply as the feature reads it; every citation's
+ * item sent and its quote in it as sent (the code check), never a map; `found` or a `need`; the
+ * expected edit and place, or none; no absence as fact without "searched"; required phrases.
+ */
+function scoreScribe(
+  scoring: Extract<EvalCase['scoring'], { kind: 'scribe' }>,
+  answer: string
+): LiveResult['verdict'] {
+  const reply = readScribeReply(answer, null)
+  if (reply.kind === 'broken') return { kind: 'json', ok: false, problem: 'not one JSON object' }
+  const want = scoring.expect
+  if (reply.kind === 'need') {
+    return want.need === true
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `asked for "${reply.need}"` }
+  }
+  if (want.need === true) return { kind: 'json', ok: false, problem: 'answered instead of asking' }
+  const problems: string[] = []
+  const parsed = parseCitedAnswer(reply.answer)
+  let citations = 0
+  let bad = parsed.malformed
+  for (const sentence of parsed.sentences) {
+    for (const citation of sentence.citations) {
+      citations += 1
+      const text = scoring.sent[citation.evidence]
+      if (
+        text === undefined ||
+        scoring.maps.includes(citation.evidence) ||
+        !findQuote(text, citation.quote)
+      ) {
+        bad += 1
+      }
+    }
+  }
+  if (bad > 0) problems.push(`${bad} of ${citations} citations fail the code check`)
+  if (want.found !== undefined && reply.found !== want.found) {
+    problems.push(`found ${reply.found}, expected ${want.found}`)
+  }
+  const edits = reply.edits.map((edit) =>
+    typeof edit === 'object' && edit !== null ? (edit as Record<string, unknown>) : {}
+  )
+  if (want.noEdits === true && edits.length > 0)
+    problems.push(`${edits.length} edits on a read run`)
+  if (want.edit !== undefined) {
+    const expected = want.edit
+    const hit = edits.find(
+      (edit) =>
+        edit.edit === expected.kind &&
+        (expected.place === undefined || edit.place === expected.place)
+    )
+    if (hit === undefined) {
+      const word = (value: unknown): string => (typeof value === 'string' ? value : '?')
+      const got = edits.map(
+        (edit) => `${word(edit.edit)}${edit.place === undefined ? '' : `/${word(edit.place)}`}`
+      )
+      problems.push(
+        `no ${expected.kind}${expected.place === undefined ? '' : `/${expected.place}`} edit (edits: ${got.join(', ') || 'none'})`
+      )
+    }
+    if (
+      expected.kind === 'insert' &&
+      hit !== undefined &&
+      typeof hit.text === 'string' &&
+      hit.text !== ''
+    ) {
+      problems.push('wrote prose instead of a brief')
+    }
+  }
+  if (ABSENCE.test(reply.answer) && !/searched/iu.test(reply.answer)) {
+    problems.push('states an absence without its scope')
+  }
+  for (const phrase of want.required ?? []) {
+    if (!reply.answer.toLowerCase().includes(phrase.toLowerCase())) problems.push(`no "${phrase}"`)
+  }
+  return problems.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: problems.join('; ') }
+}
+
 /**
  * The live fidelity run through `live` (F-5.12; one key, F-16.22): every case once through the
  * request path, as the app sends it, each answer post-processed and scored as its feature scores
@@ -956,6 +1038,8 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
       maxTokens: c.maxTokens,
       json: entry.output === 'json',
       ...(c.temperature === undefined ? {} : { temperature: c.temperature }),
+      // F-16.25: a case's own reasoning, as the feature sends it (Ms Scribe's answer turns).
+      ...(c.reasoning === undefined ? {} : { reasoning: c.reasoning }),
       // Everything the request carries, so two cases apart only in temperature or cap never
       // share the run's cache: each case reaches the provider once.
       contextHash: sha256(
@@ -1198,6 +1282,10 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
         answer: reply.text,
         verdict: scoreVerify(c.scoring.expected, reply.text)
       })
+      continue
+    }
+    if (c.scoring.kind === 'scribe') {
+      results.push({ ...base, answer: reply.text, verdict: scoreScribe(c.scoring, reply.text) })
       continue
     }
     if (c.scoring.kind === 'structure') {

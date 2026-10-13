@@ -102,6 +102,7 @@ import { NOTES_SUGGEST_PROMPT_V4_VERSION } from './notesSuggest.v4'
 import { PLAN_LINKS_PROMPT_V2_VERSION } from './planLinks.v2'
 import { READER_V2_PROMPT_VERSION } from './reader.v2'
 import { VERIFY_V2_PROMPT_VERSION } from './verify.v2'
+import { AGENT_PROMPT_V9_VERSION } from './agent.v9'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -226,7 +227,9 @@ export const PROMPT_VERSIONS = [
   PLAN_LINKS_PROMPT_V2_VERSION,
   // F-16.22, F-16.23 (story memory v2 only): who knows what and plot threads; v1 stays for its rows.
   READER_V2_PROMPT_VERSION,
-  VERIFY_V2_PROMPT_VERSION
+  VERIFY_V2_PROMPT_VERSION,
+  // F-16.25, F-16.26 (story memory v2 only): Ms Scribe's one answer call; v1 keeps agent.v8.
+  AGENT_PROMPT_V9_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -704,15 +707,18 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     since: 'F-16.21'
   },
   [READER_V2_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.22' },
-  [VERIFY_V2_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.22' }
+  [VERIFY_V2_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.22' },
+  [AGENT_PROMPT_V9_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-16.25' }
 }
 
 /**
  * F-16.25 (P3-D10): a prompt version whose input cap is its own rather than its feature's, so a
  * new version may carry more (Ms Scribe's `agent.v9` sends the whole open scene, 24,000) while the
- * feature's older versions and every v1 request keep the cap they had. Slice 2 adds `agent.v9`.
+ * feature's older versions and every v1 request keep the cap they had.
  */
-export const PROMPT_INPUT_BUDGETS: Partial<Record<PromptVersion, number>> = {}
+export const PROMPT_INPUT_BUDGETS: Partial<Record<PromptVersion, number>> = {
+  [AGENT_PROMPT_V9_VERSION]: 24_000
+}
 
 /** The input cap a request built from `version` is checked against: its own, else its feature's. */
 export function promptInputBudget(

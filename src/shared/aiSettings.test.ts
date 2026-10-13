@@ -177,6 +177,18 @@ describe('dataSharingSends (F-16.4)', () => {
     expect(AI_DATA_SHARING.agent.sendsV2).toContain('Research')
     expect(AI_DATA_SHARING.agent.sendsV2).toContain('your to-dos')
     expect(AI_DATA_SHARING.agent.sendsV2).not.toMatch(/tag names|story-bible sheets|To do list/)
+    // F-16.25 (agent.v9): the whole open scene, labelled evidence, one widened chapter, sheet lines.
+    for (const part of [
+      'the whole open scene',
+      'each labelled with where',
+      'Not canon text, your Ideas',
+      'who knows what',
+      'about 8,000 tokens of one chapter',
+      'about 1,500 tokens',
+      "records' names for sheet lines"
+    ]) {
+      expect(AI_DATA_SHARING.agent.sendsV2).toContain(part)
+    }
     expect(AI_DATA_SHARING.proofread.sendsV2).toContain('names and nicknames of your records')
   })
 

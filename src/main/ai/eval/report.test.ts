@@ -161,7 +161,8 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
   it.each([
     ['index', 0.12],
     ['openQuestion', 0.015],
-    ['openQuestionWidened', 0.03],
+    // P3-D22: the call that asks to widen (agent.v9:need), which design Part 5 did not count.
+    ['openQuestionWidened', 0.038],
     ['session', 0.013],
     ['checkBook', 0.035],
     ['whatIf', 0.11]
@@ -207,7 +208,7 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
     }
   })
 
-  it('F-16.9, F-16.17, F-16.20, F-16.21, F-16.22: the shipped rows left the planned table and their prompts are catalogued', () => {
+  it('F-16.9, F-16.17, F-16.20, F-16.21, F-16.22, F-16.25: the shipped rows left the planned table and their prompts are catalogued', () => {
     expect(SHIPPED_PLAN_ROWS.map((row) => row.id)).toEqual([
       'contextImport.v3',
       'reviewChat.v3',
@@ -225,7 +226,11 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
       'reader.v2:card',
       'verify.v2',
       'verify.v2:pro',
-      'verify.v2:spot'
+      'verify.v2:spot',
+      'agent.v9:open',
+      'agent.v9:lookup',
+      'agent.v9:need',
+      'agent.v9:widened'
     ])
     for (const row of SHIPPED_PLAN_ROWS) {
       expect(PLANNED_COST_NOTES.some((planned) => planned.id === row.id)).toBe(false)

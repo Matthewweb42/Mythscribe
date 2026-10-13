@@ -7,6 +7,7 @@ import {
   isDraftIntent,
   isOpenAction,
   isRewriteIntent,
+  isSheetQuestion,
   settledAfterReload,
   type AgentAccess,
   type AgentChange,
@@ -21,6 +22,7 @@ import {
   type RouteEdit
 } from '@shared/assistantRoute'
 import type { ClearGroup } from '@shared/bibleClear'
+import type { RecordPage } from '@shared/memory/records'
 import { DEFAULT_ASSISTANT_MODE, type AssistantMode } from '@shared/aiSettings'
 import {
   CHAT_HISTORY_TURNS,
@@ -243,6 +245,13 @@ interface AssistantState {
     option: { group: ClearGroup; id: string },
     checked: boolean
   ) => void
+  /**
+   * F-16.26 (decision 3 as the author changed it): the author's answer to "Is this an idea or
+   * canon?" on a sheet line Ms Scribe could not place: *Idea* puts it in the record's Ideas,
+   * *Canon* in its Pinned, and the choice is the click that lands it (in Ask and in Auto), with
+   * the confirmation and its Undo. Not in Plan, which never writes.
+   */
+  pickSheetPlace: (messageId: string, changeId: string, place: RecordPage) => Promise<void>
   /**
    * Takes an applied edit back (this session only: the undo lives in memory; for a sheet or tag
    * edit it calls the Changes log's undo, F-9.15).
@@ -744,6 +753,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   async applyChange(messageId, changeId) {
     const found = findChange(messageId, changeId)
     if (found?.change.status !== 'pending' || get().changing[changeId]) return
+    // F-16.26: a sheet line lands only once the author said Idea or Canon (`pickSheetPlace`).
+    if (isSheetQuestion(found.change.edit)) return
     // 2026-10-07: prose the app drafts first; Apply on one asks for it (an insertion lands in
     // the editor as ghost text and waits for Tab there).
     if (isIntent(found.change.edit)) {
@@ -758,10 +769,12 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       const undo =
         found.change.edit.kind === 'undoTurn'
           ? await undoLastTurn(messageId)
-          : await applyAgentEdit(found.change.edit, drafted ?? found.message.proposalId ?? '', {
-              source: 'chat',
-              run: messageId
-            })
+          : await applyAgentEdit(
+              found.change.edit,
+              drafted ?? found.message.proposalId ?? '',
+              { source: 'chat', run: messageId },
+              (notice) => patchChange(messageId, changeId, { notice })
+            )
       if (undo !== null) undoers.set(changeId, undo)
       patchChange(messageId, changeId, { status: 'applied', error: null })
       if (drafted !== null) void proposalStore.settle(drafted, 'accepted', null)
@@ -776,8 +789,12 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   async applyAll(messageId) {
     const found = findMessage(messageId)
     // Deletions are never part of it: each asks on its own (F-5.21).
+    // F-16.26: nor a sheet line waiting for "Is this an idea or canon?", whose answer is the click.
     const ids = (found?.agent?.changes ?? [])
-      .filter((change) => change.status === 'pending' && !isDeletion(change.edit))
+      .filter(
+        (change) =>
+          change.status === 'pending' && !isDeletion(change.edit) && !isSheetQuestion(change.edit)
+      )
       .map((change) => change.id)
     for (const changeId of ids) await get().applyChange(messageId, changeId)
   },
@@ -821,6 +838,21 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
         )
       }
     })
+  },
+
+  async pickSheetPlace(messageId, changeId, place) {
+    const found = findChange(messageId, changeId)
+    const edit = found?.change.edit
+    if (found?.change.status !== 'pending' || edit?.kind !== 'sheetLine' || edit.place !== null) {
+      return
+    }
+    if (get().changing[changeId]) return
+    if (agentAccessFor(chatModeNow()) === 'read') {
+      toast.error(PLAN_NO_EDITS_MESSAGE)
+      return
+    }
+    patchChange(messageId, changeId, { edit: { ...edit, place } })
+    await get().applyChange(messageId, changeId)
   },
 
   async undoChange(messageId, changeId) {
@@ -1288,6 +1320,8 @@ async function runAgentTurn(
       usage: result.usage,
       proposalId: result.proposalId,
       query: result.query,
+      // F-16.25: a Ms Scribe turn (story memory v2) keeps its checked citations and marks.
+      scribe: result.scribe,
       agent: { access, steps: result.steps, changes }
     },
     result.cached
@@ -1304,7 +1338,15 @@ async function runAgentTurn(
   if (autoApply) {
     const store = useAssistantStore.getState()
     for (const change of changes) {
-      if (isDeletion(change.edit) || change.violation !== null || isIntent(change.edit)) continue
+      // F-16.26: a sheet line Ms Scribe could not place waits for "Is this an idea or canon?".
+      if (
+        isDeletion(change.edit) ||
+        change.violation !== null ||
+        isIntent(change.edit) ||
+        isSheetQuestion(change.edit)
+      ) {
+        continue
+      }
       await store.applyChange(messageId, change.id)
     }
   }

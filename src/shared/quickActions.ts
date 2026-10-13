@@ -69,9 +69,17 @@ export function recapQuestion(selection: string | null): string {
 /** The user turn of a What should come next? run. */
 export const WHAT_NEXT_QUESTION = 'What should come next?'
 
+/** How a direction's Write this message opens (F-5.17). */
+export const DIRECTION_MESSAGE_OPENING = 'Continue the scene in this direction: '
+
 /** The Author-mode instruction a direction's Write this sends (F-5.17: one click to ghost text). */
 export function directionMessage(direction: WhatNextDirection): string {
-  return `Continue the scene in this direction: ${direction.title}. ${direction.text}`
+  return `${DIRECTION_MESSAGE_OPENING}${direction.title}. ${direction.text}`
+}
+
+/** F-16.25: whether a chat message is a direction's Write this (Ms Scribe's `draft` turn). */
+export function isDirectionMessage(message: string): boolean {
+  return message.trimStart().startsWith(DIRECTION_MESSAGE_OPENING)
 }
 
 export interface QuickActionState {

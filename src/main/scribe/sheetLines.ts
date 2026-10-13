@@ -52,6 +52,25 @@ function sheetRecord(db: TreeDb, id: string): StoryRecord {
 }
 
 /**
+ * How a line relates to what a record's page already says (`relateLine`): `duplicate` when the
+ * page says it (the same words, or a labelled line the page covers), else the line's kind and the
+ * paragraph it would update or contradict. Ms Scribe offers no line a page already holds
+ * (`runScribe`, P3-D16), and `addSheetLine` refuses one.
+ */
+export function relateToPage(
+  record: StoryRecord,
+  page: RecordPage,
+  text: string
+): ReturnType<typeof relateLine> {
+  const doc = pageOf(record, page)
+  const said = (doc === null ? [] : pageTextBlocks(doc)).map((block) => ({
+    index: block.index,
+    text: block.text
+  }))
+  return relateLine(text.replace(/\s+/gu, ' ').trim(), said)
+}
+
+/**
  * Adds one line at the end of a record's Pinned or Ideas page, marked `aiWritten { turn, date }`,
  * and re-indexes the record. ALREADY_EXISTS when the page says it already (`relateLine`: the
  * same words, or a labelled line the page covers); `conflict` is the Pinned line under the same
@@ -63,8 +82,7 @@ export function addSheetLine(db: TreeDb, input: SheetLineAdd, now: Date): SheetL
   const record = sheetRecord(db, input.id)
   const page = pageOf(record, input.page)
   const blocks = page === null ? [] : pageTextBlocks(page)
-  const said = blocks.map((block) => ({ index: block.index, text: block.text }))
-  const relation = relateLine(text, said)
+  const relation = relateToPage(record, input.page, text)
   if (relation === 'duplicate') {
     throw new AppError(
       'ALREADY_EXISTS',

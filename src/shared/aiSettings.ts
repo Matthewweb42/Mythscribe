@@ -621,20 +621,15 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'profile (stylometric rules, learned style notes, and up to 3 exemplar passages) and ' +
       'your author rules and banned phrases go too.',
     sendsV2:
-      `Your message, the recent turns of the conversation, ${STORY_MAP_SENDS_V2}, the open ` +
-      "document's title, synopsis, " +
-      "notes (the first 1,500 characters), and card (the AI's map of it), up to 1,500 characters before " +
-      'the caret and 2,000 of the selected passage, and then, one lookup at a time (at most 6 ' +
-      'per message), what the assistant asks to read: a record (its names, its Pinned lines ' +
-      'except those marked Not canon, its Ideas labelled as ideas, the scenes it is the point ' +
-      'of view of with their typed place and time, where the book names it, and the card of the ' +
-      'last scene that names it), scene cards, ' +
-      'matching paragraphs of the manuscript, scene notes, Pinned, Ideas and Research ' +
-      'documents (each labelled canon, plan or idea), the outline of titles and word counts, ' +
-      'up to 6,000 characters of a document per read, notes, and your to-dos. When it may ' +
-      'edit, the voice profile (stylometric rules, learned style notes, and up to 3 exemplar ' +
-      'passages) and your author rules and banned phrases go too, and prose it drafts carries ' +
-      `${STORY_NOTES_SENDS}.`,
+      'Your message; the earlier questions and answers of the conversation (about 1,500 tokens ' +
+      'at most, older turns cut to their first line); the names and nicknames of your records; ' +
+      'the whole open scene; and the passages picked for the question, each labelled with where ' +
+      'it is (the manuscript up to now, later in the book, your notes and Pinned lines, Research ' +
+      'source documents, lines filed from a document, Not canon text, your Ideas, synopses and ' +
+      'planned scenes, idea scenes): scene paragraphs, the facts read from the book with their ' +
+      'quotes, who knows what, story years and ages, scene cards, the outline, your to-dos. When ' +
+      'it needs more, up to about 8,000 tokens of one chapter. When it may edit (Ask, Auto), the ' +
+      "voice profile and your author rules, and your records' names for sheet lines.",
     minDial: 1
   },
   contextImport: {
