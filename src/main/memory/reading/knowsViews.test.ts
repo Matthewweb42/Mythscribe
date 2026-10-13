@@ -11,12 +11,18 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../../document/documentStore'
 import { activeDraftId } from '../../draft/draftStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
-import { createNode, getNode, type TreeDb } from '../../tree/treeStore'
+import { createNode, deleteNode, getNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
 import { createAuthorTodo, listAuthorTodos } from '../authorTodoStore'
-import { getDismissedByKey, listDismissed, undoDismissed } from '../dismissedStore'
+import { dismiss, getDismissedByKey, listDismissed, undoDismissed } from '../dismissedStore'
 import { invariantIndexed, scanNamesFor } from '../nameIndexer'
-import { createRecord, getRecord, invariantAliases, listRecords } from '../recordStore'
+import {
+  createRecord,
+  deleteRecord,
+  getRecord,
+  invariantAliases,
+  listRecords
+} from '../recordStore'
 import { setSceneDetails } from '../sceneDetailStore'
 import { revealIn, sceneTexts, seedClaims } from './claimFixture'
 import { getClaim, invariantClaims, invariantKnows } from './claimStore'
@@ -250,6 +256,24 @@ describe('This scene’s Who knows what (F-16.22, P2b-D21)', () => {
     memory = sceneMemory(db, two)
     expect(memory.secrets.tension).toEqual([])
     expect(memory.secrets.more).toBe(1)
+  })
+
+  it('counts only characters and groups Here as learners: a place or a secret *+ also here* is none', () => {
+    const map = soldMap()
+    checked(one)
+    checked(two)
+    details(one, mara, [orrin, tomas, quay, map])
+    const [touched] = sceneMemory(db, one).secrets.touched
+    expect(touched?.without).toEqual([mara])
+    // Orrin holds it Here and Mara (the POV) has her own line: no "Orrin knows; not the Quay".
+    details(two, mara, [orrin, quay, map])
+    const memory = sceneMemory(db, two)
+    expect(memory.secrets.tension.map((line) => [line.kind, line.recordId])).toEqual([
+      ['readersKnow', mara]
+    ])
+    // A place typed as the POV is no learner either.
+    details(two, quay, [orrin])
+    expect(sceneMemory(db, two).secrets.tension).toEqual([])
   })
 
   it('never says anyone does not know, whatever the book holds', () => {
@@ -491,6 +515,117 @@ describe('Split and Not a secret (P2b-D5, D13)', () => {
     expect(invariants()).toEqual([])
     // Split still works on the restored merge.
     expect(splitReveal(db, merged, LATER).recordId).not.toBe(map)
+  })
+
+  it('brings back both secrets one sentence revealed, from the one row they share', () => {
+    const map = soldMap()
+    const { recordId: stranger } = createTopic(
+      db,
+      {
+        kind: 'secret',
+        label: 'the stranger',
+        quote: revealIn(db, one, {
+          para: 1,
+          quote: 'Tomas sold the map to a stranger',
+          label: 'the stranger'
+        })
+      },
+      NOW
+    )
+    const count = listDismissed(db).count
+    const a = topicNotRight(db, map, LATER)
+    const b = topicNotRight(db, stranger, LATER)
+    // One sentence, one row: it names both, and both snapshots list it.
+    expect(b.dismissed.map((row) => row.id)).toEqual(a.dismissed.map((row) => row.id))
+    expect(b.dismissed[0]?.label).toBe('Not a secret: the sold map; Not a secret: the stranger')
+    expect(listDismissed(db).count).toBe(count + 1)
+    const id = a.dismissed[0]?.id ?? ''
+    undoDismissed(db, id)
+    const restored = restoreTopicNotRight(db, id)
+    expect(restored?.topicIds.sort()).toEqual([map, stranger].sort())
+    expect(getRecord(db, map)).toMatchObject({ name: 'the sold map' })
+    expect(getRecord(db, stranger)).toMatchObject({ name: 'the stranger' })
+    expect(getTopicSnapshots(db)).toEqual([])
+    expect(listDismissed(db).count).toBe(count)
+    expect(invariants()).toEqual([])
+  })
+
+  it('puts a secret back after a scene one of its Dismissed rows named was deleted', () => {
+    const map = soldMap()
+    // A row about the secret in scene two (as *Not right* on a thread's step writes one).
+    dismiss(
+      db,
+      { kind: 'notRight', key: 'step|two', recordId: map, nodeId: two, label: 'Not right: a step' },
+      NOW
+    )
+    const { dismissed } = topicNotRight(db, map, LATER)
+    deleteNode(db, two)
+    const id = dismissed[0]?.id ?? ''
+    undoDismissed(db, id)
+    expect(restoreTopicNotRight(db, id)?.topicIds).toEqual([map])
+    expect(getRecord(db, map)).not.toBeNull()
+    // The scene went, as its foreign key would have cleared it.
+    expect(getDismissedByKey(db, 'notRight', 'step|two')).toMatchObject({
+      recordId: map,
+      nodeId: null
+    })
+  })
+
+  it('never counts a thought for the knower once its thinker is gone, live or after Undo', () => {
+    const map = soldMap()
+    const lise = record('Lise')
+    // "Orrin knew, Lise thought": Lise's belief about Orrin, never Orrin knowing.
+    const [thought] = seedClaims(
+      db,
+      one,
+      [
+        {
+          recordId: mara,
+          slot: 'knows',
+          value: 'deduced',
+          how: 'deduced',
+          objectId: map,
+          voice: 'thought',
+          speakerId: lise,
+          quote: 'Mara watched from the stair',
+          para: 0,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    const { dismissed } = topicNotRight(db, map, LATER)
+    deleteRecord(db, lise)
+    const id = dismissed[0]?.id ?? ''
+    undoDismissed(db, id)
+    restoreTopicNotRight(db, id)
+    expect(getRecord(db, map)).not.toBeNull()
+    expect(getClaim(db, thought ?? '')).toBeNull()
+    expect(sceneMemory(db, one).secrets.touched[0]?.without).toEqual([mara])
+    // Live: deleting the thinker takes the thought along instead of leaving it speakerless.
+    const ella = record('Ella')
+    const [live] = seedClaims(
+      db,
+      one,
+      [
+        {
+          recordId: mara,
+          slot: 'knows',
+          value: 'deduced',
+          how: 'deduced',
+          objectId: map,
+          voice: 'thought',
+          speakerId: ella,
+          quote: 'Mara watched from the stair',
+          para: 0,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    deleteRecord(db, ella)
+    expect(getClaim(db, live ?? '')).toBeNull()
+    expect(sceneMemory(db, one).secrets.touched[0]?.without).toEqual([mara])
   })
 
   it('keeps the same reveal from making it again, and refuses the author’s own secrets', () => {

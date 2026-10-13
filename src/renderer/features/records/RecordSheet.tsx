@@ -128,28 +128,36 @@ function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
                 saveNames((input) => ({ ...input, name: { ...input.name, text } }))
               }
             />
-            <label className="flex items-center gap-2 text-xs text-fg-muted">
-              Category
-              <select
-                aria-label="Category"
-                value={record.categoryId}
-                disabled={busy || topic}
-                onChange={(event) =>
-                  void run(async () => {
-                    await useRecordStore
-                      .getState()
-                      .update(record.id, { categoryId: event.target.value })
-                  })
-                }
-                className={SELECT}
-              >
-                {categories.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {topic ? (
+              // A topic's category is fixed, and a secret's is in no picker (`SECRET_CATEGORY`):
+              // a select would show the first option in its place.
+              <p data-testid="record-category" className="m-0 text-xs text-fg-muted">
+                Category: {category.name}
+              </p>
+            ) : (
+              <label className="flex items-center gap-2 text-xs text-fg-muted">
+                Category
+                <select
+                  aria-label="Category"
+                  value={record.categoryId}
+                  disabled={busy}
+                  onChange={(event) =>
+                    void run(async () => {
+                      await useRecordStore
+                        .getState()
+                        .update(record.id, { categoryId: event.target.value })
+                    })
+                  }
+                  className={SELECT}
+                >
+                  {categories.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
           <button
             type="button"

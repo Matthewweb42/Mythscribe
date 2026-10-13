@@ -19,7 +19,7 @@ import type { TreeDb } from '../../tree/treeStore'
 import { readerRosterAddition, readerRosterLine } from '../../ai/prompts/reader.v1'
 import { READER_V2_PROMPT_VERSION } from '../../ai/prompts/reader.v2'
 import { currentDraftId } from '../../draft/draftStore'
-import { namedInCounts } from '../nameIndexer'
+import { namedTotals } from '../nameIndexer'
 import { listRecords } from '../recordStore'
 import { claimSources } from './claimStore'
 import { topicsInDraft } from './recordEvidence'
@@ -330,15 +330,6 @@ function appended(row: RosterRow, records: readonly StoryRecordSummary[]): Roste
   }
   if (tokensOf([...next.base, ...next.additions]) > ROSTER_RECORD_TOKENS) return null
   return next
-}
-
-/** How often each record is named across the book (certain mentions), for the cap's cut. */
-function namedTotals(db: TreeDb): Map<string, number> {
-  const totals = new Map<string, number>()
-  for (const row of namedInCounts(db)) {
-    totals.set(row.recordId, (totals.get(row.recordId) ?? 0) + row.count)
-  }
-  return totals
 }
 
 /**

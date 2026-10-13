@@ -1967,7 +1967,7 @@ test('story memory v2: who knows what in the panel, the grid and sheets (P2b sli
   const sheet = page.getByTestId('record-sheet')
   const theSecret = sheet.getByRole('region', { name: 'The secret' })
   await expect(theSecret.getByTestId('topic-reveal').nth(1)).toContainText(
-    'also read as “the map sale” in 1.3: judged the same by a second AI read',
+    'also read as “the map sale” in 1.3: merged into this secret',
     { timeout: 15_000 }
   )
   await theSecret.getByRole('button', { name: 'Split “the map sale” off' }).click()

@@ -26,6 +26,7 @@ import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { pageKey, resetPageStore, usePageStore } from '@renderer/features/research/pageStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { resetDismissedStore } from '@renderer/features/thisScene/dismissedStore'
 import { IpcRequestError, setIpcClient } from '@renderer/lib/ipc'
 import { resetNameMentionStore, useNameMentionStore } from './nameMentionStore'
 import { GATE_DEBOUNCE_MS, RecordCreateDialog } from './RecordCreateDialog'
@@ -133,6 +134,7 @@ async function loaded(): Promise<void> {
 beforeEach(() => {
   install()
   resetMemoryStore()
+  resetDismissedStore()
   resetRecordStore()
   resetNameMentionStore()
   resetPageStore()
@@ -147,6 +149,7 @@ afterEach(() => {
   vi.useRealTimers()
   resetActiveEditorStore()
   resetMemoryStore()
+  resetDismissedStore()
   resetRecordStore()
   resetNameMentionStore()
   resetPageStore()
@@ -768,7 +771,8 @@ describe('sheets of who knows what (F-16.22)', () => {
             knowsCellFixture('r-ella', { later: true, ref: '1.4' })
           ],
           knewBefore: ['r-mara']
-        })
+        }),
+        checkedUpTo: { nodeId: 'sc-3', ref: '1.3' }
       }
     })
 
@@ -818,7 +822,8 @@ describe('sheets of who knows what (F-16.22)', () => {
                 })
               }
             ],
-            later: 2
+            later: 2,
+            checkedUpTo: { nodeId: 'sc-3', ref: '1.3' }
           }
         })
       },
@@ -848,7 +853,9 @@ describe('sheets of who knows what (F-16.22)', () => {
     expect(screen.queryByRole('button', { name: /Rename in book/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Split…' })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Knows' })).toBeNull()
-    expect(screen.getByRole('combobox', { name: 'Category' })).toBeDisabled()
+    // A secret's category is in no picker: it is named, never a select showing another one.
+    expect(screen.queryByRole('combobox', { name: 'Category' })).toBeNull()
+    expect(screen.getByTestId('record-category')).toHaveTextContent('Category: Secrets')
     expect(within(section).getByTestId('topic-readers-since')).toHaveTextContent(
       'readers since 1.1'
     )
@@ -872,7 +879,7 @@ describe('sheets of who knows what (F-16.22)', () => {
     await sheetOf('s-map')
     const section = await screen.findByRole('region', { name: 'The secret' })
     expect(within(section).getAllByTestId('topic-reveal')[1]).toHaveTextContent(
-      'also read as “the map sale” in 1.3: judged the same by a second AI read'
+      'also read as “the map sale” in 1.3: merged into this secret'
     )
     fireEvent.click(within(section).getByRole('button', { name: 'Split “the map sale” off' }))
     await waitFor(() => expect(sent('memory:splitTopic')).toEqual([{ topicQuoteId: 'tq-merged' }]))
@@ -937,6 +944,64 @@ describe('sheets of who knows what (F-16.22)', () => {
     ).toEqual(['Choose…', 'Ella Harrow', 'Tomas Harrow'])
   })
 
+  it('scopes the sheets’ empty states by what was checked', async () => {
+    installSecrets({
+      'memory:sheet': (input) => {
+        const { recordId, asOf } = input as Input<'memory:sheet'>
+        const checkedUpTo = { nodeId: 'sc-2', ref: '1.2' }
+        return recordId === 's-sale'
+          ? sheetMemoryFixture(recordId, {
+              asOf,
+              topic: {
+                kind: 'secret',
+                secret: secretViewFixture(recordId, 'the map sale', { readersSince: null }),
+                checkedUpTo
+              }
+            })
+          : sheetMemoryFixture(recordId, {
+              asOf,
+              knows: { lines: [], others: [], later: 1, checkedUpTo }
+            })
+      }
+    })
+    await sheetOf('r-ella')
+    const knows = await screen.findByRole('region', { name: 'Knows' })
+    await waitFor(() =>
+      expect(within(knows).getByTestId('knows-none')).toHaveTextContent(
+        'No scene shows Ella Harrow learning a secret (checked up to 1.2)'
+      )
+    )
+    expect(within(knows).getByTestId('knows-later-lines')).toHaveTextContent(
+      '1 more later in the book'
+    )
+  })
+
+  it('scopes a secret’s sheet with no reveal and no holder', async () => {
+    installSecrets({
+      'memory:sheet': (input) => {
+        const { recordId, asOf } = input as Input<'memory:sheet'>
+        return sheetMemoryFixture(recordId, {
+          asOf,
+          topic: {
+            kind: 'secret',
+            secret: secretViewFixture(recordId, 'the map sale', { readersSince: null }),
+            checkedUpTo: null
+          }
+        })
+      }
+    })
+    await sheetOf('s-sale')
+    const section = await screen.findByRole('region', { name: 'The secret' })
+    await waitFor(() =>
+      expect(within(section).getByTestId('topic-no-holders')).toHaveTextContent(
+        'No scene shows anyone learning this (not checked yet)'
+      )
+    )
+    expect(within(section).getByTestId('topic-readers-since')).toHaveTextContent(
+      'No scene reveals it yet (not checked yet)'
+    )
+  })
+
   it('lists the Secrets section with "readers since · N know", the AI mark, and New secret', async () => {
     installSecrets({
       'memory:knows': () =>
@@ -954,6 +1019,10 @@ describe('sheets of who knows what (F-16.22)', () => {
     const map = within(list).getByRole('button', { name: /^the sold map/ })
     await waitFor(() => expect(map).toHaveTextContent('readers since 1.1 · 2 know'))
     expect(within(map).getByTitle('Found by the AI in your book')).toHaveTextContent('AI')
+    // An AI-made secret the grid does not hold is revealed only where the reader no longer reads.
+    expect(within(list).getByRole('button', { name: /^the map sale/ })).toHaveTextContent(
+      'not in the book now (another draft, or an Idea or left-out scene)'
+    )
     expect(sent('memory:knows')).toEqual([{ asOf: null }])
     fireEvent.click(screen.getByRole('button', { name: 'New secret…' }))
     expect(useRecordStore.getState().creating).toBe('secret')

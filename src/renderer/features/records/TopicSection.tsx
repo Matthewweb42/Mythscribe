@@ -1,11 +1,13 @@
 import { useId, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { KNOWER_KINDS } from '@shared/memory/knows'
-import type { SecretView } from '@shared/memory/views'
+import type { SceneRefView, SecretView } from '@shared/memory/views'
 import { ClaimLine } from '@renderer/features/memory/ClaimLine'
 import { TopicInfoCard } from '@renderer/features/memory/knows/TopicInfo'
 import {
   holderLine,
+  noHoldersText,
+  noRevealText,
   otherKnowsText,
   readersSinceText
 } from '@renderer/features/memory/knows/knowsView'
@@ -26,8 +28,9 @@ const SMALL =
  * since 1.1"; its defining reveal with *Go there* and how it was checked, every reveal merged into
  * it with *Split*, and *Not a secret* when the AI made it (`TopicInfoCard`); then who knows it as
  * of [scene ▾] (each line with ⓘ and *Not right*; the author's marks with *Remove*; the lines that
- * never count apart; how many learn it later) and *+ Someone knew before the book* with a picker
- * of the characters and groups.
+ * never count apart; how many learn it later; with no line, the scoped "No scene shows anyone
+ * learning this (checked up to 1.2)", P2b rule 9) and *+ Someone knew before the book* with a
+ * picker of the characters and groups.
  */
 export function TopicSection({ recordId }: { recordId: string }): React.JSX.Element {
   const { asOf, scenes, setAsOf } = useAsOf()
@@ -44,13 +47,19 @@ export function TopicSection({ recordId }: { recordId: string }): React.JSX.Elem
       ) : topic?.kind !== 'secret' ? (
         <p className="m-0 text-xs text-fg-muted">Nothing read about this secret yet.</p>
       ) : (
-        <SecretBody secret={topic.secret} />
+        <SecretBody secret={topic.secret} checkedUpTo={topic.checkedUpTo} />
       )}
     </section>
   )
 }
 
-function SecretBody({ secret }: { secret: SecretView }): React.JSX.Element {
+function SecretBody({
+  secret,
+  checkedUpTo
+}: {
+  secret: SecretView
+  checkedUpTo: SceneRefView | null
+}): React.JSX.Element {
   const nameOf = useNameOf()
   const paused = useMemoryStore((s) => s.status?.paused ?? null)
   const holders = secret.cells.filter((cell) => !cell.later)
@@ -59,14 +68,16 @@ function SecretBody({ secret }: { secret: SecretView }): React.JSX.Element {
     <>
       <p className="m-0 text-xs text-fg-muted" data-testid="topic-readers-since">
         {secret.readersSince === null
-          ? 'No scene reveals it yet.'
+          ? noRevealText(checkedUpTo)
           : readersSinceText(secret.readersSince)}
       </p>
       <TopicInfoCard topic={secret} kind="secret" />
       <div role="group" aria-label="Who knows it">
         <h4 className={GROUP}>Who knows it</h4>
         {holders.length === 0 ? (
-          <p className="m-0 text-xs text-fg-muted">No one has a line about it up to here.</p>
+          <p className="m-0 text-xs text-fg-muted" data-testid="topic-no-holders">
+            {noHoldersText(checkedUpTo)}
+          </p>
         ) : (
           <ul className="m-0 list-none p-0">
             {holders.map((cell) =>

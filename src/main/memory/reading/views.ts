@@ -346,6 +346,7 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
   ).map((line) => ({ ...line, label: slotLabel(line.slot) }))
 
   const last = draftId === null ? null : lastReading(db, nodeId, draftId)
+  const knowers = knowersOf(here, records)
   return {
     nodeId,
     ref: reading.refs.get(nodeId) ?? null,
@@ -376,15 +377,26 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
       draftId === null
         ? []
         : sceneClaims(db, nodeId, draftId).map((each) => claimView(each, reading)),
-    // F-16.22: the secrets the scene touches and its tension lines, as of the scene.
+    // F-16.22: the secrets the scene touches and its tension lines, as of the scene. Only the
+    // characters and groups Here can know (a place or a thread *+ also here* is no learner).
     secrets: sceneSecrets(
       storedKnows(db, nodeId, reading, nodes),
       nodeId,
-      here.map((chip) => chip.recordId),
-      povOf(here)
+      knowers.map((chip) => chip.recordId),
+      povOf(knowers)
     )
   }
 }
+
+/** The Here chips whose record can know a secret (`KNOWER_KINDS`), in order. */
+const knowersOf = (
+  here: readonly HereChip[],
+  records: ReadonlyMap<string, Pick<StoryRecordSummary, 'kind'>>
+): HereChip[] =>
+  here.filter((chip) => {
+    const kind = records.get(chip.recordId)?.kind
+    return kind !== undefined && KNOWER_KINDS.includes(kind)
+  })
 
 /** The POV among a scene's Here chips, or null. */
 const povOf = (here: readonly HereChip[]): string | null =>

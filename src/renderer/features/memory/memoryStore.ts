@@ -29,8 +29,9 @@ import { ipc } from '@renderer/lib/ipc'
  *
  * Scenes and sheets are read on demand by the views that show them (`useSceneMemory`,
  * `useSheetMemory`), counted while shown, and dropped when nothing shows them. Main says what
- * moved: `memory:changed` (a reading, *Not right*, typed details: the shown scenes and sheets it
- * names are read again), `names:changed` (Mentioned), a roster `record:changed` (everything shown),
+ * moved: `memory:changed` (a reading, *Not right*, typed details: every shown scene is read again,
+ * since its memory is as of it over the whole book, and the sheets it names, or that read the whole
+ * book when a scene moved), `names:changed` (Mentioned), a roster `record:changed` (everything shown),
  * and pushes the status and the notices whole. F-16.20: the active draft's card lines by scene
  * (`cardLines`, what the Outline and the cork board show in grey), read on open and again when a
  * reading moved a scene. Loaded on a v2 open; reset in tests.
@@ -133,33 +134,26 @@ function withoutLine(sheet: SheetMemory, claimId: string): SheetMemory {
   }
 }
 
-/** Whether a shown scene's memory names any of these records (its secrets and holders too). */
-function namesAny(entry: SceneEntry, recordIds: ReadonlySet<string>): boolean {
-  return (
-    entry.here.some((chip) => recordIds.has(chip.recordId)) ||
-    entry.mentioned.some((chip) => recordIds.has(chip.recordId)) ||
-    entry.trueNow.some((line) => recordIds.has(line.recordId)) ||
-    entry.secrets.touched.some(
-      ({ secret }) =>
-        recordIds.has(secret.recordId) || secret.cells.some((cell) => recordIds.has(cell.knowerId))
-    ) ||
-    entry.secrets.tension.some(
-      (line) => recordIds.has(line.secretId) || recordIds.has(line.recordId)
-    )
-  )
-}
+/**
+ * Whether a shown sheet reads whole-book state as of its scene (F-16.22: a knower's Knows, a
+ * secret's own view, each with "checked up to"), so a change anywhere in the book may move it.
+ */
+const readsWholeBook = (sheet: SheetMemory | undefined): boolean =>
+  sheet !== undefined && (sheet.knows !== null || sheet.topic !== null)
 
 export const useMemoryStore = create<MemoryState>((set, get) => {
   /** Reads again every shown scene and sheet that `pick` chooses. */
   const refresh = (
-    scenes: (nodeId: string, entry: SceneEntry | undefined) => boolean,
-    sheets: (recordId: string) => boolean
+    scenes: (nodeId: string) => boolean,
+    sheets: (recordId: string, sheet: SheetMemory | undefined) => boolean
   ): void => {
     for (const nodeId of sceneWatchers.keys()) {
-      if (scenes(nodeId, get().scenes[nodeId])) get().loadScene(nodeId).catch(report)
+      if (scenes(nodeId)) get().loadScene(nodeId).catch(report)
     }
-    for (const sheet of sheetWatchers.values()) {
-      if (sheets(sheet.recordId)) get().loadSheet(sheet.recordId, sheet.asOf).catch(report)
+    for (const [key, sheet] of sheetWatchers) {
+      if (sheets(sheet.recordId, get().sheets[key])) {
+        get().loadSheet(sheet.recordId, sheet.asOf).catch(report)
+      }
     }
     // The grids hold every secret and knower: any change may move them.
     for (const grid of knowsWatchers.values()) get().loadKnows(grid.asOf).catch(report)
@@ -408,12 +402,16 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         ipc().on('memory:changed', ({ nodeIds, recordIds }) => {
           // A reading (or an edit beside a card) may have moved a scene's card line.
           if (nodeIds.length > 0) get().loadCardLines().catch(report)
-          const nodes = new Set(nodeIds)
           const records = new Set(recordIds)
+          // Every shown scene is read again (one or two at most): its memory is as of the scene
+          // over the whole book, so a reading, a mark or an answer anywhere may move its True now,
+          // its secrets, its tension lines, "+ N more" or "checked up to" (F-16.22) without naming
+          // it or anything it shows. A sheet is read again when it is named, or when it reads the
+          // whole book and a scene moved.
           refresh(
-            (nodeId, entry) =>
-              nodes.has(nodeId) || (entry !== undefined && namesAny(entry, records)),
-            (recordId) => records.has(recordId)
+            () => true,
+            (recordId, sheet) =>
+              records.has(recordId) || (nodeIds.length > 0 && readsWholeBook(sheet))
           )
         }),
         ipc().on('names:changed', ({ nodeIds }) => {

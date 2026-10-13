@@ -317,9 +317,16 @@ export const ThreadsMemory = z.object({
 })
 export type ThreadsMemory = z.infer<typeof ThreadsMemory>
 
-/** A topic's sheet section: a secret's or a thread's view. */
+/**
+ * A topic's sheet section: a secret's or a thread's view. A secret's carries `checkedUpTo`, which
+ * scopes "no one has a line" (P2b rule 9).
+ */
 export const TopicView = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('secret'), secret: SecretView }),
+  z.object({
+    kind: z.literal('secret'),
+    secret: SecretView,
+    checkedUpTo: SceneRefView.nullable()
+  }),
   z.object({ kind: z.literal('thread'), thread: ThreadMemoryView })
 ])
 export type TopicView = z.infer<typeof TopicView>
@@ -336,12 +343,14 @@ export type KnowsSheetLine = z.infer<typeof KnowsSheetLine>
  * A character's or group's **Knows, as of [scene]** (F-16.22, plan P2b §4.2): its line per secret
  * as of the scene (counted ones, the author's *Knew before the book*, partial ones shown muted),
  * the lines that never count (someone else's dialogue, a rumour, a dream) apart, and how many
- * secrets it first learns later in the book. Never a line for a secret it has none for.
+ * secrets it first learns later in the book. Never a line for a secret it has none for; with no
+ * line at all, `checkedUpTo` scopes the empty state (P2b rule 9).
  */
 export const KnowsSheetView = z.object({
   lines: z.array(KnowsSheetLine),
   others: z.array(KnowsSheetLine),
-  later: z.number().int().nonnegative()
+  later: z.number().int().nonnegative(),
+  checkedUpTo: SceneRefView.nullable()
 })
 export type KnowsSheetView = z.infer<typeof KnowsSheetView>
 

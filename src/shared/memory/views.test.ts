@@ -45,7 +45,7 @@ describe('the reading views (F-16.18)', () => {
         accumulating: [],
         others: [],
         later: 0,
-        knows: { lines: [], others: [], later: 2 },
+        knows: { lines: [], others: [], later: 2, checkedUpTo: null },
         topic: null
       }).success
     ).toBe(true)

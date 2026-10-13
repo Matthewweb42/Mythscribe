@@ -45,6 +45,7 @@ import type { TreeDb } from '../tree/treeStore'
 import { dismiss, dismissedKeys, forgetDismissed } from './dismissedStore'
 import {
   deleteKnowsAbout,
+  deleteThoughtsBy,
   emptyTopics,
   isTopicRecord,
   mergeEvidence,
@@ -1106,7 +1107,8 @@ export function savePage(
 /**
  * Deletes a record; its names, mentions, dismissals and claims (F-16.17) go with it, and the
  * reader's roster is rebuilt. P2b: a secret takes the knows claims about it (their object would be
- * cleared, leaving orphans) and its reveals and knew-before rows (cascaded); an AI-made topic left
+ * cleared, leaving orphans) and its reveals and knew-before rows (cascaded); any record takes the
+ * knows thoughts it thought about someone else (`deleteThoughtsBy`); an AI-made topic left
  * with nothing behind it goes too (`pruneTopics`). Answers what it was and the topics pruned with
  * it (the caller tells the windows about both).
  */
@@ -1116,6 +1118,7 @@ export function deleteRecord(db: TreeDb, id: string): { record: StoryRecord; pru
   db.transaction((tx) => {
     removeFromAlsoHere(tx, id, null)
     if (gone.kind === 'secret') deleteKnowsAbout(tx, id)
+    deleteThoughtsBy(tx, id)
     tx.delete(record).where(eq(record.id, id)).run()
     pruned = pruneTopics(tx)
     // A topic is not in the roster's record lines: its own part follows by comparing (P2b-D10).

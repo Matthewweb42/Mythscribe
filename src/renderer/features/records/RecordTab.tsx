@@ -58,12 +58,23 @@ export function RecordTab({ categoryId }: { categoryId: string }): React.JSX.Ele
 
 /**
  * F-16.22: the Secrets section's list, each secret with "readers since 5.2 · 3 know" as of the
- * end of the book (the who-knows-what grid's rows).
+ * end of the book (the who-knows-what grid's rows). An AI-made secret the grid does not hold is
+ * revealed only where the reader no longer reads (another draft, an Idea or left-out scene) and
+ * says so; nothing is said until the grid has loaded.
  */
 function SecretList({ ids, filtered }: { ids: string[]; filtered: boolean }): React.JSX.Element {
   const grid = useKnowsGrid(null)
+  const byId = useRecordStore((s) => s.byId)
   const notes = Object.fromEntries(
-    ids.map((id) => [id, secretSummary(grid?.rows.find((row) => row.recordId === id))])
+    ids.map((id) => [
+      id,
+      grid === undefined
+        ? ''
+        : secretSummary(
+            grid.rows.find((row) => row.recordId === id),
+            byId[id]?.origin === 'ai'
+          )
+    ])
   )
   return <RecordList categoryId={SECRET_CATEGORY_ID} ids={ids} filtered={filtered} notes={notes} />
 }

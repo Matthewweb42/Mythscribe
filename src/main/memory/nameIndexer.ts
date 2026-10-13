@@ -153,6 +153,18 @@ export function namedInCounts(db: TreeDb): NamedInRow[] {
 }
 
 /**
+ * How often the book names each record in all, certain mentions only (`namedInCounts` summed per
+ * record): the roster cap's cut and the who-knows-what grid's column order (F-16.22) read it.
+ */
+export function namedTotals(db: TreeDb): Map<string, number> {
+  const totals = new Map<string, number>()
+  for (const row of namedInCounts(db)) {
+    totals.set(row.recordId, (totals.get(row.recordId) ?? 0) + row.count)
+  }
+  return totals
+}
+
+/**
  * Every record the name index holds, with its kind, as the memory invariants read it (P2b's
  * `topicName`): the scan's roster and every record a stored mention names.
  */

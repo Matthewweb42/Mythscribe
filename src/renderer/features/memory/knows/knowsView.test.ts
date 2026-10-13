@@ -7,6 +7,9 @@ import {
   howText,
   knowsLineText,
   moreText,
+  noHoldersText,
+  noKnowsText,
+  noRevealText,
   otherKnowsText,
   readersSinceText,
   revealLines,
@@ -27,6 +30,16 @@ describe('who knows what, in words (F-16.22)', () => {
   it('scopes every absence by what was checked, and never states it as a fact', () => {
     expect(absenceLine('Mara', { nodeId: 'sc-1', ref: '1.1' })).toBe(
       'No scene shows Mara learning this (checked up to 1.1)'
+    )
+    // The sheets' empty states are scoped too.
+    expect(noHoldersText({ nodeId: 'sc-2', ref: '1.2' })).toBe(
+      'No scene shows anyone learning this (checked up to 1.2)'
+    )
+    expect(noRevealText({ nodeId: 'sc-2', ref: '1.2' })).toBe(
+      'No scene reveals it yet (checked up to 1.2)'
+    )
+    expect(noKnowsText('Mara', null)).toBe(
+      'No scene shows Mara learning a secret (not checked yet)'
     )
     expect(absenceLine('Mara', null)).toBe('No scene shows Mara learning this (not checked yet)')
     expect(scopeText(null)).toBe('(not checked yet)')
@@ -138,6 +151,11 @@ describe('who knows what, in words (F-16.22)', () => {
     })
     expect(secretSummary(secret)).toBe('readers since 5.2 · 2 know')
     expect(secretSummary({ ...secret, readersSince: null, cells: [] })).toBe('not in the book yet')
+    // An AI-made secret the grid does not hold: revealed only where the reader no longer reads.
+    expect(secretSummary(undefined, true)).toBe(
+      'not in the book now (another draft, or an Idea or left-out scene)'
+    )
+    expect(secretSummary(undefined)).toBe('')
     expect(readersSinceText({ nodeId: 'sc-1', ref: '1.1', stale: false })).toBe('readers since 1.1')
     expect(revealLines(topicQuoteFixture('q'), 'secret')).toEqual([
       'Revealed in 1.1 ¶2',
@@ -154,6 +172,6 @@ describe('who knows what, in words (F-16.22)', () => {
         }),
         'secret'
       )
-    ).toEqual(['also read as “the map sale” in 1.3: judged the same by a second AI read'])
+    ).toEqual(['also read as “the map sale” in 1.3: merged into this secret'])
   })
 })

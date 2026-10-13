@@ -4,7 +4,7 @@ import type { KnowsGrid, KnowsSheetLine, KnowsSheetView, TopicView } from '@shar
 import type { NodeRow } from '../../db/schema'
 import { currentDraftId } from '../../draft/draftStore'
 import type { TreeDb } from '../../tree/treeStore'
-import { namedInCounts } from '../nameIndexer'
+import { namedTotals } from '../nameIndexer'
 import { slotClaims } from './claimStore'
 import { listKnewBefore } from './knewBeforeStore'
 import { readingSummaries } from './readingStore'
@@ -77,15 +77,6 @@ export function storedKnows(
   })
 }
 
-/** How often the book names each record, certain mentions only (the grid's column order). */
-export function namedTotals(db: TreeDb): Map<string, number> {
-  const totals = new Map<string, number>()
-  for (const row of namedInCounts(db)) {
-    totals.set(row.recordId, (totals.get(row.recordId) ?? 0) + row.count)
-  }
-  return totals
-}
-
 /**
  * The Book's who-knows-what grid as of a scene (P2b-D20): the secrets readers know then (newest
  * first), the characters and groups with a line or a knew-before mark, plus the scene's POV
@@ -117,11 +108,13 @@ export function sheetKnows(knows: KnowsAsOf, recordId: string): KnowsSheetView {
       }
     }
   }
-  return { lines, others, later }
+  return { lines, others, later, checkedUpTo: knows.checkedUpTo }
 }
 
 /** A secret's own view as of the scene (its sheet's *The secret*); null when it is no secret. */
 export function secretTopic(knows: KnowsAsOf, recordId: string): TopicView | null {
   const secret = knows.secrets.find((each) => each.recordId === recordId)
-  return secret === undefined ? null : { kind: 'secret', secret }
+  return secret === undefined
+    ? null
+    : { kind: 'secret', secret, checkedUpTo: knows.checkedUpTo }
 }

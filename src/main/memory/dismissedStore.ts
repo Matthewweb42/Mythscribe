@@ -117,6 +117,21 @@ export function undoDismissed(db: TreeDb, id: string): Dismissed {
   return toDismissed(row)
 }
 
+/**
+ * Renames a tombstone (capped like any label): one row that stands for two answers names both
+ * (F-16.22: two secrets *Not a secret* took away that one sentence revealed). Answers the row.
+ */
+export function relabelDismissed(db: TreeDb, id: string, label: string): Dismissed {
+  db.update(dismissed)
+    .set({ label: label.slice(0, DISMISSED_LABEL_MAX) })
+    .where(eq(dismissed.id, id))
+    .run()
+  const row = db.select().from(dismissed).where(eq(dismissed.id, id)).get()
+  if (row === undefined)
+    throw new AppError('NOT_FOUND', 'That entry is no longer dismissed', { id })
+  return toDismissed(row)
+}
+
 /** Removes a tombstone by kind and key, if there is one (an alias the author added back). */
 export function forgetDismissed(db: TreeDb, kind: DismissedKind, key: string): void {
   db.delete(dismissed)

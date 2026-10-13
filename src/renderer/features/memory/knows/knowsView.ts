@@ -103,12 +103,37 @@ export function tensionText(
   return `${nameOf(line.holderId)} knows ${line.label}; no scene shows ${nameOf(line.recordId)} learning it ${scope}`
 }
 
+/**
+ * A secret's sheet with no one holding it as of the scene, scoped: "No scene shows anyone learning
+ * this (checked up to 1.2)".
+ */
+export const noHoldersText = (checkedUpTo: SceneRefView | null): string =>
+  `No scene shows anyone learning this ${scopeText(checkedUpTo)}`
+
+/** A secret no scene reveals as of the scene, scoped: "No scene reveals it yet (not checked yet)". */
+export const noRevealText = (checkedUpTo: SceneRefView | null): string =>
+  `No scene reveals it yet ${scopeText(checkedUpTo)}`
+
+/**
+ * A knower's sheet with no line about any secret as of the scene, scoped: "No scene shows Mara
+ * learning a secret (checked up to 1.2)".
+ */
+export const noKnowsText = (name: string, checkedUpTo: SceneRefView | null): string =>
+  `No scene shows ${name} learning a secret ${scopeText(checkedUpTo)}`
+
 /** "+ 9 more in Book". */
 export const moreText = (more: number): string => `+ ${more} more in Book`
 
-/** A sidebar row's note for a secret: "readers since 5.2 · 3 know"; "not in the book yet". */
-export function secretSummary(secret: SecretView | undefined): string {
-  if (secret === undefined) return ''
+/**
+ * A sidebar row's note for a secret, as of the end of the book: "readers since 5.2 · 3 know"; "not
+ * in the book yet" (the author's own, not revealed). An AI-made secret that is no row of the grid
+ * (`aiMade`, `secret` undefined) has no reveal in a readable scene of the active draft: the reader
+ * leaves it out, and the note says where it may still be.
+ */
+export function secretSummary(secret: SecretView | undefined, aiMade = false): string {
+  if (secret === undefined) {
+    return aiMade ? 'not in the book now (another draft, or an Idea or left-out scene)' : ''
+  }
   const holders = secret.cells.filter((cell) => !cell.later && cell.line === 'counts').length
   const since =
     secret.readersSince === null ? 'not in the book yet' : readersSinceText(secret.readersSince)
@@ -116,13 +141,15 @@ export function secretSummary(secret: SecretView | undefined): string {
 }
 
 /**
- * ⓘ on a reveal: where it is and how it was checked; a merged one says it was judged the same
- * ("also read as “the map sale” in 1.2: judged the same by a second AI read"); the reading's cost.
+ * ⓘ on a reveal: where it is and how it was checked; a merged one says only that it was merged
+ * ("also read as “the map sale” in 1.2: merged into this secret"): the checker's same-as and the
+ * author's *Same as…* both leave a merged reveal, and nothing stored tells them apart. The
+ * reading's cost.
  */
 export function revealLines(quote: TopicQuoteView, kind: 'secret' | 'thread'): string[] {
   const lines =
     quote.role === 'merged'
-      ? [`also read as “${quote.label}” in ${quote.ref}: judged the same by a second AI read`]
+      ? [`also read as “${quote.label}” in ${quote.ref}: merged into this ${kind}`]
       : [
           `${kind === 'secret' ? 'Revealed' : 'Opened'} in ${quote.ref} ¶${quote.para + 1}`,
           'checked by a second AI read'

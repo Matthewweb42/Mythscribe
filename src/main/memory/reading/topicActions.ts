@@ -10,12 +10,15 @@ import {
   dismiss,
   dismissedIds,
   dismissedRowsOf,
+  getDismissedByKey,
   insertDismissedRows,
+  relabelDismissed,
   undoDismissed
 } from '../dismissedStore'
 import { deleteRecord, requireRecord, restoreTopicRecord, topicRecordRows } from '../recordStore'
 import { insertClaimRows, taggedClaimRows, topicClaimRows } from './claimStore'
 import { insertKnewBeforeRows, knewBeforeRowsOf } from './knewBeforeStore'
+import { knowsThinker } from './recordEvidence'
 import { getTopicSnapshots, setTopicSnapshots, type TopicSnapshot } from './readerRows'
 import {
   deleteTopicEvidence,
@@ -157,20 +160,21 @@ export function topicNotRight(
     const label = `Not ${NOUN[kind]}: ${topic.name}`
     const reveals = quotes.length > 0 ? quotes : null
     for (const quote of reveals ?? []) {
-      const row = dismiss(
+      const key = dismissedKey({
+        kind: 'notRight',
+        topic: { kind, stating: statingOf(quote.stating) }
+      })
+      const before = getDismissedByKey(tx, 'notRight', key)
+      let row = dismiss(
         tx,
-        {
-          kind: 'notRight',
-          key: dismissedKey({
-            kind: 'notRight',
-            topic: { kind, stating: statingOf(quote.stating) }
-          }),
-          nodeId: quote.nodeId,
-          label,
-          quote: quote.quote
-        },
+        { kind: 'notRight', key, nodeId: quote.nodeId, label, quote: quote.quote },
         now
       )
+      // A sentence that revealed two topics keys one row for both (the row another *Not a
+      // secret* wrote): it names both, and its *Undo* brings back every topic that lists it.
+      if (before !== null && !before.label.includes(label)) {
+        row = relabelDismissed(tx, row.id, `${before.label}; ${label}`)
+      }
       if (!written.some((each) => each.id === row.id)) written.push(row)
     }
     if (reveals === null) {
@@ -216,76 +220,110 @@ function exists(
 }
 
 /**
- * *Undo* on a row *Not a secret* / *Not a thread* wrote (the row itself is gone already): the topic
- * comes back as it was stored, with its label (" (secret)" added when another record took it
- * since), its reveals and lines where their scene and draft still are (a reading, source or
- * speaker gone since is cleared; a knower gone takes its line along), the author's marks and the
- * Dismissed rows that went with it; its other `notRight` rows leave the list. Null when the row
- * was no topic's. The anchors job then checks what came back against the text as it is now.
+ * *Undo* on a row *Not a secret* / *Not a thread* wrote (the row itself is gone already): every
+ * topic that row stands for (one sentence may have revealed two) comes back as it was stored, with
+ * its label (" (secret)" added when another record took it since), its reveals and lines where
+ * their scene and draft still are (a reading, source or speaker gone since is cleared; a knower
+ * gone takes its line along, and so does a knows thought whose thinker is gone, so it never counts
+ * for the knower), the author's marks and the Dismissed rows that went with it (a
+ * scene gone since is cleared on them); its other `notRight` rows leave the list. Null when the
+ * row was no topic's. The anchors job then checks what came back against the text as it is now.
  */
 export function restoreTopicNotRight(
   db: TreeDb,
   dismissedId: string
 ): (TopicChange & { undone: string[] }) | null {
   const snapshots = getTopicSnapshots(db)
-  const snapshot = snapshots.find((each) => each.rows.includes(dismissedId))
-  if (snapshot === undefined) return null
-  const recordId = snapshot.record.id
-  let result: (TopicChange & { undone: string[] }) | null = null
+  const mine = snapshots.filter((each) => each.rows.includes(dismissedId))
+  if (mine.length === 0) return null
+  const result: TopicChange & { undone: string[] } = {
+    topicIds: [],
+    nodeIds: [],
+    recordIds: [],
+    undone: []
+  }
   db.transaction((tx) => {
     setTopicSnapshots(
       tx,
-      snapshots.filter((each) => each !== snapshot)
+      snapshots.filter((each) => !mine.includes(each))
     )
     const live = dismissedIds(tx, 'notRight')
-    const undone = snapshot.rows.filter((id) => id !== dismissedId && live.has(id))
-    for (const id of undone) undoDismissed(tx, id)
-    if (!restoreTopicRecord(tx, { record: snapshot.record, aliases: snapshot.aliases })) {
-      result = { topicIds: [], nodeIds: [], recordIds: [], undone }
-      return
-    }
-    const placed = (row: { nodeId: string; draftId: string }): boolean =>
-      exists(tx, node, row.nodeId) && exists(tx, draft, row.draftId)
-    const optional = (id: string | null): string | null =>
-      id !== null && exists(tx, record, id) ? id : null
-    insertTopicQuoteRows(
-      tx,
-      snapshot.quotes.filter(placed).map((row) => ({
-        ...row,
-        readingId:
-          row.readingId !== null && exists(tx, reading, row.readingId) ? row.readingId : null
-      }))
+    const undone = unique(
+      mine.flatMap((snapshot) => snapshot.rows.filter((id) => id !== dismissedId && live.has(id)))
     )
-    const claims = snapshot.claims
-      .filter((row) => placed(row) && (row.recordId === null || exists(tx, record, row.recordId)))
-      .map((row) => ({
-        ...row,
-        readingId:
-          row.readingId !== null && exists(tx, reading, row.readingId) ? row.readingId : null,
-        objectId: optional(row.objectId),
-        speakerId: optional(row.speakerId),
-        fromId: optional(row.fromId),
-        // The reveal a merged line came with is put back above when its scene still is.
-        topicQuoteId:
-          row.topicQuoteId !== null &&
-          snapshot.quotes.some((quote) => quote.id === row.topicQuoteId && placed(quote))
-            ? row.topicQuoteId
-            : null
-      }))
-    insertClaimRows(tx, claims)
-    insertKnewBeforeRows(tx, snapshot.knewBefore)
-    insertDismissedRows(tx, snapshot.dismissed)
-    repointTodos(tx, snapshot.todos, recordId)
-    const touches = claimTouches(claims, recordId)
-    result = {
-      topicIds: [recordId],
-      nodeIds: unique([
-        ...snapshot.quotes.filter(placed).map((row) => row.nodeId),
-        ...touches.nodeIds
-      ]),
-      recordIds: touches.recordIds,
-      undone
+    for (const id of undone) undoDismissed(tx, id)
+    result.undone = undone
+    for (const snapshot of mine) {
+      const change = restoreSnapshot(tx, snapshot)
+      result.topicIds = unique([...result.topicIds, ...change.topicIds])
+      result.nodeIds = unique([...result.nodeIds, ...change.nodeIds])
+      result.recordIds = unique([...result.recordIds, ...change.recordIds])
     }
   })
   return result
+}
+
+/** One topic's snapshot put back (`restoreTopicNotRight`); nothing when its record cannot be. */
+function restoreSnapshot(tx: TreeDb, snapshot: TopicSnapshot): TopicChange {
+  const recordId = snapshot.record.id
+  if (!restoreTopicRecord(tx, { record: snapshot.record, aliases: snapshot.aliases })) {
+    return { topicIds: [], nodeIds: [], recordIds: [] }
+  }
+  const placed = (row: { nodeId: string; draftId: string }): boolean =>
+    exists(tx, node, row.nodeId) && exists(tx, draft, row.draftId)
+  const optional = (id: string | null): string | null =>
+    id !== null && exists(tx, record, id) ? id : null
+  insertTopicQuoteRows(
+    tx,
+    snapshot.quotes.filter(placed).map((row) => ({
+      ...row,
+      readingId: row.readingId !== null && exists(tx, reading, row.readingId) ? row.readingId : null
+    }))
+  )
+  // A knows thought whose thinker is gone would read as the knower's own (`knowsLine`): it stays
+  // gone rather than counting for the wrong person (`deleteThoughtsBy`).
+  const voiced = (row: ClaimRow): boolean => {
+    const thinker = knowsThinker(row)
+    return thinker === null || exists(tx, record, thinker)
+  }
+  const claims = snapshot.claims
+    .filter(
+      (row) =>
+        placed(row) && voiced(row) && (row.recordId === null || exists(tx, record, row.recordId))
+    )
+    .map((row) => ({
+      ...row,
+      readingId:
+        row.readingId !== null && exists(tx, reading, row.readingId) ? row.readingId : null,
+      objectId: optional(row.objectId),
+      speakerId: optional(row.speakerId),
+      fromId: optional(row.fromId),
+      // The reveal a merged line came with is put back above when its scene still is.
+      topicQuoteId:
+        row.topicQuoteId !== null &&
+        snapshot.quotes.some((quote) => quote.id === row.topicQuoteId && placed(quote))
+          ? row.topicQuoteId
+          : null
+    }))
+  insertClaimRows(tx, claims)
+  insertKnewBeforeRows(tx, snapshot.knewBefore)
+  // A scene gone since is cleared, as its foreign key would have done.
+  insertDismissedRows(
+    tx,
+    snapshot.dismissed.map((row) => ({
+      ...row,
+      recordId: optional(row.recordId),
+      nodeId: row.nodeId !== null && exists(tx, node, row.nodeId) ? row.nodeId : null
+    }))
+  )
+  repointTodos(tx, snapshot.todos, recordId)
+  const touches = claimTouches(claims, recordId)
+  return {
+    topicIds: [recordId],
+    nodeIds: unique([
+      ...snapshot.quotes.filter(placed).map((row) => row.nodeId),
+      ...touches.nodeIds
+    ]),
+    recordIds: touches.recordIds
+  }
 }

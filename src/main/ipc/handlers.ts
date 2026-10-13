@@ -4881,20 +4881,28 @@ export function registerHandlers({
 
   register('dismissed:undo', ({ id }) => {
     const db = manager.require().connection.orm
-    const undone = undoDismissed(db, id)
+    // The row goes and what it took away comes back in one transaction: a restore that fails
+    // leaves the row on the list, to be undone again.
+    const { undone, topic, restored } = db.transaction((tx) => {
+      const row = undoDismissed(tx, id)
+      if (row.kind !== 'notRight') return { undone: row, topic: null, restored: null }
+      return {
+        undone: row,
+        // F-16.22: a secret or thread *Not a secret* took away comes back as it was.
+        topic: restoreTopicNotRight(tx, row.id),
+        restored: restoreNotRight(tx, row.id)
+      }
+    })
     // What it kept quiet may come back: a mention (every scan's hash holds the list), a question.
     if (undone.kind === 'notMention') queueMemoryIndex(db)
     // F-16.18: *Undo* on *Not right › Wrong value* brings its lines back as they were; the anchors
     // job then checks them against the text as it is now. A typed-detail *Keep mine* undone may
     // be asked again.
-    if (undone.kind === 'notRight') {
-      // F-16.22: a secret or thread *Not a secret* took away comes back as it was.
-      const topic = restoreTopicNotRight(db, undone.id)
+    if (restored !== null) {
       if (topic !== null) {
         if (topic.nodeIds.length > 0) mentionQueue.indexAll('anchors', topic.nodeIds)
         topicsChanged(topic)
       }
-      const restored = restoreNotRight(db, undone.id)
       // The anchors job's own `memory:changed` follows once it has checked them.
       if (restored.nodeIds.length > 0) mentionQueue.indexAll('anchors', restored.nodeIds)
       // A card value said to be not right (no lines kept) counts again in Here and the card.
@@ -4912,9 +4920,9 @@ export function registerHandlers({
     if (undone.kind === 'notProblem') reader.detailsChanged()
     // F-16.21: *Undo* of an *Unlink* puts the plan link back as it was (the author's or automatic).
     if (undone.kind === 'unlink') {
-      const restored = restoreUnlinked(db, undone)
-      if (restored.linksChanged || restored.changedNodeIds.length > 0) {
-        emit(windows(), 'planLinks:changed', { changedNodeIds: restored.changedNodeIds })
+      const relinked = restoreUnlinked(db, undone)
+      if (relinked.linksChanged || relinked.changedNodeIds.length > 0) {
+        emit(windows(), 'planLinks:changed', { changedNodeIds: relinked.changedNodeIds })
       }
     }
     publishQuestions()

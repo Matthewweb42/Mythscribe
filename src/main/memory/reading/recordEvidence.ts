@@ -1,11 +1,19 @@
-import { and, eq, inArray, like, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, like, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { CardFields, CardPresent, ClaimPending } from '@shared/memory/claims'
 import { docToText } from '@shared/docText'
 import { normName } from '@shared/memory/names'
 import { isTopicCategory } from '@shared/memory/topics'
 import { TiptapNode } from '@shared/tiptap'
-import { card, claim, knewBefore, memoryBackfill, record, topicQuote } from '../../db/schema'
+import {
+  card,
+  claim,
+  knewBefore,
+  memoryBackfill,
+  record,
+  topicQuote,
+  type ClaimRow
+} from '../../db/schema'
 import type { TreeDb } from '../../tree/treeStore'
 
 /**
@@ -22,7 +30,9 @@ import type { TreeDb } from '../../tree/treeStore'
  * is gone is left out when it is read. P2b: a merge also re-points the author's *Knew before the
  * book* rows (both ends, a pair the kept record already has dropped) and the secrets' and threads'
  * reveals; a deleted secret takes the knows claims about it (`deleteKnowsAbout`: their object
- * would be cleared, leaving orphans), and an AI-made topic nothing backs any more is found by
+ * would be cleared, leaving orphans), a deleted record takes the knows thoughts it thought about
+ * someone else (`deleteThoughtsBy`: with no thinker they would read as the knower's own), and an
+ * AI-made topic nothing backs any more is found by
  * `emptyTopics` for the record store to prune (P2b-D12).
  */
 
@@ -232,6 +242,33 @@ export function deleteKnowsAbout(db: TreeDb, secretId: string): number {
   return db
     .delete(claim)
     .where(and(eq(claim.objectId, secretId), eq(claim.slot, 'knows')))
+    .run().changes
+}
+
+/**
+ * A knows thought's stored thinker, or null for any other line (or a thought with none stored, which
+ * reads as the knower's own). A thought whose thinker is gone must not come back without one.
+ */
+export const knowsThinker = (row: Pick<ClaimRow, 'slot' | 'voice' | 'speakerId'>): string | null =>
+  row.slot === 'knows' && row.voice === 'thought' ? row.speakerId : null
+
+/**
+ * The knows thoughts a record that is going thought about someone else (P2b-D7: "Orrin knew, Mara
+ * thought" is Mara's belief, never Orrin knowing). Their speaker would be cleared, and a thought
+ * with no thinker reads as the knower's own (`knowsLine`), so they go instead of starting to count.
+ * Answers how many went. The caller holds the transaction.
+ */
+export function deleteThoughtsBy(db: TreeDb, speakerId: string): number {
+  return db
+    .delete(claim)
+    .where(
+      and(
+        eq(claim.speakerId, speakerId),
+        eq(claim.slot, 'knows'),
+        eq(claim.voice, 'thought'),
+        or(isNull(claim.recordId), ne(claim.recordId, speakerId))
+      )
+    )
     .run().changes
 }
 

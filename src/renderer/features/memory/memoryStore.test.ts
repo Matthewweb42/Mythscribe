@@ -55,7 +55,13 @@ beforeEach(() => {
       }),
     'memory:sheet': (input) => {
       const { recordId, asOf } = input as Input<'memory:sheet'>
-      return sheetMemoryFixture(recordId, { asOf, later: asOf === null ? 0 : 2 })
+      return sheetMemoryFixture(recordId, {
+        asOf,
+        later: asOf === null ? 0 : 2,
+        // A knower's sheet reads the whole book (F-16.22).
+        knows:
+          recordId === 'r-orrin' ? { lines: [], others: [], later: 0, checkedUpTo: null } : null
+      })
     },
     'memory:status': () => memoryStatusFixture({ todayUsd: 0.01 }),
     'memory:notices': () => [],
@@ -99,17 +105,20 @@ describe('useMemoryStore (F-16.18)', () => {
     expect(useMemoryStore.getState().claims).toEqual({})
   })
 
-  it('reads again only the shown scenes and sheets a change names', async () => {
+  it('reads every shown scene again on a memory change, and only the sheets it names', async () => {
     renderHook(() => useSceneMemory('sc-1'))
     renderHook(() => useSceneMemory('sc-2'))
     renderHook(() => useSheetMemory('r-mara', null))
     await flush()
     main.calls.length = 0
-    act(() => main.emit('memory:changed', { nodeIds: ['sc-2'], recordIds: [] }))
+    // F-16.22: a scene's memory is as of it over the whole book, so another scene's reading (a
+    // new secret no one Here has a line about, "checked up to" moving) reads both again.
+    act(() => main.emit('memory:changed', { nodeIds: ['sc-9'], recordIds: ['s-new'] }))
     await flush()
-    expect(main.sent('memory:scene')).toEqual([{ nodeId: 'sc-2' }])
+    expect(main.sent('memory:scene')).toEqual([{ nodeId: 'sc-1' }, { nodeId: 'sc-2' }])
+    expect(main.sent('memory:sheet')).toEqual([])
     main.calls.length = 0
-    // A record a shown scene mentions, and the sheet of that record.
+    // The sheet of a record the change names.
     act(() => main.emit('memory:changed', { nodeIds: [], recordIds: ['r-ella', 'r-mara'] }))
     await flush()
     expect(main.sent('memory:scene')).toEqual([{ nodeId: 'sc-1' }, { nodeId: 'sc-2' }])
@@ -118,6 +127,17 @@ describe('useMemoryStore (F-16.18)', () => {
     act(() => main.emit('names:changed', { nodeIds: ['sc-1'] }))
     await flush()
     expect(main.sent('memory:scene')).toEqual([{ nodeId: 'sc-1' }])
+  })
+
+  it('F-16.22: reads a knower’s or a secret’s sheet again whenever a scene moved', async () => {
+    renderHook(() => useSheetMemory('r-orrin', null))
+    renderHook(() => useSheetMemory('r-quay', null))
+    await flush()
+    main.calls.length = 0
+    act(() => main.emit('memory:changed', { nodeIds: ['sc-9'], recordIds: [] }))
+    await flush()
+    // Orrin's Knows and its "checked up to" may have moved; the Quay's From the book did not.
+    expect(main.sent('memory:sheet')).toEqual([{ recordId: 'r-orrin', asOf: null }])
   })
 
   it('takes the status and the notices main pushes', async () => {

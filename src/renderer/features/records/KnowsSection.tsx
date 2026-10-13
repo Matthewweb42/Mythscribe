@@ -2,7 +2,11 @@ import { useState } from 'react'
 import { KNOWER_KINDS } from '@shared/memory/knows'
 import type { KnowsSheetLine } from '@shared/memory/views'
 import { ClaimLine } from '@renderer/features/memory/ClaimLine'
-import { knowsLineText, otherKnowsText } from '@renderer/features/memory/knows/knowsView'
+import {
+  knowsLineText,
+  noKnowsText,
+  otherKnowsText
+} from '@renderer/features/memory/knows/knowsView'
 import { useNameOf } from '@renderer/features/memory/knows/useNameOf'
 import { useMemoryStore, useSheetMemory } from '@renderer/features/memory/memoryStore'
 import { staleNote } from '@renderer/features/memory/memoryView'
@@ -19,7 +23,8 @@ const SMALL =
  * line about each secret as of the scene, each with ⓘ and *Not right* ("the sold map: overheard
  * from Tomas", noted "1.1"; half-knowing ones muted), the author's *Knew before the book* marks
  * with *Remove*, the lines that never count apart (someone else's words, a rumour, a dream), and
- * "2 more later in the book". Never a line for a secret it has none for.
+ * "2 more later in the book". Never a line for a secret it has none for; with no line that holds
+ * one, the scoped "No scene shows Mara learning a secret (checked up to 1.2)" (P2b rule 9).
  */
 export function KnowsSection({ recordId }: { recordId: string }): React.JSX.Element {
   const { asOf, scenes, setAsOf } = useAsOf()
@@ -27,8 +32,6 @@ export function KnowsSection({ recordId }: { recordId: string }): React.JSX.Elem
   const knows = sheet?.knows ?? null
   const nameOf = useNameOf()
   const paused = useMemoryStore((s) => s.status?.paused ?? null)
-  const empty =
-    knows !== null && knows.lines.length === 0 && knows.others.length === 0 && knows.later === 0
   return (
     <section aria-label="Knows" className="flex flex-col gap-1" data-testid="knows-section">
       <div className="flex flex-wrap items-center gap-2">
@@ -37,10 +40,13 @@ export function KnowsSection({ recordId }: { recordId: string }): React.JSX.Elem
       </div>
       {sheet === undefined ? (
         <p className="m-0 text-xs text-fg-muted">Reading…</p>
-      ) : knows === null || empty ? (
-        <p className="m-0 text-xs text-fg-muted">No lines about secrets up to here.</p>
-      ) : (
+      ) : knows === null ? null : (
         <>
+          {knows.lines.length > 0 ? null : (
+            <p className="m-0 text-xs text-fg-muted" data-testid="knows-none">
+              {noKnowsText(nameOf(recordId), knows.checkedUpTo)}
+            </p>
+          )}
           <ul className="m-0 list-none p-0">
             {knows.lines.map((line) =>
               line.cell.claimId === null ? (

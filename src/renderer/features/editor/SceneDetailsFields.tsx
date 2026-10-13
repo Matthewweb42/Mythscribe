@@ -8,6 +8,7 @@ import {
   STORY_YEAR_MAX,
   STORY_YEAR_MIN
 } from '@shared/memory/sceneDetails'
+import { isTopicKind } from '@shared/memory/topics'
 import { SCENE_META_FIELD_MAX, SCENE_META_TIMELINE_MAX } from '@shared/sceneMeta'
 import { LabelPicker } from '@renderer/features/labels/LabelPicker'
 import { useRecordStore } from '@renderer/features/records/recordStore'
@@ -92,7 +93,10 @@ export function AlsoHereField({ editor }: { editor: SceneDetailsEditor }): React
   const everyone = useRecordsOfKind(null)
   const byId = useRecordStore((s) => s.byId)
   const { details, disabled, save } = editor
-  const addable = everyone.filter((record) => !details.alsoHere.includes(record.id))
+  // A secret or a thread (F-16.22) is never present in a scene.
+  const addable = everyone.filter(
+    (record) => !isTopicKind(record.kind) && !details.alsoHere.includes(record.id)
+  )
   return (
     <>
       {details.alsoHere.map((recordId) => (

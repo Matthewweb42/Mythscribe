@@ -9,7 +9,7 @@ import { gateText } from '@shared/memory/gate'
 import { HOLDS, LEARNS, PARTIAL, knowsLine, parseHow } from '@shared/memory/knows'
 import { normName } from '@shared/memory/names'
 import { stepCounts, threadsAsOf } from '@shared/memory/threadsAsOf'
-import { knowsAsOf, type KnowsAsOf } from '@shared/memory/whoKnows'
+import type { KnowsAsOf } from '@shared/memory/whoKnows'
 import { recordAge, storyYears, type AgeClaim, type StoryYear } from '@shared/memory/years'
 import type { ThreadStatus } from '@shared/memory/views'
 import { activeDraftId } from '../../draft/draftStore'
@@ -18,7 +18,7 @@ import { nameScanShared } from '../../memory/nameIndexer'
 import { storedSceneDetails } from '../../memory/sceneDetailStore'
 import { getCard } from '../../memory/reading/cardStore'
 import { draftClaims, slotClaims } from '../../memory/reading/claimStore'
-import { listKnewBefore } from '../../memory/reading/knewBeforeStore'
+import { storedKnows as storedKnowsView } from '../../memory/reading/knowsViews'
 import { lastReading } from '../../memory/reading/readingStore'
 import {
   fakeAi,
@@ -29,10 +29,10 @@ import {
   type FakeAi,
   type FakeAnswer
 } from '../../memory/reading/readingFixture'
-import { sceneReadFlags } from '../../memory/reading/sceneReadStore'
 import { listTopicQuotes, listTopics } from '../../memory/reading/topicStore'
 import { heldCard, readingOrder } from '../../memory/reading/views'
 import type { CompletionRequest } from '../providers/types'
+import { listNodes } from '../../tree/treeStore'
 import { TEST_BOOK } from '../../memory/testBook/book'
 import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
 import { buildTestBookProject, type TestBookProject } from '../../memory/testBook/project'
@@ -447,22 +447,15 @@ export function scoreKnows(book: TestBookProject): KnowsScore {
   }
 }
 
-/** Who knows what as of a scene over the stored book (`knowsAsOf`). */
+/** Who knows what as of a scene over the stored book: the app's own view (`knowsViews.ts`). */
 function storedKnows(book: TestBookProject, atScene: string | null): KnowsAsOf {
-  const draftId = activeDraftId(book.db)
-  return knowsAsOf({
-    secrets: listTopics(book.db, 'secret').map((topic) => ({
-      recordId: topic.recordId,
-      label: topic.label,
-      origin: topic.origin
-    })),
-    claims: slotClaims(book.db, 'knows', draftId),
-    quotes: listTopicQuotes(book.db, draftId),
-    knewBefore: listKnewBefore(book.db),
-    reading: readingOrder(book.db),
-    flags: sceneReadFlags(book.db, draftId),
-    atId: atScene === null ? null : (book.scenes.get(atScene) ?? null)
-  })
+  const nodes = listNodes(book.db)
+  return storedKnowsView(
+    book.db,
+    atScene === null ? null : (book.scenes.get(atScene) ?? null),
+    readingOrder(book.db, nodes),
+    nodes
+  )
 }
 
 /** The grid's cells the labels give a secret as of a scene: counted first, then partial. */

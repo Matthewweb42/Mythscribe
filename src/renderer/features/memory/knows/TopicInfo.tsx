@@ -30,9 +30,9 @@ function goThere(quote: TopicQuoteView): void {
 
 /**
  * ⓘ on a secret or thread (F-16.22; plan P2b §4.2): its defining reveal with *Go there*, "checked
- * by a second AI read" and what that reading cost; each reveal merged into it as the same ("also
- * read as “the map sale” in 1.2: judged the same by a second AI read") with *Split*; and *Not a
- * secret* / *Not a thread* when the AI made it (it goes to Dismissed, where *Undo* brings it back).
+ * by a second AI read" and what that reading cost; each reveal merged into it ("also read as
+ * “the map sale” in 1.2: merged into this secret") with *Split*; and *Not a secret* / *Not a
+ * thread* when the AI made it (it goes to Dismissed, where *Undo* brings it back).
  * One the author made says so.
  */
 export function TopicInfoCard({

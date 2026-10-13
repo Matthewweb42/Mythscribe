@@ -37,6 +37,7 @@ import {
   type NotAboutMoves,
   type NotRightStash
 } from './readerRows'
+import { knowsThinker } from './recordEvidence'
 import { readerRoster } from './rosterCache'
 import { topicItemLines } from './topicContext'
 import { heldCard, hereChips, readingOrder } from './views'
@@ -221,6 +222,9 @@ export function restoreNotRight(
     if (present.has(row.id)) continue
     if (!exists(db, node, row.nodeId) || !exists(db, draft, row.draftId)) continue
     if (row.recordId !== null && !exists(db, record, row.recordId)) continue
+    // A knows thought whose thinker is gone would come back as the knower's own (P2b-D7).
+    const thinker = knowsThinker(row)
+    if (thinker !== null && !exists(db, record, thinker)) continue
     const restored: ClaimRow = {
       ...row,
       readingId:
