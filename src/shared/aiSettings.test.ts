@@ -380,11 +380,20 @@ describe('the toggle list per story memory (F-16.17, P2a-D24)', () => {
     expect(AI_DATA_SHARING.verify.sends).toContain('one either side')
     // F-16.22, F-16.23 (P2b): the secrets and threads, who is known to know them, and reveals.
     expect(AI_DATA_SHARING.reader.sends).toContain(
-      'the secrets and plot threads already found (a short label each)'
+      'the secrets and plot threads already found (a short label each, never one only an Idea scene'
     )
     expect(AI_DATA_SHARING.reader.sends).toContain('who is known to know them')
     expect(AI_DATA_SHARING.verify.sends).toContain('the people who might have told them')
-    expect(AI_DATA_SHARING.verify.sends).toContain("that one's revealing sentence")
+    expect(AI_DATA_SHARING.verify.sends).toContain("that one's label and revealing sentence")
+    // Review of P2b slice 2: knows and step items carry the secret's or thread's sentence, which
+    // may stand in another scene; the reader's topic lines say where; never an Idea scene.
+    expect(AI_DATA_SHARING.verify.sends).toContain(
+      "the secret's short label with the sentence that revealed it (which may stand in another scene)"
+    )
+    expect(AI_DATA_SHARING.verify.sends).toContain('for a step in a plot thread')
+    expect(AI_DATA_SHARING.verify.sends).toContain('Never a sentence from an Idea scene')
+    expect(AI_DATA_SHARING.reader.sends).toContain('or someone in the scene holds')
+    expect(AI_DATA_SHARING.reader.sends).toContain('the scenes where each opened and last moved')
     // Never who does not know.
     expect(AI_DATA_SHARING.reader.sends).not.toMatch(/does not know|doesn't know/)
   })

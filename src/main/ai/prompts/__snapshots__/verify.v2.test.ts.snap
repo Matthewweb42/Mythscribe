@@ -9,9 +9,9 @@ exports[`verify.v2 prompt (F-16.22, F-16.23) > a strong spot check is one item a
 - "voice": narration, dialogue, thought or rumour, as the sentences give it. "mode": now, memory, hypothetical or dream.
 - A knows item: ok only when the sentences show that record learning or holding that secret; "r" the learner from "Who"; "how" the way the text shows it, one of saw, told, overheard, read, deduced, suspects, believesFalse, knewBefore, tells, refers; "fr" the id from "From" they had it from, or null.
 - A thread item: ok when the sentences open, advance or resolve that thread; "how": opens, advances or resolves.
-- A reveals item: ok when the sentences reveal that secret or set up that thread.
+- A reveals item: ok when the sentences reveal that secret or set up that thread; "voice" and "mode" as they give it.
 - A same item: ok only when both are the same hidden fact or open question, not merely related ones.
-- A card, on-page, reveals or same item needs only "i" and "ok".
+- A card, on-page or same item needs only "i" and "ok".
 Reply with JSON only: {"v":[{"i":1,"ok":true,"r":"r12","voice":"narration","mode":"now"},{"i":2,"ok":true,"r":"r7","how":"overheard","fr":"r2","voice":"narration","mode":"now"}]}",
     "role": "system",
   },
@@ -36,9 +36,9 @@ exports[`verify.v2 prompt (F-16.22, F-16.23) > matches the golden messages for a
 - "voice": narration, dialogue, thought or rumour, as the sentences give it. "mode": now, memory, hypothetical or dream.
 - A knows item: ok only when the sentences show that record learning or holding that secret; "r" the learner from "Who"; "how" the way the text shows it, one of saw, told, overheard, read, deduced, suspects, believesFalse, knewBefore, tells, refers; "fr" the id from "From" they had it from, or null.
 - A thread item: ok when the sentences open, advance or resolve that thread; "how": opens, advances or resolves.
-- A reveals item: ok when the sentences reveal that secret or set up that thread.
+- A reveals item: ok when the sentences reveal that secret or set up that thread; "voice" and "mode" as they give it.
 - A same item: ok only when both are the same hidden fact or open question, not merely related ones.
-- A card, on-page, reveals or same item needs only "i" and "ok".
+- A card, on-page or same item needs only "i" and "ok".
 Reply with JSON only: {"v":[{"i":1,"ok":true,"r":"r12","voice":"narration","mode":"now"},{"i":2,"ok":true,"r":"r7","how":"overheard","fr":"r2","voice":"narration","mode":"now"}]}",
     "role": "system",
   },

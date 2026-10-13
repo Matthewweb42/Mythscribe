@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
-import { TOPIC_ROSTER_TOKENS, topicLinesTokens } from '@shared/memory/topics'
-import { outputCap } from '@shared/memory/windows'
+import {
+  TOPIC_ROSTER_MAX_TOKENS,
+  TOPIC_ROSTER_TOKENS,
+  topicLinesTokens
+} from '@shared/memory/topics'
+import { PAGE_TOKENS, outputCap } from '@shared/memory/windows'
 import { READER_ROSTER_HEADING, READER_RULES } from './reader.v1'
 import {
   READER_ANCHORED_HEADING,
@@ -18,6 +22,7 @@ import {
   READER_V2_TOPIC_LINES_TOKENS,
   READER_V2_TOPICS_TOKENS,
   buildReaderV2Prompt,
+  readerV2PageTokens,
   type BuildReaderV2PromptInput
 } from './reader.v2'
 
@@ -226,6 +231,55 @@ describe('reader.v2 prompt (F-16.22, F-16.23)', () => {
     expect(built.trimmed.rosterOver).toBe(over)
     expect(built.messages[0]?.content.endsWith(topics.join('\n'))).toBe(true)
     expect(built.trimmed.near).toBeGreaterThan(0)
+  })
+
+  it('fits a topics roster at its ceiling: the near lines, then the page, give the overflow', () => {
+    const topics: string[] = []
+    for (
+      let i = 1;
+      topicLinesTokens([...topics, `s${i} the hidden matter ${i} · secret`]) <=
+      TOPIC_ROSTER_MAX_TOKENS;
+      i += 1
+    ) {
+      topics.push(`s${i} the hidden matter ${i} · secret`)
+    }
+    const pageTokens = readerV2PageTokens(topics)
+    expect(pageTokens).toBe(
+      PAGE_TOKENS - (topicLinesTokens(topics) - READER_V2_TOPICS_TOKENS - READER_V2_NEAR_TOKENS)
+    )
+    expect(readerV2PageTokens(TOPICS)).toBe(PAGE_TOKENS)
+    const roster: string[] = []
+    for (
+      let i = 1;
+      estimateTokens([...roster, ''].join('\n')) < READER_V2_RECORD_ROSTER_TOKENS - 20;
+      i += 1
+    ) {
+      roster.push(`r${i} Character Number ${i} (Number ${i}) · character`)
+    }
+    // A page as the pipeline plans it beside this roster, every other block full.
+    const lines = Math.floor(pageTokens / 101)
+    const page = Array.from({ length: lines }, (_, p) => ({ p, text: 'word '.repeat(80).trim() }))
+    const many = Array.from(
+      { length: 60 },
+      (_, i) => `r${i} eyes “grey” · hair “red” · role “clerk”`
+    )
+    const worst = buildReaderV2Prompt({
+      ...windowRead,
+      roster,
+      topics,
+      near: many,
+      topicLines: many,
+      anchored: many,
+      paragraphs: page,
+      cardDue: true,
+      maxTokens: outputCap({ purpose: 'full', proseTokens: pageTokens, cardDue: true })
+    })
+    expect(estimateTokens(text(worst.messages))).toBeLessThanOrEqual(inputBudget('reader'))
+    expect(worst.trimmed.rosterOver).toBeGreaterThan(READER_V2_NEAR_TOKENS)
+    // The roster and the page are whole.
+    const all = text(worst.messages)
+    for (const line of topics) expect(all).toContain(line)
+    expect(all).toContain(`¶${lines - 1} ${'word '.repeat(80).trim()}`)
   })
 
   it('keeps the output caps: 720 for a page, the window formula, plus 120 when the card is due', () => {

@@ -8,19 +8,29 @@ import { sceneSentences } from '@shared/memory/anchor'
 import { setsState, valueKey, type Claim } from '@shared/memory/claims'
 import { normalizeForMatch } from '@shared/critique'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
+import { parseVerifyAnswer, type VerifyVerdict } from '@shared/memory/readerAnswer'
 import { containsValue } from '@shared/memory/reconcile'
+import { SPOT_STRONG_AROUND } from '@shared/memory/spot'
 import { dismissedNames, rosterOf } from '../../memory/recordStore'
 import { twinGate } from '@shared/memory/twinGate'
 import type { CachedResponse } from '../cacheStore'
 import { dayOf, defaultAiUsageState } from '../dailyCap'
-import { buildVerifyV2Prompt, type VerifyV2Item } from '../prompts/verify.v2'
+import { buildVerifyV2Prompt } from '../prompts/verify.v2'
 import { buildOpenAiProvider } from '../providers/openai'
 import type { CompletionRequest } from '../providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from '../request'
 import type { UsageEntry } from '../usageStore'
 import { activeDraftId } from '../../draft/draftStore'
 import { draftClaims, invariantClaims } from '../../memory/reading/claimStore'
-import { runReading, type ReadingItemEvent } from '../../memory/reading/pipeline'
+import {
+  agrees,
+  claimCheck,
+  runReading,
+  type ClaimCheck,
+  type ReadingItemEvent
+} from '../../memory/reading/pipeline'
+import { loadReadingScene, readBook as readerBook } from '../../memory/reading/readerContext'
+import { topicItemLines } from '../../memory/reading/topicContext'
 import { readerRoster } from '../../memory/reading/rosterCache'
 import { lastReading } from '../../memory/reading/readingStore'
 import {
@@ -578,25 +588,29 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
       )
 
       // The spot checks: up to 50 literal claims on the fast tier (batches of 10), up to 20
-      // verified ones on the strong tier, one per call with three sentences either side.
+      // verified ones on the strong tier, one per call with three sentences either side. Each is
+      // built and scored as the app's spot checks do (`claimCheck`, `agrees`): a knows line as a
+      // knows item with its secret and sources, a thread step as a step item, the how agreed too.
       const claims = liveClaims(book)
       const roster = readerRoster(book.db)
-      const item = (claim: Claim, around: number): VerifyV2Item => {
-        const texts = sceneTexts(book.db, claim.nodeId)
-        const sentences = sceneSentences(texts)
-        const at = sentences.findIndex(
-          (sentence) => sentence.p === claim.para && overlaps(sentence.text, claim.quote)
-        )
-        return {
-          kind: 'claim',
-          who: claim.recordId === null ? [] : [roster.whoLine(claim.recordId)],
-          fact: `${claim.slot}: ${claim.value} (${claim.voice}, ${claim.mode})`,
-          text: sentences
-            .slice(Math.max(0, at - around), at + around + 1)
-            .map((sentence) => sentence.text)
-            .join(' ')
-        }
+      const topicLines = topicItemLines(book.db, roster, activeDraftId(book.db))
+      const readable = readerBook(book.db)
+      const check = (claim: Claim, around: number): { claim: Claim; check: ClaimCheck } | null => {
+        const scene = loadReadingScene(book.db, claim.nodeId, readable)
+        const built = scene === null ? null : claimCheck(scene, claim, roster, around, topicLines)
+        return built === null ? null : { claim, check: built }
       }
+      const agreed = (
+        entry: { claim: Claim; check: ClaimCheck },
+        verdict: VerifyVerdict | undefined
+      ): boolean =>
+        verdict !== undefined &&
+        agrees(verdict, {
+          expect: entry.check.expect,
+          voice: entry.claim.voice,
+          mode: entry.claim.mode,
+          how: entry.check.how
+        })
       const spot = { fastAgree: 0, fastChecked: 0, strongAgree: 0, strongChecked: 0 }
       // The 50¢ stop holds through the spot checks too: checked before every request.
       let stopped = spent() > LIVE_STOP_USD
@@ -607,13 +621,13 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
       if (!stopped) {
         const literal = claims
           .filter((claim) => claim.proof === 'literal')
+          .flatMap((claim) => check(claim, 1) ?? [])
           .slice(0, 50)
-          .map((claim) => item(claim, 1))
-        const batches: VerifyV2Item[][] = []
+        const batches: (typeof literal)[] = []
         for (let i = 0; i < literal.length; i += 10) batches.push(literal.slice(i, i + 10))
         for (const batch of batches) {
           if (over()) break
-          const prompt = buildVerifyV2Prompt({ items: batch })
+          const prompt = buildVerifyV2Prompt({ items: batch.map((entry) => entry.check) })
           const result = await runAiRequest(ai, {
             feature: 'verify',
             tier: 'fast',
@@ -623,13 +637,17 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
             contextHash: sha256(JSON.stringify(prompt.messages)),
             promptVersion: prompt.version
           })
-          const verdicts = parseLive(result.text)
+          const verdicts = parseVerifyAnswer(result.text)
           spot.fastChecked += batch.length
-          spot.fastAgree += batch.filter((_, i) => verdicts.get(i + 1) === true).length
+          spot.fastAgree += batch.filter((entry, i) => agreed(entry, verdicts.get(i + 1))).length
         }
-        for (const claim of claims.filter((each) => each.proof === 'verified').slice(0, 20)) {
+        const strong = claims
+          .filter((each) => each.proof === 'verified')
+          .flatMap((claim) => check(claim, SPOT_STRONG_AROUND) ?? [])
+          .slice(0, 20)
+        for (const entry of strong) {
           if (over()) break
-          const prompt = buildVerifyV2Prompt({ items: [item(claim, 3)], strong: true })
+          const prompt = buildVerifyV2Prompt({ items: [entry.check], strong: true })
           const result = await runAiRequest(ai, {
             feature: 'verify',
             tier: 'strong',
@@ -640,7 +658,7 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
             promptVersion: prompt.version
           })
           spot.strongChecked += 1
-          if (parseLive(result.text).get(1) === true) spot.strongAgree += 1
+          if (agreed(entry, parseVerifyAnswer(result.text).get(1))) spot.strongAgree += 1
         }
       }
 
@@ -667,21 +685,6 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
     }
   }, 900_000)
 })
-
-/** A checker reply's verdicts as item → ok. */
-function parseLive(text: string): Map<number, boolean> {
-  const out = new Map<number, boolean>()
-  try {
-    const parsed = JSON.parse(text) as { v?: { i?: unknown; ok?: unknown }[] }
-    for (const verdict of parsed.v ?? []) {
-      if (typeof verdict.i === 'number' && typeof verdict.ok === 'boolean')
-        out.set(verdict.i, verdict.ok)
-    }
-  } catch {
-    // Not JSON: no verdicts, every item disagrees.
-  }
-  return out
-}
 
 const percent = (part: number, whole: number): string =>
   whole === 0 ? 'n/a' : `${((part / whole) * 100).toFixed(1)} %`

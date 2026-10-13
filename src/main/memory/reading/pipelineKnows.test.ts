@@ -2,7 +2,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { estimateTokens, inputBudget } from '@shared/ai'
 import { sceneSentences } from '@shared/memory/anchor'
+import { TOPIC_ROSTER_MAX_TOKENS } from '@shared/memory/topics'
 import type { Claim } from '@shared/memory/claims'
 import { dismissedKey } from '@shared/memory/dismissed'
 import { gateText } from '@shared/memory/gate'
@@ -11,6 +13,7 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { resetInflight } from '../../ai/inflight'
 import type { CompletionRequest } from '../../ai/providers/types'
 import { saveDocument } from '../../document/documentStore'
+import { setSceneMeta } from '../../document/sceneMetaStore'
 import { activeDraftId } from '../../draft/draftStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { createNode, getNode, type TreeDb } from '../../tree/treeStore'
@@ -23,7 +26,7 @@ import { setSceneDetails } from '../sceneDetailStore'
 import { runAnchors } from './anchors'
 import { sceneTexts } from './claimFixture'
 import { invariantClaims, invariantKnows, sceneClaims } from './claimStore'
-import { runReading, type ReadingOutcome } from './pipeline'
+import { gateScene, runReading, type ReadingOutcome } from './pipeline'
 import { lastReading } from './readingStore'
 import {
   fakeAi,
@@ -788,17 +791,32 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
     expect(invariants()).toEqual([])
   })
 
-  it('prunes an AI-made topic once a rebuild leaves nothing behind it', async () => {
+  it('re-checks the scene’s reveals on a rebuild: one stated again stays, and an edit then prunes it', async () => {
     await read(fake(SCENE_ONE_PLAN))
     const map = topicNamed('the sold map')
+    const rebuild = fake({
+      topics: [{ kind: 'secret', id: 's1', p: 0, q: 'Tomas sold the map' }],
+      lines: []
+    })
     const outcome = await runReading(
       db,
-      { ai: fake({ lines: [] }).deps },
+      { ai: rebuild.deps },
       { nodeId: one, caretPara: null, requestId: 'r-rebuild', purpose: 'rebuild' }
     )
-    // The knows lines go with a rebuild that does not state them; the reveal stands on its text.
+    // The reader saw the live reveal as re-checking and stated it again; the checker passed it.
+    expect(rebuild.requests[0]?.messages.at(-1)?.content).toContain(
+      's1 revealed “Tomas sold the map” ¶0, re-checking'
+    )
+    expect(
+      checksOf(rebuild)
+        .filter((check) => check.kind === 'reveals')
+        .map((check) => check.topic)
+    ).toEqual(['s1 the sold map · secret'])
+    // The knows lines go with a rebuild that does not state them; the reveal stands, re-proved.
     expect(knowsOf()).toEqual([])
-    expect(getRecord(db, map)).not.toBeNull()
+    expect(recordTopicQuotes(db, map).map((quote) => [quote.state, quote.quote])).toEqual([
+      ['live', 'Tomas sold the map']
+    ])
     expect(outcome.read).toBe(true)
     // Its sentence rewritten and read again with nothing about it: the topic goes.
     saveDocument(db, one, doc('Tomas walked on the quay.', ...SCENE_ONE.slice(1)))
@@ -807,6 +825,23 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
     expect(getRecord(db, map)).toBeNull()
     expect(last).toMatchObject({ read: true })
     if (last.read) expect(last.topicIds).toContain(map)
+    expect(invariants()).toEqual([])
+  })
+
+  it('drops a reveal a rebuild does not prove again, and prunes the topic a bad model made', async () => {
+    await read(fake(SCENE_ONE_PLAN))
+    const map = topicNamed('the sold map')
+    const heir = topicNamed('the missing heir')
+    const outcome = await runReading(
+      db,
+      { ai: fake({ lines: [] }).deps },
+      { nodeId: one, caretPara: null, requestId: 'r-rebuild', purpose: 'rebuild' }
+    )
+    expect(knowsOf()).toEqual([])
+    expect(getRecord(db, map)).toBeNull()
+    expect(getRecord(db, heir)).toBeNull()
+    expect(outcome).toMatchObject({ read: true })
+    if (outcome.read) expect(outcome.topicIds).toEqual([map, heir].sort())
     expect(invariants()).toEqual([])
   })
 
@@ -844,9 +879,7 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
     const knows = ai.requests.filter((request) => sentChecks(request)[0]?.kind === 'knows')
     expect(knows).toHaveLength(2)
     expect(knows.every((request) => request.maxTokens === 48)).toBe(true)
-    expect(sentChecks(knows[0]!)[0]?.topic).toBe(
-      's1 the sold map: “Tomas sold the map”'
-    )
+    expect(sentChecks(knows[0]!)[0]?.topic).toBe('s1 the sold map: “Tomas sold the map”')
     // Orrin's line: the strong model read the how otherwise, so it goes.
     expect(knowsOf().map((line) => line[0])).toEqual([tomas])
     expect(run.deleted).toHaveLength(1)
@@ -881,5 +914,392 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
     const dismissed = wrongValue(db, tomasLine?.id ?? '', NOW)
     expect(dismissed.dismissed?.label).toBe('Tomas: knows the sold map (knew before)')
     expect(knowsOf().map((line) => line[0])).toEqual([mara])
+  })
+  it('reads a full page past a topics roster at its ceiling, within the input cap', async () => {
+    // 200 secrets of the author's: far past the roster's 1,000 tokens.
+    for (let i = 0; i < 200; i += 1) record(`secret ${i + 1} of the hall`, [], 'secret')
+    const long = Array.from(
+      { length: 12 },
+      (_, i) =>
+        `Tomas walked the length of the quay for the ${i + 1}th time. ` +
+        'The rain fell on the slate roofs and the nets. '.repeat(16)
+    )
+    saveDocument(db, one, doc(...long))
+    scanNamesFor(db, one, NOW)
+    const ai = fake({ lines: [] })
+    const outcome = await read(ai)
+    expect(outcome).toMatchObject({ read: true })
+    const readers = ai.requests.filter((request) => requestKind(request) === 'reader')
+    expect(readers.length).toBeGreaterThan(0)
+    for (const request of readers) {
+      const all = request.messages.map((message) => message.content).join('\n')
+      expect(estimateTokens(all)).toBeLessThanOrEqual(inputBudget('reader'))
+      const system = request.messages[0]?.content ?? ''
+      const topics = system.slice(system.indexOf('Secrets and threads (id label · kind):'))
+      expect(estimateTokens(topics)).toBeLessThanOrEqual(TOPIC_ROSTER_MAX_TOKENS + 20)
+    }
+    expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toMatchObject({
+      topicRosterLeftOut: 1
+    })
+  })
+
+  it('never sends an Idea scene’s reveal, nor merges into a topic only an Idea scene backs', async () => {
+    await read(fake(SCENE_ONE_PLAN))
+    setSceneMeta(db, one, { location: '', pov: '', timeline: '', status: 'idea' })
+    runAnchors(db, one, NOW)
+    saveDocument(db, two, doc('The map had been sold by Tomas, and Mara knew it.'))
+    scanNamesFor(db, two, NOW)
+    const ai = fake({
+      topics: [
+        { n: 'the map sale', kind: 'secret', id: 'x1', p: 0, q: 'The map had been sold by Tomas' }
+      ],
+      lines: [{ p: 0, r: 'Mara Vell', s: 'knows', o: 'x1', how: 'saw', q: 'Mara knew it' }],
+      present: ['Mara Vell']
+    })
+    await read(ai, two)
+    for (const request of ai.requests) {
+      expect(JSON.stringify(request.messages)).not.toContain('Tomas sold the map')
+      expect(JSON.stringify(request.messages)).not.toContain('the sold map')
+    }
+    expect(checksOf(ai).some((check) => check.kind === 'same')).toBe(false)
+    expect(
+      listTopics(db, 'secret')
+        .map((topic) => topic.label)
+        .sort()
+    ).toEqual(['the map sale', 'the sold map'])
+    expect(knowsOf(two)).toEqual([[mara, topicNamed('the map sale'), 'saw', null]])
+  })
+
+  it('merges a secret a long scene reveals on page 1 and a later page proposes again under its own label', async () => {
+    const filler = 'The rain fell on the slate roofs and the nets. '.repeat(130)
+    saveDocument(
+      db,
+      one,
+      doc(
+        `Tomas sold the map on the quay. ${filler}`,
+        `The map had been sold by Tomas, and Orrin overheard Tomas. ${filler}`
+      )
+    )
+    scanNamesFor(db, one, NOW)
+    const ai = fake({
+      topics: [
+        { n: 'the sold map', kind: 'secret', id: 'x1', p: 0, q: 'Tomas sold the map' },
+        { n: 'the map sale', kind: 'secret', id: 'x1', p: 1, q: 'The map had been sold by Tomas' }
+      ],
+      lines: [
+        {
+          p: 1,
+          r: 'Orrin',
+          s: 'knows',
+          o: 'x1',
+          how: 'overheard',
+          fr: 'Tomas',
+          q: 'Orrin overheard Tomas'
+        }
+      ]
+    })
+    const outcome = await read(ai)
+    expect(outcome).toMatchObject({ read: true, pages: 2 })
+    const same = checksOf(ai).filter((check) => check.kind === 'same')
+    expect(same.map((check) => check.topic)).toEqual([
+      'x1 the map sale: “The map had been sold by Tomas” (1.1) | new the sold map: “Tomas sold the map” (1.1)'
+    ])
+    expect(listTopics(db, 'secret').map((topic) => topic.label)).toEqual(['the sold map'])
+    const map = topicNamed('the sold map')
+    const quotes = recordTopicQuotes(db, map)
+    expect(quotes.map((quote) => [quote.role, quote.label])).toEqual([
+      ['defining', 'the sold map'],
+      ['merged', 'the map sale']
+    ])
+    expect(claimsOf().find((claim) => claim.slot === 'knows')).toMatchObject({
+      recordId: orrin,
+      objectId: map,
+      topicQuoteId: quotes[1]?.id
+    })
+    expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toMatchObject({
+      topicsCreated: 1,
+      topicsMerged: 1
+    })
+    expect(invariants()).toEqual([])
+  })
+
+  it('reads again a reply cut inside its new secrets and threads, and keeps them', async () => {
+    let calls = 0
+    const ai = fakeAi((request) => {
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      calls += 1
+      const full = readerReply(request, SCENE_ONE_PLAN)
+      if (calls > 1) return { text: full }
+      // Cut just after the knows lines and the step, as "n" opens.
+      return { text: `${full.slice(0, full.indexOf('"n":[') + 5)}`, finishReason: 'length' }
+    })
+    await read(ai)
+    const readers = ai.requests.filter((request) => requestKind(request) === 'reader')
+    expect(readers).toHaveLength(2)
+    // The retry reads the whole page: the lost topics could stand anywhere in it.
+    expect(readers[1]?.messages.at(-1)?.content).toContain('¶0 Tomas sold the map')
+    const map = topicNamed('the sold map')
+    expect(
+      listTopics(db)
+        .map((topic) => topic.label)
+        .sort()
+    ).toEqual(['the missing heir', 'the sold map'])
+    expect(knowsOf()).toEqual([
+      [tomas, map, 'knewBefore', null],
+      [orrin, map, 'overheard', tomas]
+    ])
+    const rejections = lastReading(db, one, activeDraftId(db))?.yields.rejections ?? {}
+    expect(rejections.record).toBeUndefined()
+  })
+
+  it('leaves a line whose topic two cut replies lost unread, never counted against the reader', async () => {
+    const ai = fakeAi((request) => {
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      const full = readerReply(request, SCENE_ONE_PLAN)
+      return { text: `${full.slice(0, full.indexOf('"n":[') + 5)}`, finishReason: 'length' }
+    })
+    await read(ai)
+    expect(listTopics(db)).toEqual([])
+    const rejections = lastReading(db, one, activeDraftId(db))?.yields.rejections ?? {}
+    expect(rejections).toMatchObject({ unanswered: 3 })
+    expect(rejections.record).toBeUndefined()
+    // Nothing was read through: the next reading reads the scene again.
+    expect(await read(fake(SCENE_ONE_PLAN))).toMatchObject({ read: true })
+    expect(listTopics(db)).toHaveLength(2)
+  })
+
+  it('treats a same-as check with no verdict as unanswered: no second topic, read again', async () => {
+    await read(fake(SCENE_ONE_PLAN))
+    saveDocument(db, two, doc('The map had been sold by Tomas, and Mara knew it.'))
+    scanNamesFor(db, two, NOW)
+    const plan = {
+      topics: [
+        { n: 'the map sale', kind: 'secret', id: 'x1', p: 0, q: 'The map had been sold by Tomas' }
+      ] satisfies NewTopic[],
+      lines: [
+        { p: 0, r: 'Mara Vell', s: 'knows', o: 'x1', how: 'saw', q: 'Mara knew it' }
+      ] satisfies Line[],
+      present: ['Mara Vell']
+    }
+    const ai = fakeAi((request) => {
+      if (requestKind(request) !== 'verify') return { text: readerReply(request, plan) }
+      const reply = JSON.parse(verifyReply(request)) as { v: { i: number }[] }
+      const same = sentChecks(request).filter((check) => check.kind === 'same')
+      const skip = new Set(same.map((check) => check.i))
+      return { text: JSON.stringify({ v: reply.v.filter((verdict) => !skip.has(verdict.i)) }) }
+    })
+    await read(ai, two)
+    expect(listTopics(db, 'secret').map((topic) => topic.label)).toEqual(['the sold map'])
+    expect(knowsOf(two)).toEqual([])
+    expect(lastReading(db, two, activeDraftId(db))?.yields.rejections).toMatchObject({
+      unanswered: 2
+    })
+    expect(await read(fake(plan), two)).toMatchObject({ read: true })
+  })
+
+  it('makes a labelled new secret given a listed id a new one, its facts with it', async () => {
+    await read(fake(SCENE_ONE_PLAN))
+    const map = topicNamed('the sold map')
+    saveDocument(db, two, doc('Orrin stole the key, and Mara saw him.'))
+    scanNamesFor(db, two, NOW)
+    const ai = fake(
+      {
+        topics: [{ n: 'the stolen key', kind: 'secret', id: 's1', p: 0, q: 'Orrin stole the key' }],
+        lines: [{ p: 0, r: 'Mara Vell', s: 'knows', o: 's1', how: 'saw', q: 'Mara saw him' }],
+        present: ['Mara Vell']
+      },
+      (check) => (check.kind === 'same' ? { ok: false } : null)
+    )
+    await read(ai, two)
+    const key = topicNamed('the stolen key')
+    expect(key).not.toBe('')
+    expect(knowsOf(two)).toEqual([[mara, key, 'saw', null]])
+    expect(knowsOf(two).some((line) => line[1] === map)).toBe(false)
+  })
+
+  it('makes no secret of a reveal the text only rumours, and keeps a thread set up as a plan', async () => {
+    const ai = fake(SCENE_ONE_PLAN, (check) =>
+      check.kind === 'reveals' ? { voice: 'rumour', mode: 'now' } : null
+    )
+    await read(ai)
+    expect(listTopics(db).map((topic) => topic.label)).toEqual(['the missing heir'])
+    expect(knowsOf()).toEqual([])
+    expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toMatchObject({
+      topicNotCounted: 1,
+      topicsCreated: 1
+    })
+    // A thread opened by a vow (a plan: hypothetical) is still a thread.
+    const vow = fake(SCENE_ONE_PLAN, (check) =>
+      check.kind === 'reveals' ? { voice: 'narration', mode: 'hypothetical' } : null
+    )
+    saveDocument(db, two, doc('Mara swore to find the heir.'))
+    scanNamesFor(db, two, NOW)
+    await read(vow, two)
+    expect(listTopics(db, 'secret')).toEqual([])
+  })
+
+  it('lets a group know where its sentence names it by its head noun', async () => {
+    saveDocument(
+      db,
+      one,
+      doc('Tomas sold the map on the quay.', 'By Sunday the whole regiment knew of the sale.')
+    )
+    scanNamesFor(db, one, NOW)
+    await read(
+      fake({
+        topics: [{ n: 'the sold map', kind: 'secret', id: 'x1', p: 0, q: 'Tomas sold the map' }],
+        lines: [
+          {
+            p: 1,
+            r: 'the regiment',
+            s: 'knows',
+            o: 'x1',
+            how: 'told',
+            q: 'the whole regiment knew of the sale'
+          }
+        ]
+      })
+    )
+    expect(knowsOf().map((line) => [line[0], line[2]])).toEqual([[regiment, 'told']])
+    expect(claimsOf().find((claim) => claim.slot === 'knows')?.subjectText).toBe('regiment')
+  })
+
+  it('checks a learner the card proposes on the page too, so a failed POV check loses nothing', async () => {
+    const ai = fake(
+      {
+        ...SCENE_ONE_PLAN,
+        present: [],
+        pov: { name: 'Orrin', p: 1, q: 'Orrin overheard Tomas from behind the nets' }
+      },
+      (check) => (check.kind === 'card' && check.label === 'Card POV' ? { ok: false } : null)
+    )
+    await read(ai)
+    expect(checksOf(ai).some((check) => check.label === 'Card POV')).toBe(true)
+    expect(
+      checksOf(ai)
+        .filter((check) => check.kind === 'present')
+        .map((check) => check.names[0])
+        .sort()
+    ).toEqual(['Orrin', 'Tomas'])
+    expect(knowsOf().map((line) => line[0])).toEqual([tomas, orrin])
+    // The POV did not hold; Orrin's own on-page check kept his line.
+    expect(
+      (await import('./cardStore')).getCard(db, one, activeDraftId(db))?.fields.pov?.verified
+    ).toBe(false)
+  })
+
+  it('reads again a knows line whose on-page check got no verdict; a refused one is not the checker’s', async () => {
+    const plan = { ...SCENE_ONE_PLAN, present: [] }
+    const ai = fakeAi((request) => {
+      if (requestKind(request) !== 'verify') return { text: readerReply(request, plan) }
+      const reply = JSON.parse(verifyReply(request)) as { v: { i: number }[] }
+      const orrinHere = sentChecks(request).find(
+        (check) => check.kind === 'present' && check.names[0] === 'Orrin'
+      )
+      return {
+        text: JSON.stringify({ v: reply.v.filter((verdict) => verdict.i !== orrinHere?.i) })
+      }
+    })
+    await read(ai)
+    expect(knowsOf().map((line) => line[0])).toEqual([tomas])
+    const yields = lastReading(db, one, activeDraftId(db))?.yields
+    expect(yields?.rejections).toMatchObject({ unanswered: 1 })
+    expect(yields?.rejections.notHere).toBeUndefined()
+    // The checker passed every line it answered: none is held against it.
+    expect(yields?.verifySent).toBe(yields?.verified)
+    expect(getSceneRead(db, one, activeDraftId(db))?.settled).toBe(false)
+    // A refused on-page check: notHere, still not the checker's failure.
+    saveDocument(db, two, doc(...SCENE_ONE))
+    scanNamesFor(db, two, NOW)
+    await read(
+      fake(plan, (check) =>
+        check.kind === 'present' && check.names[0] === 'Orrin' ? { ok: false } : null
+      ),
+      two
+    )
+    const second = lastReading(db, two, activeDraftId(db))?.yields
+    expect(second?.rejections).toMatchObject({ notHere: 1 })
+    expect(second?.verifySent).toBe(second?.verified)
+  })
+
+  it('keeps a scene unsettled on the idle trigger while the caret paragraph holds an unread finished sentence', async () => {
+    await read(fake(SCENE_ONE_PLAN))
+    expect(getSceneRead(db, one, activeDraftId(db))?.settled).toBe(true)
+    // A new paragraph at the caret: one finished sentence, then the one being typed.
+    saveDocument(db, one, doc(...SCENE_ONE, 'Orrin said nothing at all. He'))
+    runAnchors(db, one, NOW)
+    expect(getSceneRead(db, one, activeDraftId(db))?.settled).toBe(false)
+    // The idle gate leaves the caret paragraph out of what to read, never out of "settled".
+    expect(gateScene(db, one, 3)?.decision).toMatchObject({ read: 'nothing' })
+    expect(getSceneRead(db, one, activeDraftId(db))?.settled).toBe(false)
+    expect(gateScene(db, one, null)?.decision).toMatchObject({ read: 'window', paras: [3] })
+    // An idle reading of another paragraph does not settle it either.
+    saveDocument(
+      db,
+      one,
+      doc(
+        'Tomas sold the map on the quay at dawn.',
+        ...SCENE_ONE.slice(1),
+        'Orrin said nothing at all. He'
+      )
+    )
+    runAnchors(db, one, NOW)
+    const idle = await runReading(
+      db,
+      { ai: fake({ lines: [] }).deps },
+      { nodeId: one, caretPara: 3, requestId: 'r-idle' }
+    )
+    expect(idle).toMatchObject({ read: true })
+    expect(getSceneRead(db, one, activeDraftId(db))?.settled).toBe(false)
+    // Read with the caret gone: settled.
+    await read(fake({ lines: [] }))
+    expect(getSceneRead(db, one, activeDraftId(db))?.settled).toBe(true)
+  })
+
+  it('Not about on a knows line: only a knower, the source re-read, the Here rule kept', async () => {
+    await read(fake(SCENE_ONE_PLAN))
+    const orrinLine = claimsOf().find((claim) => claim.slot === 'knows' && claim.recordId === orrin)
+    const place = record('the quay', [], 'setting')
+    await expect(
+      notAbout(
+        db,
+        { ai: fakeAi(() => ({ text: '{"v":[]}' })).deps },
+        { claimId: orrinLine?.id ?? '', recordId: place, requestId: 'na-place' }
+      )
+    ).rejects.toThrow(/character or a group/)
+    // Moved to Tomas (on the card): his own source cannot be him.
+    const toTomas = fakeAi((request) => ({
+      text: verifyReply(request, (check) => ({
+        r: check.who[check.names.indexOf('Tomas')] ?? null,
+        fr: check.who[check.names.indexOf('Tomas')] ?? null
+      }))
+    }))
+    const moved = await notAbout(
+      db,
+      { ai: toTomas.deps },
+      { claimId: orrinLine?.id ?? '', recordId: tomas, requestId: 'na-tomas' }
+    )
+    expect(moved.outcome).toBe('moved')
+    expect(claimsOf().find((claim) => claim.id === orrinLine?.id)).toMatchObject({
+      recordId: tomas,
+      fromId: null
+    })
+    expect(sentChecks(toTomas.requests[0]!).map((check) => check.kind)).toEqual(['knows'])
+    // Mara is not Here: an on-page check rides along; not shown there, the move is refused.
+    const toMara = fakeAi((request) => ({
+      text: verifyReply(request, (check) =>
+        check.kind === 'present'
+          ? { ok: false }
+          : { r: check.who[check.names.indexOf('Mara Vell')] ?? null }
+      )
+    }))
+    const refused = await notAbout(
+      db,
+      { ai: toMara.deps },
+      { claimId: orrinLine?.id ?? '', recordId: mara, requestId: 'na-mara' }
+    )
+    expect(sentChecks(toMara.requests[0]!).map((check) => check.kind)).toEqual(['knows', 'present'])
+    expect(refused.outcome).toBe('dismissed')
+    expect(knowsOf().some((line) => line[0] === mara)).toBe(false)
   })
 })

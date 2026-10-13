@@ -78,6 +78,14 @@ export const TOPIC_LABEL_MAX_WORDS = 8
 export const TOPIC_LABEL_SHORT_WORDS = 4
 /** The topics roster's share of the reader's cached prefix (P2b-D10). */
 export const TOPIC_ROSTER_TOKENS = 400
+/**
+ * The most the topics roster may hold (P2b-D10, amended in review): past its 400 tokens labels
+ * shorten and the overflow comes out of the near lines, then out of the page; past this ceiling
+ * (about 140 topics at 4-word labels) the AI-made topics with the least evidence are left out of
+ * the list (counted), so a reading always fits its input cap. A left-out topic the reader proposes
+ * again is caught by the same-as check.
+ */
+export const TOPIC_ROSTER_MAX_TOKENS = 1_000
 
 /** New topics one page may make (P2b-D11); the rest are dropped and counted (`topicCap`). */
 export const TOPIC_CAPS: Readonly<Record<TopicKind, number>> = { secret: 3, thread: 2 }

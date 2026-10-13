@@ -608,7 +608,7 @@ const knowsLabel = (learner: string, secret: string, scene: string): KnowsLabel 
 function verifyV2Case(
   name: string,
   note: string,
-  items: readonly (VerifyV2Item & { expect: boolean })[],
+  items: readonly (VerifyV2Item & { expect: boolean | 'notCounted' })[],
   strong = false
 ): EvalCase {
   const built = buildVerifyV2Prompt({ items, strong })
@@ -669,7 +669,10 @@ const TYPICAL_V2_BATCH: (VerifyV2Item & { expect: boolean })[] = [
   }
 ]
 
-const REVEALS_SAME_BATCH: (VerifyV2Item & { expect: boolean })[] = [
+/** h14's town talk of the Captain's losses at cards: a secret only rumoured (P2b-D7). */
+const H14_RUMOUR = 'it was said that the Captain had lost an estate at cards'
+
+const REVEALS_SAME_BATCH: (VerifyV2Item & { expect: boolean | 'notCounted' })[] = [
   {
     kind: 'reveals',
     who: [],
@@ -711,6 +714,18 @@ const REVEALS_SAME_BATCH: (VerifyV2Item & { expect: boolean })[] = [
     fact: '',
     text: textOf('h05', 7, 'put the linen away in the wrong press'),
     expect: false
+  },
+  {
+    kind: 'reveals',
+    who: [],
+    topic: "x4 the Captain's lost estate · new secret",
+    fact: '',
+    text: textOf(
+      'h14',
+      testBookScene('h14').paragraphs.findIndex((text) => text.includes(H14_RUMOUR)),
+      H14_RUMOUR
+    ),
+    expect: 'notCounted'
   }
 ]
 
@@ -788,7 +803,7 @@ export const MEMORY_V2_EVAL_CASES: readonly EvalCase[] = [
   ),
   verifyV2Case(
     'reveals and same',
-    'reveals and same-as items: the engagement read as “Lottie’s engagement” against “the secret engagement” (same), the debts against it (not), a sentence that reveals nothing',
+    'reveals and same-as items: “Lottie’s engagement” against “the secret engagement” (same), the debts against it (not), a sentence revealing nothing, a secret only rumoured (h14)',
     REVEALS_SAME_BATCH
   ),
   verifyV2Case(

@@ -729,9 +729,12 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       "after five such reads); the scene's place in the book; its typed POV, place, time and " +
       "year; its current card (the AI's one-line map of the scene with where, when and whose " +
       'point of view); one line per record (its name, nicknames and kind); the secrets and plot ' +
-      'threads already found (a short label each) and, for those the changed paragraphs touch, ' +
-      'who is known to know them; and the facts already ' +
-      'read about the records those paragraphs name and from the paragraphs themselves. Sent when ' +
+      'threads already found (a short label each, never one only an Idea scene or a scene left ' +
+      'out of compile reveals); for the secrets those paragraphs touch or someone in the scene ' +
+      'holds, who is known to know them and in which scene, and for the open plot threads they ' +
+      'touch, the scenes where each opened and last moved; and the facts already read about the ' +
+      'records those paragraphs name and from the paragraphs themselves (the sentences there that ' +
+      'revealed a secret or a thread included). Sent when ' +
       'you leave a scene, pause for the minutes you set, press Read now, or rebuild the memory. ' +
       'Never notes, Research, Pinned, Ideas, chats, other drafts, Idea scenes or scenes left out ' +
       'of compile.',
@@ -744,12 +747,17 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'fact, the records it might be about (name, nicknames and kind), and its sentence with ' +
       "one either side (and, for a 'she' or 'he', up to eight sentences back to the first that " +
       'names someone it could mean); for a fact about who knows a secret, the people who might ' +
-      'have told them; for a new secret or plot thread, the sentence that reveals it and, when ' +
-      "it may repeat one already found, that one's revealing sentence; the scene card's point " +
-      'of view, year and flashback, and who is on the page, ' +
+      "have told them and the secret's short label with the sentence that revealed it (which " +
+      'may stand in another scene); for a step in a plot thread, its short label with the ' +
+      'sentence that set it up (which may stand in another scene); for a new secret or plot ' +
+      'thread, the sentence that reveals it and, when it may repeat one already found or one ' +
+      "an earlier page of the scene found, that one's label and revealing sentence; the scene " +
+      "card's point of view, year and flashback, and who is on the page, " +
       'each with its sentence; for spot checks, a fact with three sentences either side; for ' +
       'Not right › Not about, that line, the record you pick and everyone named in the eight ' +
-      'sentences before it (name, nicknames and kind), with three sentences either side.',
+      'sentences before it (name, nicknames and kind), with three sentences either side (and ' +
+      'whether the person you pick is on the page there). Never a sentence from an Idea scene ' +
+      'or a scene left out of compile.',
     minDial: 1
   }
 }

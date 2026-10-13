@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  groupHeadIn,
   nameInSentence,
   pronounPerson,
   resolveSubject,
@@ -204,5 +205,18 @@ describe('the ladder’s subject step (F-16.17)', () => {
       recordId: 'mara'
     })
     expect(resolveSubject({ ...base, typedPov: 'tomas', quote: told })).toEqual({ kind: 'none' })
+  })
+})
+
+describe('a group named by its head noun (P2b-D8, amended in review)', () => {
+  it('finds the last word of a group’s name in the sentence, any case, whole words', () => {
+    expect(groupHeadIn(['the regiment'], ['By Sunday the whole regiment knew.'])).toBe('regiment')
+    expect(groupHeadIn(['the Harbour Watch', 'the Watch'], ['The whole watch knew it.'])).toBe(
+      'Watch'
+    )
+    expect(groupHeadIn(['the regiment'], ['The regimental band played.'])).toBeNull()
+    expect(groupHeadIn(['the regiment'], ['They all knew.'])).toBeNull()
+    // A head shorter than three letters never counts.
+    expect(groupHeadIn(['the Ox'], ['the ox knew'])).toBeNull()
   })
 })

@@ -68,8 +68,12 @@ describe('verify.v2 prompt (F-16.22, F-16.23)', () => {
     expect(built.messages[0]?.content.startsWith(VERIFY_SENTINEL)).toBe(true)
     expect(VERIFY_RULES.startsWith(VERIFY_SENTINEL)).toBe(true)
     expect(built.messages[0]?.content).toBe(VERIFY_V2_RULES)
-    // A fact and a step at 28, a knows item at 36, reveals, same and on-page at 12.
-    expect(built.maxTokens).toBe(20 + 28 * 2 + VERIFY_KNOWS_TOKENS + 12 * 3)
+    // A fact, a step and a reveal at 28 (a reveal answers its voice and mode, so a rumoured
+    // secret makes none), a knows item at 36, same and on-page at 12.
+    expect(built.maxTokens).toBe(20 + 28 * 3 + VERIFY_KNOWS_TOKENS + 12 * 2)
+    expect(built.messages[0]?.content).toContain(
+      'A reveals item: ok when the sentences reveal that secret or set up that thread; "voice" and "mode"'
+    )
     const user = built.messages[1]?.content ?? ''
     expect(user).toContain('2. Who: r3 Orrin · character\nFrom: r2 Tomas Harrow')
     expect(user).toContain('Secret: s1 the sold map')
@@ -97,6 +101,7 @@ describe('verify.v2 prompt (F-16.22, F-16.23)', () => {
   it('caps max_tokens at the budget and splits by input and by output, in order', () => {
     expect(verifyV2MaxTokens([{ kind: 'knows' }])).toBe(20 + 36)
     expect(verifyV2MaxTokens([{ kind: 'same' }])).toBe(32)
+    expect(verifyV2MaxTokens([{ kind: 'reveals' }])).toBe(48)
     expect(verifyV2MaxTokens(Array.from({ length: 100 }, () => ({ kind: 'knows' as const })))).toBe(
       outputBudget('verify')
     )

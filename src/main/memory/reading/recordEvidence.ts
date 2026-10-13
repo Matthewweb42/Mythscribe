@@ -317,28 +317,39 @@ export function topicBackings(db: TreeDb): TopicBacking[] {
 }
 
 /**
- * The secrets and threads with a reveal or a claim in one draft (the reader's topics roster lists
- * the AI-made ones only while the active draft backs them: an inactive draft is never read).
+ * The secrets and threads with a reveal or a claim in one draft, each with how much stands behind
+ * it there (reveals, knows lines about it, its steps). `readable` keeps only evidence in scenes
+ * the reader may read: a topic backed only by an Idea scene, one left out of compile or one moved
+ * out of the manuscript is not read as real (AI rule 3; the reader's topics roster and the same-as
+ * pool, review of P2b slice 2). The reader's roster lists the AI-made ones only while the active
+ * draft backs them (an inactive draft is never read).
  */
-export function topicsInDraft(db: TreeDb, draftId: string): Set<string> {
+export function topicsInDraft(
+  db: TreeDb,
+  draftId: string,
+  readable: (nodeId: string) => boolean = () => true
+): Map<string, number> {
   const quoted = db
-    .selectDistinct({ id: topicQuote.recordId })
+    .select({ id: topicQuote.recordId, nodeId: topicQuote.nodeId })
     .from(topicQuote)
     .where(eq(topicQuote.draftId, draftId))
     .all()
   const known = db
-    .selectDistinct({ id: claim.objectId })
+    .select({ id: claim.objectId, nodeId: claim.nodeId })
     .from(claim)
     .where(and(eq(claim.draftId, draftId), eq(claim.slot, 'knows')))
     .all()
   const stepped = db
-    .selectDistinct({ id: claim.recordId })
+    .select({ id: claim.recordId, nodeId: claim.nodeId })
     .from(claim)
     .where(and(eq(claim.draftId, draftId), eq(claim.slot, 'thread')))
     .all()
-  return new Set(
-    [...quoted, ...known, ...stepped].flatMap((row) => (row.id === null ? [] : [row.id]))
-  )
+  const weights = new Map<string, number>()
+  for (const row of [...quoted, ...known, ...stepped]) {
+    if (row.id === null || !readable(row.nodeId)) continue
+    weights.set(row.id, (weights.get(row.id) ?? 0) + 1)
+  }
+  return weights
 }
 
 /**

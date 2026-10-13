@@ -10,9 +10,11 @@ import {
   type TopicKind,
   type TopicName
 } from '@shared/memory/topics'
+import { readerMayRead } from '@shared/memory/sources'
 import type { ThreadMemoryView } from '@shared/memory/views'
 import type { TreeDb } from '../../tree/treeStore'
 import { listRecords } from '../recordStore'
+import { claimSources } from './claimStore'
 import { topicsInDraft } from './recordEvidence'
 import type { ReaderRoster } from './rosterCache'
 import { listTopicQuotes, type TopicQuote } from './topicStore'
@@ -23,7 +25,10 @@ import { listTopicQuotes, type TopicQuote } from './topicStore'
  * the pipeline can say which listed topics the window touches (the user turn's topic lines), how a
  * checker item names a topic (`s3 the sold map: “…”`) and which open topics a new one may repeat
  * (the Same candidates, P2b-D4). Local: nothing here is sent but what these lines say, and nothing
- * here ever says who does not know (P2b rule 9).
+ * here ever says who does not know (P2b rule 9). Only readable scenes count: a reveal in an Idea
+ * scene, a scene left out of compile or outside the manuscript is never sent, and an AI-made topic
+ * only such scenes back is neither a topic line nor a same-as candidate (AI rule 3); a re-checking
+ * reveal is not sent either (its sentence may be gone), so such a topic is named by its label.
  */
 
 /** A secret or thread record as the reading reads it. */
@@ -45,7 +50,10 @@ export interface TopicContext {
   /** The kind of a secret or thread record; null for any other record. */
   kindOf(recordId: string): TopicKind | null
   labelOf(recordId: string): string
-  /** Its revealing sentence in the active draft: its defining reveal (a live one first), else a merged one. */
+  /**
+   * Its revealing sentence in the active draft: its live defining reveal in a readable scene, else
+   * a live merged one there; null when none (the topic is then named by its label alone).
+   */
   revealOf(recordId: string): TopicReveal | null
   /** A knows or step item's topic as the checker reads it: `s3 the sold map: “Tomas sold the map”`. */
   itemLine(recordId: string): string
@@ -80,21 +88,23 @@ export interface TopicContextInput {
 const LINE_HOLDERS = 4
 
 /**
- * A topic's revealing sentence in a draft's reveals (`quotes`, read on first need): its defining
- * reveal, a live one first, else a merged one; memoised per topic.
+ * A topic's revealing sentence in a draft's reveals (`quotes`, read on first need): its live
+ * defining reveal in a readable scene, else a live merged one there; memoised per topic. A parked
+ * reveal (an Idea scene, one left out of compile) and a re-checking one are never picked.
  */
 function revealPicker(
   quotes: () => readonly TopicQuote[],
-  refOf: (nodeId: string) => string
+  refOf: (nodeId: string) => string,
+  readable: (nodeId: string) => boolean
 ): (recordId: string) => TopicReveal | null {
   const reveals = new Map<string, TopicReveal | null>()
   return (recordId) => {
     if (reveals.has(recordId)) return reveals.get(recordId) ?? null
-    const rank = (quote: TopicQuote): number =>
-      (quote.role === 'defining' ? 0 : 2) + (quote.state === 'live' ? 0 : 1)
     const best = quotes()
-      .filter((quote) => quote.recordId === recordId)
-      .sort((a, b) => rank(a) - rank(b))[0]
+      .filter(
+        (quote) => quote.recordId === recordId && quote.state === 'live' && readable(quote.nodeId)
+      )
+      .sort((a, b) => (a.role === 'defining' ? 0 : 1) - (b.role === 'defining' ? 0 : 1))[0]
     const found =
       best === undefined
         ? null
@@ -120,8 +130,8 @@ function itemLiner(
 
 /**
  * The checker's topic lines alone (the spot checks and *Not right › Not about*, which read a
- * stored knows line or step outside a reading): each topic with its revealing sentence in the
- * draft (`draftId`; none when null).
+ * stored knows line or step outside a reading): each topic with its live revealing sentence in a
+ * readable scene of the draft (`draftId`; none when null).
  */
 export function topicItemLines(
   db: TreeDb,
@@ -134,9 +144,17 @@ export function topicItemLines(
       .map((record) => [record.id, record.name])
   )
   let quotes: TopicQuote[] | null = null
+  let sources: ((nodeId: string) => boolean) | null = null
   const revealOf = revealPicker(
     () => (quotes ??= draftId === null ? [] : listTopicQuotes(db, draftId)),
-    () => ''
+    () => '',
+    (nodeId) => {
+      if (sources === null) {
+        const source = claimSources(db)
+        sources = (id) => readerMayRead(source(id))
+      }
+      return sources(nodeId)
+    }
   )
   return { itemLine: itemLiner(roster, (recordId) => labels.get(recordId) ?? '', revealOf) }
 }
@@ -158,10 +176,12 @@ export function topicContext(db: TreeDb, input: TopicContextInput): TopicContext
     }
   }
   const refOf = (nodeId: string): string => order.refs.get(nodeId) ?? '?'
+  /** A scene the reader may read (an Idea, a scene left out of compile, has no place in `order`). */
+  const readable = (nodeId: string): boolean => order.order.has(nodeId)
 
   let quotes: TopicQuote[] | null = null
   const allQuotes = (): TopicQuote[] => (quotes ??= listTopicQuotes(db, input.draftId))
-  const revealOf = revealPicker(allQuotes, refOf)
+  const revealOf = revealPicker(allQuotes, refOf, readable)
 
   const termsOf = (label: string, quote: string): string[] => topicTerms(label, quote, names)
 
@@ -208,9 +228,9 @@ export function topicContext(db: TreeDb, input: TopicContextInput): TopicContext
     return threads.get(recordId) ?? null
   }
 
-  let backed: Set<string> | null = null
+  let backed: Map<string, number> | null = null
   const isBacked = (recordId: string): boolean =>
-    (backed ??= topicsInDraft(db, input.draftId)).has(recordId)
+    (backed ??= topicsInDraft(db, input.draftId, readable)).has(recordId)
 
   const itemLine = itemLiner(roster, (recordId) => topics.get(recordId)?.label ?? '', revealOf)
 

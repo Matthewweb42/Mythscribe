@@ -22,7 +22,8 @@ import {
  * - **Step**: a thread with its opening sentence, the step and what happens; the checker confirms
  *   the step, with voice and mode (a hypothetical or a rumour never moves a thread, P2b-D22);
  * - **Reveals**: a new secret or thread (or a listed one whose reveal is re-checked) and the
- *   sentences that reveal or open it: ok when they do;
+ *   sentences that reveal or open it: ok when they do, with voice and mode (28 tokens a verdict),
+ *   so a secret the text only rumours, supposes or dreams makes none (P2b-D7, review of slice 2);
  * - **Same**: a new topic and an open one it may repeat, each with its revealing sentence
  *   ("same as s3?", P2b-D4): ok only when both are the same hidden fact or open question.
  *
@@ -51,19 +52,20 @@ export const VERIFY_V2_RULES =
   '"fr" the id from "From" they had it from, or null.\n' +
   '- A thread item: ok when the sentences open, advance or resolve that thread; "how": opens, ' +
   'advances or resolves.\n' +
-  '- A reveals item: ok when the sentences reveal that secret or set up that thread.\n' +
+  '- A reveals item: ok when the sentences reveal that secret or set up that thread; "voice" and ' +
+  '"mode" as they give it.\n' +
   '- A same item: ok only when both are the same hidden fact or open question, not merely ' +
   'related ones.\n' +
-  '- A card, on-page, reveals or same item needs only "i" and "ok".\n' +
+  '- A card, on-page or same item needs only "i" and "ok".\n' +
   'Reply with JSON only: {"v":[{"i":1,"ok":true,"r":"r12","voice":"narration","mode":"now"},' +
   '{"i":2,"ok":true,"r":"r7","how":"overheard","fr":"r2","voice":"narration","mode":"now"}]}'
 
 /**
  * Output tokens per verdict: a knows verdict
  * (`{"i":4,"ok":true,"r":"r7","how":"overheard","fr":"r2","voice":"narration","mode":"now"},`)
- * about 36; a fact's or a thread step's 28 (`verify.v1`'s, a step answering `how` in place of `r`,
- * decided by Claude, unconfirmed); a reveals, same, card or on-page one 12. The strong spot check of
- * a knows line asks 48.
+ * about 36; a fact's, a thread step's or a reveal's 28 (`verify.v1`'s, a step answering `how` in
+ * place of `r`, a reveal only voice and mode; decided by Claude, unconfirmed); a same, card or
+ * on-page one 12. The strong spot check of a knows line asks 48.
  */
 export const VERIFY_KNOWS_TOKENS = 36
 export const VERIFY_STRONG_KNOWS_TOKENS = 48
@@ -122,6 +124,7 @@ export function verifyV2ItemOutput(item: Pick<VerifyV2Item, 'kind'>): number {
       return VERIFY_KNOWS_TOKENS
     case 'claim':
     case 'step':
+    case 'reveals':
       return VERIFY_CLAIM_TOKENS
     default:
       return VERIFY_CHECK_TOKENS

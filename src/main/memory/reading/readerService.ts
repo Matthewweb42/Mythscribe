@@ -657,7 +657,12 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       publish()
       return
     }
-    deps.changed({ nodeIds: [nodeId], recordIds: outcome.recordIds })
+    // The secrets and threads the reading made, merged into, revived, gave up or pruned are named
+    // too (plan P2b §2.4 step 7), so their views refresh even when no claim on them changed.
+    deps.changed({
+      nodeIds: [nodeId],
+      recordIds: [...new Set([...outcome.recordIds, ...outcome.topicIds])].sort()
+    })
     if (outcome.topicIds.length > 0) deps.recordsChanged?.(outcome.topicIds)
     if (outcome.names.length > 0) deps.questions()
     const at = root(db)

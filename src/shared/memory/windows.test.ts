@@ -79,6 +79,17 @@ describe('planPages (F-16.16)', () => {
     expect(piecesParas(pages)).toEqual(new Set([0, 1, 2]))
   })
 
+  it('packs smaller pages and windows when the reader has less room (P2b-D10, amended)', () => {
+    const scene = Array.from({ length: 6 }, () => para(1000))
+    const pages = planPages(scene, words, 1_500)
+    expect(ranges(pages)).toEqual([[0], [1], [2], [3], [4], [5]])
+    for (const page of pages) expect(page.tokens).toBeLessThanOrEqual(1_500)
+    const big = [para(600), para(600), para(600), para(600), para(600)]
+    const windows = planWindows(big, [2], new Set([0]), words, 1_000)
+    for (const piece of windows) expect(piece.tokens).toBeLessThanOrEqual(1_000)
+    expect(ranges(windows)).toEqual([[0], [1], [2], [3], [4]])
+  })
+
   it('keeps one sentence longer than a page whole', () => {
     const giant = `${Array.from({ length: 3000 }, () => 'w').join(' ')}.`
     const pages = planPages([giant], words)

@@ -2,10 +2,12 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { estimateTokens } from '@shared/ai'
 import { normName } from '@shared/memory/names'
-import type { StoryRecordSummary } from '@shared/memory/records'
+import type { RecordOrigin, StoryRecordSummary } from '@shared/memory/records'
+import { readerMayRead } from '@shared/memory/sources'
 import {
   TOPIC_ID_PREFIX,
   TOPIC_LABEL_SHORT_WORDS,
+  TOPIC_ROSTER_MAX_TOKENS,
   TOPIC_ROSTER_TOKENS,
   TopicKind,
   topicLabel,
@@ -19,6 +21,7 @@ import { READER_V2_PROMPT_VERSION } from '../../ai/prompts/reader.v2'
 import { currentDraftId } from '../../draft/draftStore'
 import { namedInCounts } from '../nameIndexer'
 import { listRecords } from '../recordStore'
+import { claimSources } from './claimStore'
 import { topicsInDraft } from './recordEvidence'
 import { MEMORY_ROSTER_KEY } from './roster'
 
@@ -37,9 +40,14 @@ import { MEMORY_ROSTER_KEY } from './roster'
  *
  * P2b (P2b-D10): the row's `topics` part holds the secrets and threads (`s3 the sold map ·
  * secret`, `t2 Ashby's return · thread`), rendered after the record lines, so a topic made,
- * renamed, merged, split or pruned rebuilds only that part and never moves the record prefix. It
- * never drops a topic: past `TOPIC_ROSTER_TOKENS`, every label shortens to 4 words, and what is
- * still over comes out of the near lines' budget (`buildReaderV2Prompt`'s `trimmed.rosterOver`).
+ * renamed, merged, split or pruned rebuilds only that part and never moves the record prefix. Past
+ * `TOPIC_ROSTER_TOKENS`, every label shortens to 4 words, and what is still over comes out of the
+ * near lines' budget, then out of the page (`readerV2PageTokens`); past `TOPIC_ROSTER_MAX_TOKENS`
+ * the AI-made topics with the least evidence are left out (the author's last, `dropped`, counted
+ * by the reading as `topicRosterLeftOut`), so the reader's request always fits its cap (P2b-D10,
+ * amended in review). An AI-made topic is listed only while readable scenes of the active draft
+ * back it: one backed only by an Idea scene, a scene left out of compile or text outside the
+ * manuscript is not sent (AI rule 3).
  */
 
 /** The records' share of the roster's 1,600 tokens (P2b's secrets and threads hold the other 400). */
@@ -59,7 +67,9 @@ const TopicsPart = z.object({
   additions: z.array(z.string()),
   held: z.record(z.string(), HeldTopic),
   /** Labels shortened to fit the budget. */
-  short: z.boolean()
+  short: z.boolean(),
+  /** Topics left out past the ceiling (the least evidenced AI-made ones first). */
+  dropped: z.array(z.string()).default([])
 })
 type TopicsPart = z.infer<typeof TopicsPart>
 
@@ -96,6 +106,8 @@ export interface ReaderRoster {
   topicShortOf(recordId: string): string | null
   /** The topic a short id names, or null. */
   topicOf(shortId: string): string | null
+  /** How many topics the roster left out past its ceiling (P2b-D10, amended). */
+  topicsLeftOut: number
 }
 
 /** A secret or thread as the topics part lists it. */
@@ -104,6 +116,10 @@ export interface RosterTopic {
   kind: z.infer<typeof TopicKind>
   label: string
   created: string
+  /** Who made it: the author's are left out last. */
+  origin: RecordOrigin
+  /** Its evidence in the active draft's readable scenes (reveals, knows lines, steps). */
+  weight: number
 }
 
 const topicLine = (short: string, topic: RosterTopic, shortLabels: boolean): string =>
@@ -116,26 +132,54 @@ const topicLine = (short: string, topic: RosterTopic, shortLabels: boolean): str
 const byAge = <T extends { created: string; recordId: string }>(a: T, b: T): number =>
   a.created.localeCompare(b.created) || a.recordId.localeCompare(b.recordId)
 
-/** The topics part afresh: every topic oldest first, labels shortened when over the budget. */
+/**
+ * The topics part afresh: every topic oldest first, labels shortened when over the budget; past
+ * the ceiling, the AI-made topics with the least evidence are left out (the newest first among
+ * equals, the author's last).
+ */
 export function buildTopics(topics: readonly RosterTopic[]): TopicsPart {
   const ordered = [...topics].sort(byAge)
-  const lay = (short: boolean): TopicsPart => {
+  const lay = (short: boolean, kept: ReadonlySet<string>): TopicsPart => {
     const next = { secret: 1, thread: 1 }
     const ids: Record<string, string> = {}
     const base: string[] = []
-    for (const topic of ordered) {
+    const listed = ordered.filter((topic) => kept.has(topic.recordId))
+    for (const topic of listed) {
       const id = `${TOPIC_ID_PREFIX[topic.kind]}${next[topic.kind]}`
       next[topic.kind] += 1
       ids[topic.recordId] = id
       base.push(topicLine(id, topic, short))
     }
     const held = Object.fromEntries(
-      ordered.map((topic) => [topic.recordId, { label: topic.label, kind: topic.kind }])
+      listed.map((topic) => [topic.recordId, { label: topic.label, kind: topic.kind }])
     )
-    return { ids, next, base, additions: [], held, short }
+    const dropped = ordered
+      .filter((topic) => !kept.has(topic.recordId))
+      .map((topic) => topic.recordId)
+    return { ids, next, base, additions: [], held, short, dropped }
   }
-  const full = lay(false)
-  return topicLinesTokens(full.base) <= TOPIC_ROSTER_TOKENS ? full : lay(true)
+  const all = new Set(ordered.map((topic) => topic.recordId))
+  const full = lay(false, all)
+  if (topicLinesTokens(full.base) <= TOPIC_ROSTER_TOKENS) return full
+  const kept = new Set(all)
+  const dropOrder = [...ordered].sort(
+    (a, b) =>
+      (a.origin === 'ai' ? 0 : 1) - (b.origin === 'ai' ? 0 : 1) ||
+      a.weight - b.weight ||
+      b.created.localeCompare(a.created) ||
+      b.recordId.localeCompare(a.recordId)
+  )
+  // Each short line's tokens, summed: the joined lines are within one token a line of it.
+  const lineTokens = new Map(
+    ordered.map((topic) => [topic.recordId, topicLinesTokens([topicLine('s000', topic, true)]) + 1])
+  )
+  let size = [...lineTokens.values()].reduce((sum, each) => sum + each, 0)
+  for (const topic of dropOrder) {
+    if (size <= TOPIC_ROSTER_MAX_TOKENS) break
+    kept.delete(topic.recordId)
+    size -= lineTokens.get(topic.recordId) ?? 0
+  }
+  return lay(true, kept)
 }
 
 /**
@@ -156,14 +200,16 @@ export function appendTopics(part: TopicsPart, topics: readonly RosterTopic[]): 
     held: { ...part.held }
   }
   for (const topic of [...topics].sort(byAge)) {
-    if (next.held[topic.recordId] !== undefined) continue
+    if (next.held[topic.recordId] !== undefined || part.dropped.includes(topic.recordId)) continue
     const id = `${TOPIC_ID_PREFIX[topic.kind]}${next.next[topic.kind]}`
     next.next[topic.kind] += 1
     next.ids[topic.recordId] = id
     next.additions.push(topicLine(id, topic, part.short))
     next.held[topic.recordId] = { label: topic.label, kind: topic.kind }
   }
-  if (topicLinesTokens([...next.base, ...next.additions]) > TOPIC_ROSTER_TOKENS) return null
+  const tokens = topicLinesTokens([...next.base, ...next.additions])
+  // Over the 400 with full labels: shorten them all; over the ceiling: leave some out afresh.
+  if ((!part.short && tokens > TOPIC_ROSTER_TOKENS) || tokens > TOPIC_ROSTER_MAX_TOKENS) return null
   return next
 }
 
@@ -302,14 +348,27 @@ function namedTotals(db: TreeDb): Map<string, number> {
 export function readerRoster(db: TreeDb): ReaderRoster {
   const all = listRecords(db)
   const records = all.filter((record) => READ_KINDS.has(record.kind))
-  // The author's secrets and threads, and the AI's while the active draft backs them (one only an
-  // inactive draft revealed was never read as real, P2b-D10's "never drops" holds within a draft).
+  // The author's secrets and threads, and the AI's while readable scenes of the active draft back
+  // them (one only an inactive draft or an Idea scene revealed was never read as real).
   const draftId = currentDraftId(db)
-  const backed = draftId === null ? new Set<string>() : topicsInDraft(db, draftId)
+  const sources = claimSources(db)
+  const backed =
+    draftId === null
+      ? new Map<string, number>()
+      : topicsInDraft(db, draftId, (nodeId) => readerMayRead(sources(nodeId)))
   const topics: RosterTopic[] = all.flatMap((record) =>
     (record.kind === 'secret' || record.kind === 'thread') &&
     (record.origin !== 'ai' || backed.has(record.id))
-      ? [{ recordId: record.id, kind: record.kind, label: record.name, created: record.created }]
+      ? [
+          {
+            recordId: record.id,
+            kind: record.kind,
+            label: record.name,
+            created: record.created,
+            origin: record.origin,
+            weight: backed.get(record.id) ?? 0
+          }
+        ]
       : []
   )
   const stored = readRow(db)
@@ -349,6 +408,7 @@ export function readerRoster(db: TreeDb): ReaderRoster {
     },
     topicLines: [...part.base, ...part.additions],
     topicShortOf: (recordId) => topicIds.get(recordId) ?? null,
-    topicOf: (short) => topicBack.get(short.trim()) ?? null
+    topicOf: (short) => topicBack.get(short.trim()) ?? null,
+    topicsLeftOut: part.dropped.length
   }
 }

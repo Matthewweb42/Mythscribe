@@ -2,7 +2,7 @@ import { eq, inArray } from 'drizzle-orm'
 import type { Claim } from '@shared/memory/claims'
 import { cardEntryIsRecord, dismissedKey, type Dismissed } from '@shared/memory/dismissed'
 import { gateText } from '@shared/memory/gate'
-import { HOW_LABEL, parseHow } from '@shared/memory/knows'
+import { HOW_LABEL, KNOWER_KINDS, keepsFrom, parseHow } from '@shared/memory/knows'
 import { locateQuote } from '@shared/memory/quote'
 import { parseVerifyAnswer } from '@shared/memory/readerAnswer'
 import { notRightLine } from '@shared/memory/reconcile'
@@ -24,10 +24,10 @@ import { currentDraftId } from '../../draft/draftStore'
 import { AppError } from '../../ipc/errors'
 import type { TreeDb } from '../../tree/treeStore'
 import { dismiss, dismissedIds } from '../dismissedStore'
-import { getRecord } from '../recordStore'
+import { getRecord, listRecords } from '../recordStore'
 import { getCard } from './cardStore'
 import { claimRows, deleteClaims, getClaim } from './claimStore'
-import { agrees, notAboutCheck } from './pipeline'
+import { agrees, hereCheck, notAboutCheck } from './pipeline'
 import { loadReadingScene, readBook, type Book, type ReadingScene } from './readerContext'
 import {
   getNotAboutMoves,
@@ -39,7 +39,7 @@ import {
 } from './readerRows'
 import { readerRoster } from './rosterCache'
 import { topicItemLines } from './topicContext'
-import { readingOrder } from './views'
+import { heldCard, hereChips, readingOrder } from './views'
 
 /**
  * *Not right* on an AI line (F-16.18; design §2.7 "Dismissed", plan P2a §4). Two choices:
@@ -63,7 +63,11 @@ import { readingOrder } from './views'
  *
  * P2b: a knows line's tombstone keys by its secret and how (`notRightLine`) and reads "Orrin: knows
  * the sold map (overheard)"; *Not about* re-checks it as a knows item for the picked learner (the
- * checker must also give its how). A thread step is about its thread: *Not about* does not apply
+ * checker must also give its how): only a character or a group may be picked (VALIDATION), a
+ * character not Here is checked on the page in the same request (P2b-D8; not shown there: the
+ * move is refused as for an unsupported line), and the moved line takes the source the checker
+ * named among the candidates for the new learner (only for told, overheard, read; never the
+ * learner), else none. A thread step is about its thread: *Not about* does not apply
  * (`unchecked`).
  */
 
@@ -289,8 +293,15 @@ export async function notAbout(
 ): Promise<NotRightOutcome> {
   const claim = getClaim(db, input.claimId)
   if (claim === null) return goneOutcome()
-  if (getRecord(db, input.recordId) === null) {
+  const picked = getRecord(db, input.recordId)
+  if (picked === null) {
     throw new AppError('NOT_FOUND', 'That record no longer exists', { recordId: input.recordId })
+  }
+  // P2b-D6: only a character or a group can know a secret.
+  if (claim.slot === 'knows' && !KNOWER_KINDS.includes(picked.kind)) {
+    throw new AppError('VALIDATION', 'Only a character or a group can know a secret', {
+      recordId: input.recordId
+    })
   }
   const was = claim.recordId
   if (was === input.recordId) {
@@ -316,8 +327,24 @@ export async function notAbout(
           SPOT_STRONG_AROUND,
           topicItemLines(db, roster, claim.draftId)
         )
-  if (check === null) return unchecked
-  const prompt = buildVerifyV2Prompt({ items: [check.item] })
+  if (check === null || scene === null) return unchecked
+  // P2b-D8: a character who learns a secret is Here (the typed details, the held card) or shown
+  // on the page by the same request's on-page check.
+  const card = getCard(db, claim.nodeId, claim.draftId)
+  const here = new Set(
+    hereChips(
+      scene.details,
+      card === null ? null : heldCard(db, card, true),
+      new Map(listRecords(db).map((each) => [each.id, each]))
+    ).map((chip) => chip.recordId)
+  )
+  const onPage =
+    claim.slot === 'knows' && picked.kind === 'character' && !here.has(input.recordId)
+      ? hereCheck(scene, claim, input.recordId, roster)
+      : null
+  const prompt = buildVerifyV2Prompt({
+    items: onPage === null ? [check.item] : [check.item, onPage]
+  })
   const result = await runAiRequest(deps.ai, {
     feature: 'verify',
     tier: 'fast',
@@ -330,14 +357,27 @@ export async function notAbout(
     cacheIf: (text) => parseVerifyAnswer(text).size > 0
   })
   input.onSpend?.(result.costUsd)
-  const verdict = parseVerifyAnswer(result.text).get(1)
-  if (verdict === undefined) return unchecked
-  const supported = agrees(verdict, {
-    expect: check.expect,
-    voice: claim.voice,
-    mode: claim.mode,
-    how: check.how
-  })
+  const answers = parseVerifyAnswer(result.text)
+  const verdict = answers.get(1)
+  const shown = onPage === null ? undefined : answers.get(2)
+  if (verdict === undefined || (onPage !== null && shown === undefined)) return unchecked
+  const supported =
+    agrees(verdict, {
+      expect: check.expect,
+      voice: claim.voice,
+      mode: claim.mode,
+      how: check.how
+    }) &&
+    (onPage === null || shown?.ok === true)
+  // A knows line keeps a source only for told, overheard or read, one of the candidates the
+  // checker named, and never the learner (P2b-D6).
+  const how = parseHow(claim.how)
+  const fr = verdict.fr?.trim() ?? null
+  const named = fr === null ? null : (check.from.find((id) => roster.shortOf(id) === fr) ?? null)
+  const fromId =
+    claim.slot === 'knows' && how !== null && keepsFrom(how) && named !== input.recordId
+      ? named
+      : null
   // The text may have changed while the check was out: the line is read again from the store.
   const current = getClaim(db, claim.id)
   if (current === null) return goneOutcome()
@@ -353,6 +393,7 @@ export async function notAbout(
       .set({
         recordId: input.recordId,
         pending: null,
+        ...(current.slot === 'knows' ? { fromId } : {}),
         // A line that waited on its subject has it now.
         state: current.state === 'waiting' ? 'live' : current.state,
         proof: 'verified',

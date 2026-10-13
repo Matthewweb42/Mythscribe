@@ -903,14 +903,25 @@ function scoreReader(
 }
 
 /** The story-memory checker (F-16.17): each verdict's `ok` against the label's `expect`. */
-function scoreVerify(expected: readonly boolean[], answer: string): LiveResult['verdict'] {
+function scoreVerify(
+  expected: readonly (boolean | 'notCounted')[],
+  answer: string
+): LiveResult['verdict'] {
   const verdicts = parseVerifyAnswer(answer)
   if (verdicts.size === 0) return { kind: 'json', ok: false, problem: 'not { v: [...] }' }
-  const wrong = expected.flatMap((want, i) =>
-    (verdicts.get(i + 1)?.ok ?? false) === want
-      ? []
-      : [`${i + 1}: expected ${want ? 'ok' : 'not ok'}`]
-  )
+  const wrong = expected.flatMap((want, i) => {
+    const verdict = verdicts.get(i + 1)
+    if (want === 'notCounted') {
+      // P2b-D7 (review of slice 2): a rumoured, supposed or dreamt reveal makes no secret.
+      const counted =
+        verdict?.ok === true &&
+        verdict.voice !== 'rumour' &&
+        verdict.mode !== 'hypothetical' &&
+        verdict.mode !== 'dream'
+      return counted ? [`${i + 1}: expected no counted reveal (rumour, hypothetical or dream)`] : []
+    }
+    return (verdict?.ok ?? false) === want ? [] : [`${i + 1}: expected ${want ? 'ok' : 'not ok'}`]
+  })
   return wrong.length === 0
     ? { kind: 'json', ok: true, problem: null }
     : { kind: 'json', ok: false, problem: wrong.join(', ') }

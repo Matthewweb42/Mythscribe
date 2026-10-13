@@ -116,13 +116,15 @@ function pack(
  * The window pieces of a partial read: each unread paragraph ±2; when none of the paragraphs
  * from that start to the changed one names a record, the start moves back to the last one that
  * does; overlapping or touching ranges merge; a range over 1,500 prose tokens is split at
- * paragraph boundaries (a single paragraph over a page is cut at sentences).
+ * paragraph boundaries (a single paragraph over a page is cut at sentences). `pageTokens` lowers
+ * both limits when the reader's prompt has less room (P2b-D10).
  */
 export function planWindows(
   paragraphs: readonly string[],
   unreadParas: readonly number[],
   namingParas: ReadonlySet<number>,
-  tokens: Tokens = estimateTokens
+  tokens: Tokens = estimateTokens,
+  pageTokens: number = PAGE_TOKENS
 ): ReadPiece[] {
   const last = paragraphs.length - 1
   if (last < 0) return []
@@ -152,17 +154,21 @@ export function planWindows(
     } else merged.push([range[0], range[1]])
   }
   return merged.flatMap(([from, to]) =>
-    pack(paragraphs, from, to, WINDOW_SPLIT_TOKENS, PAGE_TOKENS, tokens)
+    pack(paragraphs, from, to, Math.min(WINDOW_SPLIT_TOKENS, pageTokens), pageTokens, tokens)
   )
 }
 
-/** The pages of a full read: the whole scene in pieces of at most 2,500 prose tokens. */
+/**
+ * The pages of a full read: the whole scene in pieces of at most 2,500 prose tokens, or fewer
+ * (`pageTokens`) when the reader's prompt has less room (a topics roster past its share, P2b-D10).
+ */
 export function planPages(
   paragraphs: readonly string[],
-  tokens: Tokens = estimateTokens
+  tokens: Tokens = estimateTokens,
+  pageTokens: number = PAGE_TOKENS
 ): ReadPiece[] {
   if (paragraphs.length === 0) return []
-  return pack(paragraphs, 0, paragraphs.length - 1, PAGE_TOKENS, PAGE_TOKENS, tokens)
+  return pack(paragraphs, 0, paragraphs.length - 1, pageTokens, pageTokens, tokens)
 }
 
 /** The paragraphs a set of pieces sends (for the read set and `reading.paras`). */

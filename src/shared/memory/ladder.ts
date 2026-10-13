@@ -132,6 +132,23 @@ export function nameInSentence(
   return match === null ? null : { start: match.index, end: match.index + match[0].length }
 }
 
+/**
+ * P2b-D8 (amended in review of P2b slice 2): a group a sentence names by its head noun, the last
+ * word of one of its names, in any case, as a whole word ("By Sunday the whole regiment knew"
+ * names "the regiment"; design §2.5's "the whole harbour knew"). The head noun as written in its
+ * name, or null when none stands in the sentences; a head shorter than three letters never counts.
+ */
+export function groupHeadIn(names: readonly string[], sentences: readonly string[]): string | null {
+  for (const name of names) {
+    const head = /([\p{L}][\p{L}'’-]*)[^\p{L}]*$/u.exec(name.trim())?.[1]
+    if (head === undefined || [...head].length < 3) continue
+    const escaped = head.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu')
+    if (sentences.some((sentence) => pattern.test(straightenQuotes(sentence)))) return head
+  }
+  return null
+}
+
 const unique = (ids: readonly string[]): string[] => [...new Set(ids)]
 
 /** Settles who a proposed fact is about (see the module comment). */

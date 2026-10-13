@@ -330,7 +330,7 @@ function verifyAnswer(messages: { content: string }[]): string {
       const shared = words(a ?? '').some((word) => words(b ?? '').includes(word))
       return [{ i, ok: shared }]
     }
-    if (head[2] === 'Reveals') return [{ i, ok: true }]
+    if (head[2] === 'Reveals') return [{ i, ok: true, voice: 'narration', mode: 'now' }]
     const step = /^(opens|advances|resolves):/.exec(fact)?.[1]
     if (head[2] === 'Thread') return [{ i, ok: true, how: step, voice: 'narration', mode: 'now' }]
     const knows = /^knows, (\w+)(?: from (r\d+))?/.exec(fact)

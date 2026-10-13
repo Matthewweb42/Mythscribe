@@ -13,6 +13,7 @@ import {
   TOPIC_ROSTER_TOKENS,
   topicLinesTokens
 } from '@shared/memory/topics'
+import { PAGE_TOKENS } from '@shared/memory/windows'
 import type { AiMessage } from '../providers/types'
 import {
   READER_ROSTER_HEADING,
@@ -40,7 +41,9 @@ import {
  * facts anchored in it (≤ 250, knows and steps included, and its re-checking reveals) and the
  * numbered paragraphs (≤ 2,500 prose tokens). Over the input budget the near lines go first,
  * then the topic lines, then the anchored ones; never the window or a roster. A topics roster past
- * its 400 takes the overflow out of the near lines' budget (`trimmed.rosterOver`).
+ * its 400 takes the overflow out of the near lines' budget (`trimmed.rosterOver`), and what the
+ * near lines cannot give out of the page (`readerV2PageTokens`: the pipeline plans smaller pages),
+ * so a reading always fits its input cap; the roster itself stops at `TOPIC_ROSTER_MAX_TOKENS`.
  */
 export const READER_V2_PROMPT_VERSION = 'reader.v2'
 
@@ -158,6 +161,19 @@ export interface BuiltReaderV2Prompt {
   trimmed: { near: number; topics: number; anchored: number; rosterOver: number }
 }
 
+/** How many tokens the topics roster runs past its 400 (P2b-D10). */
+export const topicsRosterOver = (topics: readonly string[]): number =>
+  Math.max(0, topicLinesTokens(topics) - READER_V2_TOPICS_TOKENS)
+
+/**
+ * The most prose tokens a page (or a window piece) may send beside this topics roster: 2,500, less
+ * what the roster runs past its 400 beyond the near lines' 250 (P2b-D10, amended in review), so
+ * the prompt's total never grows with the roster and a reading never fails its input cap.
+ */
+export function readerV2PageTokens(topics: readonly string[]): number {
+  return PAGE_TOKENS - Math.max(0, topicsRosterOver(topics) - READER_V2_NEAR_TOKENS)
+}
+
 /** The system message: the rules, the record roster, then the topics roster. */
 export function readerV2System(roster: readonly string[], topics: readonly string[]): string {
   const listed = topics.length === 0 ? READER_NO_TOPICS : topics.join('\n')
@@ -190,7 +206,7 @@ function userTurn(
 export function buildReaderV2Prompt(input: BuildReaderV2PromptInput): BuiltReaderV2Prompt {
   const system = readerV2System(input.roster, input.topics)
   // P2b-D10: the topics roster never drops a topic; what it runs past its 400 the near lines give.
-  const rosterOver = Math.max(0, topicLinesTokens(input.topics) - READER_V2_TOPICS_TOKENS)
+  const rosterOver = topicsRosterOver(input.topics)
   let near = fitLines(input.near, Math.max(0, READER_V2_NEAR_TOKENS - rosterOver))
   let topicLines = fitLines(input.topicLines, READER_V2_TOPIC_LINES_TOKENS)
   let anchored = fitLines(input.anchored, READER_V2_ANCHORED_TOKENS)

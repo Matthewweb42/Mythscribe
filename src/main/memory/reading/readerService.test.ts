@@ -254,6 +254,8 @@ describe('Read now (F-16.16, F-16.17)', () => {
     const secret = listRecords(db).find((each) => each.kind === 'secret')
     expect(secret?.name).toBe('the sold map')
     expect(pushed).toEqual([[secret?.id]])
+    // memory:changed names it too (plan P2b §2.4 step 7), though no claim on it changed.
+    expect(changed.at(-1)?.recordIds).toContain(secret?.id)
   })
 
   it('F-16.21: links an open plan after a reading that wrote a card, and says so', async () => {

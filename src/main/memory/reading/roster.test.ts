@@ -13,7 +13,14 @@ import { manuscriptDocuments } from '../../voice/profile'
 import { scanNamesFor } from '../nameIndexer'
 import { addAlias, createRecord, deleteRecord, setAliases, requireRecord } from '../recordStore'
 import { MEMORY_ROSTER_KEY } from './roster'
-import { ROSTER_RECORD_TOKENS, readerRoster, rosterLine } from './rosterCache'
+import { TOPIC_ROSTER_MAX_TOKENS, topicLinesTokens } from '@shared/memory/topics'
+import {
+  ROSTER_RECORD_TOKENS,
+  buildTopics,
+  readerRoster,
+  rosterLine,
+  type RosterTopic
+} from './rosterCache'
 
 let tmp: string
 let session: ProjectSession
@@ -161,6 +168,33 @@ describe('the reader’s roster cache (F-16.17, plan P2a §2.5)', () => {
     expect(roster.lines).toEqual(['r1 Mara Vell (Mara) · character'])
     expect(roster.topicLines).toEqual(['s1 the sold map · secret'])
     expect((JSON.parse(stored() ?? '{}') as { base: string[] }).base).toEqual(before.base)
+  })
+
+  it('P2b-D10 (amended): past the ceiling, leaves out the AI-made topics with the least evidence, the author’s last', () => {
+    const topic = (i: number, origin: RosterTopic['origin'], weight: number): RosterTopic => ({
+      recordId: `id-${String(i).padStart(3, '0')}`,
+      kind: i % 4 === 0 ? 'thread' : 'secret',
+      label: `the long hidden matter number ${i} of the hall`,
+      created: new Date(NOW.getTime() + i * 1_000).toISOString(),
+      origin,
+      weight
+    })
+    const author = Array.from({ length: 60 }, (_, i) => topic(i, 'author', 0))
+    const ai = Array.from({ length: 140 }, (_, i) => topic(60 + i, 'ai', i < 70 ? 5 : 1))
+    const part = buildTopics([...author, ...ai])
+    expect(part.short).toBe(true)
+    expect(topicLinesTokens(part.base)).toBeLessThanOrEqual(TOPIC_ROSTER_MAX_TOKENS)
+    expect(part.dropped.length).toBeGreaterThan(0)
+    // Every author topic is kept; the AI ones left out are the least evidenced, newest first.
+    for (const each of author) expect(part.held[each.recordId]).toBeDefined()
+    const dropped = new Set(part.dropped)
+    const kept = ai.filter((each) => !dropped.has(each.recordId))
+    const left = ai.filter((each) => dropped.has(each.recordId))
+    expect(Math.min(...kept.map((each) => each.weight))).toBeGreaterThanOrEqual(
+      Math.max(...left.map((each) => each.weight))
+    )
+    // Under the ceiling nothing is left out.
+    expect(buildTopics(author).dropped).toEqual([])
   })
 
   it('formats a line from a record', () => {

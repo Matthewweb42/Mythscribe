@@ -1,3 +1,4 @@
+import { estimateTokens } from '@shared/ai'
 import { anchorFor, sceneSentences } from '@shared/memory/anchor'
 import {
   CARD_GIST_MAX_WORDS,
@@ -28,12 +29,14 @@ import {
   readSetOf,
   unreadSentences,
   type GateSentence,
+  type KnownWords,
   type ReadDecision,
   type ReadSentence
 } from '@shared/memory/gate'
 import { KNOWER_KINDS, keepsFrom, parseHow } from '@shared/memory/knows'
 import {
   ANTECEDENT_SENTENCES,
+  groupHeadIn,
   nameInSentence,
   resolveSubject,
   type LadderReject,
@@ -70,7 +73,8 @@ import { activeDraftId, currentDraftId } from '../../draft/draftStore'
 import {
   READER_V2_PROMPT_VERSION,
   STEP_VALUE_MAX_WORDS,
-  buildReaderV2Prompt
+  buildReaderV2Prompt,
+  readerV2PageTokens
 } from '../../ai/prompts/reader.v2'
 import {
   VERIFY_UNNAMED_MARK,
@@ -392,13 +396,21 @@ interface NewTopic {
   stating: string[]
   /** Folded into another new topic of this reading with the same label (its key). */
   into: string | null
-  dropped: 'topic' | 'topicCap' | 'dismissed' | 'unanswered' | null
+  /**
+   * Why it was dropped: its sentence not found or its reveal refused (`topic`), past the caps, a
+   * reveal the author dismissed, a check with no verdict (`unanswered`, read again), or a secret
+   * the text only gives as a rumour, a hypothetical or a dream (`notCounted`, P2b-D7).
+   */
+  dropped: 'topic' | 'topicCap' | 'dismissed' | 'unanswered' | 'notCounted' | null
   /** Its Reveals check. */
   reveal: number | null
   /** Its Same checks, highest overlap first. */
-  same: { recordId: string; check: number }[]
-  /** The open topic it merges into once the checker judged them the same (P2b-D4). */
-  mergeInto: string | null
+  same: { target: TopicRef; check: number }[]
+  /**
+   * What it merges into once the checker judged them the same (P2b-D4): an open topic, or a new
+   * one an earlier page of this reading made (its key; review of P2b slice 2).
+   */
+  mergeInto: TopicRef | null
 }
 
 /** P2b: a listed topic's re-checking reveal the reader stated again. */
@@ -449,7 +461,7 @@ interface Check extends VerifyV2Item {
     /** A listed topic's re-checking reveal, stated again. */
     | { kind: 'restated'; index: number }
     /** P2b-D4: a new topic against an open one it may repeat. */
-    | { kind: 'same'; key: string; recordId: string }
+    | { kind: 'same'; key: string; with: TopicRef }
   /** Short ids the checker may answer for a pronoun or a new name, to the record (or name) each means. */
   ids: Map<string, string>
 }
@@ -692,6 +704,32 @@ export interface NotAboutCheck {
   expect: string
   /** A knows line's how, which the checker must answer too; null for a fact. */
   how: string | null
+  /** A knows line's source candidates (record ids) for the picked learner; empty for a fact. */
+  from: string[]
+}
+
+/** The on-page fact a present or Here check asks (P2a's card entries, P2b-D8's learners). */
+export const onPageFact = (roster: ReaderRoster, recordId: string): string =>
+  `${roster.shortOf(recordId)} is on the page in this scene (present, not only named or remembered)`
+
+/**
+ * P2b-D8: the on-page check of a learner for a stored knows line, on its quote's sentences ±1 (*Not
+ * about* moving the line to a character not Here); null when the quote is gone.
+ */
+export function hereCheck(
+  scene: ReadingScene,
+  claim: Claim,
+  recordId: string,
+  roster: ReaderRoster
+): VerifyV2Item | null {
+  const found = claimSentences(scene, claim)
+  if (found === null) return null
+  return {
+    kind: 'present',
+    who: [roster.whoLine(recordId)],
+    fact: onPageFact(roster, recordId),
+    text: contextText(scene, found.first, found.last)
+  }
 }
 
 /**
@@ -743,27 +781,40 @@ export function notAboutCheck(
     unnamed && id === pickedId ? `${roster.whoLine(id)}${VERIFY_UNNAMED_MARK}` : roster.whoLine(id)
   )
   const text = contextText(scene, first, last, naming, around)
-  const fact = lineText({ ...claim, kind }, roster)
   if (kind === 'knows') {
+    // The source candidates for the picked learner: never the learner, whoever the line had.
+    const from = storedFromCandidates(scene, { ...claim, recordId: pickedId }, first, last)
     return {
       item: {
         kind: 'knows',
         who,
-        from: storedFromCandidates(scene, { ...claim, recordId: pickedId }, first, last).map((id) =>
-          roster.whoLine(id)
-        ),
+        from: from.map((id) => roster.whoLine(id)),
         topic:
           claim.objectId === null
             ? '?'
             : (topics?.itemLine(claim.objectId) ?? roster.topicShortOf(claim.objectId) ?? '?'),
-        fact,
+        // The line as it would read for the picked learner: its source only when still a candidate.
+        fact: lineText(
+          {
+            ...claim,
+            kind,
+            fromId: claim.fromId !== null && from.includes(claim.fromId) ? claim.fromId : null
+          },
+          roster
+        ),
         text
       },
       expect: roster.shortOf(pickedId),
-      how: claim.how
+      how: claim.how,
+      from
     }
   }
-  return { item: { kind: 'claim', who, fact, text }, expect: roster.shortOf(pickedId), how: null }
+  return {
+    item: { kind: 'claim', who, fact: lineText({ ...claim, kind }, roster), text },
+    expect: roster.shortOf(pickedId),
+    how: null,
+    from: []
+  }
 }
 
 /**
@@ -790,14 +841,47 @@ export function agrees(
 }
 
 /**
- * Merges two answers of one piece (a cut-off reply and its retry). The retry's new secrets and
- * threads are renamed (`x1` → `x1'`), with the facts that use them, so the two replies' own ids
- * never collide.
+ * The ids a reply's knows lines and steps point at that are neither listed (`listed`) nor given by
+ * one of its own new secrets or threads: the part of the reply that gave them was cut off.
  */
-function mergeAnswers(a: ReaderAnswer, b: ReaderAnswer): ReaderAnswer {
-  const fresh = new Set(b.topics.filter((topic) => topic.label !== null).map((topic) => topic.id))
+function danglingTopicIds(answer: ReaderAnswer, listed: (id: string) => boolean): Set<string> {
+  const given = new Set(
+    answer.topics.filter((topic) => topic.label !== null).map((topic) => topic.id.trim())
+  )
+  const out = new Set<string>()
+  for (const claim of answer.claims) {
+    const id = claim.s === 'knows' ? claim.o : claim.s === 'thread' ? claim.r : null
+    if (id !== null && !listed(id) && !given.has(id.trim())) out.add(id.trim())
+  }
+  return out
+}
+
+/** A reply without the knows lines and steps that point at `ids` in the paragraphs `at` says. */
+function withoutLines(
+  answer: ReaderAnswer,
+  ids: ReadonlySet<string>,
+  at: (p: number) => boolean
+): ReaderAnswer {
+  const points = (claim: ReaderClaim): boolean => {
+    const id = claim.s === 'knows' ? claim.o : claim.s === 'thread' ? claim.r : null
+    return id !== null && ids.has(id.trim()) && at(claim.p)
+  }
+  return { ...answer, claims: answer.claims.filter((claim) => !points(claim)) }
+}
+
+/**
+ * Merges two answers of one piece (a cut-off reply and its retry). Every id of the retry's that
+ * is not a listed topic's is renamed (`x1` → `x1'`), in its new secrets and threads and in the
+ * facts that use them, so the two replies' own ids never collide (a retry's line pointing at an id
+ * it never gave stays unresolved, never the first reply's).
+ */
+function mergeAnswers(
+  a: ReaderAnswer,
+  b: ReaderAnswer,
+  listed: (id: string) => boolean
+): ReaderAnswer {
   const renamed = (id: string | null): string | null =>
-    id !== null && fresh.has(id) ? `${id}'` : id
+    id !== null && !listed(id) ? `${id.trim()}'` : id
   return {
     claims: [
       ...a.claims,
@@ -844,6 +928,23 @@ function inOrder(answer: ReaderAnswer | null): boolean {
 /** Where a cut-off reply's retry starts: after the last paragraph quoted, or over when out of order. */
 const reachedOf = (answer: ReaderAnswer | null): number =>
   inOrder(answer) ? lastQuoted(answer) : -1
+
+/**
+ * Where a cut-off reply's retry starts (`reachedOf`), earlier when the reply was cut inside its
+ * list of new names, secrets and threads (a knows line or step points at a new id it never gave):
+ * that list is in paragraph order, so what it lost stands at or after the last one it gave (the
+ * whole piece when it gave none). Review of P2b slice 2.
+ */
+function retryAfter(answer: ReaderAnswer | null, listed: (id: string) => boolean): number {
+  const reached = reachedOf(answer)
+  if (answer === null || danglingTopicIds(answer, listed).size === 0) return reached
+  const lastNew = Math.max(
+    -1,
+    ...answer.names.map((name) => name.p),
+    ...answer.topics.map((topic) => topic.p)
+  )
+  return Math.min(reached, lastNew - 1)
+}
 
 /** Paragraph ranges (inclusive) of a set of paragraphs. */
 function ranges(paras: readonly number[]): ParaRange[] {
@@ -894,24 +995,33 @@ export function gateScene(
   const stored = sceneClaims(db, nodeId, draftId)
   const card = getCard(db, nodeId, draftId)
   const present = new Set(scene.hashes)
-  // The known words cost a pass over the manuscript: read only when an edit could be cosmetic.
-  const unread = readSet === null ? [] : unreadSentences(current, readSet)
   // A re-checking reveal (P2b) is read again like a re-checking fact.
   const staleReveals = sceneTopicQuotes(db, nodeId, draftId).filter((q) => q.state === 'stale')
-  const decision = readDecision({
-    sentences: current,
-    read: readSet,
-    partials: previous?.partials ?? 0,
-    staleParas: new Set([
-      ...stored.filter((claim) => claim.state === 'stale').map((c) => c.para),
-      ...staleReveals.map((quote) => quote.para)
-    ]),
-    cardStale: card?.anchor.some((hash) => !present.has(hash)) === true,
-    knownWords: unread.length > 0 ? book.knownWords(nodeId) : new Set<string>()
-  })
-  // P2b-D9: nothing finished is unread (or only cosmetically changed): the scene is settled.
+  const staleParas = new Set([
+    ...stored.filter((claim) => claim.state === 'stale').map((c) => c.para),
+    ...staleReveals.map((quote) => quote.para)
+  ])
+  const cardStale = card?.anchor.some((hash) => !present.has(hash)) === true
+  // The known words cost a pass over the manuscript: read only when an edit could be cosmetic.
+  let known: KnownWords | null = null
+  const decide = (sentences: readonly GateSentence[]): ReadDecision => {
+    const unread = readSet === null ? [] : unreadSentences(sentences, readSet)
+    return readDecision({
+      sentences,
+      read: readSet,
+      partials: previous?.partials ?? 0,
+      staleParas,
+      cardStale,
+      knownWords: unread.length > 0 ? (known ??= book.knownWords(nodeId)) : new Set<string>()
+    })
+  }
+  const decision = decide(current)
+  // P2b-D9: nothing finished is unread (or only cosmetically changed): the scene is settled. The
+  // idle trigger leaves the caret paragraph out of what to read, never out of what is settled.
   if (decision.read === 'nothing' && decision.reason !== 'empty' && previous !== null) {
-    setSceneSettled(db, nodeId, draftId, true)
+    const whole =
+      caretPara === null ? decision : decide(gateSentences(scene.texts, { caretPara: null, names }))
+    if (whole.read === 'nothing') setSceneSettled(db, nodeId, draftId, true)
   }
   return { scene, draftId, current, readSet, stored, card, decision }
 }
@@ -951,15 +1061,17 @@ export async function runReading(
             : 'full'
           : 'window'
 
-  // 2. The plan.
+  // 2. The plan. A topics roster past its share makes the pages smaller, so every request fits
+  // its input cap (P2b-D10, amended in review).
+  const roster = readerRoster(db)
+  const pageTokens = readerV2PageTokens(roster.topicLines)
   const windowParas = backfill ? backfillParas : decision.read === 'window' ? decision.paras : []
   const pieces = full
-    ? planPages(scene.texts)
-    : planWindows(scene.texts, windowParas, namingParas(scene))
+    ? planPages(scene.texts, estimateTokens, pageTokens)
+    : planWindows(scene.texts, windowParas, namingParas(scene), estimateTokens, pageTokens)
   if (pieces.length === 0) return { read: false, reason: 'empty' }
   const due = cardDue({ card, full, present, finished: current.map((s) => s.hash) })
 
-  const roster = readerRoster(db)
   const order = readingOrder(db)
   const at = order.at.get(input.nodeId) ?? Number.MAX_SAFE_INTEGER
   const draft = draftClaims(db, draftId).filter(
@@ -983,6 +1095,11 @@ export async function runReading(
     )
   )
   const storedReveals = sceneTopicQuotes(db, input.nodeId, draftId)
+  /**
+   * A reveal this reading checks again: a re-checking one, or, on a rebuild, every one (a rebuild
+   * replaces what it does not prove again, the scene's secrets and threads included, P2a-D25).
+   */
+  const rechecks = (reveal: { state: string }): boolean => reveal.state === 'stale' || rebuild
   const yields = emptyYields()
   const reject = (reason: LadderReject | 'unparsed'): void => {
     yields.rejected += 1
@@ -992,6 +1109,8 @@ export async function runReading(
   const count = (key: string): void => {
     yields.rejections[key] = (yields.rejections[key] ?? 0) + 1
   }
+  // P2b-D10 (amended): the roster left topics out past its ceiling.
+  if (roster.topicsLeftOut > 0) count('topicRosterLeftOut')
   const spend: Spend = {
     model: '',
     tokensIn: 0,
@@ -1009,6 +1128,9 @@ export async function runReading(
 
   try {
     // 3–4. The reader, piece by piece.
+    /** The pieces whose reply was cut off at its cap (a line's lost topic is then not its fault). */
+    const cutPieces = new Set<number>()
+    const isListed = (id: string): boolean => roster.topicOf(id) !== null
     const claimIds = new Map<string, string>()
     const answers: { piece: number; answer: ReaderAnswer }[] = []
     /** Paragraphs sent but not read through: they stay unread for the gate and reconcile. */
@@ -1028,10 +1150,11 @@ export async function runReading(
         claimIds.set(short, claim.id)
         anchored.push(line)
       }
-      // P2b: the re-checking reveals here, so the reader may state them again.
+      // P2b: the re-checking reveals here, so the reader may state them again (on a rebuild,
+      // every reveal here: a rebuild checks the scene's secrets and threads afresh too).
       for (const reveal of storedReveals) {
         const short = roster.topicShortOf(reveal.recordId)
-        if (reveal.state !== 'stale' || !paras.has(reveal.para) || short === null) continue
+        if (!rechecks(reveal) || !paras.has(reveal.para) || short === null) continue
         anchored.push(revealLine(short, reveal))
       }
       const named = [
@@ -1086,10 +1209,17 @@ export async function runReading(
       let answer = first.answer
       if (first.cut) {
         yields.cut += 1
+        cutPieces.add(index)
         // Only the paragraphs after the last one quoted are read again, once (all of them when
-        // the reply did not keep to paragraph order, so where it stopped says nothing).
-        const last = reachedOf(first.answer)
+        // the reply did not keep to paragraph order, so where it stopped says nothing; from the
+        // last new name, secret or thread it gave when it was cut inside that list).
+        const last = retryAfter(first.answer, isListed)
         const rest = piece.paragraphs.filter((part) => part.p > last)
+        // A knows line or step pointing at a new secret or thread the cut reply never gave is
+        // left to the retry when the retry reads its paragraph again.
+        if (answer !== null && rest.length > 0) {
+          answer = withoutLines(answer, danglingTopicIds(answer, isListed), (p) => p > last)
+        }
         if (rest.length > 0) {
           const again = await ask(rest)
           if (again.cut) yields.cut += 1
@@ -1106,7 +1236,7 @@ export async function runReading(
               const seen = new Set(rest.map((part) => part.p))
               for (const part of piece.paragraphs) if (!seen.has(part.p)) unseenByCard.add(part.p)
             }
-            answer = answer === null ? again.answer : mergeAnswers(answer, again.answer)
+            answer = answer === null ? again.answer : mergeAnswers(answer, again.answer, isListed)
           }
         }
       }
@@ -1167,16 +1297,20 @@ export async function runReading(
       const caps: Record<TopicKind, number> = { secret: 0, thread: 0 }
       const sent = new Set((pieces[piece]?.paragraphs ?? []).map((part) => part.p))
       for (const topic of answer.topics) {
-        const listed = roster.topicOf(topic.id)
+        // A labelled one is new whatever its id (one reusing a listed id is re-keyed to this
+        // piece, so its facts never land on the listed topic, review of P2b slice 2).
+        const listed = topic.label === null ? roster.topicOf(topic.id) : null
         if (listed !== null) {
-          // A listed one's reveal stated again: kept only for a re-checking reveal in the window.
-          const stale = storedReveals.find(
+          // A listed one's reveal stated again: kept only for a re-checking reveal in the window
+          // (every reveal there on a rebuild), the one in its paragraph first.
+          const open = storedReveals.filter(
             (reveal) =>
               reveal.recordId === listed &&
-              reveal.state === 'stale' &&
+              rechecks(reveal) &&
               sent.has(reveal.para) &&
               !restated.some((each) => each.quoteId === reveal.id)
           )
+          const stale = open.find((reveal) => reveal.para === topic.p) ?? open[0]
           if (topics.kindOf(listed) !== topic.kind || stale === undefined) continue
           yields.items += 1
           const location = locate(scene, texts[piece] ?? [], topic.p, topic.q)
@@ -1199,7 +1333,7 @@ export async function runReading(
           continue
         }
         yields.items += 1
-        const key = `${piece}:${topic.id}`
+        const key = `${piece}:${topic.id.trim()}`
         const label = topicLabel(topic.label ?? '')
         if (label === '' || newTopics.has(key)) {
           reject('shape')
@@ -1271,15 +1405,19 @@ export async function runReading(
       }
       return found
     }
-    /** A knows line's secret or a step's thread: listed with that kind, or new in this piece. */
+    /**
+     * A knows line's secret or a step's thread: new in this piece (a new one given a listed id is
+     * this piece's), else listed with that kind.
+     */
     const topicRef = (piece: number, id: string | null, kind: TopicKind): TopicRef | null => {
       if (id === null) return null
+      const fresh = newTopic(`${piece}:${id.trim()}`)
+      if (fresh !== null) return fresh.kind === kind ? { kind: 'new', key: fresh.key } : null
       const listed = roster.topicOf(id)
       if (listed !== null) {
         return topics.kindOf(listed) === kind ? { kind: 'listed', recordId: listed } : null
       }
-      const fresh = newTopic(`${piece}:${id.trim()}`)
-      return fresh !== null && fresh.kind === kind ? { kind: 'new', key: fresh.key } : null
+      return null
     }
 
     const ladder = (
@@ -1381,9 +1519,15 @@ export async function runReading(
       } else if ('recordId' in about) {
         item.subject = resolve(about.recordId)
         if (line.kind === 'knows') {
-          // P2b-D8: a group knows only where its sentence names it; a knows line never waits.
+          // P2b-D8: a group knows only where its sentence names it, its head noun enough ("the
+          // whole regiment knew", amended in review); a knows line never waits.
           if (scene.kindOf(about.recordId) === 'group' && item.subject.kind !== 'named') {
-            return refuse('group', claim, who)
+            const head = groupHeadIn(
+              (recordsById.get(about.recordId)?.aliases ?? []).map((alias) => alias.text),
+              quote.map((sentence) => sentence.text)
+            )
+            if (head === null) return refuse('group', claim, who)
+            item.subject = { kind: 'named', text: head }
           }
           if (item.subject.kind === 'shared') return refuse('subject', claim, who)
         }
@@ -1456,18 +1600,27 @@ export async function runReading(
      */
     const topicLine = (piece: number, claim: ReaderClaim): void => {
       const knows = claim.s === 'knows'
-      const ref = topicRef(piece, knows ? claim.o : claim.r, knows ? 'secret' : 'thread')
+      const id = knows ? claim.o : claim.r
+      const ref = topicRef(piece, id, knows ? 'secret' : 'thread')
       const nobody = { recordId: null, name: null }
       if (ref === null) {
+        if (cutPieces.has(piece) && id !== null && !isListed(id)) {
+          // Its new secret or thread was in the part of the reply cut off: not the reader's
+          // error; its paragraph is read again (review of P2b slice 2).
+          refuse('unanswered', claim, nobody)
+          unread.add(claim.p)
+          return
+        }
         yields.items += 1
         return refuse('record', claim, nobody)
       }
       if (ref.kind === 'new') {
         const dropped = newTopics.get(ref.key)?.dropped ?? null
         if (dropped === 'dismissed') return
+        // A fact riding a dropped topic goes with it; its quote was never looked for, so it is
+        // not an item for the health gate (review of P2b slice 2).
         if (dropped !== null) {
-          yields.items += 1
-          return refuse(dropped === 'unanswered' ? 'topic' : dropped, claim, nobody)
+          return refuse(dropped === 'topicCap' ? 'topicCap' : 'topic', claim, nobody)
         }
       }
       if (!knows) {
@@ -1738,8 +1891,7 @@ export async function runReading(
     cardCheck('pov', fields.pov)
     cardCheck('year', fields.year)
     cardCheck('flashback', fields.flashback)
-    const onPage = (recordId: string): string =>
-      `${roster.shortOf(recordId)} is on the page in this scene (present, not only named or remembered)`
+    const onPage = (recordId: string): string => onPageFact(roster, recordId)
     for (const [index, entry] of presentEntries.entries()) {
       checks.push({
         kind: 'present',
@@ -1751,18 +1903,15 @@ export async function runReading(
         ids: new Map()
       })
     }
-    // P2b-D8: a named character learner not Here in code, nor on this reading's card, gets one
-    // on-page check per page, on the sentences of its first knows line there.
-    const proposedHere = new Set([
-      ...(povRecord === null ? [] : [povRecord]),
-      ...presentEntries.map((entry) => entry.recordId)
-    ])
+    // P2b-D8: a named character learner not Here before the reading gets one on-page check per
+    // page, on the sentences of its first knows line there, even when this reading's card names
+    // them (the card's own check may fail where the knows sentence shows them, review of slice 2).
     const hereChecks = new Set<string>()
     for (const item of items) {
       const learner = item.recordId
       if (item.kind !== 'knows' || learner === null || !isCharacter(learner)) continue
       if (item.subject.kind !== 'named' && item.subject.kind !== 'firstPerson') continue
-      if (hereBefore.has(learner) || proposedHere.has(learner)) continue
+      if (hereBefore.has(learner)) continue
       const key = `${item.piece}:${learner}`
       if (hereChecks.has(key)) continue
       hereChecks.add(key)
@@ -1789,6 +1938,9 @@ export async function runReading(
       open.set(kind, found)
       return found
     }
+    const ref = order.refs.get(input.nodeId) ?? '?'
+    /** The facets of this reading's new topics, compared like open ones (a page with the ones before it). */
+    const freshFacets = new Map<string, TopicFacet>()
     for (const topic of kept) {
       topic.reveal = checks.length
       checks.push({
@@ -1815,24 +1967,41 @@ export async function runReading(
         terms: topics.termsOf(topic.label, topic.q),
         holders
       }
-      const ref = order.refs.get(input.nodeId) ?? '?'
-      for (const candidate of sameAsCandidates(fresh, openOf(topic.kind), { max: 3 })) {
-        const reveal = topics.revealOf(candidate.id)
-        const listed = `${roster.topicShortOf(candidate.id) ?? '?'} ${topics.labelOf(candidate.id)}`
-        topic.same.push({ recordId: candidate.id, check: checks.length })
+      // The open topics, and the new ones earlier pages of this reading proposed: a secret a long
+      // scene reveals on page 1 and a later page proposes again under its own label is judged in
+      // the same batch (review of P2b slice 2).
+      const earlier = [...freshFacets.values()].filter(
+        (facet) => (newTopics.get(facet.id)?.piece ?? topic.piece) < topic.piece
+      )
+      for (const candidate of sameAsCandidates(fresh, [...openOf(topic.kind), ...earlier], {
+        max: 3
+      })) {
+        const other = newTopics.get(candidate.id)
+        const target: TopicRef =
+          other === undefined
+            ? { kind: 'listed', recordId: candidate.id }
+            : { kind: 'new', key: other.key }
+        let side: string
+        if (other !== undefined) {
+          side = `new ${other.label}: “${other.q}” (${ref})`
+        } else {
+          const reveal = topics.revealOf(candidate.id)
+          const listed = `${roster.topicShortOf(candidate.id) ?? '?'} ${topics.labelOf(candidate.id)}`
+          side = reveal === null ? listed : `${listed}: “${reveal.quote}” (${reveal.ref})`
+        }
+        topic.same.push({ target, check: checks.length })
         checks.push({
           kind: 'same',
           who: [],
-          topic:
-            `${topic.id} ${topic.label}: “${topic.q}” (${ref}) | ` +
-            (reveal === null ? listed : `${listed}: “${reveal.quote}” (${reveal.ref})`),
+          topic: `${topic.id} ${topic.label}: “${topic.q}” (${ref}) | ${side}`,
           fact: '',
           text: '',
           piece: topic.piece,
-          target: { kind: 'same', key: topic.key, recordId: candidate.id },
+          target: { kind: 'same', key: topic.key, with: target },
           ids: new Map()
         })
       }
+      freshFacets.set(topic.key, fresh)
     }
     for (const [index, entry] of restated.entries()) {
       entry.check = checks.length
@@ -1937,16 +2106,38 @@ export async function runReading(
     if (cardFields.pov?.verified === true) hereNow.add(cardFields.pov.value)
     for (const entry of cardPresent) if (entry.verified) hereNow.add(entry.recordId)
     const shownHere = new Set<string>()
+    /** Learners whose on-page check got no verdict: their lines are read again, not refused. */
+    const hereUnanswered = new Set<string>()
     for (const [index, check] of checks.entries()) {
-      if (check.target.kind === 'here' && verdicts.get(index)?.ok === true) {
-        shownHere.add(check.target.recordId)
-      }
+      if (check.target.kind !== 'here') continue
+      const verdict = verdicts.get(index)
+      if (verdict?.ok === true) shownHere.add(check.target.recordId)
+      else if (verdict === undefined) hereUnanswered.add(check.target.recordId)
     }
 
-    // P2b-D3, D4: each new topic's reveal, then the first open topic judged the same.
+    /**
+     * P2b-D7 (review of slice 2): a secret's reveal counts only as narration, thought or dialogue
+     * in the story's now or a memory; one the text gives as a rumour, a hypothetical or a dream
+     * makes no secret and sets no "readers have known since". A thread is set up however it is
+     * said (a vow or a plan is a hypothetical). A verdict that leaves voice or mode out is read as
+     * the reader's own (narration, now): the checker said it reveals it.
+     */
+    const revealCounts = (kind: TopicKind, verdict: VerifyVerdict): boolean =>
+      kind === 'thread' ||
+      (verdict.voice !== 'rumour' && verdict.mode !== 'hypothetical' && verdict.mode !== 'dream')
+    /** Whether a same-as target still stands: an open topic not deleted meanwhile, or a new one kept. */
+    const stands = (target: TopicRef): boolean =>
+      target.kind === 'listed'
+        ? getRecord(db, target.recordId) !== null
+        : newTopics.get(target.key)?.dropped === null
+    // P2b-D3, D4: each new topic's reveal, then the first topic judged the same (in page order,
+    // so an earlier page's new topic is settled before a later one may merge into it).
     for (const topic of kept) {
       const verdict = topic.reveal === null ? undefined : verdicts.get(topic.reveal)
-      if (verdict === undefined) {
+      // A missing verdict is no judgment: a reveal or a same-as check the checker never answered
+      // leaves the topic, its facts and its paragraph to the next reading (a missing "same as"
+      // is not "not the same", review of slice 2).
+      if (verdict === undefined || topic.same.some((each) => !verdicts.has(each.check))) {
         topic.dropped = 'unanswered'
         reject('unanswered')
         unread.add(topic.p)
@@ -1959,10 +2150,15 @@ export async function runReading(
         continue
       }
       yields.verified += 1
-      const same = topic.same.find((each) => verdicts.get(each.check)?.ok === true)
-      // A topic gone since (deleted while the requests were out) is no merge target.
-      topic.mergeInto =
-        same !== undefined && getRecord(db, same.recordId) !== null ? same.recordId : null
+      if (!revealCounts(topic.kind, verdict)) {
+        topic.dropped = 'notCounted'
+        count('topicNotCounted')
+        continue
+      }
+      const same = topic.same.find(
+        (each) => verdicts.get(each.check)?.ok === true && stands(each.target)
+      )
+      topic.mergeInto = same?.target ?? null
       count(topic.mergeInto === null ? 'topicsCreated' : 'topicsMerged')
     }
     /** The restated reveals the checker passed, to revive; unanswered ones leave their paragraph unread. */
@@ -1980,6 +2176,11 @@ export async function runReading(
         continue
       }
       yields.verified += 1
+      // A secret's sentence that now only rumours it is no reveal: it is not revived, and goes.
+      if (!revealCounts(entry.kind, verdict)) {
+        count('topicNotCounted')
+        continue
+      }
       revived.push(entry)
     }
 
@@ -2041,6 +2242,19 @@ export async function runReading(
       if (item.topic?.kind === 'new') freshTopic.set(fact, item.topic.key)
       return fact
     }
+    /**
+     * A knows line the checker supported whose learner the Here rule refuses in code (P2b-D8): not
+     * held against the checker; one whose on-page check got no verdict is read again.
+     */
+    const notHere = (
+      why: 'notHere' | 'unanswered',
+      item: Item,
+      who: { recordId: string | null; name: string | null }
+    ): void => {
+      yields.verifySent -= 1
+      refuse(why, item.claim, who)
+      if (why === 'unanswered') unread.add(item.claim.p)
+    }
     for (const item of items) {
       const subject = item.subject
       const who = { recordId: item.recordId, name: item.name?.text ?? null }
@@ -2095,10 +2309,12 @@ export async function runReading(
         unread.add(item.claim.p)
         continue
       }
-      // A knows line or step whose new topic the checker did not find revealed goes with it.
+      // A knows line or step whose new topic the checker did not find revealed goes with it; one
+      // whose topic got no verdict is read again (review of P2b slice 2).
       const topic = item.topic?.kind === 'new' ? newTopic(item.topic.key) : null
       if (topic !== null && topic.dropped !== null) {
-        refuse('topic', item.claim, who)
+        refuse(topic.dropped === 'unanswered' ? 'unanswered' : 'topic', item.claim, who)
+        if (topic.dropped === 'unanswered') unread.add(item.claim.p)
         continue
       }
       yields.verifySent += 1
@@ -2147,10 +2363,12 @@ export async function runReading(
       }
       const learnerLine = (
         learner: string
-      ): { how: string | null; fromId: string | null } | null => {
+      ): { how: string | null; fromId: string | null } | 'notHere' | 'unanswered' => {
         if (how === null) return { how: null, fromId: null }
         // P2b-D8: a character learner is Here or the POV, or shown on the page.
-        if (isCharacter(learner) && !hereNow.has(learner) && !shownHere.has(learner)) return null
+        if (isCharacter(learner) && !hereNow.has(learner) && !shownHere.has(learner)) {
+          return hereUnanswered.has(learner) ? 'unanswered' : 'notHere'
+        }
         const source = verdict.fr === null ? null : (check.ids.get(verdict.fr) ?? null)
         return {
           how,
@@ -2184,8 +2402,8 @@ export async function runReading(
           continue
         }
         const known = answered === null ? { how: null, fromId: null } : learnerLine(answered)
-        if (known === null) {
-          refuse('notHere', item.claim, { ...who, recordId: answered })
+        if (typeof known === 'string') {
+          notHere(known, item, { ...who, recordId: answered })
           continue
         }
         // The anchor keeps the sentence that names the one picked (else the nearest naming one).
@@ -2227,8 +2445,8 @@ export async function runReading(
       }
       const known =
         item.recordId === null ? { how: null, fromId: null } : learnerLine(item.recordId)
-      if (known === null) {
-        refuse('notHere', item.claim, who)
+      if (typeof known === 'string') {
+        notHere(known, item, who)
         continue
       }
       keep(
@@ -2289,9 +2507,12 @@ export async function runReading(
     const topicIds = new Set<string>()
     const inserted: { id: string; proof: ClaimProof }[] = []
     let lineMoved = false
-    // P2b-D9: whether the reading leaves nothing finished unread (the entries it will write).
+    // P2b-D9: whether the reading leaves nothing finished unread (the entries it will write), the
+    // caret paragraph's finished sentences included (the idle trigger did not send them).
     const readEntries = nextReadSet(readSet, current, wholeRead ? 'all' : readParas)
-    const settled = unreadSentences(current, readSetOf(readEntries, names)).length === 0
+    const finished =
+      input.caretPara === null ? current : gateSentences(scene.texts, { caretPara: null, names })
+    const settled = unreadSentences(finished, readSetOf(readEntries, names)).length === 0
     db.transaction((tx) => {
       readingId = insertReading(
         tx,
@@ -2345,10 +2566,17 @@ export async function runReading(
           stating: topic.stating,
           readingId
         }
-        if (topic.mergeInto !== null) {
-          const topicQuoteId = mergeInto(tx, topic.mergeInto, quote, [], at0)
-          made.set(topic.key, { recordId: topic.mergeInto, topicQuoteId })
-          topicIds.add(topic.mergeInto)
+        // Into an open topic, or into what an earlier page's new topic became.
+        const target =
+          topic.mergeInto === null
+            ? null
+            : topic.mergeInto.kind === 'listed'
+              ? topic.mergeInto.recordId
+              : (made.get(topic.mergeInto.key)?.recordId ?? null)
+        if (target !== null) {
+          const topicQuoteId = mergeInto(tx, target, quote, [], at0)
+          made.set(topic.key, { recordId: target, topicQuoteId })
+          topicIds.add(target)
           continue
         }
         const created = createTopic(
@@ -2463,9 +2691,12 @@ export async function runReading(
         revivedIds.add(entry.quoteId)
         topicIds.add(entry.recordId)
       }
+      // On a whole rebuild read, a reveal the reading did not prove again goes too.
+      const before = new Set(storedReveals.map((quote) => quote.id))
       const gone = sceneTopicQuotes(tx, input.nodeId, draftId).filter(
         (quote) =>
-          quote.state === 'stale' &&
+          before.has(quote.id) &&
+          (quote.state === 'stale' || (rebuild && wholeRead)) &&
           !revivedIds.has(quote.id) &&
           (wholeRead || readParas.has(quote.para))
       )

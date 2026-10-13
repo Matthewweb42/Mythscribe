@@ -904,9 +904,11 @@ export interface EvalCase {
       }
     /**
      * The story-memory checker (F-16.17; F-16.22): each item's `ok` must match the label's
-     * `expect` (a knows, step, reveals or same item's too).
+     * `expect` (a knows, step, reveals or same item's too); `notCounted` (a reveals item of a
+     * secret the text only rumours, supposes or dreams) passes when the verdict is not ok, or ok
+     * with a rumour voice or a hypothetical or dream mode: the pipeline then makes no secret.
      */
-    | { kind: 'verify'; expected: boolean[] }
+    | { kind: 'verify'; expected: (boolean | 'notCounted')[] }
 }
 
 /** A test-book label as a reader case scores against it. */
