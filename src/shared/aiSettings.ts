@@ -759,11 +759,11 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
   cite: {
     label: 'Ms Scribe’s quote check',
     sends:
-      'Story memory v2 only, after an answer that cites the book: your message, each cited ' +
-      'sentence of the answer with the quoted passages and a sentence either side; for a first, ' +
-      'last, ever, never or how-many answer, or one that found nothing, its first sentence, ' +
-      'which scenes were searched, the words searched for and up to five earlier passages the ' +
-      'search found.',
+      'Story memory v2 only, after an answer that cites the book or says it found nothing: your ' +
+      'message and the open scene’s number, each cited sentence of the answer with the quoted ' +
+      'passages and a sentence either side; for a first, last, ever, never or how-many answer, ' +
+      'or one that found nothing, its first sentence, which scenes were searched, the words ' +
+      'searched for and up to five passages the search found.',
     minDial: 1
   }
 }

@@ -21,7 +21,7 @@ import { WHAT_NEXT_DIRECTIONS } from '@shared/whatNext'
 import { parseAgentReply } from '../agent'
 import { readScribeReply } from '../../scribe/runScribe'
 import { CITE_SENTINEL, parseCiteReply } from '../prompts/cite.v1'
-import { parseCitedAnswer, quoteHeld } from '@shared/scribeAnswer'
+import { parseCitedAnswer, quoteHeld, statesAbsenceAsFact, statesScope } from '@shared/scribeAnswer'
 import { parseBetaReaderAnswerV2 } from '../betaReader'
 import { parsePlanLinksV2Answer } from '../../memory/reading/planLinks'
 import { checkChatFidelity, postProcessChatText } from '../chat'
@@ -960,10 +960,6 @@ function scoreCite(
     : { kind: 'json', ok: false, problem: wrong.join(', ') }
 }
 
-/** Saying someone does not know something, which no answer may state as fact (P2b rule 9). */
-const ABSENCE =
-  /\b(?:doesn['’]t|does not|did not|didn['’]t|never) (?:know|knew|learns?|learned|learnt|find out|found out)\b/iu
-
 /**
  * Ms Scribe's answer (F-16.25, `agent.v9`): the reply as the feature reads it; every citation's
  * item sent and its quote in it as sent (the code check), never a map; `found` or a `need`; the
@@ -1033,7 +1029,9 @@ function scoreScribe(
       problems.push('wrote prose instead of a brief')
     }
   }
-  if (ABSENCE.test(reply.answer) && !/searched/iu.test(reply.answer)) {
+  // Someone does not know something, which no answer may state as fact (P2b rule 9), unless it
+  // says what was searched: the same rule `runScribe` checks.
+  if (statesAbsenceAsFact(reply.answer) && !statesScope(reply.answer)) {
     problems.push('states an absence without its scope')
   }
   for (const phrase of want.required ?? []) {

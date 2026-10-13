@@ -7,6 +7,7 @@ import { foldTitles, gateWords, isTitle, normName } from './memory/names'
 import { RECORD_ALIASES_MAX, RECORD_ALIAS_MAX, RECORD_NAME_MAX } from './memory/records'
 import { twinGate, TwinRule, type TwinRosterRecord } from './memory/twinGate'
 import { resolveKind, type ReviewChange, type ReviewOp } from './reviewChat'
+import { clipAtWord, flatText } from './textClip'
 
 /**
  * Filing an upload into Pinned (F-16.9, decision 6; story memory v2): the AI reads one Research
@@ -271,16 +272,10 @@ export interface FilingPlan {
 
 const words = (text: string): number => text.trim().split(/\s+/u).filter(Boolean).length
 
-const flat = (text: string): string => text.replace(/\s+/gu, ' ').trim()
+const flat = flatText
 
 /** A line within `FILING_LINE_MAX`, cut at a word. */
-function lineText(text: string): string {
-  const one = flat(text)
-  if (one.length <= FILING_LINE_MAX) return one
-  const cut = one.slice(0, FILING_LINE_MAX)
-  const at = cut.lastIndexOf(' ')
-  return `${(at > FILING_LINE_MAX / 2 ? cut.slice(0, at) : cut).trimEnd()}…`
-}
+const lineText = (text: string): string => clipAtWord(text, FILING_LINE_MAX)
 
 /** "Eyes: grey" → { label: 'eyes', value: 'grey' }; null for a line with no short label. */
 export function splitLabel(text: string): { label: string; value: string } | null {

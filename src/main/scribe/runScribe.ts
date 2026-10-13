@@ -29,8 +29,12 @@ import {
   type ScribeTurnKind
 } from '@shared/scribe'
 import {
+  asksForFact,
+  bareAnswer,
   isAbsence,
   isAdviceOrQuestion,
+  isHedged,
+  mainClaimAt,
   markerize,
   needsCitation,
   notFoundLine,
@@ -39,6 +43,7 @@ import {
   scopeLine,
   scribeHistory,
   searchedPhrase,
+  statesAbsenceAsFact,
   statesScope,
   stripCitationMarkup,
   type HistoryTurn,
@@ -135,15 +140,19 @@ import { askIndexOf, caretParaOf, gatherStep0, type SceneE0, type Step0 } from '
  *
  * Code checks every citation: kept only when its item was sent and the quote is in the item's text
  * as sent; a map (card) is never kept. Sentences that name a record or a scene and kept no
- * citation are marked "not checked" (P3-D13). Then `cite.v1` (fast, one call, none when nothing
- * was cited) rules on every sentence with a kept citation: `no` drops its citations and marks it
- * unsupported, `yes` marks them "quote and sentence checked"; for a first/last/ever/never answer
- * (or one that found nothing) it also checks the earlier passages the search found (P3 slice 3).
- * The scope comes first: such a question is answered over every scene up to now, Step 0's search
- * added when the navigation searched less. A found answer whose first sentence (the main claim,
- * P3-D14) keeps no citation, is found `no`, has an earlier passage, or (for those questions) does
- * not say what was searched is asked once more with a retry turn; still unsupported, the answer
- * is "Not found in the manuscript (I looked in …)". Edits go through `offerEdit` (v2 refuses what it never offers); `pin`
+ * citation are marked "not checked" (P3-D13). Then `cite.v1` (fast, one call; none when nothing
+ * was cited and no absence has passages to check) rules on every sentence with a kept citation:
+ * `no` drops its citations and marks it unsupported, `yes` marks them "quote and sentence
+ * checked"; for a first/last/ever/never answer (or one that found nothing) it also checks the
+ * passages the search found (P3 slice 3). The scope comes first: such a question is answered over
+ * every scene up to now, Step 0's search added when the navigation searched less. On a question
+ * that asks for a fact from the book (`asksForFact`), a found answer whose main claim (P3-D14: the
+ * first sentence, the second after a bare yes or no) keeps no citation (unless it is a
+ * possibility or an opinion, `isHedged`), is found `no`, has an earlier passage, does not say what
+ * was searched (those questions), or says someone does not know something is asked once more
+ * with a retry turn; still unsupported, or the retry failing, the answer is "Not found in the
+ * manuscript (I looked in …)". A Plan run asked for a change or a sheet line is checked as a
+ * change turn. Edits go through `offerEdit` (v2 refuses what it never offers); `pin`
  * becomes a sheet line (decision 3 as the author changed it) unless its record is unknown, a secret
  * or thread, or its page already says it, which the answer then says. A read run (Plan) drops every
  * edit. Nothing is written here but search misses: never a claim, card or reading (P3 rule 6).
@@ -544,8 +553,13 @@ interface CheckedAnswer {
   refused: number
   /** How far each kept citation was checked, by `evidence\u0000quote`. */
   levels: Map<string, ScribeCitation['checked']>
-  /** Why the first sentence (the main claim) is unsupported; null when it stands. */
+  /** Why the main claim is unsupported; null when it stands. */
   main: UnsupportedReason | null
+  /**
+   * The main claim as the retry quotes it back (P3-D14): the first sentence, with the second when
+   * the first only answers yes or no (`mainClaimAt`).
+   */
+  claim: string
 }
 
 /** What the step list shows while `cite.v1` runs (P3 §3.3 step 4). */
@@ -641,13 +655,25 @@ export async function runScribe(
   // The answer's checks (P3 §3.3): answer turns are asked again, then answered Not found; a first,
   // last, ever, never or how-many answer (or one that found nothing) must say what was searched
   // and has its scope checked; the quote check runs when its switch allows.
-  const answerTurn = turn === 'answer' || turn === 'lookup' || turn === 'idea'
   // Edit and draft turns describe what Ms Scribe changes: a sentence about her own change ("I
-  // added a beat…") is no claim, but one that names a record or a scene is checked as any.
-  const changeTurn = turn === 'edit' || turn === 'draft'
+  // added a beat…") is no claim, but one that names a record or a scene is checked as any. A Plan
+  // run asked for a change or a sheet line is an answer turn to the prompt, but its reply only
+  // describes the change, so it is checked as a change turn's (never turned Not found).
+  const asked =
+    input.navigation === null && !write
+      ? scribeTurnOf({ ...input, access: 'write' }, step0.cues)
+      : turn
+  const changeTurn = asked === 'edit' || asked === 'draft'
+  const answerTurn = !changeTurn && (turn === 'answer' || turn === 'lookup' || turn === 'idea')
+  // The main-claim rules (P3-D14) hold for questions that ask for a fact from the book; an opinion,
+  // what-if or brainstorm answer is shown with its naming sentences marked "not checked".
+  const claimRules = answerTurn && asksForFact(input.message, step0.cues)
+  const knowsAsked = step0.cues.knows || step0.cues.learns
   const ordinal = step0.cues.scopeAll
   const latest = ordinalSearch(input.message, step0.names).latest
   const citeOn = isFeatureAllowed(settings, 'cite')
+  /** Now, as the quote check reads "happened" and "later in the book" against: the open scene's ref. */
+  const nowRef = step0.nowId === null ? null : sceneRefOf(frame, step0.nowId) || null
   const index = askIndexOf(db, listRecords(db))
 
   const outer = input.requestId === undefined ? null : registerInflight(input.requestId)
@@ -755,12 +781,13 @@ export async function runScribe(
   }
 
   /**
-   * The checks of one answer (P3 §2.3 step 4, §3.3): code's quote check of every citation, the
-   * main claim by code (a found answer's first sentence that names a record or a scene keeps a
-   * citation, unless it says the search found nothing; an ordinal or absence answer says what was
-   * searched), then,
-   * when something was cited and the main claim stands, `cite.v1` on every cited sentence with the
-   * scope item of an ordinal or absence answer.
+   * The checks of one answer (P3 §2.3 step 4, §3.3): code's quote check of every citation; the
+   * main claim by code (`mainClaimAt`: the first sentence, the second after a bare yes or no), on
+   * questions that ask for a fact from the book only (`asksForFact`): it keeps a citation unless it
+   * says the search found nothing or is a possibility or an opinion (`isHedged`); someone does not
+   * know something is never said as a fact; an ordinal or absence answer says what was searched.
+   * Then, when something was cited (or an absence answer has passages to check its scope against)
+   * and the main claim stands, `cite.v1` on every cited sentence with the scope item.
    */
   const checkAnswer = async (
     answer: string,
@@ -771,6 +798,7 @@ export async function runScribe(
     if (e0 !== null && scene !== null) sent.set('E0', sentE0(e0, scene.sent))
     for (const item of fitted.sent) sent.set(item.id, sentOf(item, frame))
     const parsed = parseCitedAnswer(answer.slice(0, AGENT_ANSWER_MAX))
+    const at = mainClaimAt(parsed.sentences)
     const kept = new Set<string>()
     let refused = parsed.malformed
     const verdicts: SentenceVerdict[] = parsed.sentences.map((sentence, i) => ({
@@ -792,24 +820,47 @@ export async function runScribe(
       }),
       needsCitation: changeTurn
         ? !OWN_CHANGE.test(sentence.text.trim()) && needsCitation(sentence.text, index)
-        : // The main claim: a found answer's first sentence must rest on a citation (P3-D14),
-          // unless it is advice or a question back to the author (P3-D13).
-          i === 0
-          ? !isAdviceOrQuestion(sentence.text)
-          : needsCitation(sentence.text, index),
+        : // The main claim must rest on a citation (P3-D14), unless it is advice or a question
+          // back to the author (P3-D13); a bare "Yes." before it is no claim of its own.
+          i < at
+          ? false
+          : i === at
+            ? !isAdviceOrQuestion(sentence.text)
+            : needsCitation(sentence.text, index),
       unsupported: false
     }))
     const first = parsed.sentences[0]
-    const absent = first !== undefined && isAbsence(first.text)
+    const claim = parsed.sentences[at]
+    const claimText =
+      first === undefined || claim === undefined
+        ? ''
+        : parsed.text.slice(first.start, claim.end).trim()
+    const absent = claim !== undefined && isAbsence(claim.text)
+    const hedged = claim !== undefined && isHedged(claim.text)
+    const scoped = statesScope(parsed.text)
     let main: UnsupportedReason | null = null
-    if (answerTurn && found && first !== undefined) {
+    if (claimRules && found && first !== undefined && claim !== undefined) {
+      // Someone does not know or never learns something, said as a fact (P2b rule 9; agent.v9:
+      // "say I found no scene where … (searched …)"): unsupported as the main claim, or a bare
+      // "No." to a knows question; marked unsupported anywhere after it.
+      const asFact = (text: string): boolean =>
+        !scoped && !isHedged(text) && statesAbsenceAsFact(text)
+      parsed.sentences.forEach((sentence, i) => {
+        const verdict = verdicts[i]
+        if (i > at && verdict !== undefined && asFact(sentence.text)) {
+          verdicts[i] = { ...verdict, unsupported: true }
+        }
+      })
+      const bareNo = knowsAsked && !absent && !scoped && bareAnswer(first.text) === 'no'
       // A claim about the book (it names a record or a scene, P3-D13) with no kept citation; a
-      // first sentence that names nothing stays marked "not checked", never turned Not found.
-      const lead = verdicts[0]
-      const claims = !absent && needsCitation(first.text, index)
-      if (lead !== undefined && claims && !lead.keep.some(Boolean)) {
+      // claim that names nothing stays marked "not checked", never turned Not found.
+      const claims = !absent && !hedged && needsCitation(claim.text, index)
+      const cites = verdicts.slice(0, at + 1).some((verdict) => verdict.keep.some(Boolean))
+      if (bareNo || parsed.sentences.slice(0, at + 1).some((each) => asFact(each.text))) {
+        main = 'absence'
+      } else if (claims && !cites) {
         main = 'noCitation'
-      } else if (scope !== null && (absent || (ordinal && claims)) && !statesScope(parsed.text)) {
+      } else if (scope !== null && (absent || (ordinal && claims)) && !scoped) {
         main = 'noScope'
       }
     }
@@ -827,39 +878,47 @@ export async function runScribe(
       verdicts,
       refused,
       levels: citationLevels(parsed, verdicts, new Map()),
-      main
+      main,
+      claim: claimText
     })
-    if (main !== null || cited.length === 0 || !citeOn || costUsd >= AGENT_COST_CAP_USD) {
-      return unchecked()
-    }
+    if (main !== null || !citeOn || costUsd >= AGENT_COST_CAP_USD) return unchecked()
 
-    // The scope item (P3 §3.2): an ordinal answer's first sentence and the scene it cites, or an
-    // answer that found nothing, with the passages the search found before it (after it, for a
-    // last one). Nothing to list, nothing sent.
+    // The scope item (P3 §3.2): an ordinal answer's main claim and the scene it cites, with the
+    // passages the search found before it (after it, for a last one); an answer that found
+    // nothing, with every passage the search found (the earliest first). Nothing to list, nothing
+    // sent.
     let scopeItem: CitePromptScope | null = null
-    if (scope !== null && first !== undefined && (ordinal || absent)) {
-      const lead = first.citations.find((citation, j) => {
-        const item = sent.get(citation.evidence)
-        return verdicts[0]?.keep[j] === true && item?.open?.kind === 'scene'
-      })
+    if (scope !== null && claim !== undefined && (ordinal || absent)) {
+      const lead = absent
+        ? undefined
+        : claim.citations.find((citation, j) => {
+            const item = sent.get(citation.evidence)
+            return verdicts[at]?.keep[j] === true && item?.open?.kind === 'scene'
+          })
       const leadItem = lead === undefined ? undefined : sent.get(lead.evidence)
-      const at =
+      // A passage or a claim lands in its own paragraph, so the scene's earlier ones are listed.
+      const place =
         lead === undefined || leadItem?.open?.kind !== 'scene'
           ? null
-          : { nodeId: leadItem.open.id, para: placeOf(leadItem, lead.quote) }
-      const hits = absent || at !== null ? scopeHits(frame, baseline, at, { latest, terms }) : []
+          : { nodeId: leadItem.open.id, para: placeOf(leadItem, lead.quote) ?? leadItem.open.para }
+      const hits =
+        absent || place !== null ? scopeHits(frame, baseline, place, { latest, terms }) : []
       if (hits.length > 0) {
         scopeItem = {
           searched: searchedPhrase(scope),
-          claim: first.text,
-          cited: at === null ? null : sceneRefOf(frame, at.nodeId) || null,
+          claim: claimText,
+          cited: place === null ? null : sceneRefOf(frame, place.nodeId) || null,
           latest,
           hits
         }
       }
     }
+    // An answer that found nothing is checked against the passages the search found even when it
+    // cites nothing (design rule 5: absence is never a fact).
+    if (cited.length === 0 && scopeItem === null) return unchecked()
     const built = buildCitePrompt({
       question: input.message,
+      now: nowRef,
       sentences: cited.map((each) => each.sentence),
       scope: scopeItem
     })
@@ -896,14 +955,18 @@ export async function runScribe(
     const outcome = applyCite(parseCiteReply(text), cited, built.sent, verdicts, {
       sent: built.scope,
       latest,
-      absence: absent
+      absence: absent,
+      claimAt: at
     })
+    // A possibility or an opinion its quotes do not say is marked, never asked about again.
+    const ruled = outcome.main === 'quotesDoNotSay' && hedged ? null : outcome.main
     return {
       parsed,
       verdicts,
       refused,
       levels: citationLevels(parsed, verdicts, outcome.verdicts),
-      main: answerTurn && found ? outcome.main : null
+      main: claimRules && found ? ruled : null,
+      claim: claimText
     }
   }
 
@@ -1023,15 +1086,27 @@ export async function runScribe(
     let checked = await checkOf(reply)
     let retried = false
     // P3-D14: a main claim the checks do not support is asked about once more (under the cost
-    // cap), its first sentence quoted back with the reason; the second answer is checked the same.
+    // cap), quoted back with the reason; the second answer is checked the same. A retry that
+    // fails (a rate limit, the daily cap) ends Not found, as one that cannot run does: never the
+    // unsupported claim, never the whole turn lost.
     if (checked !== null && checked.main !== null && costUsd < AGENT_COST_CAP_USD) {
-      const sentence = checked.parsed.sentences[0]?.text ?? ''
       retried = true
       hooks.reset?.()
-      const again = await ask(fitted, { sentence, reason: checked.main })
-      if (again.reply.kind === 'answer') {
-        reply = again.reply
-        checked = await checkOf(reply)
+      const retryId =
+        input.requestId === undefined ? null : agentStepRequestId(input.requestId, asks)
+      try {
+        const again = await ask(fitted, { sentence: checked.claim, reason: checked.main })
+        if (again.reply.kind === 'answer') {
+          reply = again.reply
+          checked = await checkOf(reply)
+        }
+      } catch (error) {
+        current = null
+        if (error instanceof AiCancelledError) throw error
+        if (retryId !== null) {
+          const why = error instanceof Error ? error.message : String(error)
+          hooks.note?.(retryId, `The retry failed (${why}); the answer reads Not found.`)
+        }
       }
     }
 

@@ -1,7 +1,6 @@
 import type { QuestionCues } from '@shared/memory/askParse'
 import {
   evidenceTag,
-  NAVIGATION_HITS_MAX,
   NAVIGATION_TERMS_MAX,
   sameEvidence,
   type EvidenceKey,
@@ -12,6 +11,7 @@ import {
 } from '@shared/scribe'
 import { quoteContext, type ParsedAnswer, type SentenceVerdict } from '@shared/scribeAnswer'
 import {
+  CITE_CONTEXT_CHARS,
   CITE_SCOPE_HITS_MAX,
   type CitePromptScope,
   type CitePromptSentence,
@@ -59,8 +59,8 @@ export interface ScopedSearch {
  * The scope rule (P3 §3.3 step 2, P3-D8): without a navigation, Step 0's menu and its search;
  * with one, its keys and search, unless the question needs every scene up to now (or the whole
  * book) and the navigation searched less: then Step 0's every-earlier-scene search, run for this
- * question already, is added (its scene hits after the navigation's keys, its words and hits
- * joined) and its scope is the answer's.
+ * question already, is added (its scene hits after the navigation's keys, its words joined, its
+ * hits first and every one kept) and its scope is the answer's.
  */
 export function enforceScope(
   navigation: Navigation | null,
@@ -90,15 +90,17 @@ export function enforceScope(
     if (key.kind !== 'passage' || key.source !== 'scene') continue
     if (!keys.some((each) => sameEvidence(each, key))) keys.push(key)
   }
-  const hits = [...navigation.hits]
-  for (const hit of step0.hits) {
+  // Step 0's hits first and all kept (the scope is its search: the scope item and the search-miss
+  // check read them), then the navigation's; each list holds at most 50 already.
+  const hits = [...step0.hits]
+  for (const hit of navigation.hits) {
     if (!hits.some((each) => each.nodeId === hit.nodeId && each.para === hit.para)) hits.push(hit)
   }
   return {
     keys,
     scope: step0.scope,
     terms: [...new Set([...navigation.terms, ...step0.terms])].slice(0, NAVIGATION_TERMS_MAX),
-    hits: hits.slice(0, NAVIGATION_HITS_MAX),
+    hits,
     widened: true
   }
 }
@@ -133,8 +135,19 @@ export interface CitedSentence {
 }
 
 /**
+ * A quote's context as the check reads it: its sentence ±1 (`quoteContext`), or its own sentence
+ * alone when that is longer than the check sends (`CITE_CONTEXT_CHARS`), so the neighbours are
+ * cut before the quote's own sentence is; `cite.v1` then clips around the quote.
+ */
+function contextOf(quotable: readonly string[], quote: string): string {
+  const wide = quoteContext(quotable, quote)
+  if (wide === null) return quote
+  return wide.length <= CITE_CONTEXT_CHARS ? wide : (quoteContext(quotable, quote, 0) ?? wide)
+}
+
+/**
  * The sentences `cite.v1` rules on: every sentence with a kept citation, in the answer's order,
- * each kept quote with its sentence ±1 in the item as sent (`quoteContext`).
+ * each kept quote with its sentence ±1 in the item as sent (`contextOf`).
  */
 export function citedSentences(
   parsed: Pick<ParsedAnswer, 'sentences'>,
@@ -152,7 +165,7 @@ export function citedSentences(
           evidence: citation.evidence,
           tag: citeTag(item, paraOf(citation.evidence, citation.quote)),
           quote: citation.quote,
-          context: quoteContext(item.context, citation.quote) ?? citation.quote
+          context: contextOf(item.context, citation.quote)
         }
       ]
     })
@@ -225,16 +238,16 @@ export interface CiteOutcome {
 /**
  * The checker's reply on the sentences sent (the first `sent` of `cited`), mapped back to the
  * answer's sentences: a `no` marks its sentence unsupported in `verdicts` (its citations then go,
- * `markerize`); the main claim (sentence 0) is unsupported when it was found `no`, or when the
- * scope item found the same thing earlier (later for a last answer; for an answer that found
- * nothing, the thing it said was not found).
+ * `markerize`); the main claim (sentence `claimAt`: 0, or 1 after a bare yes or no) is
+ * unsupported when it was found `no`, or when the scope item found the same thing earlier (later
+ * for a last answer; for an answer that found nothing, the thing it said was not found).
  */
 export function applyCite(
   reply: CiteReply,
   cited: readonly CitedSentence[],
   sent: number,
   verdicts: SentenceVerdict[],
-  scope: { sent: boolean; latest: boolean; absence: boolean }
+  scope: { sent: boolean; latest: boolean; absence: boolean; claimAt: number }
 ): CiteOutcome {
   const found = new Map<number, CiteVerdict>()
   cited.slice(0, sent).forEach((each, i) => {
@@ -246,7 +259,7 @@ export function applyCite(
       verdicts[each.index] = { ...current, unsupported: true }
     }
   })
-  let main: UnsupportedReason | null = found.get(0) === 'no' ? 'quotesDoNotSay' : null
+  let main: UnsupportedReason | null = found.get(scope.claimAt) === 'no' ? 'quotesDoNotSay' : null
   if (main === null && scope.sent && reply.scope === 'earlier') {
     main = scope.absence ? 'notFoundShown' : scope.latest ? 'later' : 'earlier'
   }

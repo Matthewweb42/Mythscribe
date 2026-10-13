@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
+import { normalizeForMatch } from '@shared/critique'
 import { salvageJsonItems, unfence } from '@shared/memory/readerAnswer'
+import { clipAtWord } from '@shared/textClip'
 import type { AiMessage } from '../providers/types'
 
 /**
@@ -8,28 +10,38 @@ import type { AiMessage } from '../providers/types'
  * reasoning off. After code has kept an answer's citations (each quote in its item as sent), one
  * request asks whether each cited sentence says what its quotes say ("yes", "partly", "no"), and,
  * for a first/last/ever/never answer, whether an earlier passage the search found shows the same
- * thing (the scope item, P3-D8). Never the whole scene: each quote travels in its own sentence with
- * one either side. One call per answer, none when nothing was cited.
+ * thing (the scope item, P3-D8), and, for an answer that found nothing, whether a passage the
+ * search found shows it. Never the whole scene: each quote travels in its own sentence with one
+ * either side. One call per answer, none when nothing was cited and no absence has passages to be
+ * checked against. The labels are read as agent.v9 reads them, against the Now line.
  *
  * Order (token rule 3): the rules, identical for every check (cached); then one user turn with the
- * question, the numbered sentences and the scope item.
+ * question and Now, the numbered sentences and the scope item.
  */
 export const CITE_PROMPT_VERSION = 'cite.v1'
 
 /** The opening sentence; the e2e's fake provider keys on it. */
 export const CITE_SENTINEL = 'You are the citation checker inside a novel-writing app.'
 
-/** The rules (the golden holds them at 250 tokens or under). */
+/**
+ * The rules (the golden holds them at 250 tokens or under). The labels are the evidence tags'
+ * words (`EVIDENCE_LABEL_WORDS`) as agent.v9 reads them: "happened" text has happened by Now (the
+ * user turn's Now line), "later in the book" after it; notes, source documents and filed lines say
+ * who or what things are, never that an event happened (design §2.6).
+ */
 export const CITE_RULES =
-  `${CITE_SENTINEL} Each numbered sentence comes from an answer about the author's book, with ` +
-  'the passages it quotes, each quote shown in its sentence with one sentence either side.\n' +
-  '- "ok": "yes" when the quotes say what the sentence says, not merely mention the same people ' +
-  'or things; "partly" when they support only part of it; "no" when they do not support it. ' +
-  'Judge from the passages given alone, never from what you know. A passage labelled your idea, ' +
-  'planned, idea scene or not canon supports a sentence only if the sentence says it is that.\n' +
-  '- "scope", only with a Scope item: "earlier" when a passage listed there shows the same thing ' +
-  'as the first sentence, so it is not the first (or the last), or shows what the answer says ' +
-  'was not found; else "ok". Without a Scope item: "none".\n' +
+  `${CITE_SENTINEL} Each numbered sentence is from an answer about the author's book; each quote ` +
+  'it cites is shown in its sentence with one either side.\n' +
+  '- "ok": "yes" when the quotes say what the sentence says, not merely name the same things; ' +
+  '"partly" when they support only part of it; "no" when they do not. Judge from the passages ' +
+  'alone.\n' +
+  '- Labels: only "happened" text has happened by Now; "later in the book" happens after Now; ' +
+  'your notes, source documents and "filed from" lines say who or what things are, never that ' +
+  'an event happened; your idea, planned, idea scene and not canon text never happened. Such a ' +
+  'passage supports a sentence only if it says so.\n' +
+  '- "scope", only with a Scope item: "earlier" when a listed passage shows the same thing as ' +
+  'the first sentence (so it is not the first, or the last) or what the answer says was not ' +
+  'found; else "ok". Without one: "none".\n' +
   'Reply with JSON only: {"v":[{"i":1,"ok":"yes"}],"scope":"none"}'
 
 /** The most cited sentences one check carries (an answer keeps at most 8 citations). */
@@ -44,13 +56,17 @@ export const CITE_SENTENCES_TOKENS = 1_800
 export const CITE_SCOPE_TOKENS = 400
 export const CITE_QUESTION_CHARS = 1_000
 /**
- * A cited sentence, a quote (25 words at most, `quoteHeld`), a quote's context and a scope passage,
- * cut to these many characters: the first sentence with all eight quotes fits whatever else is sent.
+ * A cited sentence, a quote (25 words at most, `quoteHeld`), a quote's tag, its context and a
+ * scope passage, cut to these many characters. When the first sentence with all its quotes does
+ * not fit beside the question and the scope item, its contexts are cut shorter
+ * (`CITE_FIRST_CONTEXT_CHARS`, around the quote); at the shortest it always fits.
  */
 export const CITE_SENTENCE_CHARS = 400
 export const CITE_QUOTE_CHARS = 200
 export const CITE_CONTEXT_CHARS = 450
 export const CITE_HIT_CHARS = 240
+/** The first sentence's context caps, tried in order until it fits (the last always does). */
+export const CITE_FIRST_CONTEXT_CHARS = [CITE_CONTEXT_CHARS, 300, 200, 120] as const
 /** What the fit keeps back for the joins between the parts. */
 const CITE_MARGIN_TOKENS = 10
 
@@ -76,9 +92,9 @@ export interface CitePromptSentence {
 }
 
 /**
- * The scope item (P3 §3.2): what code searched, the answer's first sentence and the scene it
- * cites, and up to five passages the search found before it (after it, for a last or latest
- * answer) in reading order.
+ * The scope item (P3 §3.2): what code searched, the answer's main claim and the scene it cites,
+ * and up to five passages the search found before it (after it, for a last or latest answer) in
+ * reading order; for an answer that found nothing, every passage the search found (no scene).
  */
 export interface CitePromptScope {
   /** `searchedPhrase`: "every scene up to 14.2 for distrust, suspicion". */
@@ -93,6 +109,9 @@ export interface CitePromptScope {
 
 export interface BuildCitePromptInput {
   question: string
+  /** Now: the open scene's ref ("9.3"), which "happened" and "later in the book" are read against. */
+  now: string | null
+  /** The cited sentences; none for an answer that found nothing checked on its scope alone. */
   sentences: readonly CitePromptSentence[]
   scope: CitePromptScope | null
 }
@@ -115,22 +134,47 @@ export function citeMaxTokens(sentences: number, scope: boolean): number {
   )
 }
 
-/** `text` with runs of space as one, cut to `max` characters at a word with `…`. */
-export function clip(text: string, max: number): string {
-  const flat = text.replace(/\s+/gu, ' ').trim()
+/**
+ * `text` flattened and cut to about `max` characters around `quote` (its whole when it fits), at
+ * words, with `…` where it was cut: the quote's own words always stay in, the neighbours go first.
+ * A quote not found in it is cut from the start (`clipAtWord`).
+ */
+export function clipAround(text: string, quote: string, max: number): string {
+  const flat = normalizeForMatch(text)
   if (flat.length <= max) return flat
-  const cut = flat.slice(0, max)
-  const at = cut.lastIndexOf(' ')
-  return `${(at > max / 2 ? cut.slice(0, at) : cut).trimEnd()}…`
+  const needle = normalizeForMatch(quote)
+  const at = needle === '' ? -1 : flat.indexOf(needle)
+  if (at < 0) return clipAtWord(flat, max)
+  if (needle.length >= max) return clipAtWord(needle, max)
+  const end = at + needle.length
+  let from = Math.max(0, Math.min(at - Math.floor((max - needle.length) / 2), flat.length - max))
+  let to = Math.min(flat.length, from + max)
+  // Cut at words, never into the quote.
+  if (from > 0) {
+    const space = flat.indexOf(' ', from)
+    if (space >= 0 && space < at) from = space + 1
+  }
+  if (to < flat.length) {
+    const space = flat.lastIndexOf(' ', to)
+    if (space >= end) to = space
+  }
+  return `${from > 0 ? '…' : ''}${flat.slice(from, to).trim()}${to < flat.length ? '…' : ''}`
 }
 
-/** One sentence as its lines in the user turn, numbered from 1. */
-export function citeSentenceText(sentence: CitePromptSentence, n: number): string {
+/**
+ * One sentence as its lines in the user turn, numbered from 1, each quote's context cut around it
+ * to `contextChars`.
+ */
+export function citeSentenceText(
+  sentence: CitePromptSentence,
+  n: number,
+  contextChars: number = CITE_CONTEXT_CHARS
+): string {
   return [
-    `${n}. ${clip(sentence.text, CITE_SENTENCE_CHARS)}`,
+    `${n}. ${clipAtWord(sentence.text, CITE_SENTENCE_CHARS)}`,
     ...sentence.quotes.map(
       (quote) =>
-        `${quote.evidence} [${clip(quote.tag, CITE_QUOTE_CHARS)}] “${clip(quote.quote, CITE_QUOTE_CHARS)}” in: ${clip(quote.context, CITE_CONTEXT_CHARS)}`
+        `${quote.evidence} [${clipAtWord(quote.tag, CITE_QUOTE_CHARS)}] “${clipAtWord(quote.quote, CITE_QUOTE_CHARS)}” in: ${clipAround(quote.context, quote.quote, contextChars)}`
     )
   ].join('\n')
 }
@@ -139,13 +183,13 @@ export function citeSentenceText(sentence: CitePromptSentence, n: number): strin
 export function citeScopeText(scope: CitePromptScope): string {
   const cited = scope.cited === null ? '' : ` It cites ${scope.cited}.`
   const head =
-    `Scope: searched ${scope.searched}. The first sentence: “${clip(scope.claim, CITE_SENTENCE_CHARS)}”${cited}\n` +
+    `Scope: searched ${scope.searched}. The first sentence: “${clipAtWord(scope.claim, CITE_SENTENCE_CHARS)}”${cited}\n` +
     (scope.cited === null
       ? 'Passages the search found:'
       : `Passages the search found ${scope.latest ? 'after' : 'before'} ${scope.cited}:`)
   const lines: string[] = []
   for (const hit of scope.hits.slice(0, CITE_SCOPE_HITS_MAX)) {
-    const line = `- ${hit.ref}: ${clip(hit.text, CITE_HIT_CHARS)}`
+    const line = `- ${hit.ref}: ${clipAtWord(hit.text, CITE_HIT_CHARS)}`
     if (estimateTokens([head, ...lines, line].join('\n')) > CITE_SCOPE_TOKENS) break
     lines.push(line)
   }
@@ -153,13 +197,17 @@ export function citeScopeText(scope: CitePromptScope): string {
 }
 
 /**
- * The check of one answer: the rules, then the question, the sentences in the answer's order (the
- * main claim first), each whole with all its quotes, within `CITE_SENTENCES_TOKENS` and what the
- * input cap leaves (the later ones dropped first, so the first sentence is always sent), and the
- * scope item when given.
+ * The check of one answer: the rules, then the question with Now, the sentences in the answer's
+ * order (the main claim first), each whole with all its quotes, within `CITE_SENTENCES_TOKENS` and
+ * what the input cap leaves, and the scope item when given. The first sentence is always sent: its
+ * quotes' contexts are cut shorter until it fits (`CITE_FIRST_CONTEXT_CHARS`); the later ones are
+ * dropped first. With no sentence (an answer that found nothing), the scope item alone.
  */
 export function buildCitePrompt(input: BuildCitePromptInput): BuiltCitePrompt {
-  const question = `Question: ${clip(input.question, CITE_QUESTION_CHARS)}`
+  const question = [
+    `Question: ${clipAtWord(input.question, CITE_QUESTION_CHARS)}`,
+    ...(input.now === null || input.now === '' ? [] : [`Now: ${input.now}`])
+  ].join('\n')
   const scope = input.scope === null ? null : citeScopeText(input.scope)
   const room = Math.min(
     CITE_SENTENCES_TOKENS,
@@ -167,16 +215,23 @@ export function buildCitePrompt(input: BuildCitePromptInput): BuiltCitePrompt {
       estimateTokens([CITE_RULES, question, scope ?? ''].join('\n\n\n\n')) -
       CITE_MARGIN_TOKENS
   )
+  const cost = (text: string): number => estimateTokens(`${text}\n\n`)
   const parts: string[] = []
   let used = 0
-  for (const sentence of input.sentences.slice(0, CITE_SENTENCES_MAX)) {
-    const text = citeSentenceText(sentence, parts.length + 1)
-    const cost = estimateTokens(`${text}\n\n`)
-    if (parts.length > 0 && used + cost > room) break
+  const [first, ...rest] = input.sentences.slice(0, CITE_SENTENCES_MAX)
+  if (first !== undefined) {
+    const texts = CITE_FIRST_CONTEXT_CHARS.map((chars) => citeSentenceText(first, 1, chars))
+    const text = texts.find((each) => cost(each) <= room) ?? texts[texts.length - 1] ?? ''
     parts.push(text)
-    used += cost
+    used += cost(text)
   }
-  const tail = [question, parts.join('\n\n')]
+  for (const sentence of rest) {
+    const text = citeSentenceText(sentence, parts.length + 1)
+    if (used + cost(text) > room) break
+    parts.push(text)
+    used += cost(text)
+  }
+  const tail = [question, ...(parts.length === 0 ? [] : [parts.join('\n\n')])]
   if (scope !== null) tail.push(scope)
   return {
     version: CITE_PROMPT_VERSION,

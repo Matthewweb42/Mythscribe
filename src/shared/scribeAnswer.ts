@@ -217,8 +217,14 @@ export function isAbsence(sentence: string): boolean {
   return ABSENCE_OPENING.test(sentence.trim())
 }
 
-/** Words that say what was searched ("searching every scene up to 14.2", "I looked in"). */
-const SCOPE_WORDS = /\b(?:search(?:ed|ing)?|looked\s+(?:in|at|through))\b/iu
+/**
+ * Words that say what was searched: a search word followed by what it covered, "searching every
+ * scene up to 14.2", "(searched 1.1–14.2)", "I looked in 1.1 to 9.3", "searched the whole book";
+ * never a story's own searching or looking ("Mara looked at the map in 2.1", "he searched the
+ * house").
+ */
+const SCOPE_WORDS =
+  /\b(?:search(?:ed|ing)?|looked|looking|checked|checking)\s+(?:(?:in|through|across|over)\s+)?(?:(?:every|each|all(?:\s+the)?)\s+(?:earlier\s+|previous\s+)?(?:scenes?|chapters?)\b|the\s+(?:whole\s+|entire\s+)?(?:book|manuscript)\b|(?:scenes?|chapters?)\s+\d|\d+\.\d+|up\s+to\s+\d)/iu
 
 /**
  * Whether an answer says what was searched (P3 §3.3 step 2): a first, last, ever or never answer,
@@ -226,6 +232,74 @@ const SCOPE_WORDS = /\b(?:search(?:ed|ing)?|looked\s+(?:in|at|through))\b/iu
  */
 export function statesScope(answer: string): boolean {
   return SCOPE_WORDS.test(answer)
+}
+
+/**
+ * Someone does not know, never learns or is unaware of something, said as a fact (P2b rule 9,
+ * design rule 5): no answer may state it; it says what was searched instead ("I found no scene
+ * where Tomas learns it (searched …)"). The eval scores answers with it too.
+ */
+const ABSENCE_AS_FACT =
+  /\b(?:(?:doesn['’]t|does\s+not|did\s+not|didn['’]t|never|has\s+not|hasn['’]t)\s+(?:yet\s+)?(?:know|knew|known|learns?|learned|learnt|finds?\s+out|found\s+out|hears?\s+(?:about|of)|heard\s+(?:about|of))|(?:nobody|no\s+one|no-one|none\s+of\s+them)(?:\s+else)?\s+(?:knows?|knew|learns?|learned|learnt|finds?\s+out|found\s+out)|(?:is|was|remains|stays)\s+(?:still\s+)?unaware)\b/iu
+
+/** Whether a sentence says someone does not know something as a fact (`ABSENCE_AS_FACT`). */
+export function statesAbsenceAsFact(sentence: string): boolean {
+  return ABSENCE_AS_FACT.test(sentence)
+}
+
+/** An opening that only answers yes or no ("Yes.", "No.", "Nobody.", "Not yet."). */
+const BARE_ANSWER =
+  /^(?:(yes|yeah|yep|correct|right|true|indeed|exactly|it\s+does|he\s+does|she\s+does|they\s+do)|(no|nope|false|nobody(?:\s+else)?|no\s+one(?:\s+else)?|none(?:\s+of\s+them)?|never|nothing|not\s+yet|not\s+that\s+I\s+found))[.!]?$/iu
+
+/** Whether a sentence is only a yes or a no (`BARE_ANSWER`), and which. */
+export function bareAnswer(sentence: string): 'yes' | 'no' | null {
+  const match = BARE_ANSWER.exec(sentence.trim())
+  if (match === null) return null
+  return match[1] === undefined ? 'no' : 'yes'
+}
+
+/**
+ * Where an answer's main claim is (P3-D14): its first sentence, or the second when the first only
+ * answers yes or no ("No. Tomas does not know about the map."), so the claim checked is the one
+ * that says something.
+ */
+export function mainClaimAt(sentences: readonly Pick<CitedSentence, 'text'>[]): number {
+  const [first, second] = sentences
+  return first !== undefined && second !== undefined && bareAnswer(first.text) !== null ? 1 : 0
+}
+
+/** How a sentence that is a possibility, an opinion or a suggestion opens. */
+const HEDGE_OPENING =
+  /^(?:if|what\s+if|suppose|supposing|imagine|alternatively|one\s+(?:option|way|idea|choice)|another\s+(?:option|way|idea|choice)|an?\s+(?:option|idea|alternative|choice))\b/iu
+/** Words that make a sentence a possibility or an opinion, matched with its first letter lowered. */
+const HEDGE_WORDS =
+  /\b(?:could|might|may|would|should|perhaps|maybe|possibly|probably|likely|seems?|seemed|comes?\s+across|reads?\s+as|feels?\s+like|[Ii]\s+(?:think|feel|believe|suspect|reckon|find)|[Ii]['’]d\s+say|in\s+my\s+(?:view|opinion))\b/u
+
+/**
+ * A sentence that offers a possibility or an opinion, not a fact about the book ("Mara could slip
+ * out through the cellar", "If Mara never found the map, …", "Mara comes across as guarded"): it
+ * is never retried as the main claim (P3-D14) and only marked "not checked" without a citation.
+ */
+export function isHedged(sentence: string): boolean {
+  const text = sentence.trim()
+  const lower = `${text.charAt(0).toLowerCase()}${text.slice(1)}`
+  return HEDGE_OPENING.test(text) || HEDGE_WORDS.test(lower)
+}
+
+/** A polite opening that asks for a fact all the same ("Could you tell me who …"). */
+const POLITE = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?/iu
+/** What makes a question a request for an opinion, a possibility or ideas, not a fact. */
+const NOT_FACT =
+  /\b(?:what\s+if|suppose|imagine|could|would|should|might|ought|brainstorm|ideas?\s+for|suggest(?:ions?)?|recommend|advice|help\s+me|opinion|feedback|critique|(?:do|did)\s+you\s+(?:think|feel|like|find|reckon)|you\s+think|your\s+(?:view|take|thoughts|opinion)|likeable|likable|sympathetic|believable|convincing|realistic|plausible|interesting|boring|dull|confusing|better|worse|improve|too\s+(?:slow|fast|long|short|much|little|obvious|subtle|flat|similar|dark|rushed|quiet))\b/iu
+
+/**
+ * Whether a question asks for a fact from the book (P3-D14): a record or slot, who, what, when or
+ * where, first, last, ever, never or how many, and every knows or learns question. Opinion,
+ * critique, what-if and brainstorm questions do not; their answers are never turned into "Not
+ * found" for want of a citation (their naming sentences are marked "not checked").
+ */
+export function asksForFact(question: string, cues: { knows: boolean; learns: boolean }): boolean {
+  return cues.knows || cues.learns || !NOT_FACT.test(question.replace(POLITE, ''))
 }
 
 /** What code decided about one sentence's citations. */

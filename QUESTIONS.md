@@ -12,6 +12,21 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-13 · F-16.25 · P3 slice 3 review: which answers are asked again, and what the quote check reads
+- Question: The review of slice 3 changed when Ms Scribe's answer is asked again and turned into "Not found" (replacing entries 1, 3 and 4 of the slice 3 entry below). Confirm or change these. No live run was possible here: the four new `cite.v1` cases wait for your `MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=… npm run eval:ai` run.
+- Chosen (decided by Claude, unconfirmed):
+  1. **Only questions about facts in the book are asked again.** An opinion or critique ("Is Mara likeable here?"), a what-if ("What if Mara never found the map?") or a brainstorm ("How could Mara get off the ship?") is answered as written, its sentences that name someone marked "not checked"; it is never turned into "Not found". Until the navigator (slice 4) names the kind of turn, this is read from the question's words (could, would, should, might, what if, think, likeable, better, brainstorm, ideas for…; a knows or learns question always counts as a fact question).
+  2. **A possibility or an opinion is never the claim asked about:** a first sentence with could, might, would, should, perhaps, if…, "comes across as", "I think" is marked "not checked" if uncited, and when the quote check says its quotes do not say it, it is marked, not asked about again.
+  3. **In Plan, asking for a change or a sheet line** ("Add to Mara's sheet…", "Tighten Mara's dialogue") is checked as a change: Ms Scribe's reply describing it is shown with "Plan mode writes nothing…", never "Not found".
+  4. **"Yes." or "No." on its own is no claim:** the sentence after it is the one checked and, when needed, asked about again (both quoted back).
+  5. **"Tomas does not know about the map" is never let stand as a fact** (your rule that absence is never a fact): as the answer, or a bare "No." to a "does … know" question, it is asked again once and then reads "Not found"; later in an answer it is marked unsupported. "I found no scene where Tomas learns it (searched every scene up to 1.3)" stands.
+  6. **"Says what was searched"** now means a search word followed by what it covered ("searching every scene up to 14.2", "(searched 1.1–14.2)", "the whole book"); "Mara looked at the map in 2.1" no longer counts.
+  7. **An answer that found nothing is checked even when it cites nothing** (replaces entry 4): when the search found passages, one quote check (about 0.02¢) asks whether any of them shows what the answer says was not found; if one does, the answer is asked again, then reads "Not found".
+  8. **A retry that fails** (a rate limit, the daily cap) ends "Not found in the manuscript (I looked in …)" and is noted in the developer tools, instead of losing the whole turn.
+  9. **The quote check reads labels as Ms Scribe does:** "later in the book" happens after now (the check is told which scene is now), and your notes, source documents and filed lines say who or what things are but never that an event happened. `cite.v1` was changed before it shipped (it is not on main), not given a new version number.
+- Alternatives: Ms Scribe marking her own answer as opinion or idea in its reply (a new `agent.v9` field and live run); retrying every uncited first sentence (slice 3 as built); leaving "does not know" marked only; no check for uncited absence answers; a new `cite.v2`.
+- To change it: `src/shared/scribeAnswer.ts` (`asksForFact`, `isHedged`, `bareAnswer`, `mainClaimAt`, `statesAbsenceAsFact`, `statesScope`; 1, 2, 4–6), `src/main/scribe/runScribe.ts` (`checkAnswer`, the retry; 3, 5, 7, 8), `src/main/ai/prompts/cite.v1.ts` (9), `src/main/ai/prompts/agent.v9.ts` (`UNSUPPORTED_REASONS.absence`).
+
 ## 2026-10-13 · F-16.25 · P3 slice 3 (cite.v1, the scope rule, the one retry, Not found): calls made while building it
 - Question: Ms Scribe now checks her own quotes (story memory v2 only; v1's chat is unchanged). These calls go beyond the plan's P3-D13, P3-D14 and P3-D21. No live run was possible here (no key): the six new `cite.v1` cases and `agent.v9`'s `retry-unsupported` case wait for your `MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=… npm run eval:ai` run.
 - Chosen (decided by Claude, unconfirmed):

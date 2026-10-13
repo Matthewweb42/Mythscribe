@@ -242,7 +242,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   cite: {
     trigger: 'every chat message',
-    when: 'Story memory v2 (F-16.25): cite.v1, fast tier, reasoning off, after every Ms Scribe answer that kept a citation (none when nothing was cited, and none for an instant card): the question, each cited sentence (at most 8) with its quotes in their evidence sentence ±1, and for a first, last, ever, never or how-many answer (or one that found nothing) the scope item (what code searched, the answer’s first sentence and cited scene, up to 5 passages the search found before it; none sent when it found none). max_tokens min(200, 20 + 10 per sentence + 20 for the scope). A main claim it finds unsupported asks agent.v9 once more, which is checked again (a second cite.v1 call). Figures (plan P3 §3): about 1,000 tokens in and 60 out.',
+    when: 'Story memory v2 (F-16.25): cite.v1, fast tier, reasoning off, after every Ms Scribe answer that kept a citation, and after an answer that found nothing when the search found passages to check it against (none otherwise, and none for an instant card): the question and Now (the open scene), each cited sentence (at most 8; the first always, its contexts cut around the quotes to fit) with its quotes in their evidence sentence ±1, and for a first, last, ever, never or how-many answer (or one that found nothing) the scope item (what code searched, the answer’s main claim and cited scene, up to 5 passages the search found before it, or every one for an absence; none sent when it found none). max_tokens min(200, 20 + 10 per sentence + 20 for the scope). A main claim it finds unsupported asks agent.v9 once more, which is checked again (a second cite.v1 call). Figures (plan P3 §3): about 1,000 tokens in and 60 out; the eval fixtures measure about 300–550 on the test book (2,435 at the cap).',
     callsPerUse: 1,
     typicalOutTokens: 60,
     ideas:
@@ -635,7 +635,7 @@ export const SHIPPED_PLAN_ROWS: readonly PlannedCostNote[] = [
     phase: 'P3',
     tier: 'fast',
     trigger: 'every chat message',
-    when: 'After each answer that cites the book: checks every cited sentence against its quotes, and the scope of a first, last, ever or never answer (reasoning off). The eval fixtures measure 300–1,400 on the test book; the design’s size stays the planning figure.',
+    when: 'After each answer that cites the book, or says it found nothing with passages the search found: checks every cited sentence against its quotes, and the scope of a first, last, ever or never answer or of the absence (reasoning off). The eval fixtures measure about 300–550 tokens in on the test book (2,435 at the cap); the design’s size stays the planning figure.',
     typicalInTokens: 1_000,
     typicalOutTokens: 60,
     callsPerUse: 1

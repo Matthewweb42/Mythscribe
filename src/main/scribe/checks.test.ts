@@ -100,10 +100,23 @@ describe('the scope rule (P3 §3.3 step 2, P3-D8)', () => {
       { kind: 'passage', source: 'scene', ownerId: 's1', para: 0 }
     ])
     expect(widened.terms).toEqual(['suspicion', 'suspect', 'distrust'])
+    // Step 0's hits first (the scope is its search), then the navigation's.
     expect(widened.hits).toEqual([
-      { nodeId: 's3', para: 2 },
-      { nodeId: 's1', para: 0 }
+      { nodeId: 's1', para: 0 },
+      { nodeId: 's3', para: 2 }
     ])
+    // A navigation with 50 hits of its own never pushes Step 0's out.
+    const full = enforceScope(
+      {
+        ...navigation,
+        hits: Array.from({ length: 50 }, (_, para) => ({ nodeId: 's3', para }))
+      },
+      step0Of('When does Mara first suspect him?', {
+        hits: Array.from({ length: 20 }, (_, para) => ({ nodeId: 's1', para }))
+      })
+    )
+    expect(full.hits).toHaveLength(70)
+    expect(full.hits.slice(0, 20).every((hit) => hit.nodeId === 's1')).toBe(true)
     // A question that needs no scope, a navigation that covered it, or no Step 0 search: as sent.
     expect(enforceScope(navigation, step0Of('What colour is the quay?')).widened).toBe(false)
     expect(
@@ -185,6 +198,22 @@ describe('what the quote check is sent', () => {
   })
 })
 
+describe('a quote’s context', () => {
+  it('drops the neighbouring sentences before the quote’s own sentence when they are long', () => {
+    const long = `${'The first sentence of the paragraph is long and winding, '.repeat(9)}and ends here.`
+    const quotable = [`${long} Orrin took the map from the drawer and slipped it into his coat.`]
+    const [one] = citedSentences(
+      parseCitedAnswer('Orrin took it. [E1 "slipped it into his coat"]'),
+      [{ keep: [true], needsCitation: true, unsupported: false }],
+      () => item({ quotable, context: quotable }),
+      () => 0
+    )
+    expect(one?.sentence.quotes[0]?.context).toBe(
+      'Orrin took the map from the drawer and slipped it into his coat.'
+    )
+  })
+})
+
 describe('how the verdicts land', () => {
   const parsed = parseCitedAnswer(
     'Mara first suspects it in 1.2. [E1 "Mara suspected the map was gone"] ' +
@@ -218,7 +247,7 @@ describe('how the verdicts land', () => {
       cited,
       3,
       verdicts,
-      { sent: true, latest: false, absence: false }
+      { sent: true, latest: false, absence: false, claimAt: 0 }
     )
     expect(outcome.main).toBeNull()
     expect(verdicts.map((each) => each.unsupported)).toEqual([false, true, false])
@@ -239,11 +268,21 @@ describe('how the verdicts land', () => {
     const no = applyCite({ verdicts: new Map([[1, 'no']]), scope: 'none' }, cited, 3, fresh(), {
       sent: false,
       latest: false,
-      absence: false
+      absence: false,
+      claimAt: 0
     })
     expect(no.main).toBe('quotesDoNotSay')
+    // After a bare "Yes." the main claim is the second sentence: its own no counts, the first's not.
+    const second = { sent: false, latest: false, absence: false, claimAt: 1 }
+    const verdict = (n: number): Map<number, 'no'> => new Map([[n, 'no']])
+    expect(applyCite({ verdicts: verdict(2), scope: null }, cited, 3, fresh(), second).main).toBe(
+      'quotesDoNotSay'
+    )
+    expect(
+      applyCite({ verdicts: verdict(1), scope: null }, cited, 3, fresh(), second).main
+    ).toBeNull()
     const earlier = { verdicts: new Map([[1, 'yes' as const]]), scope: 'earlier' as const }
-    const scope = { sent: true, latest: false, absence: false }
+    const scope = { sent: true, latest: false, absence: false, claimAt: 0 }
     expect(applyCite(earlier, cited, 3, fresh(), scope).main).toBe('earlier')
     expect(applyCite(earlier, cited, 3, fresh(), { ...scope, latest: true }).main).toBe('later')
     expect(applyCite(earlier, cited, 3, fresh(), { ...scope, absence: true }).main).toBe(
@@ -266,7 +305,7 @@ describe('how the verdicts land', () => {
       cited,
       2,
       verdicts,
-      { sent: false, latest: false, absence: false }
+      { sent: false, latest: false, absence: false, claimAt: 0 }
     )
     expect([...outcome.verdicts]).toEqual([[1, 'no']])
     expect(verdicts.map((each) => each.unsupported)).toEqual([false, true, false])

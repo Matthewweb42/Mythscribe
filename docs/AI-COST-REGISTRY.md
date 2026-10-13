@@ -45,7 +45,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `sheetSync` | Sheet write-ups: Structured and Blank page kept in step | background | sheetWriteUp.v1 | fast | 308 / 4743 | 350 / 1200 | $0.000141 · $0.00100 | $0.000176 | $0.00181 | 1 | $0.000141 |
 | `reader` | Story memory reading | background | reader.v2 | fast | 1626 / 5848 | 320 / 720 | $0.000317 · $0.00102 | $0.000397 | $0.00266 | 1 | $0.000317 |
 | `verify` | Story memory check | background | verify.v2 | fast | 1111 / 1742 | 140 / 400 | $0.000195 · $0.000356 | $0.000243 | $0.00146 | 1 | $0.000195 |
-| `cite` | Ms Scribe’s quote check | every chat message | cite.v1 | fast | 456 / 2417 | 60 / 200 | $0.0000806 · $0.000394 | $0.000101 | $0.000612 | 1 | $0.0000806 |
+| `cite` | Ms Scribe’s quote check | every chat message | cite.v1 | fast | 432 / 2435 | 60 / 200 | $0.0000773 · $0.000397 | $0.0000966 | $0.000594 | 1 | $0.0000773 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -196,7 +196,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `cite` — Ms Scribe’s quote check
 
-- **When:** Story memory v2 (F-16.25): cite.v1, fast tier, reasoning off, after every Ms Scribe answer that kept a citation (none when nothing was cited, and none for an instant card): the question, each cited sentence (at most 8) with its quotes in their evidence sentence ±1, and for a first, last, ever, never or how-many answer (or one that found nothing) the scope item (what code searched, the answer’s first sentence and cited scene, up to 5 passages the search found before it; none sent when it found none). max_tokens min(200, 20 + 10 per sentence + 20 for the scope). A main claim it finds unsupported asks agent.v9 once more, which is checked again (a second cite.v1 call). Figures (plan P3 §3): about 1,000 tokens in and 60 out.
+- **When:** Story memory v2 (F-16.25): cite.v1, fast tier, reasoning off, after every Ms Scribe answer that kept a citation, and after an answer that found nothing when the search found passages to check it against (none otherwise, and none for an instant card): the question and Now (the open scene), each cited sentence (at most 8; the first always, its contexts cut around the quotes to fit) with its quotes in their evidence sentence ±1, and for a first, last, ever, never or how-many answer (or one that found nothing) the scope item (what code searched, the answer’s main claim and cited scene, up to 5 passages the search found before it, or every one for an absence; none sent when it found none). max_tokens min(200, 20 + 10 per sentence + 20 for the scope). A main claim it finds unsupported asks agent.v9 once more, which is checked again (a second cite.v1 call). Figures (plan P3 §3): about 1,000 tokens in and 60 out; the eval fixtures measure about 300–550 on the test book (2,435 at the cap).
 - **Ideas:** Skip a sentence whose quote is the whole sentence word for word; measure the yes rate in the live run and check only the first sentence if it stays near 100 %; the scope item is already left out when the search found nothing before the cited place.
 
 ## Planned: story memory (F-16)

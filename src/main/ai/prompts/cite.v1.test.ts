@@ -7,6 +7,7 @@ import {
   CITE_SENTINEL,
   buildCitePrompt,
   citeMaxTokens,
+  clipAround,
   parseCiteReply,
   type CitePromptScope,
   type CitePromptSentence
@@ -59,7 +60,7 @@ const QUESTION = 'When does Lise first suspect the Captain?'
 
 describe('cite.v1 prompt (F-16.25)', () => {
   it('matches the golden messages: rules (cached), then the question, the sentences and the scope', () => {
-    const built = buildCitePrompt({ question: QUESTION, sentences, scope })
+    const built = buildCitePrompt({ question: QUESTION, now: '14.2', sentences, scope })
     expect(built.version).toBe(CITE_PROMPT_VERSION)
     expect(built.messages).toMatchSnapshot()
     expect(built.messages).toHaveLength(2)
@@ -67,6 +68,8 @@ describe('cite.v1 prompt (F-16.25)', () => {
     expect(CITE_RULES.startsWith(CITE_SENTINEL)).toBe(true)
     const user = built.messages[1]?.content ?? ''
     expect(user.indexOf('Question:')).toBe(0)
+    // Now: what "happened" and "later in the book" are read against.
+    expect(user).toContain(`Question: ${QUESTION}\nNow: 14.2\n\n1. Lise first`)
     expect(user.indexOf('1. Lise first')).toBeLessThan(user.indexOf('2. Bel never'))
     expect(user.indexOf('2. Bel never')).toBeLessThan(user.indexOf('Scope: searched'))
     expect(user).toContain('Passages the search found before 9.3:\n- 7.4 ¶2:')
@@ -78,23 +81,38 @@ describe('cite.v1 prompt (F-16.25)', () => {
 
   it('keeps its rules at 250 tokens or under, the same for every check', () => {
     expect(estimateTokens(CITE_RULES)).toBeLessThanOrEqual(250)
-    const other = buildCitePrompt({ question: 'Who sold the map?', sentences, scope: null })
+    // The labels as agent.v9 reads them: later is after Now, notes never make an event happen.
+    expect(CITE_RULES).toContain('"later in the book" happens after Now')
+    expect(CITE_RULES).toContain('never that an event happened')
+    const other = buildCitePrompt({
+      question: 'Who sold the map?',
+      now: '14.2',
+      sentences,
+      scope: null
+    })
     expect(other.messages[0]?.content).toBe(CITE_RULES)
   })
 
   it('sends the scope item only when given (an ordinal or absence answer)', () => {
-    const built = buildCitePrompt({ question: 'Who sold the map?', sentences, scope: null })
+    const built = buildCitePrompt({
+      question: 'Who sold the map?',
+      now: '14.2',
+      sentences,
+      scope: null
+    })
     expect(built.messages[1]?.content).not.toContain('Scope:')
     expect(built.scope).toBe(false)
     expect(built.maxTokens).toBe(40)
     const latest = buildCitePrompt({
       question: 'When does Lise last see the Captain?',
+      now: '14.2',
       sentences,
       scope: { ...scope, latest: true }
     })
     expect(latest.messages[1]?.content).toContain('Passages the search found after 9.3:')
     const absence = buildCitePrompt({
       question: 'Does Tomas ever learn of the map?',
+      now: '14.2',
       sentences,
       scope: { ...scope, cited: null, hits: [] }
     })
@@ -120,6 +138,7 @@ describe('cite.v1 prompt (F-16.25)', () => {
     }))
     const built = buildCitePrompt({
       question: long,
+      now: '14.2',
       sentences: many,
       scope: {
         ...scope,
@@ -138,10 +157,72 @@ describe('cite.v1 prompt (F-16.25)', () => {
     if (lead === undefined) throw new Error('no sentence')
     const short = buildCitePrompt({
       question: QUESTION,
+      now: null,
       sentences: Array.from({ length: 10 }, () => lead),
       scope: null
     })
     expect(short.sent).toBe(CITE_SENTENCES_MAX)
+  })
+})
+
+describe('cite.v1 fit and contexts (P3 slice 3 review)', () => {
+  it('fits the worst first sentence: a 1,000-character question, a full scope item, eight quotes with long filed-from tags', () => {
+    const long = 'word '.repeat(400)
+    const doc = 'Harbour and debts notes '.repeat(20)
+    const quote = Array.from({ length: 14 }, (_, i) => `w${i}`).join(' ')
+    const first: CitePromptSentence = {
+      text: `Sentence one ${long}`,
+      quotes: Array.from({ length: 8 }, (_, j) => ({
+        evidence: `E${j + 1}`,
+        tag: `filed from ${doc}, Lise’s Pinned ¶${j}`,
+        quote,
+        context: `${'before '.repeat(60)}${quote}${' after'.repeat(60)}`
+      }))
+    }
+    const built = buildCitePrompt({
+      question: long,
+      now: '14.2',
+      sentences: [first, first],
+      scope: {
+        ...scope,
+        searched: `every scene up to 14.2 for ${'longword, '.repeat(30)}`,
+        claim: long,
+        hits: Array.from({ length: 5 }, () => ({ ref: '1.1 ¶0', text: long }))
+      }
+    })
+    const total = estimateTokens(built.messages.map((message) => message.content).join('\n'))
+    expect(total).toBeLessThanOrEqual(inputBudget('cite'))
+    expect(built.sent).toBe(1)
+    // Every quote of the first sentence went, each within its cut context.
+    expect(built.messages[1]?.content.split(`“${quote}” in: `).length).toBe(9)
+    expect(built.messages[1]?.content).toContain(quote)
+  })
+
+  it('cuts a long context around the quote, so the quoted sentence stays whole', () => {
+    const before = `${'The first sentence of the paragraph is long and winding, '.repeat(8)}and ends here.`
+    const context = `${before} Orrin took the map from the drawer and slipped it into his coat. Then he left.`
+    const clipped = clipAround(context, 'slipped it into his coat', 120)
+    expect(clipped).toContain('Orrin took the map from the drawer and slipped it into his coat')
+    expect(clipped.length).toBeLessThanOrEqual(122)
+    expect(clipped.startsWith('…')).toBe(true)
+    // Short text is only flattened; a quote not in it is cut from the start.
+    expect(clipAround('a  b', 'b', 120)).toBe('a b')
+    expect(clipAround(before, 'not there at all', 40).endsWith('…')).toBe(true)
+  })
+
+  it('sends the scope item alone for an answer that found nothing and cited nothing', () => {
+    const built = buildCitePrompt({
+      question: 'Does Tomas ever learn of the map?',
+      now: '14.2',
+      sentences: [],
+      scope: { ...scope, cited: null }
+    })
+    expect(built.sent).toBe(0)
+    expect(built.messages[1]?.content).toMatch(
+      /^Question: Does Tomas ever learn of the map\?\nNow: 14\.2\n\nScope: searched /u
+    )
+    // 20 + 20 for the scope item.
+    expect(built.maxTokens).toBe(40)
   })
 })
 

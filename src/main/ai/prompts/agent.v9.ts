@@ -113,10 +113,11 @@ export const AGENT_V9_WIDENED_HEADING = 'The chapter you asked for (do not ask a
 export const AGENT_V9_UNSUPPORTED_SENTENCE_CHARS = 300
 
 /**
- * Why an answer's first sentence (its main claim) was not supported (P3-D14): it kept no
- * citation, the quote check found its quotes do not say it, a passage the search found shows the
- * same thing earlier (or later, for a last), or a first/last/ever/never answer did not say what
- * was searched. Code picks one; the retry turn words it.
+ * Why an answer's main claim (its first sentence, or the second after a bare yes or no) was not
+ * supported (P3-D14): it kept no citation, the quote check found its quotes do not say it, a
+ * passage the search found shows the same thing earlier (or later, for a last), a
+ * first/last/ever/never answer did not say what was searched, or it says someone does not know
+ * something (P2b rule 9). Code picks one; the retry turn words it.
  */
 export const UNSUPPORTED_REASONS = {
   noCitation: 'it cites no passage that says it',
@@ -124,7 +125,9 @@ export const UNSUPPORTED_REASONS = {
   earlier: 'a passage the search found shows the same thing earlier',
   later: 'a passage the search found shows the same thing later',
   notFoundShown: 'a passage the search found shows what you said was not found',
-  noScope: 'it does not say what was searched (use the Searched line)'
+  noScope: 'it does not say what was searched (use the Searched line)',
+  absence:
+    'it says someone does not know something; say "I found no scene where …" and what was searched'
 } as const
 export type UnsupportedReason = keyof typeof UNSUPPORTED_REASONS
 

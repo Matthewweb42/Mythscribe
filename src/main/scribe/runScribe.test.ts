@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { estimateTokens, priceFor } from '@shared/ai'
-import { AGENT_CUT_OFF_MESSAGE, AGENT_RETRY_MAX_TOKENS, type AgentStep } from '@shared/agent'
+import {
+  AGENT_COST_CAP_USD,
+  AGENT_CUT_OFF_MESSAGE,
+  AGENT_RETRY_MAX_TOKENS,
+  type AgentStep
+} from '@shared/agent'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { emptyCardFields } from '@shared/memory/claims'
 import { normName } from '@shared/memory/names'
@@ -8,6 +13,7 @@ import type { StoryRecordSummary } from '@shared/memory/records'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
 import { directionMessage } from '@shared/quickActions'
 import { SCRIBE_REASONING_TOKENS, type Navigation } from '@shared/scribe'
+import { parseCitedAnswer } from '@shared/scribeAnswer'
 import { claim, card, reading, searchMiss } from '../db/schema'
 import { activeDraftId } from '../draft/draftStore'
 import { defaultAiUsageState, dayOf } from '../ai/dailyCap'
@@ -17,11 +23,17 @@ import {
   AGENT_V9_SENTINEL,
   AGENT_V9_WIDENED_HEADING,
   agentV9UnsupportedTurn,
-  buildAgentPromptV9
+  buildAgentPromptV9,
+  UNSUPPORTED_REASONS
 } from '../ai/prompts/agent.v9'
 import { CITE_SENTINEL } from '../ai/prompts/cite.v1'
 import { saveDocument } from '../document/documentStore'
-import type { CompletionRequest, CompletionResult, Provider } from '../ai/providers/types'
+import {
+  AiCancelledError,
+  type CompletionRequest,
+  type CompletionResult,
+  type Provider
+} from '../ai/providers/types'
 import type { AiRequestDeps } from '../ai/request'
 import { loadAgentProject } from '../ai/agentTools'
 import type { UsageEntry } from '../ai/usageStore'
@@ -41,6 +53,7 @@ import {
   PIN_SAID,
   PIN_TOPIC,
   pinRecordOf,
+  PLAN_NO_EDIT,
   PLAN_NO_PIN,
   ShownStream,
   readScribeReply,
@@ -561,6 +574,10 @@ const sentId = (user: string, ref: string): string => {
   return match[1]
 }
 
+/** An answer's first sentence as the parser splits it. */
+const splitFirst = (answer: string): string | undefined =>
+  parseCitedAnswer(answer).sentences[0]?.text
+
 describe('runScribe: the quote check, the scope and the one retry (P3 slice 3)', () => {
   const FIRST = 'When does Mara first suspect the map was gone?'
 
@@ -804,19 +821,36 @@ describe('runScribe: the quote check, the scope and the one retry (P3 slice 3)',
     expect(cite).toHaveBeenCalledTimes(1)
     expect(asked.scribe.retried).toBe(true)
 
+    // An answer that found nothing and cites nothing is still checked on its scope (design rule
+    // 5): every passage the search found, the earliest first, and no sentence.
     complete.mockReset()
     cite.mockReset()
-    replies({
-      answer: 'I found no scene where Mara first suspects it (searched every scene up to 1.3).',
-      found: true
-    })
+    cite.mockResolvedValue(verdicts([], 'ok'))
+    const absence =
+      'I found no scene where Mara first suspects it (searched every scene up to 1.3).'
+    replies({ answer: absence, found: true })
     const none = await run({ nodeId: book.three, message: FIRST })
     expect(complete).toHaveBeenCalledTimes(1)
-    expect(cite).not.toHaveBeenCalled()
+    expect(cite).toHaveBeenCalledTimes(1)
+    const check = citeUser(0)
+    expect(check).toMatch(/^Question: [^\n]+\nNow: 1\.3\n\nScope: searched every scene up to 1\.3/u)
+    expect(check).toContain('Passages the search found:\n- 1.1 ¶')
+    expect(check).toContain('- 1.2 ¶1: Mara suspected the map was gone.')
+    expect(check).not.toMatch(/^1\. /mu)
+    expect(cite.mock.calls[0]?.[0].maxTokens).toBe(40)
     expect(none.scribe).toMatchObject({ retried: false, notFound: false })
-    expect(none.answer).toBe(
-      'I found no scene where Mara first suspects it (searched every scene up to 1.3).'
+    expect(none.answer).toBe(absence)
+
+    // When a passage the search found shows it, the answer is asked again, then reads Not found.
+    complete.mockReset()
+    cite.mockReset()
+    cite.mockResolvedValue(verdicts([], 'earlier'))
+    replies({ answer: absence, found: true }, { answer: absence, found: true })
+    const shown = await run({ nodeId: book.three, message: FIRST })
+    expect(request(1).messages.at(-1)?.content).toBe(
+      agentV9UnsupportedTurn(absence, 'notFoundShown')
     )
+    expect(shown.scribe).toMatchObject({ retried: true, notFound: true })
   })
 
   it('widens a navigation that searched less than every earlier scene before the answer is sent', async () => {
@@ -872,6 +906,255 @@ describe('runScribe: the quote check, the scope and the one retry (P3 slice 3)',
     )
     await run({ message: 'Who sold the map?' })
     expect(counts()).toEqual(before)
+  })
+})
+
+describe('runScribe: which answers the main-claim rule holds (P3 slice 3 review)', () => {
+  const spans = (result: {
+    answer: string
+    scribe: { notChecked: [number, number][] }
+  }): string[] => result.scribe.notChecked.map(([from, to]) => result.answer.slice(from, to))
+
+  it('keeps an uncited opinion, what-if or brainstorm answer, marked not checked, with one call', async () => {
+    const cases: { access: 'read' | 'write'; message: string; answer: string }[] = [
+      {
+        access: 'read',
+        message: 'Is Mara likeable in this scene?',
+        answer: 'Mara comes across as guarded but sympathetic here.'
+      },
+      {
+        access: 'write',
+        message: 'What if Mara never found the map?',
+        answer:
+          'If Mara never found the map, Orrin would have no reason to follow Tomas to the quay.'
+      },
+      {
+        access: 'write',
+        message: 'How could Mara get off the ship?',
+        answer:
+          'Mara could slip out through the cellar while Tomas distracts the guard. Or she could bribe Orrin.'
+      }
+    ]
+    for (const each of cases) {
+      complete.mockReset()
+      replies({ answer: each.answer, found: true })
+      const result = await run({ access: each.access, message: each.message })
+      expect(complete).toHaveBeenCalledTimes(1)
+      expect(result.answer).toBe(each.answer)
+      expect(result.scribe).toMatchObject({ retried: false, notFound: false })
+      expect(spans(result)[0]).toBe(splitFirst(each.answer))
+    }
+    // A hedged sentence in a factual answer is not retried either; a plain uncited claim is.
+    complete.mockReset()
+    replies({ answer: 'Orrin might have sold it.', found: true })
+    expect((await run({ message: 'Who sold the map?' })).scribe.retried).toBe(false)
+    complete.mockReset()
+    replies({ answer: 'Orrin sold it.', found: true }, { answer: 'Orrin sold it.', found: true })
+    expect((await run({ message: 'Who sold the map?' })).scribe).toMatchObject({
+      retried: true,
+      notFound: true
+    })
+  })
+
+  it('checks a Plan request for a sheet line or a change as a change turn: its words kept, one call', async () => {
+    replies({
+      answer: 'That line belongs on Mara\'s Pinned page: "Hates the sea".',
+      found: true,
+      edits: [{ edit: 'pin', name: 'Mara', text: 'Hates the sea', place: 'pinned' }]
+    })
+    const pin = await run({ message: 'Add to Mara’s sheet that she hates the sea.' })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(pin.answer).toBe(
+      `That line belongs on Mara's Pinned page: "Hates the sea".\n\n${PLAN_NO_PIN}`
+    )
+    expect(pin.scribe).toMatchObject({ retried: false, notFound: false })
+
+    complete.mockReset()
+    replies({
+      answer: "Mara's second line repeats her first, so I would cut it.",
+      found: true,
+      edits: [{ edit: 'text', id: 'n1', find: 'Mara watched', replace: '' }]
+    })
+    const edit = await run({ message: 'Tighten Mara’s dialogue in this scene.' })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(edit.answer).toBe(
+      `Mara's second line repeats her first, so I would cut it.\n\n${PLAN_NO_EDIT}`
+    )
+    expect(edit.scribe).toMatchObject({ retried: false, notFound: false })
+  })
+
+  it('reads the claim after a bare "Yes." as the main claim: checked, retried when the check says no', async () => {
+    replies({
+      answer: 'Yes. Orrin overheard Tomas. [E0 "Orrin overheard Tomas from the yard"]',
+      found: true
+    })
+    cite.mockResolvedValueOnce(verdicts(['yes']))
+    const held = await run({ message: 'Did Orrin hear Tomas?' })
+    expect(held.answer).toBe('Yes. Orrin overheard Tomas.[1]')
+    expect(held.scribe.notChecked).toEqual([])
+    expect(held.scribe).toMatchObject({ retried: false, notFound: false })
+
+    complete.mockReset()
+    cite.mockReset()
+    const sold = {
+      answer: 'Yes. Orrin sold the map. [E0 "Tomas sold the map to a stranger"]',
+      found: true
+    }
+    replies(sold, sold)
+    cite.mockResolvedValue(verdicts(['no']))
+    const result = await run({ message: 'Did Orrin sell the map?' })
+    expect(request(1).messages.at(-1)?.content).toBe(
+      agentV9UnsupportedTurn('Yes. Orrin sold the map.', 'quotesDoNotSay')
+    )
+    expect(result.scribe).toMatchObject({ retried: true, notFound: true })
+  })
+
+  it('never lets "does not know" stand as a fact: asked again, then Not found; a scoped absence stands', async () => {
+    const knows = 'Does Tomas know about the sold map?'
+    const answers = [
+      'No. Tomas does not know about the map.',
+      'Orrin does not know that Tomas sold the map. [E0 "Tomas sold the map to a stranger"]',
+      'Tomas never learns about the map.',
+      'No.'
+    ]
+    for (const answer of answers) {
+      complete.mockReset()
+      cite.mockReset()
+      cite.mockResolvedValue(verdicts(['yes']))
+      replies({ answer, found: true }, { answer, found: true })
+      const result = await run({ message: knows })
+      expect(complete).toHaveBeenCalledTimes(2)
+      expect(request(1).messages.at(-1)?.content).toContain(UNSUPPORTED_REASONS.absence)
+      expect(result.scribe).toMatchObject({ retried: true, notFound: true })
+    }
+    // Later in an answer, the sentence is marked unsupported (its citation dropped), no retry.
+    complete.mockReset()
+    cite.mockReset()
+    cite.mockResolvedValue(verdicts(['yes', 'yes']))
+    replies({
+      answer:
+        'Orrin overheard Tomas. [E0 "Orrin overheard Tomas from the yard"] ' +
+        'Mara does not know about the map. [E0 "Tomas sold the map to a stranger"]',
+      found: true
+    })
+    const later = await run({ message: 'What did Orrin hear?' })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(later.answer).toBe('Orrin overheard Tomas.[1] Mara does not know about the map.')
+    expect(later.scribe.unsupported.map(([from, to]) => later.answer.slice(from, to))).toEqual([
+      'Mara does not know about the map.'
+    ])
+
+    complete.mockReset()
+    cite.mockReset()
+    cite.mockResolvedValue(verdicts([], 'ok'))
+    const scoped = 'No. I found no scene where Tomas learns of the sale (searched 1.1).'
+    replies({ answer: scoped, found: true })
+    const stands = await run({ message: knows })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(stands.answer).toBe(scoped)
+  })
+
+  it('a retry that fails ends Not found, never the turn; a cancel still stops it', async () => {
+    replies({ answer: 'Orrin sold the map.', found: true })
+    complete.mockRejectedValueOnce(new Error('429 rate limited'))
+    const notes: string[] = []
+    const result = await runScribe(
+      book.db,
+      deps,
+      {
+        nodeId: book.one,
+        message: 'Who sold the map?',
+        history: [],
+        access: 'read',
+        focus: { beforeCaret: '', selection: '' },
+        navigation: null,
+        requestId: 'r-fail'
+      },
+      (each) => steps.push(each),
+      { note: (id, text) => notes.push(`${id}: ${text}`) },
+      () => SCRIBE_NOW
+    )
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(result.answer).toMatch(/^Not found in the manuscript \(I looked in the open scene 1\.1/u)
+    expect(result.scribe).toMatchObject({ retried: true, notFound: true })
+    expect(notes.some((note) => note.startsWith('r-fail:step1: The retry failed (429'))).toBe(true)
+
+    complete.mockReset()
+    replies({ answer: 'Orrin sold the map.', found: true })
+    complete.mockRejectedValueOnce(new AiCancelledError('The request was stopped.'))
+    await expect(run({ message: 'Who sold the map?' })).rejects.toBeInstanceOf(AiCancelledError)
+  })
+
+  it('a retry cut off twice, or asking for a chapter, ends Not found with both calls counted', async () => {
+    replies({ answer: 'Orrin sold the map.', found: true })
+    complete.mockResolvedValueOnce(said('{"answer":"Orrin s', 'length'))
+    complete.mockResolvedValueOnce(said('{"answer":"Orrin s', 'length'))
+    const cut = await run({ message: 'Who sold the map?' })
+    expect(complete).toHaveBeenCalledTimes(3)
+    expect(cut.scribe).toMatchObject({ retried: true, notFound: true })
+    expect(cut.usage.inputTokens).toBe(1_800)
+
+    complete.mockReset()
+    replies({ answer: 'Orrin sold the map.', found: true }, { need: 'chapter 1' })
+    const need = await run({ message: 'Who sold the map?' })
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(need.answer).toMatch(/^Not found in the manuscript/u)
+    expect(need.scribe).toMatchObject({ retried: true, notFound: true })
+    expect(need.usage.inputTokens).toBe(1_200)
+  })
+
+  it('over the cost cap: no quote check and no retry; an unsupported main claim reads Not found', async () => {
+    const dear = (value: unknown): CompletionResult => ({
+      ...said(value),
+      usage: { inputTokens: 2_000_000, outputTokens: 60 }
+    })
+    complete.mockResolvedValueOnce(
+      dear({
+        answer: 'Orrin overheard Tomas. [E0 "Orrin overheard Tomas from the yard"]',
+        found: true
+      })
+    )
+    const cited = await run()
+    expect(cited.costUsd).toBeGreaterThan(AGENT_COST_CAP_USD)
+    expect(cite).not.toHaveBeenCalled()
+    expect(cited.answer).toBe('Orrin overheard Tomas.[1]')
+    expect(cited.scribe.citations.map((c) => c.checked)).toEqual(['quote'])
+
+    complete.mockReset()
+    complete.mockResolvedValueOnce(dear({ answer: 'Orrin sold the map.', found: true }))
+    const uncited = await run({ message: 'Who sold the map?' })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(uncited.scribe).toMatchObject({ retried: false, notFound: true })
+  })
+
+  it('lists the earlier paragraphs of the cited passage’s own scene in the scope item', async () => {
+    const navigation: Navigation = {
+      turn: 'answer',
+      evidence: [{ kind: 'passage', source: 'scene', ownerId: book.two, para: 1 }],
+      scope: { from: '1.1', to: '1.3', allEarlier: true, wholeBook: false, terms: ['map'] },
+      terms: ['map'],
+      hits: [
+        { nodeId: book.two, para: 0 },
+        { nodeId: book.two, para: 1 },
+        { nodeId: book.one, para: 1 }
+      ]
+    }
+    replies({
+      answer:
+        'Mara first suspects it in 1.2, searching every scene up to 1.3. [E1 "Mara suspected the map was gone"]',
+      found: true
+    })
+    cite.mockResolvedValueOnce(verdicts(['yes'], 'ok'))
+    await run({
+      nodeId: book.three,
+      message: 'When does Mara first suspect the map was gone?',
+      navigation
+    })
+    const check = citeUser(0)
+    expect(check).toContain('Passages the search found before 1.2:')
+    expect(check).toContain('- 1.1 ¶1:')
+    expect(check).toContain('- 1.2 ¶0:')
+    expect(check).not.toContain('- 1.2 ¶1:')
   })
 })
 

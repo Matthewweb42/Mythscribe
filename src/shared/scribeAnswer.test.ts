@@ -4,8 +4,12 @@ import { buildAskIndex } from './memory/askParse'
 import { buildNameIndex } from './memory/nameScan'
 import { normName } from './memory/names'
 import {
+  asksForFact,
+  bareAnswer,
   isAbsence,
   isAdviceOrQuestion,
+  isHedged,
+  mainClaimAt,
   markerize,
   needsCitation,
   notFoundLine,
@@ -14,6 +18,7 @@ import {
   quoteHeld,
   quoteWords,
   scribeHistory,
+  statesAbsenceAsFact,
   statesScope,
   stripCitationMarkup,
   type HistoryTurn
@@ -174,6 +179,65 @@ describe('isAbsence and statesScope (P3 rule 5, §3.3)', () => {
     expect(statesScope('Searched every scene up to 14.2 for map.')).toBe(true)
     expect(statesScope('I looked in 1.1 to 9.3.')).toBe(true)
     expect(statesScope('Lise first suspects him in 9.3.')).toBe(false)
+    expect(statesScope('I found no scene where he learns it (searched 1.1–14.2).')).toBe(true)
+    expect(statesScope('I searched the whole book for the map.')).toBe(true)
+    // A story's own searching or looking is no scope.
+    expect(statesScope('Mara first looked at the map in 2.1.')).toBe(false)
+    expect(statesScope('Tomas searched the house in 3.2 and found nothing.')).toBe(false)
+    expect(statesScope('Orrin looked through the window.')).toBe(false)
+  })
+})
+
+describe('the main claim (P3-D14, slice 3 review)', () => {
+  it('reads someone not knowing as a fact, never a scoped search', () => {
+    expect(statesAbsenceAsFact('Tomas does not know about the map.')).toBe(true)
+    expect(statesAbsenceAsFact('Orrin never learns that Tomas sold it.')).toBe(true)
+    expect(statesAbsenceAsFact("Mara didn't find out.")).toBe(true)
+    expect(statesAbsenceAsFact('Nobody else knows.')).toBe(true)
+    expect(statesAbsenceAsFact('Lise is still unaware of the sale.')).toBe(true)
+    expect(statesAbsenceAsFact('I found no scene where Tomas learns it (searched 1.1).')).toBe(
+      false
+    )
+    expect(statesAbsenceAsFact('Tomas knows about the map.')).toBe(false)
+  })
+
+  it('takes the sentence after a bare yes or no as the main claim', () => {
+    expect(bareAnswer('Yes.')).toBe('yes')
+    expect(bareAnswer('No.')).toBe('no')
+    expect(bareAnswer('Nobody.')).toBe('no')
+    expect(bareAnswer('Not yet.')).toBe('no')
+    expect(bareAnswer('Yes, Orrin heard it.')).toBeNull()
+    const at = (answer: string): number => mainClaimAt(parseCitedAnswer(answer).sentences)
+    expect(at('Yes. Orrin overheard Tomas.')).toBe(1)
+    expect(at('No. Tomas does not know.')).toBe(1)
+    expect(at('No.')).toBe(0)
+    expect(at('Orrin overheard Tomas. Yes.')).toBe(0)
+  })
+
+  it('reads possibilities and opinions as no claim about the book', () => {
+    expect(isHedged('Mara could slip out through the cellar.')).toBe(true)
+    expect(isHedged('If Mara never found the map, Orrin would stay.')).toBe(true)
+    expect(isHedged('Mara comes across as guarded but sympathetic here.')).toBe(true)
+    expect(isHedged('I think Orrin is the stronger lead.')).toBe(true)
+    expect(isHedged('Orrin sold the map.')).toBe(false)
+    // A month is no hedge.
+    expect(isHedged('In May, Tomas sold the map.')).toBe(false)
+  })
+
+  it('asks for a fact unless the question asks an opinion, a what-if or ideas', () => {
+    const cues = { knows: false, learns: false }
+    expect(asksForFact('Who sold the map?', cues)).toBe(true)
+    expect(asksForFact('When does Mara first suspect the map was gone?', cues)).toBe(true)
+    expect(asksForFact('Could you tell me who sold the map?', cues)).toBe(true)
+    expect(asksForFact('Is Mara likeable in this scene?', cues)).toBe(false)
+    expect(asksForFact('What if Mara never found the map?', cues)).toBe(false)
+    expect(asksForFact('How could Mara get off the ship?', cues)).toBe(false)
+    expect(asksForFact('Brainstorm endings for Orrin.', cues)).toBe(false)
+    expect(asksForFact('What do you think of the opening?', cues)).toBe(false)
+    // Every knows or learns question is a fact question.
+    expect(asksForFact('Would Mara ever learn the truth?', { knows: true, learns: true })).toBe(
+      true
+    )
   })
 })
 
