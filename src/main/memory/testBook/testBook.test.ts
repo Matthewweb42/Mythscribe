@@ -391,6 +391,36 @@ describe('the test book’s questions for Ms Scribe (P3, plan §6.1)', () => {
         const scenes = [...readable].filter((id) => occurrences(sceneText(id), also) === 1)
         expect(scenes.length, `${question.id}: ${also}`).toBe(1)
       }
+      const contested = question.expected.contested
+      if (contested !== undefined) {
+        expect(readable, question.id).toContain(contested.scene)
+        expect(occurrences(sceneText(contested.scene), contested.quoteHas), question.id).toBe(1)
+      }
+      if (question.expected.checkedUpTo !== undefined) {
+        expect(readable, question.id).toContain(question.expected.checkedUpTo)
+      }
+      if (question.selection !== undefined) {
+        // A selection is a passage of the open scene.
+        expect(occurrences(sceneText(question.asOf), question.selection), question.id).toBe(1)
+      }
+    }
+  })
+
+  it('sets each trap on a source that is not the book (an Idea scene, a cut scene, an Ideas page)', () => {
+    const notTheBook = [
+      ...TEST_BOOK.filter(
+        (scene) => scene.source === 'ideaScene' || scene.source === 'excludedScene'
+      ).map((scene) => scene.paragraphs.join('\n')),
+      ...LABELS.pages.filter((page) => page.page === 'ideas').map((page) => page.lines.join('\n'))
+    ]
+    const traps = LABELS.questions.filter((each) => each.kind === 'trap')
+    expect(traps.length).toBeGreaterThanOrEqual(3)
+    for (const question of traps) {
+      const trap = question.expected.trap ?? ''
+      expect(
+        notTheBook.some((text) => occurrences(text, trap) > 0),
+        question.id
+      ).toBe(true)
     }
   })
 
@@ -403,6 +433,7 @@ describe('the test book’s questions for Ms Scribe (P3, plan §6.1)', () => {
         case 'knows':
         case 'whoKnows':
           expect(expected.instant, at).toBe(true)
+          if (question.kind === 'whoKnows') expect(expected.checkedUpTo, at).toBeDefined()
           break
         case 'lookupStale':
           expect(expected.lookup, at).toBe(true)
@@ -427,6 +458,15 @@ describe('the test book’s questions for Ms Scribe (P3, plan §6.1)', () => {
           if (expected.action === 'editPass') {
             expect([expected.pass, expected.target], at).not.toContain(undefined)
           }
+          // On the selection only with one sent.
+          expect(question.selection !== undefined, at).toBe(expected.target === 'selection')
+          break
+        case 'trap':
+          expect(question.terms?.length, at).toBeGreaterThan(0)
+          expect(expected.trap, at).toBeDefined()
+          expect(expected.scene, at).toBeUndefined()
+          // Not found, or an Ideas page named as the author's idea.
+          expect(expected.notFound || expected.label === 'idea', at).toBe(true)
           break
         case 'pin':
           expect(question.record, at).toBeDefined()

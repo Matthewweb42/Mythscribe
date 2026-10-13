@@ -133,8 +133,16 @@ const run = (over: Partial<ScribeInput> = {}): ReturnType<typeof runScribe> =>
     () => SCRIBE_NOW
   )
 
-const counts = (): number[] =>
-  [claim, card, reading].map((table) => book.db.select().from(table).all().length)
+/** The rows of the tables the chat never writes, each row whole, in one order (P3 rule 6). */
+const tableRows = (): string[][] =>
+  [claim, card, reading].map((table) =>
+    book.db
+      .select()
+      .from(table)
+      .all()
+      .map((row) => JSON.stringify(row))
+      .sort()
+  )
 
 beforeEach(() => {
   resetInflight()
@@ -189,7 +197,7 @@ describe('runScribe (F-16.25): the one answer call', () => {
       answer: 'Orrin overheard Tomas. [E0 "Orrin overheard Tomas from the yard"]',
       found: true
     })
-    const before = counts()
+    const before = tableRows()
     const result = await run()
     expect(complete).toHaveBeenCalledTimes(1)
     const sent = request(0)
@@ -232,7 +240,7 @@ describe('runScribe (F-16.25): the one answer call', () => {
     expect(result.promptVersion).toBe('agent.v9')
     expect(result.query).toBeNull()
     // Rule 6: the chat never writes claims, cards or readings.
-    expect(counts()).toEqual(before)
+    expect(tableRows()).toEqual(before)
   })
 
   it('keeps a quote its item holds; drops a quote it does not and a map; marks naming sentences not checked', async () => {
@@ -518,6 +526,29 @@ describe('runScribe: Self-Route and search misses (P3-D15)', () => {
       [book.two, 1, 'Mara suspected the map was gone']
     ])
     expect(ledger.map((entry) => entry.promptVersion)).toEqual(['agent.v9', 'agent.v9', 'cite.v1'])
+  })
+
+  it('logs no miss for a widened citation at a paragraph the turn’s words match (a ranking drop, slice 6 review)', async () => {
+    replies(
+      { need: '1.2' },
+      { answer: 'She suspected it. [W1 "Mara suspected the map was gone"]', found: true }
+    )
+    const result = await run({
+      nodeId: book.three,
+      message: 'Who waited at the harbour?',
+      navigation: {
+        turn: 'answer',
+        evidence: [],
+        scope: null,
+        // "map" is in ¶1, which the search placed but did not return (only ¶0 is a hit).
+        terms: ['waited', 'map'],
+        hits: [{ nodeId: book.two, para: 0 }]
+      }
+    })
+    expect(result.scribe.widened).toEqual({ ref: '1.2' })
+    expect(result.scribe.citations.map((c) => c.ref)).toEqual(['1.2 ¶1'])
+    expect(result.scribe.misses).toBe(0)
+    expect(book.db.select().from(searchMiss).all()).toEqual([])
   })
 
   it('answers Not found with the scope after a second need, and without asking for a need that names nothing', async () => {
@@ -918,13 +949,13 @@ describe('runScribe: the quote check, the scope and the one retry (P3 slice 3)',
   })
 
   it('writes no claim, card or reading on any of these paths (rule 6)', async () => {
-    const before = counts()
+    const before = tableRows()
     replies(
       { answer: 'Orrin sold the map.', found: true },
       { answer: 'Orrin sold the map.', found: true }
     )
     await run({ message: 'Who sold the map?' })
-    expect(counts()).toEqual(before)
+    expect(tableRows()).toEqual(before)
   })
 })
 
@@ -1214,7 +1245,7 @@ describe('runScribe: edits and sheet lines (F-16.26, P3-D16)', () => {
         { edit: 'tag', id: 'n1', tag: 'quay', add: true }
       ]
     })
-    const before = counts()
+    const before = tableRows()
     const result = await run({ access: 'write', requestId: 'r-pin', message })
     expect(result.changes.map((change) => change.edit)).toEqual([
       {
@@ -1248,7 +1279,7 @@ describe('runScribe: edits and sheet lines (F-16.26, P3-D16)', () => {
     // The pins not offered and the tag edit v2 never offers.
     expect(result.dropped).toBe(4)
     // Offered, never written: the renderer writes a line when it lands.
-    expect(counts()).toEqual(before)
+    expect(tableRows()).toEqual(before)
   })
 
   it('offers a sheet line only when the message asks for one, on a record it names, by its whole name', async () => {

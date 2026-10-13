@@ -1262,21 +1262,29 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       expected: { instant: true, scene: 'h04', quoteHas: 'Lottie is to marry Mr. Dunmore' }
     },
     {
+      // The late edit of 6.1 (Clara's age, below) leaves that scene unsettled, so the card's
+      // scoped line can only claim every scene up to 5.1: labelled so, deliberately.
       id: 'who-knows-debts',
       question: "Who knows about the Captain's debts?",
       asOf: 'h14',
       kind: 'whoKnows',
-      expected: { instant: true, scene: 'h14', quoteHas: 'she put it together' }
+      expected: { instant: true, scene: 'h14', quoteHas: 'she put it together', checkedUpTo: 's05' }
     },
     {
       id: 'who-knows-engagement',
       question: "Who knows about Lottie's engagement to Mr. Dunmore?",
       asOf: 'h14',
       kind: 'whoKnows',
-      expected: { instant: true, scene: 'h04', quoteHas: 'Lottie is to marry Mr. Dunmore' }
+      expected: {
+        instant: true,
+        scene: 'h04',
+        quoteHas: 'Lottie is to marry Mr. Dunmore',
+        checkedUpTo: 's05'
+      }
     },
     {
-      // Grey in 3.1 and brown in 14.1: a fixed slot contested (the planted C1), so no card.
+      // Grey in 3.1 and brown in 14.1: a fixed slot contested (the planted C1), so no card, and
+      // a right answer cites both sides rather than stating one as the fact.
       id: 'lookup-varrow-eyes',
       question: "What colour are Mr. Varrow's eyes?",
       asOf: 'h09',
@@ -1285,7 +1293,7 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
         lookup: true,
         scene: 'h09',
         quoteHas: 'brown eyes followed her',
-        also: ['a cold, clear grey']
+        contested: { scene: 's03', quoteHas: 'a cold, clear grey' }
       }
     },
     {
@@ -1348,8 +1356,10 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       expected: { scene: 'h05', quoteHas: 'She had overheard every word' }
     },
     {
-      id: 'ordinal-first-told',
-      question: "Who is the first to be told of Lottie's engagement?",
+      // In book order: 9.1 (Bel tells Clara). Who was told first in the story (Bel, by Lottie,
+      // before 9.1) is another question, so this one asks where the book first mentions it.
+      id: 'ordinal-engagement-first',
+      question: "When is Lottie's engagement first mentioned?",
       asOf: 'h14',
       kind: 'ordinal',
       terms: ['marry', 'engaged', 'engagement'],
@@ -1449,6 +1459,40 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       expected: { action: 'whatNext' }
     },
     {
+      // F-5.26 on the selection: the quick picks, on what is selected (none: the scene).
+      id: 'route-polish-selection',
+      question: 'Polish this.',
+      asOf: 'h14',
+      kind: 'route',
+      selection:
+        'The lane was deep in mud after the rain, but he walked the whole way and arrived with his boots in his hand.',
+      expected: { action: 'editPass', pass: 'ask', target: 'selection' }
+    },
+    {
+      // F-5.26's Pacing & structure chip, asked in words.
+      id: 'route-pacing',
+      question: 'The pacing drags in this scene.',
+      asOf: 'h14',
+      kind: 'route',
+      expected: { action: 'editPass', pass: 'developmental', target: 'scene' }
+    },
+    {
+      // F-5.26's Dialogue chip, asked in words.
+      id: 'route-dialogue',
+      question: 'Sharpen the dialogue in this scene.',
+      asOf: 'h14',
+      kind: 'route',
+      expected: { action: 'editPass', pass: 'dialogue', target: 'scene' }
+    },
+    {
+      // F-5.26's Editor's notes chip, asked in words.
+      id: 'route-editors-notes',
+      question: "Give me editor's notes on this scene.",
+      asOf: 'h14',
+      kind: 'route',
+      expected: { action: 'critique' }
+    },
+    {
       id: 'pin-lottie-sea',
       question: "Add to Lottie's sheet that she hates the sea.",
       asOf: 'h14',
@@ -1483,6 +1527,36 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       plan: true,
       record: 'lottie',
       expected: { pinText: 'hates the sea' }
+    },
+    // Traps (design §2.2, §2.3): only a source that is not the book answers these. The inactive
+    // draft (h10) is never indexed or read, so no question can reach it.
+    {
+      // Only the cut scene (h12, 16.1) marries Clara to Mr. Pruett.
+      id: 'trap-clara-married',
+      question: 'Whom did Clara Pell marry?',
+      asOf: 'h14',
+      kind: 'trap',
+      terms: ['married', 'marry', 'wedding', 'husband'],
+      expected: { notFound: true, trap: 'Pruett' }
+    },
+    {
+      // Only the Idea scene (h11, 15.1) makes the Captain Mr. Varrow's cousin.
+      id: 'trap-captain-cousin',
+      question: 'Is the Captain related to Mr. Varrow?',
+      asOf: 'h14',
+      kind: 'trap',
+      terms: ['cousin', 'related', 'relation', 'kin'],
+      expected: { notFound: true, trap: 'cousin' }
+    },
+    {
+      // Only the Captain's Ideas page has a first marriage: named "your idea", never the book's.
+      id: 'trap-captain-married',
+      question: 'Has the Captain been married before?',
+      asOf: 'h14',
+      kind: 'trap',
+      terms: ['married', 'wife', 'widower', 'Ireland'],
+      record: 'captain',
+      expected: { label: 'idea', quoteHas: 'married once before', trap: 'married once before' }
     }
   ]
 }

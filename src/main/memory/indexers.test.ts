@@ -26,6 +26,7 @@ import {
   indexOwner,
   indexScene,
   indexStaleRecords,
+  passageMatches,
   pruneMemoryIndex,
   searchMemoryPassages,
   searchMemoryPassagesInOrder,
@@ -327,6 +328,18 @@ describe('passageIndexer (F-16.5)', () => {
     expect(snippetAround(harbour, ['tomas'])).toContain('Tomas')
     long[30] = 'count'
     expect(snippetAround(long.join(' '), ['counted'])).toBe(`…${long.slice(22, 38).join(' ')}…`)
+  })
+
+  it('P3-D15: says whether the index matches one paragraph for any of the words (a ranking drop is no miss)', () => {
+    saveDocument(db, scene(0), doc('The rope was frayed.', 'Rynna tied the rope to the mast.'))
+    indexScene(db, scene(0), at(1))
+    // The ordered search keeps ¶1 (both words); ¶0 is still a paragraph the words match.
+    expect(passageMatches(db, ['rope', 'mast'], scene(0), 0)).toBe(true)
+    expect(passageMatches(db, ['ropes'], scene(0), 1)).toBe(true)
+    expect(passageMatches(db, ['mast'], scene(0), 0)).toBe(false)
+    expect(passageMatches(db, ['rope'], scene(0), 2)).toBe(false)
+    expect(passageMatches(db, ['rope'], 'another-owner', 0)).toBe(false)
+    expect(passageMatches(db, [], scene(0), 0)).toBe(false)
   })
 
   it('labels scene, Idea scene, excluded scene and note paragraphs, and skips an unchanged owner', () => {

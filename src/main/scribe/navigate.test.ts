@@ -86,8 +86,16 @@ const run = (over: Partial<NavigateInput> = {}): ReturnType<typeof runNavigate> 
     (step) => steps.push(step)
   )
 
-const counts = (): number[] =>
-  [claim, card, reading].map((table) => book.db.select().from(table).all().length)
+/** The rows of the tables the chat never writes, each row whole, in one order (P3 rule 6). */
+const tableRows = (): string[][] =>
+  [claim, card, reading].map((table) =>
+    book.db
+      .select()
+      .from(table)
+      .all()
+      .map((row) => JSON.stringify(row))
+      .sort()
+  )
 
 beforeEach(() => {
   resetInflight()
@@ -151,7 +159,7 @@ describe('no request (F-16.24): a typed action, an instant card, a lookup handed
 
   it('answers "Mara’s eyes?" with an instant card and no AI call', async () => {
     const [claimId] = grey()
-    const before = counts()
+    const before = tableRows()
     const result = await run({ message: 'Mara’s eyes?' })
     expect(result.kind).toBe('instant')
     if (result.kind !== 'instant') throw new Error('no card')
@@ -166,7 +174,7 @@ describe('no request (F-16.24): a typed action, an instant card, a lookup handed
     expect(result.costUsd).toBe(0)
     expect(complete).not.toHaveBeenCalled()
     expect(readNow).not.toHaveBeenCalled()
-    expect(counts()).toEqual(before)
+    expect(tableRows()).toEqual(before)
   })
 
   it('reads the latest change first (one reader request), then answers with the card and its cost', async () => {
@@ -450,7 +458,7 @@ describe('finding the evidence (F-16.25)', () => {
       { call: [{ read: '1.1 ¶1-2' }] },
       { use: ['E2', 'E99'] }
     )
-    const before = counts()
+    const before = tableRows()
     const result = await run({ message: 'Who bought the map?' })
     expect(complete).toHaveBeenCalledTimes(3)
     expect(steps.map((step) => step.tool)).toEqual(['search', 'read'])
@@ -475,7 +483,7 @@ describe('finding the evidence (F-16.25)', () => {
     expect(result.navigation?.evidence).toHaveLength(1)
     expect(result.costUsd).toBeGreaterThan(0)
     expect(ledger).toHaveLength(3)
-    expect(counts()).toEqual(before)
+    expect(tableRows()).toEqual(before)
   })
 
   it('ends at step 1 when the menu already answers (use), and uses the whole menu when it names nothing usable', async () => {

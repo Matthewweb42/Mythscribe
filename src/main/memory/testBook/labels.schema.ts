@@ -221,7 +221,13 @@ export const QUESTION_KINDS = [
   /** A request the navigator routes to an action (F-5.26's edit passes among them). */
   'route',
   /** A line the author asks Ms Scribe to put on a sheet (decision 3 as the author changed it). */
-  'pin'
+  'pin',
+  /**
+   * A question only a source that is not the book answers (an Idea scene, a cut scene, an Ideas
+   * page; design §2.2 "never real, and never read"): not found, or that source named for what it
+   * is, never its words as a fact of the book.
+   */
+  'trap'
 ] as const
 
 export const LabelQuestion = z.object({
@@ -234,8 +240,10 @@ export const LabelQuestion = z.object({
   plan: z.boolean().default(false),
   /** The words a good navigator searches for (its own synonyms), for a question that searches. */
   terms: z.array(z.string().min(1)).max(8).optional(),
-  /** The record an idea or a sheet line is about. */
+  /** The record an idea or a sheet line is about, or the one an absence question asks after. */
   record: Id.optional(),
+  /** The passage selected when it is asked (the chat's focus), for a route on the selection. */
+  selection: z.string().min(1).optional(),
   /**
    * The author's change after the book was read, made before any question is asked: this
    * paragraph's `from` became `to`, so the fact read from it goes stale (a lookup turn).
@@ -259,6 +267,21 @@ export const LabelQuestion = z.object({
     quoteHas: z.string().min(1).optional(),
     /** Other passages that say the same thing (the honest checker's yes), never the answer. */
     also: z.array(z.string().min(1)).optional(),
+    /**
+     * The other side of a contested value (two passages that disagree, so no card): a right
+     * answer cites both, this one as well as `scene`'s, and states neither alone as the fact.
+     */
+    contested: z.object({ scene: SceneId, quoteHas: z.string().min(1) }).optional(),
+    /**
+     * A who-knows card's scoped absence line: every scene up to this one is settled (a scene
+     * edited after reading is not, so the line stops before it).
+     */
+    checkedUpTo: SceneId.optional(),
+    /**
+     * Words only a source that is not the book holds (a trap): a sentence of the answer that holds
+     * them must name that source for what it is ("your idea", "idea scene", "cut") or hedge.
+     */
+    trap: z.string().min(1).optional(),
     /** Ends "Not found in the manuscript (I looked in …)". */
     notFound: z.boolean().default(false),
     /** The cited source's label: the author's idea or her Pinned notes. */

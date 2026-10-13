@@ -6,8 +6,14 @@ import { OPENROUTER_BASE_URL, OPENROUTER_DEFAULT_MODELS, type Tier } from '@shar
 import { defaultAiSettings } from '@shared/aiSettings'
 import type { RouteDecision } from '@shared/assistantRoute'
 import type { InvariantCitation } from '@shared/memory/invariants'
-import type { InstantCard, Navigation } from '@shared/scribe'
-import { parseCitedAnswer, quoteHeld, statesAbsenceAsFact, statesScope } from '@shared/scribeAnswer'
+import { sourceLabelWords, type InstantCard, type Navigation } from '@shared/scribe'
+import {
+  isAbsence,
+  parseCitedAnswer,
+  quoteHeld,
+  statesAbsenceAsFact,
+  statesScope
+} from '@shared/scribeAnswer'
 import { card, claim, reading } from '../../db/schema'
 import { indexOwner, indexScene } from '../../memory/passageIndexer'
 import { runAnchors } from '../../memory/reading/anchors'
@@ -26,11 +32,11 @@ import {
 import { setAiSettings } from '../../project/settingsStore'
 import { runNavigate, type NavigateReader } from '../../scribe/navigate'
 import { searchMisses } from '../../scribe/searchMissStore'
-import { PIN_NOT_ASKED, runScribe, type ScribeResult } from '../../scribe/runScribe'
+import { PIN_NOT_ASKED, PLAN_NO_PIN, runScribe, type ScribeResult } from '../../scribe/runScribe'
 import { replyObject } from '../agent'
-import { AGENT_V9_SENTINEL } from '../prompts/agent.v9'
+import { AGENT_V9_EDIT_TOOLS, AGENT_V9_RULES, AGENT_V9_SENTINEL } from '../prompts/agent.v9'
 import { parseCiteReply } from '../prompts/cite.v1'
-import { NAVIGATOR_SENTINEL } from '../prompts/navigator.v1'
+import { NAVIGATOR_RULES, NAVIGATOR_SENTINEL } from '../prompts/navigator.v1'
 import type { AiMessage, Provider, StreamChunk } from '../providers/types'
 import type { UsageEntry } from '../usageStore'
 import { fakeChatServer, type ChatServer } from './fakeChatServer'
@@ -50,15 +56,19 @@ import {
   sceneOf
 } from './memoryOracle'
 import {
+  NOT_THE_BOOK,
   SCRIBE_QUESTIONS,
+  affirmsKnowing,
   answerEvidence,
   answerTail,
   citeMarker,
   findQuoted,
+  namesNotTheBook,
   namesRef,
   navigatorMenu,
   oracleCiteReply,
   quoteAround,
+  recordName,
   sceneRef,
   scribeOracleReply,
   scribeOracleServer,
@@ -79,13 +89,16 @@ import {
  *   oracle navigator, answer and checker (`scribeOracle.ts`) behind a fake OpenRouter
  *   (`fakeChatServer`) reached from `OPENROUTER_API_KEY` alone. Instant questions send nothing;
  *   stale and contested values are lookups with no navigator request; routes are the labels' (F-5.26
- *   kept); every answer cites the labelled passage, quote and sentence checked; ordinal answers
- *   searched every earlier scene; ideas are labelled; not-found questions end not found with what
- *   was looked in; no request carries an absence; sheet lines land where asked; the invariants
- *   hold, and no claim, card or reading is written.
+ *   kept, on the scene and the selection); every answer cites the labelled passage (both sides of
+ *   a contested value), quote and sentence checked; ordinal answers searched every earlier scene;
+ *   ideas are labelled; not-found questions end not found with what was looked in; traps (only an
+ *   Idea scene, a cut scene or an Ideas page answers) end not found or name the source; no
+ *   request carries an absence; sheet lines land where asked, in the author's words; the
+ *   invariants hold, and no claim, card or reading is written.
  * - The **adversarial replay**: planted replies (a card cited, a quote not in its item, a "first"
- *   with an earlier passage, a sheet line nobody asked for, a second need, navigator prose), each
- *   caught as the plan says.
+ *   with an earlier passage, a sheet line nobody asked for, a pin in Plan, other words or a second
+ *   line on a sheet, "yes, he knows" to an absence question, a trap stated as fact, a second need,
+ *   navigator prose), each caught by the app or, past a fooled checker, by the scoring.
  * - The **live Ms Scribe run** (`MYTHSCRIBE_EVAL_LIVE=1`; owed by the author before the
  *   switch-over; it cannot run in the build sessions, which have no key):
  *
@@ -116,8 +129,16 @@ export const SCRIBE_PASS_BARS = {
   notFoundHonesty: 1,
   /** Answers saying someone does not know something without what was searched. */
   absenceAsFact: 0,
+  /** Absence answers whose main claim says the person knows (they never learn it). */
+  absenceClaimsKnows: 0,
+  /** Answers stating an Idea, an Idea scene, a cut scene or Not canon text as the book's fact. */
+  notTheBookAsFact: 0,
+  /** Trap questions ended not found, or answered with the source named for what it is. */
+  trapHonesty: 1,
   ideasLabelled: 1,
   sheetPlace: 0.9,
+  /** Sheet lines holding the author's words, one line per request. */
+  sheetWords: 0.9,
   /** The average cost of an open question (navigator, answer, check) on an own key. */
   openCostUsd: 0.025
 } as const
@@ -126,15 +147,28 @@ export const SCRIBE_PASS_BARS = {
 const LIVE_STOP_USD = 1
 
 /** The kinds the open-question cost covers: navigated answer turns (design Part 5's open row). */
-const OPEN_KINDS: readonly QuestionKind[] = ['open', 'ordinal', 'absence', 'idea', 'notFound']
+const OPEN_KINDS: readonly QuestionKind[] = [
+  'open',
+  'ordinal',
+  'absence',
+  'idea',
+  'notFound',
+  'trap'
+]
 /** The kinds answer correctness covers: a labelled passage the answer must cite. */
 const CORRECTNESS_KINDS: readonly QuestionKind[] = ['lookupStale', 'open', 'ordinal', 'idea']
 const INSTANT_KINDS: readonly QuestionKind[] = ['slot', 'knows', 'whoKnows']
 
 /** The renderer's scoped absence words: never in a request (P2b rule 9, P3 rule 5). */
 const SCOPED = /no (?:other )?scene shows|checked up to/iu
-/** Someone not knowing as a line the app made: never in a user turn sent. */
+/** Someone not knowing as a line the app made: never in a turn sent, but the rules' own words. */
 const DOES_NOT_KNOW = /\b(?:does(?:n['’]t| not) know|never learns?)\b/iu
+/** A turn as sent with the prompts' fixed rules taken out (they say "never say … does not know"). */
+const withoutRules = (content: string): string =>
+  [AGENT_V9_RULES, AGENT_V9_EDIT_TOOLS, NAVIGATOR_RULES].reduce(
+    (text, rules) => text.split(rules).join(''),
+    content
+  )
 
 // ---- One request as the run saw it -----------------------------------------------------------
 
@@ -309,7 +343,7 @@ export async function askScribe(
   const seen = session.captured.length
   const nodeId = book.scenes.get(question.asOf) ?? null
   const requestId = `scribe-${question.id}`
-  const focus = { beforeCaret: '', selection: '' }
+  const focus = { beforeCaret: '', selection: question.selection ?? '' }
   let outcome: AskOutcome
   try {
     const navigated = await runNavigate(
@@ -398,8 +432,16 @@ export interface ScribeQuestionScore {
   scope: boolean | null
   notFound: boolean | null
   absenceAsFact: boolean
+  /** An absence question answered "yes, they know" (its main claim). */
+  claimsKnows: boolean
+  /** A kept citation of what is never the book on a sentence that does not name it so. */
+  notTheBookAsFact: boolean
+  /** A trap question: not found, or the source named; never its words as fact. */
+  trap: boolean | null
   idea: boolean | null
   place: boolean | null
+  /** The sheet line holds the label's words, and is the only one. */
+  pinText: boolean | null
   widened: boolean
   misses: number
   /** `agent.v9` replies, and how many were cut off at their cap. */
@@ -435,8 +477,12 @@ export function scoreAsk(book: TestBookProject, ask: ScribeAsk): ScribeQuestionS
     scope: null,
     notFound: null,
     absenceAsFact: false,
+    claimsKnows: false,
+    notTheBookAsFact: false,
+    trap: null,
     idea: null,
     place: null,
+    pinText: null,
     widened: false,
     misses: 0,
     answers: answers.length,
@@ -483,8 +529,12 @@ export function scoreAsk(book: TestBookProject, ask: ScribeAsk): ScribeQuestionS
         const said = holder.claimId === null ? null : getClaim(book.db, holder.claimId)
         return said !== null && holds(said.quote, expected.quoteHas ?? '')
       })
+      // The scoped absence line's reach: every scene up to the labelled one is settled.
+      const checked = expected.checkedUpTo === undefined ? null : sceneRef(expected.checkedUpTo)
+      ok &&= (card.checkedUpTo?.ref ?? null) === checked
     } else {
-      ok &&= question.kind === 'slot'
+      // An age card is computed from a birth year; the test book's ages are all stated.
+      ok = false
     }
     score.instant = why(ok, `instant card ${card.kind} not the label's`)
     score.right = INSTANT_KINDS.includes(question.kind)
@@ -552,24 +602,47 @@ export function scoreAsk(book: TestBookProject, ask: ScribeAsk): ScribeQuestionS
   score.absenceAsFact = statesAbsenceAsFact(answer) && !statesScope(answer)
   if (score.absenceAsFact) score.why.push('states an absence as fact')
   const cites = result.scribe.citations
-  const cited = (where: (citation: (typeof cites)[number]) => boolean): boolean =>
-    cites.some((citation) => where(citation) && holds(citation.quote, expected.quoteHas ?? ''))
+  const inScene = (citation: (typeof cites)[number], scene: string | undefined): boolean =>
+    citation.open?.kind === 'scene' && sceneOf(book, citation.open.id) === scene
+  const cited = (
+    where: (citation: (typeof cites)[number]) => boolean,
+    quote = expected.quoteHas ?? ''
+  ): boolean => cites.some((citation) => where(citation) && holds(citation.quote, quote))
+  // What is never the book (an Idea, an Idea scene, a cut scene, Not canon text), kept as a
+  // citation on a sentence that does not name it so: stated as the book's fact (design §2.2).
+  const finalReply = answers.at(-1)
+  const sentences = parseCitedAnswer(
+    finalReply === undefined ? '' : (replyAnswer(finalReply.text) ?? '')
+  ).sentences
+  score.notTheBookAsFact =
+    !result.scribe.notFound &&
+    cites.some((citation) => {
+      if (!NOT_THE_BOOK.includes(citation.label)) return false
+      const sentence = sentences.find((each) =>
+        each.citations.some(
+          (made) => made.evidence === citation.evidence && holds(made.quote, citation.quote)
+        )
+      )
+      return sentence === undefined || !namesNotTheBook(sentence.text)
+    })
+  if (score.notTheBookAsFact) score.why.push('states what is not the book as its fact')
   switch (question.kind) {
     case 'lookupStale':
     case 'open':
     case 'ordinal':
     case 'idea': {
-      const ok =
+      let ok =
         expected.label !== undefined
           ? cited((citation) => citation.label === expected.label)
-          : cited(
-              (citation) =>
-                citation.open?.kind === 'scene' &&
-                sceneOf(book, citation.open.id) === expected.scene
-            )
+          : cited((citation) => inScene(citation, expected.scene))
+      // A contested value: both passages cited, never one side as the fact (design §2.6).
+      const other = expected.contested
+      if (other !== undefined) {
+        ok &&= cited((citation) => inScene(citation, other.scene), other.quoteHas)
+      }
       score.correct = why(
         ok,
-        `does not cite the label's passage (${cites.map((c) => c.ref).join(', ') || 'no citation'})`
+        `does not cite the label's passage${other === undefined ? '' : 's'} (${cites.map((c) => c.ref).join(', ') || 'no citation'})`
       )
       break
     }
@@ -586,6 +659,30 @@ export function scoreAsk(book: TestBookProject, ask: ScribeAsk): ScribeQuestionS
   if (question.kind === 'notFound') {
     score.notFound = why(result.scribe.notFound, 'did not end not found')
   }
+  if (question.kind === 'absence') {
+    score.claimsKnows = affirmsKnowing(answer)
+    if (score.claimsKnows) score.why.push(`says ${recordName(question.record)} knows`)
+  }
+  if (question.kind === 'trap') {
+    // Never the trap's words as a fact; then not found, a scoped "I found no scene…", or the
+    // source named (a kept citation of it on a sentence that says what it is).
+    const trap = expected.trap ?? ''
+    const stated = parseCitedAnswer(answer).sentences.some(
+      (sentence) => holds(sentence.text, trap) && !namesNotTheBook(sentence.text)
+    )
+    const named = cites.some(
+      (citation) => NOT_THE_BOOK.includes(citation.label) && holds(citation.quote, trap)
+    )
+    const first = parseCitedAnswer(answer).sentences[0]?.text ?? ''
+    score.trap = why(
+      !stated &&
+        !score.notTheBookAsFact &&
+        (result.scribe.notFound || (isAbsence(first) && statesScope(answer)) || named),
+      stated || score.notTheBookAsFact
+        ? `states the trap (${trap}) as fact`
+        : 'neither not found nor the source named'
+    )
+  }
   if (question.kind === 'idea') {
     score.idea = why(
       cites.some((citation) => citation.label === 'idea'),
@@ -593,14 +690,24 @@ export function scoreAsk(book: TestBookProject, ask: ScribeAsk): ScribeQuestionS
     )
   }
   if (question.kind === 'pin') {
-    const line = result.changes.find((change) => change.edit.kind === 'sheetLine')?.edit
-    const place = line?.kind === 'sheetLine' ? (line.place ?? 'ask') : undefined
-    const record = line?.kind === 'sheetLine' ? line.recordId : undefined
+    const lines = result.changes.flatMap((change) =>
+      change.edit.kind === 'sheetLine' ? [change.edit] : []
+    )
+    const line = lines[0]
+    const place = line === undefined ? undefined : (line.place ?? 'ask')
     score.place = why(
       place === expected.place &&
-        (place === undefined || record === book.records.get(question.record ?? '')),
+        (line === undefined || line.recordId === book.records.get(question.record ?? '')),
       `sheet line ${place ?? 'none'} (expected ${expected.place ?? 'none'})`
     )
+    // The words she asked to save, as one line (agent.v9: "only what she asked to save, in her
+    // words"): another fact in Pinned is canon she never wrote.
+    if (expected.place !== undefined) {
+      score.pinText = why(
+        lines.length === 1 && holds(line?.text ?? '', expected.pinText ?? ''),
+        `sheet line words ${lines.map((each) => `“${each.text}”`).join(', ') || 'none'} (expected “${expected.pinText ?? ''}”)`
+      )
+    }
   }
   const measures: Record<QuestionKind, () => (boolean | null)[]> = {
     slot: () => [why(false, 'not an instant card')],
@@ -609,13 +716,17 @@ export function scoreAsk(book: TestBookProject, ask: ScribeAsk): ScribeQuestionS
     lookupStale: () => [score.correct, score.outcome === 'lookup'],
     open: () => [score.correct],
     ordinal: () => [score.correct, score.scope],
-    absence: () => [score.scope],
+    absence: () => [score.scope, !score.claimsKnows],
     idea: () => [score.correct, score.idea],
     notFound: () => [score.notFound],
     route: () => [why(false, 'not routed')],
-    pin: () => [score.place]
+    pin: () => [score.place, ...(expected.place === undefined ? [] : [score.pinText])],
+    trap: () => [score.trap]
   }
-  score.right = measures[question.kind]().every((each) => each === true) && !score.absenceAsFact
+  score.right =
+    measures[question.kind]().every((each) => each === true) &&
+    !score.absenceAsFact &&
+    !score.notTheBookAsFact
   return score
 }
 
@@ -645,8 +756,14 @@ export interface ScribeRunScore {
   notFound: Share
   /** Questions whose answer states an absence as fact. */
   absenceAsFact: string[]
+  /** Absence questions answered "yes, they know". */
+  claimsKnows: string[]
+  /** Questions whose answer states what is never the book as its fact. */
+  notTheBookAsFact: string[]
+  traps: Share
   ideas: Share
   place: Share
+  pinText: Share
   widened: number
   misses: number
   cutOff: { cut: number; answers: number }
@@ -688,8 +805,15 @@ export function scoreScribeRun(book: TestBookProject, asks: readonly ScribeAsk[]
     scope: share(of(['ordinal', 'absence']), (each) => each.scope ?? false),
     notFound: share(of(['notFound']), (each) => each.notFound ?? false),
     absenceAsFact: asked.filter((each) => each.absenceAsFact).map((each) => each.id),
+    claimsKnows: asked.filter((each) => each.claimsKnows).map((each) => each.id),
+    notTheBookAsFact: asked.filter((each) => each.notTheBookAsFact).map((each) => each.id),
+    traps: share(of(['trap']), (each) => each.trap ?? false),
     ideas: share(of(['idea']), (each) => each.idea ?? false),
     place: share(of(['pin']), (each) => each.place ?? false),
+    pinText: share(
+      of(['pin']).filter((each) => each.pinText !== null),
+      (each) => each.pinText
+    ),
     widened: asked.filter((each) => each.widened).length,
     misses: asked.reduce((sum, each) => sum + each.misses, 0),
     cutOff: {
@@ -751,9 +875,17 @@ export function scribeReport(score: ScribeRunScore, run: ScribeLiveRun): ScribeL
   bar('scope honesty', score.scope, bars.scopeHonesty)
   bar('not-found honesty', score.notFound, bars.notFoundHonesty)
   bar('Ideas labelled', score.ideas, bars.ideasLabelled)
+  bar('trap honesty', score.traps, bars.trapHonesty)
   bar('sheet-write place', score.place, bars.sheetPlace)
+  bar('sheet-line words', score.pinText, bars.sheetWords)
   if (score.absenceAsFact.length > bars.absenceAsFact) {
     failures.push(`absence as fact in ${score.absenceAsFact.join(', ')}`)
+  }
+  if (score.claimsKnows.length > bars.absenceClaimsKnows) {
+    failures.push(`absence answered "knows" in ${score.claimsKnows.join(', ')}`)
+  }
+  if (score.notTheBookAsFact.length > bars.notTheBookAsFact) {
+    failures.push(`not the book stated as fact in ${score.notTheBookAsFact.join(', ')}`)
   }
   if (score.openCostUsd !== null && score.openCostUsd > bars.openCostUsd) {
     failures.push(`open question ${cents(score.openCostUsd)} > ${cents(bars.openCostUsd)}`)
@@ -783,8 +915,12 @@ export function scribeReport(score: ScribeRunScore, run: ScribeLiveRun): ScribeL
     `| Scope honesty (ordinal and absence answers search every earlier scene) | ${percent(score.scope.right, score.scope.of)} | ${bars.scopeHonesty * 100} % |`,
     `| Not-found honesty | ${percent(score.notFound.right, score.notFound.of)} | ${bars.notFoundHonesty * 100} % |`,
     `| Absence stated as fact | ${score.absenceAsFact.length} | ${bars.absenceAsFact} |`,
+    `| Absence answered "knows" (the person never learns it) | ${score.claimsKnows.length} | ${bars.absenceClaimsKnows} |`,
+    `| Idea, Idea scene, cut scene or Not canon text stated as the book's fact | ${score.notTheBookAsFact.length} | ${bars.notTheBookAsFact} |`,
+    `| Trap honesty (not found, or the source named) | ${percent(score.traps.right, score.traps.of)} | ${bars.trapHonesty * 100} % |`,
     `| Ideas labelled "your idea" | ${percent(score.ideas.right, score.ideas.of)} | ${bars.ideasLabelled * 100} % |`,
     `| Sheet-write place (pinned, ideas, ask; none in Plan) | ${percent(score.place.right, score.place.of)} | ≥ ${bars.sheetPlace * 100} % |`,
+    `| Sheet-line words (the author's, one line) | ${percent(score.pinText.right, score.pinText.of)} | ≥ ${bars.sheetWords * 100} % |`,
     `| Widened (Self-Route) / search misses logged | ${score.widened} / ${score.misses} | no bar |`,
     `| Answers cut off at their cap | ${percent(score.cutOff.cut, score.cutOff.answers)} | no bar |`,
     `| Reasoning tokens on answer turns | ${score.reasoningTokens} | 0 expected |`,
@@ -862,9 +998,16 @@ export async function runLiveScribe(
 
 // ---- The offline replays -------------------------------------------------------------------
 
-/** The rows of the tables the chat must never write (P3 rule 6). */
-const tableCounts = (book: TestBookProject): number[] =>
-  [claim, card, reading].map((table) => book.db.select().from(table).all().length)
+/** The rows of the tables the chat must never write (P3 rule 6), each row whole, in one order. */
+const tableRows = (book: TestBookProject): string[][] =>
+  [claim, card, reading].map((table) =>
+    book.db
+      .select()
+      .from(table)
+      .all()
+      .map((row) => JSON.stringify(row))
+      .sort()
+  )
 
 /** The citations an answer kept, as the invariants read them (a card would be `citesCard`). */
 const citationsOf = (asks: readonly ScribeAsk[]): InvariantCitation[] =>
@@ -903,17 +1046,17 @@ describe('Ms Scribe over the test book: the oracle replay (F-16.24, F-16.25, F-1
   let session: ScribeSession | undefined
   let server: ChatServer | undefined
   let asks: ScribeAsk[] = []
-  let before: number[] = []
-  let after: number[] = []
+  let before: string[][] = []
+  let after: string[][] = []
 
   beforeAll(async () => {
     const oracle = oracleLive()
     server = oracle.server
     session = await openScribeSession(oracle.live, { read: 'oracle', now: NOW })
-    before = tableCounts(session.book)
+    before = tableRows(session.book)
     asks = []
     for (const question of SCRIBE_QUESTIONS) asks.push(await askScribe(session, question, NOW))
-    after = tableCounts(session.book)
+    after = tableRows(session.book)
   }, 120_000)
   afterAll(() => session?.close())
 
@@ -948,6 +1091,12 @@ describe('Ms Scribe over the test book: the oracle replay (F-16.24, F-16.25, F-1
         right: true
       })
     }
+    // The contested eyes: both sides cited (grey in 3.1, brown in 14.1), neither alone.
+    const eyes = answerOf(byId(asks, 'lookup-varrow-eyes'))
+    expect(eyes.scribe.citations.map((citation) => citation.ref.split(' ')[0])).toEqual([
+      '3.1',
+      '14.1'
+    ])
     // The edited age: the paragraph as it reads now, never the stale fact line's value.
     const clara = answerOf(byId(asks, 'lookup-clara-edited'))
     expect(clara.scribe.citations.map((citation) => citation.quote).join(' ')).toContain(
@@ -961,7 +1110,7 @@ describe('Ms Scribe over the test book: the oracle replay (F-16.24, F-16.25, F-1
   it('routes as the labels say (F-5.26 kept): one navigator request, nothing else sent', () => {
     const book = session?.book ?? fail()
     const routes = of('route')
-    expect(routes.length).toBeGreaterThanOrEqual(4)
+    expect(routes.length).toBeGreaterThanOrEqual(8)
     for (const ask of routes) {
       const at = ask.question.id
       expect(
@@ -975,6 +1124,13 @@ describe('Ms Scribe over the test book: the oracle replay (F-16.24, F-16.25, F-1
       action: 'editPass',
       instruction: null,
       edit: { pass: 'ask', target: 'scene', chapter: null }
+    })
+    // On the selection only when one is sent: the same route with nothing selected is the scene.
+    const polish = byId(asks, 'route-polish-selection').outcome
+    expect(polish.kind === 'route' ? polish.decision.edit : null).toEqual({
+      pass: 'ask',
+      target: 'selection',
+      chapter: null
     })
   })
 
@@ -1004,9 +1160,14 @@ describe('Ms Scribe over the test book: the oracle replay (F-16.24, F-16.25, F-1
     }
     for (const ask of of('idea')) {
       const result = answerOf(ask)
-      expect(result.scribe.citations.map((citation) => citation.label)).toContain('idea')
-      expect(result.answer).toContain('your idea, not in the book')
+      // The chat's source label is the app's; the prose naming it is scored (notTheBookAsFact).
+      expect(
+        result.scribe.citations.map((citation) => sourceLabelWords(citation.label, citation.doc))
+      ).toContain('your idea, not in the book')
+      expect(scoreAsk(book, ask).notTheBookAsFact, ask.question.id).toBe(false)
     }
+    // A paragraph the ordered search placed but ranked below its scene's best is no search miss.
+    expect(answerOf(byId(asks, 'ordinal-lise-learns')).scribe.misses).toBe(0)
     const bell = answerOf(byId(asks, 'open-bell-pinned'))
     expect(bell.scribe.citations.map((citation) => citation.label)).toEqual(['notes'])
   })
@@ -1024,19 +1185,47 @@ describe('Ms Scribe over the test book: the oracle replay (F-16.24, F-16.25, F-1
       expect(scoreAsk(book, ask), at).toMatchObject({
         scope: true,
         absenceAsFact: false,
+        claimsKnows: false,
         right: true
       })
-      expect(result.answer, at).toMatch(/^I found no scene where /u)
+      // The oracle's words; what the app does is keep it, uncited, as the scoped absence.
+      expect(isAbsence(result.answer), at).toBe(true)
       expect(result.scribe.scope, at).toContain('every scene up to 18.1')
     }
-    // Nothing sent says someone does not know: not the renderer's scoped words, not a line.
+    // Nothing sent says someone does not know: not the renderer's scoped words, not a line, in
+    // a user turn or a system turn (the roster, the navigator's prefix) past the fixed rules.
     for (const each of session?.captured ?? []) {
       expect(JSON.stringify(each.messages)).not.toMatch(SCOPED)
-      for (const message of each.messages.filter((m) => m.role === 'user')) {
-        expect(message.content).not.toMatch(DOES_NOT_KNOW)
+      for (const message of each.messages) {
+        expect(withoutRules(message.content)).not.toMatch(DOES_NOT_KNOW)
       }
     }
     expect(server?.calls.length).toBe(session?.captured.length)
+  })
+
+  it('answers a trap (an Idea scene, a cut scene, an Ideas page) not found or with the source named', () => {
+    const book = session?.book ?? fail()
+    const traps = of('trap')
+    expect(traps.length).toBeGreaterThanOrEqual(3)
+    for (const ask of traps) {
+      expect(scoreAsk(book, ask), ask.question.id).toMatchObject({
+        trap: true,
+        notTheBookAsFact: false,
+        right: true
+      })
+    }
+    expect(answerOf(byId(asks, 'trap-clara-married')).scribe.notFound).toBe(true)
+    expect(answerOf(byId(asks, 'trap-captain-cousin')).scribe.notFound).toBe(true)
+    const married = answerOf(byId(asks, 'trap-captain-married'))
+    expect(married.scribe.citations.map((citation) => citation.label)).toEqual(['idea'])
+    // The cut and Idea scenes were on the menu the navigator saw: the trap was there to take.
+    const menus = (id: string): string =>
+      byId(asks, id)
+        .captured.filter((each) => each.kind === 'navigator')
+        .map((each) => JSON.stringify(each.messages))
+        .join('')
+    expect(menus('trap-clara-married')).toContain('cut from the book')
+    expect(menus('trap-captain-cousin')).toContain('idea scene')
   })
 
   it('puts a sheet line where the author asked, asks “idea or canon?” when unsure, and Plan writes nothing', () => {
@@ -1044,9 +1233,12 @@ describe('Ms Scribe over the test book: the oracle replay (F-16.24, F-16.25, F-1
     for (const ask of of('pin')) {
       expect(scoreAsk(book, ask), ask.question.id).toMatchObject({ place: true, right: true })
     }
-    const plan = answerOf(byId(asks, 'pin-plan'))
-    expect(plan.changes).toEqual([])
-    expect(plan.answer).toContain('Ask or Auto')
+    // Plan sends no edit tools and offers no change (a pin sent anyway: the adversarial replay).
+    const planned = byId(asks, 'pin-plan')
+    expect(answerOf(planned).changes).toEqual([])
+    for (const each of planned.captured.filter((request) => request.kind === 'answer')) {
+      expect(each.messages[0]?.content).not.toContain(AGENT_V9_EDIT_TOOLS)
+    }
     const asked = answerOf(byId(asks, 'pin-lottie-scar')).changes.map((change) => change.edit)
     expect(asked).toEqual([
       expect.objectContaining({ kind: 'sheetLine', place: null, text: 'A scar from the fire.' })
@@ -1168,6 +1360,31 @@ const NAVIGATOR_PROSE =
   'The duel is first mentioned in 12.1, where the town talks of it in Elsdale.'
 /** A sentence citing a quote its item does not hold. */
 const UNHELD = 'Johanna burned the letter at once'
+/** h14's line on Mr. Harrow at dinner, as E0 holds it (he notices nothing). */
+const HARROW_AT_DINNER =
+  'Mr. Harrow sat at the head of the table and talked to the Captain about the price of corn, and noticed nothing at all.'
+/** "Yes, he knows" to an absence question, citing a real line (the reviewers' plant). */
+const HARROW_KNOWS = `Yes, Mr. Harrow knows about the Captain's debts and talked to him about them. ${citeMarker('E0', HARROW_AT_DINNER)} I searched every scene up to 18.1 for debts.`
+
+/** A checker fooled into supporting every sentence (a live cite.v1 that errs). */
+const FOOLED_CHECKER = (
+  _messages: readonly AiMessage[],
+  honest: ReturnType<typeof oracleCiteReply>
+): string => JSON.stringify({ v: honest.v.map((each) => ({ ...each, ok: 'yes' })), scope: 'ok' })
+
+/** An answer stating the item tagged `tag` that holds `has` as the book's fact. */
+const statesAsFact =
+  (sentence: string, tag: string, has: string) =>
+  (messages: readonly AiMessage[]): string => {
+    const found = findQuoted(answerEvidence(answerTail(messages)), has, (item) =>
+      item.tag.startsWith(tag)
+    )
+    return JSON.stringify({
+      answer: `${sentence} ${citeMarker(found?.item.id ?? 'E99', found?.quote ?? has)}`,
+      found: true,
+      edits: []
+    })
+  }
 
 /** The planted replies (plan P3 §6.2's adversarial list). */
 const PLANTS: ScribePlants = {
@@ -1202,7 +1419,7 @@ const PLANTS: ScribePlants = {
     }
   },
   // A "first" that is not the first: the scope check finds the earlier passage, twice.
-  'ordinal-first-told': {
+  'ordinal-engagement-first': {
     navigator: (messages, honest, step) =>
       step === 1
         ? honest
@@ -1239,6 +1456,78 @@ const PLANTS: ScribePlants = {
         ]
       })
   },
+  // A sheet line sent in Plan, which has no edit tools: dropped, and Plan says so.
+  'pin-plan': {
+    answer: () =>
+      JSON.stringify({
+        answer: 'I’ll put that on Lottie Harrow’s sheet.',
+        found: true,
+        edits: [{ edit: 'pin', name: 'Lottie Harrow', text: 'Hates the sea.', place: 'pinned' }]
+      })
+  },
+  // Other words than she asked to save, in Pinned (canon she never wrote).
+  'pin-lottie-sea': {
+    answer: (_messages, honest) =>
+      JSON.stringify({
+        ...honest,
+        edits: [
+          {
+            edit: 'pin',
+            name: 'Lottie Harrow',
+            text: 'Loves the sea and swims every morning.',
+            place: 'pinned'
+          }
+        ]
+      })
+  },
+  // The asked line and a second one nobody asked for.
+  'pin-captain-twin': {
+    answer: (_messages, honest) =>
+      JSON.stringify({
+        ...honest,
+        edits: [
+          ...(honest.edits ?? []),
+          { edit: 'pin', name: 'the Captain', text: 'Owes Mr. Varrow money.', place: 'ideas' }
+        ]
+      })
+  },
+  // "Yes, he knows" to an absence question: the honest checker refuses it, so not found.
+  'absence-harrow-debts': {
+    answer: () => JSON.stringify({ answer: HARROW_KNOWS, found: true, edits: [] })
+  },
+  // The same past a fooled checker: kept, so the scoring must count it wrong.
+  'absence-lady-pell': {
+    answer: (messages) => {
+      const found = findQuoted(
+        answerEvidence(answerTail(messages)),
+        'Lottie is to marry',
+        () => true
+      )
+      return JSON.stringify({
+        answer: `Yes, Lady Pell knows of the engagement. ${citeMarker(found?.item.id ?? 'E1', found?.quote ?? '')}`,
+        found: true,
+        edits: []
+      })
+    },
+    cite: FOOLED_CHECKER
+  },
+  // A cut scene stated as fact: the honest checker refuses it, so not found.
+  'trap-clara-married': {
+    answer: statesAsFact(
+      'Clara Pell married Mr. Pruett in the spring.',
+      'cut from the book',
+      'Clara Pell married Mr. Pruett'
+    )
+  },
+  // An Idea scene stated as fact past a fooled checker: the scoring must count it wrong.
+  'trap-captain-cousin': {
+    answer: statesAsFact(
+      'The Captain is Mr. Varrow’s cousin.',
+      'idea scene',
+      'The Captain turns out to be'
+    ),
+    cite: FOOLED_CHECKER
+  },
   // A second need after the widening.
   'open-lise-overheard': {
     answer: () => JSON.stringify({ need: 'chapter 10' })
@@ -1259,19 +1548,19 @@ const PLANTS: ScribePlants = {
 describe('Ms Scribe over the test book: the adversarial replay (F-16.25, F-16.26)', () => {
   let session: ScribeSession | undefined
   let asks: ScribeAsk[] = []
-  let before: number[] = []
-  let after: number[] = []
+  let before: string[][] = []
+  let after: string[][] = []
 
   beforeAll(async () => {
     const oracle = oracleLive(PLANTS)
     session = await openScribeSession(oracle.live, { read: 'oracle', now: NOW })
-    before = tableCounts(session.book)
+    before = tableRows(session.book)
     asks = []
     for (const id of Object.keys(PLANTS)) {
       const question = SCRIBE_QUESTIONS.find((each) => each.id === id) ?? fail()
       asks.push(await askScribe(session, question, NOW))
     }
-    after = tableCounts(session.book)
+    after = tableRows(session.book)
   }, 120_000)
   afterAll(() => session?.close())
 
@@ -1295,7 +1584,7 @@ describe('Ms Scribe over the test book: the adversarial replay (F-16.25, F-16.26
   })
 
   it('retries a “first” that a passage the search found shows earlier, then says not found', () => {
-    const ask = byId(asks, 'ordinal-first-told')
+    const ask = byId(asks, 'ordinal-engagement-first')
     const result = answerOf(ask)
     // The planted answer cited a real passage (10.1); the honest check listed 9.1 before it.
     const check = ask.captured.find((each) => each.kind === 'cite') ?? fail()
@@ -1321,6 +1610,61 @@ describe('Ms Scribe over the test book: the adversarial replay (F-16.25, F-16.26
     const result = answerOf(byId(asks, 'open-dunmore-father'))
     expect(result.changes).toEqual([])
     expect(result.answer).toContain(PIN_NOT_ASKED)
+  })
+
+  it('drops a sheet line sent in Plan and says Plan writes nothing (the app’s words)', () => {
+    const book = session?.book ?? fail()
+    const ask = byId(asks, 'pin-plan')
+    const result = answerOf(ask)
+    expect(
+      replyObject(ask.captured.find((each) => each.kind === 'answer')?.text ?? '')?.edits
+    ).toHaveLength(1)
+    expect(result.changes).toEqual([])
+    expect(result.answer.endsWith(PLAN_NO_PIN)).toBe(true)
+    expect(scoreAsk(book, ask)).toMatchObject({ place: true, pinText: null, right: true })
+  })
+
+  it('scores a sheet line in other words, or a second line beside the asked one, wrong', () => {
+    const book = session?.book ?? fail()
+    const sea = byId(asks, 'pin-lottie-sea')
+    // The app offers it (the author confirms or undoes it); the scoring is what catches it.
+    expect(answerOf(sea).changes.map((change) => change.edit)).toEqual([
+      expect.objectContaining({ kind: 'sheetLine', text: 'Loves the sea and swims every morning.' })
+    ])
+    expect(scoreAsk(book, sea)).toMatchObject({ place: true, pinText: false, right: false })
+    const twin = byId(asks, 'pin-captain-twin')
+    expect(answerOf(twin).changes).toHaveLength(2)
+    expect(scoreAsk(book, twin)).toMatchObject({ place: true, pinText: false, right: false })
+  })
+
+  it('answers “yes, he knows” to an absence question not found, and scores it wrong past a fooled checker', () => {
+    const book = session?.book ?? fail()
+    expect(affirmsKnowing(HARROW_KNOWS)).toBe(true)
+    const harrow = byId(asks, 'absence-harrow-debts')
+    const checks = harrow.captured.filter((each) => each.kind === 'cite')
+    expect(checks.length).toBeGreaterThan(0)
+    expect(oracleCiteReply(checks[0]?.messages ?? []).v[0]).toEqual({ i: 1, ok: 'no' })
+    expect(answerOf(harrow).scribe).toMatchObject({ notFound: true, citations: [] })
+    expect(scoreAsk(book, harrow)).toMatchObject({ claimsKnows: false, right: true })
+    const pell = byId(asks, 'absence-lady-pell')
+    expect(answerOf(pell).scribe.notFound).toBe(false)
+    expect(scoreAsk(book, pell)).toMatchObject({ claimsKnows: true, right: false })
+  })
+
+  it('answers a trap stated as fact not found, and scores it wrong past a fooled checker', () => {
+    const book = session?.book ?? fail()
+    const clara = byId(asks, 'trap-clara-married')
+    expect(answerOf(clara).scribe.notFound).toBe(true)
+    expect(scoreAsk(book, clara)).toMatchObject({ trap: true, right: true })
+    const cousin = byId(asks, 'trap-captain-cousin')
+    expect(answerOf(cousin).scribe.citations.map((citation) => citation.label)).toEqual([
+      'ideaScene'
+    ])
+    expect(scoreAsk(book, cousin)).toMatchObject({
+      notTheBookAsFact: true,
+      trap: false,
+      right: false
+    })
   })
 
   it('answers a second need not found, with what it looked in', () => {

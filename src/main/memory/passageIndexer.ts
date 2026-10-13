@@ -634,6 +634,29 @@ export function searchMemoryPassagesInOrder(
 }
 
 /**
+ * Whether the index matches this paragraph of `ownerId` for any of `terms`, as every search here
+ * matches (`ftsQuery`): the search-miss log's test (P3-D15, slice 6 review). A paragraph FTS
+ * places but a ranking leaves out (the ordered search keeps one paragraph a scene) was found, so
+ * it is never logged as something FTS and the navigator's synonyms missed. One query per widened
+ * citation, so the cost is a match of the terms.
+ */
+export function passageMatches(
+  db: TreeDb,
+  terms: readonly string[],
+  ownerId: string,
+  para: number
+): boolean {
+  const match = ftsQuery(terms.join(' '))
+  if (match === null) return false
+  return (
+    db.all<{ id: number }>(
+      sql`SELECT rowid AS id FROM memory_passage_fts WHERE memory_passage_fts MATCH ${match}
+          AND owner_id = ${ownerId} AND para = ${para} LIMIT 1`
+    ).length > 0
+  )
+}
+
+/**
  * About `SNIPPET_TOKENS` words of `text` around the first word one of `terms` starts ("counted"
  * for "count"), or that starts one of them as a stem does (the index stems words: "count" for
  * "counted"; four letters at least and at most three fewer, so "to" is no hit for "tomas"), `…`

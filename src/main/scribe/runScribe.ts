@@ -94,6 +94,7 @@ import {
   type AiRequestResult
 } from '../ai/request'
 import { namedTotals } from '../memory/nameIndexer'
+import { passageMatches } from '../memory/passageIndexer'
 import { rowTexts } from '../memory/reading/readingFrame'
 import { getRecord, listRecords } from '../memory/recordStore'
 import { povOf } from '../memory/sceneDetailStore'
@@ -1217,8 +1218,9 @@ export async function runScribe(
     })
 
     // Search misses (P3-D15): a kept citation into the widened text at a paragraph the turn's
-    // search did not return. Without a search (no words to search for) nothing is a miss, and a
-    // citation code could not place in one paragraph is never logged.
+    // search did not return and its words do not match (a paragraph FTS placed but a ranking left
+    // out was found, not missed: slice 6 review). Without a search (no words to search for)
+    // nothing is a miss, and a citation code could not place in one paragraph is never logged.
     let misses = 0
     if (terms.length > 0) {
       for (const citation of citations) {
@@ -1227,6 +1229,7 @@ export async function runScribe(
         const para = item === undefined ? null : placeOf(item, citation.quote)
         if (item?.widened !== true || nodeId === null || para === null) continue
         if (baseline.some((hit) => hit.nodeId === nodeId && hit.para === para)) continue
+        if (passageMatches(db, terms, nodeId, para)) continue
         logSearchMiss(
           db,
           {

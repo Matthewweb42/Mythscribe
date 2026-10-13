@@ -1,5 +1,14 @@
 import { normalizeForMatch } from '@shared/critique'
-import { quoteWords } from '@shared/scribeAnswer'
+import { EVIDENCE_LABEL_WORDS, type EvidenceLabel } from '@shared/scribe'
+import {
+  bareAnswer,
+  isAbsence,
+  isHedged,
+  mainClaimAt,
+  parseCitedAnswer,
+  quoteWords,
+  statesAbsenceAsFact
+} from '@shared/scribeAnswer'
 import { requestKind } from '../../memory/reading/readingFixture'
 import { testBookScene } from '../../memory/testBook/book'
 import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
@@ -29,13 +38,16 @@ import { nameOf, oracleRead, oracleVerify } from './memoryOracle'
  *   step 2 uses the menu items in the label's scene (the line holding the label's words first), a
  *   "your idea" or "your notes" item for a page, else everything it found.
  * - **Answer** (`agent.v9`): cites the label's words where the evidence holds them, in the label's
- *   scene (or page), as `[E7 "…"]`; an ordinal answer says what was searched from the Searched
- *   line; an absence answer is the scoped "I found no scene where …"; a not-found question is
+ *   scene (or page), as `[E7 "…"]`, and both sides of a contested value; an ordinal answer says
+ *   what was searched from the Searched line; an absence answer is the scoped "I found no scene
+ *   where …"; a not-found question (and a trap only a source that is not the book answers) is
  *   `found: false`; a sheet request is a `pin` edit with the label's place (none in Plan). When
  *   the evidence lacks the scene, it asks once for it (`{"need":"13.1"}`), then says not found.
  * - **Checker** (`cite.v1`): a sentence is supported when its quotes hold the label's words (or
- *   another passage the label says says the same); the scope is "earlier" when a listed passage
- *   is in the label's scene and the answer cites another.
+ *   another passage the label says says the same, or the other side of a contested value), never
+ *   when it states an Idea, an Idea scene, a cut scene or Not canon text without naming it so,
+ *   nor when an absence answer's sentence says the person knows; the scope is "earlier" when a
+ *   listed passage is in the label's scene and the answer cites another.
  * - **Reader** and **checker** of the memory (`reader.v2`, `verify.v2`): `memoryOracle.ts`'s.
  *
  * `ScribePlants` replace a question's honest reply for the adversarial replay. Test support
@@ -299,6 +311,10 @@ export function oracleAnswerReply(messages: readonly AiMessage[]): Reply {
     }
     case 'notFound':
       return { answer: 'The evidence does not say.', found: false, edits: [] }
+    case 'trap':
+      if (expected.notFound)
+        return { answer: 'The evidence does not say.', found: false, edits: [] }
+      break
     case 'absence': {
       const searched = searchedPhrase(tail)
       return {
@@ -326,8 +342,19 @@ export function oracleAnswerReply(messages: readonly AiMessage[]): Reply {
   const marker = citeMarker(found.item.id, found.quote)
   const ref = tagRef(found.item.tag)
   const searched = searchedPhrase(tail)
+  const other =
+    expected.contested === undefined
+      ? null
+      : findQuoted(items, expected.contested.quoteHas, (item) =>
+          namesRef(item.tag, sceneRef(expected.contested?.scene ?? ''))
+        )
   let answer: string
-  if (expected.label === 'idea') {
+  if (other !== null) {
+    const otherRef = tagRef(other.item.tag)
+    answer =
+      `The book says two things. In ${otherRef}: ${citeMarker(other.item.id, other.quote)} ` +
+      `In ${ref}: ${marker}`
+  } else if (expected.label === 'idea') {
     answer = `That is your idea, not in the book, from ${name}’s Ideas. ${marker}`
   } else if (expected.label === 'notes') {
     answer = `Your notes on ${name} say so. ${marker}`
@@ -344,11 +371,12 @@ export function oracleAnswerReply(messages: readonly AiMessage[]): Reply {
 
 // ---- The quote checker ---------------------------------------------------------------------
 
-/** One cited sentence as `cite.v1` was sent it, with its quotes. */
+/** One cited sentence as `cite.v1` was sent it, with its quotes and their items' tags. */
 export interface OracleCiteSentence {
   n: number
   text: string
   quotes: string[]
+  tags: string[]
 }
 
 /** The scope item of a `cite.v1` request: the scene the answer cites and the passages listed. */
@@ -370,12 +398,13 @@ export function citeRequest(messages: readonly AiMessage[]): {
   for (const line of user.split('\n')) {
     const sentence = /^(\d+)\. (.*)$/u.exec(line)
     if (sentence !== null && !inScope) {
-      sentences.push({ n: Number(sentence[1]), text: sentence[2] ?? '', quotes: [] })
+      sentences.push({ n: Number(sentence[1]), text: sentence[2] ?? '', quotes: [], tags: [] })
       continue
     }
-    const quote = /^[EW]\d+ \[[^\]]*\] “(.*?)” in: /u.exec(line)
+    const quote = /^[EW]\d+ \[([^\]]*)\] “(.*?)” in: /u.exec(line)
     if (quote !== null && !inScope) {
-      sentences.at(-1)?.quotes.push(quote[1] ?? '')
+      sentences.at(-1)?.quotes.push(quote[2] ?? '')
+      sentences.at(-1)?.tags.push(quote[1] ?? '')
       continue
     }
     if (line.startsWith('Scope: searched ')) {
@@ -389,6 +418,54 @@ export function citeRequest(messages: readonly AiMessage[]): {
   return { question, sentences, scope }
 }
 
+/** The labels of what is never the book (design §2.2): cited, a sentence must name them so. */
+export const NOT_THE_BOOK: readonly EvidenceLabel[] = ['idea', 'ideaScene', 'cutScene', 'notCanon']
+const NOT_THE_BOOK_TAGS = NOT_THE_BOOK.map((label) => EVIDENCE_LABEL_WORDS[label])
+
+/** Words that name a source as not the book: "your idea", "idea scene", "cut", a draft, a dream. */
+const NAMES_NOT_THE_BOOK =
+  /\b(?:ideas?|cut|draft|dream(?:s|ed|t)?|not\s+canon|not\s+in\s+the\s+book|left\s+out)\b/iu
+
+/**
+ * Whether a sentence offers what it says as something other than the book's fact: it names the
+ * source as an idea, a cut scene, a draft or a dream, or it hedges (`isHedged`).
+ */
+export const namesNotTheBook = (sentence: string): boolean =>
+  NAMES_NOT_THE_BOOK.test(sentence) || isHedged(sentence)
+
+/** Someone knowing, learning or being told something, as a claim (the knows verbs). */
+const KNOWS_VERB =
+  /\b(?:knows?|knew|learn(?:s|ed|t)|(?:is|was|were|has\s+been|had\s+been)\s+told|finds?\s+out|found\s+out|hears?|heard|(?:is|was)\s+aware|discover(?:s|ed))\b/iu
+const NEGATED = /\b(?:no|not|never|nothing|nobody|none|n['’]t)\b/iu
+
+/** A sentence that is, or opens with, a yes ("Yes.", "Yes, Mara knows…"). */
+const saysYes = (sentence: string): boolean =>
+  bareAnswer(sentence) === 'yes' || /^(?:yes|yeah|yep)\b/iu.test(sentence.trim())
+
+/** Whether one sentence says someone knows, learned or was told (with no negation in it). */
+export function claimsKnows(sentence: string): boolean {
+  const text = sentence.trim()
+  if (saysYes(text)) return true
+  return (
+    KNOWS_VERB.test(text) &&
+    !NEGATED.test(text) &&
+    !isAbsence(text) &&
+    !statesAbsenceAsFact(text) &&
+    !isHedged(text)
+  )
+}
+
+/**
+ * Whether an answer's main claim says the person knows (an absence question's wrong answer:
+ * the person never learns it): a bare or leading "yes", or a knows claim (`mainClaimAt`).
+ */
+export function affirmsKnowing(answer: string): boolean {
+  const sentences = parseCitedAnswer(answer).sentences
+  return (
+    saysYes(sentences[0]?.text ?? '') || claimsKnows(sentences[mainClaimAt(sentences)]?.text ?? '')
+  )
+}
+
 /** The honest checker's verdicts on one `cite.v1` request. */
 export function oracleCiteReply(messages: readonly AiMessage[]): {
   v: { i: number; ok: 'yes' | 'no' }[]
@@ -396,16 +473,25 @@ export function oracleCiteReply(messages: readonly AiMessage[]): {
 } {
   const request = citeRequest(messages)
   const question = questionNamed(request.question)
-  const wanted = [question?.expected.quoteHas, ...(question?.expected.also ?? [])].filter(
-    (quote): quote is string => quote !== undefined
-  )
-  const v = request.sentences.map((sentence) => ({
-    i: sentence.n,
-    ok:
+  const wanted = [
+    question?.expected.quoteHas,
+    question?.expected.contested?.quoteHas,
+    ...(question?.expected.also ?? [])
+  ].filter((quote): quote is string => quote !== undefined)
+  const supported = (sentence: OracleCiteSentence): boolean => {
+    if (question?.kind === 'absence' && claimsKnows(sentence.text)) return false
+    const notTheBook = sentence.tags.some((tag) =>
+      NOT_THE_BOOK_TAGS.some((words) => tag.startsWith(words))
+    )
+    if (notTheBook && !namesNotTheBook(sentence.text)) return false
+    return (
       wanted.length === 0 ||
       sentence.quotes.some((quote) => wanted.some((each) => holds(quote, each)))
-        ? ('yes' as const)
-        : ('no' as const)
+    )
+  }
+  const v = request.sentences.map((sentence) => ({
+    i: sentence.n,
+    ok: supported(sentence) ? ('yes' as const) : ('no' as const)
   }))
   if (request.scope === null) return { v, scope: 'none' }
   const scene = question?.expected.scene
@@ -428,6 +514,8 @@ export function oracleCiteReply(messages: readonly AiMessage[]): {
 export interface ScribePlant {
   navigator?: (messages: readonly AiMessage[], honest: string, step: number) => string
   answer?: (messages: readonly AiMessage[], honest: Reply, attempt: number) => string
+  /** A checker that errs (a live `cite.v1` fooled), so the scoring is what must catch it. */
+  cite?: (messages: readonly AiMessage[], honest: ReturnType<typeof oracleCiteReply>) => string
 }
 export type ScribePlants = Readonly<Partial<Record<string, ScribePlant>>>
 
@@ -462,7 +550,10 @@ export function scribeOracleReply(
     attempts.set(key, attempt)
     return plant?.answer?.(messages, honest, attempt) ?? JSON.stringify(honest)
   }
-  if (kind === 'cite') return JSON.stringify(oracleCiteReply(messages))
+  if (kind === 'cite') {
+    const honest = oracleCiteReply(messages)
+    return plant?.cite?.(messages, honest) ?? JSON.stringify(honest)
+  }
   return JSON.stringify({ answer: 'I cannot tell.', found: false })
 }
 
