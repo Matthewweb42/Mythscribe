@@ -9448,6 +9448,81 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     })
   })
 
+  // F-16.24, F-16.25 (plan P3 §4.3): in v2 the navigator routes and finds, in place of route.v2.
+  it('F-16.25: ai:navigate routes an edit request with navigator.v1 in v2, and ai:route is v1’s', async () => {
+    const scene = await openV2()
+    await invoke('document:save', {
+      id: scene,
+      content: paragraphs('Mara watched the quay.', 'Orrin overheard Tomas.')
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
+    complete.mockResolvedValueOnce({
+      text: '{"a":"editPass","t":"edit","pass":"ask","target":"scene"}',
+      model: 'gpt-fake',
+      usage: { inputTokens: 1_200, outputTokens: 20 }
+    })
+    const routed = await invoke('ai:navigate', {
+      nodeId: scene,
+      message: 'Make this scene better.',
+      history: [],
+      focus: { beforeCaret: '', selection: '' },
+      requestId: 'nv-1'
+    })
+    expect(routed).toMatchObject({
+      ok: true,
+      kind: 'route',
+      action: 'editPass',
+      edit: { pass: 'ask', target: 'scene', chapter: null },
+      routedBy: 'model',
+      requestId: 'nv-1'
+    })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(complete.mock.calls[0]?.[0].messages[0]?.content).toMatch(
+      /^You are the navigator inside a novel-writing app's assistant\./
+    )
+    // A step with a search, then the evidence: an answer turn with its navigation and steps.
+    complete
+      .mockResolvedValueOnce({
+        text: '{"a":"query","t":"answer","call":[{"search":["overheard","heard"]}]}',
+        model: 'gpt-fake',
+        usage: { inputTokens: 1_200, outputTokens: 30 }
+      })
+      .mockResolvedValueOnce({
+        text: '{"use":["E1"]}',
+        model: 'gpt-fake',
+        usage: { inputTokens: 1_300, outputTokens: 10 }
+      })
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    const found = await invoke('ai:navigate', {
+      nodeId: scene,
+      message: 'When does Orrin first hear about the map?',
+      history: [],
+      focus: { beforeCaret: '', selection: '' },
+      requestId: 'nv-2'
+    })
+    if (!found.ok || found.kind !== 'answer') throw new Error('no answer')
+    expect(found.action).toBe('query')
+    expect(found.navigation?.turn).toBe('answer')
+    expect(found.navigation?.evidence).toHaveLength(1)
+    expect(found.steps).toEqual([{ tool: 'search', label: "Searching 'overheard, heard'…" }])
+    expect(found.usage).toEqual({ inputTokens: 2_500, outputTokens: 40 })
+    expect(sentOf('ai:agentStep')).toEqual([
+      { requestId: 'nv-2', step: { tool: 'search', label: "Searching 'overheard, heard'…" } }
+    ])
+    // route.v2 is never asked in a v2 project: its channel is refused before any handler.
+    await expect(
+      invoke('ai:route', {
+        nodeId: scene,
+        message: 'Make this scene better.',
+        history: [],
+        selection: null,
+        requestId: 'rt-v2'
+      })
+    ).rejects.toThrow('VALIDATION: This project uses the other story memory')
+    expect(complete).toHaveBeenCalledTimes(3)
+  })
+
   // F-16.17 (plan P2a §3.7): nothing is summarised in v2, so the v1 conversion never comes up.
   it('never summarises in v2, and never opens the v1 conversion dialog', async () => {
     const scene = await openV2()

@@ -42,7 +42,14 @@ import { readingOrder, rowTexts } from '../memory/reading/readingFrame'
 import { sheetFrame, sheetMemory } from '../memory/reading/views'
 import { listRecords } from '../memory/recordStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
-import { ageText, evidenceFrame, passageNow, sceneLabel, type EvidenceFrame } from './evidence'
+import {
+  ageText,
+  evidenceFrame,
+  itemOf,
+  passageNow,
+  sceneLabel,
+  type EvidenceFrame
+} from './evidence'
 
 /**
  * Step 0 (F-16.24; design §2.6, plan P3 §1.3): what every chat question gets locally, before any
@@ -166,6 +173,15 @@ export interface Step0 {
    */
   scope: SearchScope | null
   /**
+   * The question asks for every earlier scene (first, last, ever, never, how many, learns, or a
+   * knows question with something to search for): the navigator's searches go in reading order too.
+   */
+  ordinal: boolean
+  /** A last or latest question: the cap keeps the latest scenes. */
+  latest: boolean
+  /** Each named record's names, as an ordered search ranks by them. */
+  groups: string[][]
+  /**
    * Every manuscript paragraph the searches returned, those the cap cut too (at most 50): the
    * search-miss baseline (P3-D15).
    */
@@ -182,7 +198,7 @@ export const SELECTION_OPENING = 200
 export const ORDINAL_OTHER_HITS = 6
 
 /** Every source but a manuscript scene and a card: what an ordinal search adds beside the scenes. */
-const OTHER_SOURCES: readonly PassageSource[] = DEFAULT_PASSAGE_SOURCES.filter(
+export const OTHER_SOURCES: readonly PassageSource[] = DEFAULT_PASSAGE_SOURCES.filter(
   (source) => source !== 'scene'
 )
 
@@ -211,6 +227,33 @@ const valueLine = (line: SheetLineView, kind: 'fixed' | 'lasting' | 'transient')
   return `${line.label}: ${line.value.value} (${at}${line.value.stale ? ', re-checking' : ''})${also}`
 }
 
+/** One secret a record knows or half-knows as of now, as its sheet lists it. */
+type KnowsLine = NonNullable<SheetMemory['knows']>['lines'][number]
+
+/**
+ * A knows line as Step 0's digest and the navigator's `knows` tool word it: "Knows the sold map
+ * (overheard from Tomas, 1.1)"; half-knowing never reads as knowing (P2b-D7): "Suspects the sold
+ * map (1.2)", "Believes otherwise about …". Null for a later line or one that does not count:
+ * absence is never a line (P2b rule 9).
+ */
+export function knowsLineText(
+  line: KnowsLine,
+  nameOf: (id: string | null) => string
+): string | null {
+  const cell = line.cell
+  if (cell.later || cell.line === 'other') return null
+  const where = cell.ref ?? ''
+  if (cell.line === 'partial') {
+    const what =
+      cell.how === 'believesFalse'
+        ? `Believes otherwise about ${line.label}`
+        : `${HOW_LABEL[cell.how].replace(/^./u, (first) => first.toUpperCase())} ${line.label}`
+    return where === '' ? what : `${what} (${where})`
+  }
+  const from = cell.fromId === null ? '' : ` from ${nameOf(cell.fromId)}`
+  return `Knows ${line.label} (${HOW_LABEL[cell.how]}${from}${where === '' ? '' : `, ${where}`})`
+}
+
 /**
  * A record's digest as of now from its sheet (`sheetMemory`): fixed, lasting and transient values
  * with where the book says them (stale ones "re-checking"), the secrets it knows or half-knows,
@@ -235,24 +278,8 @@ export function recordDigest(
     add(valueLine(line, 'transient'), { kind: 'claim', claimId: line.value.claimId })
   }
   for (const line of sheet.knows?.lines ?? []) {
-    const cell = line.cell
-    if (cell.later || cell.line === 'other') continue
-    const key: EvidenceKey = { kind: 'knows', secretId: line.secretId }
-    const where = cell.ref ?? ''
-    // Half-knowing never reads as knowing (P2b-D7): "Suspects …", "Believes otherwise about …".
-    if (cell.line === 'partial') {
-      const what =
-        cell.how === 'believesFalse'
-          ? `Believes otherwise about ${line.label}`
-          : `${HOW_LABEL[cell.how].replace(/^./u, (first) => first.toUpperCase())} ${line.label}`
-      add(where === '' ? what : `${what} (${where})`, key)
-      continue
-    }
-    const from = cell.fromId === null ? '' : ` from ${nameOf(cell.fromId)}`
-    add(
-      `Knows ${line.label} (${HOW_LABEL[cell.how]}${from}${where === '' ? '' : `, ${where}`})`,
-      key
-    )
+    const text = knowsLineText(line, nameOf)
+    if (text !== null) add(text, { kind: 'knows', secretId: line.secretId })
   }
   for (const thread of sheet.threads?.threads ?? []) {
     if (thread.status === 'notYet') continue
@@ -313,6 +340,128 @@ export function ordinalScope(
     allEarlier: options.cut === null && !whole,
     wholeBook: options.cut === null && whole,
     terms
+  }
+}
+
+/**
+ * Each named record by every name it has (a nickname in the prose counts), else as the question
+ * writes it: the name groups an ordered search ranks by.
+ */
+export function nameGroups(ask: AskIndex, names: AskNames): string[][] {
+  return names.records.map((name) => {
+    const words = ask.roster
+      .filter((alias) => alias.recordId === name.recordId)
+      .flatMap((alias) => queryTerms(alias.text))
+    return [...new Set(words.length > 0 ? words : nameWords(name.text))]
+  })
+}
+
+/** What an ordered search found: the kept paragraphs, every matching one, and the scope. */
+export interface OrderedSceneSearch {
+  hits: MemoryPassageHit[]
+  matched: SearchHit[]
+  scope: SearchScope | null
+}
+
+/**
+ * Every readable scene up to now (the whole book with `wholeBook`) searched in reading order for
+ * `search`'s words, ranked by them and the name `groups` (P3-D8): each scene's best paragraph, the
+ * first `ORDINAL_HITS_MAX` (the last, for a `latest` question) kept, and the scope over `terms`
+ * that code can claim (`ordinalScope`: the fully kept stretch when the cap cut some). Step 0's
+ * first/last/ever search, and the navigator's `search` on such a question.
+ */
+export function orderedSceneSearch(
+  db: TreeDb,
+  frame: EvidenceFrame,
+  input: {
+    search: readonly string[]
+    terms: string[]
+    groups: readonly (readonly string[])[]
+    wholeBook: boolean
+    latest: boolean
+  }
+): OrderedSceneSearch {
+  const now = frame.nowId === null ? -1 : (frame.reading.at.get(frame.nowId) ?? -1)
+  const upTo = input.wholeBook || now < 0 ? Infinity : now
+  const found = searchMemoryPassagesInOrder(db, input.search, {
+    names: input.groups,
+    sources: ['scene'],
+    max: ORDINAL_HITS_MAX,
+    latest: input.latest,
+    orderOf: (ownerId) => {
+      const order = frame.reading.order.get(ownerId)
+      return order !== undefined && order <= upTo ? order : undefined
+    },
+    nodes: frame.nodes
+  })
+  return {
+    hits: found.hits,
+    matched: found.matched.map((each) => ({ nodeId: each.ownerId, para: each.para })),
+    scope: ordinalScope(frame, input.terms, {
+      wholeBook: input.wholeBook,
+      latest: input.latest,
+      cut: found.cut
+    })
+  }
+}
+
+/**
+ * The evidence menu as it grows (P3 §1.3, §4.2): Step 0 fills it, the navigator's tools add to it.
+ * Each item gets the next id (`E1`…) once; a hit in a manuscript scene, an Idea scene or a cut one
+ * also joins `hits`, the search-miss baseline (P3-D15).
+ */
+export class EvidenceMenu {
+  readonly items: MenuItem[] = []
+  readonly hits: SearchHit[] = []
+
+  constructor(
+    private readonly frame: EvidenceFrame,
+    seed: { items: readonly MenuItem[]; hits: readonly SearchHit[] } = { items: [], hits: [] }
+  ) {
+    this.items.push(...seed.items)
+    this.hits.push(...seed.hits)
+  }
+
+  /** Adds an item unless the menu has its key already; answers it, or null. */
+  add(key: EvidenceKey, label: EvidenceLabel, ref: string, snippet: string): MenuItem | null {
+    if (this.items.some((item) => sameEvidence(item.key, key))) return null
+    const item: MenuItem = { id: `E${this.items.length + 1}`, key, label, ref, snippet }
+    this.items.push(item)
+    return item
+  }
+
+  /** A search hit as it is now (`passageNow`); null when gone or already on the menu. */
+  addHit(hit: Pick<MemoryPassageHit, 'source' | 'ownerId' | 'para' | 'snippet'>): MenuItem | null {
+    const item = passageNow(this.frame, hit.source, hit.ownerId, hit.para)
+    if (item === null) return null
+    if (hit.source === 'scene' || hit.source === 'ideaScene' || hit.source === 'excludedScene') {
+      this.addHits([{ nodeId: hit.ownerId, para: hit.para }])
+    }
+    return this.add(
+      { kind: 'passage', source: hit.source, ownerId: hit.ownerId, para: hit.para },
+      item.label,
+      item.ref,
+      hit.snippet.replace(/\s+/g, ' ').trim()
+    )
+  }
+
+  /**
+   * A key as the book is now (`itemOf`): its label and place, its text as the snippet; null when
+   * it names nothing now or is on the menu already.
+   */
+  addKey(key: EvidenceKey, ref?: string): MenuItem | null {
+    const item = itemOf(this.frame, key)
+    if (item === null) return null
+    return this.add(key, item.label, ref ?? (item.ref || item.title), item.text)
+  }
+
+  /** Paragraphs a search or a read returned, each once. */
+  addHits(hits: readonly SearchHit[]): void {
+    for (const hit of hits) {
+      if (!this.hits.some((each) => each.nodeId === hit.nodeId && each.para === hit.para)) {
+        this.hits.push(hit)
+      }
+    }
   }
 }
 
@@ -382,45 +531,29 @@ export function gatherStep0(
     cues.knows &&
     (names.topics.some((topic) => topic.kind === 'secret') || (knower && search.terms.length > 0))
   const ordinal = cues.scopeAll || cues.learns || knowsAbout
+  const groups = nameGroups(ask, names)
   let terms = asked
   let scope: SearchScope | null = null
   let scenes: MemoryPassageHit[] = []
   let others: MemoryPassageHit[]
-  const baseline: SearchHit[] = []
+  let matched: SearchHit[] = []
   if (ordinal) {
-    // Each named record by every name it has (a nickname in the prose counts), else as written.
-    const groups = names.records.map((name) => {
-      const words = ask.roster
-        .filter((alias) => alias.recordId === name.recordId)
-        .flatMap((alias) => queryTerms(alias.text))
-      return [...new Set(words.length > 0 ? words : nameWords(name.text))]
-    })
     const content = search.terms
       .map((term) => term.slice(0, NAVIGATION_TERM_MAX))
       .slice(0, NAVIGATION_TERMS_MAX)
     terms = (content.length > 0 ? content : [...new Set(groups.flat())])
       .map((term) => term.slice(0, NAVIGATION_TERM_MAX))
       .slice(0, NAVIGATION_TERMS_MAX)
-    const now = frame.nowId === null ? -1 : (frame.reading.at.get(frame.nowId) ?? -1)
-    const upTo = cues.wholeBook || now < 0 ? Infinity : now
-    const found = searchMemoryPassagesInOrder(db, content, {
-      names: groups,
-      sources: ['scene'],
-      max: ORDINAL_HITS_MAX,
-      latest: search.latest,
-      orderOf: (ownerId) => {
-        const order = frame.reading.order.get(ownerId)
-        return order !== undefined && order <= upTo ? order : undefined
-      },
-      nodes
+    const found = orderedSceneSearch(db, frame, {
+      search: content,
+      terms,
+      groups,
+      wholeBook: cues.wholeBook,
+      latest: search.latest
     })
     scenes = found.hits
-    scope = ordinalScope(frame, terms, {
-      wholeBook: cues.wholeBook,
-      latest: search.latest,
-      cut: found.cut
-    })
-    for (const each of found.matched) baseline.push({ nodeId: each.ownerId, para: each.para })
+    scope = found.scope
+    matched = found.matched
     others = searchMemoryPassages(db, query, {
       sources: OTHER_SOURCES,
       limit: ORDINAL_OTHER_HITS,
@@ -430,36 +563,16 @@ export function gatherStep0(
     others = searchMemoryPassages(db, query, { limit: NAVIGATOR_MENU_HITS, nodes })
   }
 
-  const menu: MenuItem[] = []
-  const push = (key: EvidenceKey, label: EvidenceLabel, ref: string, snippet: string): void => {
-    if (menu.some((item) => sameEvidence(item.key, key))) return
-    menu.push({ id: `E${menu.length + 1}`, key, label, ref, snippet })
-  }
+  const menu = new EvidenceMenu(frame)
   for (const digest of digests) {
     for (const line of digest.lines) {
       const label: EvidenceLabel = line.key.kind === 'timeline' ? 'computed' : 'happened'
-      push(line.key, label, digest.name, `${digest.name} · ${line.text}`)
+      menu.add(line.key, label, digest.name, `${digest.name} · ${line.text}`)
     }
   }
-  const hits: SearchHit[] = []
-  const place = (hit: MemoryPassageHit): void => {
-    const item = passageNow(frame, hit.source, hit.ownerId, hit.para)
-    if (item === null) return
-    if (hit.source === 'scene' || hit.source === 'ideaScene' || hit.source === 'excludedScene') {
-      hits.push({ nodeId: hit.ownerId, para: hit.para })
-    }
-    push(
-      { kind: 'passage', source: hit.source, ownerId: hit.ownerId, para: hit.para },
-      item.label,
-      item.ref,
-      hit.snippet.replace(/\s+/g, ' ').trim()
-    )
-  }
-  for (const hit of cues.idea ? [...others, ...scenes] : [...scenes, ...others]) place(hit)
+  for (const hit of cues.idea ? [...others, ...scenes] : [...scenes, ...others]) menu.addHit(hit)
   // What the cap cut is still what the search returned: never a search miss later (P3-D15).
-  for (const hit of baseline) {
-    if (!hits.some((each) => each.nodeId === hit.nodeId && each.para === hit.para)) hits.push(hit)
-  }
+  menu.addHits(matched)
 
   return {
     nowId: time.nowId,
@@ -472,7 +585,10 @@ export function gatherStep0(
     records: digests,
     terms,
     scope,
-    hits: hits.slice(0, NAVIGATION_HITS_MAX),
-    menu
+    ordinal,
+    latest: search.latest,
+    groups,
+    hits: menu.hits.slice(0, NAVIGATION_HITS_MAX),
+    menu: menu.items
   }
 }

@@ -134,7 +134,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   route: {
     trigger: 'every chat message',
-    when: 'Classifies an Auto/Ask message to pick the feature (skipped for exact action names). Since route.v2 (F-5.26) it also picks an edit pass (its type or "ask", and the selection, scene, or chapter): ~200 more input tokens in the cached system turn, ~15 more output tokens on an edit request.',
+    when: 'Classifies an Auto/Ask message to pick the feature (skipped for exact action names). Since route.v2 (F-5.26) it also picks an edit pass (its type or "ask", and the selection, scene, or chapter): ~200 more input tokens in the cached system turn, ~15 more output tokens on an edit request. Story memory v1 only since F-16.25: a v2 project routes with navigator.v1 (the navigator row).',
     callsPerUse: 1,
     typicalOutTokens: 40,
     ideas:
@@ -240,6 +240,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     ideas:
       'Prove more in code (literal patterns per slot) so fewer items are sent; fold presence checks into the reader once the live run shows they agree; the strong spot check only while the proof agreement is new.'
   },
+  navigator: {
+    trigger: 'every chat message',
+    when: 'Story memory v2 (F-16.25): navigator.v1, fast tier, reasoning off, on every chat message an instant card does not answer (none for an instant card, none for a stale or contested lookup, which goes straight to agent.v9, and none for a typed action name). Step 1 classifies the message with route.v2’s actions and edit-pass fields (a routed edit request, “make this scene better”, ends there: about 4,000 tokens in, 60 out) and the turn kind; for a chat or question it then calls up to three local tools per step (search with its own synonyms over the passage index, cards, read, state, knows, timeline, ideas, outline, to-dos) and ends with the evidence ids to use, at most three steps of 150 tokens out each. The cached prefix (rules and tools, the roster of names, secrets and threads, the first line of each Ideas page, the story map: ≤ 3,000 tokens) stays the same within a chapter; the tail is Now, the open document, the selection’s opening, the last two turns, the question and the evidence menu (≤ 1,000), and steps 2–3 add what the tools found (≤ 1,400). Input cap 6,000. Figures (plan P3 §4, design Part 5): about 6,000 tokens in and 150 out per step, two steps for an open question.',
+    callsPerUse: 2,
+    typicalOutTokens: 150,
+    ideas:
+      'Answer step 1 from the tail alone when the live run shows routing is no better with the prefix (a new version); let Step 0’s menu end the search at step 1 more often (`use` at once); cache the prefix per chapter (already stable).'
+  },
   cite: {
     trigger: 'every chat message',
     when: 'Story memory v2 (F-16.25): cite.v1, fast tier, reasoning off, after every Ms Scribe answer that kept a citation, and after an answer that found nothing when the search found passages to check it against (none otherwise, and none for an instant card): the question and Now (the open scene), each cited sentence (at most 8; the first always, its contexts cut around the quotes to fit) with its quotes in their evidence sentence ±1, and for a first, last, ever, never or how-many answer (or one that found nothing) the scope item (what code searched, the answer’s main claim and cited scene, up to 5 passages the search found before it, or every one for an absence; none sent when it found none). max_tokens min(200, 20 + 10 per sentence + 20 for the scope). A main claim it finds unsupported asks agent.v9 once more, which is checked again (a second cite.v1 call). Figures (plan P3 §3): about 1,000 tokens in and 60 out; the eval fixtures measure about 300–550 on the test book (2,435 at the cap).',
@@ -277,19 +285,6 @@ export interface PlannedCostNote {
 }
 
 export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
-  {
-    id: 'navigator.v1',
-    prompt: 'navigator.v1',
-    feature: 'navigator',
-    existing: false,
-    phase: 'P3',
-    tier: 'fast',
-    trigger: 'every chat message',
-    when: 'An open question: up to two steps choosing which passages Ms Scribe reads.',
-    typicalInTokens: 6_000,
-    typicalOutTokens: 150,
-    callsPerUse: 1
-  },
   {
     id: 'judge.v1',
     prompt: 'judge.v1',
@@ -348,7 +343,7 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
  * The story-memory rows that have shipped (F-16.9, P1 slice 5; F-16.17, P2a slice 2: the reader
  * and verify rows; F-16.22, F-16.23, P2b slice 2: their v2 rows, which the tasks read now, the v1
  * rows kept for the ledger's older readings; F-16.20, F-16.21, P2a slice 5: `synopsis.v2`, `notesSuggest.v4` and
- * `planLinks.v2`; F-16.25, P3 slice 2: `agent.v9`'s open, lookup, need and widened calls; P3 slice 3: `cite.v1`): their features' notes are in `AI_COST_NOTES` now (the registry's per-feature
+ * `planLinks.v2`; F-16.25, P3 slice 2: `agent.v9`'s open, lookup, need and widened calls; P3 slice 3: `cite.v1`; P3 slice 4: `navigator.v1`): their features' notes are in `AI_COST_NOTES` now (the registry's per-feature
  * table shows them), and these rows keep the design's sizes so the planned tasks that run them
  * ("File a 20,000-word upload, once", "Index the book once") and the switch-over's rebuild price
  * (`plannedRow` in `switchover/plan.ts`) stay priced from the same figures.
@@ -638,6 +633,19 @@ export const SHIPPED_PLAN_ROWS: readonly PlannedCostNote[] = [
     when: 'After each answer that cites the book, or says it found nothing with passages the search found: checks every cited sentence against its quotes, and the scope of a first, last, ever or never answer or of the absence (reasoning off). The eval fixtures measure about 300–550 tokens in on the test book (2,435 at the cap); the design’s size stays the planning figure.',
     typicalInTokens: 1_000,
     typicalOutTokens: 60,
+    callsPerUse: 1
+  },
+  {
+    id: 'navigator.v1',
+    prompt: 'navigator.v1',
+    feature: 'navigator',
+    existing: true,
+    phase: 'P3',
+    tier: 'fast',
+    trigger: 'every chat message',
+    when: 'An open question: up to three steps choosing which passages Ms Scribe reads (reasoning off). Since P3 slice 4 it also routes a v2 message (route.v2’s actions and edit passes); an instant card asks nothing. The eval fixtures measure the cached prefix and a step on the test fixtures; the design’s size stays the planning figure.',
+    typicalInTokens: 6_000,
+    typicalOutTokens: 150,
     callsPerUse: 1
   }
 ]

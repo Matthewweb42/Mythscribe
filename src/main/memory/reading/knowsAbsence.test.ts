@@ -25,8 +25,15 @@ import { fakeAi, requestKind } from './readingFixture'
 import { writeSceneRead } from './sceneReadStore'
 import { createTopic } from './topicStore'
 import { sceneMemory } from './views'
-import { renderEvidence, resolveEvidence } from '../../scribe/evidence'
-import { gatherStep0 } from '../../scribe/step0'
+import { evidenceFrame, renderEvidence, resolveEvidence } from '../../scribe/evidence'
+import { askIndexOf, EvidenceMenu, gatherStep0 } from '../../scribe/step0'
+import { navigatorPrefix } from '../../scribe/navigate'
+import { runNavigatorTool, type NavigatorWorld } from '../../scribe/tools'
+import {
+  buildNavigatorPrompt,
+  navigatorMenuLine,
+  type NavigatorCall
+} from '../../ai/prompts/navigator.v1'
 import type { EvidenceKey } from '@shared/scribe'
 
 /**
@@ -230,6 +237,49 @@ describe('absence is never a fact on any surface that reaches a model (P2b rule 
     expect(knows).toContain('Orrin: overheard from Tomas')
     expect(knows).toContain('Tomas: knew before the book')
     expect(knows).not.toContain('Mara')
+  })
+
+  it('keeps the navigator’s tools and its prompt free of absences (F-16.25, P3 slice 4)', () => {
+    const question = 'Does Mara know about the sold map?'
+    const step0 = gatherStep0(db, {
+      nodeId: two,
+      question,
+      focus: { caretPara: null, selection: null }
+    })
+    const frame = evidenceFrame(db, step0.nowId)
+    const world: NavigatorWorld = {
+      project: loadAgentProject(db, two, 'v2'),
+      frame,
+      ask: askIndexOf(db),
+      step0,
+      menu: new EvidenceMenu(frame, { items: step0.menu, hits: step0.hits }),
+      terms: [],
+      scope: null,
+      reads: 0
+    }
+    const calls: NavigatorCall[] = [
+      { tool: 'knows', arg: 'the sold map' },
+      { tool: 'knows', arg: 'Mara' },
+      { tool: 'knows', arg: 'Orrin' },
+      { tool: 'state', arg: 'Mara' },
+      { tool: 'timeline', arg: 'Mara' },
+      { tool: 'search', terms: ['map', 'sold'] }
+    ]
+    for (const call of calls) {
+      const run = runNavigatorTool(world, call)
+      const shown = [...run.added.map(navigatorMenuLine), run.note ?? ''].join('\n')
+      expect(shown, JSON.stringify(call)).not.toMatch(ABSENCE)
+      expect(shown, JSON.stringify(call)).not.toMatch(NOT_KNOWING)
+    }
+    const built = buildNavigatorPrompt({
+      prefix: navigatorPrefix(db, frame),
+      tail: { now: '1.2', active: null, selection: null, history: [], message: question },
+      menu: world.menu.items,
+      steps: []
+    })
+    const sent = built.messages.map((message) => message.content).join('\n')
+    expect(sent).not.toMatch(ABSENCE)
+    expect(sent).not.toMatch(NOT_KNOWING)
   })
 
   it('keeps reader.v2 and verify.v2 requests free of absences', async () => {

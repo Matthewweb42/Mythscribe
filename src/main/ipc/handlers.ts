@@ -63,6 +63,7 @@ import type {
   AiRewriteResult,
   AiSummarizeResult,
   AiWhatNextResult,
+  AiNavigateResult,
   AiRouteResult,
   AiSuggestNotesResult,
   AiSuggestSynopsisResult,
@@ -516,6 +517,7 @@ import {
   updateRecord,
   withTopicRelabels
 } from '../memory/recordStore'
+import { runNavigate } from '../scribe/navigate'
 import { runScribe } from '../scribe/runScribe'
 import { searchMisses } from '../scribe/searchMissStore'
 import { addSheetLine, removeSheetLine } from '../scribe/sheetLines'
@@ -3858,6 +3860,56 @@ export function registerHandlers({
           cached,
           model,
           requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // F-16.24, F-16.25 (story memory v2, in place of `ai:route`): Ms Scribe's navigation: Step 0
+  // and an instant card with no AI call (reading the latest change first through *Read now*), or
+  // `navigator.v1`'s route action or answer turn. Each lookup is announced as `ai:agentStep` for
+  // `requestId`; the ledger rows are the cost. The logic is `runNavigate`'s.
+  register(
+    'ai:navigate',
+    async ({ nodeId, message, history, focus, requestId }): Promise<AiNavigateResult> => {
+      try {
+        const db = manager.require().connection.orm
+        const result = await runNavigate(
+          db,
+          requestDeps(db),
+          { readNow: (id, readId) => reader.readNow(id, readId) },
+          { nodeId, message, history, focus, requestId },
+          (step) => emit(windows(), 'ai:agentStep', { requestId, step })
+        )
+        const { usage, costUsd, cached, model } = result
+        const spend = { usage, costUsd, cached, model, requestId }
+        switch (result.kind) {
+          case 'instant':
+            return { ok: true, kind: 'instant', card: result.card, ...spend }
+          case 'route':
+            return {
+              ok: true,
+              kind: 'route',
+              action: result.decision.action,
+              instruction: result.decision.instruction,
+              edit: result.decision.edit,
+              routedBy: result.routedBy,
+              ...spend
+            }
+          case 'answer':
+            return {
+              ok: true,
+              kind: 'answer',
+              action: result.action,
+              navigation: result.navigation,
+              steps: result.steps,
+              routedBy: result.routedBy,
+              ...spend
+            }
         }
       } catch (err) {
         if (err instanceof AiProviderError)

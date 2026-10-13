@@ -8,11 +8,13 @@ import { EDIT_ASK_QUESTION } from '@shared/editRequest'
 import type {
   AiChatResult,
   AiAgentResult,
+  AiNavigateResult,
   AiRouteResult,
   Channel,
   Input,
   Output
 } from '@shared/ipc/contract'
+import type { InstantCard } from '@shared/scribe'
 import {
   resetActiveEditorStore,
   useActiveEditorStore
@@ -30,6 +32,7 @@ import { resetFocusStore } from '@renderer/features/focus/focusStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -84,6 +87,8 @@ const routed = (
 
 let calls: [Channel, unknown][]
 let route: AiRouteResult
+/** F-16.25: what `ai:navigate` answers in a story memory v2 project. */
+let navigate: AiNavigateResult
 
 function client(): IpcClient {
   return {
@@ -97,6 +102,11 @@ function client(): IpcClient {
           return input as Output<C>
         case 'ai:route':
           return { ...route, requestId: (input as Input<'ai:route'>).requestId } as Output<C>
+        case 'ai:navigate':
+          return {
+            ...navigate,
+            requestId: (input as Input<'ai:navigate'>).requestId
+          } as Output<C>
         case 'ai:chat': {
           const result: AiChatResult = {
             ok: true,
@@ -194,6 +204,20 @@ let editor: Editor
 beforeEach(async () => {
   calls = []
   route = routed('chat')
+  navigate = {
+    ok: true,
+    kind: 'route',
+    action: 'chat',
+    instruction: null,
+    edit: null,
+    routedBy: 'model',
+    usage,
+    costUsd: 0.00002,
+    cached: false,
+    model: 'gpt-fast',
+    requestId: 'r'
+  }
+  useProjectStore.setState({ current: null })
   resetAssistantStore()
   resetDocumentStore()
   resetActiveEditorStore()
@@ -223,6 +247,7 @@ beforeEach(async () => {
   await useAssistantStore.getState().load()
 })
 afterEach(() => {
+  useProjectStore.setState({ current: null })
   resetAssistantStore()
   resetCritiqueStore()
   resetRewriteStore()
@@ -516,5 +541,187 @@ describe('Ask AI attachment (2026-10-06)', () => {
   it('never pushes the message past the cap', () => {
     expect(withAttachment('a'.repeat(5000), 'quote')).toHaveLength(4000)
     expect(withAttachment('hello', null)).toBe('hello')
+  })
+})
+
+describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.24, F-16.25)', () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      current: {
+        id: 'p-2',
+        name: 'Memory',
+        format: 'novel',
+        path: '/books/Memory.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 37,
+        storyMemory: 'v2'
+      }
+    })
+  })
+
+  const routedV2 = (
+    action: Extract<AiNavigateResult, { kind: 'route' }>['action'],
+    edit: RouteEdit | null = null
+  ): AiNavigateResult => ({
+    ok: true,
+    kind: 'route',
+    action,
+    instruction: null,
+    edit,
+    routedBy: 'model',
+    usage,
+    costUsd: 0.0006,
+    cached: false,
+    model: 'gpt-fast',
+    requestId: 'r'
+  })
+
+  it('asks ai:navigate (never ai:route) with the open scene, the last turns and the caret focus', async () => {
+    editor.commands.setTextSelection({ from: 1, to: 13 })
+    await useAssistantStore.getState().send('Who is on the ridge?')
+    expect(sent('ai:route')).toHaveLength(0)
+    expect(sent('ai:navigate')).toEqual([
+      expect.objectContaining({
+        nodeId: 'sc-1',
+        message: 'Who is on the ridge?',
+        history: [],
+        focus: { beforeCaret: '', selection: 'Mara climbed' }
+      })
+    ])
+  })
+
+  it('keeps F-5.26: a vague request asks which edit with the five quick picks; Tighten prose runs one pass', async () => {
+    navigate = routedV2('editPass', { pass: 'ask', target: 'scene', chapter: null })
+    await useAssistantStore.getState().send('Make this scene better.')
+    expect(sent('editPass:start')).toHaveLength(0)
+    expect(turns()[1]).toMatchObject({
+      action: 'editPass',
+      content: EDIT_ASK_QUESTION,
+      model: 'gpt-fast',
+      costUsd: 0.0006,
+      edit: {
+        choices: ['line', 'developmental', 'dialogue', 'proofread', 'critique'],
+        picked: null
+      }
+    })
+    await useAssistantStore.getState().pickEdit(turns()[1]?.id ?? '', 'line')
+    expect(sent('editPass:start')).toEqual([
+      { type: 'line', instruction: null, nodeIds: ['sc-1'], excerpt: null }
+    ])
+    expect(sent('ai:route')).toHaveLength(0)
+  })
+
+  it('runs every other route action as before, and Plan keeps edits out', async () => {
+    navigate = routedV2('critique')
+    await useAssistantStore.getState().send("Give me editor's notes")
+    await expect.poll(() => useCritiqueStore.getState().session?.nodeId).toBe('sc-1')
+    useAiSettingsStore.setState({ settings: settings({ chatMode: 'plan' }) })
+    navigate = routedV2('editPass', { pass: 'line', target: 'scene', chapter: null })
+    await useAssistantStore.getState().send('Tighten the prose')
+    expect(sent('editPass:start')).toHaveLength(0)
+    expect(sent('ai:agent')).toEqual([expect.objectContaining({ access: 'read' })])
+    // No navigation: Ms Scribe answers from Step 0's evidence.
+    expect(sent('ai:agent')[0]?.navigation).toBeUndefined()
+  })
+
+  it('shows an instant card as the turn’s text with no AI call', async () => {
+    const card: InstantCard = {
+      kind: 'slot',
+      recordId: 'm',
+      name: 'Mara',
+      slot: 'eyes',
+      label: 'Eyes',
+      value: 'grey',
+      claimId: 'c1',
+      quote: 'her grey eyes',
+      ref: '1.1',
+      nodeId: 'sc-1',
+      para: 0,
+      since: null,
+      lastStated: false,
+      asOfRef: '1.1',
+      readFirst: null
+    }
+    navigate = {
+      ok: true,
+      kind: 'instant',
+      card,
+      usage: { inputTokens: 0, outputTokens: 0 },
+      costUsd: 0,
+      cached: false,
+      model: null,
+      requestId: 'r'
+    }
+    await useAssistantStore.getState().send('Mara’s eyes?')
+    expect(sent('ai:agent')).toHaveLength(0)
+    expect(turns()[1]).toMatchObject({
+      content: 'Mara · Eyes: grey (1.1)',
+      card,
+      costUsd: 0,
+      action: 'query'
+    })
+    expect(useAssistantStore.getState().pending).toEqual({})
+  })
+
+  it('hands an answer turn to Ms Scribe with the navigation; the steps and the cost are both calls’', async () => {
+    const navigation = {
+      turn: 'answer' as const,
+      evidence: [{ kind: 'outline' as const }],
+      scope: null,
+      terms: ['ridge'],
+      hits: []
+    }
+    navigate = {
+      ok: true,
+      kind: 'answer',
+      action: 'query',
+      navigation,
+      steps: [{ tool: 'search', label: "Searching 'ridge'…" }],
+      routedBy: 'model',
+      usage: { inputTokens: 2_000, outputTokens: 40 },
+      costUsd: 0.0005,
+      cached: false,
+      model: 'gpt-fast',
+      requestId: 'r'
+    }
+    await useAssistantStore.getState().send('When does Mara first climb the ridge?')
+    expect(sent('ai:agent')).toEqual([
+      expect.objectContaining({
+        access: 'read',
+        navigation,
+        message: 'When does Mara first climb the ridge?'
+      })
+    ])
+    expect(turns()[1]).toMatchObject({
+      action: 'query',
+      mode: 'query',
+      model: 'gpt-strong',
+      costUsd: 0.0015,
+      usage: { inputTokens: 2_090, outputTokens: 48 },
+      agent: {
+        steps: [{ tool: 'search', label: "Searching 'ridge'…" }]
+      }
+    })
+  })
+
+  it('falls back to Ms Scribe on Step 0’s evidence when the chat is off for routing (DISABLED), and settles other failures', async () => {
+    navigate = { ok: false, code: 'DISABLED', message: 'off', nextStep: '', requestId: 'r' }
+    await useAssistantStore.getState().send('Hello')
+    expect(sent('ai:agent')).toEqual([expect.objectContaining({ access: 'write' })])
+    expect(sent('ai:agent')[0]?.navigation).toBeUndefined()
+    navigate = {
+      ok: false,
+      code: 'RATE_LIMIT',
+      message: 'OpenAI is rate limiting this key.',
+      nextStep: 'Wait a minute.',
+      requestId: 'r'
+    }
+    await useAssistantStore.getState().send('Hello again')
+    expect(sent('ai:agent')).toHaveLength(1)
+    expect(useDialogStore.getState().toasts.map((t) => t.message)).toContain(
+      'OpenAI is rate limiting this key. Wait a minute.'
+    )
   })
 })

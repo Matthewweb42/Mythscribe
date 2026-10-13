@@ -30,6 +30,7 @@ import {
   groupEnabled,
   withGroup
 } from './aiSettings'
+import { nameAssistant } from './assistantName'
 import { DEFAULT_HONESTY } from './critique'
 import { contract } from './ipc/contract'
 
@@ -93,10 +94,12 @@ describe('defaultAiSettings (F-14.4)', () => {
 
   it('names the toggles a stored row has for ids this build does not know, booleans only', () => {
     expect(
-      unknownFeatureToggles({ features: { judge: false, chat: false, odd: 'x', navigator: true } })
-    ).toEqual({ judge: false, navigator: true })
+      unknownFeatureToggles({ features: { judge: false, chat: false, odd: 'x', vectors: true } })
+    ).toEqual({ judge: false, vectors: true })
     // F-16.25: `cite` is this build's own id now, never an unknown one.
     expect(unknownFeatureToggles({ features: { cite: true } })).toEqual({})
+    // F-16.25 (P3 slice 4): so is `navigator`.
+    expect(unknownFeatureToggles({ features: { navigator: true } })).toEqual({})
     expect(unknownFeatureToggles(null)).toEqual({})
     expect(unknownFeatureToggles({ features: 'all' })).toEqual({})
   })
@@ -366,12 +369,66 @@ describe('the toggle list per story memory (F-16.17, P2a-D24)', () => {
 
   it('shows the reader and its check as one Story memory reading switch in v2', () => {
     const groups = featureToggleItems('v2').filter((item) => item.kind === 'group')
-    expect(groups).toEqual([{ kind: 'group', group: FEATURE_GROUPS[0] }])
+    expect(groups).toContainEqual({ kind: 'group', group: FEATURE_GROUPS[0] })
     expect(FEATURE_GROUPS[0]).toEqual({
       id: 'storyMemoryReading',
       label: 'Story memory reading',
-      features: ['reader', 'verify']
+      features: ['reader', 'verify'],
+      memory: 'v2'
     })
+  })
+
+  it('F-16.25 (P3-D17): shows Ms Scribe as one switch in v2 (the answer, the navigator, the quote check), named as the assistant', () => {
+    const scribe = FEATURE_GROUPS.find((group) => group.id === 'msScribe')
+    expect(scribe).toEqual({
+      id: 'msScribe',
+      label: 'Assistant',
+      features: ['agent', 'navigator', 'cite'],
+      memory: 'v2'
+    })
+    expect(nameAssistant(scribe?.label ?? '', 'Ms Scribe')).toBe('Ms Scribe')
+    const v2 = featureToggleItems('v2')
+    expect(v2.filter((item) => item.kind === 'group').map((item) => item.group.id)).toEqual([
+      'msScribe',
+      'storyMemoryReading'
+    ])
+    // In the group's place, never beside it.
+    expect(v2.some((item) => item.kind === 'feature' && item.id === 'agent')).toBe(false)
+    // v1: the agent keeps its own toggle, and no v2 group shows.
+    const v1 = featureToggleItems('v1')
+    expect(v1.filter((item) => item.kind === 'group')).toEqual([])
+    expect(v1).toContainEqual({ kind: 'feature', id: 'agent' })
+    expect(v1.some((item) => item.kind === 'feature' && item.id === 'navigator')).toBe(false)
+  })
+
+  it('F-16.25 (P3-D17): hides the router and Story Intelligence in v2, the navigator in v1', () => {
+    expect(MEMORY_ONLY_FEATURES.v1).toEqual(expect.arrayContaining(['route', 'query']))
+    expect(MEMORY_ONLY_FEATURES.v2).toEqual(expect.arrayContaining(['navigator', 'cite']))
+    const ids = (memory: 'v1' | 'v2'): string[] =>
+      featureToggleItems(memory).flatMap((item) =>
+        item.kind === 'group' ? item.group.features : [item.id]
+      )
+    expect(ids('v2')).not.toContain('route')
+    expect(ids('v2')).not.toContain('query')
+    expect(ids('v1')).toEqual(expect.arrayContaining(['route', 'query', 'agent']))
+    expect(AI_DATA_SHARING.route.sendsV2).toContain('Nothing in this project')
+    expect(AI_DATA_SHARING.query.sendsV2).toContain('Nothing in this project')
+  })
+
+  it('F-16.25: describes what the navigator sends, never the whole scene', () => {
+    expect(AI_DATA_SHARING.navigator.label).toBe('Ms Scribe’s search')
+    for (const part of [
+      'first 1,000 characters',
+      'last two turns (300 characters each)',
+      'first 200 characters of a selected passage',
+      'names and nicknames of your records',
+      'first line of each record’s Ideas',
+      'a map of the book',
+      'short snippets'
+    ]) {
+      expect(AI_DATA_SHARING.navigator.sends).toContain(part)
+    }
+    expect(AI_DATA_SHARING.navigator.sends).not.toContain('whole open scene')
   })
 
   it('writes both ids and reads on only when both are on', () => {

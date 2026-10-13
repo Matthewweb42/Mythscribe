@@ -153,7 +153,8 @@ describe('budgets', () => {
       sheetSync: 1_200,
       reader: 720,
       verify: 400,
-      cite: 200
+      cite: 200,
+      navigator: 150
     })
     expect(Object.keys(FEATURE_INPUT_BUDGETS).sort()).toEqual(Object.keys(FEATURE_BUDGETS).sort())
     for (const feature of AI_FEATURE_IDS) {

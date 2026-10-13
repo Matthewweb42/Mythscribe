@@ -390,6 +390,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'Your question, scene summaries, the full text of the top matching scenes, the sheets ' +
       'of the story-bible entries your question names with what the manuscript states about ' +
       "them, and the open scene's synopsis and notes (the first 1,500 characters).",
+    // F-16.25 (P3-D17): a v2 project's questions go to Ms Scribe (the assistant row).
+    sendsV2: 'Nothing in this project: Ms Scribe answers questions about the book.',
     minDial: 1
   },
   critique: {
@@ -454,6 +456,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'Your message (the first 1,000 characters), the last two turns of the conversation (300 ' +
       'characters each), the first 200 characters of the passage you selected, and the open ' +
       "document's kind and title, so the assistant can pick which feature answers you.",
+    // F-16.25 (P3-D17): a v2 project's messages are routed by Ms Scribe's search (navigator.v1).
+    sendsV2: 'Nothing in this project: Ms Scribe’s search picks which feature answers you.',
     minDial: 1
   },
   synopsis: {
@@ -765,6 +769,20 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'or one that found nothing, its first sentence, which scenes were searched, the words ' +
       'searched for and up to five passages the search found.',
     minDial: 1
+  },
+  navigator: {
+    label: 'Ms Scribe’s search',
+    sends:
+      'Story memory v2 only, for every chat message: your message (its first 1,000 characters), ' +
+      'the last two turns (300 characters each), the open document’s kind and title, the first ' +
+      '200 characters of a selected passage; the names and nicknames of your records and the ' +
+      'labels of the secrets and threads found; the first line of each record’s Ideas; a map of ' +
+      'the book (one line per scene near the open chapter, one per chapter elsewhere, from the ' +
+      'scene cards); and, as it searches, short snippets of the passages, facts, cards, ' +
+      'who-knows-what lines, story years and ages, outline entries and to-dos its search finds, ' +
+      'each labelled with where it is. Nothing for a question the book already answers (an ' +
+      'instant card).',
+    minDial: 1
   }
 }
 
@@ -796,24 +814,37 @@ export const AI_FEATURES_BY_LEVEL: readonly AiFeatureId[] = [...AI_FEATURE_IDS].
  * their toggle hides in v2 too (AI rule 3 holds: a feature that sends nothing needs no switch).
  */
 export const MEMORY_ONLY_FEATURES: Readonly<Record<StoryMemoryVersion, readonly AiFeatureId[]>> = {
-  v1: ['tags', 'summary', 'continuity', 'organise', 'todo', 'sheetSync'],
-  v2: ['reader', 'verify', 'cite']
+  // F-16.25 (P3-D17): in v2 the navigator routes and Ms Scribe answers, so the router (`route`)
+  // and Story Intelligence (`query`) are v1's.
+  v1: ['tags', 'summary', 'continuity', 'organise', 'todo', 'sheetSync', 'route', 'query'],
+  v2: ['reader', 'verify', 'cite', 'navigator']
 }
 
 /** Several features behind one switch in Settings, which writes them all (P2a-D24). */
 export interface FeatureGroup {
   id: string
+  /** The switch's name; "Assistant" reads as the assistant's name (`nameAssistant`, F-7.13). */
   label: string
   features: readonly AiFeatureId[]
+  /** The story memory whose toggle list shows the group; null for both (F-16.25). */
+  memory: StoryMemoryVersion | null
 }
 
 /**
  * F-16.17: the reader and its checker run together (a reading without its check stores only what
  * code proves, and the check alone has nothing to check), so Settings shows one **Story memory
- * reading** switch for both.
+ * reading** switch for both. F-16.25 (P3-D17): in v2, Ms Scribe is one switch too: the answer
+ * (`agent`), the navigator that routes and searches for it, and the quote check run together; it
+ * is labelled with the assistant's name. In v1, `agent` stays its own toggle.
  */
 export const FEATURE_GROUPS: readonly FeatureGroup[] = [
-  { id: 'storyMemoryReading', label: 'Story memory reading', features: ['reader', 'verify'] }
+  {
+    id: 'storyMemoryReading',
+    label: 'Story memory reading',
+    features: ['reader', 'verify'],
+    memory: 'v2'
+  },
+  { id: 'msScribe', label: 'Assistant', features: ['agent', 'navigator', 'cite'], memory: 'v2' }
 ]
 
 /** One row of a project's feature toggles: a feature, or a group in its first member's place. */
@@ -822,7 +853,7 @@ export type FeatureToggleItem =
 
 /**
  * The toggles a project with story memory `memory` shows, in display order (`AI_FEATURES_BY_LEVEL`):
- * the other memory's features left out, a group in place of its members.
+ * the other memory's features left out, a group of this memory in place of its members.
  */
 export function featureToggleItems(memory: StoryMemoryVersion): FeatureToggleItem[] {
   const other: StoryMemoryVersion = memory === 'v1' ? 'v2' : 'v1'
@@ -831,7 +862,11 @@ export function featureToggleItems(memory: StoryMemoryVersion): FeatureToggleIte
   const placed = new Set<string>()
   for (const id of AI_FEATURES_BY_LEVEL) {
     if (hidden.has(id)) continue
-    const group = FEATURE_GROUPS.find((candidate) => candidate.features.includes(id))
+    const group = FEATURE_GROUPS.find(
+      (candidate) =>
+        (candidate.memory === null || candidate.memory === memory) &&
+        candidate.features.includes(id)
+    )
     if (group === undefined) {
       items.push({ kind: 'feature', id })
       continue

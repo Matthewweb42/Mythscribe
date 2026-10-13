@@ -46,6 +46,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `reader` | Story memory reading | background | reader.v2 | fast | 1626 / 5848 | 320 / 720 | $0.000317 · $0.00102 | $0.000397 | $0.00266 | 1 | $0.000317 |
 | `verify` | Story memory check | background | verify.v2 | fast | 1111 / 1742 | 140 / 400 | $0.000195 · $0.000356 | $0.000243 | $0.00146 | 1 | $0.000195 |
 | `cite` | Ms Scribe’s quote check | every chat message | cite.v1 | fast | 432 / 2435 | 60 / 200 | $0.0000773 · $0.000397 | $0.0000966 | $0.000594 | 1 | $0.0000773 |
+| `navigator` | Ms Scribe’s search | every chat message | navigator.v1 | fast | 1177 / 5578 | 150 / 150 | $0.000207 · $0.000823 | $0.000258 | $0.00156 | 2 | $0.000414 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -126,7 +127,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `route` — Assistant routing
 
-- **When:** Classifies an Auto/Ask message to pick the feature (skipped for exact action names). Since route.v2 (F-5.26) it also picks an edit pass (its type or "ask", and the selection, scene, or chapter): ~200 more input tokens in the cached system turn, ~15 more output tokens on an edit request.
+- **When:** Classifies an Auto/Ask message to pick the feature (skipped for exact action names). Since route.v2 (F-5.26) it also picks an edit pass (its type or "ask", and the selection, scene, or chapter): ~200 more input tokens in the cached system turn, ~15 more output tokens on an edit request. Story memory v1 only since F-16.25: a v2 project routes with navigator.v1 (the navigator row).
 - **Ideas:** Local keyword match first; merge into the agent step to save a round trip. A quick pick on an edit request (F-5.26) costs no routing: it starts the pass directly.
 
 ### `synopsis` — Synopsis suggestions
@@ -199,6 +200,11 @@ git history of this file is the log of each feature's cost over time (author req
 - **When:** Story memory v2 (F-16.25): cite.v1, fast tier, reasoning off, after every Ms Scribe answer that kept a citation, and after an answer that found nothing when the search found passages to check it against (none otherwise, and none for an instant card): the question and Now (the open scene), each cited sentence (at most 8; the first always, its contexts cut around the quotes to fit) with its quotes in their evidence sentence ±1, and for a first, last, ever, never or how-many answer (or one that found nothing) the scope item (what code searched, the answer’s main claim and cited scene, up to 5 passages the search found before it, or every one for an absence; none sent when it found none). max_tokens min(200, 20 + 10 per sentence + 20 for the scope). A main claim it finds unsupported asks agent.v9 once more, which is checked again (a second cite.v1 call). Figures (plan P3 §3): about 1,000 tokens in and 60 out; the eval fixtures measure about 300–550 on the test book (2,435 at the cap).
 - **Ideas:** Skip a sentence whose quote is the whole sentence word for word; measure the yes rate in the live run and check only the first sentence if it stays near 100 %; the scope item is already left out when the search found nothing before the cited place.
 
+### `navigator` — Ms Scribe’s search
+
+- **When:** Story memory v2 (F-16.25): navigator.v1, fast tier, reasoning off, on every chat message an instant card does not answer (none for an instant card, none for a stale or contested lookup, which goes straight to agent.v9, and none for a typed action name). Step 1 classifies the message with route.v2’s actions and edit-pass fields (a routed edit request, “make this scene better”, ends there: about 4,000 tokens in, 60 out) and the turn kind; for a chat or question it then calls up to three local tools per step (search with its own synonyms over the passage index, cards, read, state, knows, timeline, ideas, outline, to-dos) and ends with the evidence ids to use, at most three steps of 150 tokens out each. The cached prefix (rules and tools, the roster of names, secrets and threads, the first line of each Ideas page, the story map: ≤ 3,000 tokens) stays the same within a chapter; the tail is Now, the open document, the selection’s opening, the last two turns, the question and the evidence menu (≤ 1,000), and steps 2–3 add what the tools found (≤ 1,400). Input cap 6,000. Figures (plan P3 §4, design Part 5): about 6,000 tokens in and 150 out per step, two steps for an open question.
+- **Ideas:** Answer step 1 from the tail alone when the live run shows routing is no better with the prefix (a new version); let Step 0’s menu end the search at step 1 more often (`use` at once); cache the prefix per chapter (already stable).
+
 ## Planned: story memory (F-16)
 
 The story-memory redesign (`FEATURES.md` §2.16, design Part 5) priced before it is built, from
@@ -209,7 +215,6 @@ table above when its feature ships. Cached input is not discounted; task totals 
 
 | Request | Feature | Phase | Tier | Trigger | In / out | Own key (OpenRouter) | Hosted | OpenAI key | When |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `navigator.v1` | `navigator` | P3 | fast | every chat message | 6000 / 150 | $0.000882 | $0.00110 | $0.00517 | An open question: up to two steps choosing which passages Ms Scribe reads. |
 | `judge.v1` | `judge` | P4 | fast | background | 1500 / 300 | $0.000294 | $0.000368 | $0.00248 | Up to 10 contradiction pairs per call, each judged twice with the quotes swapped. |
 | `judge.v1:pro` | `judge` | P4 | strong | on request | 600 / 90 | $0.00136 | $0.00170 | $0.00285 | Check the book: the strong model confirms up to 20 pairs called a contradiction both ways. |
 | `agent.v9:try` | `agent` (existing) | P5 | strong | on request | 7000 / 700 | $0.0146 | $0.0183 | $0.0280 | A Try chat turn (a what-if, after the launch line): reasoning low, never read into memory. |

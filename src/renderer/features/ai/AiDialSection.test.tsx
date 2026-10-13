@@ -179,6 +179,15 @@ describe('AiDialSection (F-14.4, F-5.21)', () => {
     await userEvent.click(reading)
     await waitFor(() => expect(sets()).toHaveLength(2))
     expect(sets()[1]?.features).toMatchObject({ reader: true, verify: true })
+    // F-16.25 (P3-D17): Ms Scribe is one switch named as the assistant, writing its three ids.
+    const scribe = screen.getByRole('checkbox', { name: DEFAULT_ASSISTANT_NAME })
+    expect(scribe).toBeChecked()
+    await userEvent.click(scribe)
+    await waitFor(() => expect(sets()).toHaveLength(3))
+    expect(sets()[2]?.features).toMatchObject({ agent: false, navigator: false, cite: false })
+    await userEvent.click(scribe)
+    await waitFor(() => expect(sets()).toHaveLength(4))
+    expect(sets()[3]?.features).toMatchObject({ agent: true, navigator: true, cite: true })
     // The data-sharing table keeps one row per id.
     const table = screen.getByRole('table', { name: 'What each AI feature sends' })
     expect(within(table).getAllByRole('row').slice(1)).toHaveLength(AI_FEATURE_IDS.length)

@@ -2,19 +2,13 @@ import { z } from 'zod'
 import {
   localRoute,
   routeForMemory,
-  ROUTE_CHAPTER_MAX,
   ROUTE_HISTORY_TURNS,
-  ROUTE_INSTRUCTION_MAX,
   ROUTE_MESSAGE_CHARS,
   ROUTE_SELECTION_PREVIEW_CHARS,
   ROUTE_TITLE_CHARS,
   ROUTE_TURN_CHARS,
-  RouteAction,
-  RouteEditPass,
-  RouteEditTarget,
   settleRoute,
   type RouteDecision,
-  type RouteEdit,
   type RouteSituation
 } from '@shared/assistantRoute'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
@@ -26,6 +20,7 @@ import type { ChatTurn } from './prompts/chat.v1'
 import { buildRoutePromptV2, ROUTE_PROMPT_V2_VERSION } from './prompts/route.v2'
 import type { CompletionUsage } from './providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from './request'
+import { CHAT_DECISION, readRouteFields } from './routeFields'
 
 export interface RouteInput {
   /** The open document, or null with none open. */
@@ -141,43 +136,15 @@ export async function runRoute(
 /**
  * The model's `{ action, instruction }`, leniently: an answer that is not JSON, not an object,
  * or names no known action is `chat` (the router must never cost the author their turn); the
- * instruction is trimmed and cut to `ROUTE_INSTRUCTION_MAX`, and blank or not a string is null.
- * The action is matched case-insensitively, since models capitalise ids now and then. An
- * `editPass` answer (route.v2, F-5.26) also carries its pass (unknown reads as `ask`), its
- * target (unknown reads as `scene`), and the chapter it names (blank is null); `settleRoute`
- * then completes and checks it.
+ * fields are read by `readRouteFields`.
  */
 export function parseRouteAnswer(text: string): RouteDecision {
-  const chat: RouteDecision = { action: 'chat', instruction: null, edit: null }
   let json: unknown
   try {
     json = JSON.parse(text)
   } catch {
-    return chat
+    return CHAT_DECISION
   }
   const answer = ModelAnswer.safeParse(json)
-  if (!answer.success || typeof answer.data.action !== 'string') return chat
-  const action = matchId(RouteAction.options, answer.data.action)
-  if (action === undefined) return chat
-  const instruction = cleanText(answer.data.instruction, ROUTE_INSTRUCTION_MAX)
-  if (action !== 'editPass') return { action, instruction, edit: null }
-  const edit: RouteEdit = {
-    pass: matchId(RouteEditPass.options, answer.data.pass) ?? 'ask',
-    target: matchId(RouteEditTarget.options, answer.data.target) ?? 'scene',
-    chapter: cleanText(answer.data.chapter, ROUTE_CHAPTER_MAX)
-  }
-  return { action, instruction, edit }
-}
-
-/** The id in `ids` that `value` names, ignoring case and surrounding space; undefined for none. */
-function matchId<T extends string>(ids: readonly T[], value: unknown): T | undefined {
-  if (typeof value !== 'string') return undefined
-  const wanted = value.trim().toLowerCase()
-  return ids.find((id) => id.toLowerCase() === wanted)
-}
-
-/** A string trimmed and cut to `max`; blank or not a string is null. */
-function cleanText(value: unknown, max: number): string | null {
-  const text = typeof value === 'string' ? value.trim().slice(0, max).trim() : ''
-  return text || null
+  return answer.success ? readRouteFields(answer.data) : CHAT_DECISION
 }

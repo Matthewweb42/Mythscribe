@@ -227,6 +227,8 @@ import { CustomThemeId, CustomThemeInput, ThemeId } from '../themes'
 import { AssistantNameInput } from '../assistantName'
 import { StoryMemoryVersion } from '../storyMemory'
 import {
+  InstantCard,
+  NAVIGATOR_TOOL_STEPS_MAX,
   Navigation,
   SEARCH_MISSES_LIST_MAX,
   ScribeTurn,
@@ -806,6 +808,50 @@ export const AiRouteResult = z.discriminatedUnion('ok', [
   AiFailureWithRequest
 ])
 export type AiRouteResult = z.infer<typeof AiRouteResult>
+
+/**
+ * What `ai:navigate` answers (F-16.24, F-16.25; story memory v2): an **instant card** the memory
+ * answered with no AI call (its cost is a read of the latest change first, when one ran); a
+ * **route** action the renderer runs as `ai:route`'s (F-5.26's edit passes and the scene features,
+ * unchanged); or an **answer** turn with the navigation `ai:agent` takes (null: Step 0's evidence)
+ * and the navigator's steps. The cost is the navigator's (and a read-first's); an expected AI
+ * failure comes back as data.
+ */
+const NavigateSpend = {
+  usage: AiUsage,
+  costUsd: z.number(),
+  cached: z.boolean(),
+  model: z.string().nullable(),
+  requestId: z.string()
+}
+export const AiNavigateResult = z.union([
+  z.object({
+    ok: z.literal(true),
+    kind: z.literal('instant'),
+    card: InstantCard,
+    ...NavigateSpend
+  }),
+  z.object({
+    ok: z.literal(true),
+    kind: z.literal('route'),
+    action: RouteAction,
+    instruction: z.string().nullable(),
+    edit: RouteEdit.nullable(),
+    routedBy: z.enum(['local', 'model']),
+    ...NavigateSpend
+  }),
+  z.object({
+    ok: z.literal(true),
+    kind: z.literal('answer'),
+    action: z.enum(['chat', 'query']),
+    navigation: Navigation.nullable(),
+    steps: z.array(AgentStep).max(NAVIGATOR_TOOL_STEPS_MAX),
+    routedBy: z.enum(['local', 'model']),
+    ...NavigateSpend
+  }),
+  AiFailureWithRequest
+])
+export type AiNavigateResult = z.infer<typeof AiNavigateResult>
 
 /**
  * What `ai:suggestSynopsis` answers (F-5.20): the suggested synopsis, whether the scene was cut
@@ -2800,6 +2846,26 @@ export const contract = {
    * renderer then calls the chosen feature's own channel. AI failures come back as data with
    * the echoed `requestId` (DISABLED when the router is off: fall back to `ai:chat`).
    */
+  /**
+   * Ms Scribe's navigation (F-16.24, F-16.25; story memory v2 only, in place of `ai:route`): Step 0
+   * (local), then an instant card with no AI call, or `navigator.v1` (fast, at most three steps,
+   * each step's lookups arriving first as `ai:agentStep` events for `requestId`): a route action
+   * the renderer runs as before (F-5.26), or an answer turn whose navigation the renderer hands to
+   * `ai:agent`. `history` is the recent turns (main reads the last two); `focus` the caret window
+   * and selection. DISABLED when the chat is off; other AI failures come back as data.
+   */
+  'ai:navigate': {
+    input: z.object({
+      nodeId: z.string().nullable(),
+      message: z.string().trim().min(1).max(CHAT_MESSAGE_MAX),
+      history: z
+        .array(z.object({ role: ChatRole, content: z.string().max(CHAT_MESSAGE_MAX) }))
+        .max(CHAT_HISTORY_TURNS),
+      focus: AgentFocus,
+      requestId: z.string()
+    }),
+    output: AiNavigateResult
+  },
   'ai:route': {
     input: z.object({
       nodeId: z.string().nullable(),

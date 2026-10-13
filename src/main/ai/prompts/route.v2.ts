@@ -17,11 +17,11 @@ import { buildRoutePrompt, type BuildRoutePromptInput } from './route.v1'
  */
 export const ROUTE_PROMPT_V2_VERSION = 'route.v2'
 
-/** The opening sentence is v1's, so a fake provider in tests keys on it for either version. */
-export const ROUTE_RULES_V2 =
-  "You are the router inside a novel-writing app's assistant. Read the author's message and " +
-  'pick the one action that answers it. Reply with JSON only: ' +
-  '{"action":"chat","instruction":""}. Actions:\n' +
+/**
+ * route.v2's action list, one line each (F-5.26). `navigator.v1` (F-16.25, story memory v2) carries
+ * it word for word, so the navigator routes as this router does.
+ */
+export const ROUTE_V2_ACTION_LINES =
   '- chat: discussion, brainstorming, advice, or anything else.\n' +
   '- query: a question about what happens or is true in the manuscript (who, what, where, when).\n' +
   "- rewrite: rewrite or rephrase the selected passage (for example in the author's voice); " +
@@ -33,18 +33,29 @@ export const ROUTE_RULES_V2 =
   '- continuity: check the scene for contradictions with the story so far.\n' +
   '- whatNext: ideas for what could happen next.\n' +
   "- synopsis: write or suggest the scene's synopsis.\n" +
-  "- notes: suggest key points to keep in mind in the scene's notes.\n" +
-  'Set "instruction" to the specific request restated in one short sentence for that action, ' +
-  'or "" when there is none. For editPass also set "pass", "target", and "chapter": ' +
-  '{"action":"editPass","instruction":"","pass":"ask","target":"scene","chapter":""}. ' +
+  "- notes: suggest key points to keep in mind in the scene's notes.\n"
+
+/** route.v2's edit-pass fields (F-5.26): which pass and what it covers; `navigator.v1` keeps them. */
+export const ROUTE_V2_EDIT_FIELDS =
   'pass: "ask" when the request is vague (make it better, improve, polish); "line" for prose, ' +
   'flow, wordiness, tightening; "developmental" for pacing, structure, stakes, character arcs; ' +
   '"dialogue" for dialogue; "proofread" for typos, spelling, grammar, punctuation; "copy" for ' +
   'consistency of names, tense, repetition; "continuity" for contradictions with the story; ' +
   '"custom" for any other specific change, restated in "instruction". target: "selection" when ' +
   'a passage is selected and the message does not name the scene or a chapter; "chapter" for a ' +
-  'chapter, with "chapter" set to the chapter it names ("" for this chapter); otherwise "scene". ' +
-  'Never answer the message itself.'
+  'chapter, with "chapter" set to the chapter it names ("" for this chapter); otherwise "scene".'
+
+/** The opening sentence is v1's, so a fake provider in tests keys on it for either version. */
+export const ROUTE_RULES_V2 =
+  "You are the router inside a novel-writing app's assistant. Read the author's message and " +
+  'pick the one action that answers it. Reply with JSON only: ' +
+  '{"action":"chat","instruction":""}. Actions:\n' +
+  ROUTE_V2_ACTION_LINES +
+  'Set "instruction" to the specific request restated in one short sentence for that action, ' +
+  'or "" when there is none. For editPass also set "pass", "target", and "chapter": ' +
+  '{"action":"editPass","instruction":"","pass":"ask","target":"scene","chapter":""}. ' +
+  ROUTE_V2_EDIT_FIELDS +
+  ' Never answer the message itself.'
 
 export interface BuiltRoutePromptV2 {
   version: typeof ROUTE_PROMPT_V2_VERSION

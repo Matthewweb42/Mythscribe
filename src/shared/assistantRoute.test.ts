@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   localRoute,
   ROUTE_ACTIONS,
+  routeActionFeature,
   routeForMemory,
   settleRoute,
   type RouteDecision
@@ -172,5 +173,19 @@ describe('routeForMemory (F-16.4)', () => {
     for (const action of ROUTE_ACTIONS.filter((each) => each !== 'continuity')) {
       expect(routeForMemory(plain(action), 'v2')).toEqual(plain(action))
     }
+  })
+})
+
+describe('routeActionFeature (F-16.25, P3-D17)', () => {
+  it('gates chat and questions by Ms Scribe (agent) in v2, and keeps every feature in v1', () => {
+    expect(routeActionFeature('chat', 'v2')).toBe('agent')
+    expect(routeActionFeature('query', 'v2')).toBe('agent')
+    expect(routeActionFeature('chat', 'v1')).toBe('chat')
+    expect(routeActionFeature('query', 'v1')).toBe('query')
+    for (const action of ROUTE_ACTIONS.filter((each) => each !== 'chat' && each !== 'query')) {
+      expect(routeActionFeature(action, 'v2')).toBe(routeActionFeature(action, 'v1'))
+    }
+    expect(routeActionFeature('notes', 'v2')).toBe('notesSuggest')
+    expect(routeActionFeature('editPass', 'v2')).toBe('editPass')
   })
 })

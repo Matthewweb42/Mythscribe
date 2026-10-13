@@ -47,7 +47,14 @@ import {
   type EditChoice,
   type EditTurn
 } from '@shared/editRequest'
-import type { AiAgentResult, AiRouteResult, AiWhatNextResult, Input } from '@shared/ipc/contract'
+import type {
+  AiAgentResult,
+  AiNavigateResult,
+  AiRouteResult,
+  AiWhatNextResult,
+  Input
+} from '@shared/ipc/contract'
+import type { Navigation } from '@shared/scribe'
 import type { QuerySceneRef } from '@shared/query'
 import { WHAT_NEXT_QUESTION, directionMessage, recapQuestion } from '@shared/quickActions'
 import { WHAT_NEXT_CHAR_BUDGET, directionsText, type WhatNextDirection } from '@shared/whatNext'
@@ -98,7 +105,10 @@ import {
 } from './editRequest'
 import { confirmLine } from '@renderer/features/editPass/passQuote'
 import { useAiSettingsStore } from './aiSettingsStore'
+import { instantCardText } from './instantCardText'
 import { proposalStore } from './proposalStore'
+import { currentStoryMemory } from '@renderer/features/project/storyMemory'
+import { useRecordStore } from '@renderer/features/records/recordStore'
 
 /** The title of a conversation nobody has written in yet. */
 export const NEW_CONVERSATION_TITLE = 'New conversation'
@@ -964,10 +974,18 @@ function patchLastTurn(id: string, patch: Partial<ChatMessage>): void {
   )
 }
 
-/** Hands conversation `id`'s turn to a new request (the router answered; the feature's request starts). */
-function nextRequest(id: string): string {
+/**
+ * Hands conversation `id`'s turn to a new request (the router answered; the feature's request
+ * starts). F-16.25: the navigator's lookups stay on the pending turn, the answer's following them.
+ */
+function nextRequest(id: string, prior: PriorSpend | null = null): string {
   const requestId = nextId('r')
   setPending(id, requestId)
+  if (prior !== null && prior.steps.length > 0) {
+    useAssistantStore.setState((s) => ({
+      agentSteps: { ...s.agentSteps, [requestId]: prior.steps }
+    }))
+  }
   return requestId
 }
 
@@ -1036,6 +1054,11 @@ async function routeTurn(
   history: Input<'ai:chat'>['history'],
   mode: AssistantMode
 ): Promise<void> {
+  // F-16.24, F-16.25: a story memory v2 project asks Ms Scribe's navigator instead of route.v2.
+  if (currentStoryMemory() === 'v2') {
+    await navigateTurn(id, requestId, text, history, mode)
+    return
+  }
   const open = openSceneNow()
   const { editor } = open
   const preview =
@@ -1091,6 +1114,128 @@ async function routeTurn(
   })
 }
 
+/**
+ * One story memory v2 turn (F-16.24, F-16.25; plan P3 §4.3) in chat mode `mode`: Ms Scribe's
+ * navigation (`ai:navigate`) after the scene is saved, its lookups showing on the pending turn.
+ * An instant card lands as the turn's text with no AI call (plain until slice 5 draws it); a route
+ * action runs as the router's does (`dispatchRoute`, so F-5.26's quick picks and every scene
+ * feature are unchanged, and Plan keeps edits out); an answer goes to Ms Scribe (`ai:agent`) with
+ * the navigation, the turn's cost and steps the navigator's and the answer's together (P3-D23).
+ * The chat being off (DISABLED) answers as v1's router-off does; any other failure settles the turn.
+ */
+async function navigateTurn(
+  id: string,
+  requestId: string,
+  text: string,
+  history: Input<'ai:chat'>['history'],
+  mode: AssistantMode
+): Promise<void> {
+  const open = openSceneNow()
+  let result: AiNavigateResult
+  try {
+    // Step 0 reads the saved scene: the words typed just before asking go first.
+    await useDocumentStore.getState().flush()
+    if (useAssistantStore.getState().pending[id] !== requestId) return // stopped while saving
+    result = await useAiActivityStore.getState().track(
+      'navigator',
+      requestId,
+      ipc().invoke('ai:navigate', {
+        nodeId: open.nodeId,
+        message: text,
+        history: history.slice(-ROUTE_HISTORY_TURNS),
+        focus: focusOf(),
+        requestId
+      })
+    )
+  } catch (err) {
+    dropSteps(requestId)
+    settleFailure(id, requestId, describeError(err))
+    return
+  }
+  if (useAssistantStore.getState().pending[id] !== requestId) {
+    dropSteps(requestId)
+    return // stopped or closed meanwhile
+  }
+  const routed = (
+    action: RouteAction,
+    instruction: string | null,
+    edit: RouteEdit | null,
+    cost: Partial<ChatMessage>,
+    answer: Pick<RoutedTurn, 'navigation' | 'prior'> = { navigation: null, prior: null }
+  ): RoutedTurn => ({
+    action: routeActionFor(mode, action),
+    instruction,
+    edit,
+    cost,
+    text,
+    history,
+    open,
+    mode,
+    ...answer
+  })
+  if (!result.ok) {
+    dropSteps(requestId)
+    if (result.code !== 'DISABLED') {
+      settleFailure(
+        id,
+        requestId,
+        result.code === 'CANCELLED' ? null : `${result.message} ${result.nextStep}`.trim()
+      )
+      return
+    }
+    await dispatchRoute(id, routed('chat', null, null, {}))
+    return
+  }
+  const cost: Partial<ChatMessage> =
+    result.model === null && result.costUsd === 0
+      ? {}
+      : { model: result.model, costUsd: result.costUsd, usage: result.usage }
+  switch (result.kind) {
+    case 'instant': {
+      dropSteps(requestId)
+      const records = useRecordStore.getState().byId
+      patchLastTurn(id, { action: 'query', mode: 'query' })
+      finishTurn(
+        id,
+        {
+          content: instantCardText(result.card, (recordId) =>
+            recordId === null ? '' : (records[recordId]?.name ?? 'someone')
+          ),
+          card: result.card,
+          model: result.model,
+          costUsd: result.costUsd,
+          usage: result.usage
+        },
+        result.cached
+      )
+      return
+    }
+    case 'route':
+      dropSteps(requestId)
+      await dispatchRoute(id, routed(result.action, result.instruction, result.edit, cost))
+      return
+    case 'answer': {
+      const steps = useAssistantStore.getState().agentSteps[requestId] ?? result.steps
+      dropSteps(requestId)
+      await dispatchRoute(
+        id,
+        routed(result.action, null, null, cost, {
+          navigation: result.navigation,
+          prior: { steps, costUsd: result.costUsd, usage: result.usage }
+        })
+      )
+      return
+    }
+  }
+}
+
+/** What the navigator spent and looked up before the answer (P3-D23): summed onto the turn. */
+interface PriorSpend {
+  steps: AgentStep[]
+  costUsd: number
+  usage: { inputTokens: number; outputTokens: number }
+}
+
 /** What the router decided for one Auto turn, and what the turn carries into the feature. */
 interface RoutedTurn {
   action: RouteAction
@@ -1104,6 +1249,10 @@ interface RoutedTurn {
   open: OpenScene
   /** The chat mode the turn was sent in. */
   mode: AssistantMode
+  /** F-16.25 (v2): what the navigator found for the answer; null for v1 and a turn it did not navigate. */
+  navigation?: Navigation | null
+  /** F-16.25 (v2): the navigator's lookups and cost, shown and summed on the answer's turn. */
+  prior?: PriorSpend | null
 }
 
 /** Runs the feature the router picked on conversation `id`'s turn pair, labelled with the action. */
@@ -1111,24 +1260,32 @@ async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
   const { action, instruction, edit, cost, text, history, open, mode } = routed
   const { editor, nodeId } = open
   const autoApply = appliesEditsItself(mode)
+  const navigation = routed.navigation ?? null
+  const prior = routed.prior ?? null
   switch (action) {
     case 'chat': {
       // F-5.22: the chat is the agent, which may look things up and, in Ask and Auto, edit the book.
       patchLastTurn(id, { action, mode: 'plan' })
-      await runAgentTurn(id, nextRequest(id), agentAccessFor(mode), autoApply, {
-        nodeId,
-        message: text,
-        history
-      })
+      await runAgentTurn(
+        id,
+        nextRequest(id, prior),
+        agentAccessFor(mode),
+        autoApply,
+        { nodeId, message: text, history, ...(navigation === null ? {} : { navigation }) },
+        prior
+      )
       return
     }
     case 'query': {
       patchLastTurn(id, { action, mode: 'query' })
-      await runAgentTurn(id, nextRequest(id), 'read', autoApply, {
-        nodeId,
-        message: text,
-        history
-      })
+      await runAgentTurn(
+        id,
+        nextRequest(id, prior),
+        'read',
+        autoApply,
+        { nodeId, message: text, history, ...(navigation === null ? {} : { navigation }) },
+        prior
+      )
       return
     }
     case 'whatNext': {
@@ -1249,6 +1406,8 @@ interface AgentAsk {
   nodeId: string | null
   message: string
   history: Input<'ai:agent'>['history']
+  /** F-16.25 (v2): the navigator's evidence; null or left out, Step 0's (and always in v1). */
+  navigation?: Navigation | null
 }
 
 /**
@@ -1264,7 +1423,8 @@ async function runAgentTurn(
   requestId: string,
   access: AgentAccess,
   autoApply: boolean,
-  ask: AgentAsk
+  ask: AgentAsk,
+  prior: PriorSpend | null = null
 ): Promise<void> {
   let result: AiAgentResult
   try {
@@ -1316,13 +1476,20 @@ async function runAgentTurn(
     {
       content: result.answer,
       model: result.model,
-      costUsd: result.costUsd,
-      usage: result.usage,
+      // P3-D23: a v2 turn costs the navigator's requests and the answer's together.
+      costUsd: (prior?.costUsd ?? 0) + result.costUsd,
+      usage:
+        prior === null
+          ? result.usage
+          : {
+              inputTokens: prior.usage.inputTokens + result.usage.inputTokens,
+              outputTokens: prior.usage.outputTokens + result.usage.outputTokens
+            },
       proposalId: result.proposalId,
       query: result.query,
       // F-16.25: a Ms Scribe turn (story memory v2) keeps its checked citations and marks.
       scribe: result.scribe,
-      agent: { access, steps: result.steps, changes }
+      agent: { access, steps: [...(prior?.steps ?? []), ...result.steps], changes }
     },
     result.cached
   )

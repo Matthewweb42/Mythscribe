@@ -349,7 +349,10 @@ export const AI_FEATURE_IDS = [
   'verify',
   // F-16.25 (story memory v2): the citation checker, which checks Ms Scribe's cited sentences
   // against their passages, and the scope of a first, last, ever or never answer.
-  'cite'
+  'cite',
+  // F-16.25 (story memory v2): Ms Scribe's navigator, which picks what answers a chat message
+  // (route.v2's actions) and finds the passages that answer it.
+  'navigator'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -457,7 +460,10 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // strong spot check asks 40.
   verify: 400,
   // F-16.25: min(200, 20 + 10 per cited sentence + 20 for the scope item) (`citeMaxTokens`).
-  cite: 200
+  cite: 200,
+  // F-16.25: one step of `navigator.v1`: the action, the turn and a restated request, then at most
+  // three tool calls or the evidence ids to use; never prose.
+  navigator: 150
 }
 
 /**
@@ -547,7 +553,12 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // F-16.25: the cached rules (≤ 250), the question, up to 8 cited sentences each with its quotes
   // in their evidence sentence ±1 (≤ 1,800), and the scope item of an ordinal or absence answer
   // (≤ 400); the far sentences go first.
-  cite: 2_500
+  cite: 2_500,
+  // F-16.25: the cached prefix (rules and tools ≤ 700, roster ≤ 800, the Ideas' first lines ≤ 400,
+  // the story map ≤ 1,100; ≤ 3,000 in all), the tail (Now, the open document, the selection's
+  // opening, the last two turns ≤ 300; the question ≤ 260; the evidence menu ≤ 1,000) and steps
+  // 2–3 (≤ 1,400); the menu's far items go first.
+  navigator: 6_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

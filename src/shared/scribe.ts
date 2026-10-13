@@ -76,6 +76,8 @@ export const SCRIBE_ROSTER_TOKENS = 600
 /** The navigator's steps per message, its tool calls per step, and Step 0's best hits. */
 export const NAVIGATOR_STEPS = 3
 export const NAVIGATOR_CALLS_PER_STEP = 3
+/** The most lookups one navigation shows in the chat (every call of every step). */
+export const NAVIGATOR_TOOL_STEPS_MAX = NAVIGATOR_STEPS * NAVIGATOR_CALLS_PER_STEP
 export const NAVIGATOR_MENU_HITS = 12
 /** A first/last/ever/never question's hits, in reading order (P3-D8). */
 export const ORDINAL_HITS_MAX = 20

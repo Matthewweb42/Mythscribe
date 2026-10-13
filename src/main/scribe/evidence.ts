@@ -125,7 +125,8 @@ export function sceneLabel(frame: EvidenceFrame, nodeId: string): EvidenceLabel 
   return labelOf('scene', meaningOf('scene', { order, openOrder: now }))
 }
 
-function parseDoc(raw: string | null): TiptapNodeT | null {
+/** A stored page or document (JSON), or null when it does not parse. */
+export function parseDoc(raw: string | null): TiptapNodeT | null {
   if (raw === null) return null
   try {
     const parsed = TiptapNode.safeParse(JSON.parse(raw))

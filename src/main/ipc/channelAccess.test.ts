@@ -171,6 +171,17 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
     expect(isWriteChannel('scribe:searchMisses')).toBe(false)
   })
 
+  it('F-16.25 (P3 slice 4): the navigator is v2’s AI channel; the router is v1’s, so v2 never sends route.v2', () => {
+    expect(CHANNEL_MEMORY['ai:navigate']).toBe('v2')
+    expect(CHANNEL_ACCESS['ai:navigate']).toBe('ai')
+    expect(() => assertChannelMemory('ai:navigate', 'v1')).toThrow(OTHER_MEMORY_MESSAGE)
+    expect(CHANNEL_MEMORY['ai:route']).toBe('v1')
+    expect(() => assertChannelMemory('ai:route', 'v2')).toThrow(OTHER_MEMORY_MESSAGE)
+    expect(() => assertChannelMemory('ai:route', 'v1')).not.toThrow()
+    // Ms Scribe's answer stays one channel for both memories.
+    expect(CHANNEL_MEMORY['ai:agent']).toBe('any')
+  })
+
   it('F-16.23: the Threads and the Timeline are v2 and only read', () => {
     for (const channel of ['memory:threads', 'memory:timeline'] as const) {
       expect(CHANNEL_MEMORY[channel], channel).toBe('v2')

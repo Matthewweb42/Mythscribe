@@ -54,8 +54,11 @@ export const ROUTE_ACTION_LABEL: Record<RouteAction, string> = {
   editPass: 'Edit pass'
 }
 
-/** The feature whose dial level and toggle gate each action (the router's own gate is `route`). */
-export const ROUTE_ACTION_FEATURE: Record<RouteAction, AiFeatureId> = {
+/**
+ * The feature whose dial level and toggle gate each action in a v1 project (the router's own gate
+ * is `route`); read through `routeActionFeature`, which knows v2's.
+ */
+const ROUTE_ACTION_FEATURE: Record<RouteAction, AiFeatureId> = {
   chat: 'chat',
   query: 'query',
   rewrite: 'rewrite',
@@ -67,6 +70,16 @@ export const ROUTE_ACTION_FEATURE: Record<RouteAction, AiFeatureId> = {
   synopsis: 'synopsis',
   notes: 'notesSuggest',
   editPass: 'editPass'
+}
+
+/**
+ * The feature that gates `action` in a project with story memory `memory` (F-16.25, P3-D17): in
+ * v2 a chat message or a question about the book is Ms Scribe's (`agent`, behind the navigator),
+ * since v2 hides `chat`'s router and Story Intelligence; every other action keeps its feature.
+ */
+export function routeActionFeature(action: RouteAction, memory: StoryMemoryVersion): AiFeatureId {
+  if (memory === 'v2' && (action === 'chat' || action === 'query')) return 'agent'
+  return ROUTE_ACTION_FEATURE[action]
 }
 
 /** The actions that act on the open document; without one they fall back to `chat`. */

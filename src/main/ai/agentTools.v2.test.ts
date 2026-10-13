@@ -24,12 +24,8 @@ import { upsertCard } from '../memory/reading/cardStore'
 import { cardAnchorOf } from '../memory/reading/claimFixture'
 import { loadAgentProject, resolveAgentEdit, runAgentTool, type AgentProject } from './agentTools'
 import { sceneHead } from './agentRefs'
-import {
-  AGENT_V2_REFUSED,
-  AGENT_V2_REFUSED_EDITS,
-  passageMark,
-  UNREAL_SCENE_NOTE
-} from './agentToolsV2'
+import { AGENT_V2_REFUSED, AGENT_V2_REFUSED_EDITS, UNREAL_SCENE_NOTE } from './agentToolsV2'
+import { passageMark } from '../scribe/tools'
 
 /**
  * F-16.4 (P1 slice 4): `agent.v8` runs unchanged in a story memory v2 project until P3, so its

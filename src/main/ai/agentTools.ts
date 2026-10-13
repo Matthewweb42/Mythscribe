@@ -63,13 +63,11 @@ import {
   AGENT_V2_REFUSED_TOOLS,
   findPassagesV2,
   lookupV2,
-  recordByNameV2,
   refusesV2Edit,
-  scenesNaming,
   UNREAL_SCENE_NOTE,
-  unrealScenes,
   todoV2
 } from './agentToolsV2'
+import { recordByNameV2, scenesNaming, unrealScenes } from '../scribe/tools'
 import { headTruncate } from './context/chatContext'
 import { rankCandidates, sceneTitles } from './context/queryContext'
 import { notesText } from './context/scenePanel'

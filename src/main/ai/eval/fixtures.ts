@@ -67,6 +67,7 @@ import {
 import { voiceBlock } from '../../voice/voiceBlock'
 import { MEMORY_EVAL_CASES, MEMORY_V2_EVAL_CASES } from './memoryFixtures'
 import { citeEvalCases } from './citeFixtures'
+import { navigatorEvalCases } from './navigatorFixtures'
 import { scribeEvalCases } from './scribeFixtures'
 import { CARD_GIST_MAX_WORDS, CARD_LINE_MAX_WORDS } from '@shared/memory/claims'
 import type { PromptCard } from '@shared/memory/cardText'
@@ -943,6 +944,16 @@ export interface EvalCase {
         kind: 'cite'
         expected: ('yes' | 'partly' | 'no' | null)[]
         scope: 'ok' | 'earlier' | 'none' | null
+      }
+    /**
+     * Ms Scribe's navigator (F-16.25, `navigator.v1`): step `step`'s reply parses through
+     * `parseNavigatorStep`; at step 1 the expected action, and an edit pass's pass and target; the
+     * expected first tool, or ids to use; at most 150 output tokens; no prose field.
+     */
+    | {
+        kind: 'navigator'
+        step: number
+        expected: { action?: string; pass?: string; target?: string; tool?: string; use?: boolean }
       }
 }
 
@@ -6720,5 +6731,7 @@ export const EVAL_CASES: EvalCase[] = [
   // F-16.25, F-16.26: Ms Scribe's one answer call (agent.v9), story memory v2 only.
   ...scribeEvalCases(voiceBlock(FIXTURE_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' }) ?? ''),
   // F-16.25 (P3 slice 3): Ms Scribe's quote check (cite.v1), story memory v2 only.
-  ...citeEvalCases()
+  ...citeEvalCases(),
+  // F-16.25 (P3 slice 4): Ms Scribe's navigator, in place of route.v2 in story memory v2.
+  ...navigatorEvalCases()
 ]

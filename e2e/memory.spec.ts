@@ -179,8 +179,43 @@ const SCRIBE_EDITS_OPENING = 'Edits: only when the message asks for a change'
 const CITE_SENTINEL = 'You are the citation checker inside a novel-writing app.'
 /** The sentence the fake checker finds unsupported: its quote names Tomas as the seller. */
 const PLANTED_UNSUPPORTED = 'Orrin sold the map'
-/** F-5.19: `route.v2`'s opening; the fake answers it `{}`, which routes to chat. */
+/** F-5.19: `route.v2`'s opening; v1 only since P3 slice 4, so no v2 request may open with it. */
 const ROUTE_V2_SENTINEL = "You are the router inside a novel-writing app's assistant."
+/** F-16.25 (P3 slice 4): `navigator.v1`'s opening (`NAVIGATOR_SENTINEL`); the fake navigates. */
+const NAVIGATOR_SENTINEL = "You are the navigator inside a novel-writing app's assistant."
+/** F-14.15: the edit pass's opening (`EDIT_PASS_SENTINEL`); the fake finds nothing to change. */
+const EDIT_PASS_SENTINEL = 'You are the edit-pass feature inside a novel-writing app.'
+/** F-5.26: the vague request the fake navigator sends to an edit pass that asks which kind. */
+const IMPROVE_MESSAGE = 'Make this scene better.'
+/** P3 slice 4: the "first" question the fake navigator searches for, then names the hit. */
+const FIRST_QUESTION = 'When does Orrin first hear about the map?'
+/** The sentence that answers it, in scene 1.1's first paragraph. */
+const OVERHEARD = 'Orrin overheard Tomas'
+
+/**
+ * The fake navigator (F-16.25, `navigator.v1`), from the message in its first user turn and the
+ * step (one more than the replies so far): `IMPROVE_MESSAGE` is an edit pass that asks first
+ * (route.v2's fields); `FIRST_QUESTION` is a question that searches "overheard", and at step 2
+ * uses the menu or found line of a 1.1 paragraph holding it; anything else is chat with nothing
+ * named (the whole menu answers).
+ */
+function navigatorAnswer(messages: { role: string; content: string }[]): string {
+  const message = /\nMessage:\n"""\n([\s\S]*?)\n"""/u.exec(messages[1]?.content ?? '')?.[1] ?? ''
+  const step = 1 + messages.filter((each) => each.role === 'assistant').length
+  if (step === 1 && message === IMPROVE_MESSAGE) {
+    return JSON.stringify({ a: 'editPass', t: 'edit', pass: 'ask', target: 'scene' })
+  }
+  if (step === 1 && message === FIRST_QUESTION) {
+    return JSON.stringify({ a: 'query', t: 'answer', call: [{ search: ['overheard'] }] })
+  }
+  if (step === 1) return JSON.stringify({ a: 'chat' })
+  const lines = messages
+    .filter((each) => each.role === 'user')
+    .map((each) => each.content)
+    .join('\n')
+  const hit = /^(E\d+) happened 1\.1 ¶\d+: .*overheard/mu.exec(lines)?.[1]
+  return JSON.stringify({ use: hit === undefined ? [] : [hit] })
+}
 
 /**
  * The fake Ms Scribe (F-16.25, F-16.26), answering from the question at the end of the user turn
@@ -221,6 +256,19 @@ function scribeAnswer(messages: { content: string }[]): string {
     const retry = messages.at(-1)?.content.startsWith('Your first sentence') === true
     return JSON.stringify({
       answer: `${PLANTED_UNSUPPORTED}${retry ? ' that night' : ''}. [E0 "Tomas sold the map"]`,
+      found: true,
+      edits: []
+    })
+  }
+  if (question === FIRST_QUESTION) {
+    // P3 slice 4: cites the 1.1 paragraph the navigator found (an E item, as 1.2 is open) and
+    // says what was searched, as a "first" answer must.
+    const id = new RegExp(
+      `^(E\\d+) \\[happened, 1\\.1 ¶\\d+\\][^\\n]*\\n[^\\n]*${OVERHEARD}`,
+      'mu'
+    ).exec(last)?.[1]
+    return JSON.stringify({
+      answer: `In 1.1, ${OVERHEARD}; I searched every scene up to 1.2. [${id ?? 'E1'} "${OVERHEARD}"]`,
       found: true,
       edits: []
     })
@@ -535,9 +583,13 @@ function startFakeProvider(): Promise<string> {
                     ? scribeAnswer(request.messages)
                     : system.startsWith(CITE_SENTINEL)
                       ? citeAnswer(request.messages)
-                      : json
-                        ? '{}'
-                        : GHOST_ANSWER
+                      : system.startsWith(NAVIGATOR_SENTINEL)
+                        ? navigatorAnswer(request.messages)
+                        : system.startsWith(EDIT_PASS_SENTINEL)
+                          ? JSON.stringify({ changes: [] })
+                          : json
+                            ? '{}'
+                            : GHOST_ANSWER
       const usage = { prompt_tokens: 400, completion_tokens: 40, total_tokens: 440 }
       const base = { id: 'chatcmpl-fake', created: 0, model: request.model }
       if (request.stream === true) {
@@ -2379,9 +2431,9 @@ test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet 
     await messageBox.press('Enter')
   }
 
-  // Ask, a question: one agent.v9 request (after the router's), the whole open scene as E0
-  // numbered, no tool protocol; the kept citation's quote is the one E0 holds, and one cite.v1
-  // request checks it (P3 slice 3).
+  // Ask, a question: one agent.v9 request (after the navigator's, P3 slice 4), the whole open
+  // scene as E0 numbered, no tool protocol; the kept citation's quote is the one E0 holds, and
+  // one cite.v1 request checks it (P3 slice 3).
   const before = scribeBodies().length
   const citesBefore = citeBodies().length
   await send('Ask', 'What did Orrin hear?')
@@ -2403,15 +2455,15 @@ test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet 
     providerBodies
       .slice(-3)
       .map((body) =>
-        body.messages[0]?.content.startsWith(ROUTE_V2_SENTINEL) === true
-          ? 'route'
+        body.messages[0]?.content.startsWith(NAVIGATOR_SENTINEL) === true
+          ? 'navigate'
           : body.messages[0]?.content.startsWith(SCRIBE_SENTINEL) === true
             ? 'answer'
             : body.messages[0]?.content.startsWith(CITE_SENTINEL) === true
               ? 'check'
               : 'other'
       )
-  ).toEqual(['route', 'answer', 'check'])
+  ).toEqual(['navigate', 'answer', 'check'])
   interface StoredScribe {
     citations: { quote: string; evidence: string; checked: string }[]
     notFound: boolean
@@ -2496,6 +2548,152 @@ test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet 
   expect(
     scribeBodies().some((body) => body.messages[0]?.content.includes(SCRIBE_EDITS_OPENING))
   ).toBe(true)
+  expect(
+    providerBodies.some((body) =>
+      body.messages.some((message) => message.content.includes('No scene shows'))
+    )
+  ).toBe(false)
+})
+
+test('story memory v2: the navigator routes and finds, instant cards answer (P3 slice 4)', async () => {
+  // A new project (Use AI on, chat in Ask, the own key at the fake): Mara Vell ("Mara"), Orrin
+  // and Tomas; scene 1.1 has the map sold and overheard, then Mara's eyes; scene 1.2 follows.
+  // Both are read once.
+  const first = await newV2Project('Navigator Novel')
+  for (const [name, aliases] of [
+    ['Mara Vell', [{ text: 'Mara' }]],
+    ['Orrin', []],
+    ['Tomas', []]
+  ] as const) {
+    await invoke('record:create', { name, categoryId: 'character', aliases, force: true })
+  }
+  const paragraphs = (lines: string[]): object => ({
+    type: 'doc',
+    content: lines.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] }))
+  })
+  await invoke('document:save', {
+    id: first.id,
+    content: paragraphs([`Tomas sold the map. ${OVERHEARD}.`, "Mara's eyes were grey."])
+  })
+  const second = await invoke<TreeNode>('tree:create', {
+    parentId: first.parentId,
+    kind: 'document',
+    hierarchyLevel: 'scene',
+    title: 'The door'
+  })
+  await invoke('document:save', {
+    id: second.id,
+    content: paragraphs(['Orrin waited by the door.'])
+  })
+  for (const [n, nodeId] of [first.id, second.id].entries()) {
+    expect(await invoke('memory:readNow', { nodeId, requestId: `e2e-p3-nav-${n}` })).toMatchObject({
+      ok: true
+    })
+  }
+  await reopenProject('Navigator Novel')
+  await showSection('Manuscript')
+  const tree = page.getByRole('tree', { name: 'Document tree' })
+  await tree.getByRole('treeitem', { name: first.title }).first().click()
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await expect(editor).toContainText('eyes were grey')
+
+  const scribeButton = page.getByRole('button', { name: 'Ms Scribe', exact: true })
+  if ((await scribeButton.getAttribute('aria-pressed')) !== 'true') await scribeButton.click()
+  const assistant = page.getByTestId('assistant-panel')
+  await expect(assistant).toBeVisible()
+  await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
+  const messageBox = assistant.getByRole('textbox', { name: 'Message' })
+  const turns = assistant.locator('[data-testid="chat-turn"]')
+  const send = async (message: string): Promise<void> => {
+    await messageBox.fill(message)
+    await messageBox.press('Enter')
+  }
+  const opens =
+    (opening: string) =>
+    (body: (typeof providerBodies)[number]): boolean =>
+      body.messages[0]?.content.startsWith(opening) === true
+  const kindOf = (body: (typeof providerBodies)[number]): string =>
+    opens(NAVIGATOR_SENTINEL)(body)
+      ? 'navigate'
+      : opens(SCRIBE_SENTINEL)(body)
+        ? 'answer'
+        : opens(CITE_SENTINEL)(body)
+          ? 'check'
+          : opens(READER_SENTINEL)(body)
+            ? 'read'
+            : opens(VERIFY_SENTINEL)(body)
+              ? 'verify'
+              : opens(EDIT_PASS_SENTINEL)(body)
+                ? 'editPass'
+                : 'other'
+
+  // F-5.26 kept: a vague request is one navigator request whose first step picks an edit pass
+  // that asks first: "What should I focus on?" with the five quick picks; Tighten prose runs one
+  // edit-pass request (route.v2 is never asked).
+  const improveFrom = providerBodies.length
+  await send(IMPROVE_MESSAGE)
+  await expect(turns).toHaveCount(2)
+  const improve = turns.nth(1)
+  await expect(improve.getByTestId('chat-turn-action')).toHaveText('Edit pass')
+  await expect(improve).toContainText('What should I focus on?')
+  const choices = improve.getByTestId('edit-choice')
+  await expect(choices).toHaveCount(5)
+  await expect(choices.first()).toContainText('Tighten prose')
+  expect(providerBodies.slice(improveFrom).map(kindOf)).toEqual(['navigate'])
+  await choices.first().click()
+  await expect(improve.getByTestId('edit-request-status')).toHaveAttribute('data-status', 'done', {
+    timeout: 15_000
+  })
+  expect(providerBodies.slice(improveFrom).map(kindOf)).toEqual(['navigate', 'editPass'])
+
+  // An instant card: Mara's eyes come from the memory with no request at all.
+  const instantFrom = providerBodies.length
+  await send("Mara's eyes?")
+  await expect(turns).toHaveCount(4)
+  await expect(turns.nth(3)).toContainText('Eyes: grey (1.1)')
+  expect(providerBodies).toHaveLength(instantFrom)
+
+  // The sentence edited (typed, so nothing reads it yet): the same question reads the latest
+  // change first (one reader request, Read now's path), then answers with the new value.
+  await caretToEnd(editor)
+  for (const _ of 'grey.') await page.keyboard.press('Backspace')
+  await page.keyboard.type('brown.')
+  await expect
+    .poll(async () => (await storedText(first.id)).replace(/’/g, "'"), { timeout: 15_000 })
+    .toContain("Mara's eyes were brown.")
+  const readFrom = providerBodies.length
+  await send("Mara's eyes?")
+  await expect(turns).toHaveCount(6)
+  await expect(turns.nth(5)).toContainText('Eyes: brown (1.1)', { timeout: 15_000 })
+  const reads = providerBodies.slice(readFrom).map(kindOf)
+  expect(reads[0]).toBe('read')
+  expect(reads.filter((kind) => kind === 'read')).toHaveLength(1)
+  expect(reads.filter((kind) => kind !== 'read' && kind !== 'verify')).toEqual([])
+
+  // A "first" question with scene 1.2 open: two navigator steps (a search, then the evidence to
+  // use), one agent.v9 request whose evidence holds the 1.1 paragraph found, one cite.v1 check.
+  await tree.getByRole('treeitem', { name: 'The door' }).first().click()
+  await expect(editor).toContainText('Orrin waited by the door.')
+  const askFrom = providerBodies.length
+  await send(FIRST_QUESTION)
+  await expect(turns).toHaveCount(8)
+  const answered = turns.nth(7)
+  await expect(answered).toContainText(`In 1.1, ${OVERHEARD}`, { timeout: 15_000 })
+  const asked = providerBodies
+    .slice(askFrom)
+    .filter((body) => kindOf(body) !== 'read' && kindOf(body) !== 'verify')
+  expect(asked.map(kindOf)).toEqual(['navigate', 'navigate', 'answer', 'check'])
+  expect(asked[1]?.messages.at(-1)?.content).toContain('Step 2 of 3')
+  const tail = asked[2]?.messages.at(-1)?.content ?? ''
+  expect(tail).toMatch(
+    new RegExp(`^E\\d+ \\[happened, 1\\.1 ¶0\\][^\\n]*\\n[^\\n]*${OVERHEARD}`, 'mu')
+  )
+  expect(tail.endsWith(`Question: ${FIRST_QUESTION}`)).toBe(true)
+  expect(asked[3]?.messages.at(-1)?.content).toContain(OVERHEARD)
+  await expect(answered.getByTestId('agent-step').first()).toHaveText("Searching 'overheard'…")
+
+  // v2 never asks route.v2, and no request stated an absence.
+  expect(providerBodies.some(opens(ROUTE_V2_SENTINEL))).toBe(false)
   expect(
     providerBodies.some((body) =>
       body.messages.some((message) => message.content.includes('No scene shows'))

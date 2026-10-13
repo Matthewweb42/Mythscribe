@@ -2,13 +2,18 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { OPENROUTER_BASE_URL, OPENROUTER_DEFAULT_MODELS, outputBudget } from '@shared/ai'
+import {
+  estimateTokens,
+  OPENROUTER_BASE_URL,
+  OPENROUTER_DEFAULT_MODELS,
+  outputBudget
+} from '@shared/ai'
 import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote, normalizeForMatch } from '@shared/critique'
 import type { EditPassType } from '@shared/editPass'
 import { parseFilingAnswer, quoteParagraph } from '@shared/filing'
 import { locateQuote } from '@shared/memory/quote'
-import { parseReaderAnswer, parseVerifyAnswer } from '@shared/memory/readerAnswer'
+import { parseReaderAnswer, parseVerifyAnswer, unfence } from '@shared/memory/readerAnswer'
 import { parseHow } from '@shared/memory/knows'
 import { parseStep } from '@shared/memory/topics'
 import { STORY_NOTES_CONTINUITY_HEADING, STORY_NOTES_HEADING } from '@shared/memory/storyNotes'
@@ -21,6 +26,7 @@ import { WHAT_NEXT_DIRECTIONS } from '@shared/whatNext'
 import { parseAgentReply } from '../agent'
 import { readScribeReply } from '../../scribe/runScribe'
 import { CITE_SENTINEL, parseCiteReply } from '../prompts/cite.v1'
+import { NAVIGATOR_SENTINEL, parseNavigatorStep } from '../prompts/navigator.v1'
 import { parseCitedAnswer, quoteHeld, statesAbsenceAsFact, statesScope } from '@shared/scribeAnswer'
 import { parseBetaReaderAnswerV2 } from '../betaReader'
 import { parsePlanLinksV2Answer } from '../../memory/reading/planLinks'
@@ -960,6 +966,60 @@ function scoreCite(
     : { kind: 'json', ok: false, problem: wrong.join(', ') }
 }
 
+/** The fields a navigator step may carry: ids, names, words and the request restated, never prose. */
+const NAVIGATOR_FIELDS = new Set([
+  'a',
+  'action',
+  't',
+  'i',
+  'instruction',
+  'pass',
+  'target',
+  'chapter',
+  'call',
+  'use'
+])
+
+/**
+ * Ms Scribe's navigator (F-16.25, `navigator.v1`): the step as the feature reads it
+ * (`parseNavigatorStep`); at step 1 the expected action, pass and target (route.v2's, settled by
+ * the same readers); the expected first tool, or ids to use; at most 150 output tokens; no field
+ * outside the schema (no prose).
+ */
+function scoreNavigator(
+  scoring: Extract<EvalCase['scoring'], { kind: 'navigator' }>,
+  answer: string
+): LiveResult['verdict'] {
+  const step = parseNavigatorStep(answer, scoring.step)
+  if (!step.readable) return { kind: 'json', ok: false, problem: 'not one JSON object' }
+  const problems: string[] = []
+  if (estimateTokens(answer) > outputBudget('navigator')) problems.push('over 150 tokens')
+  // Readable, so the reply is one JSON object.
+  const json: unknown = JSON.parse(unfence(answer))
+  const keys = typeof json === 'object' && json !== null ? Object.keys(json) : []
+  const prose = keys.filter((key) => !NAVIGATOR_FIELDS.has(key))
+  if (prose.length > 0) problems.push(`fields outside the schema: ${prose.join(', ')}`)
+  const want = scoring.expected
+  if (want.action !== undefined && step.route?.action !== want.action) {
+    problems.push(`action ${step.route?.action ?? 'none'}, expected ${want.action}`)
+  }
+  if (want.pass !== undefined && step.route?.edit?.pass !== want.pass) {
+    problems.push(`pass ${step.route?.edit?.pass ?? 'none'}, expected ${want.pass}`)
+  }
+  if (want.target !== undefined && step.route?.edit?.target !== want.target) {
+    problems.push(`target ${step.route?.edit?.target ?? 'none'}, expected ${want.target}`)
+  }
+  if (want.tool !== undefined && step.calls[0]?.tool !== want.tool) {
+    problems.push(`first tool ${step.calls[0]?.tool ?? 'none'}, expected ${want.tool}`)
+  }
+  if (want.use === true && (step.use === null || step.use.length === 0)) {
+    problems.push('expected it to end with use')
+  }
+  return problems.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: problems.join('; ') }
+}
+
 /**
  * Ms Scribe's answer (F-16.25, `agent.v9`): the reply as the feature reads it; every citation's
  * item sent and its quote in it as sent (the code check), never a map; `found` or a `need`; the
@@ -1314,6 +1374,14 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
       results.push({ ...base, answer: reply.text, verdict: scoreCite(c.scoring, reply.text) })
       continue
     }
+    if (c.scoring.kind === 'navigator') {
+      results.push({
+        ...base,
+        answer: reply.text,
+        verdict: scoreNavigator(c.scoring, reply.text)
+      })
+      continue
+    }
     if (c.scoring.kind === 'structure') {
       results.push({
         ...base,
@@ -1364,14 +1432,17 @@ describe('the live prompt eval, end to end against a fake OpenRouter (F-16.22; n
       expect(call.headers.get('authorization')).toBe('Bearer sk-or-fake')
       expect(Object.values(OPENROUTER_DEFAULT_MODELS)).toContain(call.body.model)
     }
-    // The story-memory reader and checker, and Ms Scribe's quote check (P3-D21), ask for no
-    // reasoning, as the app sends them.
+    // The story-memory reader and checker, Ms Scribe's quote check (P3-D21) and her navigator
+    // ask for no reasoning, as the app sends them.
     const memory = server.calls.filter((call) =>
-      /^You are the (story-memory reader|fact checker|citation checker)/.test(
+      /^You are the (story-memory reader|fact checker|citation checker|navigator)/.test(
         call.messages[0]?.content ?? ''
       )
     )
     expect(memory.some((call) => call.messages[0]?.content.startsWith(CITE_SENTINEL))).toBe(true)
+    expect(memory.some((call) => call.messages[0]?.content.startsWith(NAVIGATOR_SENTINEL))).toBe(
+      true
+    )
     expect(memory.length).toBeGreaterThan(0)
     for (const call of memory) expect(call.body.reasoning).toEqual({ enabled: false })
     expect(
