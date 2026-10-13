@@ -100,6 +100,7 @@ import {
 } from '../project/settingsStore'
 import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
 import { cardAnchorOf, revealIn, seedClaims } from '../memory/reading/claimFixture'
+import { findingRows } from '../memory/findings/findingStore'
 import { scanNamesFor } from '../memory/nameIndexer'
 import { createTopic, deleteTopicQuotes, mergeInto } from '../memory/reading/topicStore'
 import { logSearchMiss } from '../scribe/searchMissStore'
@@ -9234,6 +9235,59 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       expect(dismissed.count).toBe(1)
       await invoke('dismissed:undo', { id: dismissed.items[0]?.id ?? '' })
       expect((await invoke('names:questions', undefined)).map((q) => q.name)).toEqual(['Hesk'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('finds the contradiction candidates again whenever what the memory holds moves (F-16.27)', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await openV2()
+      const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+      if (!('record' in made)) throw new Error('blocked')
+      const mara = made.record.id
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs("Mara's eyes were grey.", "Mara's eyes were brown.")
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      const db = manager.require().connection.orm
+      seedClaims(
+        db,
+        scene,
+        [
+          { recordId: mara, slot: 'eyes', value: 'grey', quote: "Mara's eyes were grey", para: 0 },
+          { recordId: mara, slot: 'eyes', value: 'brown', quote: "Mara's eyes were brown", para: 1 }
+        ],
+        new Date()
+      )
+      expect(findingRows(db, activeDraftId(db))).toEqual([])
+      // Typed details are among what the memory holds: memory:changed, and the recompute follows.
+      await invoke('sceneDetail:set', {
+        nodeId: scene,
+        details: {
+          povRecordId: mara,
+          place: { recordId: null, text: '' },
+          time: { text: '' },
+          storyYear: null,
+          alsoHere: []
+        }
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect(findingRows(db, activeDraftId(db)).map((row) => [row.rule, row.state])).toEqual([
+        ['C1', 'unjudged']
+      ])
+      expect(sentOf('memory:findingsChanged')).toEqual([{ open: 0, unclear: 0, waiting: 1 }])
+      // A Pinned save is checked against the book once the page is indexed (C6's code part).
+      await invoke('record:savePage', { id: mara, page: 'pinned', doc: paragraphs('Eyes: green') })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect(
+        findingRows(db, activeDraftId(db))
+          .map((row) => row.rule)
+          .sort()
+      ).toEqual(['C1', 'C6', 'C6'])
+      expect(complete).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }

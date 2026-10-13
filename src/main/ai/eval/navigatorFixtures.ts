@@ -54,7 +54,9 @@ const firstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/u.exec(text)?
 /** The test book's manuscript scenes as the map's chapters (one or two scenes each). */
 function bookChapters(): NavigatorMapChapter[] {
   const chapters: NavigatorMapChapter[] = []
-  for (const scene of TEST_BOOK.filter((each) => each.source === 'scene')) {
+  for (const scene of TEST_BOOK.filter(
+    (each) => each.source === 'scene' && each.addedFor === undefined
+  )) {
     const last = chapters.at(-1)
     const number = String(scene.chapter)
     const line = firstSentence(scene.paragraphs[0] ?? '').slice(0, 160)
@@ -74,7 +76,8 @@ function bookChapters(): NavigatorMapChapter[] {
   return chapters
 }
 
-const RECORDS = TEST_BOOK_LABELS.records
+// P4's records (and scenes, above) stay out, so these token rows stay as P3 wrote them.
+const RECORDS = TEST_BOOK_LABELS.records.filter((record) => record.addedFor !== 'P4')
 const NAMED = new Map(RECORDS.map((record, i) => [record.id, RECORDS.length - i]))
 
 function prefixOf(): NavigatorPrefix {

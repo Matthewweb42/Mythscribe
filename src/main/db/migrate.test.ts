@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(38)
+    expect(result.version).toBe(39)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -150,7 +150,9 @@ describe('migrate', () => {
       'card',
       'claim',
       'plan_link',
-      'memory_backfill'
+      'memory_backfill',
+      'finding',
+      'verdict_cache'
     ]) {
       expect(tables()).toContain(table)
     }
@@ -1718,7 +1720,7 @@ describe('search misses (0037, F-16.25) leave every older row and column', () =>
     const kept = tablesBefore.filter((table) => table !== 'schema_migrations')
     const rowsBefore = dumpOf(db, kept)
 
-    expect(migrate(db).applied).toEqual(['0037_search_miss'])
+    expect(migrate(db, loadMigrations().slice(0, 38)).applied).toEqual(['0037_search_miss'])
 
     const old = schemaOf(db).filter((object) =>
       objectsBefore.some((before) => before.type === object.type && before.name === object.name)
@@ -1760,5 +1762,101 @@ describe('search misses (0037, F-16.25) leave every older row and column', () =>
     })
     db.prepare("DELETE FROM node WHERE id = 's9'").run()
     expect(db.prepare('SELECT COUNT(*) AS n FROM search_miss').get()).toEqual({ n: 0 })
+  })
+})
+
+describe('contradictions (0038, F-16.27) leave every older row and column', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, loadMigrations().slice(0, 38))
+    fillEveryTable(db)
+  })
+  afterEach(() => db.close())
+
+  it('keeps every older table and value byte for byte and adds two empty tables', () => {
+    const tablesBefore = tableNamesOf(db)
+    for (const table of tablesBefore) {
+      if (table === 'schema_migrations' || table.startsWith('memory_passage_fts_')) continue
+      expect(
+        (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n,
+        table
+      ).toBeGreaterThan(0)
+    }
+    const objectsBefore = schemaOf(db)
+    const kept = tablesBefore.filter((table) => table !== 'schema_migrations')
+    const rowsBefore = dumpOf(db, kept)
+
+    expect(migrate(db, loadMigrations().slice(0, 39)).applied).toEqual(['0038_story_findings'])
+
+    const old = schemaOf(db).filter((object) =>
+      objectsBefore.some((before) => before.type === object.type && before.name === object.name)
+    )
+    expect(JSON.stringify(old)).toBe(JSON.stringify(objectsBefore))
+    expect(JSON.stringify(dumpOf(db, kept))).toBe(JSON.stringify(rowsBefore))
+    const added = tableNamesOf(db).filter((table) => !tablesBefore.includes(table))
+    expect(added.sort()).toEqual(['finding', 'verdict_cache'])
+    for (const table of added) {
+      expect(
+        (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n,
+        table
+      ).toBe(0)
+    }
+    const addedObjects = schemaOf(db)
+      .filter(
+        (object) =>
+          !objectsBefore.some(
+            (before) => before.type === object.type && before.name === object.name
+          )
+      )
+      .map((object) => `${object.type} ${object.name}`)
+    expect(addedObjects.sort()).toEqual([
+      'index finding_draft_key_uq',
+      'index finding_draft_state_idx',
+      'index finding_record_idx',
+      'index sqlite_autoindex_finding_1',
+      'index sqlite_autoindex_verdict_cache_1',
+      'index verdict_cache_used_idx',
+      'table finding',
+      'table verdict_cache'
+    ])
+  })
+
+  it('drops a finding with its record and with its draft, one per draft and key', () => {
+    migrate(db)
+    db.pragma('foreign_keys = ON')
+    db.prepare(
+      "INSERT INTO draft (id, name, position, created, modified) VALUES ('d2', 'Two', 1, 'x', 'x')"
+    ).run()
+    const record = db.prepare(
+      "INSERT INTO record (id, category_id, origin, created, modified) VALUES (?, 'character', 'author', 'x', 'x')"
+    )
+    record.run('mara')
+    record.run('tomas')
+    const insert = db.prepare(
+      `INSERT INTO finding (id, draft_id, rule, record_id, slot, key, np_key, a, b, state, created)
+       VALUES (?, 'd2', 'C1', ?, 'eyes', ?, ?, '{}', '{}', 'unjudged', 'x')`
+    )
+    insert.run('f1', 'mara', 'C1|k1', 'k1')
+    insert.run('f2', 'tomas', 'C1|k2', 'k2')
+    expect(() => insert.run('f3', 'mara', 'C1|k1', 'k1')).toThrow()
+    expect(db.prepare("SELECT cost_usd, verdict_ab FROM finding WHERE id = 'f1'").get()).toEqual({
+      cost_usd: 0,
+      verdict_ab: null
+    })
+    const n = (): number =>
+      (db.prepare('SELECT COUNT(*) AS n FROM finding').get() as { n: number }).n
+    db.prepare("DELETE FROM record WHERE id = 'mara'").run()
+    expect(n()).toBe(1)
+    db.prepare("DELETE FROM draft WHERE id = 'd2'").run()
+    expect(n()).toBe(0)
+    db.prepare(
+      `INSERT INTO verdict_cache (key, verdict, tier, prompt_version, model, created, used)
+       VALUES ('h1', 'c', 'fast', 'judge.v1', 'm', 'x', 'x')`
+    ).run()
+    expect(db.prepare("SELECT cost_usd FROM verdict_cache WHERE key = 'h1'").get()).toEqual({
+      cost_usd: 0
+    })
   })
 })

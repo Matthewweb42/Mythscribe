@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, eq, inArray, like, ne, or, sql } from 'drizzle-orm'
 import { docToText } from '@shared/docText'
-import { dismissedKey } from '@shared/memory/dismissed'
+import { dismissedKey, rekeyFinding } from '@shared/memory/dismissed'
 import type { InvariantAlias } from '@shared/memory/invariants'
 import { gateWords, normName } from '@shared/memory/names'
 import { rewriteWords } from '@shared/memory/renameEvidence'
@@ -1186,6 +1186,14 @@ function rekey(kind: string, key: string, from: string, to: string): string | nu
     next = next
       .replace(`|knows:${from}|`, `|knows:${to}|`)
       .replace(`|thread:${from}|`, `|thread:${to}|`)
+  }
+  // P4-D14: a finding's Not a problem key names its record, a kinship or knows slot's record and a
+  // note owner; a loose end's names its thread or character.
+  if (kind === 'notProblem') {
+    const finding = rekeyFinding(next, from, to)
+    if (finding !== null) return finding
+    const loose = /^loose\|(thread|character)\|([^|]*)\|/u.exec(next)
+    if (loose?.[2] === from) next = `loose|${loose[1] ?? ''}|${to}|${next.slice(loose[0].length)}`
   }
   return next
 }

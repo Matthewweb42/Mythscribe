@@ -3832,7 +3832,16 @@ export const events = {
   /** F-16.16 (v2): the reading status moved (a reading, a pause, spend). */
   'memory:statusChanged': MemoryStatus,
   /** F-16.16 (v2): the reading notices changed; the whole list. */
-  'memory:noticesChanged': z.array(MemoryNotice)
+  'memory:noticesChanged': z.array(MemoryNotice),
+  /**
+   * F-16.27 (v2): the active draft's findings moved (a recompute opened, closed or re-stated some):
+   * how many are open, unclear and waiting for a verdict.
+   */
+  'memory:findingsChanged': z.object({
+    open: z.number().int().nonnegative(),
+    unclear: z.number().int().nonnegative(),
+    waiting: z.number().int().nonnegative()
+  })
 } as const satisfies Record<string, z.ZodType>
 
 export type Events = typeof events

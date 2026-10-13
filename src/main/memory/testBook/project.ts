@@ -6,10 +6,13 @@ import { saveDocument } from '../../document/documentStore'
 import { setSceneMeta } from '../../document/sceneMetaStore'
 import { activeDraftId, duplicateDraft, switchDraft } from '../../draft/draftStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
+import { ensureResearchRoot } from '../../project/seed'
 import { getCompileState, setCompileState } from '../../project/settingsStore'
+import { createResearchNote } from '../../research/researchStore'
 import { createNode, deleteNode, listNodes, type TreeDb } from '../../tree/treeStore'
 import { dismiss } from '../dismissedStore'
 import { scanNamesFor } from '../nameIndexer'
+import { indexNodePassages, indexStaleRecords } from '../passageIndexer'
 import { createRecord, savePage } from '../recordStore'
 import { setSceneDetails } from '../sceneDetailStore'
 import { TEST_BOOK, testBookScene } from './book'
@@ -21,7 +24,7 @@ import type { LabelQuestion } from './labels.schema'
  * names (shared surnames shared, the Captain matched in exact case), the Dismissed names, one
  * chapter per book chapter with its scenes and typed details, the Idea scene (h11) with the Idea
  * status, the cut scene (h12) left out of compile, and the earlier draft of chapter 14 (h10) as an
- * inactive draft of h09's scene. Built for the offline replays and the live runs
+ * inactive draft of h09's scene, and P4's planned card (h17) with no words. Built for the offline replays and the live runs
  * (`ai/eval/memory.eval.ts`, `ai/eval/knows.eval.ts`, `ai/eval/scribe.eval.ts`, which also adds
  * the labelled record pages and the author's late edits); test data only.
  */
@@ -51,14 +54,23 @@ const CATEGORY: Readonly<Record<string, string | undefined>> = {
   term: 'lore'
 }
 
-/** Builds the project in `dir` (an empty temporary folder). */
-export function buildTestBookProject(dir: string, now: Date): TestBookProject {
+/**
+ * Builds the project in `dir` (an empty temporary folder). `without: 'P4'` leaves out P4's scenes
+ * (h15–h17) and records, for a test written against the book as P3 knew it (its search hits).
+ */
+export function buildTestBookProject(
+  dir: string,
+  now: Date,
+  options: { without?: 'P4' } = {}
+): TestBookProject {
+  const kept = (item: { addedFor?: string }): boolean =>
+    options.without === undefined || item.addedFor !== options.without
   const session = createProject(projectFolderFor(dir, 'Test book'), 'Test book', 'novel', {
     storyMemoryOverride: 'v2'
   })
   const db = session.connection.orm
   const records = new Map<string, string>()
-  for (const label of TEST_BOOK_LABELS.records) {
+  for (const label of TEST_BOOK_LABELS.records.filter(kept)) {
     const categoryId = CATEGORY[label.kind]
     if (categoryId === undefined) continue
     const main = normName(label.name)
@@ -102,7 +114,7 @@ export function buildTestBookProject(dir: string, now: Date): TestBookProject {
   const chapters = new Map<number, string>()
   const scenes = new Map<string, string>()
   const excluded: string[] = []
-  for (const scene of TEST_BOOK) {
+  for (const scene of TEST_BOOK.filter(kept)) {
     if (scene.source === 'inactiveDraft') continue
     let chapter = chapters.get(scene.chapter)
     if (chapter === undefined) {
@@ -121,7 +133,8 @@ export function buildTestBookProject(dir: string, now: Date): TestBookProject {
       title: scene.title
     }).id
     scenes.set(scene.id, node)
-    saveDocument(db, node, doc(scene.paragraphs))
+    // The planned card (h17, P4) has no words: a scene card the author has not drafted.
+    if (scene.paragraphs.length > 0) saveDocument(db, node, doc(scene.paragraphs))
     const details = scene.details
     if (details !== undefined) {
       setSceneDetails(
@@ -174,6 +187,27 @@ export function addTestBookPages(book: TestBookProject, now: Date): void {
     if (recordId === undefined) throw new Error(`The test book has no record ${page.record}`)
     savePage(book.db, recordId, page.page, doc(page.lines), now)
   }
+}
+
+/**
+ * P4 (F-16.27): the author's notes the contradictions read: the P4 records' Pinned pages and the
+ * Research page, written as the author would write them, then indexed as the app's passages job
+ * would after a save.
+ */
+export function addTestBookNotes(book: TestBookProject, now: Date): void {
+  for (const note of TEST_BOOK_LABELS.notes) {
+    if (note.record !== undefined) {
+      const recordId = book.records.get(note.record)
+      if (recordId === undefined) throw new Error(`The test book has no record ${note.record}`)
+      savePage(book.db, recordId, 'pinned', doc(note.lines), now)
+      continue
+    }
+    ensureResearchRoot(book.db, now)
+    const page = createResearchNote(book.db, 'novel', { title: note.research ?? 'Notes' }, now)
+    saveDocument(book.db, page.id, doc(note.lines))
+    indexNodePassages(book.db, page.id, now)
+  }
+  indexStaleRecords(book.db, now)
 }
 
 /** A labelled question's late edit: the scene's paragraph as the author changed it. */

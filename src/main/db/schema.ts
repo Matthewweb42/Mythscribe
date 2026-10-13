@@ -51,6 +51,12 @@ import {
   TOPIC_QUOTE_ROLES,
   TOPIC_QUOTE_STATES
 } from '../../shared/memory/claims'
+import {
+  FINDING_RULES,
+  FINDING_STATES,
+  FINDING_VARIANTS,
+  JUDGE_VERDICTS
+} from '../../shared/memory/findings'
 import { LABEL_KINDS } from '../../shared/storyLabels'
 import { RESEARCH_ORIGINS } from '../../shared/research'
 
@@ -1453,3 +1459,78 @@ export const searchMiss = sqliteTable(
 )
 export type SearchMissRow = typeof searchMiss.$inferSelect
 export type SearchMissInsert = typeof searchMiss.$inferInsert
+
+/**
+ * A contradiction candidate and its verdicts (F-16.27; plan P4 §1.1, migration `0038_story_findings`,
+ * additive; derived): a pair code found under one of rules C1–C7 (`candidates.ts`), its two sides as
+ * JSON references (`FindingSide`: a claim, a presence or a note sentence, never a copy of the
+ * quote), C4's year in `extra`, the judge's verdict in each order, the stronger check's, its state
+ * and what judging it cost. `key` is its lifecycle identity (rule, variant and the *Not a problem*
+ * key `np_key`), unique per draft; only the active draft's rows are live (design §2.2). The record
+ * is the subject (the knower for C3, the thread for C5): its rows go with it, and with the draft.
+ */
+export const finding = sqliteTable(
+  'finding',
+  {
+    id: text('id').primaryKey(),
+    draftId: text('draft_id')
+      .notNull()
+      .references(() => draft.id, { onDelete: 'cascade' }),
+    rule: text('rule', { enum: FINDING_RULES }).notNull(),
+    variant: text('variant', { enum: FINDING_VARIANTS }),
+    recordId: text('record_id')
+      .notNull()
+      .references(() => record.id, { onDelete: 'cascade' }),
+    slot: text('slot').notNull(),
+    key: text('key').notNull(),
+    npKey: text('np_key').notNull(),
+    /** JSON `FindingSide`. */
+    a: text('a').notNull(),
+    b: text('b').notNull(),
+    /** JSON `FindingExtra`, or null. */
+    extra: text('extra'),
+    verdictAb: text('verdict_ab', { enum: JUDGE_VERDICTS }),
+    verdictBa: text('verdict_ba', { enum: JUDGE_VERDICTS }),
+    why: text('why'),
+    confirm: text('confirm', { enum: JUDGE_VERDICTS }),
+    confirmWhy: text('confirm_why'),
+    state: text('state', { enum: FINDING_STATES }).notNull(),
+    costUsd: real('cost_usd').notNull().default(0),
+    shownAt: text('shown_at'),
+    created: text('created').notNull(),
+    judgedAt: text('judged_at'),
+    confirmedAt: text('confirmed_at')
+  },
+  (t) => [
+    uniqueIndex('finding_draft_key_uq').on(t.draftId, t.key),
+    index('finding_draft_state_idx').on(t.draftId, t.state),
+    index('finding_record_idx').on(t.recordId)
+  ]
+)
+export type FindingRow = typeof finding.$inferSelect
+export type FindingInsert = typeof finding.$inferInsert
+
+/**
+ * The judge's verdicts remembered (F-16.27; plan P4 §1.1, derived, local, not per draft): one row
+ * per pair-order judged, keyed by a hash of the prompt version, the tier, the order and the pair as
+ * sent with scene numbers masked and names folded (slice 2), so the same words are never judged
+ * twice, whatever the draft, a scene move or a Rename in book. At most `VERDICT_CACHE_MAX` rows: an
+ * insert prunes the least recently used (`used`).
+ */
+export const verdictCache = sqliteTable(
+  'verdict_cache',
+  {
+    key: text('key').primaryKey(),
+    verdict: text('verdict', { enum: JUDGE_VERDICTS }).notNull(),
+    why: text('why'),
+    tier: text('tier').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    model: text('model').notNull(),
+    costUsd: real('cost_usd').notNull().default(0),
+    created: text('created').notNull(),
+    used: text('used').notNull()
+  },
+  (t) => [index('verdict_cache_used_idx').on(t.used)]
+)
+export type VerdictCacheRow = typeof verdictCache.$inferSelect
+export type VerdictCacheInsert = typeof verdictCache.$inferInsert

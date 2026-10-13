@@ -4,6 +4,7 @@ import {
   checkMemoryInvariants,
   type InvariantAlias,
   type InvariantClaim,
+  type InvariantFinding,
   type InvariantInput,
   type InvariantKnows,
   type InvariantTopic
@@ -177,5 +178,54 @@ describe('checkMemoryInvariants (F-16.3)', () => {
       { kind: 'topicName', recordId: 't1' },
       { kind: 'topicName', recordId: 's1' }
     ])
+  })
+})
+
+describe('finding invariants (P4, F-16.27)', () => {
+  const finding = (over: Partial<InvariantFinding> = {}): InvariantFinding => ({
+    id: 'f1',
+    state: 'open',
+    verdictAb: 'c',
+    verdictBa: 'c',
+    npKey: 'finding|mara|eyes|s1|grey|s2|brown',
+    claimSides: [
+      { claimId: 'c1', live: true },
+      { claimId: 'c2', live: true }
+    ],
+    ...over
+  })
+
+  it('passes an open finding judged a contradiction both ways on live claims', () => {
+    expect(checkMemoryInvariants(input({ findings: [finding()] }))).toEqual([])
+    expect(
+      checkMemoryInvariants(input({ findings: [finding({ state: 'unjudged', verdictAb: null })] }))
+    ).toEqual([])
+  })
+
+  it('reports an open finding without two contradiction verdicts', () => {
+    expect(checkMemoryInvariants(input({ findings: [finding({ verdictBa: 'u' })] }))).toEqual([
+      { kind: 'findingUnjudged', findingId: 'f1' }
+    ])
+  })
+
+  it('reports a stored finding the author said is not a problem', () => {
+    const row = finding({ state: 'unjudged', verdictAb: null, verdictBa: null })
+    expect(
+      checkMemoryInvariants(input({ findings: [row], dismissedFindings: new Set([row.npKey]) }))
+    ).toEqual([{ kind: 'findingDismissed', findingId: 'f1' }])
+  })
+
+  it('reports an open finding whose claim side is no live claim', () => {
+    const row = finding({
+      claimSides: [
+        { claimId: 'c1', live: true },
+        { claimId: 'c9', live: false }
+      ]
+    })
+    expect(checkMemoryInvariants(input({ findings: [row] }))).toEqual([
+      { kind: 'findingSide', findingId: 'f1', claimId: 'c9' }
+    ])
+    // A held one waits for its re-read.
+    expect(checkMemoryInvariants(input({ findings: [{ ...row, state: 'held' }] }))).toEqual([])
   })
 })

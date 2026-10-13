@@ -12,7 +12,8 @@ import {
   SpotTier,
   SpotVerdict
 } from './claims'
-import { Dismissed } from './dismissed'
+import { Dismissed, LOOSE_END_KINDS } from './dismissed'
+import { FINDING_STATES, FindingView } from './findings'
 import { KnowsHow } from './knows'
 import { RecordOrigin } from './records'
 import { SlotSchema } from './slots'
@@ -922,3 +923,48 @@ export const TimelineMemory = z.object({
   rows: z.array(TimelineRow)
 })
 export type TimelineMemory = z.infer<typeof TimelineMemory>
+
+/**
+ * F-16.27 (plan P4 §1.2): what `memory:findings` answers (slice 2): the active draft's open
+ * findings (those touching the asked scene first, then by `RULE_ORDER` and reading order) and the
+ * unclear ones, counts by state, how many wait for a verdict, and whether a judge job is queued or
+ * running. Empty while the Contradiction check is off.
+ */
+export const FindingsView = z.object({
+  open: z.array(FindingView),
+  unclear: z.array(FindingView),
+  counts: z.record(z.enum(FINDING_STATES), z.number().int().nonnegative()),
+  waiting: z.number().int().nonnegative(),
+  judging: z.boolean()
+})
+export type FindingsView = z.infer<typeof FindingsView>
+
+/**
+ * F-16.29 (plan P4 §1.2, `looseEnds.ts`): one loose end behind the furthest drafted scene: a
+ * thread, a character or a planned card, where it was last touched, the scene the window is
+ * measured to, "checked up to", and the question *Ask Ms Scribe* sends (worded positively; the
+ * scoped "nothing since" line is the renderer's alone).
+ */
+export const LooseEnd = z.object({
+  kind: z.enum(LOOSE_END_KINDS),
+  /** The thread's or character's record id, or the planned scene's node id. */
+  id: z.string(),
+  name: z.string(),
+  /** Where it was last touched ("7.3"); null for a planned card. */
+  lastRef: z.string().nullable(),
+  lastNodeId: z.string().nullable(),
+  /** The scene the window is measured to ("18.2"). */
+  horizonRef: z.string(),
+  checkedUpTo: SceneRefView.nullable(),
+  ask: z.string()
+})
+export type LooseEnd = z.infer<typeof LooseEnd>
+
+/** Needs a look's Loose ends: at most 10, the rest counted, with the furthest drafted scene. */
+export const LooseEndsView = z.object({
+  items: z.array(LooseEnd),
+  more: z.number().int().nonnegative(),
+  furthest: SceneRefView.nullable(),
+  checkedUpTo: SceneRefView.nullable()
+})
+export type LooseEndsView = z.infer<typeof LooseEndsView>

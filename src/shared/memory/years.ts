@@ -275,6 +275,67 @@ export const bornLines = (pinned: readonly string[]): string[] =>
   pinned.filter((paragraph) => BORN_LINE.test(paragraph))
 
 /**
+ * A Pinned paragraph's birth year and the words of its value ("Born: 1792" → 1792, "1792"); null
+ * when it is no Born line or names no single year (P4's C4 reads the line itself, as a note side).
+ */
+export function bornLine(paragraph: string): { year: number; value: string } | null {
+  const value = BORN_LINE.exec(paragraph)?.[1]?.trim() ?? ''
+  const year = yearIn(value)
+  return year === null ? null : { year, value }
+}
+
+/**
+ * The calendar a year is written in (P4-D6): the era marks beside its digits ("AR" in "1812 AR",
+ * "B.C."), upper-cased, else ''. "the spring of 1812" and a typed 1812 are both the plain calendar.
+ */
+export function yearCalendar(text: string): string {
+  const match = /(?<![\p{L}\p{N}])\d{3,4}(?![\p{L}\p{N}])/u.exec(text)
+  if (match === null) return ''
+  const before = text.slice(0, match.index).trim().split(/\s+/).at(-1) ?? ''
+  const after =
+    text
+      .slice(match.index + match[0].length)
+      .trim()
+      .split(/\s+/)[0] ?? ''
+  const era = (word: string): string => {
+    const bare = word.replace(/[,;:!?)(]+$/u, '').replace(/^[(]+/u, '')
+    return /^(?:\p{Lu}\.?){1,4}$/u.test(bare) ? bare.replace(/\./g, '') : ''
+  }
+  return [era(before), era(after)].filter((each) => each !== '').join(' ')
+}
+
+/**
+ * The count a stated age gives (P4's C4): the first in it, in digits ("17", "about 40") or words
+ * ("seventeen", "twenty-four", "twenty four", "seven-and-twenty"); null when it holds none. "A"
+ * and "an" alone are no age.
+ */
+export function ageYears(value: string): number | null {
+  const tokens = value
+    .toLowerCase()
+    .split(/[^a-z0-9-]+/)
+    .filter((token) => token !== '')
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i] ?? ''
+    if (/^\d+$/.test(token)) return Number(token)
+    if (token === 'a' || token === 'an') continue
+    const parts = token.split('-')
+    const [first = '', second = '', third = ''] = parts
+    // "seven-and-twenty": a unit, "and", a ten.
+    const unit = UNITS[first]
+    const tens = TENS[third]
+    if (parts.length === 3 && second === 'and' && unit !== undefined && tens !== undefined) {
+      return tens + unit
+    }
+    const count = countWord(token)
+    if (count === null) continue
+    // "twenty four": a ten, then a unit word.
+    const next = UNITS[tokens[i + 1] ?? '']
+    return TENS[token] !== undefined && next !== undefined && next < 10 ? count + next : count
+  }
+  return null
+}
+
+/**
  * A record's birth year as of a scene (P2b-D15): the latest live narration-now `born` claim up to
  * the scene with exactly one year in its value; else a canon Pinned line "Born: 1792" (the
  * switch-over's form of the v1 field, so the ages she had keep working); else null. `pinned` is

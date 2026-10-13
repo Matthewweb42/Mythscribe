@@ -168,8 +168,10 @@ function labelStatus(thread: string, atScene: string | null): ThreadStatus {
       (atScene === null || order(step.scene) <= order(atScene)) &&
       stepCounts({ voice: step.voice ?? 'narration', mode: step.mode ?? 'now' })
   )
-  if (steps.some((step) => step.how === 'resolves')) return 'resolved'
-  return steps.length > 0 ? 'open' : 'notYet'
+  // The last counted step decides (P4): a thread advanced after it was resolved is open again.
+  const last = steps.toSorted((a, b) => order(a.scene) - order(b.scene) || a.p - b.p).at(-1)
+  if (last === undefined) return 'notYet'
+  return last.how === 'resolves' ? 'resolved' : 'open'
 }
 
 /** A stored knows line, as the scorer reads it. */
@@ -606,7 +608,11 @@ for (const readOrder of ['book', 'reverse'] as const) {
     it('gives the story years and ages the labels give (decision 5)', () => {
       const book = run?.book ?? fail()
       // Read through the app's own views (timeViews.ts), as the Timeline and the sheets read them.
-      const years = storedYears(book.db)
+      // The planned card (h17, P4) has no words and no label: a plan, not a read scene.
+      const planned = new Set(
+        TEST_BOOK.filter((scene) => scene.source === 'plannedCard').map((scene) => scene.id)
+      )
+      const years = storedYears(book.db).filter((row) => !planned.has(sceneOf(book, row.nodeId)))
       expect(
         years.map((row) => {
           const scene = sceneOf(book, row.nodeId)
@@ -1441,7 +1447,7 @@ describe('the live knows run stops and still reports (F-16.22; nothing spent)', 
     const report = await runLiveKnows(live, { now: NOW })
     expect(report.passes.map((pass) => pass.error)).toEqual([
       expect.stringMatching(/^\w+: RATE_LIMIT: .* after \d+ scenes read$/),
-      expect.stringMatching(/^h14: RATE_LIMIT: .* after 0 scenes read$/)
+      expect.stringMatching(/^h16: RATE_LIMIT: .* after 0 scenes read$/)
     ])
     expect(report.passes.map((pass) => pass.stopped)).toEqual([false, false])
     // The six answered requests were paid for: the report counts them.

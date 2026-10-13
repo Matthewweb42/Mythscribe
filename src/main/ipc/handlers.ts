@@ -470,6 +470,8 @@ import {
   staleNameScans
 } from '../memory/nameIndexer'
 import { anchorsChanged, runAnchors } from '../memory/reading/anchors'
+import { runFindingsJob } from '../memory/findings/findingsJob'
+import { isUnderResearch } from '../research/researchTree'
 import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
 import { settleOwnedNames } from '../memory/reading/waiting'
 import { claimInfo, knowsGridMemory, sceneMemory, sheetMemory } from '../memory/reading/views'
@@ -921,7 +923,7 @@ export function registerHandlers({
     }
     const changed = anchorsChanged(result)
     if (changed || result.card) {
-      emit(windows(), 'memory:changed', { nodeIds: [nodeId], recordIds: result.recordIds })
+      memoryChanged({ nodeIds: [nodeId], recordIds: result.recordIds })
       if (result.card) reader.detailsChanged()
     }
     return changed
@@ -932,7 +934,7 @@ export function registerHandlers({
   const mentionQueue = createIndexQueue<{ changed: boolean; scanned: boolean }>({
     // F-16.5: the v2 name scan and passage index ride the same local queue; each run below
     // keeps to its own story memory, so a job left by the other one is dropped quietly.
-    kind: ['mentions', 'names', 'passages', 'anchors'],
+    kind: ['mentions', 'names', 'passages', 'anchors', 'findings'],
     db: () => (manager.current() === null ? null : manager.require().connection.orm),
     run: (job) => {
       const db = manager.require().connection.orm
@@ -942,6 +944,16 @@ export function registerHandlers({
         if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
         const changed = checkAnchorsNow(db, job.nodeId, now)
         return Promise.resolve({ requested: false, value: { changed, scanned: changed } })
+      }
+      if (job.kind === 'findings') {
+        // F-16.27: the local recompute of the contradiction candidates (no AI, nothing sent).
+        if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
+        const result = runFindingsJob(db, now)
+        if (result.counts !== null) emit(windows(), 'memory:findingsChanged', result.counts)
+        return Promise.resolve({
+          requested: false,
+          value: { changed: result.changed, scanned: result.changed }
+        })
       }
       if (job.kind === 'names') {
         if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
@@ -954,10 +966,13 @@ export function registerHandlers({
         if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
         // Keyed to the manuscript root, the job is every record page that changed; keyed to a
         // node, its scene and notes, or its Research page (F-16.8).
-        const changed =
-          job.nodeId === manuscriptRootId(db)
-            ? indexStaleRecords(db, now) > 0
-            : indexNodePassages(db, job.nodeId, now)
+        const pages = job.nodeId === manuscriptRootId(db)
+        const changed = pages
+          ? indexStaleRecords(db, now) > 0
+          : indexNodePassages(db, job.nodeId, now)
+        // F-16.27: C6 reads the canon notes from the index, so a record page or a Research page
+        // indexed anew is checked again (the code part of a note save, design §2.4).
+        if (changed && (pages || isResearchDocument(db, job.nodeId))) queueFindings(db)
         return Promise.resolve({ requested: false, value: { changed, scanned: changed } })
       }
       // F-4.12: the tag mention scan is v1's.
@@ -979,6 +994,39 @@ export function registerHandlers({
     debounceMs: MENTION_DEBOUNCE_MS,
     minIntervalMs: 0
   })
+
+  /**
+   * F-16.27 (v2): the contradiction candidates are found again, once the burst of changes settles
+   * (the `findings` job, keyed to the manuscript root on the mention queue, debounced there).
+   */
+  const queueFindings = (db: TreeDb): void => {
+    if (memory() !== 'v2') return
+    const root = manuscriptRootId(db)
+    if (root !== null) mentionQueue.touch('findings', root)
+  }
+
+  /**
+   * F-16.17, F-16.27 (v2): the one way `memory:changed` is pushed. What the memory holds changed
+   * for these scenes and records (a reading, the anchors job, *Not right*, a card's *Not right*,
+   * knew-before, a split, *Not a secret*, an Undo, Rename in book, typed details, a tree move): the
+   * renderer reads them again, and the contradiction candidates are found again.
+   */
+  const memoryChanged = (payload: {
+    nodeIds: readonly string[]
+    recordIds: readonly string[]
+  }): void => {
+    emit(windows(), 'memory:changed', {
+      nodeIds: [...payload.nodeIds],
+      recordIds: [...payload.recordIds]
+    })
+    if (manager.current() !== null) queueFindings(manager.require().connection.orm)
+  }
+
+  /** Whether a node is a Research document (its passages are canon notes C6 reads). */
+  const isResearchDocument = (db: TreeDb, nodeId: string): boolean => {
+    const row = getNode(db, nodeId)
+    return row?.kind === 'document' && isUnderResearch(db, row)
+  }
 
   /**
    * F-16.5: the v2 backfill: every scene whose name scan or passages are out of date (a roster
@@ -1046,7 +1094,7 @@ export function registerHandlers({
         return s
       }),
     cancelRequest: (requestId) => void cancelInflight(requestId),
-    changed: (payload) => emit(windows(), 'memory:changed', payload),
+    changed: (payload) => memoryChanged(payload),
     // P2b: secrets and threads a reading made or merged into; not names, so the roster stays.
     recordsChanged: (recordIds) => emit(windows(), 'record:changed', { recordIds, roster: false }),
     questions: () => publishQuestions(),
@@ -1268,7 +1316,7 @@ export function registerHandlers({
    */
   const bookOrderMoved = (nodeIds: readonly string[]): void => {
     if (memory() !== 'v2') return
-    emit(windows(), 'memory:changed', { nodeIds: [...nodeIds], recordIds: [] })
+    memoryChanged({ nodeIds: [...nodeIds], recordIds: [] })
   }
 
   register('tree:create', (input) => {
@@ -1526,7 +1574,7 @@ export function registerHandlers({
     const root = manuscriptRootId(db)
     if (root !== null) mentionQueue.touch('passages', root)
     if (v2 && JSON.stringify(pinnedBorn(db, recordId)) !== JSON.stringify(before)) {
-      emit(windows(), 'memory:changed', { nodeIds: [], recordIds: [recordId] })
+      memoryChanged({ nodeIds: [], recordIds: [recordId] })
     }
     return saved
   }
@@ -2280,6 +2328,8 @@ export function registerHandlers({
     // F-16.18: each draft has its own cards, so the passage index takes the new draft's card
     // lines, scenes whose text did not change included (v2 only; by hash, nothing else is read).
     queueMemoryIndex(db)
+    // F-16.27: only the active draft's findings are live; the new draft's are found again.
+    queueFindings(db)
     return result
   })
 
@@ -4868,8 +4918,11 @@ export function registerHandlers({
     if (memory() === 'v2') {
       const settled = settleOwnedNames(db, new Date())
       if (settled.nodeIds.length > 0) {
-        emit(windows(), 'memory:changed', { nodeIds: settled.nodeIds, recordIds: [...recordIds] })
+        memoryChanged({ nodeIds: settled.nodeIds, recordIds: [...recordIds] })
       }
+      // F-16.27: a record merged, split or deleted moves its findings (a merge re-keys its Not a
+      // problem rows; a deleted record's rows went with it): the candidates are found again.
+      queueFindings(db)
     }
     queueMemoryIndex(db)
     publishQuestions()
@@ -4879,7 +4932,7 @@ export function registerHandlers({
   /** F-16.22: a secret or thread made, gone or put back: its list, its sheets and the scenes it touched. */
   const topicsChanged = (change: TopicChange): void => {
     emit(windows(), 'record:changed', { recordIds: change.topicIds, roster: true })
-    emit(windows(), 'memory:changed', {
+    memoryChanged({
       nodeIds: change.nodeIds,
       recordIds: [...change.topicIds, ...change.recordIds]
     })
@@ -5078,7 +5131,7 @@ export function registerHandlers({
         ...new Set([...restored.recordIds, ...(undone.recordId === null ? [] : [undone.recordId])])
       ]
       if (nodeIds.length > 0 || recordIds.length > 0) {
-        emit(windows(), 'memory:changed', { nodeIds, recordIds })
+        memoryChanged({ nodeIds, recordIds })
       }
       reader.detailsChanged()
     }
@@ -5120,7 +5173,7 @@ export function registerHandlers({
     // F-16.18 (decision 4): Here and the typed-detail conflicts compare the typed details with
     // the scene's card, so they are looked at again.
     if (memory() === 'v2') {
-      emit(windows(), 'memory:changed', { nodeIds: [nodeId], recordIds: [] })
+      memoryChanged({ nodeIds: [nodeId], recordIds: [] })
       reader.detailsChanged()
     }
     return stored
@@ -5156,7 +5209,7 @@ export function registerHandlers({
       reader.namesAdded(result.record.id, [answer.name])
     } else publishQuestions()
     if (settled !== null && settled.nodeIds.length > 0) {
-      emit(windows(), 'memory:changed', {
+      memoryChanged({
         nodeIds: settled.nodeIds,
         recordIds: result.kind === 'record' ? [result.record.id] : []
       })
@@ -5341,7 +5394,7 @@ export function registerHandlers({
   register('memory:knewBefore', ({ secretId, recordId, knew }) => {
     const db = manager.require().connection.orm
     const changed = setKnewBefore(db, secretId, recordId, knew, new Date())
-    if (changed) emit(windows(), 'memory:changed', { nodeIds: [], recordIds: [secretId, recordId] })
+    if (changed) memoryChanged({ nodeIds: [], recordIds: [secretId, recordId] })
     return { changed }
   })
 
@@ -5369,7 +5422,7 @@ export function registerHandlers({
   register('memory:cardNotRight', (input) => {
     const db = manager.require().connection.orm
     const row = cardNotRight(db, input, new Date())
-    emit(windows(), 'memory:changed', {
+    memoryChanged({
       nodeIds: [input.nodeId],
       recordIds: row.recordId === null ? [] : [row.recordId]
     })

@@ -649,7 +649,10 @@ describe('the test book’s years and ages through the stores (decision 5)', () 
         .filter(([sceneId]) => sceneId !== 'h10')
         .map(([sceneId, nodeId]) => [nodeId, sceneId])
     )
-    const rows = timelineMemory(book.db, null).rows
+    // The planned card (h17, P4) has no words and no year label: a plan, not a read scene.
+    const rows = timelineMemory(book.db, null).rows.filter(
+      (row) => sceneOf.get(row.nodeId) !== 'h17'
+    )
     expect(
       rows.map((row) => {
         const { year } = row

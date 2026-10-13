@@ -12,6 +12,24 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-13 · F-16.27, F-16.29 · P4 slice 1 (candidates, loose ends, the local recompute): calls made while building it
+- Question: Building slice 1 (the `finding` and `verdict_cache` tables, rules C1–C7 in code, loose ends, the recompute after every memory change; no AI, no UI) needed calls the plan left to the build.
+- Chosen (decided by Claude, unconfirmed):
+  1. **A year is not a side.** C4's year (typed or quoted, and where) rides along with the pair (`extra`), so a pair is always two passages, or a passage and a note line.
+  2. **C7** (history and details, *Check the book* only) compares values within one slot only, needs at least one side told by the narration as happening now, and skips any pair C1 already makes.
+  3. **A dead character "here"** pairs each later appearance with the latest death before it (not every death).
+  4. **A falling age** compares with the last age stated outside a flashback; a flashback scene's lower age is made and hidden.
+  5. **A thread advancing after it was resolved** is not flagged when the thread was opened again in between.
+  6. **Calendars:** two years are compared only when their era marks match (a mark such as "AR" or "BC" beside the digits; none on both counts as the same).
+  7. **Loose ends:** a thread you made but never touched is not a loose end (nothing to pick up); the character's question names them ("Where is Celia Ashby after that?").
+  8. **Timing:** the `findings` recompute rides the name-scan queue (1.5 s after the last change), and runs after the passages job when a record page or a Research page is saved, because your notes are read from the search index.
+  9. **Held findings:** a finding whose sentence you just edited stays (not shown, not closed) while its claims exist; a claim read again keeps its finding and its verdicts (the pair is the same words).
+  10. **A thread's status** is decided by its last counted step: a thread resolved and then advanced again is open (this changes the knows eval's expectation for Lottie's match, which h15 now advances).
+  11. **The test book:** h15 "The portrait" (1815), h16 "The gate, years before" (a flashback, 1811), and a planned card with no words, "The Captain's reckoning", before them. The hair that changes with no word of it (C2) is planted inside h15 (dark under the lamp, fair at dinner), not across scenes, so no earlier "as of" answer moves; the dated note says Vellmouth (the book's London). Dunmore's lie in h02 is now a candidate the judge must rule fine (plan §1.6), not "no candidate". P4's records and scenes stay out of the older eval fixtures, so the token report did not move; one P3 search test builds the book without them.
+- Alternatives: a year as a third kind of side; C7 across slots or on speech alone; every death paired with every later appearance; flag an advance even after a re-opening; read notes from the pages directly on every recompute; plant the hair change across two scenes.
+- To change it: `src/shared/memory/candidates.ts` (1–6), `src/shared/memory/looseEnds.ts` (7), `src/main/ipc/handlers.ts` `queueFindings` (8), `src/main/memory/findings/recompute.ts` (9), `src/main/ai/eval/knows.eval.ts` `labelStatus` (10), `src/main/memory/testBook/` (11).
+- Not run: no live run exists for slice 1 (no AI); the live contradictions run belongs to slice 6 and needs your key.
+
 ## 2026-10-13 · F-16.27–16.30 · P4 plan: the calls the design left open
 - Question: Planning P4, contradictions and Needs a look (`docs/research/story-memory-2026-10-11/plans/P4.md`, six slices, nothing built yet), needed calls the design did not make. Details are in the plan's §8 (P4-D1 to P4-D26).
 - Chosen (decided by Claude, unconfirmed):

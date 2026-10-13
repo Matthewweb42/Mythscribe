@@ -8,8 +8,9 @@ import { THREAD_STEPS } from '@shared/memory/topics'
  * The shape of the test book's labels (F-16.3): what a correct reading of `TEST_BOOK` yields,
  * scene by scene, for the P2a reader and verifier scoring (claims), P1's name matching and twin
  * gate (records, mentions, twin cases), P2b's who-knows-what (knows lines, thread steps, years and
- * ages), P4's contradiction rules (planted contradictions and the "must not produce"
- * negatives), and P3's Ms Scribe (record pages and the questions she is asked). Test data only:
+ * ages), P4's contradiction rules (planted contradictions, the "must not produce" negatives, who
+ * is on the page, the author's notes and the loose ends), and P3's Ms Scribe (record pages and the
+ * questions she is asked). Test data only:
  * nothing in the app imports it.
  */
 
@@ -48,10 +49,10 @@ export const LabelRecord = z.object({
   /** For a secret or thread: the sentence that reveals it or opens it (P2b-D3). */
   defining: z.object({ scene: SceneId, p: z.number().int().min(0), quote: z.string() }).optional(),
   /**
-   * A record added with P2b's scenes (h13, h14): left out of the `reader.v1` eval cases' roster,
-   * so their token rows stay as P2a wrote them.
+   * A record added with P2b's scenes (h13, h14) or P4's (h15, h16): left out of the `reader.v1`
+   * eval cases' roster, so their token rows stay as P2a wrote them.
    */
-  addedFor: z.literal('P2b').optional()
+  addedFor: z.enum(['P2b', 'P4']).optional()
 })
 
 export const CLAIM_VOICES = ['narration', 'dialogue', 'thought', 'rumour'] as const
@@ -73,6 +74,10 @@ export const LabelClaim = z.object({
   mode: z.enum(CLAIM_MODES),
   /** How a correct pipeline ends: proved in code, proved by the verifier, or not stored. */
   expect: z.enum(CLAIM_EXPECTS),
+  /** P4: the second record of a kinship claim (a relation names it in its slot). */
+  object: Id.optional(),
+  /** P4: the sentence states a change ("had cut her hair short"). */
+  change: z.boolean().optional(),
   reason: z.string().min(1)
 })
 
@@ -140,7 +145,9 @@ export const LabelYear = z.object({
   hint: SceneId.optional(),
   elapsed: SceneQuote.optional(),
   quotedYear: SceneQuote.extend({ value: z.string().min(1) }).optional(),
-  flashback: z.boolean().default(false)
+  flashback: z.boolean().default(false),
+  /** P4: the sentence that shows the scene is a flashback (the card's verified `flashback`). */
+  flashbackQuote: SceneQuote.optional()
 })
 
 /**
@@ -166,11 +173,28 @@ const QuoteRef = z.object({ scene: SceneId, p: z.number().int().min(0), quote: z
 
 export const CONTRADICTION_RULES = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7'] as const
 
+/** P4: a line of the author's notes (a record's Pinned page, or a Research page by its title). */
+const NoteRef = z.object({
+  record: Id.optional(),
+  research: z.string().min(1).optional(),
+  quote: z.string().min(1)
+})
+
 export const LabelContradiction = z.object({
   rule: z.enum(CONTRADICTION_RULES),
+  /** P4: C2's `dead` or `body`, C4's `birth` or `falls`. */
+  variant: z.enum(['dead', 'body', 'birth', 'falls']).optional(),
   record: Id,
   a: QuoteRef,
-  b: QuoteRef,
+  /** The book's other side; absent when the other side is a note (C6). */
+  b: QuoteRef.optional(),
+  /** P4: the note side of a C6 pair. */
+  note: NoteRef.optional(),
+  /**
+   * P4: a pair that needs a scene not to be a flashback, in a scene that is one: a candidate code
+   * makes and hides (Check the book lists it with *Not a flashback?*), never a finding as it is.
+   */
+  hidden: z.boolean().default(false),
   reason: z.string().min(1)
 })
 
@@ -185,6 +209,40 @@ export const LabelNegative = z.object({
   secret: Id.optional(),
   slot: Slot.optional(),
   rule: z.enum(CONTRADICTION_RULES).optional(),
+  /**
+   * P4, a finding negative only: code makes the candidate and the judge must rule it fine (a lie
+   * in speech against the narration, a remembered colour against a note); without it, code makes
+   * no candidate at all.
+   */
+  candidate: z.boolean().default(false),
+  reason: z.string().min(1)
+})
+
+/** P4: a record on the page in a scene, by the quote that shows it (the card's `present`). */
+export const LabelPresence = z.object({
+  scene: SceneId,
+  record: Id,
+  p: z.number().int().min(0),
+  quote: z.string().min(1)
+})
+
+/**
+ * P4: a line of the author's notes the contradictions read: a record's Pinned page, or a Research
+ * page (written in MythScribe, canon) by its title.
+ */
+export const LabelNote = z.object({
+  record: Id.optional(),
+  research: z.string().min(1).optional(),
+  lines: z.array(z.string().min(1)).min(1)
+})
+
+/** P4: a loose end as of the end of the book (F-16.29): a thread, a character or a planned card. */
+export const LabelLooseEnd = z.object({
+  kind: z.enum(['thread', 'character', 'planned']),
+  /** The thread's or character's record, or the planned card's scene. */
+  id: z.string().min(1),
+  /** Where it was last touched (none for a planned card). */
+  last: SceneId.optional(),
   reason: z.string().min(1)
 })
 
@@ -311,6 +369,12 @@ export const TestBookLabels = z.object({
   contradictions: z.array(LabelContradiction).min(1),
   negatives: z.array(LabelNegative).min(1),
   pages: z.array(LabelPage).min(1),
-  questions: z.array(LabelQuestion).min(1)
+  questions: z.array(LabelQuestion).min(1),
+  /** P4: who the cards put on the page, beyond the knows lines' learners. */
+  presence: z.array(LabelPresence).min(1),
+  /** P4: the author's notes the contradictions read (on P4 records and a Research page). */
+  notes: z.array(LabelNote).min(1),
+  /** P4: what the book leaves hanging as of its end. */
+  looseEnds: z.array(LabelLooseEnd).min(1)
 })
 export type TestBookLabels = z.input<typeof TestBookLabels>

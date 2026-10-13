@@ -29,7 +29,10 @@ import { normName } from './names'
  *   `thread:<threadId>` with its step; an AI-made secret or thread the author said is not one is
  *   keyed by its kind and its reveal's sentences (`topic|kind|…`, P2b-D13).
  * - `notProblem`: a conflict that is fine: a filed line's (F-16.9, by the caller's `ref`), the
- *   typed-detail conflict's *Keep mine* (decision 4, F-16.18: `detail`), and P4's findings.
+ *   typed-detail conflict's *Keep mine* (decision 4, F-16.18: `detail`), and P4's: a finding
+ *   (F-16.27, design §2.4: keyed by the record, the slot and both values with their places, so it
+ *   survives rewording and renames) and a loose end (F-16.29: keyed by what it is and the scene it
+ *   was last touched in, so a later touch brings it back).
  */
 export const DISMISSED_KINDS = [
   'name',
@@ -83,6 +86,36 @@ export type DismissedKeyInput =
     }
   | { kind: 'notProblem'; ref: string }
   | { kind: 'notProblem'; detail: { nodeId: string; field: string; value: string } }
+  | { kind: 'notProblem'; finding: FindingKeyInput }
+  | { kind: 'notProblem'; loose: LooseKeyInput }
+
+/**
+ * A finding's *Not a problem* key input (F-16.27, P4-D14): the record, the slot (`kinship:<id>`,
+ * `knows:<secretId>` and `thread` included) and each side's place and value. A place is a scene's
+ * node id or a note's owner (`note:record:<id>`, `note:research:<id>`); a value is keyed
+ * (`valueKey`), so rewording and renames leave the key standing.
+ */
+export interface FindingKeyInput {
+  recordId: string
+  slot: string
+  a: { at: string; value: string }
+  b: { at: string; value: string }
+}
+
+/** The kinds of loose end (F-16.29). */
+export const LOOSE_END_KINDS = ['thread', 'character', 'planned'] as const
+export type LooseEndKind = (typeof LOOSE_END_KINDS)[number]
+
+/** A loose end's *Not a problem* key input: what it is, and the scene it was last touched in. */
+export interface LooseKeyInput {
+  kind: LooseEndKind
+  id: string
+  lastNodeId: string | null
+}
+
+/** One side of a finding key: its place and its keyed value, no `|` inside the value. */
+const findingPart = (side: { at: string; value: string }): string =>
+  `${side.at}|${valueKey(side.value).replace(/\|/g, '/')}`
 
 /** A card entry *Not right* may dismiss: one of its fields, or a character on the page. */
 export type CardEntryName = CardFieldName | 'present'
@@ -110,7 +143,9 @@ export function statingKey(stating: readonly string[]): string {
  * `topic|kind|statingKey`; a knows line keys by its learner with the slot `knows:<secretId>` and its
  * how as the value, so a merge of either record re-keys it); `notProblem` → the caller's reference, or for
  * a typed detail `detail|nodeId|field|valueKey` (the text's value the author kept hers against; for
- * a POV, the text's record id, so a rename never asks again).
+ * a POV, the text's record id, so a rename never asks again), for a finding
+ * `finding|recordId|slot|<lower at|valueKey>|<higher at|valueKey>` (the two sides sorted, so it is
+ * one key whichever came first), for a loose end `loose|kind|id|lastNodeId`.
  */
 export function dismissedKey(input: DismissedKeyInput): string {
   switch (input.kind) {
@@ -137,10 +172,39 @@ export function dismissedKey(input: DismissedKeyInput): string {
         return `${input.recordId}|${input.slot}|${valueKey(input.value)}|a${sentenceHash(input.anchor.join(' '))}`
       }
       return `${input.recordId}|${input.slot}|${valueKey(input.value)}|${statingKey(input.stating)}`
-    case 'notProblem':
+    case 'notProblem': {
       if ('ref' in input) return input.ref
+      if ('finding' in input) {
+        const { recordId, slot, a, b } = input.finding
+        const [lower, higher] = [findingPart(a), findingPart(b)].sort()
+        return `finding|${recordId}|${slot}|${lower ?? ''}|${higher ?? ''}`
+      }
+      if ('loose' in input) {
+        const { kind, id, lastNodeId } = input.loose
+        return `loose|${kind}|${id}|${lastNodeId ?? ''}`
+      }
       return `detail|${input.detail.nodeId}|${input.detail.field}|${valueKey(input.detail.value)}`
+    }
   }
+}
+
+/**
+ * A finding key with one record's id moved to another (*Same as…*, P4-D14): the subject, a
+ * `kinship:`/`knows:` slot's record and a note owner's record, the two sides sorted again. Null for
+ * a key that is no finding key.
+ */
+export function rekeyFinding(key: string, from: string, to: string): string | null {
+  const parts = key.split('|')
+  if (parts[0] !== 'finding' || parts.length !== 7) return null
+  const [, recordId = '', slot = '', atA = '', valueA = '', atB = '', valueB = ''] = parts
+  const move = (id: string): string => (id === from ? to : id)
+  const moveSlot = slot.replace(
+    /^(kinship|knows):(.+)$/u,
+    (_, kind: string, id: string) => `${kind}:${move(id)}`
+  )
+  const moveAt = (at: string): string => (at === `note:record:${from}` ? `note:record:${to}` : at)
+  const pair = [`${moveAt(atA)}|${valueA}`, `${moveAt(atB)}|${valueB}`].sort()
+  return `finding|${move(recordId)}|${moveSlot}|${pair[0] ?? ''}|${pair[1] ?? ''}`
 }
 
 /** The longest label and quote a row keeps (what the Dismissed list shows). */

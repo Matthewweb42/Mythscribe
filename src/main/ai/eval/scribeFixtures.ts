@@ -29,10 +29,13 @@ import type { EvalCase, ScribeExpect } from './fixtures'
 /** A scene's reference in the test book: its chapter, one scene each (`h09` → 14.1). */
 const refOf = (sceneId: string): string => `${testBookScene(sceneId).chapter}.1`
 
-/** The test book's records as the roster lists them (names and nicknames, named kinds only). */
+/**
+ * The test book's records as the roster lists them (names and nicknames, named kinds only; P4's
+ * left out so these token rows stay as P3 wrote them).
+ */
 const ROSTER = scribeRoster(
   TEST_BOOK_LABELS.records
-    .filter((record) => isNamedKind(record.kind))
+    .filter((record) => isNamedKind(record.kind) && record.addedFor !== 'P4')
     .map((record, i) => ({
       id: record.id,
       name: record.name,

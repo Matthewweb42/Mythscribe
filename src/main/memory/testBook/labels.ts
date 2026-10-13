@@ -180,6 +180,23 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       aliases: [{ text: "Lottie's match" }],
       defining: { scene: 'h04', p: 2, quote: 'Lottie is to marry Mr. Dunmore' },
       addedFor: 'P2b'
+    },
+    {
+      // P4: a new character in h15 with a stated age off her birth year, her hair changing with
+      // no word of it, and Pinned notes against the book.
+      id: 'anne',
+      name: 'Anne Fenwick',
+      kind: 'character',
+      aliases: [{ text: 'Anne Fenwick' }, { text: 'Miss Fenwick' }, { text: 'Anne' }],
+      addedFor: 'P4'
+    },
+    {
+      // P4: remembered (h15), rumoured dead (h15), alive in a flashback (h16).
+      id: 'fenwick-father',
+      name: 'Mr. Fenwick',
+      kind: 'character',
+      aliases: [{ text: 'Mr. Fenwick' }],
+      addedFor: 'P4'
     }
   ],
   dismissed: ['Michaelmas'],
@@ -585,6 +602,242 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       expect: 'verified',
       reason:
         'A stated age in a relative clause, a year after h09 ("A year later"): the last stated age as of h14, with no hint since.'
+    },
+    {
+      id: 'anne-location',
+      scene: 'h15',
+      p: 0,
+      record: 'anne',
+      slot: 'location',
+      value: 'Greyhallow',
+      quote: 'Anne Fenwick was at Greyhallow that summer',
+      voice: 'narration',
+      mode: 'now',
+      expect: 'literal',
+      reason:
+        "Where Anne is in h15; her Pinned page's dated line puts her in Vellmouth then (C6, a transient slot)."
+    },
+    {
+      id: 'anne-hair-dark',
+      scene: 'h15',
+      p: 2,
+      record: 'anne',
+      slot: 'hair',
+      value: 'dark',
+      quote: "Anne's hair was dark under the painter's lamp",
+      voice: 'narration',
+      mode: 'now',
+      expect: 'literal',
+      reason:
+        'Her hair under the lamp: dark, against fair at dinner with no word of a change (the planted C2 body).'
+    },
+    {
+      id: 'anne-eyes-grey',
+      scene: 'h15',
+      p: 2,
+      record: 'anne',
+      slot: 'eyes',
+      value: 'grey',
+      quote: "Anne's eyes were grey",
+      voice: 'narration',
+      mode: 'now',
+      expect: 'literal',
+      reason:
+        'Eyes are fixed: grey here against the "Eyes: blue" line on her Pinned page (the planted C6).'
+    },
+    {
+      id: 'anne-born',
+      scene: 'h15',
+      p: 3,
+      record: 'anne',
+      slot: 'born',
+      value: 'in 1795',
+      quote: 'Anne Fenwick was born in 1795',
+      voice: 'narration',
+      mode: 'now',
+      expect: 'literal',
+      reason:
+        'Born in 1795, in a scene typed 1815, while she is stated to be eighteen (the planted C4 birth).'
+    },
+    {
+      id: 'anne-age',
+      scene: 'h15',
+      p: 4,
+      record: 'anne',
+      slot: 'age',
+      value: 'eighteen',
+      quote: 'Anne Fenwick was eighteen',
+      voice: 'narration',
+      mode: 'now',
+      expect: 'literal',
+      reason: 'Eighteen in 1815 against a birth in 1795: two years off (C4 birth).'
+    },
+    {
+      id: 'anne-cousin',
+      scene: 'h15',
+      p: 5,
+      record: 'anne',
+      slot: 'kinship',
+      value: "Lise's cousin",
+      quote: "Anne Fenwick was Lise's cousin",
+      voice: 'narration',
+      mode: 'now',
+      expect: 'verified',
+      object: 'liesel',
+      reason: 'A kinship with a second record (Liesel): the Research page says the same, so no C6.'
+    },
+    {
+      id: 'fenwick-eyes-remembered',
+      scene: 'h15',
+      p: 6,
+      record: 'fenwick-father',
+      slot: 'eyes',
+      value: 'blue',
+      quote: "Anne remembered Mr. Fenwick's blue eyes",
+      voice: 'narration',
+      mode: 'memory',
+      expect: 'verified',
+      reason:
+        'A remembered eye colour against his Pinned "Eyes: brown": a candidate the judge must rule fine (a memory may be wrong).'
+    },
+    {
+      id: 'fenwick-drowned',
+      scene: 'h15',
+      p: 7,
+      record: 'fenwick-father',
+      slot: 'alive',
+      value: 'drowned',
+      quote: 'Mr. Fenwick had drowned off Vellmouth the winter before',
+      voice: 'rumour',
+      mode: 'now',
+      expect: 'verified',
+      reason: 'Village talk: a rumoured death sets no state, so his h16 appearance raises no C2.'
+    },
+    {
+      id: 'lottie-hair-long',
+      scene: 'h15',
+      p: 8,
+      record: 'lottie',
+      slot: 'hair',
+      value: 'long',
+      quote: "Lottie's hair was long that morning",
+      voice: 'narration',
+      mode: 'now',
+      expect: 'literal',
+      reason: 'Long in the morning, cut short by dinner with a change sentence: no C2.'
+    },
+    {
+      id: 'lottie-age-seventeen',
+      scene: 'h15',
+      p: 9,
+      record: 'lottie',
+      slot: 'age',
+      value: 'seventeen',
+      quote: 'Lottie was seventeen that June',
+      voice: 'narration',
+      mode: 'now',
+      expect: 'literal',
+      reason: 'Seventeen after nineteen in h14: a stated age that falls (the planted C4 falls).'
+    },
+    {
+      id: 'anne-birthplace-lottie',
+      scene: 'h15',
+      p: 10,
+      record: 'anne',
+      slot: 'detail:birthplace',
+      value: 'Gullhaven',
+      quote: 'Miss Fenwick was born at Gullhaven',
+      voice: 'dialogue',
+      speaker: 'lottie',
+      mode: 'now',
+      expect: 'verified',
+      reason: "Lottie's word: speech only, so with Bel's it is never a C1 candidate."
+    },
+    {
+      id: 'anne-birthplace-bel',
+      scene: 'h15',
+      p: 11,
+      record: 'anne',
+      slot: 'detail:birthplace',
+      value: 'Elsdale',
+      quote: 'Miss Fenwick was born in Elsdale',
+      voice: 'dialogue',
+      speaker: 'bel',
+      mode: 'now',
+      expect: 'verified',
+      reason:
+        "Bel's word against Lottie's: two dialogue values with no narration, never a C1 candidate."
+    },
+    {
+      id: 'lottie-hair-short',
+      scene: 'h15',
+      p: 12,
+      record: 'lottie',
+      slot: 'hair',
+      value: 'short',
+      quote: 'By dinner Lottie had cut her hair short',
+      voice: 'narration',
+      mode: 'now',
+      expect: 'verified',
+      change: true,
+      reason:
+        'A change sentence ("had cut"): the claim carries the change flag, so long then short is no C2.'
+    },
+    {
+      id: 'anne-hair-fair',
+      scene: 'h15',
+      p: 14,
+      record: 'anne',
+      slot: 'hair',
+      value: 'fair',
+      quote: "Anne's fair hair was pinned up for the evening",
+      voice: 'narration',
+      mode: 'now',
+      expect: 'verified',
+      reason:
+        'Fair at dinner after dark under the lamp, with no word of a change (C2 body); the Captain in the sentence sends it to the verifier.'
+    },
+    {
+      id: 'captain-father-merchant',
+      scene: 'h15',
+      p: 15,
+      record: 'captain',
+      slot: 'history',
+      value: 'father was a merchant in Vellmouth',
+      quote: "The Captain's father was a merchant in Vellmouth",
+      voice: 'narration',
+      mode: 'now',
+      expect: 'verified',
+      reason:
+        "One account of the Captain's father; the next paragraph gives another (the planted C7)."
+    },
+    {
+      id: 'captain-father-clergyman',
+      scene: 'h15',
+      p: 16,
+      record: 'captain',
+      slot: 'history',
+      value: 'father was a clergyman in Vellmouth',
+      quote: "The Captain's father was a clergyman in Vellmouth",
+      voice: 'narration',
+      mode: 'now',
+      expect: 'verified',
+      reason:
+        'A second account of the same father, both narration: only Check the book pairs them (C7).'
+    },
+    {
+      id: 'fenwick-alive-then',
+      scene: 'h16',
+      p: 2,
+      record: 'fenwick-father',
+      slot: 'alive',
+      value: 'alive',
+      quote: 'In those days Mr. Fenwick was alive',
+      voice: 'narration',
+      mode: 'now',
+      expect: 'literal',
+      reason:
+        'Alive in the flashback (1811); his Pinned "Dies at Waterloo, 1815." is about the future, so no C6.'
     }
   ],
   mentions: [
@@ -748,7 +1001,22 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
         'ashby',
         'clara'
       ]
-    }
+    },
+    {
+      scene: 'h15',
+      records: [
+        'anne',
+        'greyhallow',
+        'liesel',
+        'fenwick-father',
+        'lottie',
+        'gullhaven',
+        'bel',
+        'elsdale',
+        'captain'
+      ]
+    },
+    { scene: 'h16', records: ['liesel', 'thornmere', 'hobb', 'fenwick-father'] }
   ],
   twinCases: [
     {
@@ -1010,6 +1278,14 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       scene: 'h09',
       p: 3,
       quote: 'Lottie was eighteen now, and married'
+    },
+    {
+      // P4: advanced after h09 resolved it (the planted C5).
+      thread: 'thread-lottie-match',
+      how: 'advances',
+      scene: 'h15',
+      p: 13,
+      quote: "the lawyers met again over Lottie's match"
     }
   ],
   years: [
@@ -1032,6 +1308,16 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       source: 'unknown',
       hint: 'h14',
       elapsed: { p: 0, quote: 'A year later' }
+    },
+    // P4: a typed year after h14's unknown one.
+    { scene: 'h15', year: 1815, source: 'typed' },
+    {
+      // P4: a verified flashback card; its typed year is its own and carries nothing.
+      scene: 'h16',
+      year: 1811,
+      source: 'typed',
+      flashback: true,
+      flashbackQuote: { p: 0, quote: 'Years before, when Lise was a girl' }
     }
   ],
   ages: [
@@ -1070,6 +1356,7 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
     },
     {
       rule: 'C2',
+      variant: 'dead',
       record: 'hobb',
       a: { scene: 'h03', p: 3, quote: 'He died in the night, in his chair by the lodge fire' },
       b: { scene: 'h09', p: 1, quote: 'Hobb opened the lodge gate for them' },
@@ -1083,6 +1370,71 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       b: { scene: 'h05', p: 2, quote: 'Mr. Dunmore and I are engaged' },
       reason:
         'Bel tells Clara the secret in h04, but only learns it from Lottie in h05, which is not a memory.'
+    },
+    {
+      rule: 'C2',
+      variant: 'body',
+      record: 'anne',
+      a: { scene: 'h15', p: 2, quote: "Anne's hair was dark under the painter's lamp" },
+      b: { scene: 'h15', p: 14, quote: "Anne's fair hair was pinned up for the evening" },
+      reason:
+        'Dark under the lamp, fair at dinner, both narration, with no change sentence between.'
+    },
+    {
+      rule: 'C4',
+      variant: 'birth',
+      record: 'anne',
+      a: { scene: 'h15', p: 3, quote: 'Anne Fenwick was born in 1795' },
+      b: { scene: 'h15', p: 4, quote: 'Anne Fenwick was eighteen' },
+      reason: 'Born in 1795 and eighteen in a scene typed 1815: two years off.'
+    },
+    {
+      rule: 'C4',
+      variant: 'falls',
+      record: 'lottie',
+      a: { scene: 'h14', p: 11, quote: 'Lottie, who was nineteen' },
+      b: { scene: 'h15', p: 9, quote: 'Lottie was seventeen that June' },
+      reason: 'Nineteen in h14, seventeen later in h15: a stated age falls, outside any flashback.'
+    },
+    {
+      rule: 'C5',
+      record: 'thread-lottie-match',
+      a: { scene: 'h09', p: 3, quote: 'Lottie was eighteen now, and married' },
+      b: { scene: 'h15', p: 13, quote: "the lawyers met again over Lottie's match" },
+      reason: "Lottie's match resolved in h09 (married) and advances again in h15."
+    },
+    {
+      rule: 'C6',
+      record: 'anne',
+      a: { scene: 'h15', p: 2, quote: "Anne's eyes were grey" },
+      note: { record: 'anne', quote: 'Eyes: blue' },
+      reason: 'Eyes are fixed: grey in the book, blue on her Pinned page.'
+    },
+    {
+      rule: 'C6',
+      record: 'anne',
+      a: { scene: 'h15', p: 0, quote: 'Anne Fenwick was at Greyhallow that summer' },
+      note: { record: 'anne', quote: "Location (from 19.1 'The portrait'): Vellmouth" },
+      reason:
+        "Location is transient: the note's line is dated to 19.1, where the book has her at Greyhallow."
+    },
+    {
+      rule: 'C7',
+      record: 'captain',
+      a: { scene: 'h15', p: 15, quote: "The Captain's father was a merchant in Vellmouth" },
+      b: { scene: 'h15', p: 16, quote: "The Captain's father was a clergyman in Vellmouth" },
+      reason:
+        'Two narration accounts of the same father (history): a Check the book candidate only.'
+    },
+    {
+      rule: 'C2',
+      variant: 'dead',
+      record: 'hobb',
+      a: { scene: 'h03', p: 3, quote: 'He died in the night, in his chair by the lodge fire' },
+      b: { scene: 'h16', p: 1, quote: 'Hobb stood at the lodge gate in the rain' },
+      hidden: true,
+      reason:
+        'Hobb at the gate after his death, but h16 is a verified flashback: made and hidden, listed by Check the book with Not a flashback?'
     }
   ],
   negatives: [
@@ -1105,7 +1457,9 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       kind: 'finding',
       rule: 'C1',
       record: 'dunmore',
-      reason: "Dunmore's clergyman father is his own speech: no C1 against s05's narration."
+      candidate: true,
+      reason:
+        "Dunmore's clergyman father is his own speech: a candidate against s05's narration the judge must rule fine (a lie)."
     },
     {
       scene: 'h02',
@@ -1201,6 +1555,64 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       slot: 'detail:wealth',
       reason:
         "Mrs. Harrow's mistaken belief that he has a large fortune sets nothing about the Captain."
+    },
+    {
+      scene: 'h15',
+      kind: 'finding',
+      rule: 'C2',
+      record: 'lottie',
+      slot: 'hair',
+      reason: 'Long in the morning, cut short by dinner with a change sentence: no C2 body.'
+    },
+    {
+      scene: 'h15',
+      kind: 'finding',
+      rule: 'C1',
+      record: 'anne',
+      slot: 'detail:birthplace',
+      reason: "Lottie's Gullhaven and Bel's Elsdale are both speech: never a C1 candidate."
+    },
+    {
+      scene: 'h15',
+      kind: 'finding',
+      rule: 'C7',
+      record: 'anne',
+      slot: 'detail:birthplace',
+      reason: 'Two speech values with no narration: no C7 candidate either.'
+    },
+    {
+      scene: 'h15',
+      kind: 'finding',
+      rule: 'C2',
+      record: 'fenwick-father',
+      reason: 'A rumoured drowning sets no state: no C2 dead for his h16 appearance.'
+    },
+    {
+      scene: 'h15',
+      kind: 'finding',
+      rule: 'C6',
+      record: 'fenwick-father',
+      slot: 'eyes',
+      candidate: true,
+      reason:
+        'A remembered blue against his Pinned "Eyes: brown": a candidate the judge must rule fine.'
+    },
+    {
+      scene: 'h16',
+      kind: 'finding',
+      rule: 'C6',
+      record: 'fenwick-father',
+      slot: 'alive',
+      reason:
+        'His Pinned "Dies at Waterloo, 1815." is about the future: no C6 against him alive in 1811.'
+    },
+    {
+      scene: 'h15',
+      kind: 'finding',
+      rule: 'C6',
+      record: 'anne',
+      slot: 'kinship',
+      reason: "The Research page's cousin agrees with the book: no C6."
     }
   ],
   // P3 (F-16.24–F-16.26): what the author wrote on two records' pages, so Ms Scribe has canon
@@ -1557,6 +1969,61 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       terms: ['married', 'wife', 'widower', 'Ireland'],
       record: 'captain',
       expected: { label: 'idea', quoteHas: 'married once before', trap: 'married once before' }
+    }
+  ],
+  // P4 (F-16.27): who the cards put on the page beyond the knows lines' learners.
+  presence: [
+    { scene: 'h09', record: 'hobb', p: 1, quote: 'Hobb opened the lodge gate for them' },
+    { scene: 'h16', record: 'hobb', p: 1, quote: 'Hobb stood at the lodge gate in the rain' },
+    {
+      scene: 'h16',
+      record: 'fenwick-father',
+      p: 2,
+      quote: 'Mr. Fenwick was alive, and rode over from Vellmouth'
+    },
+    { scene: 'h15', record: 'anne', p: 0, quote: 'Anne Fenwick was at Greyhallow that summer' },
+    { scene: 'h15', record: 'lottie', p: 8, quote: "Lottie's hair was long that morning" }
+  ],
+  // P4 (F-16.27): the author's notes the contradictions read, on P4 records only (so no P3
+  // question's evidence moves) and one Research page.
+  notes: [
+    { record: 'anne', lines: ['Eyes: blue', "Location (from 19.1 'The portrait'): Vellmouth"] },
+    { record: 'fenwick-father', lines: ['Eyes: brown', 'Dies at Waterloo, 1815.'] },
+    {
+      research: 'The Fenwicks',
+      lines: [
+        "Anne Fenwick is Lise's cousin on her mother's side.",
+        'The Fenwicks keep a house at Vellmouth.'
+      ]
+    }
+  ],
+  // P4 (F-16.29): what the book leaves hanging as of its end (h16), worked out by hand: each
+  // character named in 3 or more scenes and last named a window (8 scenes) or more before h16,
+  // alive (Hobb is dead), in the order last touched; no thread (Ashby's return is resolved, and
+  // Lottie's match moved in h15); and the planned card.
+  looseEnds: [
+    {
+      kind: 'character',
+      id: 'pell-sir',
+      last: 's05',
+      reason: 'Named in s01, s03, s04 and s05, never after: a window (8 scenes) or more before h16.'
+    },
+    {
+      kind: 'character',
+      id: 'pell-lady',
+      last: 'h04',
+      reason: 'Named in s01, s03, s05 and h04, never after.'
+    },
+    {
+      kind: 'character',
+      id: 'celia',
+      last: 'h05',
+      reason: 'Named in s03, s04, s05, h01 and h05, never after.'
+    },
+    {
+      kind: 'planned',
+      id: 'h17',
+      reason: 'A planned card with no words and no link, before the last drafted scenes.'
     }
   ]
 }

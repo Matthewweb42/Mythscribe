@@ -55,7 +55,8 @@ const ask = (question: string, open: string, caretPara: number | null = null): S
 
 beforeAll(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-step0-'))
-  book = buildTestBookProject(tmp, NOW)
+  // The book as P3 knew it: P4's later scenes would crowd the hits these cases rank.
+  book = buildTestBookProject(tmp, NOW, { without: 'P4' })
   varrow = book.records.get('varrow') ?? ''
   seedClaims(
     book.db,

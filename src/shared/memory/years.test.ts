@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { ReadingOrder } from './asOf'
 import {
   ageAsOf,
+  ageYears,
   birthYear,
+  bornLine,
   changesSince,
   elapsedBreaks,
   hintWords,
@@ -10,6 +12,7 @@ import {
   sinceNodeId,
   statedAge,
   storyYears,
+  yearCalendar,
   yearIn,
   type AgeClaim,
   type YearRow
@@ -433,5 +436,34 @@ describe('ageAsOf (decision 5)', () => {
         atId: 's3'
       })
     ).toBeNull()
+  })
+})
+
+describe('ages and years as C4 reads them (F-16.27)', () => {
+  it('reads a stated age in digits or words', () => {
+    expect(ageYears('17')).toBe(17)
+    expect(ageYears('about 40')).toBe(40)
+    expect(ageYears('seventeen')).toBe(17)
+    expect(ageYears('nineteen')).toBe(19)
+    expect(ageYears('twenty-four')).toBe(24)
+    expect(ageYears('twenty four')).toBe(24)
+    expect(ageYears('seven-and-twenty')).toBe(27)
+    expect(ageYears('two-and-twenty')).toBe(22)
+    expect(ageYears('a girl')).toBeNull()
+    expect(ageYears('old')).toBeNull()
+  })
+
+  it('reads a Pinned Born line as a year and its words', () => {
+    expect(bornLine('Born: 1792')).toEqual({ year: 1792, value: '1792' })
+    expect(bornLine('Born (story year): spring 1790')).toEqual({ year: 1790, value: 'spring 1790' })
+    expect(bornLine('Born in the north')).toBeNull()
+  })
+
+  it('reads the calendar beside a year: era marks only', () => {
+    expect(yearCalendar('1812')).toBe('')
+    expect(yearCalendar('the spring of 1812')).toBe('')
+    expect(yearCalendar('in 1795')).toBe('')
+    expect(yearCalendar('1812 AR')).toBe('AR')
+    expect(yearCalendar('in 300 B.C.')).toBe('BC')
   })
 })

@@ -281,6 +281,47 @@ export const LITERAL_PATTERNS: Readonly<Partial<Record<Slot, readonly LiteralPat
   ]
 }
 
+/**
+ * The value a slot's patterns read from a sentence (P4's C6 note side, P4-D8): `masked` is `text`
+ * with the subject's names masked as `§` and every other name as `_`, at the same length. The
+ * first pattern that matches (its modifiers and tail rules holding) gives the captured words as
+ * written, outer punctuation trimmed; null when none matches, or when a marker (a negation, a
+ * modal, a comparison…) stands in the sentence, as for a literal proof.
+ */
+export function patternValue(slot: Slot, text: string, masked: string): string | null {
+  const patterns = LITERAL_PATTERNS[slot]
+  if (patterns === undefined) return null
+  const plain = straightenQuotes(text)
+  for (const { pattern, modifiers, tail } of patterns) {
+    const match = pattern.exec(masked)
+    const captured = match?.groups?.v
+    const span = match?.indices?.groups?.v
+    if (match === null || captured === undefined || span === undefined) continue
+    if (modifiers === true && !modifiersOnly(captured)) continue
+    if (tail !== undefined && !tail.test(masked.slice(match.index + match[0].length))) continue
+    const value = plain
+      .slice(span[0], span[1])
+      .replace(/[\s,;:.!?]+$/u, '')
+      .trim()
+    if (value === '') continue
+    const verb = match.indices?.groups?.verb
+    const ignore: [number, number][] = verb === undefined ? [] : [[verb[0], verb[1]]]
+    return findMarkers(masked, { ignore }).length === 0 ? value : null
+  }
+  return null
+}
+
+const KIN_PATTERN = new RegExp(`(?<![\\p{L}\\p{N}])(?:${KIN})(?![\\p{L}\\p{N}])`, 'giu')
+
+/** The kin words of a text ("son", "sister"), lower case, each with where it stands. */
+export function kinWords(text: string): { word: string; start: number; end: number }[] {
+  return [...text.matchAll(KIN_PATTERN)].map((match) => ({
+    word: match[0].toLowerCase(),
+    start: match.index,
+    end: match.index + match[0].length
+  }))
+}
+
 /** Whether a slot has literal patterns at all. */
 export function hasLiteralPatterns(slot: Slot): boolean {
   return LITERAL_PATTERNS[slot] !== undefined

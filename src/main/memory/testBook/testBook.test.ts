@@ -27,7 +27,10 @@ import { editedParagraphs } from './project'
 
 const LABELS = TestBookLabels.parse(TEST_BOOK_LABELS)
 const RECORD_IDS = new Set(LABELS.records.map((record) => record.id))
-const NEVER_READ = TEST_BOOK.filter((scene) => !readerMayRead(scene.source)).map((s) => s.id)
+// The planned card (h17, P4) has no words to read: a plan, never one of the never-read scenes.
+const NEVER_READ = TEST_BOOK.filter(
+  (scene) => !readerMayRead(scene.source) && scene.source !== 'plannedCard'
+).map((s) => s.id)
 
 function located(scene: string, p: number, quote: string): boolean {
   return locateQuote(testBookScene(scene).paragraphs, p, quote).ok
@@ -72,7 +75,19 @@ describe('the test book (F-16.3)', () => {
   it('finds both quotes of every planted contradiction, and every knows line and defining quote', () => {
     for (const finding of LABELS.contradictions) {
       expect(located(finding.a.scene, finding.a.p, finding.a.quote), finding.a.quote).toBe(true)
-      expect(located(finding.b.scene, finding.b.p, finding.b.quote), finding.b.quote).toBe(true)
+      const { b, note } = finding
+      // P4: the other side is a passage of the book or a line of the labelled notes, never both.
+      expect(b === undefined, finding.reason).toBe(note !== undefined)
+      if (b !== undefined) expect(located(b.scene, b.p, b.quote), b.quote).toBe(true)
+      if (note !== undefined) {
+        const lines = LABELS.notes
+          .filter((each) => each.record === note.record && each.research === note.research)
+          .flatMap((each) => each.lines)
+        expect(lines, note.quote).toContain(note.quote)
+      }
+    }
+    for (const each of LABELS.presence) {
+      expect(located(each.scene, each.p, each.quote), each.quote).toBe(true)
     }
     for (const line of LABELS.knows) {
       expect(located(line.scene, line.p, line.quote), line.quote).toBe(true)
@@ -86,6 +101,10 @@ describe('the test book (F-16.3)', () => {
       }
       if (year.quotedYear) {
         expect(located(year.scene, year.quotedYear.p, year.quotedYear.quote), year.scene).toBe(true)
+      }
+      if (year.flashbackQuote) {
+        const { p, quote } = year.flashbackQuote
+        expect(located(year.scene, p, quote), year.scene).toBe(true)
       }
     }
     for (const record of LABELS.records) {
@@ -121,7 +140,11 @@ describe('the test book (F-16.3)', () => {
       ...LABELS.threads.map((step) => step.scene),
       ...LABELS.years.map((year) => year.scene),
       ...LABELS.ages.map((age) => age.scene),
-      ...LABELS.contradictions.flatMap((finding) => [finding.a.scene, finding.b.scene])
+      ...LABELS.contradictions.flatMap((finding) => [
+        finding.a.scene,
+        ...(finding.b === undefined ? [] : [finding.b.scene])
+      ]),
+      ...LABELS.presence.map((each) => each.scene)
     ]
     for (const scene of labelled) expect(NEVER_READ).not.toContain(scene)
     // Each never-read scene has a negative saying what must not come out of it.

@@ -8,9 +8,12 @@ import type { MemorySource } from '@shared/memory/sources'
  *
  * Source. Scenes s01–s05 are adapted excerpts of chapters 1, 2, 3, 6 and 18 of *Pride and
  * Prejudice* by Jane Austen (1813; public domain, Project Gutenberg eBook #1342), shortened in
- * places. Scenes h01–h14 are original, written for this book (h13 and h14 for P2b's who knows
+ * places. Scenes h01–h16 are original, written for this book (h13 and h14 for P2b's who knows
  * what, threads, years and ages: a group learner, a secret held, deduced, suspected and mistaken,
- * a rumour, and two scenes with no typed year).
+ * a rumour, and two scenes with no typed year; h15 and h16 for P4's contradictions: a stated age
+ * off its birth year, a hair colour changed with no word of it, a falling age, a thread advanced
+ * after it was resolved, two accounts of a father, values against the author's notes, and a
+ * flashback with a dead man at the gate). h17 is a planned card with no words (P4's loose ends).
  *
  * Disguise. Every name and place is changed, so a model that answers from memory of the novel
  * answers wrongly, which shows up in scoring:
@@ -32,7 +35,7 @@ import type { MemorySource } from '@shared/memory/sources'
 
 export type TestBookSource = Extract<
   MemorySource,
-  'scene' | 'ideaScene' | 'inactiveDraft' | 'excludedScene'
+  'scene' | 'ideaScene' | 'inactiveDraft' | 'excludedScene' | 'plannedCard'
 >
 
 export interface TestBookScene {
@@ -45,6 +48,11 @@ export interface TestBookScene {
   /** Typed scene details (F-16.11): record ids for POV and place, free text for time. */
   details?: { pov?: string; place?: string; time?: string; year?: number }
   paragraphs: readonly string[]
+  /**
+   * A scene added for P4's contradictions (h15, h16, the planned card h17): left out of the older
+   * eval cases (the navigator's map), so their token rows stay as they were.
+   */
+  addedFor?: 'P4'
 }
 
 export const TEST_BOOK_SOURCE = {
@@ -474,6 +482,57 @@ export const TEST_BOOK: readonly TestBookScene[] = [
       `Lottie, who was nineteen and expecting her first child, had come over from Gullhaven for the week, and talked of nothing but caps and cradles.`,
       `When the Captain took his leave, Mr. Harrow shook his hand warmly and told him to come again, and Lise thought that her father was the only person in the room who was quite at ease.`
     ]
+  },
+  {
+    // P4: a planned card with no words, placed after h14 and before h15 (a loose end).
+    id: 'h17',
+    chapter: 18,
+    title: 'The Captain’s reckoning',
+    source: 'plannedCard',
+    paragraphs: [],
+    addedFor: 'P4'
+  },
+  {
+    id: 'h15',
+    chapter: 19,
+    title: 'The portrait',
+    source: 'scene',
+    details: { pov: 'liesel', place: 'greyhallow', year: 1815, time: 'June' },
+    paragraphs: [
+      `Anne Fenwick was at Greyhallow that summer, sitting for her portrait in the long gallery.`,
+      `Lise had come to keep her company, and found the house full of painters and dust sheets.`,
+      `Anne's hair was dark under the painter's lamp. Anne's eyes were grey, and very steady.`,
+      `Anne Fenwick was born in 1795, in the year her father bought the house at Vellmouth.`,
+      `Anne Fenwick was eighteen, and very still.`,
+      `Anne Fenwick was Lise's cousin, on her mother's side, though they had met only twice.`,
+      `Anne remembered Mr. Fenwick's blue eyes, and how he had laughed at her first portrait.`,
+      `It was said in the village that Mr. Fenwick had drowned off Vellmouth the winter before.`,
+      `Lottie's hair was long that morning.`,
+      `Lottie was seventeen that June and wanted everyone to know it.`,
+      `“Miss Fenwick was born at Gullhaven,” said Lottie.`,
+      `“Miss Fenwick was born in Elsdale,” Bel said at once.`,
+      `By dinner Lottie had cut her hair short, to her mother's horror.`,
+      `That week the lawyers met again over Lottie's match, and the settlement moved a step further.`,
+      `Anne's fair hair was pinned up for the evening, and she came down to dinner on the Captain's arm.`,
+      `The Captain's father was a merchant in Vellmouth, and had left him a warehouse full of tea.`,
+      `The Captain's father was a clergyman in Vellmouth, and had buried half the parish.`,
+      `Lise watched them all from the window seat, and thought that the portrait would never be finished.`
+    ],
+    addedFor: 'P4'
+  },
+  {
+    id: 'h16',
+    chapter: 20,
+    title: 'The gate, years before',
+    source: 'scene',
+    // A flashback: its typed year is its own and carries nothing (decision 5).
+    details: { pov: 'liesel', place: 'thornmere', year: 1811 },
+    paragraphs: [
+      `Years before, when Lise was a girl, the lodge at Thornmere smelled of pipe smoke and apples.`,
+      `Hobb stood at the lodge gate in the rain and lifted his hat to the carriage.`,
+      `In those days Mr. Fenwick was alive, and rode over from Vellmouth every Sunday to dine.`
+    ],
+    addedFor: 'P4'
   }
 ]
 

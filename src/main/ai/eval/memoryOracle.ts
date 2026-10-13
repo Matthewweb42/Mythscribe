@@ -118,8 +118,12 @@ export function proposal(
     voice: label.voice,
     sp: label.speaker === undefined ? null : (ids.get(nameOf.get(label.speaker) ?? '') ?? null),
     mode: label.mode,
-    o: relation ? (ids.get(nameOf.get(label.slot.slice('relation:'.length)) ?? '') ?? null) : null,
-    chg: false
+    o: relation
+      ? (ids.get(nameOf.get(label.slot.slice('relation:'.length)) ?? '') ?? null)
+      : label.object === undefined
+        ? null
+        : (ids.get(nameOf.get(label.object) ?? '') ?? null),
+    chg: label.change ?? false
   }
 }
 
@@ -157,7 +161,8 @@ export const wantsCard = (request: OracleRequest): boolean =>
  * The oracle's card: a fixed line and gist, the scene's labelled elapsed hint and quoted year
  * when their paragraphs were sent (decision 5 reads them back from the held card), and on the
  * page every character a knows label there has learning or holding a secret (the test book puts
- * each learner on the page or in the point of view, P2b-D8), at that line's sentence.
+ * each learner on the page or in the point of view, P2b-D8), at that line's sentence; P4 adds
+ * the labelled presence lines and the flashback sentence.
  */
 export function oracleCard(request: OracleRequest): Record<string, unknown> {
   const sent = sentParagraphs(request)
@@ -170,6 +175,13 @@ export function oracleCard(request: OracleRequest): Record<string, unknown> {
     if (!present.some(([other]) => other === id)) present.push([id, line.p, line.quote])
   }
   const scene = requestScene(request)
+  // P4: who else the labels put on the page (Hobb at the gate), at their sentence.
+  for (const line of TEST_BOOK_LABELS.presence) {
+    const id = ids.get(nameOf.get(line.record) ?? '')
+    if (line.scene !== scene?.id || id === undefined || !sentHolds(sent, line.p, line.quote))
+      continue
+    if (!present.some(([other]) => other === id)) present.push([id, line.p, line.quote])
+  }
   const year = TEST_BOOK_LABELS.years.find((each) => each.scene === scene?.id)
   const elapsed =
     year?.elapsed !== undefined && sentHolds(sent, year.elapsed.p, year.elapsed.quote)
@@ -179,6 +191,11 @@ export function oracleCard(request: OracleRequest): Record<string, unknown> {
     year?.quotedYear !== undefined && sentHolds(sent, year.quotedYear.p, year.quotedYear.quote)
       ? [year.quotedYear.value, year.quotedYear.p, year.quotedYear.quote]
       : null
+  const flash =
+    year?.flashbackQuote !== undefined &&
+    sentHolds(sent, year.flashbackQuote.p, year.flashbackQuote.quote)
+      ? ['yes', year.flashbackQuote.p, year.flashbackQuote.quote]
+      : null
   return {
     line: 'A scene of the test book.',
     gist: 'A scene of the test book, read by the oracle.',
@@ -187,7 +204,7 @@ export function oracleCard(request: OracleRequest): Record<string, unknown> {
     year: quoted,
     elapsed,
     pov: null,
-    flash: null,
+    flash,
     present,
     mood: null,
     theme: null
@@ -422,8 +439,25 @@ function presentVerdict(check: SentCheck, truth: OracleTruth): Record<string, un
     ) ||
     truth.onPage.some(
       (each) => nameOf.get(each.learner) === name && textHolds(check.text, each.quote)
+    ) ||
+    TEST_BOOK_LABELS.presence.some(
+      (label) => nameOf.get(label.record) === name && textHolds(check.text, label.quote)
     )
   return shown ? { i: check.i, ok: true, r: check.who[0] ?? null } : { i: check.i, ok: false }
+}
+
+/**
+ * A card item: a flashback the labels mark by its sentence (P4, h16) is confirmed; every other
+ * card field (POV, year, not a flashback) is not, as before.
+ */
+function cardVerdict(check: SentCheck): Record<string, unknown> {
+  const flashback =
+    check.fact.startsWith('this passage is a flashback') &&
+    TEST_BOOK_LABELS.years.some(
+      (year) =>
+        year.flashbackQuote !== undefined && textHolds(check.text, year.flashbackQuote.quote)
+    )
+  return flashback ? { i: check.i, ok: true, r: null } : { i: check.i, ok: false }
 }
 
 /** The honest checker: each item as the labels (and `truth`) say the text shows it. */
@@ -443,7 +477,7 @@ export function oracleVerify(request: OracleRequest, truth: OracleTruth = NO_TRU
       case 'present':
         return presentVerdict(check, truth)
       case 'card':
-        return { i: check.i, ok: false }
+        return cardVerdict(check)
     }
   })
   return JSON.stringify({ v: verdicts })
@@ -659,12 +693,14 @@ export function storedFor(
 }
 
 /**
- * The memory invariants over the whole project (P2b's knows, topics and name index included), and
- * (P3) the citations of Ms Scribe's answers, so one citing a card is caught.
+ * The memory invariants over the whole project (P2b's knows, topics and name index included),
+ * (P3) the citations of Ms Scribe's answers, so one citing a card is caught, and (P4) the
+ * findings with the *Not a problem* keys.
  */
 export function invariants(
   book: TestBookProject,
-  citations: InvariantInput['citations'] = []
+  citations: InvariantInput['citations'] = [],
+  findings: Pick<InvariantInput, 'findings' | 'dismissedFindings'> = {}
 ): ReturnType<typeof checkMemoryInvariants> {
   const scenes = new Map(
     [...new Set(book.scenes.values())].map((node) => [
@@ -679,7 +715,8 @@ export function invariants(
     citations,
     knows: invariantKnows(book.db),
     topics: invariantTopics(book.db),
-    indexed: invariantIndexed(book.db)
+    indexed: invariantIndexed(book.db),
+    ...findings
   })
 }
 

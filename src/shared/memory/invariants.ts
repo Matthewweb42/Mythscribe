@@ -64,6 +64,19 @@ export interface InvariantTopic {
   authorTouched: boolean
 }
 
+/**
+ * A stored finding (P4, F-16.27): its state, both verdicts, its *Not a problem* key, and each
+ * claim side's standing (a live claim of the active draft in a readable scene, or not).
+ */
+export interface InvariantFinding {
+  id: string
+  state: string
+  verdictAb: string | null
+  verdictBa: string | null
+  npKey: string
+  claimSides: readonly { claimId: string; live: boolean }[]
+}
+
 export type InvariantViolation =
   | { kind: 'anchorMissing'; claimId: string; sceneId: string; missing: string[] }
   | { kind: 'anchorEmpty'; claimId: string; sceneId: string }
@@ -75,6 +88,9 @@ export type InvariantViolation =
   | { kind: 'knowsLearner'; claimId: string }
   | { kind: 'topicEmpty'; recordId: string }
   | { kind: 'topicName'; recordId: string }
+  | { kind: 'findingUnjudged'; findingId: string }
+  | { kind: 'findingDismissed'; findingId: string }
+  | { kind: 'findingSide'; findingId: string; claimId: string }
 
 export interface InvariantInput {
   claims: readonly InvariantClaim[]
@@ -88,6 +104,9 @@ export interface InvariantInput {
   topics?: readonly InvariantTopic[]
   /** P2b: every record the name index holds (mentions, the scan's roster), with its kind. */
   indexed?: readonly { recordId: string; kind: RecordKind }[]
+  /** P4: the active draft's findings, and the *Not a problem* keys on the Dismissed list. */
+  findings?: readonly InvariantFinding[]
+  dismissedFindings?: ReadonlySet<string>
 }
 
 const NO_HASHES: ReadonlySet<string> = new Set()
@@ -107,6 +126,10 @@ const NO_HASHES: ReadonlySet<string> = new Set()
  *   thread with no reveal and no claim left in any draft and nothing from the author (it should
  *   have been pruned, P2b-D12); `topicName`, a secret or thread in the name index (they are not
  *   names, P2b-D2).
+ * - P4: `findingUnjudged`, an open finding without two "contradiction" verdicts; `findingDismissed`,
+ *   a stored finding whose *Not a problem* key is on the Dismissed list (it should have closed);
+ *   `findingSide`, an open finding whose claim side is not a live claim of the active draft in a
+ *   readable scene.
  * An empty list is a clean memory.
  */
 export function checkMemoryInvariants(input: InvariantInput): InvariantViolation[] {
@@ -173,6 +196,21 @@ export function checkMemoryInvariants(input: InvariantInput): InvariantViolation
     if ((entry.kind === 'secret' || entry.kind === 'thread') && !named.has(entry.recordId)) {
       named.add(entry.recordId)
       violations.push({ kind: 'topicName', recordId: entry.recordId })
+    }
+  }
+  const dismissedFindings = input.dismissedFindings ?? new Set<string>()
+  for (const finding of input.findings ?? []) {
+    if (finding.state === 'open' && (finding.verdictAb !== 'c' || finding.verdictBa !== 'c')) {
+      violations.push({ kind: 'findingUnjudged', findingId: finding.id })
+    }
+    if (dismissedFindings.has(finding.npKey)) {
+      violations.push({ kind: 'findingDismissed', findingId: finding.id })
+    }
+    if (finding.state !== 'open') continue
+    for (const side of finding.claimSides) {
+      if (!side.live) {
+        violations.push({ kind: 'findingSide', findingId: finding.id, claimId: side.claimId })
+      }
     }
   }
   return violations

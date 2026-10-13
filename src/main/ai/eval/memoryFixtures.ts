@@ -365,9 +365,12 @@ export const MEMORY_EVAL_CASES: readonly EvalCase[] = [
 
 // ---- P2b: reader.v2 and verify.v2 (F-16.22, F-16.23) -------------------------------------------
 
-/** The v2 roster: every record but the secrets and threads (P2b's own records included). */
+/**
+ * The v2 roster: every record but the secrets and threads (P2b's own records included, P4's left
+ * out so these token rows stay as P2b wrote them).
+ */
 const RECORDS_V2 = TEST_BOOK_LABELS.records.filter(
-  (record) => record.kind !== 'secret' && record.kind !== 'thread'
+  (record) => record.kind !== 'secret' && record.kind !== 'thread' && record.addedFor !== 'P4'
 )
 const SHORT_V2 = new Map(RECORDS_V2.map((record, i) => [record.id, `r${i + 1}`]))
 const TEST_BOOK_ROSTER_V2: readonly string[] = RECORDS_V2.map((record, i) =>
