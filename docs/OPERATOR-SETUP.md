@@ -107,13 +107,16 @@ OPENROUTER_API_KEY=sk-or-… npm run ai:probe -- -u                             
 MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- prompts   # live fidelity of every prompt version
 MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- memory    # story memory's planted errors (stops at 50¢)
 MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- knows     # who knows what, two passes (stops at 50¢)
+MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- scribe    # Ms Scribe's 31 test-book questions (stops at $1)
 ```
-`MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai` runs the three eval runs together. They use V4 Flash
+`MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai` runs the four eval runs together. The Ms Scribe run
+reads the test book's memory with the oracle (free) unless `MYTHSCRIBE_EVAL_READ=live` is set, which reads it with the live
+reader and checker first (about 13¢ more; an environment variable because vitest refuses unknown flags such as `--read`). They use V4 Flash
 and V4 Pro unless `MYTHSCRIBE_EVAL_FAST_MODEL` / `MYTHSCRIBE_EVAL_STRONG_MODEL` name others; `OPENAI_API_KEY` (with
 `OPENAI_BASE_URL` for OpenRouter or another OpenAI-compatible server) still works when `OPENROUTER_API_KEY` is not set.
 Reports: `test-results/eval-ai/live-report.md`, `test-results/eval-memory/planted-<date>.md` and
-`test-results/eval-knows/knows-<date>.md` (each with a `.json`); copy the story-memory ones into
-`docs/research/story-memory-2026-10-11/eval/` and commit them. In a cloud session the key is an environment secret, and
+`test-results/eval-knows/knows-<date>.md` and `test-results/eval-scribe/scribe-<date>.md` (each with a `.json`); copy the
+story-memory ones into `docs/research/story-memory-2026-10-11/eval/` and commit them. In a cloud session the key is an environment secret, and
 `openrouter.ai` must be allowed in the environment's network access.
 
 Prices move. To check today's prices without logging in:
@@ -147,6 +150,11 @@ story-memory reader later) under small output caps, where thinking would eat the
 - **No `routing.features` overrides are needed.** The app's own feature → tier choices hold: the story-memory reader,
   verifier, judge, navigator and citation requests run on the fast tier; the chat agent runs on strong; filing an upload into
   sheets runs on strong with reasoning off (the author's decision 6, 2026-10-11).
+- **Ms Scribe (P3, 2026-10-13).** In a story memory v2 project the chat sends three feature ids: `navigator`
+  (`navigator.v1`, fast, reasoning `off`, at most three short steps a message), `agent` (`agent.v9`, strong, one answer call
+  with `reasoning: "off"` on answer, lookup, idea and to-do turns and `"low"` on edit, draft and what-if turns) and `cite`
+  (`cite.v1`, fast, reasoning `off`, one short check per cited answer). The Worker already honours the lowering rule above and
+  any well-formed feature id, so nothing new needs deploying; `route` and `query` are sent only by v1 projects.
 - **Providers.** Leave OpenRouter's `provider.order` unset, but every provider DeepSeek routes to must meet 1.2's privacy
   settings.
 - **Deploy order.** Deploy the Worker (lenient feature ids, the `reasoning` field, the corrected default prices) before any

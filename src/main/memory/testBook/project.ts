@@ -10,10 +10,11 @@ import { getCompileState, setCompileState } from '../../project/settingsStore'
 import { createNode, deleteNode, listNodes, type TreeDb } from '../../tree/treeStore'
 import { dismiss } from '../dismissedStore'
 import { scanNamesFor } from '../nameIndexer'
-import { createRecord } from '../recordStore'
+import { createRecord, savePage } from '../recordStore'
 import { setSceneDetails } from '../sceneDetailStore'
-import { TEST_BOOK } from './book'
+import { TEST_BOOK, testBookScene } from './book'
 import { TEST_BOOK_LABELS } from './labels'
+import type { LabelQuestion } from './labels.schema'
 
 /**
  * The test book as a story memory v2 project (F-16.17; plan P2a §2.7): its records with their
@@ -21,7 +22,8 @@ import { TEST_BOOK_LABELS } from './labels'
  * chapter per book chapter with its scenes and typed details, the Idea scene (h11) with the Idea
  * status, the cut scene (h12) left out of compile, and the earlier draft of chapter 14 (h10) as an
  * inactive draft of h09's scene. Built for the offline replays and the live runs
- * (`ai/eval/memory.eval.ts`, `ai/eval/knows.eval.ts`); test data only.
+ * (`ai/eval/memory.eval.ts`, `ai/eval/knows.eval.ts`, `ai/eval/scribe.eval.ts`, which also adds
+ * the labelled record pages and the author's late edits); test data only.
  */
 
 export interface TestBookProject {
@@ -160,4 +162,36 @@ export function buildTestBookProject(dir: string, now: Date): TestBookProject {
   }
   for (const node of new Set(scenes.values())) scanNamesFor(db, node, now)
   return { session, db, records, scenes, inactiveDraftId }
+}
+
+/**
+ * P3 (plan §6.1): the record pages the labels give (the Bell's Pinned notes, the Captain's and
+ * Lottie's Ideas), written as the author would write them. The caller indexes them.
+ */
+export function addTestBookPages(book: TestBookProject, now: Date): void {
+  for (const page of TEST_BOOK_LABELS.pages) {
+    const recordId = book.records.get(page.record)
+    if (recordId === undefined) throw new Error(`The test book has no record ${page.record}`)
+    savePage(book.db, recordId, page.page, doc(page.lines), now)
+  }
+}
+
+/** A labelled question's late edit: the scene's paragraph as the author changed it. */
+export function editedParagraphs(edit: NonNullable<LabelQuestion['edit']>): string[] {
+  return testBookScene(edit.scene).paragraphs.map((text, p) =>
+    p === edit.p ? text.replace(edit.from, edit.to) : text
+  )
+}
+
+/**
+ * P3: the author's late edit a question labels, saved after the book was read (the caller runs
+ * the anchors check and the passage index, as the app's queue would).
+ */
+export function editTestBook(
+  book: TestBookProject,
+  edit: NonNullable<LabelQuestion['edit']>
+): void {
+  const nodeId = book.scenes.get(edit.scene)
+  if (nodeId === undefined) throw new Error(`The test book has no scene ${edit.scene}`)
+  saveDocument(book.db, nodeId, doc(editedParagraphs(edit)))
 }

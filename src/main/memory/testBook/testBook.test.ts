@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { estimateTokens } from '@shared/ai'
+import { normalizeForMatch } from '@shared/critique'
 import { anchorFor, anchorHolds, sceneSentences } from '@shared/memory/anchor'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
 import { PARTIAL, knowsLine } from '@shared/memory/knows'
@@ -15,7 +16,8 @@ import {
 } from '@shared/memory/years'
 import { TEST_BOOK, TEST_BOOK_SOURCE, testBookScene } from './book'
 import { TEST_BOOK_LABELS } from './labels'
-import { TestBookLabels } from './labels.schema'
+import { QUESTION_KINDS, TestBookLabels } from './labels.schema'
+import { editedParagraphs } from './project'
 
 /**
  * The test book and its labels checked with the same helpers the reader will use (F-16.3): a
@@ -329,5 +331,120 @@ describe('the test book’s years and ages (P2b, decision 5)', () => {
         entry.kind === 'hint' ? entry.hint.text : entry.value
       )
     ).toEqual(['Three winters later', 1814, 'A year later'])
+  })
+})
+
+/** How many times `quote` occurs in `text`, both normalized (straight quotes, single spaces). */
+function occurrences(text: string, quote: string): number {
+  const haystack = normalizeForMatch(text).toLowerCase()
+  const needle = normalizeForMatch(quote).toLowerCase()
+  if (needle === '') return 0
+  let count = 0
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+    count += 1
+  }
+  return count
+}
+
+describe('the test book’s questions for Ms Scribe (P3, plan §6.1)', () => {
+  const records = new Map(LABELS.records.map((record) => [record.id, record]))
+  const readable = new Set(
+    TEST_BOOK.filter((scene) => scene.source === 'scene').map((scene) => scene.id)
+  )
+  /** A scene's text as the questions find it: with any labelled late edit made. */
+  const sceneText = (id: string): string => {
+    const edit = LABELS.questions.find((question) => question.edit?.scene === id)?.edit
+    return (edit === undefined ? testBookScene(id).paragraphs : editedParagraphs(edit)).join('\n')
+  }
+
+  it('asks every kind, about 24 questions, each worded once', () => {
+    expect(new Set(LABELS.questions.map((question) => question.kind))).toEqual(
+      new Set(QUESTION_KINDS)
+    )
+    expect(LABELS.questions.length).toBeGreaterThanOrEqual(24)
+    const ids = LABELS.questions.map((question) => question.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    // The oracle and the live run's scoring find a question by its words.
+    const texts = LABELS.questions.map((question) => question.question)
+    expect(new Set(texts).size).toBe(texts.length)
+  })
+
+  it('opens every question on a readable scene, and its cited scene holds the quote once', () => {
+    for (const question of LABELS.questions) {
+      expect(readable, question.id).toContain(question.asOf)
+      const { scene, quoteHas, label } = question.expected
+      if (scene !== undefined) {
+        expect(readable, question.id).toContain(scene)
+        expect(quoteHas, question.id).toBeDefined()
+        expect(occurrences(sceneText(scene), quoteHas ?? ''), question.id).toBe(1)
+      }
+      if (label !== undefined) {
+        // A page's line: the record's Pinned (your notes) or Ideas (your idea).
+        const page = LABELS.pages.find(
+          (each) =>
+            each.record === question.record && each.page === (label === 'idea' ? 'ideas' : 'pinned')
+        )
+        expect(page, question.id).toBeDefined()
+        expect(occurrences(page?.lines.join('\n') ?? '', quoteHas ?? ''), question.id).toBe(1)
+      }
+      for (const also of question.expected.also ?? []) {
+        const scenes = [...readable].filter((id) => occurrences(sceneText(id), also) === 1)
+        expect(scenes.length, `${question.id}: ${also}`).toBe(1)
+      }
+    }
+  })
+
+  it('labels each kind with what it is scored on', () => {
+    for (const question of LABELS.questions) {
+      const { expected } = question
+      const at = question.id
+      switch (question.kind) {
+        case 'slot':
+        case 'knows':
+        case 'whoKnows':
+          expect(expected.instant, at).toBe(true)
+          break
+        case 'lookupStale':
+          expect(expected.lookup, at).toBe(true)
+          expect(expected.scene, at).toBeDefined()
+          break
+        case 'open':
+        case 'ordinal':
+          expect(question.terms?.length, at).toBeGreaterThan(0)
+          expect(expected.quoteHas, at).toBeDefined()
+          break
+        case 'absence':
+        case 'notFound':
+          expect(question.terms?.length, at).toBeGreaterThan(0)
+          expect(expected.scene, at).toBeUndefined()
+          expect(expected.notFound ?? false, at).toBe(question.kind === 'notFound')
+          break
+        case 'idea':
+          expect(expected.label, at).toBe('idea')
+          break
+        case 'route':
+          expect(expected.action, at).toBeDefined()
+          if (expected.action === 'editPass') {
+            expect([expected.pass, expected.target], at).not.toContain(undefined)
+          }
+          break
+        case 'pin':
+          expect(question.record, at).toBeDefined()
+          // A Plan run offers no sheet line; Ask places it.
+          expect(expected.place === undefined, at).toBe(question.plan === true)
+          expect(question.question.toLowerCase(), at).toContain(expected.pinText?.toLowerCase())
+          break
+      }
+      if (question.record !== undefined) expect(records.has(question.record), at).toBe(true)
+      if (question.edit !== undefined) {
+        const paragraph = testBookScene(question.edit.scene).paragraphs[question.edit.p] ?? ''
+        expect(occurrences(paragraph, question.edit.from), at).toBe(1)
+      }
+    }
+  })
+
+  it('writes its pages on records that exist, a Pinned note and two Ideas', () => {
+    for (const page of LABELS.pages) expect(records.has(page.record), page.record).toBe(true)
+    expect(LABELS.pages.map((page) => page.page).sort()).toEqual(['ideas', 'ideas', 'pinned'])
   })
 })

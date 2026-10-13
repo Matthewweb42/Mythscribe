@@ -1202,5 +1202,287 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       reason:
         "Mrs. Harrow's mistaken belief that he has a large fortune sets nothing about the Captain."
     }
+  ],
+  // P3 (F-16.24–F-16.26): what the author wrote on two records' pages, so Ms Scribe has canon
+  // notes and the author's ideas to recall.
+  pages: [
+    {
+      record: 'the-bell',
+      page: 'pinned',
+      lines: ['The Bell is kept by the Widow Marsh, who lets rooms to officers.']
+    },
+    {
+      record: 'captain',
+      page: 'ideas',
+      lines: ['Perhaps the Captain was married once before, in Ireland.']
+    },
+    {
+      record: 'lottie',
+      page: 'ideas',
+      lines: ['Maybe Lottie and Mr. Dunmore sail for the Cape in the last chapter.']
+    }
+  ],
+  // P3 (plan §6.1): the questions Ms Scribe is asked, read by the offline replays against the
+  // oracle and scored in the live run. `asOf` is the open scene (Now); every one is asked in Ask
+  // mode unless `plan`.
+  questions: [
+    {
+      id: 'slot-varrow-eyes',
+      question: "Mr. Varrow's eyes?",
+      asOf: 'h05',
+      kind: 'slot',
+      expected: { instant: true, scene: 's03', quoteHas: 'a cold, clear grey' }
+    },
+    {
+      id: 'slot-captain-scar',
+      question: 'Does the Captain have a scar?',
+      asOf: 'h14',
+      kind: 'slot',
+      expected: { instant: true, scene: 'h02', quoteHas: 'long white scar' }
+    },
+    {
+      id: 'slot-captain-role',
+      question: "What is the Captain's role?",
+      asOf: 'h14',
+      kind: 'slot',
+      expected: { instant: true, scene: 'h14', quoteHas: 'a farmer now' }
+    },
+    {
+      id: 'slot-lottie-age',
+      question: 'How old is Lottie?',
+      asOf: 'h09',
+      kind: 'slot',
+      expected: { instant: true, scene: 'h09', quoteHas: 'eighteen now' }
+    },
+    {
+      id: 'knows-clara',
+      question: "Does Clara know about Lottie's engagement to Mr. Dunmore?",
+      asOf: 'h05',
+      kind: 'knows',
+      expected: { instant: true, scene: 'h04', quoteHas: 'Lottie is to marry Mr. Dunmore' }
+    },
+    {
+      id: 'who-knows-debts',
+      question: "Who knows about the Captain's debts?",
+      asOf: 'h14',
+      kind: 'whoKnows',
+      expected: { instant: true, scene: 'h14', quoteHas: 'she put it together' }
+    },
+    {
+      id: 'who-knows-engagement',
+      question: "Who knows about Lottie's engagement to Mr. Dunmore?",
+      asOf: 'h14',
+      kind: 'whoKnows',
+      expected: { instant: true, scene: 'h04', quoteHas: 'Lottie is to marry Mr. Dunmore' }
+    },
+    {
+      // Grey in 3.1 and brown in 14.1: a fixed slot contested (the planted C1), so no card.
+      id: 'lookup-varrow-eyes',
+      question: "What colour are Mr. Varrow's eyes?",
+      asOf: 'h09',
+      kind: 'lookupStale',
+      expected: {
+        lookup: true,
+        scene: 'h09',
+        quoteHas: 'brown eyes followed her',
+        also: ['a cold, clear grey']
+      }
+    },
+    {
+      // Her age is stated in 13.1, and the years have moved on since: no card, never added up.
+      id: 'lookup-johanna-age',
+      question: 'How old is Johanna?',
+      asOf: 'h14',
+      kind: 'lookupStale',
+      expected: { lookup: true, scene: 'h08', quoteHas: 'two-and-twenty' }
+    },
+    {
+      // The author changed Clara's age after it was read: the paragraph as it reads now answers.
+      id: 'lookup-clara-edited',
+      question: 'How old is Clara?',
+      asOf: 'h09',
+      kind: 'lookupStale',
+      edit: { scene: 'h01', p: 6, from: 'seven-and-twenty', to: 'eight-and-twenty' },
+      expected: { lookup: true, scene: 'h01', quoteHas: 'eight-and-twenty' }
+    },
+    {
+      id: 'open-lise-overheard',
+      question: "How did Lise find out about Lottie's engagement?",
+      asOf: 'h14',
+      kind: 'open',
+      terms: ['overheard', 'engaged', 'landing', 'door'],
+      expected: { scene: 'h05', quoteHas: 'She had overheard every word' }
+    },
+    {
+      id: 'open-dunmore-father',
+      question: 'What did Mr. Dunmore say about his father?',
+      asOf: 'h07',
+      kind: 'open',
+      terms: ['father', 'clergyman', 'family'],
+      expected: { scene: 'h02', quoteHas: 'My father was a clergyman in Elsdale' }
+    },
+    {
+      id: 'open-johanna-wrote',
+      question: "Whom did Johanna write to after Lottie's letter?",
+      asOf: 'h14',
+      kind: 'open',
+      terms: ['wrote', 'letter', 'write'],
+      expected: { scene: 'h08', quoteHas: 'She wrote instead to Mr. Ashby' }
+    },
+    {
+      // Canon the author keeps on the Bell's Pinned page, never in a scene.
+      id: 'open-bell-pinned',
+      question: 'Who keeps the Bell at Callow Cross?',
+      asOf: 'h14',
+      kind: 'open',
+      terms: ['kept', 'keeps', 'landlady', 'inn'],
+      record: 'the-bell',
+      expected: { label: 'notes', quoteHas: 'kept by the Widow Marsh' }
+    },
+    {
+      id: 'ordinal-lise-learns',
+      question: "When does Lise first learn of Lottie's engagement?",
+      asOf: 'h14',
+      kind: 'ordinal',
+      terms: ['overheard', 'engaged', 'engagement'],
+      expected: { scene: 'h05', quoteHas: 'She had overheard every word' }
+    },
+    {
+      id: 'ordinal-first-told',
+      question: "Who is the first to be told of Lottie's engagement?",
+      asOf: 'h14',
+      kind: 'ordinal',
+      terms: ['marry', 'engaged', 'engagement'],
+      expected: {
+        scene: 'h04',
+        quoteHas: 'Lottie is to marry Mr. Dunmore',
+        also: ['Mr. Dunmore and I are engaged']
+      }
+    },
+    {
+      id: 'ordinal-duel',
+      question: "When is Mr. Varrow's duel first mentioned?",
+      asOf: 'h14',
+      kind: 'ordinal',
+      terms: ['duel', 'fought'],
+      expected: { scene: 'h07', quoteHas: 'fought a duel in Elsdale' }
+    },
+    {
+      // Mr. Harrow notices nothing (h14): no line says he knows, and none may say he does not.
+      id: 'absence-harrow-debts',
+      question: "Does Mr. Harrow know about the Captain's debts?",
+      asOf: 'h14',
+      kind: 'absence',
+      terms: ['debts', 'owed', 'money'],
+      record: 'harrow-mr',
+      expected: {}
+    },
+    {
+      // Clara keeps the secret from her mother (h04): Lady Pell never learns it.
+      id: 'absence-lady-pell',
+      question: "Does Lady Pell know about Lottie's engagement to Mr. Dunmore?",
+      asOf: 'h14',
+      kind: 'absence',
+      terms: ['engaged', 'engagement', 'marry'],
+      record: 'pell-lady',
+      expected: {}
+    },
+    {
+      id: 'idea-captain-past',
+      question: "What was my idea about the Captain's past?",
+      asOf: 'h14',
+      kind: 'idea',
+      record: 'captain',
+      expected: { label: 'idea', quoteHas: 'married once before' }
+    },
+    {
+      id: 'idea-lottie',
+      question: 'What ideas did I have for Lottie?',
+      asOf: 'h14',
+      kind: 'idea',
+      record: 'lottie',
+      expected: { label: 'idea', quoteHas: 'sail for the Cape' }
+    },
+    {
+      id: 'notfound-horse',
+      question: 'What was the name of the horse the Captain sold?',
+      asOf: 'h14',
+      kind: 'notFound',
+      terms: ['horse', 'sold', 'named'],
+      expected: { notFound: true }
+    },
+    {
+      id: 'notfound-ashby-born',
+      question: 'Where was Mr. Ashby born?',
+      asOf: 'h14',
+      kind: 'notFound',
+      terms: ['born', 'birthplace', 'native'],
+      expected: { notFound: true }
+    },
+    {
+      // F-5.26: a vague request gets the quick picks.
+      id: 'route-better',
+      question: 'Make this scene better.',
+      asOf: 'h14',
+      kind: 'route',
+      expected: { action: 'editPass', pass: 'ask', target: 'scene' }
+    },
+    {
+      id: 'route-tighten',
+      question: 'Tighten the prose in this scene.',
+      asOf: 'h14',
+      kind: 'route',
+      expected: { action: 'editPass', pass: 'line', target: 'scene' }
+    },
+    {
+      id: 'route-proofread-chapter',
+      question: 'Proofread chapter 3.',
+      asOf: 'h14',
+      kind: 'route',
+      expected: { action: 'editPass', pass: 'proofread', target: 'chapter', chapter: '3' }
+    },
+    {
+      id: 'route-what-next',
+      question: 'What could happen next?',
+      asOf: 'h14',
+      kind: 'route',
+      expected: { action: 'whatNext' }
+    },
+    {
+      id: 'pin-lottie-sea',
+      question: "Add to Lottie's sheet that she hates the sea.",
+      asOf: 'h14',
+      kind: 'pin',
+      record: 'lottie',
+      expected: { place: 'pinned', pinText: 'hates the sea' }
+    },
+    {
+      id: 'pin-captain-twin',
+      question:
+        "Brainstorm: maybe the Captain had a twin brother. Save it as an idea on the Captain's sheet.",
+      asOf: 'h14',
+      kind: 'pin',
+      record: 'captain',
+      expected: { place: 'ideas', pinText: 'twin brother' }
+    },
+    {
+      // Canon or an idea? Ms Scribe cannot tell, so the chat asks.
+      id: 'pin-lottie-scar',
+      question: 'Save this for Lottie: a scar from the fire.',
+      asOf: 'h14',
+      kind: 'pin',
+      record: 'lottie',
+      expected: { place: 'ask', pinText: 'a scar from the fire' }
+    },
+    {
+      // Plan mode writes nothing: no sheet line is offered.
+      id: 'pin-plan',
+      question: "Put on Lottie's sheet that she hates the sea.",
+      asOf: 'h14',
+      kind: 'pin',
+      plan: true,
+      record: 'lottie',
+      expected: { pinText: 'hates the sea' }
+    }
   ]
 }

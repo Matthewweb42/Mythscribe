@@ -7,7 +7,7 @@ import {
   type ClaimVoice
 } from '@shared/memory/claims'
 import { normalizeForMatch } from '@shared/critique'
-import { checkMemoryInvariants } from '@shared/memory/invariants'
+import { checkMemoryInvariants, type InvariantInput } from '@shared/memory/invariants'
 import { parseHow, type KnowsHow } from '@shared/memory/knows'
 import { normName } from '@shared/memory/names'
 import { containsValue } from '@shared/memory/reconcile'
@@ -658,8 +658,14 @@ export function storedFor(
   )
 }
 
-/** The memory invariants over the whole project (P2b's knows, topics and name index included). */
-export function invariants(book: TestBookProject): ReturnType<typeof checkMemoryInvariants> {
+/**
+ * The memory invariants over the whole project (P2b's knows, topics and name index included), and
+ * (P3) the citations of Ms Scribe's answers, so one citing a card is caught.
+ */
+export function invariants(
+  book: TestBookProject,
+  citations: InvariantInput['citations'] = []
+): ReturnType<typeof checkMemoryInvariants> {
   const scenes = new Map(
     [...new Set(book.scenes.values())].map((node) => [
       node,
@@ -670,7 +676,7 @@ export function invariants(book: TestBookProject): ReturnType<typeof checkMemory
     claims: invariantClaims(book.db),
     sceneHashes: scenes,
     aliases: invariantAliases(book.db),
-    citations: [],
+    citations,
     knows: invariantKnows(book.db),
     topics: invariantTopics(book.db),
     indexed: invariantIndexed(book.db)

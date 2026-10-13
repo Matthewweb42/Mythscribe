@@ -6,7 +6,9 @@ import type { AiMessage } from '../providers/types'
  * `liveProviderFromEnv` at it, so a live run is driven end to end from `OPENROUTER_API_KEY` alone
  * without a request leaving the machine or a cent being spent. It answers every chat completion
  * with `answer` (or the HTTP error status it names), reports OpenRouter's `usage.cost`, and records
- * each call (URL, headers, body).
+ * each call (URL, headers, body). A streamed request (`stream: true`, Ms Scribe's answer, F-16.25)
+ * is answered as server-sent events: the text in two chunks, the finish, then the usage chunk
+ * `stream_options.include_usage` asks for.
  * Test support only: nothing in the app imports it.
  */
 
@@ -62,6 +64,39 @@ export function fakeChatServer(
       )
     }
     const usage = reply.usage ?? { inputTokens: 1_000, outputTokens: 100 }
+    const usageBlock = {
+      prompt_tokens: usage.inputTokens,
+      completion_tokens: usage.outputTokens,
+      total_tokens: usage.inputTokens + usage.outputTokens,
+      ...(reply.costUsd === null ? {} : { cost: reply.costUsd ?? 0.0001 })
+    }
+    if (body.stream === true) {
+      const model = typeof body.model === 'string' ? body.model : 'fake-model'
+      const chunk = (choices: unknown[], extra: Record<string, unknown> = {}): string =>
+        `data: ${JSON.stringify({
+          id: `fake-${calls.length}`,
+          object: 'chat.completion.chunk',
+          created: 0,
+          model,
+          choices,
+          ...extra
+        })}`
+      const cut = Math.floor(reply.text.length / 2)
+      const events = [
+        chunk([{ index: 0, delta: { role: 'assistant', content: reply.text.slice(0, cut) } }]),
+        chunk([{ index: 0, delta: { content: reply.text.slice(cut) } }]),
+        chunk([{ index: 0, delta: {}, finish_reason: reply.finishReason ?? 'stop' }]),
+        chunk([], { usage: usageBlock }),
+        'data: [DONE]',
+        ''
+      ]
+      return Promise.resolve(
+        new Response(events.join('\n\n'), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' }
+        })
+      )
+    }
     return Promise.resolve(
       new Response(
         JSON.stringify({
@@ -76,12 +111,7 @@ export function fakeChatServer(
               message: { role: 'assistant', content: reply.text }
             }
           ],
-          usage: {
-            prompt_tokens: usage.inputTokens,
-            completion_tokens: usage.outputTokens,
-            total_tokens: usage.inputTokens + usage.outputTokens,
-            ...(reply.costUsd === null ? {} : { cost: reply.costUsd ?? 0.0001 })
-          }
+          usage: usageBlock
         }),
         { status: 200, headers: { 'content-type': 'application/json' } }
       )

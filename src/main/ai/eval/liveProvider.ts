@@ -16,12 +16,13 @@ import type { UsageEntry } from '../usageStore'
 /**
  * One key for every live path (F-16.22; plan P2b §3.1): the live prompt fidelity run
  * (`prompts.eval.ts`), the live planted-error run (`memory.eval.ts`), the live knows run
- * (`knows.eval.ts`) and the price probe (`aiProbe.probe.ts`) all start from `OPENROUTER_API_KEY`
- * alone, so the author keeps one secret:
+ * (`knows.eval.ts`), the live Ms Scribe run (`scribe.eval.ts`, P3) and the price probe
+ * (`aiProbe.probe.ts`) all start from `OPENROUTER_API_KEY` alone, so the author keeps one secret:
  *
- *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai             # fidelity, planted errors, knows
+ *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai             # fidelity, planted errors, knows, Ms Scribe
  *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- memory   # planted errors only
  *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- knows    # who knows what only
+ *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- scribe   # Ms Scribe only (stops at $1)
  *     OPENROUTER_API_KEY=sk-or-… npm run ai:probe                                  # the price probe
  *
  * `OPENROUTER_API_KEY` set: OpenRouter's base URL, its reasoning control (the app's "off" for

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, OPENROUTER_BASE_URL, OPENROUTER_DEFAULT_MODELS } from '@shared/ai'
 import { resetInflight } from '../inflight'
-import { runAiRequest, sha256 } from '../request'
+import { runAiRequest, runAiStream, sha256 } from '../request'
 import { fakeChatServer, type ChatCall } from './fakeChatServer'
 import { AiRateLimitError } from '../providers/types'
 import {
@@ -237,6 +237,44 @@ describe('liveProviderFromEnv: a request leaves as the app sends it (F-16.22)', 
     expect(call.body.reasoning_effort).toBeUndefined()
     // The ledger counts what OpenRouter reported, not the table's estimate.
     expect(costUsd).toBe(0.0042)
+  })
+
+  it('streams a streamed request (Ms Scribe’s answer, F-16.25) as events, its reported cost counted', async () => {
+    const { fetch, calls } = fakeChatServer(() => ({
+      text: '{"answer":"Orrin overheard Tomas.","found":true}',
+      usage: { inputTokens: 300, outputTokens: 20 },
+      costUsd: 0.0031
+    }))
+    const run = liveRequestDeps(liveProviderFromEnv({ OPENROUTER_API_KEY: OR_KEY }, { fetch }))
+    const messages = [
+      { role: 'system' as const, content: 'You are the story assistant.' },
+      { role: 'user' as const, content: 'Question: What did Orrin hear?' }
+    ]
+    const deltas: string[] = []
+    const result = await runAiStream(
+      run.deps,
+      {
+        feature: 'agent',
+        tier: 'strong',
+        messages,
+        maxTokens: 700,
+        json: true,
+        contextHash: sha256(JSON.stringify(messages)),
+        promptVersion: 'agent.v9',
+        reasoning: 'off'
+      },
+      (delta) => deltas.push(delta)
+    )
+    expect(calls[0]?.body).toMatchObject({
+      model: OPENROUTER_DEFAULT_MODELS.strong,
+      stream: true,
+      reasoning: { enabled: false }
+    })
+    expect(deltas.length).toBeGreaterThan(1)
+    expect(deltas.join('')).toBe('{"answer":"Orrin overheard Tomas.","found":true}')
+    expect(result.text).toBe(deltas.join(''))
+    expect(result.usage).toMatchObject({ inputTokens: 300, outputTokens: 20 })
+    expect(run.spent()).toBe(0.0031)
   })
 
   it('OPENAI_API_KEY alone: OpenAI itself, its lowest effort, no OpenRouter fields', async () => {

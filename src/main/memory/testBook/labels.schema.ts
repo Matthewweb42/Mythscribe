@@ -1,13 +1,16 @@
 import { z } from 'zod'
+import { ROUTE_ACTIONS, ROUTE_EDIT_PASSES, ROUTE_EDIT_TARGETS } from '@shared/assistantRoute'
 import { KNOWS_HOWS } from '@shared/memory/knows'
+import { RECORD_PAGES } from '@shared/memory/records'
 import { THREAD_STEPS } from '@shared/memory/topics'
 
 /**
  * The shape of the test book's labels (F-16.3): what a correct reading of `TEST_BOOK` yields,
  * scene by scene, for the P2a reader and verifier scoring (claims), P1's name matching and twin
  * gate (records, mentions, twin cases), P2b's who-knows-what (knows lines, thread steps, years and
- * ages), and P4's contradiction rules (planted contradictions and the "must not produce"
- * negatives). Test data only: nothing in the app imports it.
+ * ages), P4's contradiction rules (planted contradictions and the "must not produce"
+ * negatives), and P3's Ms Scribe (record pages and the questions she is asked). Test data only:
+ * nothing in the app imports it.
  */
 
 const Id = z.string().regex(/^[a-z][a-z0-9-]*$/)
@@ -185,6 +188,92 @@ export const LabelNegative = z.object({
   reason: z.string().min(1)
 })
 
+/**
+ * P3 (F-16.24–F-16.26): a line the author wrote on a record's Pinned or Ideas page, so Ms Scribe
+ * has canon notes and ideas to recall ("your idea, not in the book").
+ */
+export const LabelPage = z.object({
+  record: Id,
+  page: z.enum(RECORD_PAGES),
+  lines: z.array(z.string().min(1)).min(1)
+})
+
+/** What a question asks of Ms Scribe (plan P3 §6.1). */
+export const QUESTION_KINDS = [
+  /** A record's value the memory holds: an instant card, no request. */
+  'slot',
+  /** Does A know X, when A does: an instant card. */
+  'knows',
+  /** Who knows X: an instant card. */
+  'whoKnows',
+  /** A stale or contested value: a lookup turn, no navigator request. */
+  'lookupStale',
+  /** An open question the navigator searches for. */
+  'open',
+  /** First, last, ever, never, how many: the answer says it searched every earlier scene. */
+  'ordinal',
+  /** Someone who never learns a secret: a scoped answer, never "does not know" as fact. */
+  'absence',
+  /** The author's idea recalled, labelled "your idea, not in the book". */
+  'idea',
+  /** A question the book does not answer: "Not found in the manuscript (I looked in …)". */
+  'notFound',
+  /** A request the navigator routes to an action (F-5.26's edit passes among them). */
+  'route',
+  /** A line the author asks Ms Scribe to put on a sheet (decision 3 as the author changed it). */
+  'pin'
+] as const
+
+export const LabelQuestion = z.object({
+  id: Id,
+  question: z.string().min(1).max(300),
+  /** The open scene: Now. */
+  asOf: SceneId,
+  kind: z.enum(QUESTION_KINDS),
+  /** Asked in Plan mode (a read run, which writes nothing); otherwise in Ask (write access). */
+  plan: z.boolean().default(false),
+  /** The words a good navigator searches for (its own synonyms), for a question that searches. */
+  terms: z.array(z.string().min(1)).max(8).optional(),
+  /** The record an idea or a sheet line is about. */
+  record: Id.optional(),
+  /**
+   * The author's change after the book was read, made before any question is asked: this
+   * paragraph's `from` became `to`, so the fact read from it goes stale (a lookup turn).
+   */
+  edit: z
+    .object({ scene: SceneId, p: z.number().int().min(0), from: z.string(), to: z.string() })
+    .optional(),
+  expected: z.object({
+    /** Answered by an instant card with no request. */
+    instant: z.boolean().default(false),
+    /** Handed to Ms Scribe as a lookup turn with no navigator request (P3-D5). */
+    lookup: z.boolean().default(false),
+    /** The route action, as `settleRoute` settles it, and the edit pass's fields. */
+    action: z.enum(ROUTE_ACTIONS).optional(),
+    pass: z.enum(ROUTE_EDIT_PASSES).optional(),
+    target: z.enum(ROUTE_EDIT_TARGETS).optional(),
+    chapter: z.string().optional(),
+    /** The scene the answer (or the card) must cite. */
+    scene: SceneId.optional(),
+    /** Words the cited quote holds, once in that scene (or on the record's page). */
+    quoteHas: z.string().min(1).optional(),
+    /** Other passages that say the same thing (the honest checker's yes), never the answer. */
+    also: z.array(z.string().min(1)).optional(),
+    /** Ends "Not found in the manuscript (I looked in …)". */
+    notFound: z.boolean().default(false),
+    /** The cited source's label: the author's idea or her Pinned notes. */
+    label: z.enum(['idea', 'notes']).optional(),
+    /** Where the sheet line goes: Pinned, Ideas, or "Is this an idea or canon?" (ask). */
+    place: z.enum(['pinned', 'ideas', 'ask']).optional(),
+    /** The words the sheet line holds. */
+    pinText: z.string().min(1).optional()
+  })
+})
+
+/** A question as the labels write it (defaults unapplied, as `TestBookLabels` is). */
+export type LabelQuestion = z.input<typeof LabelQuestion>
+export type QuestionKind = (typeof QUESTION_KINDS)[number]
+
 export const TestBookLabels = z.object({
   records: z.array(LabelRecord).min(1),
   /** Names on the Dismissed list before reading (the twin gate blocks them silently). */
@@ -197,6 +286,8 @@ export const TestBookLabels = z.object({
   years: z.array(LabelYear).min(1),
   ages: z.array(LabelAge).min(1),
   contradictions: z.array(LabelContradiction).min(1),
-  negatives: z.array(LabelNegative).min(1)
+  negatives: z.array(LabelNegative).min(1),
+  pages: z.array(LabelPage).min(1),
+  questions: z.array(LabelQuestion).min(1)
 })
 export type TestBookLabels = z.input<typeof TestBookLabels>
