@@ -9376,7 +9376,7 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
   })
 
   // F-16.25, F-16.26 (plan P3 §2.1): in v2 the chat is Ms Scribe's one answer call.
-  it('F-16.25: ai:agent runs Ms Scribe in v2: one agent.v9 request with E0, a checked citation, a sheet line', async () => {
+  it('F-16.25: ai:agent runs Ms Scribe in v2: one agent.v9 request with E0, a checked citation (one cite.v1 check), a sheet line', async () => {
     const scene = await openV2()
     await invoke('document:save', {
       id: scene,
@@ -9391,11 +9391,18 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       found: true,
       edits: [{ edit: 'pin', name: 'Mara', text: 'Hates the sea', place: 'pinned' }]
     })
-    complete.mockResolvedValueOnce({
-      text: reply,
-      model: 'gpt-fake',
-      usage: { inputTokens: 900, outputTokens: 40 }
-    })
+    complete
+      .mockResolvedValueOnce({
+        text: reply,
+        model: 'gpt-fake',
+        usage: { inputTokens: 900, outputTokens: 40 }
+      })
+      // P3 slice 3: the one quote check of the cited sentence.
+      .mockResolvedValueOnce({
+        text: '{"v":[{"i":1,"ok":"yes"}],"scope":"none"}',
+        model: 'gpt-fake',
+        usage: { inputTokens: 200, outputTokens: 12 }
+      })
     streamChunks = [
       (request) => complete(request).then((done) => ({ delta: done.text, usage: done.usage }))
     ]
@@ -9408,15 +9415,20 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       requestId: 'sc-1'
     })
     if (!result.ok) throw new Error(result.message)
-    expect(complete).toHaveBeenCalledTimes(1)
+    expect(complete).toHaveBeenCalledTimes(2)
     const sent = complete.mock.calls[0]?.[0]
     expect(sent?.messages[0]?.content.startsWith('You are the story assistant')).toBe(true)
     expect(sent?.messages.at(-1)?.content).toContain('¶1 Orrin overheard Tomas.')
+    const check = complete.mock.calls[1]?.[0]
+    expect(check?.messages[0]?.content.startsWith('You are the citation checker')).toBe(true)
+    expect(check?.tier).toBe('fast')
     expect(result.answer).toBe('Orrin overheard Tomas.[1]')
-    expect(result.scribe?.citations.map((citation) => citation.quote)).toEqual([
-      'Orrin overheard Tomas'
+    expect(result.scribe?.citations.map((citation) => [citation.quote, citation.checked])).toEqual([
+      ['Orrin overheard Tomas', 'cite']
     ])
-    expect(result.steps).toEqual([])
+    expect(result.steps).toEqual([{ tool: 'check', label: 'Checking the quotes…' }])
+    // The turn's cost and tokens are the answer's and the check's together.
+    expect(result.usage).toEqual({ inputTokens: 1_100, outputTokens: 52 })
     expect(result.changes.map((change) => change.edit)).toEqual([
       {
         kind: 'sheetLine',

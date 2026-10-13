@@ -978,6 +978,35 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     }
   })
 
+  it('F-16.25 (P3-D21): cite.v1 leaves Cloud, OpenRouter and a direct OpenAI key with reasoning off, and the lowest effort', async () => {
+    for (const id of ['cloud', 'openrouter', 'openai'] as const) {
+      const f = fakes()
+      const seen: CompletionRequest[] = []
+      f.complete.mockImplementation((request) => {
+        seen.push(request)
+        return Promise.resolve({
+          text: '{}',
+          model: 'm',
+          usage: { inputTokens: 1, outputTokens: 1 }
+        })
+      })
+      if (f.provider === null) throw new Error('no provider')
+      f.provider = { ...f.provider, id }
+      // Thinking on for the fast tier in Settings: never for the quote check.
+      const routing = { ...defaultAiRouting(), reasoning: { fast: 'low' as const } }
+      f.deps.routing = () => ({ routing, table: autoTable(null) })
+      await runAiRequest(f.deps, {
+        ...input,
+        feature: 'cite',
+        json: true,
+        promptVersion: 'cite.v1',
+        contextHash: `${id}-cite`
+      })
+      expect(seen.at(-1)?.reasoning, id).toBe('off')
+      if (id !== 'cloud') expect(seen.at(-1)?.lowestEffort, id).toBe(true)
+    }
+  })
+
   it('F-16.9: sends contextImport.v3 and reviewChat.v3 with reasoning off, and leaves reviewChat.v2 as it was', async () => {
     const f = fakes()
     const seen: CompletionRequest[] = []
@@ -1036,6 +1065,7 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     ['ghostText', 'off'],
     ['reader', 'off'],
     ['verify', 'off'],
+    ['cite', 'off'],
     ['tags', undefined],
     ['agent', undefined]
   ] as const)(

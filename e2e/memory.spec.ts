@@ -175,18 +175,26 @@ const SCRIBE_SENTINEL =
   "You are the story assistant inside a novel-writing app, answering the book's author from the evidence below."
 /** F-16.25: the opening of `agent.v9`'s edit list, sent on write runs (Ask, Auto) only. */
 const SCRIBE_EDITS_OPENING = 'Edits: only when the message asks for a change'
+/** F-16.25 (P3 slice 3): `cite.v1`'s opening (`CITE_SENTINEL`); the fake checks the quotes. */
+const CITE_SENTINEL = 'You are the citation checker inside a novel-writing app.'
+/** The sentence the fake checker finds unsupported: its quote names Tomas as the seller. */
+const PLANTED_UNSUPPORTED = 'Orrin sold the map'
 /** F-5.19: `route.v2`'s opening; the fake answers it `{}`, which routes to chat. */
 const ROUTE_V2_SENTINEL = "You are the router inside a novel-writing app's assistant."
 
 /**
- * The fake Ms Scribe (F-16.25, F-16.26), answering from the question at the end of the last user
- * turn: a question naming Orrin cites E0 ("Orrin overheard Tomas"); "Add to <Name>'s sheet that
- * she <words>." pins "<Words>" on that sheet (on a read run, without the edit list, it says what
- * it would add and still sends the pin, which the app drops and says so); "Save this for <Name>:
- * <words>." asks idea or canon (place `ask`); anything else is a plain found answer.
+ * The fake Ms Scribe (F-16.25, F-16.26), answering from the question at the end of the user turn
+ * that holds it (the main-claim retry adds a turn after it): "Who sold the map?" claims Orrin,
+ * citing E0's "Tomas sold the map", on the retry too, worded a little apart (P3 slice 3: the
+ * checker finds it unsupported both times); a question naming Orrin cites E0 ("Orrin overheard Tomas"); "Add to
+ * <Name>'s sheet that she <words>." pins "<Words>" on that sheet (on a read run, without the edit
+ * list, it says what it would add and still sends the pin, which the app drops and says so);
+ * "Save this for <Name>: <words>." asks idea or canon (place `ask`); anything else is a plain
+ * found answer.
  */
 function scribeAnswer(messages: { content: string }[]): string {
-  const last = messages.at(-1)?.content ?? ''
+  const last =
+    [...messages].reverse().find((message) => message.content.includes('Question: '))?.content ?? ''
   const question = last.slice(last.lastIndexOf('Question: ') + 'Question: '.length).trim()
   const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
   const write = messages[0]?.content.includes(SCRIBE_EDITS_OPENING) === true
@@ -208,6 +216,15 @@ function scribeAnswer(messages: { content: string }[]): string {
       edits: [{ edit: 'pin', name: save[1], text: capital(save[2] ?? ''), place: 'ask' }]
     })
   }
+  if (question === 'Who sold the map?') {
+    // The retry's answer words it apart, so its check is a request of its own (not the cache's).
+    const retry = messages.at(-1)?.content.startsWith('Your first sentence') === true
+    return JSON.stringify({
+      answer: `${PLANTED_UNSUPPORTED}${retry ? ' that night' : ''}. [E0 "Tomas sold the map"]`,
+      found: true,
+      edits: []
+    })
+  }
   if (/\bOrrin\b/u.test(question)) {
     return JSON.stringify({
       answer: 'Orrin overheard Tomas. [E0 "Orrin overheard Tomas"]',
@@ -216,6 +233,19 @@ function scribeAnswer(messages: { content: string }[]): string {
     })
   }
   return JSON.stringify({ answer: 'The book does not say yet.', found: true, edits: [] })
+}
+
+/**
+ * The fake quote checker (F-16.25, `cite.v1`): every numbered sentence supported but the planted
+ * one ("Orrin sold the map"), and a scope item, when sent, ok.
+ */
+function citeAnswer(messages: { content: string }[]): string {
+  const user = messages.at(-1)?.content ?? ''
+  const verdicts = [...user.matchAll(/^(\d+)\. (.*)$/gmu)].map((match) => ({
+    i: Number(match[1]),
+    ok: (match[2] ?? '').includes(PLANTED_UNSUPPORTED) ? 'no' : 'yes'
+  }))
+  return JSON.stringify({ v: verdicts, scope: user.includes('\nScope: ') ? 'ok' : 'none' })
 }
 
 /**
@@ -503,9 +533,11 @@ function startFakeProvider(): Promise<string> {
                   ? JSON.stringify({ items: [] })
                   : system.startsWith(SCRIBE_SENTINEL)
                     ? scribeAnswer(request.messages)
-                    : json
-                      ? '{}'
-                      : GHOST_ANSWER
+                    : system.startsWith(CITE_SENTINEL)
+                      ? citeAnswer(request.messages)
+                      : json
+                        ? '{}'
+                        : GHOST_ANSWER
       const usage = { prompt_tokens: 400, completion_tokens: 40, total_tokens: 440 }
       const base = { id: 'chatcmpl-fake', created: 0, model: request.model }
       if (request.stream === true) {
@@ -2287,7 +2319,7 @@ async function pageLines(
   }))
 }
 
-test('story memory v2: Ms Scribe v9 answers and writes sheet lines (P3 slice 2)', async () => {
+test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet lines (P3 slices 2 and 3)', async () => {
   // A new project (Use AI on, chat in Ask, the own key at the fake): Mara, Orrin and Tomas, and
   // scene 1.1 read once.
   const first = await newV2Project('Scribe Novel')
@@ -2339,6 +2371,8 @@ test('story memory v2: Ms Scribe v9 answers and writes sheet lines (P3 slice 2)'
   const turns = assistant.locator('[data-testid="chat-turn"]')
   const scribeBodies = (): typeof providerBodies =>
     providerBodies.filter((body) => body.messages[0]?.content.startsWith(SCRIBE_SENTINEL) === true)
+  const citeBodies = (): typeof providerBodies =>
+    providerBodies.filter((body) => body.messages[0]?.content.startsWith(CITE_SENTINEL) === true)
   const send = async (mode: 'Auto' | 'Ask' | 'Plan', message: string): Promise<void> => {
     await assistant.getByRole('radio', { name: mode, exact: true }).click()
     await messageBox.fill(message)
@@ -2346,12 +2380,18 @@ test('story memory v2: Ms Scribe v9 answers and writes sheet lines (P3 slice 2)'
   }
 
   // Ask, a question: one agent.v9 request (after the router's), the whole open scene as E0
-  // numbered, no tool protocol; the kept citation's quote is the one E0 holds.
+  // numbered, no tool protocol; the kept citation's quote is the one E0 holds, and one cite.v1
+  // request checks it (P3 slice 3).
   const before = scribeBodies().length
+  const citesBefore = citeBodies().length
   await send('Ask', 'What did Orrin hear?')
   await expect(turns).toHaveCount(2)
   await expect(turns.nth(1)).toContainText('Orrin overheard Tomas.', { timeout: 15_000 })
   expect(scribeBodies()).toHaveLength(before + 1)
+  expect(citeBodies()).toHaveLength(citesBefore + 1)
+  expect(citeBodies().at(-1)?.messages.at(-1)?.content).toContain(
+    '1. Orrin overheard Tomas.\nE0 [happened, the open scene 1.1 ¶0] “Orrin overheard Tomas”'
+  )
   const asked = scribeBodies().at(-1)
   const tail = asked?.messages.at(-1)?.content ?? ''
   expect(tail).toContain('E0 [happened, the open scene 1.1, id ')
@@ -2361,27 +2401,35 @@ test('story memory v2: Ms Scribe v9 answers and writes sheet lines (P3 slice 2)'
   expect(asked?.json).toBe(true)
   expect(
     providerBodies
-      .slice(-2)
-      .map((body) => body.messages[0]?.content.startsWith(ROUTE_V2_SENTINEL) === true)
-  ).toEqual([true, false])
-  const stored = async (): Promise<
-    { role: string; scribe: { citations: { quote: string; evidence: string }[] } | null }[]
-  > => {
+      .slice(-3)
+      .map((body) =>
+        body.messages[0]?.content.startsWith(ROUTE_V2_SENTINEL) === true
+          ? 'route'
+          : body.messages[0]?.content.startsWith(SCRIBE_SENTINEL) === true
+            ? 'answer'
+            : body.messages[0]?.content.startsWith(CITE_SENTINEL) === true
+              ? 'check'
+              : 'other'
+      )
+  ).toEqual(['route', 'answer', 'check'])
+  interface StoredScribe {
+    citations: { quote: string; evidence: string; checked: string }[]
+    notFound: boolean
+    retried: boolean
+  }
+  const stored = async (): Promise<{ role: string; scribe: StoredScribe | null }[]> => {
     const value = await invoke<{
       active: string | null
-      items: {
-        id: string
-        messages: {
-          role: string
-          scribe: { citations: { quote: string; evidence: string }[] } | null
-        }[]
-      }[]
+      items: { id: string; messages: { role: string; scribe: StoredScribe | null }[] }[]
     }>('conversations:get', undefined)
     return value.items.find((item) => item.id === value.active)?.messages ?? []
   }
+  // Quote and sentence checked: the fake checker found it supported.
   await expect
     .poll(async () => (await stored()).at(-1)?.scribe?.citations ?? [])
-    .toEqual([expect.objectContaining({ evidence: 'E0', quote: 'Orrin overheard Tomas' })])
+    .toEqual([
+      expect.objectContaining({ evidence: 'E0', quote: 'Orrin overheard Tomas', checked: 'cite' })
+    ])
 
   // Auto, an explicit sheet write: the line lands on Mara's Pinned with the chat's mark, the
   // turn says so with Undo, and Undo takes it out.
@@ -2420,6 +2468,30 @@ test('story memory v2: Ms Scribe v9 answers and writes sheet lines (P3 slice 2)'
   expect(scribeBodies().at(-1)?.messages[0]?.content).not.toContain(SCRIBE_EDITS_OPENING)
   await expect(turns.nth(7).getByTestId('agent-change')).toHaveCount(0)
   expect(await pageLines(mara, 'pinned')).toEqual([])
+  // Nothing those three turns said cited the book, so no check ran (P3 slice 3).
+  expect(citeBodies()).toHaveLength(citesBefore + 1)
+
+  // P3 slice 3: a main claim the check finds unsupported is asked again once; still unsupported,
+  // the turn reads Not found with where Ms Scribe looked. Two answer calls, one check each.
+  const answersBefore = scribeBodies().length
+  const checksBefore = citeBodies().length
+  await send('Ask', 'Who sold the map?')
+  await expect(turns).toHaveCount(10)
+  await expect(turns.nth(9)).toContainText(
+    'Not found in the manuscript (I looked in the open scene 1.1',
+    { timeout: 15_000 }
+  )
+  await expect(turns.nth(9)).not.toContainText(PLANTED_UNSUPPORTED)
+  expect(scribeBodies()).toHaveLength(answersBefore + 2)
+  expect(citeBodies()).toHaveLength(checksBefore + 2)
+  expect(scribeBodies().at(-1)?.messages.at(-1)?.content).toBe(
+    'Your first sentence (“Orrin sold the map.”) was not supported: its quotes do not say ' +
+      'this. Answer again only from the evidence, citing it, or set "found":false.'
+  )
+  await expect
+    .poll(async () => (await stored()).at(-1)?.scribe)
+    .toMatchObject({ notFound: true, retried: true, citations: [] })
+
   // The write runs carried the edit list; no request ever stated an absence.
   expect(
     scribeBodies().some((body) => body.messages[0]?.content.includes(SCRIBE_EDITS_OPENING))

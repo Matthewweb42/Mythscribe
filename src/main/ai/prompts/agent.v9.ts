@@ -35,7 +35,9 @@ import { AGENT_RETRY_TURN } from './agent.v2'
  * runs) and the roster (names and nicknames only), identical for every question of a
  * conversation until the records change, so the provider's prompt cache holds; then the earlier
  * turns, each labelled not a source; then one user turn: the voice block (edit and draft turns),
- * E0, the evidence, a widened chapter, the Searched line, and the question.
+ * E0, the evidence, a widened chapter, the Searched line, and the question. The one retry of an
+ * answer whose first sentence the checks found unsupported (P3 slice 3) adds a user turn quoting
+ * it with the reason; the one retry of a cut-off reply adds `AGENT_RETRY_TURN` last.
  */
 export const AGENT_PROMPT_V9_VERSION = 'agent.v9'
 
@@ -106,6 +108,42 @@ export const AGENT_V9_EVIDENCE_HEADING = 'Evidence:'
 
 /** The heading of a Self-Route widening (P3-D15): the model may not ask again. */
 export const AGENT_V9_WIDENED_HEADING = 'The chapter you asked for (do not ask again)'
+
+/** The longest first sentence the main-claim retry turn quotes back (P3-D14). */
+export const AGENT_V9_UNSUPPORTED_SENTENCE_CHARS = 300
+
+/**
+ * Why an answer's first sentence (its main claim) was not supported (P3-D14): it kept no
+ * citation, the quote check found its quotes do not say it, a passage the search found shows the
+ * same thing earlier (or later, for a last), or a first/last/ever/never answer did not say what
+ * was searched. Code picks one; the retry turn words it.
+ */
+export const UNSUPPORTED_REASONS = {
+  noCitation: 'it cites no passage that says it',
+  quotesDoNotSay: 'its quotes do not say this',
+  earlier: 'a passage the search found shows the same thing earlier',
+  later: 'a passage the search found shows the same thing later',
+  notFoundShown: 'a passage the search found shows what you said was not found',
+  noScope: 'it does not say what was searched (use the Searched line)'
+} as const
+export type UnsupportedReason = keyof typeof UNSUPPORTED_REASONS
+
+/**
+ * The one retry of an answer whose main claim was unsupported (P3 §3.3 step 3): its first
+ * sentence quoted back with the reason, after the user turn (the cached prefix and the evidence
+ * stay as they were sent).
+ */
+export function agentV9UnsupportedTurn(sentence: string, reason: UnsupportedReason): string {
+  const flat = sentence.replace(/\s+/gu, ' ').trim()
+  const quoted =
+    flat.length <= AGENT_V9_UNSUPPORTED_SENTENCE_CHARS
+      ? flat
+      : `${flat.slice(0, AGENT_V9_UNSUPPORTED_SENTENCE_CHARS).trimEnd()}…`
+  return (
+    `Your first sentence (“${quoted}”) was not supported: ${UNSUPPORTED_REASONS[reason]}. ` +
+    'Answer again only from the evidence, citing it, or set "found":false.'
+  )
+}
 
 /** What the user turn says in E0's place when no scene is open. */
 export const AGENT_V9_NO_SCENE = 'E0: no scene is open.'
@@ -281,6 +319,8 @@ export interface BuildAgentPromptV9Input {
   question: string
   /** True for the one retry of a reply that was cut off or unreadable. */
   retry?: boolean
+  /** The one retry of an answer whose main claim was unsupported (P3-D14): its first sentence and why. */
+  unsupported?: { sentence: string; reason: UnsupportedReason } | null
 }
 
 export interface BuiltAgentPromptV9 {
@@ -318,6 +358,12 @@ export function buildAgentPromptV9(input: BuildAgentPromptV9Input): BuiltAgentPr
     })),
     { role: 'user', content: tail.join('\n\n') }
   ]
+  if (input.unsupported !== undefined && input.unsupported !== null) {
+    messages.push({
+      role: 'user',
+      content: agentV9UnsupportedTurn(input.unsupported.sentence, input.unsupported.reason)
+    })
+  }
   if (input.retry === true) messages.push({ role: 'user', content: AGENT_RETRY_TURN })
   const reasoning = SCRIBE_REASONING[input.turn]
   return {

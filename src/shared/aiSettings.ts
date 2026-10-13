@@ -755,6 +755,16 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'whether the person you pick is on the page there). Never a sentence from an Idea scene ' +
       'or a scene left out of compile.',
     minDial: 1
+  },
+  cite: {
+    label: 'Ms Scribe’s quote check',
+    sends:
+      'Story memory v2 only, after an answer that cites the book: your message, each cited ' +
+      'sentence of the answer with the quoted passages and a sentence either side; for a first, ' +
+      'last, ever, never or how-many answer, or one that found nothing, its first sentence, ' +
+      'which scenes were searched, the words searched for and up to five earlier passages the ' +
+      'search found.',
+    minDial: 1
   }
 }
 
@@ -787,7 +797,7 @@ export const AI_FEATURES_BY_LEVEL: readonly AiFeatureId[] = [...AI_FEATURE_IDS].
  */
 export const MEMORY_ONLY_FEATURES: Readonly<Record<StoryMemoryVersion, readonly AiFeatureId[]>> = {
   v1: ['tags', 'summary', 'continuity', 'organise', 'todo', 'sheetSync'],
-  v2: ['reader', 'verify']
+  v2: ['reader', 'verify', 'cite']
 }
 
 /** Several features behind one switch in Settings, which writes them all (P2a-D24). */

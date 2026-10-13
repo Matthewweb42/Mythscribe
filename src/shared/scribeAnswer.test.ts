@@ -4,14 +4,17 @@ import { buildAskIndex } from './memory/askParse'
 import { buildNameIndex } from './memory/nameScan'
 import { normName } from './memory/names'
 import {
+  isAbsence,
   isAdviceOrQuestion,
   markerize,
   needsCitation,
   notFoundLine,
   parseCitedAnswer,
+  quoteContext,
   quoteHeld,
   quoteWords,
   scribeHistory,
+  statesScope,
   stripCitationMarkup,
   type HistoryTurn
 } from './scribeAnswer'
@@ -129,6 +132,48 @@ describe('isAdviceOrQuestion (P3-D13)', () => {
     expect(isAdviceOrQuestion('You could open on the storm.')).toBe(true)
     expect(isAdviceOrQuestion('Do you mean the yard?')).toBe(true)
     expect(isAdviceOrQuestion('Orrin overheard Tomas.')).toBe(false)
+  })
+})
+
+describe('quoteContext (cite.v1, P3 §3.2)', () => {
+  const scene =
+    'Mara watched the quay. Tomas sold the map to a stranger. Orrin heard it.\nOrrin overheard Tomas from the yard. Night fell.'
+
+  it('gives the quote’s sentence with one either side, across a line break', () => {
+    expect(quoteContext([scene], 'sold the map to a stranger')).toBe(
+      'Mara watched the quay. Tomas sold the map to a stranger. Orrin heard it.'
+    )
+    expect(quoteContext([scene], 'Orrin overheard Tomas')).toBe(
+      'Orrin heard it. Orrin overheard Tomas from the yard. Night fell.'
+    )
+  })
+
+  it('spans the sentences a quote runs across, in the stretch that holds it; null when none does', () => {
+    expect(quoteContext(['other words', scene], 'the quay. Tomas sold', 0)).toBe(
+      'Mara watched the quay. Tomas sold the map to a stranger.'
+    )
+    expect(quoteContext([scene], 'a quote nobody wrote')).toBeNull()
+    expect(quoteContext(['  one   line  '], 'one line')).toBe('one line')
+  })
+})
+
+describe('isAbsence and statesScope (P3 rule 5, §3.3)', () => {
+  it('reads an answer that found nothing', () => {
+    expect(isAbsence('I found no scene where Tomas learns it (searched 1.1–14.2).')).toBe(true)
+    expect(isAbsence('I could not find a scene where he says so.')).toBe(true)
+    expect(isAbsence('No scene shows it.')).toBe(true)
+    expect(isAbsence('Nothing in the manuscript says so.')).toBe(true)
+    expect(isAbsence('Tomas found no peace that night.')).toBe(false)
+    expect(isAbsence('I found the scene: 9.3.')).toBe(false)
+  })
+
+  it('reads an answer that says what was searched', () => {
+    expect(statesScope('The earliest I found, searching every scene up to 14.2, is 7.4.')).toBe(
+      true
+    )
+    expect(statesScope('Searched every scene up to 14.2 for map.')).toBe(true)
+    expect(statesScope('I looked in 1.1 to 9.3.')).toBe(true)
+    expect(statesScope('Lise first suspects him in 9.3.')).toBe(false)
   })
 })
 

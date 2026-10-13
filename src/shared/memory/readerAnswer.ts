@@ -244,7 +244,7 @@ function cardOf(raw: unknown): { card: ReaderCard | null; dropped: number } {
 }
 
 /** Strips a Markdown code fence a model may wrap its JSON in. */
-function unfence(text: string): string {
+export function unfence(text: string): string {
   return text
     .trim()
     .replace(/^```(?:json)?\s*/i, '')

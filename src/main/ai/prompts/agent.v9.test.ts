@@ -16,8 +16,10 @@ import {
   AGENT_V9_NO_SCENE,
   AGENT_V9_RULES,
   AGENT_V9_SENTINEL,
+  AGENT_V9_UNSUPPORTED_SENTENCE_CHARS,
   AGENT_V9_WIDENED_HEADING,
   agentV9System,
+  agentV9UnsupportedTurn,
   buildAgentPromptV9,
   renderScribeScene,
   SCENE_CUT_MARK,
@@ -158,6 +160,33 @@ describe('agent.v9 prompt (F-16.25, F-16.26)', () => {
     const retry = buildAgentPromptV9(input({ retry: true }))
     expect(retry.maxTokens).toBe(AGENT_RETRY_MAX_TOKENS)
     expect(retry.messages.at(-1)).toEqual({ role: 'user', content: AGENT_RETRY_TURN })
+  })
+
+  it('P3 slice 3: the main-claim retry quotes the first sentence with its reason after the user turn, the prompt before it unchanged', () => {
+    const first = buildAgentPromptV9(input())
+    const again = buildAgentPromptV9(
+      input({ unsupported: { sentence: 'Orrin sold the map.', reason: 'quotesDoNotSay' } })
+    )
+    expect(again.messages.slice(0, -1)).toEqual(first.messages)
+    expect(again.messages.at(-1)).toEqual({
+      role: 'user',
+      content:
+        'Your first sentence (“Orrin sold the map.”) was not supported: its quotes do not say ' +
+        'this. Answer again only from the evidence, citing it, or set "found":false.'
+    })
+    expect(again.maxTokens).toBe(first.maxTokens)
+    expect(again.reasoning).toBe('off')
+    // A cut-off retry of the retry adds the retry turn last, at the larger cap.
+    const cut = buildAgentPromptV9(
+      input({ unsupported: { sentence: 'Orrin sold the map.', reason: 'noCitation' }, retry: true })
+    )
+    expect(cut.messages.at(-2)?.content).toContain('it cites no passage that says it')
+    expect(cut.messages.at(-1)).toEqual({ role: 'user', content: AGENT_RETRY_TURN })
+    expect(cut.maxTokens).toBe(AGENT_RETRY_MAX_TOKENS)
+    // A long first sentence is cut to its opening.
+    const long = agentV9UnsupportedTurn('word '.repeat(200), 'noScope')
+    expect(long).toContain('…”) was not supported: it does not say what was searched')
+    expect(long.length).toBeLessThan(AGENT_V9_UNSUPPORTED_SENTENCE_CHARS + 200)
   })
 
   it('a widened request carries the chapter after the evidence, then the Searched line and the question', () => {

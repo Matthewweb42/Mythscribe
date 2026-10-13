@@ -12,6 +12,24 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-13 · F-16.25 · P3 slice 3 (cite.v1, the scope rule, the one retry, Not found): calls made while building it
+- Question: Ms Scribe now checks her own quotes (story memory v2 only; v1's chat is unchanged). These calls go beyond the plan's P3-D13, P3-D14 and P3-D21. No live run was possible here (no key): the six new `cite.v1` cases and `agent.v9`'s `retry-unsupported` case wait for your `MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=… npm run eval:ai` run.
+- Chosen (decided by Claude, unconfirmed):
+  1. **Which first sentences are asked about again:** only a claim about the book, one that names a record or a scene (P3-D13's rule), with no kept citation. A first sentence that names nothing ("She left early.") stays marked "not checked" and is never turned into "Not found": a brainstorm answer would otherwise always end Not found.
+  2. **"I found no scene where …" stands without a citation** (P3 rule 5's own wording): it is not asked about again, but the answer must say what was searched, or it is asked again once.
+  3. **Saying what was searched** is required of first, last, ever, never and how-many answers that make a claim, and of answers that found nothing. A plain "does Orrin know…" yes, or "What did Orrin hear?" (a learns word), need not say it; their search still covers every earlier scene.
+  4. **No check when nothing was cited**, even for an answer that found nothing: its scope is code's alone, unchecked against the passages the search found. The live run will show whether such answers are wrong often enough to check them anyway (one call, about 0.02¢).
+  5. **The scope item lists up to five passages before the cited paragraph** in reading order, the earliest first (for a last or latest answer, the ones after it, the latest first), each as the scene reads now around the search words. With nothing to list, no scope item is sent.
+  6. **A quote's sentence either side** is read across a scene's paragraphs (a one-sentence paragraph of dialogue gets its neighbours); for a fact, a page or who knows what, within its own passage only.
+  7. **"Quote and sentence checked"** is shown only when every sentence that used the quote was found "yes"; "partly", no verdict, or a failed check leave "quote checked".
+  8. **A failed check never costs the answer:** a provider error or the cap leaves the citations quote-checked; the Quote check switch (Settings › AI, its own row until slice 4's Ms Scribe switch) turns the check off the same way, while code's checks and the one retry stay.
+  9. **When the retry cannot run** (the turn is over its cost cap) or comes back cut off or asking for a chapter, the answer is "Not found in the manuscript (I looked in …)", never the unsupported claim.
+  10. **"I looked in …" names the scenes the answers cited first,** then the scenes of the evidence sent, then the search.
+  11. **The retry turn** quotes the first sentence back (300 characters at most) with the reason and asks for an answer from the evidence or `found: false`; the prompt before it is unchanged, so the cached prefix holds. The fit keeps room for it, so the maxed `agent.v9` case moved from 23,947 to 23,796 tokens.
+  12. **A narrower search widened:** when the navigator (slice 4) searched less than every scene up to now for a first/last/ever/never or knows question, Step 0's every-earlier-scene search (already run) is added, its scenes after the navigator's picks, and the chat shows "Searching every scene up to … for …".
+- Alternatives: retrying any uncited first sentence (the plan's literal reading); checking absence answers with no citation; asking every ordinal and knows answer for its scope; the scope item's passages nearest the cited scene first; sentences ±1 within one paragraph only; "cite" when any sentence said yes; the unsupported claim shown, marked, when no retry is possible.
+- To change it: `src/main/scribe/runScribe.ts` (`checkAnswer`, the retry; 1–3, 8–10), `src/main/scribe/checks.ts` (`enforceScope`, `scopeHits`, `citedSentences`, `applyCite`, `citationLevels`; 4–7, 12), `src/shared/scribeAnswer.ts` (`isAbsence`, `statesScope`, `quoteContext`), `src/main/ai/prompts/agent.v9.ts` (`agentV9UnsupportedTurn`; 11), `src/main/ai/prompts/cite.v1.ts` (the check's caps).
+
 ## 2026-10-13 · F-16.25, F-16.26 · P3 slice 2 review: what changed in Ms Scribe's answer call and sheet lines
 - Question: The review of slice 2 changed some of the calls below (entries 6 and 8 among them). These are the new ones; confirm or change them.
 - Chosen (decided by Claude, unconfirmed):

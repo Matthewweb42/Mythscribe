@@ -196,7 +196,7 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
     }
     // The planned new ids are new: none collides with a feature id this build has.
     const fresh = [...new Set(PLANNED_COST_NOTES.filter((r) => !r.existing).map((r) => r.feature))]
-    expect(fresh.sort()).toEqual(['cite', 'judge', 'navigator'])
+    expect(fresh.sort()).toEqual(['judge', 'navigator'])
     expect(fresh.some((feature) => known.includes(feature))).toBe(false)
   })
 
@@ -208,7 +208,7 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
     }
   })
 
-  it('F-16.9, F-16.17, F-16.20, F-16.21, F-16.22, F-16.25: the shipped rows left the planned table and their prompts are catalogued', () => {
+  it('F-16.9, F-16.17, F-16.20, F-16.21, F-16.22, F-16.25: the shipped rows left the planned table and their prompts are catalogued (cite.v1 since P3 slice 3)', () => {
     expect(SHIPPED_PLAN_ROWS.map((row) => row.id)).toEqual([
       'contextImport.v3',
       'reviewChat.v3',
@@ -230,7 +230,8 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
       'agent.v9:open',
       'agent.v9:lookup',
       'agent.v9:need',
-      'agent.v9:widened'
+      'agent.v9:widened',
+      'cite.v1'
     ])
     for (const row of SHIPPED_PLAN_ROWS) {
       expect(PLANNED_COST_NOTES.some((planned) => planned.id === row.id)).toBe(false)

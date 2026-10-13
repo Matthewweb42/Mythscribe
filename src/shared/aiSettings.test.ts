@@ -93,8 +93,10 @@ describe('defaultAiSettings (F-14.4)', () => {
 
   it('names the toggles a stored row has for ids this build does not know, booleans only', () => {
     expect(
-      unknownFeatureToggles({ features: { judge: false, chat: false, odd: 'x', cite: true } })
-    ).toEqual({ judge: false, cite: true })
+      unknownFeatureToggles({ features: { judge: false, chat: false, odd: 'x', navigator: true } })
+    ).toEqual({ judge: false, navigator: true })
+    // F-16.25: `cite` is this build's own id now, never an unknown one.
+    expect(unknownFeatureToggles({ features: { cite: true } })).toEqual({})
     expect(unknownFeatureToggles(null)).toEqual({})
     expect(unknownFeatureToggles({ features: 'all' })).toEqual({})
   })

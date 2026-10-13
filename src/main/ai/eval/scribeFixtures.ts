@@ -5,7 +5,12 @@ import { testBookScene } from '../../memory/testBook/book'
 import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
 import type { EvidenceItem } from '../../scribe/evidence'
 import { fitScribePrompt, type ScribeFitInput } from '../../scribe/runScribe'
-import { renderScribeScene, scribeRoster } from '../prompts/agent.v9'
+import {
+  buildAgentPromptV9,
+  renderScribeScene,
+  scribeRoster,
+  type BuildAgentPromptV9Input
+} from '../prompts/agent.v9'
 import type { EvalCase, ScribeExpect } from './fixtures'
 
 /**
@@ -110,25 +115,31 @@ function item(
   return { id, ...over, citable: over.label !== 'map', open: null, doc: null }
 }
 
-/** The case's prompt, fitted as `runScribe` fits it, and what was sent for the quote check. */
+/**
+ * The case's prompt, fitted as `runScribe` fits it, and what was sent for the quote check; with
+ * `unsupported`, the main-claim retry of that prompt (P3-D14).
+ */
 function scribeCase(
   name: string,
   note: string,
   input: ScribeFitInput,
   e0: readonly string[] | null,
-  expect: ScribeExpect
+  expect: ScribeExpect,
+  unsupported: BuildAgentPromptV9Input['unsupported'] = null
 ): EvalCase {
   const fitted = fitScribePrompt(input)
+  const built =
+    unsupported === null ? fitted.built : buildAgentPromptV9({ ...fitted.input, unsupported })
   const sent: Record<string, string[]> = {}
   if (e0 !== null) sent.E0 = [...e0]
   for (const each of fitted.sent) sent[each.id] = each.quotable
   return {
-    version: fitted.built.version,
+    version: built.version,
     name,
     note,
-    messages: fitted.built.messages,
-    maxTokens: fitted.built.maxTokens,
-    reasoning: fitted.built.reasoning,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    reasoning: built.reasoning,
     scoring: {
       kind: 'scribe',
       sent,
@@ -271,6 +282,29 @@ export function scribeEvalCases(voice: string): EvalCase[] {
       ),
       openScene('h14').paragraphs,
       { found: true }
+    ),
+    scribeCase(
+      'retry-unsupported',
+      'the open question asked again (P3-D14): its first sentence named 12.1 and the scope check found an earlier passage; answers from the evidence or sets found false',
+      fit(
+        base('h14', 'When does Lise first suspect the Captain?', {
+          searched: scopeLine({
+            from: '6.1',
+            to: '18.1',
+            allEarlier: true,
+            wholeBook: false,
+            terms: ['suspect', 'captain', 'distrust']
+          })
+        }),
+        captainOpen
+      ),
+      openScene('h14').paragraphs,
+      {},
+      {
+        sentence:
+          'Lise first suspects the Captain on the bridge in 12.1, searching every scene up to 18.1.',
+        reason: 'earlier'
+      }
     ),
     scribeCase(
       'knows-absence',

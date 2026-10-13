@@ -16,8 +16,10 @@ import {
   AGENT_V9_EDIT_TOOLS,
   AGENT_V9_SENTINEL,
   AGENT_V9_WIDENED_HEADING,
+  agentV9UnsupportedTurn,
   buildAgentPromptV9
 } from '../ai/prompts/agent.v9'
+import { CITE_SENTINEL } from '../ai/prompts/cite.v1'
 import { saveDocument } from '../document/documentStore'
 import type { CompletionRequest, CompletionResult, Provider } from '../ai/providers/types'
 import type { AiRequestDeps } from '../ai/request'
@@ -31,6 +33,7 @@ import { resetVoiceProfileCache } from '../voice/versionCache'
 import type { EvidenceItem } from './evidence'
 import {
   CHANGE_READY,
+  CHECKING_QUOTES,
   fitScribePrompt,
   PIN_NO_RECORD,
   PIN_NOT_ASKED,
@@ -63,7 +66,10 @@ import {
 type Complete = (request: CompletionRequest) => Promise<CompletionResult>
 
 let book: ScribeBook
+/** The answer calls (`agent.v9`, streamed). */
 let complete: ReturnType<typeof vi.fn<Complete>>
+/** The quote checks (`cite.v1`), answered apart so the answer calls keep their order. */
+let cite: ReturnType<typeof vi.fn<Complete>>
 let deps: AiRequestDeps
 let ledger: UsageEntry[]
 let steps: AgentStep[]
@@ -78,6 +84,12 @@ const said = (value: unknown, finishReason?: string): CompletionResult => ({
 function replies(...values: unknown[]): void {
   for (const value of values) complete.mockResolvedValueOnce(said(value))
 }
+
+/** The checker's reply: verdicts by sentence number, and the scope. */
+const verdicts = (v: string[], scope = 'none'): CompletionResult =>
+  said({ v: v.map((ok, i) => ({ i: i + 1, ok })), scope })
+
+const citeUser = (call: number): string => cite.mock.calls[call]?.[0].messages.at(-1)?.content ?? ''
 
 const request = (call: number): CompletionRequest => {
   const value = complete.mock.calls[call]?.[0]
@@ -122,12 +134,15 @@ beforeEach(() => {
   setAiSettings(book.db, { ...defaultAiSettings(), dial: 1 })
   complete = vi.fn<Complete>()
   complete.mockResolvedValue(said({ answer: 'Done.', found: true, edits: [] }))
+  cite = vi.fn<Complete>()
+  cite.mockResolvedValue(said({ v: [], scope: 'none' }))
   ledger = []
   steps = []
   const provider: Provider = {
     id: 'openai',
     resolveModel: (tier) => (tier === 'fast' ? 'gpt-5.4-mini' : 'gpt-5.4'),
-    complete,
+    complete: (req) =>
+      req.messages[0]?.content.startsWith(CITE_SENTINEL) === true ? cite(req) : complete(req),
     stream: async function* (req) {
       const reply = await complete(req)
       const cut = Math.floor(reply.text.length / 2)
@@ -181,7 +196,10 @@ describe('runScribe (F-16.25): the one answer call', () => {
     expect(user).not.toContain('"tool"')
     expect(sent.reasoning).toBe('off')
     expect(sent.maxTokens).toBe(700)
-    expect(ledger.map((entry) => entry.promptVersion)).toEqual(['agent.v9'])
+    // One answer call, then one quote check of the cited sentence.
+    expect(ledger.map((entry) => entry.promptVersion)).toEqual(['agent.v9', 'cite.v1'])
+    expect(cite).toHaveBeenCalledTimes(1)
+    expect(steps).toEqual([{ tool: 'check', label: CHECKING_QUOTES }])
     // The kept citation's quote is in its item as sent.
     expect(result.answer).toBe('Orrin overheard Tomas.[1]')
     expect(result.scribe.citations).toEqual([
@@ -302,9 +320,9 @@ describe('runScribe (F-16.25): the one answer call', () => {
     )
     replies({
       answer:
+        'She watched the quay. [E1 "Mara watched the quay with her grey eyes"] ' +
         'Mara has grey eyes. [E1 "Mara · eyes: grey"] ' +
-        'They are grey. [E1 "Mara"] ' +
-        'She watched the quay. [E1 "Mara watched the quay with her grey eyes"]',
+        'They are grey. [E1 "Mara"]',
       found: true
     })
     const result = await run({
@@ -323,7 +341,7 @@ describe('runScribe (F-16.25): the one answer call', () => {
     expect(result.scribe.citations.map((c) => [c.evidence, c.quote, c.ref])).toEqual([
       ['E1', 'Mara watched the quay with her grey eyes', '1.1 ¶0']
     ])
-    expect(result.answer).toBe('Mara has grey eyes. They are grey. She watched the quay.[1]')
+    expect(result.answer).toBe('She watched the quay.[1] Mara has grey eyes. They are grey.')
     const spans = result.scribe.notChecked.map(([from, to]) => result.answer.slice(from, to))
     expect(spans).toEqual(['Mara has grey eyes.'])
     expect(result.dropped).toBe(2)
@@ -331,11 +349,14 @@ describe('runScribe (F-16.25): the one answer call', () => {
 
   it('asks once more with the larger cap after a cut-off reply, and says so when cut twice', async () => {
     complete.mockResolvedValueOnce(said('{"answer":"Orrin ov', 'length'))
-    replies({ answer: 'Orrin heard Tomas.', found: true })
+    replies({
+      answer: 'Orrin heard Tomas. [E0 "Orrin overheard Tomas from the yard"]',
+      found: true
+    })
     const ok = await run({ requestId: 'r-1' })
     expect(complete).toHaveBeenCalledTimes(2)
     expect(request(1).maxTokens).toBe(AGENT_RETRY_MAX_TOKENS)
-    expect(ok.answer).toBe('Orrin heard Tomas.')
+    expect(ok.answer).toBe('Orrin heard Tomas.[1]')
 
     complete.mockReset()
     complete.mockResolvedValue(said('{"answer":"Orrin ov', 'length'))
@@ -452,7 +473,10 @@ describe('runScribe: Self-Route and search misses (P3-D15)', () => {
       }
     })
     expect(complete).toHaveBeenCalledTimes(2)
-    expect(steps).toEqual([{ tool: 'read', label: 'Reading 1.2…' }])
+    expect(steps).toEqual([
+      { tool: 'read', label: 'Reading 1.2…' },
+      { tool: 'check', label: CHECKING_QUOTES }
+    ])
     const widened = lastUser(1)
     expect(widened).toContain(`${AGENT_V9_WIDENED_HEADING}, 1.2:`)
     expect(widened).toContain('W1 [happened, 1.2 ¶0–1] Two\n¶0 Mara waited at the harbour')
@@ -465,7 +489,7 @@ describe('runScribe: Self-Route and search misses (P3-D15)', () => {
     expect(misses.map((row) => [row.nodeId, row.para, row.quote])).toEqual([
       [book.two, 1, 'Mara suspected the map was gone']
     ])
-    expect(ledger.map((entry) => entry.promptVersion)).toEqual(['agent.v9', 'agent.v9'])
+    expect(ledger.map((entry) => entry.promptVersion)).toEqual(['agent.v9', 'agent.v9', 'cite.v1'])
   })
 
   it('answers Not found with the scope after a second need, and without asking for a need that names nothing', async () => {
@@ -526,6 +550,328 @@ describe('runScribe: Self-Route and search misses (P3-D15)', () => {
     const result = await run({ message: 'What did Orrin eat?' })
     expect(result.scribe.notFound).toBe(true)
     expect(result.answer).toMatch(/^Not found in the manuscript \(I looked in the open scene 1\.1/)
+  })
+})
+
+/** The id an item was sent under, from its tag in the user turn ("E3 [happened, 1.2 ¶1]"). */
+const sentId = (user: string, ref: string): string => {
+  const escaped = ref.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+  const match = new RegExp(`(E\\d+) \\[[^\\]]*, ${escaped}\\]`, 'u').exec(user)
+  if (match?.[1] === undefined) throw new Error(`no item at ${ref} in:\n${user}`)
+  return match[1]
+}
+
+describe('runScribe: the quote check, the scope and the one retry (P3 slice 3)', () => {
+  const FIRST = 'When does Mara first suspect the map was gone?'
+
+  it('follows a cited answer with exactly one cite.v1 request on the fast tier; yes is quote and sentence checked, partly quote only; costs summed', async () => {
+    replies({
+      answer:
+        'Orrin overheard Tomas. [E0 "Orrin overheard Tomas from the yard"] ' +
+        'Tomas sold it to a stranger. [E0 "Tomas sold the map to a stranger"]',
+      found: true
+    })
+    cite.mockResolvedValueOnce(verdicts(['yes', 'partly']))
+    const result = await run({ requestId: 'r-c' })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(cite).toHaveBeenCalledTimes(1)
+    const check = cite.mock.calls[0]?.[0]
+    expect(check?.tier).toBe('fast')
+    // Reasoning off: a direct OpenAI key is asked for its lowest effort (P3-D21).
+    expect(check?.lowestEffort).toBe(true)
+    // Two sentences, no scope item: 20 + 10 × 2.
+    expect(check?.maxTokens).toBe(40)
+    expect(check?.messages[0]?.content.startsWith(CITE_SENTINEL)).toBe(true)
+    const user = citeUser(0)
+    expect(user.startsWith('Question: What did Orrin hear?')).toBe(true)
+    // Each quote in its sentence with one either side, across the scene's paragraphs.
+    expect(user).toContain(
+      '1. Orrin overheard Tomas.\nE0 [happened, the open scene 1.1 ¶2] “Orrin overheard Tomas from the yard” in: ' +
+        'Tomas sold the map to a stranger. Orrin overheard Tomas from the yard.'
+    )
+    expect(user).toContain(
+      '2. Tomas sold it to a stranger.\nE0 [happened, the open scene 1.1 ¶1] “Tomas sold the map to a stranger” in: ' +
+        'Mara watched the quay with her grey eyes. Tomas sold the map to a stranger. Orrin overheard Tomas from the yard.'
+    )
+    expect(user).not.toContain('Scope:')
+    expect(result.scribe.citations.map((c) => [c.n, c.checked])).toEqual([
+      [1, 'cite'],
+      [2, 'quote']
+    ])
+    expect(result.scribe).toMatchObject({ retried: false, notFound: false, unsupported: [] })
+    expect(steps).toEqual([{ tool: 'check', label: CHECKING_QUOTES }])
+    // The turn's cost is both calls'.
+    expect(ledger.map((entry) => [entry.promptVersion, entry.feature, entry.model])).toEqual([
+      ['agent.v9', 'agent', 'gpt-5.4'],
+      ['cite.v1', 'cite', 'gpt-5.4-mini']
+    ])
+    expect(result.usage).toEqual({ inputTokens: 1_200, outputTokens: 120 })
+    expect(result.costUsd).toBeCloseTo(
+      ledger.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0),
+      10
+    )
+    expect(result.costUsd).toBeGreaterThan(ledger[0]?.costUsd ?? 0)
+    // The answer's own model names the turn.
+    expect(result.model).toBe('gpt-5.4')
+  })
+
+  it('makes no cite call when nothing was cited, nor with its switch off', async () => {
+    replies({ answer: 'You could open on the storm.', found: true })
+    const advice = await run({ message: 'How should the scene open?' })
+    expect(cite).not.toHaveBeenCalled()
+    expect(steps).toEqual([])
+    expect(advice.answer).toBe('You could open on the storm.')
+
+    setAiSettings(book.db, {
+      ...defaultAiSettings(),
+      dial: 1,
+      features: { ...defaultAiSettings().features, cite: false }
+    })
+    replies({
+      answer: 'Orrin overheard Tomas. [E0 "Orrin overheard Tomas from the yard"]',
+      found: true
+    })
+    const off = await run()
+    expect(cite).not.toHaveBeenCalled()
+    expect(off.scribe.citations.map((c) => c.checked)).toEqual(['quote'])
+  })
+
+  it('drops the citations of a sentence found unsupported and marks it, keeping the rest', async () => {
+    replies({
+      answer:
+        'Orrin overheard Tomas. [E0 "Orrin overheard Tomas from the yard"] ' +
+        'Orrin sold the map. [E0 "Tomas sold the map to a stranger"]',
+      found: true
+    })
+    cite.mockResolvedValueOnce(verdicts(['yes', 'no']))
+    const result = await run()
+    expect(result.answer).toBe('Orrin overheard Tomas.[1] Orrin sold the map.')
+    expect(result.scribe.citations.map((c) => c.quote)).toEqual([
+      'Orrin overheard Tomas from the yard'
+    ])
+    const spans = result.scribe.unsupported.map(([from, to]) => result.answer.slice(from, to))
+    expect(spans).toEqual(['Orrin sold the map.'])
+    expect(result.scribe.retried).toBe(false)
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks once more when the main claim is unsupported, and keeps the second answer when it holds', async () => {
+    replies(
+      { answer: 'Orrin sold the map. [E0 "Tomas sold the map to a stranger"]', found: true },
+      { answer: 'Tomas sold the map. [E0 "Tomas sold the map to a stranger"]', found: true }
+    )
+    cite.mockResolvedValueOnce(verdicts(['no'])).mockResolvedValueOnce(verdicts(['yes']))
+    const resets: number[] = []
+    const result = await runScribe(
+      book.db,
+      deps,
+      {
+        nodeId: book.one,
+        message: 'Who sold the map?',
+        history: [],
+        access: 'read',
+        focus: { beforeCaret: '', selection: '' },
+        navigation: null,
+        requestId: 'r-retry'
+      },
+      (step) => steps.push(step),
+      { reset: () => resets.push(1) },
+      () => SCRIBE_NOW
+    )
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(cite).toHaveBeenCalledTimes(2)
+    // The retry is the same prompt with the first sentence quoted back and why.
+    const retry = request(1).messages
+    expect(retry.slice(0, -1)).toEqual(request(0).messages)
+    expect(retry.at(-1)).toEqual({
+      role: 'user',
+      content: agentV9UnsupportedTurn('Orrin sold the map.', 'quotesDoNotSay')
+    })
+    expect(resets.length).toBeGreaterThanOrEqual(1)
+    expect(result.answer).toBe('Tomas sold the map.[1]')
+    expect(result.scribe).toMatchObject({ retried: true, notFound: false })
+    expect(result.scribe.citations.map((c) => c.checked)).toEqual(['cite'])
+    expect(steps).toEqual([
+      { tool: 'check', label: CHECKING_QUOTES },
+      { tool: 'check', label: CHECKING_QUOTES }
+    ])
+    expect(ledger.map((entry) => entry.promptVersion)).toEqual([
+      'agent.v9',
+      'cite.v1',
+      'agent.v9',
+      'cite.v1'
+    ])
+    expect(result.usage.inputTokens).toBe(2_400)
+  })
+
+  it('a main claim with no citation is asked again without a check; still unsupported, it reads Not found with the open scene, the cited scenes and the search', async () => {
+    replies(
+      { answer: 'Orrin sold the map.', found: true },
+      { answer: 'Orrin sold the map. [E0 "Tomas sold the map to a stranger"]', found: true }
+    )
+    cite.mockResolvedValueOnce(verdicts(['no']))
+    const result = await run({ message: 'Who sold the map?' })
+    expect(complete).toHaveBeenCalledTimes(2)
+    // The first answer cited nothing: no check, straight to the retry; the second is checked.
+    expect(cite).toHaveBeenCalledTimes(1)
+    expect(request(1).messages.at(-1)?.content).toBe(
+      agentV9UnsupportedTurn('Orrin sold the map.', 'noCitation')
+    )
+    expect(result.answer).toMatch(/^Not found in the manuscript \(I looked in the open scene 1\.1/u)
+    expect(result.scribe).toMatchObject({ notFound: true, retried: true, citations: [] })
+
+    // An ordinal question at 1.3: the line names the open scene, the scene cited and the search.
+    complete.mockReset()
+    cite.mockReset()
+    replies({ answer: 'x', found: true })
+    await run({ nodeId: book.three, message: FIRST })
+    const at = sentId(lastUser(0), '1.2 ¶1')
+    complete.mockReset()
+    cite.mockReset()
+    const claim = {
+      answer: `Mara first suspects it in 1.2, searching every scene up to 1.3. [${at} "Mara suspected the map was gone"]`,
+      found: true
+    }
+    replies(claim, claim)
+    cite.mockResolvedValue(verdicts(['no'], 'ok'))
+    const ordinal = await run({ nodeId: book.three, message: FIRST })
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(cite).toHaveBeenCalledTimes(2)
+    expect(ordinal.answer).toMatch(
+      /^Not found in the manuscript \(I looked in the open scene 1\.3, scenes? 1\.2(?:,| and)[^)]*and searched every scene up to 1\.3 for /u
+    )
+    expect(ordinal.scribe).toMatchObject({ notFound: true, retried: true })
+  })
+
+  it('sends the scope item of a first answer with the earlier passages the search found, and asks again when one shows it earlier', async () => {
+    replies({ answer: 'x', found: true })
+    await run({ nodeId: book.three, message: FIRST })
+    const at = sentId(lastUser(0), '1.2 ¶1')
+    complete.mockReset()
+    replies(
+      {
+        answer:
+          'Mara first suspects it in 1.3, searching every scene up to 1.3. [E0 "Mara learned the map was sold"]',
+        found: true
+      },
+      {
+        answer: `Mara first suspects it in 1.2, searching every scene up to 1.3. [${at} "Mara suspected the map was gone"]`,
+        found: true
+      }
+    )
+    cite
+      .mockResolvedValueOnce(verdicts(['yes'], 'earlier'))
+      .mockResolvedValueOnce(verdicts(['yes'], 'ok'))
+    const result = await run({ nodeId: book.three, message: FIRST })
+    const scope = citeUser(0)
+    expect(scope).toContain('Scope: searched every scene up to 1.3 for ')
+    expect(scope).toContain('It cites 1.3.\nPassages the search found before 1.3:\n')
+    expect(scope).toContain('- 1.2 ¶1: Mara suspected the map was gone.')
+    expect(scope.indexOf('- 1.1 ¶')).toBeLessThan(scope.indexOf('- 1.2 ¶1'))
+    // 20 + 10 for the sentence + 20 for the scope.
+    expect(cite.mock.calls[0]?.[0].maxTokens).toBe(50)
+    expect(request(1).messages.at(-1)?.content).toBe(
+      agentV9UnsupportedTurn(
+        'Mara first suspects it in 1.3, searching every scene up to 1.3.',
+        'earlier'
+      )
+    )
+    expect(result.scribe.citations.map((c) => [c.ref, c.checked])).toEqual([['1.2 ¶1', 'cite']])
+    expect(result.scribe).toMatchObject({ retried: true, notFound: false })
+    expect(result.scribe.scope).toMatch(/^Searched every scene up to 1\.3 for /u)
+  })
+
+  it('asks again when a first answer does not say what was searched; an answer that found nothing stands on its scope', async () => {
+    replies({ answer: 'x', found: true })
+    await run({ nodeId: book.three, message: FIRST })
+    const at = sentId(lastUser(0), '1.2 ¶1')
+    complete.mockReset()
+    replies(
+      {
+        answer: `Mara first suspects it in 1.2. [${at} "Mara suspected the map was gone"]`,
+        found: true
+      },
+      {
+        answer: `Mara first suspects it in 1.2, searching every scene up to 1.3. [${at} "Mara suspected the map was gone"]`,
+        found: true
+      }
+    )
+    const asked = await run({ nodeId: book.three, message: FIRST })
+    expect(request(1).messages.at(-1)?.content).toBe(
+      agentV9UnsupportedTurn('Mara first suspects it in 1.2.', 'noScope')
+    )
+    // Only the second answer was checked.
+    expect(cite).toHaveBeenCalledTimes(1)
+    expect(asked.scribe.retried).toBe(true)
+
+    complete.mockReset()
+    cite.mockReset()
+    replies({
+      answer: 'I found no scene where Mara first suspects it (searched every scene up to 1.3).',
+      found: true
+    })
+    const none = await run({ nodeId: book.three, message: FIRST })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(cite).not.toHaveBeenCalled()
+    expect(none.scribe).toMatchObject({ retried: false, notFound: false })
+    expect(none.answer).toBe(
+      'I found no scene where Mara first suspects it (searched every scene up to 1.3).'
+    )
+  })
+
+  it('widens a navigation that searched less than every earlier scene before the answer is sent', async () => {
+    const narrow: Navigation = {
+      turn: 'answer',
+      evidence: [],
+      scope: { from: '1.3', to: '1.3', allEarlier: false, wholeBook: false, terms: ['suspect'] },
+      terms: ['suspect'],
+      hits: []
+    }
+    replies({ answer: 'I found nothing (searched).', found: false })
+    await run({ nodeId: book.three, message: FIRST, navigation: narrow })
+    const user = lastUser(0)
+    expect(user).toMatch(/\nSearched every scene up to 1\.3 for [^\n]+\.\n\nQuestion: /u)
+    expect(user).toContain('[happened, 1.2 ¶1]')
+    expect(steps[0]).toMatchObject({ tool: 'search' })
+    expect(steps[0]?.label).toMatch(/^Searching every scene up to 1\.3 for /u)
+
+    // A navigation that covered every earlier scene is sent as it is.
+    complete.mockReset()
+    steps.length = 0
+    replies({ answer: 'I found nothing (searched).', found: false })
+    await run({
+      nodeId: book.three,
+      message: FIRST,
+      navigation: {
+        ...narrow,
+        scope: { from: '1.1', to: '1.3', allEarlier: true, wholeBook: false, terms: ['suspect'] }
+      }
+    })
+    expect(lastUser(0)).toContain('Searched every scene up to 1.3 for suspect.')
+    expect(lastUser(0)).not.toContain('[happened, 1.2 ¶1]')
+    expect(steps).toEqual([])
+  })
+
+  it('never costs the author the answer: a failed check leaves the citations quote-checked', async () => {
+    replies({
+      answer: 'Orrin overheard Tomas. [E0 "Orrin overheard Tomas from the yard"]',
+      found: true
+    })
+    cite.mockRejectedValueOnce(new Error('boom'))
+    const result = await run()
+    expect(result.answer).toBe('Orrin overheard Tomas.[1]')
+    expect(result.scribe.citations.map((c) => c.checked)).toEqual(['quote'])
+    expect(result.scribe.retried).toBe(false)
+  })
+
+  it('writes no claim, card or reading on any of these paths (rule 6)', async () => {
+    const before = counts()
+    replies(
+      { answer: 'Orrin sold the map.', found: true },
+      { answer: 'Orrin sold the map.', found: true }
+    )
+    await run({ message: 'Who sold the map?' })
+    expect(counts()).toEqual(before)
   })
 })
 
@@ -740,7 +1086,7 @@ describe('fitScribePrompt (token rule 8)', () => {
       budget
     })
 
-  it('keeps the retry of a cut-off reply within the cap, whatever the fit trimmed', () => {
+  it('keeps the retries within the cap, whatever the fit trimmed', () => {
     const size = (built: { messages: { content: string }[] }): number =>
       estimateTokens(built.messages.map((message) => message.content).join('\n'))
     const whole = size(fit(24_000).built)
@@ -748,6 +1094,11 @@ describe('fitScribePrompt (token rule 8)', () => {
       const fitted = fit(budget)
       if (fitted.sent.length === 0 && fitted.input.history.length === 0) continue
       expect(size(buildAgentPromptV9({ ...fitted.input, retry: true }))).toBeLessThanOrEqual(budget)
+      // The main-claim retry (P3-D14), and its own cut-off retry, fit too.
+      const unsupported = { sentence: 'Orrin '.repeat(80), reason: 'noScope' as const }
+      expect(
+        size(buildAgentPromptV9({ ...fitted.input, unsupported, retry: true }))
+      ).toBeLessThanOrEqual(budget)
       expect(size(fitted.built)).toBeLessThanOrEqual(budget)
     }
   })

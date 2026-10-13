@@ -1,5 +1,5 @@
 import { estimateTokens } from './ai'
-import { findQuote } from './critique'
+import { findQuote, normalizeForMatch } from './critique'
 import { namesInQuestion, SCENE_REF, type AskIndex } from './memory/askParse'
 import { splitSentences } from './memory/sentences'
 import { SCRIBE_HISTORY_TOKENS, type SearchScope, type TextSpan } from './scribe'
@@ -176,6 +176,56 @@ export function quoteHeld(quotable: readonly string[], quote: string): boolean {
   const words = quoteWords(quote)
   if (words < QUOTE_WORDS_MIN || words > QUOTE_WORDS_MAX) return false
   return quotable.some((text) => findQuote(text, quote))
+}
+
+/**
+ * Where a kept quote stands, for the quote check (`cite.v1`, P3 §3.2): the sentence or sentences
+ * of the item's quotable stretch that hold it, with one sentence either side (`around`), spaces
+ * made one. Null when no stretch holds it.
+ */
+export function quoteContext(
+  quotable: readonly string[],
+  quote: string,
+  around = 1
+): string | null {
+  const text = quotable.find((stretch) => findQuote(stretch, quote))
+  if (text === undefined) return null
+  const spans = splitSentences(text)
+  if (spans.length === 0) return normalizeForMatch(text)
+  // The sentence the quote ends in, then the latest sentence it can start in.
+  const last = spans.findIndex((span) => findQuote(text.slice(0, span.end), quote))
+  if (last < 0) return normalizeForMatch(text)
+  let first = last
+  while (first > 0 && !findQuote(text.slice(spans[first]?.start ?? 0, spans[last]?.end), quote)) {
+    first -= 1
+  }
+  const from = spans[Math.max(0, first - around)]?.start ?? 0
+  const to = spans[Math.min(spans.length - 1, last + around)]?.end ?? text.length
+  return normalizeForMatch(text.slice(from, to))
+}
+
+/** How a sentence that found nothing opens ("I found no scene…", "I could not find…"). */
+const ABSENCE_OPENING =
+  /^(?:I\s+(?:found|could\s+find|can\s+find|see|saw|have\s+found)\s+no(?:thing)?\b|I\s+(?:did\s+not|didn['’]t|could\s+not|couldn['’]t|cannot|can['’]t|was\s+unable\s+to)\s+find\b|(?:No|Nothing\s+in\s+the)\s+(?:scene|passage|sentence|evidence|manuscript|book)\b)/iu
+
+/**
+ * A sentence that says the search found nothing ("I found no scene where Tomas learns it
+ * (searched …)", P3 rule 5): the scope is code's, so it needs no citation to stand as the main
+ * claim; the answer must say what was searched (`statesScope`).
+ */
+export function isAbsence(sentence: string): boolean {
+  return ABSENCE_OPENING.test(sentence.trim())
+}
+
+/** Words that say what was searched ("searching every scene up to 14.2", "I looked in"). */
+const SCOPE_WORDS = /\b(?:search(?:ed|ing)?|looked\s+(?:in|at|through))\b/iu
+
+/**
+ * Whether an answer says what was searched (P3 §3.3 step 2): a first, last, ever or never answer,
+ * or one that found nothing, must, or its main claim is unsupported.
+ */
+export function statesScope(answer: string): boolean {
+  return SCOPE_WORDS.test(answer)
 }
 
 /** What code decided about one sentence's citations. */

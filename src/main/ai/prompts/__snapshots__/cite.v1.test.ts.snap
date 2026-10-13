@@ -1,0 +1,29 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`cite.v1 prompt (F-16.25) > matches the golden messages: rules (cached), then the question, the sentences and the scope 1`] = `
+[
+  {
+    "content": "You are the citation checker inside a novel-writing app. Each numbered sentence comes from an answer about the author's book, with the passages it quotes, each quote shown in its sentence with one sentence either side.
+- "ok": "yes" when the quotes say what the sentence says, not merely mention the same people or things; "partly" when they support only part of it; "no" when they do not support it. Judge from the passages given alone, never from what you know. A passage labelled your idea, planned, idea scene or not canon supports a sentence only if the sentence says it is that.
+- "scope", only with a Scope item: "earlier" when a passage listed there shows the same thing as the first sentence, so it is not the first (or the last), or shows what the answer says was not found; else "ok". Without a Scope item: "none".
+Reply with JSON only: {"v":[{"i":1,"ok":"yes"}],"scope":"none"}",
+    "role": "system",
+  },
+  {
+    "content": "Question: When does Lise first suspect the Captain?
+
+1. Lise first suspects the Captain in 9.3.
+E2 [happened, 9.3 ¶4] “she did not trust his smile” in: The Captain bowed. Lise watched him, and she did not trust his smile. Bel laughed at something he said.
+
+2. Bel never noticed.
+E0 [happened, the open scene 14.2] “Bel laughed at something he said” in: Lise watched him. Bel laughed at something he said. The music began.
+E5 [your notes, Bel’s Pinned ¶1] “Bel trusts too easily” in: Bel trusts too easily.
+
+Scope: searched every scene up to 14.2 for suspect, distrust, captain. The first sentence: “Lise first suspects the Captain in 9.3.” It cites 9.3.
+Passages the search found before 9.3:
+- 7.4 ¶2: Lise thought the Captain a little too smooth, and said so to no one.
+- 8.1 ¶6: The Captain called at noon.",
+    "role": "user",
+  },
+]
+`;

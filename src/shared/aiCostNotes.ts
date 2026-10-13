@@ -171,7 +171,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   agent: {
     trigger: 'every chat message',
-    when: 'The per-feature table prices story memory v1 (agent.v8, up to 3 calls a message, every project until the switch-over); story memory v2’s agent.v9 (1 call a message, 2 when widened) is priced by its shipped rows (agent.v9:open, :lookup, :need, :widened) in the story-memory tasks below (a lookup, an open question, an open question widened). Story memory v2 (F-16.25, F-16.26): Ms Scribe answers in one strong-tier call (agent.v9), no lookups: the rules, the edit list on a write run and the roster of names (about 1,000 tokens, cached), then the earlier turns (≤ 1,500), the voice block on edit and draft turns, the whole open scene (≤ 12,000, typically 3,000–4,000), the labelled evidence (≤ 3,000; 1,200 for a lookup) and the question; input cap 24,000. Reasoning off and 700 out for answer, idea and to-do turns (300 for a lookup), low with 2,500 out for edit, draft and what-if turns; one retry at 3,000 after a cut-off reply; one Self-Route a turn ({"need":…}, about 20 out) asks again with up to 8,000 tokens of one chapter or range of scenes. Sheet lines the author asks for land locally (record:addLine), no AI. Story memory v1: Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately. Since agent.v7 (F-5.25) a bulk delete is one clear edit answered without lookups (the clear itself runs locally, no AI); the bulk rules, the organise rule, and the bulk and story-bible edits add ~250 input tokens to a read request and ~470 to a write request (a cached prefix). Since agent.v8 (F-5.25 fixes 5, 7, 8) the write edit list gains status, To do settle, notes clearing, undo, summaries, and open: ~110 more input tokens on a write request, none on a read request; the todo tool prints a short ref per item (~2 tokens each). The actions themselves run locally (summaries queue the existing summary jobs).',
+    when: 'The per-feature table prices story memory v1 (agent.v8, up to 3 calls a message, every project until the switch-over); story memory v2’s agent.v9 (1 call a message, 2 when widened) is priced by its shipped rows (agent.v9:open, :lookup, :need, :widened) in the story-memory tasks below (a lookup, an open question, an open question widened). Story memory v2 (F-16.25, F-16.26): Ms Scribe answers in one strong-tier call (agent.v9), no lookups: the rules, the edit list on a write run and the roster of names (about 1,000 tokens, cached), then the earlier turns (≤ 1,500), the voice block on edit and draft turns, the whole open scene (≤ 12,000, typically 3,000–4,000), the labelled evidence (≤ 3,000; 1,200 for a lookup) and the question; input cap 24,000. Reasoning off and 700 out for answer, idea and to-do turns (300 for a lookup), low with 2,500 out for edit, draft and what-if turns; one retry at 3,000 after a cut-off reply; one Self-Route a turn ({"need":…}, about 20 out) asks again with up to 8,000 tokens of one chapter or range of scenes. Since P3 slice 3 an answer whose first sentence is unsupported (no kept citation, cite.v1 says no, or an earlier passage for a first, last, ever or never answer) is asked once more with a retry turn (one more call, about 6,500 / 350), and still unsupported it reads Not found in the manuscript (I looked in …). Sheet lines the author asks for land locally (record:addLine), no AI. Story memory v1: Auto/Ask/Plan chat: research steps then an answer (up to 6 lookups; since agent.v6 a ladder: lookup ≤ 1,200 characters, scene cards ~100 tokens each, local passage search, whole scenes last); prose drafts stream separately. Since agent.v7 (F-5.25) a bulk delete is one clear edit answered without lookups (the clear itself runs locally, no AI); the bulk rules, the organise rule, and the bulk and story-bible edits add ~250 input tokens to a read request and ~470 to a write request (a cached prefix). Since agent.v8 (F-5.25 fixes 5, 7, 8) the write edit list gains status, To do settle, notes clearing, undo, summaries, and open: ~110 more input tokens on a write request, none on a read request; the todo tool prints a short ref per item (~2 tokens each). The actions themselves run locally (summaries queue the existing summary jobs).',
     callsPerUse: 3,
     typicalOutTokens: 300,
     ideas:
@@ -239,6 +239,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     typicalOutTokens: 140,
     ideas:
       'Prove more in code (literal patterns per slot) so fewer items are sent; fold presence checks into the reader once the live run shows they agree; the strong spot check only while the proof agreement is new.'
+  },
+  cite: {
+    trigger: 'every chat message',
+    when: 'Story memory v2 (F-16.25): cite.v1, fast tier, reasoning off, after every Ms Scribe answer that kept a citation (none when nothing was cited, and none for an instant card): the question, each cited sentence (at most 8) with its quotes in their evidence sentence ±1, and for a first, last, ever, never or how-many answer (or one that found nothing) the scope item (what code searched, the answer’s first sentence and cited scene, up to 5 passages the search found before it; none sent when it found none). max_tokens min(200, 20 + 10 per sentence + 20 for the scope). A main claim it finds unsupported asks agent.v9 once more, which is checked again (a second cite.v1 call). Figures (plan P3 §3): about 1,000 tokens in and 60 out.',
+    callsPerUse: 1,
+    typicalOutTokens: 60,
+    ideas:
+      'Skip a sentence whose quote is the whole sentence word for word; measure the yes rate in the live run and check only the first sentence if it stays near 100 %; the scope item is already left out when the search found nothing before the cited place.'
   }
 }
 
@@ -280,19 +288,6 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
     when: 'An open question: up to two steps choosing which passages Ms Scribe reads.',
     typicalInTokens: 6_000,
     typicalOutTokens: 150,
-    callsPerUse: 1
-  },
-  {
-    id: 'cite.v1',
-    prompt: 'cite.v1',
-    feature: 'cite',
-    existing: false,
-    phase: 'P3',
-    tier: 'fast',
-    trigger: 'every chat message',
-    when: 'After each answer: checks every citation against its passage.',
-    typicalInTokens: 1_000,
-    typicalOutTokens: 60,
     callsPerUse: 1
   },
   {
@@ -353,7 +348,7 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
  * The story-memory rows that have shipped (F-16.9, P1 slice 5; F-16.17, P2a slice 2: the reader
  * and verify rows; F-16.22, F-16.23, P2b slice 2: their v2 rows, which the tasks read now, the v1
  * rows kept for the ledger's older readings; F-16.20, F-16.21, P2a slice 5: `synopsis.v2`, `notesSuggest.v4` and
- * `planLinks.v2`; F-16.25, P3 slice 2: `agent.v9`'s open, lookup, need and widened calls): their features' notes are in `AI_COST_NOTES` now (the registry's per-feature
+ * `planLinks.v2`; F-16.25, P3 slice 2: `agent.v9`'s open, lookup, need and widened calls; P3 slice 3: `cite.v1`): their features' notes are in `AI_COST_NOTES` now (the registry's per-feature
  * table shows them), and these rows keep the design's sizes so the planned tasks that run them
  * ("File a 20,000-word upload, once", "Index the book once") and the switch-over's rebuild price
  * (`plannedRow` in `switchover/plan.ts`) stay priced from the same figures.
@@ -630,6 +625,19 @@ export const SHIPPED_PLAN_ROWS: readonly PlannedCostNote[] = [
     when: 'An open question the first evidence could not answer, asked again with one chapter or range of whole scenes (≤ 8,000 tokens; about one question in five).',
     typicalInTokens: 13_000,
     typicalOutTokens: 400,
+    callsPerUse: 1
+  },
+  {
+    id: 'cite.v1',
+    prompt: 'cite.v1',
+    feature: 'cite',
+    existing: true,
+    phase: 'P3',
+    tier: 'fast',
+    trigger: 'every chat message',
+    when: 'After each answer that cites the book: checks every cited sentence against its quotes, and the scope of a first, last, ever or never answer (reasoning off). The eval fixtures measure 300–1,400 on the test book; the design’s size stays the planning figure.',
+    typicalInTokens: 1_000,
+    typicalOutTokens: 60,
     callsPerUse: 1
   }
 ]

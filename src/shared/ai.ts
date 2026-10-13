@@ -346,7 +346,10 @@ export const AI_FEATURE_IDS = [
   'reader',
   // F-16.17 (story memory v2): the fact checker, which confirms the facts the reader proposed
   // that code could not prove, from their sentences alone.
-  'verify'
+  'verify',
+  // F-16.25 (story memory v2): the citation checker, which checks Ms Scribe's cited sentences
+  // against their passages, and the scope of a first, last, ever or never answer.
+  'cite'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -452,7 +455,9 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   reader: 720,
   // F-16.17: batches per page, min(400, 20 + 28 per fact + 12 per card or on-page item); a
   // strong spot check asks 40.
-  verify: 400
+  verify: 400,
+  // F-16.25: min(200, 20 + 10 per cited sentence + 20 for the scope item) (`citeMaxTokens`).
+  cite: 200
 }
 
 /**
@@ -538,7 +543,11 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   reader: 6_000,
   // F-16.17: the rules and the numbered items, each its candidates, fact and sentences ±1 (and the
   // antecedent span of a pronoun); a batch over 2,500 tokens of items is split.
-  verify: 3_000
+  verify: 3_000,
+  // F-16.25: the cached rules (≤ 250), the question, up to 8 cited sentences each with its quotes
+  // in their evidence sentence ±1 (≤ 1,800), and the scope item of an ordinal or absence answer
+  // (≤ 400); the far sentences go first.
+  cite: 2_500
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

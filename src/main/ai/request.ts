@@ -68,16 +68,22 @@ const NO_REASONING_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
   // F-16.17: story memory's reader and its checker are short JSON under small caps, read in the
   // background; reasoning off on every route (design §2.3 "Reasoning").
   'reader',
-  'verify'
+  'verify',
+  // F-16.25 (P3-D21): Ms Scribe's quote check is a short JSON verdict list on the fast tier.
+  'cite'
 ])
 
 /**
  * F-16.17 (P2a-D15): the story-memory requests that also ask a direct OpenAI key for its lowest
  * `reasoning_effort` (the adapter knows which effort each model takes), so a v1 request leaves
- * exactly as before. P2a slice 5 adds `planLinks.v2`; F-16.31 widens it to every request that
+ * exactly as before. P2a slice 5 adds `planLinks.v2`, P3 slice 3 `cite` (P3-D21); F-16.31 widens it to every request that
  * asks for no reasoning.
  */
-const LOWEST_EFFORT_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>(['reader', 'verify'])
+const LOWEST_EFFORT_FEATURES: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
+  'reader',
+  'verify',
+  'cite'
+])
 /** F-16.21: the story-memory prompt versions of existing features that ask for the lowest effort too. */
 const LOWEST_EFFORT_PROMPTS: ReadonlySet<PromptVersion> = new Set<PromptVersion>([
   PLAN_LINKS_PROMPT_V2_VERSION

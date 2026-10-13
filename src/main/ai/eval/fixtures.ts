@@ -66,6 +66,7 @@ import {
 } from '@shared/voice'
 import { voiceBlock } from '../../voice/voiceBlock'
 import { MEMORY_EVAL_CASES, MEMORY_V2_EVAL_CASES } from './memoryFixtures'
+import { citeEvalCases } from './citeFixtures'
 import { scribeEvalCases } from './scribeFixtures'
 import { CARD_GIST_MAX_WORDS, CARD_LINE_MAX_WORDS } from '@shared/memory/claims'
 import type { PromptCard } from '@shared/memory/cardText'
@@ -933,6 +934,16 @@ export interface EvalCase {
      * place, or none; no absence stated as fact without "searched"; the required phrases.
      */
     | { kind: 'scribe'; sent: Record<string, string[]>; maps: string[]; expect: ScribeExpect }
+    /**
+     * Ms Scribe's quote check (F-16.25, `cite.v1`): the reply parses (`parseCiteReply`); each
+     * sentence's verdict is `expected`'s by index (null: any verdict, but one); the scope verdict
+     * is `scope`'s when the case sent a scope item (null: none sent).
+     */
+    | {
+        kind: 'cite'
+        expected: ('yes' | 'partly' | 'no' | null)[]
+        scope: 'ok' | 'earlier' | 'none' | null
+      }
 }
 
 /** A test-book label as a reader case scores against it. */
@@ -6707,5 +6718,7 @@ export const EVAL_CASES: EvalCase[] = [
   // F-16.22, F-16.23: reader.v2 and verify.v2, after P2a's last catalogued versions.
   ...MEMORY_V2_EVAL_CASES,
   // F-16.25, F-16.26: Ms Scribe's one answer call (agent.v9), story memory v2 only.
-  ...scribeEvalCases(voiceBlock(FIXTURE_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' }) ?? '')
+  ...scribeEvalCases(voiceBlock(FIXTURE_PROFILE, { text: FIXTURE_PASSAGE, pov: 'Mara' }) ?? ''),
+  // F-16.25 (P3 slice 3): Ms Scribe's quote check (cite.v1), story memory v2 only.
+  ...citeEvalCases()
 ]

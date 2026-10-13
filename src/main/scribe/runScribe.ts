@@ -1,4 +1,5 @@
 import { estimateTokens } from '@shared/ai'
+import { isFeatureAllowed } from '@shared/aiSettings'
 import {
   AGENT_ANSWER_MAX,
   AGENT_COST_CAP_USD,
@@ -10,6 +11,7 @@ import {
   type AgentStep
 } from '@shared/agent'
 import { findQuote } from '@shared/critique'
+import { ordinalSearch } from '@shared/memory/askParse'
 import { caseForm, normName } from '@shared/memory/names'
 import type { RecordPage, StoryRecordSummary } from '@shared/memory/records'
 import { isNamedKind } from '@shared/memory/topics'
@@ -27,6 +29,7 @@ import {
   type ScribeTurnKind
 } from '@shared/scribe'
 import {
+  isAbsence,
   isAdviceOrQuestion,
   markerize,
   needsCitation,
@@ -35,8 +38,11 @@ import {
   quoteHeld,
   scopeLine,
   scribeHistory,
+  searchedPhrase,
+  statesScope,
   stripCitationMarkup,
   type HistoryTurn,
+  type ParsedAnswer,
   type SentenceVerdict
 } from '@shared/scribeAnswer'
 import {
@@ -56,17 +62,32 @@ import { assertFeatureAllowed } from '../ai/dial'
 import { cancelInflight, registerInflight, releaseInflight } from '../ai/inflight'
 import {
   AGENT_PROMPT_V9_VERSION,
+  AGENT_V9_UNSUPPORTED_SENTENCE_CHARS,
   buildAgentPromptV9,
   renderScribeScene,
   scribeRoster,
+  UNSUPPORTED_REASONS,
   type BuildAgentPromptV9Input,
   type BuiltAgentPromptV9,
-  type RenderedScene
+  type RenderedScene,
+  type UnsupportedReason
 } from '../ai/prompts/agent.v9'
+import {
+  buildCitePrompt,
+  CITE_PROMPT_VERSION,
+  parseCiteReply,
+  type CitePromptScope
+} from '../ai/prompts/cite.v1'
 import { promptInputBudget } from '../ai/prompts/catalogue'
 import type { ChatTurn } from '../ai/prompts/chat.v1'
 import { AiCancelledError, type CompletionUsage } from '../ai/providers/types'
-import { runAiStream, sha256, type AiRequestDeps, type AiRequestResult } from '../ai/request'
+import {
+  runAiRequest,
+  runAiStream,
+  sha256,
+  type AiRequestDeps,
+  type AiRequestResult
+} from '../ai/request'
 import { namedTotals } from '../memory/nameIndexer'
 import { rowTexts } from '../memory/reading/readingFrame'
 import { getRecord, listRecords } from '../memory/recordStore'
@@ -84,6 +105,14 @@ import {
   type EvidenceIdOf,
   type EvidenceItem
 } from './evidence'
+import {
+  applyCite,
+  citationLevels,
+  citedSentences,
+  enforceScope,
+  scopeHits,
+  type CheckedItem
+} from './checks'
 import { logSearchMiss } from './searchMissStore'
 import { resolveNeed, widenKeys } from './selfRoute'
 import { relateToPage } from './sheetLines'
@@ -106,8 +135,15 @@ import { askIndexOf, caretParaOf, gatherStep0, type SceneE0, type Step0 } from '
  *
  * Code checks every citation: kept only when its item was sent and the quote is in the item's text
  * as sent; a map (card) is never kept. Sentences that name a record or a scene and kept no
- * citation are marked "not checked" (P3-D13), and so is a found answer's first sentence without
- * one (slice 3 retries it). Edits go through `offerEdit` (v2 refuses what it never offers); `pin`
+ * citation are marked "not checked" (P3-D13). Then `cite.v1` (fast, one call, none when nothing
+ * was cited) rules on every sentence with a kept citation: `no` drops its citations and marks it
+ * unsupported, `yes` marks them "quote and sentence checked"; for a first/last/ever/never answer
+ * (or one that found nothing) it also checks the earlier passages the search found (P3 slice 3).
+ * The scope comes first: such a question is answered over every scene up to now, Step 0's search
+ * added when the navigation searched less. A found answer whose first sentence (the main claim,
+ * P3-D14) keeps no citation, is found `no`, has an earlier passage, or (for those questions) does
+ * not say what was searched is asked once more with a retry turn; still unsupported, the answer
+ * is "Not found in the manuscript (I looked in …)". Edits go through `offerEdit` (v2 refuses what it never offers); `pin`
  * becomes a sheet line (decision 3 as the author changed it) unless its record is unknown, a secret
  * or thread, or its page already says it, which the answer then says. A read run (Plan) drops every
  * edit. Nothing is written here but search misses: never a claim, card or reading (P3 rule 6).
@@ -224,6 +260,20 @@ export class ShownStream {
   }
 }
 
+/**
+ * The longest retry turns together (P3-D14's main-claim retry with its longest reason, then the
+ * cut-off retry): the fit holds the cap with both counted, so no retry is ever over it.
+ */
+const WORST_RETRY: Pick<BuildAgentPromptV9Input, 'retry' | 'unsupported'> = {
+  retry: true,
+  unsupported: {
+    sentence: 'x'.repeat(AGENT_V9_UNSUPPORTED_SENTENCE_CHARS + 1),
+    reason: (Object.keys(UNSUPPORTED_REASONS) as UnsupportedReason[]).reduce((a, b) =>
+      UNSUPPORTED_REASONS[a].length >= UNSUPPORTED_REASONS[b].length ? a : b
+    )
+  }
+}
+
 /** What the fit is given: the fixed parts, and the parts it may trim (token rule 8). */
 export interface ScribeFitInput {
   base: Omit<BuildAgentPromptV9Input, 'evidence' | 'history' | 'widened' | 'voice'>
@@ -258,8 +308,8 @@ const sizeOf = (built: { messages: { content: string }[] }): number =>
  * `agent.v9` within its input cap (P3 §2.2): the evidence to its own budget, the widened scenes to
  * 8,000, then, while the whole is over the cap, the farthest evidence goes first, then the oldest
  * history, then the widened chapter's farthest scene, then the voice block's exemplars. Never the
- * rules, E0 or the question. The cap is held with the retry turn counted, so the one retry of a
- * cut-off reply (the same prompt and `AGENT_RETRY_TURN`) is never over it.
+ * rules, E0 or the question. The cap is held with the retry turns counted (`WORST_RETRY`), so
+ * neither the main-claim retry nor the one retry of a cut-off reply is ever over it.
  */
 export function fitScribePrompt(input: ScribeFitInput): FittedScribePrompt {
   const budget = input.budget ?? promptInputBudget('agent', AGENT_PROMPT_V9_VERSION)
@@ -283,7 +333,7 @@ export function fitScribePrompt(input: ScribeFitInput): FittedScribePrompt {
         : { what: input.widened.what, text: renderEvidence(widened, Infinity, input.idOf).text }
   })
   let fitted = inputOf()
-  while (sizeOf(buildAgentPromptV9({ ...fitted, retry: true })) > budget) {
+  while (sizeOf(buildAgentPromptV9({ ...fitted, ...WORST_RETRY })) > budget) {
     if (evidence.length > 0) evidence = evidence.slice(0, -1)
     else if (history.length > 0) history = history.slice(1)
     else if (widened.length > 0) widened = widened.slice(0, -1)
@@ -411,6 +461,10 @@ interface SentItem {
   lines: { para: number; parts: readonly string[] }[] | null
   /** The scene a citation of it lands in, for the search-miss log (widened items only). */
   widened: boolean
+  /** A filed line's document (its tag reads "filed from <doc>"). */
+  doc: string | null
+  /** E0, tagged "the open scene 9.3" as it was sent. */
+  e0: boolean
 }
 
 /** E0 as it was sent (`renderScribeScene`'s paragraphs, a shortened one as its two parts). */
@@ -423,7 +477,9 @@ function sentE0(e0: SceneE0, sent: RenderedScene['sent']): SentItem {
     quotable: sent.flatMap((line) => line.parts),
     open: { kind: 'scene', id: e0.nodeId, para: null },
     lines: sent,
-    widened: false
+    widened: false,
+    doc: null,
+    e0: true
   }
 }
 
@@ -443,7 +499,9 @@ function sentOf(item: EvidenceItem, frame: EvidenceFrame): SentItem {
     quotable: item.quotable,
     open: item.open,
     lines,
-    widened: item.id.startsWith('W')
+    widened: item.id.startsWith('W'),
+    doc: item.doc,
+    e0: false
   }
 }
 
@@ -453,17 +511,58 @@ function placeOf(item: SentItem, quote: string): number | null {
   return line?.para ?? null
 }
 
-/** One kept citation in full: its label, the paragraph it lands in, where it opens. */
-function citationOf(n: number, evidence: string, quote: string, item: SentItem): ScribeCitation {
+/** One kept citation in full: its label, the paragraph it lands in, where it opens, how far checked. */
+function citationOf(
+  n: number,
+  evidence: string,
+  quote: string,
+  item: SentItem,
+  checked: ScribeCitation['checked']
+): ScribeCitation {
   const at = placeOf(item, quote)
   const ref = at === null ? item.ref : `${item.ref} ¶${at}`
   const open = item.open === null ? null : at === null ? item.open : { ...item.open, para: at }
-  return { n, evidence, label: item.label, ref, title: item.title, open, quote, checked: 'quote' }
+  return { n, evidence, label: item.label, ref, title: item.title, open, quote, checked }
 }
 
+/** A sent item as the checks read it. */
+const checkedOf = (item: SentItem): CheckedItem => ({
+  label: item.label,
+  ref: item.ref,
+  doc: item.doc,
+  quotable: item.quotable,
+  context: item.lines === null ? item.quotable : [item.quotable.join('\n')],
+  open: item.open,
+  e0: item.e0
+})
+
+/** What the code checks and `cite.v1` made of one found answer. */
+interface CheckedAnswer {
+  parsed: ParsedAnswer
+  verdicts: SentenceVerdict[]
+  /** Citations the code check refused (not sent, not in the item, a map, past the cap). */
+  refused: number
+  /** How far each kept citation was checked, by `evidence\u0000quote`. */
+  levels: Map<string, ScribeCitation['checked']>
+  /** Why the first sentence (the main claim) is unsupported; null when it stands. */
+  main: UnsupportedReason | null
+}
+
+/** What the step list shows while `cite.v1` runs (P3 §3.3 step 4). */
+export const CHECKING_QUOTES = 'Checking the quotes…'
+
+/** The request id of the `n`th quote check of run `requestId`, so `ai:cancel` stops it too. */
+export function citeRequestId(requestId: string, n: number): string {
+  return `${requestId}:cite${n}`
+}
+
+/** The longest step label (`AgentStep.label`). */
+const STEP_LABEL_MAX = 300
+
 /**
- * Runs one Ms Scribe turn. `onStep` hears a Self-Route's read ("Reading chapter 9…"); `hooks`
- * stream the answer, reset it, and annotate the developer tools as `runAgent`'s do.
+ * Runs one Ms Scribe turn. `onStep` hears a widened search, a Self-Route's read ("Reading chapter
+ * 9…") and the quote check ("Checking the quotes…"); `hooks` stream the answer, reset it (before
+ * the main-claim retry too), and annotate the developer tools as `runAgent`'s do.
  */
 export async function runScribe(
   db: TreeDb,
@@ -473,7 +572,8 @@ export async function runScribe(
   hooks: AgentHooks = {},
   now: () => Date = () => new Date()
 ): Promise<ScribeResult> {
-  assertFeatureAllowed(getAiSettings(db), 'agent')
+  const settings = getAiSettings(db)
+  assertFeatureAllowed(settings, 'agent')
   const project = loadAgentProject(db, input.nodeId, 'v2')
   const openRow = input.nodeId === null ? undefined : getNode(db, input.nodeId)
   const caretPara =
@@ -504,9 +604,10 @@ export async function runScribe(
               }
             : {})
         })
-  const keys = (input.navigation?.evidence ?? step0.menu.map((item) => item.key)).filter(
-    (key) => !inE0(key, e0)
-  )
+  // The scope rule (P3 §3.3 step 2, P3-D8): a first/last/ever/never or knows question is answered
+  // over every scene up to now; a navigation that searched less gets Step 0's search added.
+  const search = enforceScope(input.navigation, step0)
+  const keys = search.keys.filter((key) => !inE0(key, e0))
   const resolved = resolveEvidence(db, keys, step0.nowId, { frame })
   const records = listRecords(db).filter((record) => isNamedKind(record.kind))
   const roster = scribeRoster(
@@ -522,7 +623,7 @@ export async function runScribe(
   const profile = write ? buildVoiceProfile(db, { pov: pov ?? undefined }) : null
   const voice =
     profile !== null && (turn === 'edit' || turn === 'draft') ? voiceParts(profile, e0, pov) : null
-  const scope = input.navigation?.scope ?? step0.scope
+  const scope = search.scope
   const base: ScribeFitInput['base'] = {
     access: input.access,
     turn,
@@ -535,8 +636,19 @@ export async function runScribe(
   const evidenceBudget = turn === 'lookup' ? SCRIBE_LOOKUP_EVIDENCE_TOKENS : SCRIBE_EVIDENCE_TOKENS
   // What the turn's search returned: a widening reads around it, and a citation outside it is a
   // search miss (P3-D15).
-  const baseline = input.navigation?.hits ?? step0.hits
-  const terms = input.navigation?.terms ?? step0.terms
+  const baseline = search.hits
+  const terms = search.terms
+  // The answer's checks (P3 §3.3): answer turns are asked again, then answered Not found; a first,
+  // last, ever, never or how-many answer (or one that found nothing) must say what was searched
+  // and has its scope checked; the quote check runs when its switch allows.
+  const answerTurn = turn === 'answer' || turn === 'lookup' || turn === 'idea'
+  // Edit and draft turns describe what Ms Scribe changes: a sentence about her own change ("I
+  // added a beat…") is no claim, but one that names a record or a scene is checked as any.
+  const changeTurn = turn === 'edit' || turn === 'draft'
+  const ordinal = step0.cues.scopeAll
+  const latest = ordinalSearch(input.message, step0.names).latest
+  const citeOn = isFeatureAllowed(settings, 'cite')
+  const index = askIndexOf(db, listRecords(db))
 
   const outer = input.requestId === undefined ? null : registerInflight(input.requestId)
   let current: string | null = null
@@ -546,18 +658,37 @@ export async function runScribe(
   outer?.signal.addEventListener('abort', stopStep)
 
   const steps: AgentStep[] = []
+  const step = (each: AgentStep): void => {
+    const shown = { ...each, label: each.label.slice(0, STEP_LABEL_MAX) }
+    steps.push(shown)
+    onStep(shown)
+  }
   const usage: CompletionUsage = { inputTokens: 0, outputTokens: 0 }
   let costUsd = 0
   let cached = true
   let model = ''
   let dropped = resolved.dropped
+  let asks = 0
+  let checks = 0
+  /** The scenes the answers cited (code-kept), for the Not found line. */
+  const citedNodes: string[] = []
+
+  const stopped = (): void => {
+    if (outer?.signal.aborted === true) throw new AiCancelledError('The request was stopped.')
+  }
+  const add = (reply: AiRequestResult): void => {
+    usage.inputTokens += reply.usage.inputTokens
+    usage.outputTokens += reply.usage.outputTokens
+    costUsd += reply.costUsd
+    cached &&= reply.cached
+  }
 
   /** One request, its answer streamed with the markup held back, added to the turn's totals. */
   const send = async (
     prompt: BuiltAgentPromptV9,
     requestId: string | null
   ): Promise<AiRequestResult> => {
-    if (outer?.signal.aborted === true) throw new AiCancelledError('The request was stopped.')
+    stopped()
     current = requestId
     const answer = new AnswerStream()
     const shown = new ShownStream(
@@ -586,10 +717,7 @@ export async function runScribe(
       }
     )
     current = null
-    usage.inputTokens += reply.usage.inputTokens
-    usage.outputTokens += reply.usage.outputTokens
-    costUsd += reply.costUsd
-    cached &&= reply.cached
+    add(reply)
     model = reply.model
     if (streamed && readScribeReply(reply.text, reply.finishReason ?? null).kind !== 'answer') {
       hooks.reset?.()
@@ -597,23 +725,186 @@ export async function runScribe(
     return reply
   }
 
-  /** Asks once, and once more with the larger cap when the reply was cut off or unreadable. */
+  /**
+   * Asks once, and once more with the larger cap when the reply was cut off or unreadable;
+   * `unsupported` is the main-claim retry's turn (P3-D14).
+   */
   const ask = async (
     fitted: FittedScribePrompt,
-    n: number
+    unsupported: BuildAgentPromptV9Input['unsupported'] = null
   ): Promise<{ reply: ScribeReply; id: string | null }> => {
+    const n = asks
+    asks += 1
     const stepId = input.requestId === undefined ? null : agentStepRequestId(input.requestId, n)
-    const first = await send(fitted.built, stepId)
+    const prompt =
+      unsupported === null ? fitted.built : buildAgentPromptV9({ ...fitted.input, unsupported })
+    const first = await send(prompt, stepId)
     const read = readScribeReply(first.text, first.finishReason ?? null)
     if (read.kind !== 'broken') return { reply: read, id: stepId }
     if (stepId !== null) hooks.note?.(stepId, brokenNote(read.reason, first, true))
     const retryId = input.requestId === undefined ? null : agentRetryRequestId(input.requestId, n)
-    const again = await send(buildAgentPromptV9({ ...fitted.input, retry: true }), retryId)
+    const again = await send(
+      buildAgentPromptV9({ ...fitted.input, unsupported, retry: true }),
+      retryId
+    )
     const reread = readScribeReply(again.text, again.finishReason ?? null)
     if (reread.kind === 'broken' && retryId !== null) {
       hooks.note?.(retryId, brokenNote(reread.reason, again, false))
     }
     return { reply: reread, id: retryId ?? stepId }
+  }
+
+  /**
+   * The checks of one answer (P3 §2.3 step 4, §3.3): code's quote check of every citation, the
+   * main claim by code (a found answer's first sentence that names a record or a scene keeps a
+   * citation, unless it says the search found nothing; an ordinal or absence answer says what was
+   * searched), then,
+   * when something was cited and the main claim stands, `cite.v1` on every cited sentence with the
+   * scope item of an ordinal or absence answer.
+   */
+  const checkAnswer = async (
+    answer: string,
+    found: boolean,
+    fitted: FittedScribePrompt
+  ): Promise<CheckedAnswer> => {
+    const sent = new Map<string, SentItem>()
+    if (e0 !== null && scene !== null) sent.set('E0', sentE0(e0, scene.sent))
+    for (const item of fitted.sent) sent.set(item.id, sentOf(item, frame))
+    const parsed = parseCitedAnswer(answer.slice(0, AGENT_ANSWER_MAX))
+    const kept = new Set<string>()
+    let refused = parsed.malformed
+    const verdicts: SentenceVerdict[] = parsed.sentences.map((sentence, i) => ({
+      keep: sentence.citations.map((citation) => {
+        const item = sent.get(citation.evidence)
+        const key = `${citation.evidence}\u0000${citation.quote}`
+        const ok =
+          item !== undefined &&
+          item.label !== 'map' &&
+          quoteHeld(item.quotable, citation.quote) &&
+          (kept.has(key) || kept.size < SCRIBE_CITATIONS_MAX)
+        if (ok) {
+          kept.add(key)
+          if (item.open?.kind === 'scene' && !citedNodes.includes(item.open.id)) {
+            citedNodes.push(item.open.id)
+          }
+        } else refused += 1
+        return ok
+      }),
+      needsCitation: changeTurn
+        ? !OWN_CHANGE.test(sentence.text.trim()) && needsCitation(sentence.text, index)
+        : // The main claim: a found answer's first sentence must rest on a citation (P3-D14),
+          // unless it is advice or a question back to the author (P3-D13).
+          i === 0
+          ? !isAdviceOrQuestion(sentence.text)
+          : needsCitation(sentence.text, index),
+      unsupported: false
+    }))
+    const first = parsed.sentences[0]
+    const absent = first !== undefined && isAbsence(first.text)
+    let main: UnsupportedReason | null = null
+    if (answerTurn && found && first !== undefined) {
+      // A claim about the book (it names a record or a scene, P3-D13) with no kept citation; a
+      // first sentence that names nothing stays marked "not checked", never turned Not found.
+      const lead = verdicts[0]
+      const claims = !absent && needsCitation(first.text, index)
+      if (lead !== undefined && claims && !lead.keep.some(Boolean)) {
+        main = 'noCitation'
+      } else if (scope !== null && (absent || (ordinal && claims)) && !statesScope(parsed.text)) {
+        main = 'noScope'
+      }
+    }
+    const itemOf = (id: string): CheckedItem | undefined => {
+      const item = sent.get(id)
+      return item === undefined ? undefined : checkedOf(item)
+    }
+    const paraOf = (id: string, quote: string): number | null => {
+      const item = sent.get(id)
+      return item === undefined ? null : placeOf(item, quote)
+    }
+    const cited = citedSentences(parsed, verdicts, itemOf, paraOf)
+    const unchecked = (): CheckedAnswer => ({
+      parsed,
+      verdicts,
+      refused,
+      levels: citationLevels(parsed, verdicts, new Map()),
+      main
+    })
+    if (main !== null || cited.length === 0 || !citeOn || costUsd >= AGENT_COST_CAP_USD) {
+      return unchecked()
+    }
+
+    // The scope item (P3 §3.2): an ordinal answer's first sentence and the scene it cites, or an
+    // answer that found nothing, with the passages the search found before it (after it, for a
+    // last one). Nothing to list, nothing sent.
+    let scopeItem: CitePromptScope | null = null
+    if (scope !== null && first !== undefined && (ordinal || absent)) {
+      const lead = first.citations.find((citation, j) => {
+        const item = sent.get(citation.evidence)
+        return verdicts[0]?.keep[j] === true && item?.open?.kind === 'scene'
+      })
+      const leadItem = lead === undefined ? undefined : sent.get(lead.evidence)
+      const at =
+        lead === undefined || leadItem?.open?.kind !== 'scene'
+          ? null
+          : { nodeId: leadItem.open.id, para: placeOf(leadItem, lead.quote) }
+      const hits = absent || at !== null ? scopeHits(frame, baseline, at, { latest, terms }) : []
+      if (hits.length > 0) {
+        scopeItem = {
+          searched: searchedPhrase(scope),
+          claim: first.text,
+          cited: at === null ? null : sceneRefOf(frame, at.nodeId) || null,
+          latest,
+          hits
+        }
+      }
+    }
+    const built = buildCitePrompt({
+      question: input.message,
+      sentences: cited.map((each) => each.sentence),
+      scope: scopeItem
+    })
+    step({ tool: 'check', label: CHECKING_QUOTES })
+    const id = input.requestId === undefined ? null : citeRequestId(input.requestId, checks)
+    checks += 1
+    let text: string
+    try {
+      stopped()
+      current = id
+      const reply = await runAiRequest(deps, {
+        feature: 'cite',
+        tier: 'fast',
+        messages: built.messages,
+        maxTokens: built.maxTokens,
+        json: true,
+        contextHash: sha256(JSON.stringify(built.messages)),
+        promptVersion: CITE_PROMPT_VERSION,
+        ...(id === null ? {} : { requestId: id })
+      })
+      current = null
+      add(reply)
+      text = reply.text
+    } catch (error) {
+      current = null
+      if (error instanceof AiCancelledError) throw error
+      // The check never costs the author the answer: its citations stay quote-checked.
+      if (id !== null) {
+        const why = error instanceof Error ? error.message : String(error)
+        hooks.note?.(id, `The quote check failed (${why}); the citations stay quote-checked.`)
+      }
+      return unchecked()
+    }
+    const outcome = applyCite(parseCiteReply(text), cited, built.sent, verdicts, {
+      sent: built.scope,
+      latest,
+      absence: absent
+    })
+    return {
+      parsed,
+      verdicts,
+      refused,
+      levels: citationLevels(parsed, verdicts, outcome.verdicts),
+      main: answerTurn && found ? outcome.main : null
+    }
   }
 
   const totals = (): Omit<ScribeResult, 'answer' | 'changes' | 'dropped' | 'scribe' | 'steps'> => ({
@@ -637,23 +928,38 @@ export async function runScribe(
     misses: 0,
     ...over
   })
-  /** The scenes a not-found answer looked in: the scenes of the evidence sent, E0 apart. */
+  /**
+   * The scenes a not-found answer looked in: the scenes its answers cited, then the scenes of the
+   * evidence sent, E0 apart (the line names the open scene first).
+   */
   const lookedIn = (sent: readonly EvidenceItem[]): string[] =>
-    sent.flatMap((item) =>
-      item.open?.kind === 'scene' && item.label !== 'map'
-        ? [sceneRefOf(frame, item.open.id)].filter((ref) => ref !== '')
-        : []
-    )
-  const notFound = (sent: readonly EvidenceItem[], widened: string | null): ScribeResult => ({
+    [
+      ...citedNodes.map((id) => sceneRefOf(frame, id)),
+      ...sent.flatMap((item) =>
+        item.open?.kind === 'scene' && item.label !== 'map' ? [sceneRefOf(frame, item.open.id)] : []
+      )
+    ].filter((ref) => ref !== '')
+  const notFound = (
+    sent: readonly EvidenceItem[],
+    widened: string | null,
+    retried = false
+  ): ScribeResult => ({
     ...totals(),
     answer: notFoundLine(scope, { open: e0?.ref ?? null, cited: lookedIn(sent) }),
     changes: [],
     dropped,
     steps,
-    scribe: scribeOf({ notFound: true, widened: widened === null ? null : { ref: widened } })
+    scribe: scribeOf({
+      notFound: true,
+      retried,
+      widened: widened === null ? null : { ref: widened }
+    })
   })
 
   try {
+    if (search.widened && scope !== null) {
+      step({ tool: 'search', label: `Searching ${searchedPhrase(scope)}…` })
+    }
     let fitted = fitScribePrompt({
       base,
       evidence: resolved.items,
@@ -663,7 +969,7 @@ export async function runScribe(
       voice,
       ...(idOf === undefined ? {} : { idOf })
     })
-    let asked = await ask(fitted, 0)
+    let asked = await ask(fitted)
     let widenedWhat: string | null = null
     if (asked.reply.kind === 'need') {
       // P3-D15: one Self-Route a turn, while the turn is under its cost cap.
@@ -684,16 +990,13 @@ export async function runScribe(
       })
       // Nothing new to read (the need named the open scene, or nothing fits): no second call.
       if (!wide.sent.some((item) => item.id.startsWith('W'))) return notFound(fitted.sent, null)
-      const step: AgentStep = { tool: 'read', label: `Reading ${target.what}…` }
-      steps.push(step)
-      onStep(step)
+      step({ tool: 'read', label: `Reading ${target.what}…` })
       fitted = wide
       widenedWhat = target.what
-      asked = await ask(fitted, 1)
+      asked = await ask(fitted)
       if (asked.reply.kind === 'need') return notFound(fitted.sent, widenedWhat)
     }
-    const reply = asked.reply
-    if (reply.kind === 'broken') {
+    if (asked.reply.kind === 'broken') {
       return {
         ...totals(),
         answer:
@@ -707,10 +1010,30 @@ export async function runScribe(
         scribe: scribeOf({ widened: widenedWhat === null ? null : { ref: widenedWhat } })
       }
     }
+    let reply = asked.reply
 
-    // Edit and draft turns describe what Ms Scribe changes: a sentence about her own change ("I
-    // added a beat…") is no claim, but one that names a record or a scene is checked as any.
-    const changeTurn = turn === 'edit' || turn === 'draft'
+    // The checks (P3 §3.3). "Not found" answers a question, so a found:false answer turn is not
+    // checked; an edit or draft turn's reply describes its change and is checked whatever it says.
+    const checkOf = (
+      each: Extract<ScribeReply, { kind: 'answer' }>
+    ): Promise<CheckedAnswer | null> =>
+      answerTurn && !each.found
+        ? Promise.resolve(null)
+        : checkAnswer(each.answer, each.found, fitted)
+    let checked = await checkOf(reply)
+    let retried = false
+    // P3-D14: a main claim the checks do not support is asked about once more (under the cost
+    // cap), its first sentence quoted back with the reason; the second answer is checked the same.
+    if (checked !== null && checked.main !== null && costUsd < AGENT_COST_CAP_USD) {
+      const sentence = checked.parsed.sentences[0]?.text ?? ''
+      retried = true
+      hooks.reset?.()
+      const again = await ask(fitted, { sentence, reason: checked.main })
+      if (again.reply.kind === 'answer') {
+        reply = again.reply
+        checked = await checkOf(reply)
+      }
+    }
 
     // Edits: Plan drops them all and says so; a pin becomes a sheet line only when the message
     // asked for one (decision 3), on a record it named, or a sentence says why not.
@@ -769,48 +1092,24 @@ export async function runScribe(
       return body.trim() === '' ? said.trimStart() : `${body}${said}`
     }
 
-    // "Not found" answers a question; an edit or draft turn's reply describes its change.
-    if (!reply.found && (turn === 'answer' || turn === 'lookup' || turn === 'idea')) {
-      const missing = notFound(fitted.sent, widenedWhat)
+    // Not found: an answer turn that found nothing, or whose main claim stayed unsupported.
+    if (checked?.main !== null) {
+      dropped += checked?.refused ?? 0
+      const missing = notFound(fitted.sent, widenedWhat, retried)
       return { ...missing, answer: `${missing.answer}${said}`, changes }
     }
 
-    // The code check of every citation (P3 §2.3 step 4).
     const sent = new Map<string, SentItem>()
     if (e0 !== null && scene !== null) sent.set('E0', sentE0(e0, scene.sent))
     for (const item of fitted.sent) sent.set(item.id, sentOf(item, frame))
-    const parsed = parseCitedAnswer(reply.answer.slice(0, AGENT_ANSWER_MAX))
-    const index = askIndexOf(db, listRecords(db))
-    const kept = new Set<string>()
-    let refused = parsed.malformed
-    const verdicts: SentenceVerdict[] = parsed.sentences.map((sentence, i) => ({
-      keep: sentence.citations.map((citation) => {
-        const item = sent.get(citation.evidence)
-        const key = `${citation.evidence}\u0000${citation.quote}`
-        const ok =
-          item !== undefined &&
-          item.label !== 'map' &&
-          quoteHeld(item.quotable, citation.quote) &&
-          (kept.has(key) || kept.size < SCRIBE_CITATIONS_MAX)
-        if (ok) kept.add(key)
-        else refused += 1
-        return ok
-      }),
-      needsCitation: changeTurn
-        ? !OWN_CHANGE.test(sentence.text.trim()) && needsCitation(sentence.text, index)
-        : // The main claim: a found answer's first sentence must rest on a citation (P3-D14),
-          // unless it is advice or a question back to the author (P3-D13).
-          i === 0
-          ? !isAdviceOrQuestion(sentence.text)
-          : needsCitation(sentence.text, index),
-      unsupported: false
-    }))
-    const marked = markerize(parsed, verdicts)
+    const marked = markerize(checked.parsed, checked.verdicts)
+    const levels = checked.levels
     const citations: ScribeCitation[] = marked.citations.flatMap((citation) => {
       const item = sent.get(citation.evidence)
+      const level = levels.get(`${citation.evidence}\u0000${citation.quote}`) ?? 'quote'
       return item === undefined
         ? []
-        : [citationOf(citation.n, citation.evidence, citation.quote, item)]
+        : [citationOf(citation.n, citation.evidence, citation.quote, item, level)]
     })
 
     // Search misses (P3-D15): a kept citation into the widened text at a paragraph the turn's
@@ -844,12 +1143,13 @@ export async function runScribe(
       ...totals(),
       answer: withSaid(marked.text),
       changes,
-      dropped: dropped + refused,
+      dropped: dropped + checked.refused,
       steps,
       scribe: scribeOf({
         citations,
         notChecked: marked.notChecked,
         unsupported: marked.unsupported,
+        retried,
         widened: widenedWhat === null ? null : { ref: widenedWhat },
         misses
       })

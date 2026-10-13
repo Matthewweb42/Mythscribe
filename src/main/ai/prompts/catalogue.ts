@@ -103,6 +103,7 @@ import { PLAN_LINKS_PROMPT_V2_VERSION } from './planLinks.v2'
 import { READER_V2_PROMPT_VERSION } from './reader.v2'
 import { VERIFY_V2_PROMPT_VERSION } from './verify.v2'
 import { AGENT_PROMPT_V9_VERSION } from './agent.v9'
+import { CITE_PROMPT_VERSION } from './cite.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -229,7 +230,9 @@ export const PROMPT_VERSIONS = [
   READER_V2_PROMPT_VERSION,
   VERIFY_V2_PROMPT_VERSION,
   // F-16.25, F-16.26 (story memory v2 only): Ms Scribe's one answer call; v1 keeps agent.v8.
-  AGENT_PROMPT_V9_VERSION
+  AGENT_PROMPT_V9_VERSION,
+  // F-16.25 (story memory v2 only): Ms Scribe's quote check.
+  CITE_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -708,7 +711,8 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   },
   [READER_V2_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.22' },
   [VERIFY_V2_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.22' },
-  [AGENT_PROMPT_V9_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-16.25' }
+  [AGENT_PROMPT_V9_VERSION]: { feature: 'agent', tier: 'strong', output: 'json', since: 'F-16.25' },
+  [CITE_PROMPT_VERSION]: { feature: 'cite', tier: 'fast', output: 'json', since: 'F-16.25' }
 }
 
 /**

@@ -20,6 +20,7 @@ import { renderCostRegistry } from './costRegistry'
 import { WHAT_NEXT_DIRECTIONS } from '@shared/whatNext'
 import { parseAgentReply } from '../agent'
 import { readScribeReply } from '../../scribe/runScribe'
+import { CITE_SENTINEL, parseCiteReply } from '../prompts/cite.v1'
 import { parseCitedAnswer, quoteHeld } from '@shared/scribeAnswer'
 import { parseBetaReaderAnswerV2 } from '../betaReader'
 import { parsePlanLinksV2Answer } from '../../memory/reading/planLinks'
@@ -936,6 +937,29 @@ function scoreVerify(
     : { kind: 'json', ok: false, problem: wrong.join(', ') }
 }
 
+/**
+ * Ms Scribe's quote check (F-16.25, `cite.v1`): each sentence's verdict the labelled one (any, for
+ * a null label, but one), and the scope verdict when the case sent a scope item.
+ */
+function scoreCite(
+  scoring: Extract<EvalCase['scoring'], { kind: 'cite' }>,
+  answer: string
+): LiveResult['verdict'] {
+  const reply = parseCiteReply(answer)
+  if (reply.verdicts.size === 0) return { kind: 'json', ok: false, problem: 'not { v: [...] }' }
+  const wrong = scoring.expected.flatMap((want, i) => {
+    const got = reply.verdicts.get(i + 1)
+    if (got === undefined) return [`${i + 1}: no verdict`]
+    return want === null || got === want ? [] : [`${i + 1}: ${got}, expected ${want}`]
+  })
+  if (scoring.scope !== null && reply.scope !== scoring.scope) {
+    wrong.push(`scope ${reply.scope ?? 'missing'}, expected ${scoring.scope}`)
+  }
+  return wrong.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: wrong.join(', ') }
+}
+
 /** Saying someone does not know something, which no answer may state as fact (P2b rule 9). */
 const ABSENCE =
   /\b(?:doesn['’]t|does not|did not|didn['’]t|never) (?:know|knew|learns?|learned|learnt|find out|found out)\b/iu
@@ -1288,6 +1312,10 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
       results.push({ ...base, answer: reply.text, verdict: scoreScribe(c.scoring, reply.text) })
       continue
     }
+    if (c.scoring.kind === 'cite') {
+      results.push({ ...base, answer: reply.text, verdict: scoreCite(c.scoring, reply.text) })
+      continue
+    }
     if (c.scoring.kind === 'structure') {
       results.push({
         ...base,
@@ -1338,10 +1366,14 @@ describe('the live prompt eval, end to end against a fake OpenRouter (F-16.22; n
       expect(call.headers.get('authorization')).toBe('Bearer sk-or-fake')
       expect(Object.values(OPENROUTER_DEFAULT_MODELS)).toContain(call.body.model)
     }
-    // The story-memory reader and checker ask for no reasoning, as the app sends them.
+    // The story-memory reader and checker, and Ms Scribe's quote check (P3-D21), ask for no
+    // reasoning, as the app sends them.
     const memory = server.calls.filter((call) =>
-      /^You are the (story-memory reader|fact checker)/.test(call.messages[0]?.content ?? '')
+      /^You are the (story-memory reader|fact checker|citation checker)/.test(
+        call.messages[0]?.content ?? ''
+      )
     )
+    expect(memory.some((call) => call.messages[0]?.content.startsWith(CITE_SENTINEL))).toBe(true)
     expect(memory.length).toBeGreaterThan(0)
     for (const call of memory) expect(call.body.reasoning).toEqual({ enabled: false })
     expect(
