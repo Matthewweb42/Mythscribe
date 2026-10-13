@@ -5048,6 +5048,8 @@ export function registerHandlers({
     const db = manager.require().connection.orm
     const added = saveRecordPageWith(db, input.id, (each) => addSheetLine(each, input, new Date()))
     emit(windows(), 'record:changed', { recordIds: [input.id], roster: false })
+    // F-16.27: the line is indexed at once; C6 checks the sheet against the book again.
+    queueFindings(db)
     return added
   })
 
@@ -5057,6 +5059,7 @@ export function registerHandlers({
       removeSheetLine(each, input, new Date())
     )
     emit(windows(), 'record:changed', { recordIds: [input.id], roster: false })
+    queueFindings(db)
     return removed
   })
 
@@ -5135,7 +5138,11 @@ export function registerHandlers({
       }
       reader.detailsChanged()
     }
-    if (undone.kind === 'notProblem') reader.detailsChanged()
+    if (undone.kind === 'notProblem') {
+      reader.detailsChanged()
+      // F-16.27: a finding the author had said is not a problem is found again.
+      queueFindings(db)
+    }
     // F-16.21: *Undo* of an *Unlink* puts the plan link back as it was (the author's or automatic).
     if (undone.kind === 'unlink') {
       const relinked = restoreUnlinked(db, undone)

@@ -14,14 +14,14 @@ import { activeDraftId } from '../../draft/draftStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { ensureResearchRoot } from '../../project/seed'
 import { createResearchNote, setResearchNotCanon } from '../../research/researchStore'
-import { createNode, getNode, type TreeDb } from '../../tree/treeStore'
+import { createNode, deleteNode, getNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
 import { dismiss, dismissedKeys } from '../dismissedStore'
 import { indexNodePassages, indexStaleRecords } from '../passageIndexer'
 import { createRecord, renameAlias, requireRecord, sameAs, savePage } from '../recordStore'
 import { upsertCard } from '../reading/cardStore'
-import { cardAnchorOf, seedClaims } from '../reading/claimFixture'
-import { deleteClaims, setClaimsState } from '../reading/claimStore'
+import { anchoredClaim, cardAnchorOf, seedClaims } from '../reading/claimFixture'
+import { deleteClaims, reviveClaim, setClaimsState } from '../reading/claimStore'
 import { readingOrder } from '../reading/readingFrame'
 import { candidateInputs } from './candidateInputs'
 import { findingRows, findingsOf, invariantFindings, upsertFindings } from './findingStore'
@@ -143,6 +143,38 @@ describe('the rules’ inputs (F-16.27)', () => {
     expect(notes).toEqual(['Eyes: green', 'Mara has hazel eyes.'])
   })
 
+  it('reads no note of a deleted Research page, so its conflict closes', () => {
+    ensureResearchRoot(db, NOW)
+    const page = createResearchNote(db, 'novel', { title: 'Notes' }, NOW)
+    saveDocument(db, page.id, doc('Mara has hazel eyes.'))
+    indexNodePassages(db, page.id, NOW)
+    recomputeFindings(db, NOW)
+    const draft = activeDraftId(db)
+    const c6 = (): number => findingRows(db, draft).filter((row) => row.rule === 'C6').length
+    expect(c6()).toBeGreaterThan(0)
+    // Its index rows stay until the next open's prune; the rules skip them at once.
+    deleteNode(db, page.id)
+    expect(candidateInputs(db, draft).notes).toEqual([])
+    recomputeFindings(db, NOW)
+    expect(c6()).toBe(0)
+  })
+
+  it('reads the notes in page order, whichever page was indexed last', () => {
+    ensureResearchRoot(db, NOW)
+    const first = createResearchNote(db, 'novel', { title: 'First' }, NOW)
+    const second = createResearchNote(db, 'novel', { title: 'Second' }, NOW)
+    saveDocument(db, first.id, doc('Mara has hazel eyes.'))
+    saveDocument(db, second.id, doc('Mara has green eyes.'))
+    indexNodePassages(db, first.id, NOW)
+    indexNodePassages(db, second.id, NOW)
+    const order = (): string[] => candidateInputs(db, activeDraftId(db)).notes.map((n) => n.text)
+    const before = order()
+    // Re-indexing the first page re-inserts its rows after the second's.
+    saveDocument(db, first.id, doc('Mara has hazel eyes.', 'She sails at dawn.'))
+    indexNodePassages(db, first.id, NOW)
+    expect(order()).toEqual([...before.slice(0, 1), 'She sails at dawn.', ...before.slice(1)])
+  })
+
   it('reads claims of readable scenes only', () => {
     setSceneMeta(db, two, { ...parseStoredSceneMeta(null), status: 'idea' })
     const claims = candidateInputs(db, activeDraftId(db)).claims
@@ -232,7 +264,7 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
     expect(findingViolations()).toEqual([])
   })
 
-  it('holds a finding while a side is re-checked, never closing it, and reopens it on revival', () => {
+  it('holds a finding while a side is re-checked, never closing it, and keeps its verdicts when the very sentences come back', () => {
     recomputeFindings(db, NOW, { cached: bothC })
     const brown = findingsOf(db, activeDraftId(db))[0]?.b
     if (brown?.kind !== 'claim') throw new Error('no claim side')
@@ -240,10 +272,105 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
     recomputeFindings(db, NOW)
     expect(findingsOf(db, activeDraftId(db))[0]).toMatchObject({ state: 'held', verdictAb: 'c' })
     expect(findingViolations()).toEqual([])
+    // Restored (an edit undone): the same words, so the verdicts still fit.
     setClaimsState(db, [brown.claimId], 'live')
     const back = recomputeFindings(db, NOW)
     expect(back.opened).toHaveLength(1)
     expect(findingsOf(db, activeDraftId(db))[0]?.state).toBe('open')
+  })
+
+  it('judges a revived side again: its new words were never judged', () => {
+    recomputeFindings(db, NOW, { cached: bothC })
+    const brown = findingsOf(db, activeDraftId(db))[0]?.b
+    if (brown?.kind !== 'claim') throw new Error('no claim side')
+    setClaimsState(db, [brown.claimId], 'stale')
+    saveDocument(db, two, doc('The rain came.', "Mara's eyes were a deep brown."))
+    reviveClaim(
+      db,
+      brown.claimId,
+      {
+        quote: "Mara's eyes were a deep brown",
+        para: 1,
+        anchor: anchoredClaim(db, two, {
+          recordId: mara,
+          slot: 'eyes',
+          value: 'brown',
+          quote: "Mara's eyes were a deep brown",
+          para: 1
+        }).anchor,
+        proof: 'literal',
+        readingId: null
+      },
+      NOW
+    )
+    const draft = activeDraftId(db)
+    const before = findingsOf(db, draft)[0]?.key
+    recomputeFindings(db, NOW)
+    expect(findingsOf(db, draft)[0]).toMatchObject({
+      key: before,
+      state: 'unjudged',
+      verdictAb: null,
+      verdictBa: null
+    })
+    expect(findingViolations()).toEqual([])
+    // The cache, keyed on the pair as rendered, decides at no cost when it knows the new words.
+    expect(recomputeFindings(db, NOW, { cached: bothC }).opened).toHaveLength(1)
+  })
+
+  it('judges a side read again in another mode afresh (same scene, same value, same key)', () => {
+    recomputeFindings(db, NOW, { cached: bothC })
+    const draft = activeDraftId(db)
+    const [row] = findingsOf(db, draft)
+    if (row?.b.kind !== 'claim') throw new Error('no claim side')
+    deleteClaims(db, [row.b.claimId])
+    seedClaims(
+      db,
+      two,
+      [
+        {
+          recordId: mara,
+          slot: 'eyes',
+          value: 'brown',
+          quote: "Mara's eyes were brown",
+          para: 1,
+          mode: 'memory'
+        }
+      ],
+      NOW
+    )
+    recomputeFindings(db, NOW)
+    expect(findingsOf(db, draft)[0]).toMatchObject({
+      id: row.id,
+      key: row.key,
+      state: 'unjudged',
+      verdictAb: null
+    })
+    expect(findingViolations()).toEqual([])
+  })
+
+  it('closes a held row its rule no longer produces once no side is stale', () => {
+    recomputeFindings(db, NOW, { cached: bothC })
+    const draft = activeDraftId(db)
+    const [row] = findingsOf(db, draft)
+    if (row?.b.kind !== 'claim') throw new Error('no claim side')
+    setClaimsState(db, [row.b.claimId], 'stale')
+    recomputeFindings(db, NOW)
+    // An earlier brown now anchors Mara's eyes: the old pair is no longer produced.
+    saveDocument(db, one, doc("Mara's eyes were brown.", "Mara's eyes were grey."))
+    seedClaims(
+      db,
+      one,
+      [{ recordId: mara, slot: 'eyes', value: 'brown', quote: "Mara's eyes were brown", para: 0 }],
+      NOW
+    )
+    recomputeFindings(db, NOW)
+    // Its stale side still waits for the re-read.
+    expect(findingRows(db, draft).find((each) => each.key === row.key)?.state).toBe('held')
+    setClaimsState(db, [row.b.claimId], 'live')
+    const after = recomputeFindings(db, NOW)
+    expect(after.closed.map((each) => [each.finding.key, each.reason])).toEqual([[row.key, 'gone']])
+    expect(findingRows(db, draft).some((each) => each.state === 'held')).toBe(false)
+    expect(findingViolations()).toEqual([])
   })
 
   it('keeps the key through a rename (names are not in it)', () => {
@@ -298,6 +425,53 @@ describe('the recompute (F-16.27, design §2.4 "Lifecycle")', () => {
     if (side?.kind !== 'claim') throw new Error('no claim side')
     deleteClaims(db, [side.claimId])
     expect(recomputeFindings(db, NOW).closed.map((each) => each.finding.rule)).toEqual(['C7'])
+  })
+
+  it('holds a C7 finding while a side is stale, and reopens it when it is restored', () => {
+    seedClaims(
+      db,
+      one,
+      [
+        {
+          recordId: tomas,
+          slot: 'history',
+          value: 'his father kept a tavern in Vellmouth',
+          quote: 'Mara climbed the ridge',
+          para: 0
+        }
+      ],
+      NOW
+    )
+    seedClaims(
+      db,
+      two,
+      [
+        {
+          recordId: tomas,
+          slot: 'history',
+          value: 'his father kept a forge in Vellmouth',
+          quote: 'The rain came',
+          para: 0
+        }
+      ],
+      NOW
+    )
+    const draft = activeDraftId(db)
+    const check = candidatesC7(candidateInputs(db, draft))
+    upsertFindings(db, draft, check, NOW, bothC)
+    const c7 = (): string | undefined =>
+      findingRows(db, draft).find((each) => each.rule === 'C7')?.state
+    expect(c7()).toBe('open')
+    const side = check[0]?.a
+    if (side?.kind !== 'claim') throw new Error('no claim side')
+    setClaimsState(db, [side.claimId], 'stale')
+    recomputeFindings(db, NOW)
+    expect(c7()).toBe('held')
+    expect(findingViolations()).toEqual([])
+    setClaimsState(db, [side.claimId], 'live')
+    recomputeFindings(db, NOW)
+    expect(c7()).toBe('open')
+    expect(findingViolations()).toEqual([])
   })
 
   it('moves Not a problem rows to the kept record on Same as…', () => {
@@ -366,29 +540,40 @@ describe('the verdict cache', () => {
 })
 
 describe('upsert by key', () => {
-  it('writes each key once and keeps a row’s verdicts when its sides move', () => {
+  it('writes each key once and keeps a row’s verdicts only while the judged pair is unchanged', () => {
     const inputs = candidateInputs(db, activeDraftId(db))
     const draft = activeDraftId(db)
     recomputeFindings(db, NOW, { inputs, cached: bothC })
     const [row] = findingsOf(db, draft)
     if (row === undefined) throw new Error('no finding')
-    // A re-read claim has a new id, the same value and scene: the same finding.
-    const moved: Candidate = {
+    const again: Candidate = {
       rule: row.rule,
       variant: row.variant,
       recordId: row.recordId,
       slot: row.slot,
       a: row.a,
-      b: row.b.kind === 'claim' ? { ...row.b, claimId: 'renewed' } : row.b,
+      b: row.b,
       extra: null,
       held: false,
       hidden: false,
       npKey: row.npKey,
       key: row.key
     }
+    expect(upsertFindings(db, draft, [again], NOW).written).toBe(0)
+    expect(findingsOf(db, draft)[0]).toMatchObject({ id: row.id, state: 'open', verdictAb: 'c' })
+    // A re-read claim has a new id, the same value and scene: the same finding, judged again.
+    const moved: Candidate = {
+      ...again,
+      b: row.b.kind === 'claim' ? { ...row.b, claimId: 'renewed' } : row.b
+    }
     upsertFindings(db, draft, [moved], NOW)
     const [after] = findingsOf(db, draft)
-    expect(after).toMatchObject({ id: row.id, state: 'open', verdictAb: 'c' })
+    expect(after).toMatchObject({ id: row.id, state: 'unjudged', verdictAb: null, confirm: null })
     expect(after?.b).toMatchObject({ claimId: 'renewed' })
+    // A scene's card now says flashback: what the judge reads moved too.
+    upsertFindings(db, draft, [moved], NOW, bothC)
+    expect(findingsOf(db, draft)[0]?.state).toBe('open')
+    upsertFindings(db, draft, [{ ...moved, hidden: true }], NOW)
+    expect(findingsOf(db, draft)[0]).toMatchObject({ state: 'hidden', verdictAb: null })
   })
 })

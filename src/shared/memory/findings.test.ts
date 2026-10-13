@@ -17,7 +17,8 @@ const claim = (claimId: string, nodeId: string, valueKey: string): Side => ({
   kind: 'claim',
   claimId,
   nodeId,
-  valueKey
+  valueKey,
+  seen: 'seen'
 })
 
 const note: Side = {

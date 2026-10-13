@@ -50,6 +50,44 @@ export interface NoteName {
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const straight = (text: string): string => text.replace(/[‘’]/g, "'")
 
+/** One name's patterns: anywhere as written (or in any case), and a sentence opener's flip. */
+interface CompiledName {
+  pattern: RegExp
+  opening: RegExp | null
+}
+
+/** Names compiled once per names list (a record's list is one object for a whole recompute). */
+const compiledNames = new WeakMap<readonly NoteName[], CompiledName[]>()
+
+function compileNames(names: readonly NoteName[]): CompiledName[] {
+  const known = compiledNames.get(names)
+  if (known !== undefined) return known
+  const compiled = names
+    .filter((name) => !name.shared && name.text.trim() !== '')
+    .sort((a, b) => b.text.length - a.text.length)
+    .map((name) => {
+      const anyCase = name.caseRule === 'any' || !/[\p{Lu}\p{Lt}]/u.test(name.text)
+      const written = straight(name.text)
+      // A sentence's first word may differ in its first letter only ("The Captain" for "the Captain").
+      const first = written.slice(0, 1)
+      const flipped =
+        first === first.toLowerCase()
+          ? first.toUpperCase() + written.slice(1)
+          : first.toLowerCase() + written.slice(1)
+      return {
+        pattern: new RegExp(
+          `(?<![\\p{L}\\p{N}])${escapeRegExp(written)}(?:'s|')?(?![\\p{L}\\p{N}])`,
+          anyCase ? 'giu' : 'gu'
+        ),
+        opening: anyCase
+          ? null
+          : new RegExp(`^\\s*(${escapeRegExp(flipped)}(?:'s|')?)(?![\\p{L}\\p{N}])`, 'u')
+      }
+    })
+  compiledNames.set(names, compiled)
+  return compiled
+}
+
 /**
  * Where a record's names stand in a text: whole words, a possessive included, a name with a
  * capital letter as written (a name kept in any case, in any case); a shared name never counts.
@@ -61,32 +99,15 @@ export function nameSpans(
 ): { start: number; end: number }[] {
   const plain = straight(text)
   const spans: { start: number; end: number }[] = []
-  const ordered = names
-    .filter((name) => !name.shared && name.text.trim() !== '')
-    .sort((a, b) => b.text.length - a.text.length)
-  for (const name of ordered) {
-    const anyCase = name.caseRule === 'any' || !/[\p{Lu}\p{Lt}]/u.test(name.text)
-    const written = straight(name.text)
-    const pattern = new RegExp(
-      `(?<![\\p{L}\\p{N}])${escapeRegExp(written)}(?:'s|')?(?![\\p{L}\\p{N}])`,
-      anyCase ? 'giu' : 'gu'
-    )
-    // A sentence's first word may differ in its first letter only ("The Captain" for "the Captain").
-    const first = written.slice(0, 1)
-    const flipped =
-      first === first.toLowerCase()
-        ? first.toUpperCase() + written.slice(1)
-        : first.toLowerCase() + written.slice(1)
-    const opening = anyCase
-      ? null
-      : new RegExp(`^\\s*(${escapeRegExp(flipped)}(?:'s|')?)(?![\\p{L}\\p{N}])`, 'u').exec(plain)
+  for (const { pattern, opening } of compileNames(names)) {
     const found = [...plain.matchAll(pattern)].map((match) => ({
       start: match.index,
       end: match.index + match[0].length
     }))
-    if (opening !== null) {
-      const words = opening[1] ?? ''
-      found.push({ start: opening[0].length - words.length, end: opening[0].length })
+    const opener = opening?.exec(plain) ?? null
+    if (opener !== null) {
+      const words = opener[1] ?? ''
+      found.push({ start: opener[0].length - words.length, end: opener[0].length })
     }
     for (const { start, end } of found) {
       if (spans.some((span) => start < span.end && end > span.start)) continue
@@ -113,10 +134,16 @@ const EXTRA_LABELS: Readonly<Partial<Record<Slot, readonly string[]>>> = {
 /** Lower case, straight quotes, single spaces. */
 const fold = (text: string): string => straight(text).toLowerCase().replace(/\s+/g, ' ').trim()
 
+const labelsBySlot = new Map<Slot, string[]>()
+
 /** Every label a `Label: value` line about `slot` may carry, folded. */
 export function slotLabels(slot: Slot): string[] {
+  const known = labelsBySlot.get(slot)
+  if (known !== undefined) return known
   const cues = SLOT_QUESTION_CUES.find((row) => row.slot === slot)?.cues ?? []
-  return [...new Set([slotLabel(slot), ...cues, ...(EXTRA_LABELS[slot] ?? [])].map(fold))]
+  const labels = [...new Set([slotLabel(slot), ...cues, ...(EXTRA_LABELS[slot] ?? [])].map(fold))]
+  labelsBySlot.set(slot, labels)
+  return labels
 }
 
 /** A `Label: value` line, with the dated form's scene (`Label (from 12.1 'Title'): value`). */
@@ -143,21 +170,81 @@ export interface NoteRecord {
   names: readonly NoteName[]
 }
 
+/** Whether a note sentence sits on the record's own Pinned page. */
+export const onOwnPage = (sentence: NoteSentence, record: NoteRecord): boolean =>
+  sentence.note.ownerKind === 'record' &&
+  sentence.note.ownerId === record.id &&
+  sentence.note.page === 'pinned'
+
 /**
- * Whether a note sentence speaks of a record's slot (P4-D8): it names the record, or sits on the
- * record's own Pinned page; and it holds a cue for the slot (`holdsSlotCue`), or is a `Label:
- * value` line whose label is the slot's. Kinship's cue is a kin word.
+ * Whether a note sentence holds a cue for a slot: a cue word (`holdsSlotCue`), or a `Label: value`
+ * line whose label is the slot's. Kinship's cue is a kin word.
  */
-export function pairsWith(sentence: NoteSentence, record: NoteRecord, slot: Slot): boolean {
-  const own =
-    sentence.note.ownerKind === 'record' &&
-    sentence.note.ownerId === record.id &&
-    sentence.note.page === 'pinned'
-  if (!own && !namesRecord(sentence.text, record.names)) return false
+export function holdsSlot(sentence: NoteSentence, slot: Slot): boolean {
   const line = labelLine(sentence.text)
   if (line !== null && slotLabels(slot).includes(line.label)) return true
   if (slot === 'kinship') return kinWords(sentence.text).length > 0
   return holdsSlotCue(sentence.text, slot)
+}
+
+/**
+ * Whether a note sentence speaks of a record's slot (P4-D8): it names the record, or sits on the
+ * record's own Pinned page; and it holds a cue for the slot (`holdsSlot`).
+ */
+export function pairsWith(sentence: NoteSentence, record: NoteRecord, slot: Slot): boolean {
+  if (!onOwnPage(sentence, record) && !namesRecord(sentence.text, record.names)) return false
+  return holdsSlot(sentence, slot)
+}
+
+/**
+ * The canon notes indexed once for a set of records (C6 runs after every change, over notes that
+ * may hold a long Research upload): a paragraph is split into sentences only when it sits on one of
+ * their Pinned pages or folds to text holding one of their names; then each record's sentences
+ * (its own page's, and those naming it, `nameSpans`) are found once, in note order.
+ */
+export function noteIndex(
+  notes: readonly NoteParagraph[],
+  records: readonly NoteRecord[]
+): (record: NoteRecord) => NoteSentence[] {
+  const keysOf = (record: NoteRecord): string[] =>
+    record.names
+      .filter((name) => !name.shared && name.text.trim() !== '')
+      .map((name) => fold(name.text))
+  const keys = [...new Set(records.flatMap(keysOf))].sort((a, b) => b.length - a.length)
+  const owners = new Set(records.map((record) => record.id))
+  // Any of the names in any case, curly or straight apostrophes, any run of spaces: a loose sieve
+  // run once over each paragraph as written (`nameSpans` then decides, per sentence).
+  const anyName =
+    keys.length === 0
+      ? null
+      : new RegExp(
+          keys
+            .map((key) => escapeRegExp(key).replace(/'/g, "['‘’]").replace(/ /g, '\\s+'))
+            .join('|'),
+          'iu'
+        )
+  const sentences = notes
+    .filter(
+      (note) =>
+        (note.ownerKind === 'record' && note.page === 'pinned' && owners.has(note.ownerId)) ||
+        (anyName?.test(note.text) ?? false)
+    )
+    .flatMap(noteSentences)
+  const folded = sentences.map((sentence) => fold(sentence.text))
+  const found = new Map<string, NoteSentence[]>()
+  return (record) => {
+    const known = found.get(record.id)
+    if (known !== undefined) return known
+    const mine = keysOf(record)
+    const naming = sentences.filter(
+      (sentence, i) =>
+        onOwnPage(sentence, record) ||
+        (mine.some((key) => folded[i]?.includes(key) === true) &&
+          namesRecord(sentence.text, record.names))
+    )
+    found.set(record.id, naming)
+    return naming
+  }
 }
 
 /** A value code read from a note sentence, with the dated line's scene as written. */
@@ -196,10 +283,25 @@ export function noteValue(
   return value === null ? null : { value, scene: null }
 }
 
+/** Whether "of", an optional article, then one of the object's names follow `at` directly ("sister of the Captain"). */
+function objectFollowsOf(
+  text: string,
+  at: number,
+  objects: readonly { start: number; end: number }[]
+): boolean {
+  const of = /^\s+of\s+/iu.exec(text.slice(at))
+  if (of === null) return false
+  const from = at + of[0].length
+  const article = /^(?:the|a|an)\s+/iu.exec(text.slice(from))
+  const named = article === null ? null : from + article[0].length
+  return objects.some((span) => span.start === from || span.start === named)
+}
+
 /**
  * The kin word a note sentence gives for a record's kinship to `object` (P4-D8: the sentence must
  * name the object too): the kin word right after the object's possessive ("Anne is the Captain's
- * sister"), or one followed by "of" and then the object ("Anne, sister of the Captain"); a kin word
+ * sister"), or one followed directly by "of" and the object ("Anne, sister of the Captain"; never
+ * "cousin of Mary and sister of the Captain" for the cousin); a kin word
  * after the record's own possessive ("Anne's brother is the Captain") speaks of the other person and
  * is never read. Null when none is read.
  */
@@ -211,19 +313,13 @@ export function noteKinValue(
   const text = straight(sentence.text)
   const objects = nameSpans(text, object.names)
   if (objects.length === 0) return null
-  const own =
-    sentence.note.ownerKind === 'record' &&
-    sentence.note.ownerId === record.id &&
-    sentence.note.page === 'pinned'
-  if (!own && nameSpans(text, record.names).length === 0) return null
+  if (!onOwnPage(sentence, record) && nameSpans(text, record.names).length === 0) return null
   for (const kin of kinWords(text)) {
     const before = text.slice(0, kin.start).trimEnd()
     const afterObject = objects.some(
       (span) => before.length === span.end && /'s?$/u.test(text.slice(span.start, span.end))
     )
-    const ofObject =
-      /^\s+of\s+/iu.test(text.slice(kin.end)) && objects.some((span) => span.start > kin.end)
-    if (afterObject || ofObject) return kin.word
+    if (afterObject || objectFollowsOf(text, kin.end, objects)) return kin.word
   }
   return null
 }

@@ -3,6 +3,7 @@ import type { ReadingOrder } from './asOf'
 import {
   ageAsOf,
   ageYears,
+  birthSource,
   birthYear,
   bornLine,
   changesSince,
@@ -265,6 +266,32 @@ describe('birthYear (P2b-D15)', () => {
   })
 })
 
+describe('birthSource (what birthYear and C4 read)', () => {
+  it('names the claim or the Pinned paragraph the year comes from, and its words', () => {
+    const claims = [claim({ nodeId: 's1', value: 'in 1792 AR' })]
+    expect(birthSource(claims, [], READING, null)).toEqual({
+      year: 1792,
+      value: 'in 1792 AR',
+      claim: claims[0],
+      pinnedAt: null
+    })
+    expect(birthSource([], ['Eyes: grey', 'Born: 1790'], READING, null)).toEqual({
+      year: 1790,
+      value: '1790',
+      claim: null,
+      pinnedAt: 1
+    })
+  })
+
+  it('takes the claims its caller says set it (C4 holds a stale one rather than skip it)', () => {
+    const stale = [claim({ nodeId: 's1', value: 'in 1792', state: 'stale' })]
+    expect(birthSource(stale, ['Born: 1790'], READING, null)?.year).toBe(1790)
+    expect(
+      birthSource(stale, ['Born: 1790'], READING, null, (each) => each.mode === 'now')?.year
+    ).toBe(1792)
+  })
+})
+
 describe('ageAsOf (decision 5)', () => {
   const born = { year: 1792, source: 'text' as const, claimId: 'b', nodeId: 's1', ref: '1.1' }
   const carried = { kind: 'carried' as const, value: 1811, from: { nodeId: 's1', ref: '1.1' } }
@@ -451,6 +478,13 @@ describe('ages and years as C4 reads them (F-16.27)', () => {
     expect(ageYears('two-and-twenty')).toBe(22)
     expect(ageYears('a girl')).toBeNull()
     expect(ageYears('old')).toBeNull()
+    expect(ageYears('two years old')).toBe(2)
+    // Months, weeks and days are never read as years.
+    expect(ageYears('six months old')).toBeNull()
+    expect(ageYears('eighteen months')).toBeNull()
+    expect(ageYears('three weeks old')).toBeNull()
+    expect(ageYears('10 days')).toBeNull()
+    expect(ageYears('twenty four hours')).toBeNull()
   })
 
   it('reads a Pinned Born line as a year and its words', () => {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   datedScene,
+  holdsSlot,
   labelLine,
   nameSpans,
+  noteIndex,
   noteKinValue,
   noteSentences,
   noteValue,
@@ -143,6 +145,46 @@ describe('noteKinValue (P4-D8: the object named, the kin word read)', () => {
       noteKinValue(one(research("The Captain is Orrin's brother.")), orrin, captain)
     ).toBeNull()
     expect(noteKinValue(one(research('Orrin is a brother.')), orrin, captain)).toBeNull()
+  })
+
+  it('reads "of" only with the object right after it (an article allowed)', () => {
+    expect(
+      noteKinValue(
+        one(research('Orrin, cousin of Mara and brother of the Captain.')),
+        orrin,
+        captain
+      )
+    ).toBe('brother')
+    expect(
+      noteKinValue(
+        one(research('Orrin, a nephew of the old vicar, met the Captain in Bath.')),
+        orrin,
+        captain
+      )
+    ).toBeNull()
+  })
+})
+
+describe('noteIndex (C6 reads the notes once a run)', () => {
+  it('gives each record its own Pinned sentences and those naming it, in note order', () => {
+    const notes = [
+      research('The harbour wall was rebuilt.'),
+      pinned('orrin', 'Eyes: grey. Hair: dark.'),
+      research('Orrin Vale has green eyes.'),
+      research('ORRIN shouts.'),
+      research('Vale is a common name.'),
+      pinned('captain', 'Eyes: blue')
+    ]
+    const naming = noteIndex(notes, [orrin, captain])
+    expect(naming(orrin).map((each) => each.text)).toEqual([
+      'Eyes: grey.',
+      'Hair: dark.',
+      'Orrin Vale has green eyes.'
+    ])
+    expect(naming(captain).map((each) => each.text)).toEqual(['Eyes: blue'])
+    expect(
+      naming(orrin).every((each) => pairsWith(each, orrin, 'eyes') || holdsSlot(each, 'hair'))
+    ).toBe(true)
   })
 })
 

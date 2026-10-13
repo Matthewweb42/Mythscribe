@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { sentenceHash } from './anchor'
 import { ClaimMode, ClaimVoice, setsState } from './claims'
 import { dismissedKey } from './dismissed'
 
@@ -58,7 +59,9 @@ export type NoteOwnerKind = (typeof NOTE_OWNER_KINDS)[number]
 
 /**
  * One side of a finding, a reference (never a copy of the quote):
- * - `claim`: a stored claim, by id, with the scene and value it had when the candidate was made;
+ * - `claim`: a stored claim, by id, with the scene and value it had when the candidate was made,
+ *   and `seen`, a hash of what the judge reads of it (its quote, the sentences it rests on, its
+ *   voice and mode: `claimSeen`), so a pair whose words changed under the same key is judged again;
  * - `presence`: a record on the page in a scene (a held `present` entry of its card, C2);
  * - `note`: a sentence of a canon note paragraph (a record's Pinned page or a Research page), with
  *   the value code read from it and, for a dated line, the scene it names (C6, and C4's Pinned
@@ -69,7 +72,8 @@ export const FindingSide = z.discriminatedUnion('kind', [
     kind: z.literal('claim'),
     claimId: z.string(),
     nodeId: z.string(),
-    valueKey: z.string()
+    valueKey: z.string(),
+    seen: z.string()
   }),
   z.object({ kind: z.literal('presence'), nodeId: z.string(), recordId: z.string() }),
   z.object({
@@ -87,6 +91,20 @@ export const FindingSide = z.discriminatedUnion('kind', [
   })
 ])
 export type FindingSide = z.infer<typeof FindingSide>
+
+/**
+ * What the judge reads of a claim side, as a hash (never the words): its quote, the sentences its
+ * proof rests on (`anchor`), its voice and mode. A revival (a new quote under the same id) or a free
+ * re-proof (new sentences) moves it; a restore (the very sentences back) does not.
+ */
+export function claimSeen(claim: {
+  quote: string
+  anchor: readonly string[]
+  voice: ClaimVoice
+  mode: ClaimMode
+}): string {
+  return sentenceHash([claim.quote, claim.voice, claim.mode, ...claim.anchor].join(' | '))
+}
 
 /** What a finding carries beside its sides: C4's story year (typed or quoted in that scene). */
 export const FindingExtra = z.object({

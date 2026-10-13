@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import type { ReadingOrder } from '@shared/memory/asOf'
 import {
   deathWord,
+  lifeWord,
   type CandidateClaim,
   type CandidateInputs,
   type CandidateRecord,
@@ -22,6 +23,7 @@ import { parseStep } from '@shared/memory/topics'
 import { checkedUpTo } from '@shared/memory/whoKnows'
 import { searchableText } from '@shared/search'
 import { nameMention, type NodeRow } from '../../db/schema'
+import { researchDocumentIds } from '../../research/researchTree'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
 import { dismissedKeys } from '../dismissedStore'
 import { listRecords } from '../recordStore'
@@ -72,18 +74,74 @@ const toCandidateClaim = (claim: Claim & { recordId: string }): CandidateClaim =
   para: claim.para,
   state: claim.state === 'stale' ? 'stale' : 'live',
   change: claim.change,
-  created: claim.created
+  created: claim.created,
+  quote: claim.quote,
+  anchor: claim.anchor
 })
 
-/** The canon note paragraphs the passage index holds: Pinned pages and canon Research pages. */
-export function canonNotes(db: TreeDb): NoteParagraph[] {
-  const rows = db.all<{ source: string; ownerId: string; para: number; text: string }>(
-    sql`SELECT source, owner_id AS ownerId, para, text FROM memory_passage_fts
-        WHERE canon = 'canon' AND source IN ('pinned', 'note', 'research')
-        ORDER BY rowid`
+interface NoteRow {
+  source: string
+  ownerId: string
+  para: number
+  text: string
+}
+
+/** The canon note rows last read, per database, under the note owners' passage hashes then. */
+const noteRowsRead = new WeakMap<TreeDb, { hashes: string; rows: NoteRow[] }>()
+
+/**
+ * The index's canon note rows (Pinned pages, written and uploaded Research pages), read again only
+ * when a note owner's passage hash moved: the passage indexer, their one writer, sets an owner's
+ * hash with every write of its rows and drops it with them (`writeOwner`, `dropOwner`, the prune).
+ * Read from FTS5's content table (columns c0 source, c1 owner_id, c2 para, c3 canon, c4 text): a
+ * plain table scan, never the full-text table's row by row walk over every scene paragraph.
+ */
+function canonNoteRows(db: TreeDb): NoteRow[] {
+  const hashes = db
+    .all<{ kind: string; id: string; hash: string | null }>(
+      sql`SELECT owner_kind AS kind, owner_id AS id, passages_hash AS hash FROM memory_scan
+          WHERE owner_kind IN ('record', 'research') ORDER BY owner_kind, owner_id`
+    )
+    .map((row) => `${row.kind}:${row.id}:${row.hash ?? ''}`)
+    .join('|')
+  const known = noteRowsRead.get(db)
+  if (known?.hashes === hashes) return known.rows
+  const rows = db.all<NoteRow>(
+    sql`SELECT c0 AS source, c1 AS ownerId, c2 AS para, c4 AS text FROM memory_passage_fts_content
+        WHERE c3 = 'canon' AND c0 IN ('pinned', 'note', 'research')`
   )
-  return rows.map((row) =>
-    row.source === 'pinned'
+  noteRowsRead.set(db, { hashes, rows })
+  return rows
+}
+
+/**
+ * The canon note paragraphs the passage index holds: Pinned pages of records that exist and canon
+ * Research pages still in the Research tree (an owner deleted keeps its rows until the next open's
+ * prune, so they are skipped here, as every reader of the index does). In a stable page order:
+ * records in list order, then Research in tree order, each by paragraph, so which two sentences C6
+ * compares never depends on which page was re-indexed last.
+ */
+export function canonNotes(
+  db: TreeDb,
+  nodes: readonly NodeRow[] = listNodes(db),
+  records: readonly string[] = listRecords(db).map((each) => each.id)
+): NoteParagraph[] {
+  const recordAt = new Map(records.map((id, i) => [id, i]))
+  const researchAt = new Map(researchDocumentIds(nodes).map((id, i) => [id, i]))
+  const placed = canonNoteRows(db).flatMap((row) => {
+    const pinned = row.source === 'pinned'
+    const at = (pinned ? recordAt : researchAt).get(row.ownerId)
+    return at === undefined ? [] : [{ row, pinned, at }]
+  })
+  placed.sort(
+    (x, y) =>
+      Number(y.pinned) - Number(x.pinned) ||
+      x.at - y.at ||
+      x.row.para - y.row.para ||
+      x.row.source.localeCompare(y.row.source)
+  )
+  return placed.map(({ row, pinned }) =>
+    pinned
       ? {
           ownerKind: 'record',
           ownerId: row.ownerId,
@@ -96,9 +154,9 @@ export function canonNotes(db: TreeDb): NoteParagraph[] {
 }
 
 /** The records as the rules read them: kind, name and every name with its case rule. */
-function candidateRecords(db: TreeDb): Map<string, CandidateRecord> {
+function candidateRecords(records: ReturnType<typeof listRecords>): Map<string, CandidateRecord> {
   return new Map(
-    listRecords(db).map((record) => [
+    records.map((record) => [
       record.id,
       {
         id: record.id,
@@ -137,36 +195,18 @@ function readableClaims(
   )
 }
 
-/** The rules' inputs over the active draft `draftId`. */
-export function candidateInputs(
+/**
+ * One scene's held card as the rules read it (its text is read once, only when a rule asks): who is
+ * on the page by a verified quote that still stands, the verified flashback, the quoted year.
+ */
+function sceneFactsReader(
   db: TreeDb,
-  draftId: string,
-  frame: FindingsFrame = findingsFrame(db)
-): CandidateInputs {
-  const { nodes, reading } = frame
-  const rows = new Map(nodes.map((row) => [row.id, row]))
-  const cards = new Map(
-    draftCards(db, draftId)
-      .filter((card) => reading.order.has(card.nodeId))
-      .map((card) => [card.nodeId, card])
-  )
-  const onPage = new Map<string, Set<string>>()
-  for (const [nodeId, card] of cards) {
-    if (card.present.length > 0)
-      onPage.set(nodeId, new Set(card.present.map((each) => each.recordId)))
-  }
-  const typed = new Map<string, TypedScene>()
-  for (const [nodeId, details] of allSceneDetails(db)) {
-    if (!reading.order.has(nodeId)) continue
-    typed.set(nodeId, {
-      pov: details.povRecordId,
-      alsoHere: details.alsoHere,
-      year: details.storyYear
-    })
-  }
+  rows: ReadonlyMap<string, NodeRow>,
+  cards: ReadonlyMap<string, Card>
+): (nodeId: string) => SceneFacts {
   let notRight: ReadonlySet<string> | null = null
   const facts = new Map<string, SceneFacts>()
-  const scene = (nodeId: string): SceneFacts => {
+  return (nodeId) => {
     const known = facts.get(nodeId)
     if (known !== undefined) return known
     const stored = cards.get(nodeId)
@@ -187,15 +227,54 @@ export function candidateInputs(
     facts.set(nodeId, found)
     return found
   }
+}
+
+/** The active draft's stored cards in readable scenes, by scene. */
+function readableCards(db: TreeDb, draftId: string, reading: ReadingOrder): Map<string, Card> {
+  return new Map(
+    draftCards(db, draftId)
+      .filter((card) => reading.order.has(card.nodeId))
+      .map((card) => [card.nodeId, card])
+  )
+}
+
+/** The rules' inputs over the active draft `draftId`. */
+export function candidateInputs(
+  db: TreeDb,
+  draftId: string,
+  frame: FindingsFrame = findingsFrame(db)
+): CandidateInputs {
+  const { nodes, reading } = frame
+  const rows = new Map(nodes.map((row) => [row.id, row]))
+  const cards = readableCards(db, draftId, reading)
+  const onPage = new Map<string, Set<string>>()
+  for (const [nodeId, card] of cards) {
+    if (card.present.length > 0)
+      onPage.set(nodeId, new Set(card.present.map((each) => each.recordId)))
+  }
+  const typed = new Map<string, TypedScene>()
+  for (const [nodeId, details] of allSceneDetails(db)) {
+    if (!reading.order.has(nodeId)) continue
+    typed.set(nodeId, {
+      pov: details.povRecordId,
+      alsoHere: details.alsoHere,
+      year: details.storyYear
+    })
+  }
+  const records = listRecords(db)
   return {
     reading,
     claims: readableClaims(db, draftId, reading).map(toCandidateClaim),
     onPage,
     typed,
-    scene,
+    scene: sceneFactsReader(db, rows, cards),
     knewBefore: listKnewBefore(db),
-    records: candidateRecords(db),
-    notes: canonNotes(db),
+    records: candidateRecords(records),
+    notes: canonNotes(
+      db,
+      nodes,
+      records.map((each) => each.id)
+    ),
     scenes: [...reading.order.keys()].map((nodeId) => ({
       nodeId,
       ref: reading.refs.get(nodeId) ?? '',
@@ -257,14 +336,23 @@ export function looseEndInputs(
       .filter((quote) => quote.recordId === recordId && quote.state === 'live')
       .map((quote) => ({ nodeId: quote.nodeId }))
   }))
+  // Deaths and living values in story order: a value that is neither ("presumed dead") is left
+  // out, and so is a living value in a verified flashback (alive then, earlier in story time).
   const deaths = new Map<string, { order: number; dead: boolean }[]>()
+  const scene =
+    draftId === null
+      ? null
+      : sceneFactsReader(
+          db,
+          new Map(nodes.map((row) => [row.id, row])),
+          readableCards(db, draftId, reading)
+        )
   for (const claim of claims) {
     if (claim.slot !== 'alive' || !setsState(claim)) continue
+    const dead = deathWord(claim.value)
+    if (!dead && (!lifeWord(claim.value) || scene?.(claim.nodeId).flashback === true)) continue
     const order = reading.order.get(claim.nodeId) ?? -1
-    deaths.set(claim.recordId, [
-      ...(deaths.get(claim.recordId) ?? []),
-      { order, dead: deathWord(claim.value) }
-    ])
+    deaths.set(claim.recordId, [...(deaths.get(claim.recordId) ?? []), { order, dead }])
   }
   const named = namedScenes(db, reading)
   const characters: LooseCharacter[] = listRecords(db)

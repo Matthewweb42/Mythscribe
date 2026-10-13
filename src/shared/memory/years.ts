@@ -253,7 +253,11 @@ const stands = (claim: AgeClaim): boolean =>
   claim.state === 'live' && claim.voice === 'narration' && claim.mode === 'now'
 
 /** The claims in readable scenes up to the scene, in reading order. */
-function upTo(claims: readonly AgeClaim[], reading: ReadingOrder, atId: string | null): AgeClaim[] {
+function upTo<C extends AgeClaim>(
+  claims: readonly C[],
+  reading: ReadingOrder,
+  atId: string | null
+): C[] {
   const at = atId === null ? Infinity : (reading.at.get(atId) ?? -1)
   return claims
     .flatMap((claim) => {
@@ -304,19 +308,26 @@ export function yearCalendar(text: string): string {
   return [era(before), era(after)].filter((each) => each !== '').join(' ')
 }
 
+/** Units of an age that are not years: such an age is never compared in years. */
+const NOT_YEARS = /^(?:months?|weeks?|days?|hours?|minutes?)$/
+
 /**
- * The count a stated age gives (P4's C4): the first in it, in digits ("17", "about 40") or words
- * ("seventeen", "twenty-four", "twenty four", "seven-and-twenty"); null when it holds none. "A"
- * and "an" alone are no age.
+ * The count a stated age gives in years (P4's C4): the first in it, in digits ("17", "about 40")
+ * or words ("seventeen", "twenty-four", "twenty four", "seven-and-twenty"); null when it holds none,
+ * or when the count is of months, weeks, days or hours ("six months old", "eighteen months": not
+ * compared). "A" and "an" alone are no age.
  */
 export function ageYears(value: string): number | null {
   const tokens = value
     .toLowerCase()
     .split(/[^a-z0-9-]+/)
     .filter((token) => token !== '')
+  // The count, unless the word after it (`at`) is a unit other than years.
+  const inYears = (count: number, at: number): number | null =>
+    NOT_YEARS.test(tokens[at] ?? '') ? null : count
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i] ?? ''
-    if (/^\d+$/.test(token)) return Number(token)
+    if (/^\d+$/.test(token)) return inYears(Number(token), i + 1)
     if (token === 'a' || token === 'an') continue
     const parts = token.split('-')
     const [first = '', second = '', third = ''] = parts
@@ -324,47 +335,76 @@ export function ageYears(value: string): number | null {
     const unit = UNITS[first]
     const tens = TENS[third]
     if (parts.length === 3 && second === 'and' && unit !== undefined && tens !== undefined) {
-      return tens + unit
+      return inYears(tens + unit, i + 1)
     }
     const count = countWord(token)
     if (count === null) continue
     // "twenty four": a ten, then a unit word.
     const next = UNITS[tokens[i + 1] ?? '']
-    return TENS[token] !== undefined && next !== undefined && next < 10 ? count + next : count
+    return TENS[token] !== undefined && next !== undefined && next < 10
+      ? inYears(count + next, i + 2)
+      : inYears(count, i + 1)
   }
   return null
 }
 
+/** Where a record's birth year comes from as of a scene (`birthSource`). */
+export interface BirthSource<C extends AgeClaim> {
+  year: number
+  /** The words the year is written in (its calendar: `yearCalendar`). */
+  value: string
+  /** The `born` claim it comes from; null for a Pinned line. */
+  claim: C | null
+  /** The Pinned paragraph's index in `pinned`; null for a claim. */
+  pinnedAt: number | null
+}
+
 /**
- * A record's birth year as of a scene (P2b-D15): the latest live narration-now `born` claim up to
- * the scene with exactly one year in its value; else a canon Pinned line "Born: 1792" (the
- * switch-over's form of the v1 field, so the ages she had keep working); else null. `pinned` is
- * the record's canon Pinned paragraphs (Not canon ones left out by the caller).
+ * A record's birth year as of a scene and where it comes from (P2b-D15): the latest `born` claim up
+ * to the scene that `sets` (live narration in `now` mode for the sheet; P4's C4 also takes stale
+ * ones, so its pair is held) with exactly one year in its value; else the first canon Pinned line
+ * "Born: 1792" (the switch-over's form of the v1 field, so the ages she had keep working); else
+ * null. `pinned` is the record's canon Pinned paragraphs (Not canon ones left out by the caller).
  */
+export function birthSource<C extends AgeClaim>(
+  claims: readonly C[],
+  pinned: readonly string[],
+  reading: ReadingOrder,
+  atId: string | null,
+  sets: (claim: C) => boolean = stands
+): BirthSource<C> | null {
+  const text = upTo(claims, reading, atId)
+    .filter((claim) => sets(claim) && yearIn(claim.value) !== null)
+    .at(-1)
+  if (text !== undefined) {
+    return { year: yearIn(text.value) ?? 0, value: text.value, claim: text, pinnedAt: null }
+  }
+  for (const [at, paragraph] of pinned.entries()) {
+    const line = bornLine(paragraph)
+    if (line !== null) return { year: line.year, value: line.value, claim: null, pinnedAt: at }
+  }
+  return null
+}
+
+/** A record's birth year as of a scene, as the sheet and the Timeline show it (`birthSource`). */
 export function birthYear(
   claims: readonly AgeClaim[],
   pinned: readonly string[],
   reading: ReadingOrder,
   atId: string | null
 ): BornView | null {
-  const text = upTo(claims, reading, atId)
-    .filter((claim) => stands(claim) && yearIn(claim.value) !== null)
-    .at(-1)
-  if (text !== undefined) {
-    return {
-      year: yearIn(text.value) ?? 0,
-      source: 'text',
-      claimId: text.id,
-      nodeId: text.nodeId,
-      ref: reading.refs.get(text.nodeId) ?? ''
-    }
-  }
-  for (const paragraph of pinned) {
-    const match = BORN_LINE.exec(paragraph)
-    const year = match === null ? null : yearIn(match[1] ?? '')
-    if (year !== null) return { year, source: 'pinned', claimId: null, nodeId: null, ref: null }
-  }
-  return null
+  const found = birthSource(claims, pinned, reading, atId)
+  if (found === null) return null
+  const claim = found.claim
+  return claim === null
+    ? { year: found.year, source: 'pinned', claimId: null, nodeId: null, ref: null }
+    : {
+        year: found.year,
+        source: 'text',
+        claimId: claim.id,
+        nodeId: claim.nodeId,
+        ref: reading.refs.get(claim.nodeId) ?? ''
+      }
 }
 
 /** The last stated age as of a scene: the latest live narration-now `age` claim up to it. */

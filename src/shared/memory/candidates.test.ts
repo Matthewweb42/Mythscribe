@@ -13,6 +13,7 @@ import {
   candidatesC7,
   C7_PAIRS_PER_CLAIM,
   deathWord,
+  lifeWord,
   type Candidate,
   type CandidateClaim,
   type CandidateInputs,
@@ -71,6 +72,8 @@ const claim = (
     state: 'live',
     change: false,
     created: '2026-10-13T00:00:00.000Z',
+    quote: 'a quote',
+    anchor: [],
     ...over
   }
 }
@@ -214,6 +217,86 @@ describe('C1: two values in a fixed slot (P4-D2)', () => {
     expect(found[0]?.slot).toBe('kinship:tomas')
   })
 
+  it('never lets a bridging value merge two that disagree', () => {
+    const found = candidatesC1(
+      inputs({
+        claims: [
+          claim({ recordId: 'mara', slot: 'eyes', value: 'grey', nodeId: 's1' }),
+          claim({ recordId: 'mara', slot: 'eyes', value: 'grey-blue', nodeId: 's2' }),
+          claim({ recordId: 'mara', slot: 'eyes', value: 'blue', nodeId: 's3' })
+        ]
+      })
+    )
+    expect(found.map(sides)).toEqual([['s1:grey', 's3:blue']])
+  })
+
+  it('pairs kinship to an unnamed relative only under one kin word, and reads named kin by its kin word', () => {
+    expect(
+      candidatesC1(
+        inputs({
+          claims: [
+            claim({
+              recordId: 'mara',
+              slot: 'kinship',
+              value: 'daughter of a miller',
+              nodeId: 's1'
+            }),
+            claim({ recordId: 'mara', slot: 'kinship', value: 'mother of two boys', nodeId: 's2' }),
+            claim({ recordId: 'mara', slot: 'kinship', value: 'a widow', nodeId: 's3' }),
+            claim({ recordId: 'mara', slot: 'kinship', value: 'the eldest', nodeId: 's4' })
+          ]
+        })
+      )
+    ).toEqual([])
+    // Dunmore's lie: the same relation (son), two fathers, one of them in his own speech.
+    const lie = candidatesC1(
+      inputs({
+        claims: [
+          claim({
+            recordId: 'tomas',
+            slot: 'kinship',
+            value: 'son of a clergyman in Elsdale',
+            voice: 'dialogue',
+            speakerId: 'tomas',
+            nodeId: 's2'
+          }),
+          claim({
+            recordId: 'tomas',
+            slot: 'kinship',
+            value: 'son of the late steward at Greyhallow',
+            nodeId: 's5'
+          })
+        ]
+      })
+    )
+    expect(lie.map(sides)).toEqual([
+      ['s2:son of a clergyman in elsdale', 's5:son of the late steward at greyhallow']
+    ])
+    expect(lie[0]?.slot).toBe('kinship')
+    expect(
+      candidatesC1(
+        inputs({
+          claims: [
+            claim({
+              recordId: 'mara',
+              slot: 'kinship',
+              value: "Tomas's sister",
+              objectId: 'tomas',
+              nodeId: 's1'
+            }),
+            claim({
+              recordId: 'mara',
+              slot: 'kinship',
+              value: 'his younger sister',
+              objectId: 'tomas',
+              nodeId: 's2'
+            })
+          ]
+        })
+      )
+    ).toEqual([])
+  })
+
   it('leaves lasting slots to the other rules', () => {
     expect(
       candidatesC1(
@@ -240,6 +323,42 @@ describe('C2 dead: a dead character on the page later (P4-D3)', () => {
     expect(deathWord('passed away in the night')).toBe(true)
     expect(deathWord('alive')).toBe(false)
     expect(deathWord('deadly tired')).toBe(false)
+    expect(deathWord('had died in the war')).toBe(true)
+    // Negated, hedged or qualified: no death.
+    expect(deathWord('not dead')).toBe(false)
+    expect(deathWord('nearly killed')).toBe(false)
+    expect(deathWord('buried alive')).toBe(false)
+    expect(deathWord('presumed dead')).toBe(false)
+    expect(deathWord('might be dead')).toBe(false)
+    expect(deathWord('rumoured dead')).toBe(false)
+    expect(lifeWord('alive')).toBe(true)
+    expect(lifeWord('presumed dead')).toBe(false)
+    expect(lifeWord('not alive')).toBe(false)
+  })
+
+  it('never raises a death from a qualified value', () => {
+    expect(
+      candidatesC2Dead(
+        inputs({ claims: [death({ value: 'nearly killed' })], onPage, facts: present })
+      )
+    ).toEqual([])
+  })
+
+  it('is not cancelled by a living value in a flashback, or by a value that is neither', () => {
+    const then = claim({ recordId: 'hobb', slot: 'alive', value: 'alive', nodeId: 's4' })
+    expect(
+      candidatesC2Dead(
+        inputs({
+          claims: [death(), then],
+          onPage,
+          facts: { ...present, s4: { flashback: true } }
+        })
+      ).map(sides)
+    ).toEqual([['s2:dead', 's5:here']])
+    const unsure = claim({ recordId: 'hobb', slot: 'alive', value: 'presumed dead', nodeId: 's4' })
+    expect(
+      candidatesC2Dead(inputs({ claims: [death(), unsure], onPage, facts: present })).map(sides)
+    ).toEqual([['s2:dead', 's5:here']])
   })
 
   it('pairs the death with a later presence quoted on the page', () => {
@@ -362,6 +481,16 @@ describe('C3: passing on a secret before learning it', () => {
     expect(candidatesC3(inputs({ claims: [line('s4', 'told'), line('s6', 'tells')] }))).toEqual([])
   })
 
+  it('hides it when the learning line is in a flashback scene (a memory in story time)', () => {
+    const found = candidatesC3(
+      inputs({
+        claims: [line('s2', 'tells'), line('s4', 'told')],
+        facts: { s4: { flashback: true } }
+      })
+    )
+    expect(found.map((each) => each.hidden)).toEqual([true])
+  })
+
   it('is skipped when she knew before the book, or her group knew it earlier (P4-D5)', () => {
     const claims = [line('s2', 'tells'), line('s4', 'told')]
     expect(
@@ -454,6 +583,20 @@ describe('C4 birth: a stated age against the birth year and that scene’s year 
     })
   })
 
+  it('never compares an age in months, weeks or days', () => {
+    expect(
+      candidatesC4Birth(inputs({ claims: [born, age('eighteen months')], typed: typed(1797) }))
+    ).toEqual([])
+    expect(
+      candidatesC4Falls(
+        inputs({ claims: [age('six months old', 's2'), age('two years old', 's4')] })
+      )
+    ).toEqual([])
+    expect(
+      candidatesC4Falls(inputs({ claims: [age('three', 's2'), age('three weeks old', 's4')] }))
+    ).toEqual([])
+  })
+
   it('hides it in a flashback', () => {
     const found = candidatesC4Birth(
       inputs({
@@ -516,6 +659,40 @@ describe('C5: a thread advancing after it was resolved (P4-D7)', () => {
         inputs({ claims: [step('s3', 'resolves'), step('s6', 'advances', { voice: 'rumour' })] })
       )
     ).toEqual([])
+    // Re-opened in the advancing scene itself, before the advance.
+    expect(
+      candidatesC5(
+        inputs({
+          claims: [
+            step('s1', 'resolves'),
+            step('s2', 'opens', { para: 0 }),
+            step('s2', 'advances', { para: 2 })
+          ]
+        })
+      )
+    ).toEqual([])
+    // An opening after the advance does not excuse it.
+    expect(
+      candidatesC5(
+        inputs({
+          claims: [
+            step('s1', 'resolves'),
+            step('s2', 'advances', { para: 0 }),
+            step('s2', 'opens', { para: 2 })
+          ]
+        })
+      )
+    ).toHaveLength(1)
+  })
+
+  it('hides an advance told in a flashback scene', () => {
+    const found = candidatesC5(
+      inputs({
+        claims: [step('s3', 'resolves'), step('s6', 'advances')],
+        facts: { s6: { flashback: true } }
+      })
+    )
+    expect(found.map((each) => each.hidden)).toEqual([true])
   })
 })
 
@@ -550,6 +727,25 @@ describe('C6: the book against the author’s notes (P4-D8)', () => {
       })
     )
     expect(elsewhere.map(sides)).toEqual([['s3:brown', 'note:green']])
+  })
+
+  it('makes one finding per value the book gives, not one per scene that repeats it', () => {
+    const found = candidatesC6(
+      inputs({
+        claims: [
+          eyes('grey', { nodeId: 's2', voice: 'dialogue' }),
+          eyes('grey', { nodeId: 's4' }),
+          eyes('grey', { nodeId: 's6' }),
+          eyes('brown', { nodeId: 's8' })
+        ],
+        notes: [pinned('orrin', 'Eyes: blue')]
+      })
+    )
+    // Each value's earliest narration-now claim stands for it.
+    expect(found.map(sides)).toEqual([
+      ['s4:grey', 'note:blue'],
+      ['s8:brown', 'note:blue']
+    ])
   })
 
   it('pairs any voice and mode in the book: the note is the canon side', () => {
@@ -621,6 +817,23 @@ describe('C6: the book against the author’s notes (P4-D8)', () => {
     expect(
       candidatesC6(inputs({ claims: [kin], notes: [research('Orrin is a cousin.')] }))
     ).toEqual([])
+    // A kin word followed by "of" counts only when the object follows it directly.
+    expect(
+      candidatesC6(
+        inputs({ claims: [kin], notes: [research('Orrin, cousin of Mara and brother of Tomas.')] })
+      )
+    ).toEqual([])
+    expect(
+      candidatesC6(
+        inputs({
+          claims: [kin],
+          notes: [research('Orrin, a nephew of the old vicar, met Tomas in Bath.')]
+        })
+      )
+    ).toEqual([])
+    expect(
+      candidatesC6(inputs({ claims: [kin], notes: [research('Orrin, cousin of Tomas.')] }))
+    ).toHaveLength(1)
   })
 })
 

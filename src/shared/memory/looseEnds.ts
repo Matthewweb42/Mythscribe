@@ -133,6 +133,8 @@ export function looseEnds(input: LooseEndsInput): LooseEndsView {
     if (last === undefined) continue
     if (horizon - orderOf(last.nodeId) < window || horizonRef === null) continue
     const lastRef = refOf(last.nodeId).ref
+    // Scenes past "checked up to" are not read yet: the question says how far its "last" holds.
+    const scope = horizon < furthest ? ` (as far as the book is read, up to ${horizonRef.ref})` : ''
     keep({
       kind: 'thread',
       id: thread.recordId,
@@ -141,7 +143,7 @@ export function looseEnds(input: LooseEndsInput): LooseEndsView {
       lastNodeId: last.nodeId,
       horizonRef: horizonRef.ref,
       checkedUpTo: input.checkedUpTo,
-      ask: `${thread.label} ${TOUCH_VERB[last.how]} in ${lastRef}. Where does it go next?`,
+      ask: `${thread.label} ${TOUCH_VERB[last.how]} in ${lastRef}${scope}. Where does it go next?`,
       order: orderOf(last.nodeId)
     })
   }

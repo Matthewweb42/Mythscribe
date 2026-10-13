@@ -101,6 +101,8 @@ import {
 import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
 import { cardAnchorOf, revealIn, seedClaims } from '../memory/reading/claimFixture'
 import { findingRows } from '../memory/findings/findingStore'
+import { recomputeFindings } from '../memory/findings/recompute'
+import { dismiss } from '../memory/dismissedStore'
 import { scanNamesFor } from '../memory/nameIndexer'
 import { createTopic, deleteTopicQuotes, mergeInto } from '../memory/reading/topicStore'
 import { logSearchMiss } from '../scribe/searchMissStore'
@@ -9287,6 +9289,104 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
           .map((row) => row.rule)
           .sort()
       ).toEqual(['C1', 'C6', 'C6'])
+      expect(complete).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('finds the candidates again after sheet lines, an Undo of Not a problem, Research pages, Same as… and a draft switch (F-16.27)', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await openV2()
+      const record = async (name: string): Promise<string> => {
+        const made = await invoke('record:create', { name, categoryId: 'character' })
+        if (!('record' in made)) throw new Error('blocked')
+        return made.record.id
+      }
+      const mara = await record('Mara')
+      const tomas = await record('Tomas')
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs("Mara's eyes were grey.", "Mara's eyes were brown.")
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      const db = manager.require().connection.orm
+      const eyes = (recordId: string, value: string, para: number) => ({
+        recordId,
+        slot: 'eyes' as const,
+        value,
+        quote: para === 0 ? "Mara's eyes were grey" : "Mara's eyes were brown",
+        para
+      })
+      seedClaims(db, scene, [eyes(mara, 'grey', 0), eyes(mara, 'brown', 1)], new Date())
+      const settle = () => vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      const rules = (draftId = activeDraftId(db)): string[] =>
+        findingRows(db, draftId)
+          .map((row) => row.rule)
+          .sort()
+      recomputeFindings(db, new Date())
+      expect(rules()).toEqual(['C1'])
+
+      // Ms Scribe's sheet line and its Undo: C6's code part runs on each.
+      const line = { id: mara, page: 'pinned' as const, text: 'Eyes: green', turn: 'm1' }
+      await invoke('record:addLine', line)
+      await settle()
+      expect(rules()).toEqual(['C1', 'C6', 'C6'])
+      await invoke('record:removeLine', { ...line, index: 0 })
+      await settle()
+      expect(rules()).toEqual(['C1'])
+
+      // Not a problem closes the finding; its Undo brings it back.
+      const [c1] = findingRows(db, activeDraftId(db))
+      if (c1 === undefined) throw new Error('no finding')
+      dismiss(
+        db,
+        { kind: 'notProblem', key: c1.npKey, recordId: mara, label: 'Mara: eyes', quote: null },
+        new Date()
+      )
+      recomputeFindings(db, new Date())
+      expect(rules()).toEqual([])
+      const listed = await invoke('dismissed:list', undefined)
+      await invoke('dismissed:undo', { id: listed.items[0]?.id ?? '' })
+      await settle()
+      expect(rules()).toEqual(['C1'])
+
+      // A canon Research page naming her eyes is checked once indexed; Not canon closes it.
+      const page = await invoke('research:create', { title: 'Notes' })
+      await invoke('document:save', {
+        id: page.node.id,
+        content: paragraphs('Mara has hazel eyes.')
+      })
+      await settle()
+      expect(rules()).toEqual(['C1', 'C6', 'C6'])
+      await invoke('research:setNotCanon', { nodeId: page.node.id, notCanon: true })
+      await settle()
+      expect(rules()).toEqual(['C1'])
+
+      // Same as…: Tomas's findings go with him; Mara's are found again with his claims.
+      seedClaims(db, scene, [eyes(tomas, 'green', 0), eyes(tomas, 'blue', 1)], new Date())
+      recomputeFindings(db, new Date())
+      expect(
+        findingRows(db, activeDraftId(db))
+          .map((row) => row.recordId)
+          .sort()
+      ).toEqual([mara, tomas].sort())
+      await invoke('record:sameAs', { keepId: mara, mergeId: tomas })
+      await settle()
+      const merged = findingRows(db, activeDraftId(db))
+      expect(merged.every((row) => row.recordId === mara)).toBe(true)
+      expect(merged.map((row) => row.rule)).toEqual(['C1', 'C1', 'C1'])
+
+      // A draft switch: the new draft's findings are found by the job the switch queues.
+      const first = (await invoke('drafts:list', undefined)).activeId
+      const list = await invoke('drafts:duplicate', { id: first, name: 'Two' })
+      const second = list.drafts.find((each) => each.id !== first)?.id ?? ''
+      await invoke('drafts:switch', { id: second })
+      seedClaims(db, scene, [eyes(mara, 'grey', 0), eyes(mara, 'brown', 1)], new Date())
+      expect(rules(second)).toEqual([])
+      await settle()
+      expect(rules(second)).toEqual(['C1'])
       expect(complete).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()

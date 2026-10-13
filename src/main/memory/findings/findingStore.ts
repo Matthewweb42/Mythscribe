@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, count, eq, inArray } from 'drizzle-orm'
 import type { Candidate } from '@shared/memory/candidates'
 import {
   type Finding,
@@ -78,6 +78,17 @@ export function findingRows(
     .all()
 }
 
+/** How many of a draft's findings are in a state. */
+export function countFindings(db: TreeDb, draftId: string, state: FindingState): number {
+  return (
+    db
+      .select({ n: count() })
+      .from(finding)
+      .where(and(eq(finding.draftId, draftId), eq(finding.state, state)))
+      .get()?.n ?? 0
+  )
+}
+
 /** A draft's findings, optionally only in some states. */
 export function findingsOf(
   db: TreeDb,
@@ -106,31 +117,56 @@ export interface UpsertResult {
 }
 
 /**
+ * Whether a kept row's verdicts no longer fit its candidate, so the pair must be judged again
+ * (design §2.4: a verdict is keyed by the quotes, their context, their order, the modes and the
+ * flashback): a side moved (a claim read again under a new id, a revival's new quote or a free
+ * re-proof's new sentences, both hashed in `seen`; a note line that moved), the two sides swapped
+ * order, the story year changed, or the flashback a scene's card gives came or went. A held row's
+ * flashback is unknown (held masks it), so it is compared only between rows that are not held.
+ */
+function judgedPairMoved(
+  row: FindingRow,
+  each: Candidate,
+  sides: { a: string; b: string; extra: string | null }
+): boolean {
+  if (row.a !== sides.a || row.b !== sides.b || row.extra !== sides.extra) return true
+  return row.state !== 'held' && !each.held && (row.state === 'hidden') !== each.hidden
+}
+
+/**
  * Writes the candidates as findings of `draftId`, by key: a new key is inserted, its verdicts taken
  * from the cache for both orders when `cached` knows them (at no cost), else `unjudged`; a kept key
- * keeps its verdicts (a row still missing one asks the cache again), takes the candidate's sides
- * (a re-read claim's new id) and its held or hidden state. Nothing is written for a row unchanged.
+ * keeps its verdicts while the pair the judge saw is unchanged (`judgedPairMoved`), else they are
+ * cleared (the stronger check's too) and the cache asked again, so an unchanged rendering is free
+ * and a changed one is judged afresh; a row still missing a verdict asks the cache again. It takes
+ * the candidate's sides and its held or hidden state. Nothing is written for a row unchanged.
+ * `rows` is the draft's rows as they stand, when the caller has just read them.
  */
 export function upsertFindings(
   db: TreeDb,
   draftId: string,
   candidates: readonly Candidate[],
   now: Date,
-  cached: (candidate: Candidate) => PairVerdicts | null = () => null
+  cached: (candidate: Candidate) => PairVerdicts | null = () => null,
+  rows: readonly FindingRow[] = findingRows(db, draftId)
 ): UpsertResult {
   const result: UpsertResult = { opened: [], written: 0 }
   if (candidates.length === 0) return result
-  const existing = new Map(findingRows(db, draftId).map((row) => [row.key, row]))
+  const existing = new Map(rows.map((row) => [row.key, row]))
   db.transaction((tx) => {
     for (const each of candidates) {
       const row = existing.get(each.key)
       const a = JSON.stringify(each.a)
       const b = JSON.stringify(each.b)
       const extra = each.extra === null ? null : JSON.stringify(each.extra)
-      let verdictAb = row?.verdictAb ?? null
-      let verdictBa = row?.verdictBa ?? null
-      let why = row?.why ?? null
-      let judgedAt = row?.judgedAt ?? null
+      const kept = row !== undefined && !judgedPairMoved(row, each, { a, b, extra }) ? row : null
+      let verdictAb = kept?.verdictAb ?? null
+      let verdictBa = kept?.verdictBa ?? null
+      let why = kept?.why ?? null
+      let judgedAt = kept?.judgedAt ?? null
+      const confirm = kept?.confirm ?? null
+      const confirmWhy = kept?.confirmWhy ?? null
+      const confirmedAt = kept?.confirmedAt ?? null
       if (verdictAb === null || verdictBa === null) {
         const known = cached(each)
         if (known !== null && (known.ab !== null || known.ba !== null)) {
@@ -145,7 +181,7 @@ export function upsertFindings(
         hidden: each.hidden,
         verdictAb,
         verdictBa,
-        confirm: row?.confirm ?? null
+        confirm
       })
       if (row === undefined) {
         const id = randomUUID()
@@ -180,10 +216,23 @@ export function upsertFindings(
         row.extra === extra &&
         row.state === state &&
         row.verdictAb === verdictAb &&
-        row.verdictBa === verdictBa
+        row.verdictBa === verdictBa &&
+        row.confirm === confirm
       if (same) continue
       tx.update(finding)
-        .set({ a, b, extra, state, verdictAb, verdictBa, why, judgedAt })
+        .set({
+          a,
+          b,
+          extra,
+          state,
+          verdictAb,
+          verdictBa,
+          why,
+          judgedAt,
+          confirm,
+          confirmWhy,
+          confirmedAt
+        })
         .where(eq(finding.id, row.id))
         .run()
       result.written += 1

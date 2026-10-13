@@ -85,9 +85,12 @@ describe('looseEnds (F-16.29)', () => {
 
   it('measures threads only up to "checked up to" (claims exist only for read scenes)', () => {
     expect(looseEnds(input({ threads: [thread()], checkedUpTo: ref('s10') })).items).toEqual([])
-    expect(
-      looseEnds(input({ threads: [thread()], checkedUpTo: ref('s12') })).items[0]?.horizonRef
-    ).toBe('6.2')
+    const scoped = looseEnds(input({ threads: [thread()], checkedUpTo: ref('s12') })).items[0]
+    expect(scoped?.horizonRef).toBe('6.2')
+    // Its question says how far "last" holds: later scenes are not read yet.
+    expect(scoped?.ask).toBe(
+      'The missing heir was last advanced in 2.2 (as far as the book is read, up to 6.2). Where does it go next?'
+    )
     expect(looseEnds(input({ threads: [thread()], checkedUpTo: null })).items).toEqual([])
   })
 

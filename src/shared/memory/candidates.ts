@@ -2,6 +2,7 @@ import { queryTerms } from '../searchTerms'
 import type { ReadingOrder } from './asOf'
 import type { ClaimMode, ClaimVoice } from './claims'
 import {
+  claimSeen,
   findingKey,
   npKey,
   raisesAlone,
@@ -13,13 +14,17 @@ import {
 } from './findings'
 import { knowsLine, LEARNS, parseHow } from './knows'
 import { kinWords } from './literal'
+import { findMarkers, type MarkerKind } from './markers'
 import { groupsOf, type MembershipInput } from './membership'
 import {
   datedScene,
+  holdsSlot,
+  labelLine,
+  noteIndex,
   noteKinValue,
   noteSentences,
   noteValue,
-  pairsWith,
+  onOwnPage,
   type DatedScene,
   type NoteName,
   type NoteParagraph,
@@ -31,7 +36,7 @@ import { slotGroup, type Slot } from './slots'
 import { stepCounts } from './threadsAsOf'
 import { parseStep, stepRank } from './topics'
 import { detailsAgree } from './typedVsText'
-import { ageYears, bornLine, yearCalendar, yearIn } from './years'
+import { ageYears, birthSource, bornLine, yearCalendar, yearIn } from './years'
 
 /**
  * Contradiction candidates in code (F-16.27; design §2.4's table, plan P4 §1.3), pure: rules
@@ -63,6 +68,9 @@ export interface CandidateClaim {
   /** The sentence states a change ("she had cut it short"). */
   change: boolean
   created: string
+  /** Its quote and the sentence hashes its proof rests on: what the judge reads of it (`claimSeen`). */
+  quote: string
+  anchor: readonly string[]
 }
 
 /** What a scene's card says once held against the text (read only for the scenes a rule asks about). */
@@ -129,19 +137,45 @@ export const BODY_SLOTS: readonly Slot[] = ['hair', 'scars']
 const DEATH =
   /(?<![\p{L}\p{N}])(?:dead|died|killed|drowned|slain|murdered|perished|buried|hanged|passed\s+away)(?![\p{L}\p{N}])/iu
 
-/** Whether an `alive` value reads as a death. */
-export const deathWord = (value: string): boolean => DEATH.test(value)
+/** Words that keep a death word from reading as a death ("nearly killed", "presumed dead", "buried alive"). */
+const QUALIFIED =
+  /(?<![\p{L}\p{N}])(?:alive|nearly|almost|near|half|presumed|feared|reportedly|supposedly|apparently|all\s+but|as\s+good\s+as)(?![\p{L}\p{N}])/iu
+
+/** The markers that make a value say less than it seems to (`markers.ts`); a pluperfect "had died" is still a death. */
+const HEDGES: readonly MarkerKind[] = [
+  'negation',
+  'modal',
+  'conditional',
+  'reported',
+  'question',
+  'simile'
+]
+
+const hedged = (value: string): boolean =>
+  findMarkers(value).some((hit) => HEDGES.includes(hit.kind))
+
+/** Whether an `alive` value reads as a death: a death word, unqualified, unhedged ("not dead" never). */
+export const deathWord = (value: string): boolean =>
+  DEATH.test(value) && !QUALIFIED.test(value) && !hedged(value)
+
+/**
+ * Whether an `alive` value reads as living: no death word at all, unhedged ("alive", "well"); a
+ * value that is neither ("presumed dead", "nearly killed") neither raises nor cancels a death.
+ */
+export const lifeWord = (value: string): boolean => !DEATH.test(value) && !hedged(value)
 
 /** C7's pairs per claim, nearest first (P4-D9). */
 export const C7_PAIRS_PER_CLAIM = 5
 /** C6's note sentences per claim, its own sheet's first (design §2.4). */
 export const C6_SENTENCES_PER_CLAIM = 2
 
-const claimSide = (claim: CandidateClaim): FindingSide => ({
+/** A claim as a finding's side. */
+export const claimSide = (claim: CandidateClaim): FindingSide => ({
   kind: 'claim',
   claimId: claim.id,
   nodeId: claim.nodeId,
-  valueKey: claim.valueKey
+  valueKey: claim.valueKey,
+  seen: claimSeen(claim)
 })
 
 const noteSide = (
@@ -234,52 +268,93 @@ const stale = (...claims: CandidateClaim[]): boolean =>
 const fixedSlot = (claim: CandidateClaim): string =>
   claim.slot === 'kinship' && claim.objectId !== null ? `kinship:${claim.objectId}` : claim.slot
 
+/** A kinship value's kin word ("son of the late steward" → "son"; "the Captain's sister" → "sister"). */
+const kinOf = (value: string): string | null => kinWords(value)[0]?.word ?? null
+
+/** Whether two values of one slot agree: kinship by its kin word, else `detailsAgree`. */
+function valuesAgree(slot: Slot, a: string, b: string): boolean {
+  if (slot === 'kinship') {
+    const x = kinOf(a)
+    const y = kinOf(b)
+    if (x !== null && y !== null) return x === y
+  }
+  return detailsAgree(a, b)
+}
+
 /**
- * C1 (P4-D2): per record, fixed slot and (for kinship) object, the values grouped by agreement
- * (`detailsAgree`: equal, or one's words holding the other's); each group's representative is its
- * earliest narration-now claim, else its earliest claim; the anchor is the earliest group with a
- * narration-now representative, and every other group is paired with it (k groups, k−1 pairs). No
- * narration-now value at all: no pair (non-narration claims never raise C1 on their own, P4-D1).
+ * Whether two claims of one group agree: kinship to a named object by its kin word ("the Captain's
+ * sister", "his younger sister"); kinship to an unnamed relative (grouped by its kin word, so the
+ * relation is the same) by the rest of its words ("son of the late steward", "son of a clergyman").
+ */
+const claimsAgree = (a: CandidateClaim, b: CandidateClaim): boolean =>
+  a.slot === 'kinship' && a.objectId === null
+    ? detailsAgree(a.value, b.value)
+    : valuesAgree(a.slot, a.value, b.value)
+
+/**
+ * The group C1 compares a fixed claim's values in: its slot, kinship per object, and kinship to a
+ * relative not on the roster per kin word (two unnamed relatives are one relationship only under
+ * one kin word: "son of the steward" and "son of a clergyman", never "daughter of a miller" and
+ * "mother of two boys"). Null for an unnamed relative with no kin word (never compared).
+ */
+function fixedGroup(claim: CandidateClaim): string | null {
+  if (claim.slot !== 'kinship' || claim.objectId !== null) return fixedSlot(claim)
+  const kin = kinOf(claim.value)
+  return kin === null ? null : `kinship:~${kin}`
+}
+
+/**
+ * Values grouped by agreement with each group's first (earliest) value, so a value that agrees with
+ * two that disagree ("grey-blue" between "grey" and "blue") never merges them into one group.
+ */
+function valueGroups(run: readonly Placed[]): Placed[][] {
+  const groups: Placed[][] = []
+  for (const entry of run) {
+    const group = groups.find((each) => {
+      const first = each[0]
+      return first !== undefined && claimsAgree(first.claim, entry.claim)
+    })
+    if (group === undefined) groups.push([entry])
+    else group.push(entry)
+  }
+  return groups
+}
+
+/** A group's representative: its earliest narration-now claim, else its earliest claim. */
+function representative(group: readonly Placed[]): Placed | undefined {
+  const sorted = [...group].sort(byPlace)
+  return sorted.find((member) => raisesAlone(member.claim)) ?? sorted[0]
+}
+
+/**
+ * C1 (P4-D2): per record and fixed slot (kinship per object; to a relative not on the roster, per
+ * kin word: `fixedGroup`), the values grouped by agreement (`valueGroups`: equal, or one's words
+ * holding the other's; kinship to a named object by its kin word); each group's representative is
+ * its earliest narration-now claim, else its earliest claim; the anchor is the earliest group with
+ * a narration-now representative, and every other group that disagrees with it is paired with it
+ * (k groups, k−1 pairs). No narration-now value at all: no pair (non-narration claims never raise
+ * C1 on their own, P4-D1).
  */
 export function candidatesC1(inputs: CandidateInputs): Candidate[] {
   const out: Candidate[] = []
   const fixed = placedClaims(
     inputs.claims,
     inputs.reading,
-    (claim) => slotGroup(claim.slot) === 'fixed'
+    (claim) => slotGroup(claim.slot) === 'fixed' && fixedGroup(claim) !== null
   )
   for (const run of groupBy(
     fixed,
-    (entry) => `${entry.claim.recordId}|${fixedSlot(entry.claim)}`
+    (entry) => `${entry.claim.recordId}|${fixedGroup(entry.claim) ?? ''}`
   ).values()) {
-    const clusters: Placed[][] = []
-    for (const entry of run) {
-      const joined = clusters.filter((cluster) =>
-        cluster.some((member) => detailsAgree(member.claim.value, entry.claim.value))
-      )
-      if (joined.length === 0) {
-        clusters.push([entry])
-        continue
-      }
-      const [first, ...rest] = joined
-      if (first === undefined) continue
-      first.push(entry)
-      for (const other of rest) {
-        first.push(...other)
-        clusters.splice(clusters.indexOf(other), 1)
-      }
-    }
-    const reps = clusters
-      .map((cluster) => {
-        const sorted = [...cluster].sort(byPlace)
-        return sorted.find((member) => raisesAlone(member.claim)) ?? sorted[0]
-      })
+    const reps = valueGroups(run)
+      .map(representative)
       .filter((rep): rep is Placed => rep !== undefined)
       .sort(byPlace)
     const anchor = reps.find((rep) => raisesAlone(rep.claim))
     if (anchor === undefined) continue
     for (const rep of reps) {
       if (rep === anchor) continue
+      if (claimsAgree(rep.claim, anchor.claim)) continue
       const [a, b] = before(rep, anchor) ? [rep, anchor] : [anchor, rep]
       out.push(
         candidate(
@@ -302,8 +377,10 @@ export function candidatesC1(inputs: CandidateInputs): Candidate[] {
 /**
  * C2 `dead` (P4-D3): a narration-now `alive` claim reading as a death (`deathWord`) at scene A, and
  * a later scene B where the record is on the page (a held `present` entry with its verified quote,
- * never a typed POV or *+ also here*), with no narration-now `alive` claim reading as living from A
- * to B; each presence pairs with the latest death before it. B a verified flashback → hidden.
+ * never a typed POV or *+ also here*), with no narration-now `alive` claim reading as living
+ * (`lifeWord`) from A to B outside a verified flashback (a flashback's "alive then" is earlier in
+ * story time); each presence pairs with the latest death before it. B a verified flashback →
+ * hidden.
  */
 export function candidatesC2Dead(inputs: CandidateInputs): Candidate[] {
   const out: Candidate[] = []
@@ -328,7 +405,11 @@ export function candidatesC2Dead(inputs: CandidateInputs): Candidate[] {
       if (death === undefined) continue
       // A living value from the death up to and in the scene cancels it (a resurrection).
       const living = run.some(
-        (entry) => !deathWord(entry.claim.value) && before(death, entry) && entry.order <= order
+        (entry) =>
+          lifeWord(entry.claim.value) &&
+          before(death, entry) &&
+          entry.order <= order &&
+          !inputs.scene(entry.claim.nodeId).flashback
       )
       if (living) continue
       const nodeId = nodeAt.get(order)
@@ -427,7 +508,8 @@ function membershipOf(inputs: CandidateInputs): MembershipInput {
  * knower that is not a memory exists (a later scene, or the same scene's later paragraph). Skipped
  * when the author marked them *Knew before the book*, when their earliest line is `knewBefore`, or
  * when a group they belong to (`groupsOf`, P4-D5) knew it at or before that line. Never raised
- * without the later learning line (design Part 6).
+ * without the later learning line (design Part 6). The learning line in a verified flashback scene
+ * → hidden (it is a memory in story time).
  */
 export function candidatesC3(inputs: CandidateInputs): Candidate[] {
   const out: Candidate[] = []
@@ -487,46 +569,23 @@ export function candidatesC3(inputs: CandidateInputs): Candidate[] {
         `knows:${secretId}`,
         claimSide(first.claim),
         claimSide(learning.claim),
-        { held: stale(first.claim, learning.claim) }
+        {
+          held: stale(first.claim, learning.claim),
+          // A learning line in a flashback scene is earlier in story time (a memory, design §2.4).
+          hidden: inputs.scene(learning.claim.nodeId).flashback
+        }
       )
     )
   }
   return out
 }
 
-/** A record's birth year as of an age claim: its latest narration-now `born` claim with one year, else a Pinned "Born:" line. */
-interface Birth {
-  year: number
-  calendar: string
-  side: FindingSide
-  claim: CandidateClaim | null
-}
-
-function birthOf(
-  inputs: CandidateInputs,
-  births: readonly Placed[],
-  age: Placed,
-  pinnedBorn: (recordId: string) => Birth | null
-): Birth | null {
-  const claim = [...births]
-    .reverse()
-    .find((entry) => entry.order <= age.order && yearIn(entry.claim.value) !== null)
-  if (claim !== undefined) {
-    return {
-      year: yearIn(claim.claim.value) ?? 0,
-      calendar: yearCalendar(claim.claim.value),
-      side: claimSide(claim.claim),
-      claim: claim.claim
-    }
-  }
-  return pinnedBorn(age.claim.recordId)
-}
-
 /**
- * C4 `birth` (P4-D6): a narration-now stated age at scene A, the record's birth year as of A (a
- * `born` claim with one year, else a canon Pinned "Born:" line), and A's own year, typed for A or
- * quoted (verified) in A, never carried, in the same calendar; a candidate when the age is more
- * than a year off. A a verified flashback → hidden.
+ * C4 `birth` (P4-D6): a narration-now stated age at scene A, the record's birth year as of A
+ * (`birthSource`, as the sheet's `birthYear` reads it: a narration-now `born` claim with one year,
+ * stale ones included so the pair is held, else a canon Pinned "Born:" line), and A's own year,
+ * typed for A or quoted (verified) in A, never carried, in the same calendar; a candidate when the
+ * age is more than a year off. A a verified flashback → hidden.
  */
 export function candidatesC4Birth(inputs: CandidateInputs): Candidate[] {
   const out: Candidate[] = []
@@ -537,36 +596,13 @@ export function candidatesC4Birth(inputs: CandidateInputs): Candidate[] {
   )
   if (ages.length === 0) return out
   const births = groupBy(
-    placedClaims(
-      inputs.claims,
-      inputs.reading,
-      (claim) => claim.slot === 'born' && raisesAlone(claim)
-    ),
-    (entry) => entry.claim.recordId
+    inputs.claims.filter((claim) => claim.slot === 'born'),
+    (claim) => claim.recordId
   )
-  const pinned = new Map<string, Birth | null>()
-  const pinnedBorn = (recordId: string): Birth | null => {
-    if (pinned.has(recordId)) return pinned.get(recordId) ?? null
-    let found: Birth | null = null
-    for (const note of inputs.notes) {
-      if (note.ownerKind !== 'record' || note.ownerId !== recordId || note.page !== 'pinned')
-        continue
-      const line = bornLine(note.text)
-      if (line === null) continue
-      const sentences = noteSentences(note)
-      const at = sentences.find((sentence) => bornLine(sentence.text) !== null) ?? sentences[0]
-      if (at === undefined) continue
-      found = {
-        year: line.year,
-        calendar: yearCalendar(line.value),
-        side: noteSide(at, String(line.year), null),
-        claim: null
-      }
-      break
-    }
-    pinned.set(recordId, found)
-    return found
-  }
+  const pinned = groupBy(
+    inputs.notes.filter((note) => note.ownerKind === 'record' && note.page === 'pinned'),
+    (note) => note.ownerId
+  )
   for (const age of ages) {
     const stated = ageYears(age.claim.value) ?? 0
     const typed = inputs.typed.get(age.claim.nodeId)?.year ?? null
@@ -580,11 +616,27 @@ export function candidatesC4Birth(inputs: CandidateInputs): Candidate[] {
       }
     }
     if (year === null) continue
-    const birth = birthOf(inputs, births.get(age.claim.recordId) ?? [], age, pinnedBorn)
-    if (birth?.calendar !== year.calendar) continue
+    const notes = pinned.get(age.claim.recordId) ?? []
+    const birth = birthSource(
+      births.get(age.claim.recordId) ?? [],
+      notes.map((note) => note.text),
+      inputs.reading,
+      age.claim.nodeId,
+      raisesAlone
+    )
+    if (birth === null || yearCalendar(birth.value) !== year.calendar) continue
     if (Math.abs(stated - (year.value - birth.year)) <= 1) continue
+    let side: FindingSide | null = null
+    if (birth.claim !== null) side = claimSide(birth.claim)
+    else {
+      const note = birth.pinnedAt === null ? undefined : notes[birth.pinnedAt]
+      const sentences = note === undefined ? [] : noteSentences(note)
+      const at = sentences.find((sentence) => bornLine(sentence.text) !== null) ?? sentences[0]
+      if (at !== undefined) side = noteSide(at, String(birth.year), null)
+    }
+    if (side === null) continue
     out.push(
-      candidate('C4', 'birth', age.claim.recordId, 'age', claimSide(age.claim), birth.side, {
+      candidate('C4', 'birth', age.claim.recordId, 'age', claimSide(age.claim), side, {
         extra: { year: { value: year.value, source: year.source, nodeId: age.claim.nodeId } },
         held: stale(age.claim, ...(birth.claim === null ? [] : [birth.claim])),
         hidden: inputs.scene(age.claim.nodeId).flashback
@@ -634,7 +686,9 @@ export function candidatesC4Falls(inputs: CandidateInputs): Candidate[] {
 /**
  * C5 (P4-D7): a thread's counted `resolves` step and a counted `advances` step in a later scene
  * (one scene with both reads as resolved, `stepRank`, so the same scene never pairs), with no
- * `opens` step between them (a thread re-opened is not flagged).
+ * `opens` step between them, the advance's own scene up to its paragraph included (a thread
+ * re-opened is not flagged). The advance in a verified flashback scene → hidden (earlier in story
+ * time).
  */
 export function candidatesC5(inputs: CandidateInputs): Candidate[] {
   const out: Candidate[] = []
@@ -652,9 +706,15 @@ export function candidatesC5(inputs: CandidateInputs): Candidate[] {
       const resolveAt = earlier.map((entry) => parseStep(entry.claim.how)).lastIndexOf('resolves')
       const resolve = resolveAt === -1 ? undefined : earlier[resolveAt]
       if (resolve === undefined) continue
-      const reopened = earlier
-        .slice(resolveAt + 1)
-        .some((entry) => parseStep(entry.claim.how) === 'opens')
+      // Re-opened in a later scene than the resolve, up to the advance (its own scene included).
+      const reopened = sorted.some(
+        (entry) =>
+          entry !== step &&
+          parseStep(entry.claim.how) === 'opens' &&
+          entry.order > resolve.order &&
+          (entry.order < step.order ||
+            (entry.order === step.order && entry.claim.para <= step.claim.para))
+      )
       if (reopened) continue
       out.push(
         candidate(
@@ -665,7 +725,8 @@ export function candidatesC5(inputs: CandidateInputs): Candidate[] {
           claimSide(resolve.claim),
           claimSide(step.claim),
           {
-            held: stale(resolve.claim, step.claim)
+            held: stale(resolve.claim, step.claim),
+            hidden: inputs.scene(step.claim.nodeId).flashback
           }
         )
       )
@@ -675,41 +736,86 @@ export function candidatesC5(inputs: CandidateInputs): Candidate[] {
 }
 
 /**
- * C6 (P4-D8): per record, each claim in a fixed slot or kinship (any voice and mode: the note is
- * the canon side) against the canon note sentences that pair with it (`pairsWith`) and whose value
+ * C6 (P4-D8): per record, the claims in a fixed slot or kinship (any voice and mode: the note is
+ * the canon side) grouped by value as C1 groups them (one finding per value the book gives, not one
+ * per scene that repeats it), each group's representative (its earliest narration-now claim, else
+ * its earliest) against the canon note sentences that pair with it (`pairsWith`) and whose value
  * code read (`noteValue`; for kinship, `noteKinValue` with the object named) differs; a lasting or
- * transient slot only against dated note lines naming the claim's own scene. At most two note
- * sentences per claim, its own sheet's first, then in page order.
+ * transient slot only against dated note lines naming the claim's own scene (grouped per scene). At
+ * most two note sentences per claim, its own sheet's first, then in page order. Kinship with no
+ * object on the roster is never compared. The notes are indexed once (`noteIndex`).
  */
 export function candidatesC6(inputs: CandidateInputs): Candidate[] {
   const out: Candidate[] = []
   if (inputs.notes.length === 0) return out
-  const sentences = inputs.notes.flatMap(noteSentences)
+  const records = new Map<string, NoteRecord>()
   const noteRecord = (recordId: string): NoteRecord | null => {
+    const known = records.get(recordId)
+    if (known !== undefined) return known
     const record = inputs.records.get(recordId)
-    return record === undefined ? null : { id: record.id, names: record.names }
+    if (record === undefined) return null
+    const made = { id: record.id, names: record.names }
+    records.set(recordId, made)
+    return made
   }
+  const compares = (claim: CandidateClaim): boolean => {
+    const group = slotGroup(claim.slot)
+    if (group !== 'fixed' && group !== 'lasting' && group !== 'transient') return false
+    if (!inputs.records.has(claim.recordId)) return false
+    return (
+      claim.slot !== 'kinship' || (claim.objectId !== null && inputs.records.has(claim.objectId))
+    )
+  }
+  const subjects = new Map<string, NoteRecord>()
+  for (const claim of inputs.claims) {
+    if (!compares(claim)) continue
+    const record = noteRecord(claim.recordId)
+    if (record !== null) subjects.set(record.id, record)
+  }
+  if (subjects.size === 0) return out
+  const naming = noteIndex(inputs.notes, [...subjects.values()])
   const pairing = new Map<string, NoteSentence[]>()
+  /** The sentences that pair with a record's slot, its own sheet's first; for a lasting or transient slot, dated lines only. */
   const sentencesFor = (record: NoteRecord, slot: Slot): NoteSentence[] => {
     const key = `${record.id}|${slot}`
     const known = pairing.get(key)
     if (known !== undefined) return known
-    const own = (sentence: NoteSentence): boolean =>
-      sentence.note.ownerKind === 'record' && sentence.note.ownerId === record.id
-    const found = sentences.filter((sentence) => pairsWith(sentence, record, slot))
-    const ordered = [...found.filter(own), ...found.filter((sentence) => !own(sentence))]
+    const dated = slotGroup(slot) !== 'fixed'
+    const found = naming(record).filter(
+      (sentence) => holdsSlot(sentence, slot) && (!dated || labelLine(sentence.text)?.scene != null)
+    )
+    const ordered = [
+      ...found.filter((sentence) => onOwnPage(sentence, record)),
+      ...found.filter((sentence) => !onOwnPage(sentence, record))
+    ]
     pairing.set(key, ordered)
     return ordered
   }
-  for (const claim of inputs.claims) {
+  // Only claims some note sentence could pair with are grouped (most slots have no note at all).
+  const compared = placedClaims(inputs.claims, inputs.reading, (claim) => {
+    const record = compares(claim) ? subjects.get(claim.recordId) : undefined
+    return record !== undefined && sentencesFor(record, claim.slot).length > 0
+  })
+  const reps = [
+    ...groupBy(
+      compared,
+      (entry) =>
+        `${entry.claim.recordId}|${fixedSlot(entry.claim)}|${
+          slotGroup(entry.claim.slot) === 'fixed' ? '' : entry.claim.nodeId
+        }`
+    ).values()
+  ].flatMap((run) =>
+    valueGroups(run)
+      .map(representative)
+      .filter((rep): rep is Placed => rep !== undefined)
+  )
+  for (const { claim } of reps) {
     const group = slotGroup(claim.slot)
-    if (group !== 'fixed' && group !== 'lasting' && group !== 'transient') continue
-    if (!inputs.reading.order.has(claim.nodeId)) continue
-    const record = noteRecord(claim.recordId)
-    if (record === null) continue
+    const record = subjects.get(claim.recordId)
+    if (record === undefined) continue
     const object =
       claim.slot === 'kinship' && claim.objectId !== null ? noteRecord(claim.objectId) : null
-    if (claim.slot === 'kinship' && object === null) continue
+    if (claim.slot === 'kinship' && (object === null || kinOf(claim.value) === null)) continue
     const read: { sentence: NoteSentence; value: string; dated: string | null }[] = []
     for (const sentence of sentencesFor(record, claim.slot)) {
       if (read.length >= C6_SENTENCES_PER_CLAIM) break
@@ -725,8 +831,7 @@ export function candidatesC6(inputs: CandidateInputs): Candidate[] {
       read.push({ sentence, value: value.value, dated })
     }
     for (const note of read) {
-      const own = object === null ? claim.value : (kinOf(claim.value) ?? '')
-      if (own === '' || detailsAgree(own, note.value)) continue
+      if (valuesAgree(claim.slot, claim.value, note.value)) continue
       out.push(
         candidate(
           'C6',
@@ -742,9 +847,6 @@ export function candidatesC6(inputs: CandidateInputs): Candidate[] {
   }
   return out
 }
-
-/** A kinship value's kin word ("son of the late steward" → "son"; "the Captain's sister" → "sister"). */
-const kinOf = (value: string): string | null => kinWords(value)[0]?.word ?? null
 
 /** The content words of a value (four letters or more), the record's own names left out. */
 function contentWords(value: string, names: readonly NoteName[]): Set<string> {
