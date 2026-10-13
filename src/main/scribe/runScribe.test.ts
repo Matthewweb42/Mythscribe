@@ -224,7 +224,8 @@ describe('runScribe (F-16.25): the one answer call', () => {
         title: 'Scene 1',
         open: { kind: 'scene', id: book.one, para: 2 },
         quote: 'Orrin overheard Tomas from the yard',
-        checked: 'quote'
+        checked: 'quote',
+        doc: null
       }
     ])
     expect(result.scribe).toMatchObject({ turn: 'answer', notFound: false, widened: null })
@@ -642,6 +643,10 @@ describe('runScribe: the quote check, the scope and the one retry (P3 slice 3)',
       10
     )
     expect(result.costUsd).toBeGreaterThan(ledger[0]?.costUsd ?? 0)
+    // P3-D23: the check's share is reported apart, so the chat can list it (slice 5).
+    expect(result.scribe.checkUsd).toBeCloseTo(ledger[1]?.costUsd ?? -1, 10)
+    expect(result.scribe.checkUsd).toBeGreaterThan(0)
+    expect(result.scribe.citations.every((c) => c.doc === null)).toBe(true)
     // The answer's own model names the turn.
     expect(result.model).toBe('gpt-5.4')
   })

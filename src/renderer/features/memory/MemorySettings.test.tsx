@@ -63,6 +63,7 @@ beforeEach(() => {
   saved = []
   main = installFakeMain({
     'memory:health': () => HEALTH,
+    'scribe:searchMisses': () => ({ count: 0, recent: [] }),
     'cloudCap:get': () => CAP,
     'cloudCap:set': (input) => ({ ...CAP, capUsd: (input as { capUsd: number }).capUsd }),
     'aiSettings:set': (input) => {
@@ -92,6 +93,8 @@ describe('MemorySettings (F-16.16, F-16.19)', () => {
       'deepseek-v4-flash: 97 % of quotes found, 92 % of checks passed'
     )
     expect(health).toHaveTextContent('tiny-local: not judged yet (3 readings, 9 facts)')
+    // F-16.25: Details holds Ms Scribe's search misses.
+    expect(await screen.findByTestId('search-misses-count')).toHaveTextContent('Search misses: 0')
     // Not on Cloud: no cap.
     expect(screen.queryByTestId('cloud-cap')).toBeNull()
     expect(main.sent('cloudCap:get')).toEqual([])

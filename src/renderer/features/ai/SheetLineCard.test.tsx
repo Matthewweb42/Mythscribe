@@ -60,7 +60,8 @@ const turn = (
   agent: role === 'assistant' ? { access: 'write', steps: [], changes: [CHANGE] } : null,
   edit: null,
   card: null,
-  scribe: null
+  scribe: null,
+  costParts: null
 })
 
 const STORED: Conversation = {

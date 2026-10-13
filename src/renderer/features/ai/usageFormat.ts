@@ -1,5 +1,6 @@
 import { AiFeatureId, type AiUsage, type UsageTotals } from '@shared/ai'
 import { AI_DATA_SHARING } from '@shared/aiSettings'
+import type { CostPart } from '@shared/chat'
 import { currentAssistantName } from '@renderer/features/shell/viewStore'
 import { nameAssistant } from '@shared/assistantName'
 
@@ -79,3 +80,10 @@ export const describeRequest = (
       : ` · ${formatCount(request.usage.inputTokens)} in · ${formatCount(request.usage.outputTokens)} out`
   return `${request.model} · ${formatRequestCost(request.costUsd)}${tokens}${request.cached ? ' · cached' : ''}`
 }
+
+/**
+ * The parts of a turn's cost as its title lists them (P3-D23): "navigator 0.18¢ · answer 1.25¢ ·
+ * check 0.02¢".
+ */
+export const describeCostParts = (parts: readonly CostPart[]): string =>
+  parts.map((each) => `${each.part} ${formatCents(each.costUsd)}`).join(' · ')

@@ -159,6 +159,17 @@ export const EVIDENCE_LABEL_WORDS: Readonly<Record<EvidenceLabel, string>> = {
   todo: 'your to-do'
 }
 
+/**
+ * A label's words in the chat's Sources list (F-16.25, plan P3 §5): the prompt's words, but an Idea
+ * says it is not in the book ("your idea, not in the book", design §2.6) and a filed line names its
+ * document ("filed from Harbour notes").
+ */
+export function sourceLabelWords(label: EvidenceLabel, doc: string | null = null): string {
+  if (label === 'idea') return 'your idea, not in the book'
+  if (label === 'filed') return `${EVIDENCE_LABEL_WORDS.filed} ${doc ?? 'a document'}`
+  return EVIDENCE_LABEL_WORDS[label]
+}
+
 /** Whether an item with this label may be cited: everything but a map (P3-D9). */
 export const citableLabel = (label: EvidenceLabel): boolean => label !== 'map'
 
@@ -355,7 +366,9 @@ export const ScribeCitation = z.object({
   open: CitationTarget.nullable(),
   quote: z.string(),
   /** `quote`: the quote is in the item as sent; `cite`: the checker also found the sentence supported. */
-  checked: z.enum(['quote', 'cite'])
+  checked: z.enum(['quote', 'cite']),
+  /** The document a filed Pinned line came from ("filed from <doc>"); null for every other item. */
+  doc: z.string().nullable().catch(null).default(null)
 })
 export type ScribeCitation = z.infer<typeof ScribeCitation>
 
@@ -378,7 +391,12 @@ export const ScribeTurn = z.object({
   notFound: z.boolean(),
   retried: z.boolean(),
   widened: z.object({ ref: z.string() }).nullable(),
-  misses: z.number().int().nonnegative()
+  misses: z.number().int().nonnegative(),
+  /**
+   * What the quote checks (`cite.v1`) cost of the turn's total (P3-D23): the chat's cost line lists
+   * the navigator's, the answer's and the check's parts. Read leniently: older turns read 0.
+   */
+  checkUsd: z.number().nonnegative().catch(0).default(0)
 })
 export type ScribeTurn = z.infer<typeof ScribeTurn>
 

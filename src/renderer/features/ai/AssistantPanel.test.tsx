@@ -16,6 +16,7 @@ import { resetAccountStore, useAccountStore } from '@renderer/features/account/a
 import { resetEditPassStore, useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { QUERY_NOT_FOUND, type QueryTurn } from '@shared/query'
+import type { InstantCard as InstantCardData, ScribeTurn } from '@shared/scribe'
 import { LAYOUT_LIMITS, defaultLayout } from '@shared/layout'
 import {
   resetActiveEditorStore,
@@ -219,6 +220,7 @@ const message = (
   edit: null,
   card: null,
   scribe: null,
+  costParts: null,
   ...over
 })
 
@@ -1343,5 +1345,139 @@ describe('AssistantPanel edit requests (F-5.26)', () => {
     )
     await userEvent.click(within(log()).getByTestId('edit-request-review'))
     await expect.poll(() => useEditPassStore.getState().review?.currentId).toBe('ec-1')
+  })
+})
+
+describe('AssistantPanel Ms Scribe turns (F-16.24, F-16.25; story memory v2)', () => {
+  const SCRIBE: ScribeTurn = {
+    turn: 'answer',
+    citations: [
+      {
+        n: 1,
+        evidence: 'E2',
+        label: 'idea',
+        ref: 'Mara’s Ideas ¶0',
+        title: 'Mara',
+        open: null,
+        quote: 'Maybe Mara has a twin',
+        checked: 'cite',
+        doc: null
+      }
+    ],
+    notChecked: [],
+    unsupported: [],
+    scope: 'Searched every scene up to 1.1 for twin',
+    notFound: false,
+    retried: false,
+    widened: null,
+    misses: 0,
+    checkUsd: 0.0001
+  }
+  const CARD: InstantCardData = {
+    kind: 'slot',
+    recordId: 'r-mara',
+    name: 'Mara',
+    slot: 'eyes',
+    label: 'Eyes',
+    value: 'grey',
+    claimId: 'c-eyes',
+    quote: "Mara's eyes were grey",
+    ref: '1.1',
+    nodeId: 'sc-1',
+    para: 1,
+    since: null,
+    lastStated: false,
+    asOfRef: '1.1',
+    readFirst: null
+  }
+  const QUERY: QueryTurn = {
+    found: true,
+    uncited: false,
+    citations: [{ nodeId: 'sc-1', title: 'Chapter 1 › Scene 1', scene: 1, quote: 'The rain.' }],
+    sheets: [],
+    also: []
+  }
+
+  it('draws an instant card, a cited v2 answer with its cost parts, and a v1 answer as before', async () => {
+    await mountOpen({
+      active: 'c-1',
+      items: [
+        conversation({
+          messages: [
+            message('m-1', 'user', "Mara's eyes?"),
+            message('m-2', 'assistant', 'Mara · Eyes: grey (1.1)', {
+              action: 'query',
+              mode: 'query',
+              card: CARD
+            }),
+            message('m-3', 'user', 'What was my idea about her twin?'),
+            message('m-4', 'assistant', 'Your idea: a twin in the north.[1]', {
+              mode: 'plan',
+              model: 'deepseek/deepseek-v4-pro',
+              costUsd: 0.0145,
+              usage: { inputTokens: 9_000, outputTokens: 300 },
+              proposalId: 'p-4',
+              scribe: SCRIBE,
+              agent: {
+                access: 'read',
+                steps: [
+                  { tool: 'search', label: "Searching 'twin'…" },
+                  { tool: 'ideas', label: 'Reading your ideas for Mara…' },
+                  { tool: 'check', label: 'Checking the quotes…' }
+                ],
+                changes: []
+              },
+              costParts: [
+                { part: 'navigator', costUsd: 0.0018 },
+                { part: 'answer', costUsd: 0.0126 },
+                { part: 'check', costUsd: 0.0001 }
+              ]
+            }),
+            message('m-5', 'user', 'Where does she cross?'),
+            message('m-6', 'assistant', 'At dawn [1].', {
+              mode: 'query',
+              model: 'gpt-fake',
+              costUsd: 0.0009,
+              proposalId: 'p-6',
+              query: QUERY
+            })
+          ]
+        })
+      ]
+    })
+    const [, card, , scribe, , v1] = turns()
+    // The instant card: drawn from the turn's card, with its mark and no cost line (no request).
+    expect(within(card!).getByTestId('instant-card')).toHaveTextContent(
+      'Eyes: grey (1.1)'
+    )
+    expect(within(card!).getByTestId('instant-card-label')).toHaveTextContent(
+      'Read by AI from your book · quote checked · no AI call now'
+    )
+    expect(within(card!).queryByTestId('chat-turn-cost')).toBeNull()
+    // Ms Scribe's answer: its chip and source, never QueryAnswer's markers.
+    const answer = within(scribe!)
+    expect(answer.getByTestId('scribe-cite')).toHaveTextContent('[1]')
+    expect(answer.getByTestId('scribe-source-label')).toHaveTextContent(
+      'your idea, not in the book'
+    )
+    expect(answer.getByTestId('scribe-scope')).toHaveTextContent('Searched every scene up to 1.1')
+    expect(answer.queryByTestId('query-cite')).toBeNull()
+    expect(answer.getByTestId('request-cost-parts')).toHaveAttribute(
+      'title',
+      'navigator 0.2¢ · answer 1.3¢ · check 0.01¢'
+    )
+    expect(answer.getByTestId('chat-turn-cost')).toHaveTextContent('$0.0145')
+    // The navigator's lookups and the answer's quote check, folded once the answer is in.
+    expect(answer.getByText('Looked up 2 things · checked the quotes')).toBeInTheDocument()
+    expect(answer.getAllByTestId('agent-step').map((step) => step.textContent)).toEqual([
+      "Searching 'twin'…",
+      'Reading your ideas for Mara…',
+      'Checking the quotes…'
+    ])
+    // A v1 turn keeps QueryAnswer, with no parts title.
+    const old = within(v1!)
+    expect(old.getByTestId('query-cite')).toHaveTextContent('[1]')
+    expect(old.queryByTestId('scribe-answer')).toBeNull()
+    expect(old.queryByTestId('request-cost-parts')).toBeNull()
   })
 })

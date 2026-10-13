@@ -271,7 +271,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       agent: null,
       edit: null,
       card: null,
-      scribe: null
+      scribe: null,
+      costParts: null
     },
     {
       id: 'm-2',
@@ -289,7 +290,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       agent: null,
       edit: null,
       card: null,
-      scribe: null
+      scribe: null,
+      costParts: null
     }
   ],
   created: '2026-09-15T10:00:00.000Z',
@@ -599,7 +601,8 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
       agent: null,
       edit: null,
       card: null,
-      scribe: null
+      scribe: null,
+      costParts: null
     }))
     setIpcClient(
       deferredClient({
@@ -1600,10 +1603,17 @@ describe('useAssistantStore sheet lines (F-16.26, decision 3 as the author chang
       notFound: false,
       retried: false,
       widened: null,
-      misses: 0
+      misses: 0,
+      checkUsd: 0.0001
     }
     request.resolve(ok(request.input.requestId, 'Orrin heard it.', { scribe }))
     await asking
     expect(active().messages.at(-1)?.scribe).toEqual(scribe)
+    // P3-D23: the turn's cost lists its answer and its quote check apart.
+    const turn = active().messages.at(-1)
+    expect(turn?.costUsd).toBeCloseTo(0.0003, 10)
+    expect(turn?.costParts?.map((part) => part.part)).toEqual(['answer', 'check'])
+    expect(turn?.costParts?.[0]?.costUsd).toBeCloseTo(0.0002, 10)
+    expect(turn?.costParts?.[1]?.costUsd).toBeCloseTo(0.0001, 10)
   })
 })

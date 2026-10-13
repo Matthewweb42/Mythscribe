@@ -29,6 +29,7 @@ function context(patch: Partial<SuggestionContext> = {}): SuggestionContext {
     synopsisEmpty: false,
     notesEmpty: false,
     characters: [],
+    memory: 'v1',
     ...patch
   }
 }
@@ -125,5 +126,50 @@ describe('assistantSuggestions', () => {
       0
     )
     for (const text of list) expect(text.length).toBeLessThanOrEqual(SUGGESTION_MAX_CHARS)
+  })
+
+  it('F-16.24, F-16.25: in story memory v2 offers Ms Scribe’s lookups, gated by her switch and navigator', () => {
+    const v2: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
+      'chat',
+      'agent',
+      'navigator',
+      'whatNext',
+      'proofread',
+      'critique',
+      'continuity'
+    ])
+    const list = (seed: number): string[] =>
+      [0, 1, 2, 3].flatMap((step) =>
+        assistantSuggestions(
+          context({ memory: 'v2', allowed: v2, characters: ['Mara'] }),
+          seed + step
+        )
+      )
+    expect(list(0)).toEqual(
+      expect.arrayContaining([
+        "Mara's eyes?",
+        'When does Mara first appear?',
+        'What does Mara know so far?',
+        'What were my ideas for Mara?',
+        // A question about the book is Ms Scribe's in v2, with no `query` toggle.
+        'What does Mara look like?',
+        // The navigator routes the scene actions.
+        'Proofread this scene'
+      ])
+    )
+    // The consistency check waits for P4 in v2; v1 never sees v2's lookups.
+    expect(list(0)).not.toContain('Check this scene for continuity slips')
+    expect(
+      assistantSuggestions(context({ allowed: EVERYTHING, characters: ['Mara'] }), 0)
+    ).not.toContain("Mara's eyes?")
+    // Without the navigator, nothing it would route; without Ms Scribe, none of her lookups.
+    const noNavigator = new Set<AiFeatureId>([...v2].filter((id) => id !== 'navigator'))
+    expect(
+      assistantSuggestions(context({ memory: 'v2', allowed: noNavigator }), 0)
+    ).not.toContain('Proofread this scene')
+    const noAgent = new Set<AiFeatureId>([...v2].filter((id) => id !== 'agent'))
+    expect(
+      assistantSuggestions(context({ memory: 'v2', allowed: noAgent, characters: ['Mara'] }), 0)
+    ).not.toContain("Mara's eyes?")
   })
 })

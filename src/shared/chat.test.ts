@@ -49,7 +49,8 @@ describe('chat model (F-5.4)', () => {
               agent: null,
               edit: null,
               card: null,
-              scribe: null
+              scribe: null,
+              costParts: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',
@@ -108,7 +109,8 @@ describe('chat model (F-5.4)', () => {
       agent: null,
       edit: null,
       card: null,
-      scribe: null
+      scribe: null,
+      costParts: null
     })
     const conversation = (id: string, messages: Record<string, unknown>[]): unknown => ({
       id,
@@ -227,10 +229,29 @@ describe('chat model (F-5.4)', () => {
     const v1 = parseStoredConversations(conversation([base])).items[0]?.messages[0]
     expect(v1?.card).toBeNull()
     expect(v1?.scribe).toBeNull()
-    const kept = parseStoredConversations(conversation([{ ...base, card, scribe }])).items[0]
-      ?.messages[0]
+    expect(v1?.costParts).toBeNull()
+    const parts = [
+      { part: 'navigator', costUsd: 0.0002 },
+      { part: 'answer', costUsd: 0.012 },
+      { part: 'check', costUsd: 0.0001 }
+    ]
+    const kept = parseStoredConversations(
+      conversation([{ ...base, card, scribe, costParts: parts }])
+    ).items[0]?.messages[0]
     expect(kept?.card).toEqual(card)
-    expect(kept?.scribe).toEqual(scribe)
+    // A turn stored before slice 5 reads its check cost as 0 and its citations with no document.
+    expect(kept?.scribe).toEqual({
+      ...scribe,
+      checkUsd: 0,
+      citations: scribe.citations.map((citation) => ({ ...citation, doc: null }))
+    })
+    expect(kept?.costParts).toEqual(parts)
+    // Cost parts this build cannot read leave the turn and its total as they are.
+    const unread = parseStoredConversations(
+      conversation([{ ...base, costParts: [{ part: 'retired', costUsd: 1 }] }])
+    ).items[0]?.messages[0]
+    expect(unread?.content).toBe('Eyes: grey (1.1)')
+    expect(unread?.costParts).toBeNull()
     // A card kind or a citation this build does not know: the turn keeps its text.
     const odd = parseStoredConversations(
       conversation([
@@ -314,7 +335,8 @@ describe('chat model (F-5.4)', () => {
               agent: null,
               edit: null,
               card: null,
-              scribe: null
+              scribe: null,
+              costParts: null
               // no `usage` field at all, as a turn written before F-5.9 has.
             }
           ],
@@ -353,7 +375,8 @@ describe('chat model (F-5.4)', () => {
               agent: null,
               edit: null,
               card: null,
-              scribe: null
+              scribe: null,
+              costParts: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',

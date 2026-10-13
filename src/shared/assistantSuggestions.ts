@@ -5,6 +5,7 @@ import { CONTINUITY_TEXT_MIN } from './continuity'
 import { CRITIQUE_TEXT_MIN } from './critique'
 import { PROOFREAD_TEXT_MIN } from './proofread'
 import { SCENE_SUGGEST_TEXT_MIN } from './sceneSuggest'
+import type { StoryMemoryVersion } from './storyMemory'
 import { WHAT_NEXT_TEXT_MIN } from './whatNext'
 
 /**
@@ -34,8 +35,13 @@ export interface SuggestionContext {
   synopsisEmpty: boolean
   /** The open scene's notes are known to be empty. */
   notesEmpty: boolean
-  /** The story bible's character names. */
+  /** The story bible's character names (in story memory v2, the character records'). */
   characters: readonly string[]
+  /**
+   * The project's story memory (F-16.25): in v2 Ms Scribe answers questions (`agent`) and her
+   * navigator routes (`navigator`, where v1 has `route`), and v2's own lookups are offered.
+   */
+  memory: StoryMemoryVersion
 }
 
 type Need = 'selection' | 'synopsisEmpty' | 'notesEmpty' | 'character' | 'noCharacter'
@@ -49,6 +55,8 @@ interface Entry {
   /** The scene text it needs, in characters; null when it needs no open scene. */
   minLength: number | null
   need?: Need
+  /** Offered only in this story memory (F-16.25's lookups are v2's); both when left out. */
+  memory?: StoryMemoryVersion
 }
 
 /** Every mode: a prompt that changes nothing in the book. */
@@ -153,8 +161,57 @@ const ENTRIES: readonly Entry[] = [
     modes: EDITS,
     minLength: 1,
     need: 'character'
+  },
+  // F-16.24, F-16.25 (story memory v2): a lookup the memory may answer at once (an instant card),
+  // and questions Ms Scribe answers from the book with checked quotes or from the author's Ideas.
+  {
+    text: "{name}'s eyes?",
+    feature: 'agent',
+    modes: ANY,
+    minLength: null,
+    need: 'character',
+    memory: 'v2'
+  },
+  {
+    text: 'When does {name} first appear?',
+    feature: 'agent',
+    modes: ANY,
+    minLength: null,
+    need: 'character',
+    memory: 'v2'
+  },
+  {
+    text: 'What does {name} know so far?',
+    feature: 'agent',
+    modes: ANY,
+    minLength: null,
+    need: 'character',
+    memory: 'v2'
+  },
+  {
+    text: 'What were my ideas for {name}?',
+    feature: 'agent',
+    modes: ANY,
+    minLength: null,
+    need: 'character',
+    memory: 'v2'
   }
 ]
+
+/**
+ * The feature that gates `feature`'s suggestion in story memory `memory` (P3-D17): in v2 a
+ * question about the book is Ms Scribe's (`agent`), the router's work is the navigator's, and the
+ * consistency check waits for P4 (none). v1 keeps each feature as it is.
+ */
+function gateOf(
+  feature: AiFeatureId,
+  memory: StoryMemoryVersion
+): { feature: AiFeatureId; router: AiFeatureId | null } | null {
+  const router: AiFeatureId = memory === 'v2' ? 'navigator' : 'route'
+  if (memory === 'v2' && feature === 'continuity') return null
+  if (memory === 'v2' && feature === 'query') return { feature: 'agent', router: null }
+  return { feature, router: ROUTED.has(feature) ? router : null }
+}
 
 function needMet(need: Need | undefined, context: SuggestionContext): boolean {
   switch (need) {
@@ -177,10 +234,11 @@ function needMet(need: Need | undefined, context: SuggestionContext): boolean {
  * The suggestions that fit `context`, in display order. `seed` picks the character a `{name}`
  * suggestion names (the panel passes its rotation count, so the name changes as it rotates); a
  * suggestion the name pushes past `SUGGESTION_MAX_CHARS` is left out. Nothing without the
- * assistant chat allowed; a suggestion answered by another feature also needs the router.
+ * assistant chat allowed; a suggestion answered by another feature also needs the router (in story
+ * memory v2 the navigator, `gateOf`).
  */
 export function assistantSuggestions(context: SuggestionContext, seed: number): string[] {
-  const { allowed, mode, sceneLength, characters } = context
+  const { allowed, mode, sceneLength, characters, memory } = context
   if (!allowed.has('chat')) return []
   const name =
     characters.length === 0
@@ -189,8 +247,10 @@ export function assistantSuggestions(context: SuggestionContext, seed: number): 
   const out: string[] = []
   for (const entry of ENTRIES) {
     if (!entry.modes.includes(mode)) continue
-    if (!allowed.has(entry.feature)) continue
-    if (ROUTED.has(entry.feature) && !allowed.has('route')) continue
+    if (entry.memory !== undefined && entry.memory !== memory) continue
+    const gate = gateOf(entry.feature, memory)
+    if (gate === null || !allowed.has(gate.feature)) continue
+    if (gate.router !== null && !allowed.has(gate.router)) continue
     if (entry.minLength !== null && (sceneLength === null || sceneLength < entry.minLength)) {
       continue
     }

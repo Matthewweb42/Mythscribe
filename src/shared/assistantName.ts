@@ -37,12 +37,24 @@ export function normalizeAssistantName(raw: string): string {
  * A UI string with the assistant named: the shared labels and help texts say "AI assistant",
  * "the assistant", or "Assistant" (the cost registry and main's messages read them as they
  * are), and the renderer shows them through this. "the assistant panel" keeps its article
- * ("the Ms Scribe panel"); otherwise the name stands alone ("Ms Scribe looks things up").
+ * ("the Ms Scribe panel"); otherwise the name stands alone ("Ms Scribe looks things up"). A label
+ * that already says the default name ("Ms Scribe’s search", F-16.25) takes the author's too.
  */
 export function nameAssistant(text: string, name: string): string {
-  return text
-    .replace(/\bAI assistant\b/g, name)
-    .replace(/\b([Tt]he) assistant (panel|column|window)\b/g, `$1 ${name} $2`)
-    .replace(/\b[Tt]he assistant\b/g, name)
-    .replace(/\bAssistant\b/g, name)
+  // One pass, so a name that itself says "Assistant" or "Ms Scribe" is never named again.
+  return text.replace(ASSISTANT_WORDS, (_words, article?: string, place?: string) =>
+    article === undefined || place === undefined ? name : `${article} ${name} ${place}`
+  )
 }
+
+/** What `nameAssistant` replaces, in the order it tries them at each place in the text. */
+const ASSISTANT_WORDS = new RegExp(
+  [
+    String.raw`\bAI assistant\b`,
+    String.raw`\b([Tt]he) assistant (panel|column|window)\b`,
+    String.raw`\b[Tt]he assistant\b`,
+    String.raw`\bAssistant\b`,
+    String.raw`\b${DEFAULT_ASSISTANT_NAME}\b`
+  ].join('|'),
+  'g'
+)

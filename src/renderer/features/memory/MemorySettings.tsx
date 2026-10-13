@@ -12,6 +12,7 @@ import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { agreementLine, capFromText, percentOf } from './memoryView'
+import { SearchMisses } from './SearchMisses'
 
 const FIELD = 'w-20 rounded-md border border-line bg-bg px-2 py-1 text-sm'
 
@@ -21,7 +22,8 @@ const FIELD = 'w-20 rounded-md border border-line bg-bg px-2 py-1 text-sm'
  * without a save the open scene is read (2–5, committed on blur or Enter, P2a-D5); on MythScribe
  * Cloud, the monthly cap for background reading in quarter-dollar steps and what it spent this
  * month; the spot checks' "proof agreement: 48 of 50 checked"; how often readings were cut off at
- * their cap; and each model's health (quotes found, checks passed, paused or not).
+ * their cap; and each model's health (quotes found, checks passed, paused or not). Under
+ * **Details**, Ms Scribe's search misses (F-16.25, `SearchMisses`).
  */
 export function MemorySettings(): React.JSX.Element | null {
   const settings = useAiSettingsStore((s) => s.settings)
@@ -88,6 +90,11 @@ export function MemorySettings(): React.JSX.Element | null {
           )}
         </div>
       )}
+      {/* F-16.25 (P3-D15): what Ms Scribe's search missed, the trigger for F-16.35. */}
+      <details data-testid="memory-details" className="text-xs text-fg-muted">
+        <summary className="cursor-pointer">Details</summary>
+        <SearchMisses />
+      </details>
     </section>
   )
 }

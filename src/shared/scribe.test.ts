@@ -11,8 +11,10 @@ import {
   NAVIGATION_EVIDENCE_MAX,
   SCRIBE_REASONING,
   SCRIBE_TURNS,
+  ScribeTurn,
   scribeMaxTokens,
-  sameEvidence
+  sameEvidence,
+  sourceLabelWords
 } from './scribe'
 
 describe('turn kinds (P3-D11)', () => {
@@ -82,6 +84,45 @@ describe('evidence labels (design §2.2, §2.6)', () => {
     expect(evidenceTag('map', '7.4')).toBe('map, not citable, 7.4')
     expect(evidenceTag('idea', '')).toBe('your idea')
     expect(EVIDENCE_LABEL_WORDS.computed).toBe('computed from your book')
+  })
+
+  it('words a source in the chat as the prompt does, but an Idea is never in the book (slice 5)', () => {
+    expect(sourceLabelWords('idea')).toBe('your idea, not in the book')
+    expect(sourceLabelWords('filed', 'Harbour notes')).toBe('filed from Harbour notes')
+    expect(sourceLabelWords('filed')).toBe('filed from a document')
+    for (const label of EVIDENCE_LABELS.filter((each) => each !== 'idea' && each !== 'filed')) {
+      expect(sourceLabelWords(label, 'ignored')).toBe(EVIDENCE_LABEL_WORDS[label])
+    }
+  })
+})
+
+describe('a stored Ms Scribe turn (P3-D19, P3-D23)', () => {
+  it('reads a turn from before the check cost as 0, and a citation from before the document as none', () => {
+    const turn = ScribeTurn.parse({
+      turn: 'answer',
+      citations: [
+        {
+          n: 1,
+          evidence: 'E0',
+          label: 'happened',
+          ref: '1.1 ¶0',
+          title: 'Scene 1',
+          open: null,
+          quote: 'Orrin overheard Tomas',
+          checked: 'cite'
+        }
+      ],
+      notChecked: [],
+      unsupported: [],
+      scope: null,
+      notFound: false,
+      retried: false,
+      widened: null,
+      misses: 0
+    })
+    expect(turn.checkUsd).toBe(0)
+    expect(turn.citations[0]?.doc).toBeNull()
+    expect(ScribeTurn.parse({ ...turn, checkUsd: -1 }).checkUsd).toBe(0)
   })
 })
 

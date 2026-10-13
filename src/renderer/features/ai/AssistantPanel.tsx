@@ -33,6 +33,8 @@ import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStor
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
+import { useStoryMemory } from '@renderer/features/project/storyMemory'
+import { useRecordStore } from '@renderer/features/records/recordStore'
 import { UploadReviewPanel } from '@renderer/features/library/ContextUploadDialog'
 import { OrganisePanel } from '@renderer/features/organise/OrganisePanel'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
@@ -60,7 +62,9 @@ import {
 import { ContinuityLink, ContinuityView } from './ContinuityPanel'
 import { EditRequestCard } from './EditRequestCard'
 import { useContinuityStore } from './continuityStore'
+import { InstantCard } from './InstantCard'
 import { RequestCost } from './RequestCost'
+import { ScribeAnswer } from './ScribeAnswer'
 
 const ICON_BUTTON =
   'rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
@@ -431,7 +435,10 @@ function MessageLog(): React.JSX.Element {
  * One turn. The author's on the right; the assistant's on the left with its cost line once it
  * has one (`model · cost · cached`, F-4.7's note). An empty assistant turn with a request in
  * flight reads as thinking; an Author turn shows the notice, its text went to the editor; a
- * Query turn (F-5.7) shows its citations through `QueryAnswer`; a What should come next? turn
+ * Query turn (F-5.7) shows its citations through `QueryAnswer` (story memory v1); in v2 an instant
+ * card draws through `InstantCard` (F-16.24) and Ms Scribe's answer through `ScribeAnswer`
+ * (F-16.25), its cost line listing the navigator's, the answer's and the check's parts in its
+ * title (P3-D23); a What should come next? turn
  * (F-5.17) shows its directions as cards through `Directions`. An agent turn (F-5.22) shows
  * its lookups live while it waits (`liveSteps`), then its answer, the lookups folded away, and
  * its edits (`AgentChanges`). An edit request (F-5.26) shows its choices or its pass
@@ -491,6 +498,12 @@ function Turn({
         </div>
       ) : !mine && message.directions !== null ? (
         <Directions directions={message.directions} busy={busy} />
+      ) : !mine && message.card !== null ? (
+        // F-16.24 (story memory v2): a question the memory answered with no AI call.
+        <InstantCard card={message.card} />
+      ) : !mine && message.scribe !== null ? (
+        // F-16.25 (story memory v2): Ms Scribe's checked citations; v1 turns keep QueryAnswer.
+        <ScribeAnswer answer={message.content} scribe={message.scribe} />
       ) : !mine && message.mode === 'agent' ? (
         <p className="m-0 text-xs text-fg-muted italic">{AGENT_NOTICE}</p>
       ) : !mine && message.query !== null ? (
@@ -520,6 +533,7 @@ function Turn({
               usage: message.usage,
               cached
             }}
+            parts={message.costParts}
           />
         </p>
       ) : null}
@@ -876,7 +890,8 @@ const SUGGESTION_FADE_MS = 300
 /**
  * One suggestion above the message box (2026-10-06): small, muted, centred, picked locally by
  * `assistantSuggestions` from what the dial, the open scene, its selection, its synopsis and
- * notes, and the story bible's characters offer. It changes every `SUGGESTION_ROTATE_MS` with a
+ * notes, and the story bible's characters offer (in story memory v2 the character records, with
+ * Ms Scribe's lookups such as "Mara's eyes?"). It changes every `SUGGESTION_ROTATE_MS` with a
  * fade, and holds still while the message box has text or the pointer or focus is on it. With
  * reduced motion it never fades or runs on a timer: it changes each time the message box gains
  * focus. It changes with the conversation too. A click fills the message box; nothing is sent.
@@ -909,12 +924,16 @@ function SuggestionLine({
   const notes = useNotesStore((s) => (nodeId === null ? undefined : s.docs[nodeId]?.content))
   const notesEmpty = useMemo(() => notes != null && docToText(notes).trim() === '', [notes])
   const entities = useEntityStore((s) => s.byId)
+  // F-16.25: story memory v2 names its character records, offers Ms Scribe's lookups, and routes
+  // through the navigator.
+  const memory = useStoryMemory()
+  const records = useRecordStore((s) => s.byId)
   const characters = useMemo(
     () =>
-      Object.values(entities)
-        .filter((entity) => entity.kind === 'character')
-        .map((entity) => entity.name),
-    [entities]
+      (memory === 'v2' ? Object.values(records) : Object.values(entities))
+        .filter((each) => each.kind === 'character')
+        .map((each) => each.name),
+    [memory, records, entities]
   )
   const allowed = useMemo(
     () =>
@@ -944,7 +963,8 @@ function SuggestionLine({
       selection,
       synopsisEmpty: synopsis?.trim() === '',
       notesEmpty,
-      characters
+      characters,
+      memory
     },
     step
   )

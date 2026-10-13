@@ -547,7 +547,17 @@ function citationOf(
   const at = placeOf(item, quote)
   const ref = at === null ? item.ref : `${item.ref} ¶${at}`
   const open = item.open === null ? null : at === null ? item.open : { ...item.open, para: at }
-  return { n, evidence, label: item.label, ref, title: item.title, open, quote, checked }
+  return {
+    n,
+    evidence,
+    label: item.label,
+    ref,
+    title: item.title,
+    open,
+    quote,
+    checked,
+    doc: item.label === 'filed' ? item.doc : null
+  }
 }
 
 /** A sent item as the checks read it. */
@@ -706,6 +716,8 @@ export async function runScribe(
   }
   const usage: CompletionUsage = { inputTokens: 0, outputTokens: 0 }
   let costUsd = 0
+  /** The quote checks' share of `costUsd` (P3-D23: the chat lists it apart). */
+  let checkUsd = 0
   let cached = true
   let model = ''
   let dropped = resolved.dropped
@@ -956,6 +968,7 @@ export async function runScribe(
       })
       current = null
       add(reply)
+      checkUsd += reply.costUsd
       text = reply.text
     } catch (error) {
       current = null
@@ -1004,6 +1017,7 @@ export async function runScribe(
     retried: false,
     widened: null,
     misses: 0,
+    checkUsd,
     ...over
   })
   /**

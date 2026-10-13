@@ -44,3 +44,32 @@ describe('RequestCost (F-5.9, AI-BILLING-SPEC C4)', () => {
     expect(screen.getByTestId('cost').textContent).not.toMatch(/ in · | out/)
   })
 })
+
+describe('RequestCost parts (P3-D23)', () => {
+  it('shows the sum of a turn’s requests, its title listing each part', () => {
+    on('ownKey')
+    render(
+      <span data-testid="cost">
+        <RequestCost
+          request={{ ...REQUEST, costUsd: 0.0145 }}
+          parts={[
+            { part: 'navigator', costUsd: 0.0018 },
+            { part: 'answer', costUsd: 0.0125 },
+            { part: 'check', costUsd: 0.0002 }
+          ]}
+        />
+      </span>
+    )
+    expect(screen.getByTestId('cost')).toHaveTextContent('deepseek/deepseek-v4-flash · $0.0145')
+    expect(screen.getByTestId('request-cost-parts')).toHaveAttribute(
+      'title',
+      'navigator 0.2¢ · answer 1.3¢ · check 0.02¢'
+    )
+  })
+
+  it('has no parts title for a single request', () => {
+    on('ownKey')
+    render(<RequestCost request={REQUEST} parts={[{ part: 'answer', costUsd: 0.0012 }]} />)
+    expect(screen.queryByTestId('request-cost-parts')).toBeNull()
+  })
+})

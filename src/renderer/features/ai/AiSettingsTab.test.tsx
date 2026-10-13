@@ -15,11 +15,13 @@ import {
   USAGE_HISTORY_PAGE
 } from '@shared/ai'
 import { defaultAiRouting, type AiModelChoice, type AiRouting } from '@shared/aiRouting'
-import { defaultAiSettings } from '@shared/aiSettings'
+import { AI_DATA_SHARING, dataSharingSends, defaultAiSettings } from '@shared/aiSettings'
+import { DEFAULT_ASSISTANT_NAME, nameAssistant } from '@shared/assistantName'
 import { defaultAuthorRules } from '@shared/authorRules'
 import type { Channel, Input, Output, ProvenanceReport, VoiceProfile } from '@shared/ipc/contract'
 import { computeStylometrics } from '@shared/stylometry'
 import { IDLE_INDEX_QUEUE } from '@shared/jobs'
+import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { setIpcClient, IpcRequestError, type IpcClient } from '@renderer/lib/ipc'
 import { AiSettingsTab } from './AiSettingsTab'
@@ -184,6 +186,29 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
             return EMPTY_LEDGER as Output<C>
           case 'jobs:indexAll':
             return { ok: true, queued: 2, status: IDLE_INDEX_QUEUE } as Output<C>
+          // Story memory v2's Settings › AI › Story memory (F-16.19, F-16.25).
+          case 'memory:health':
+            return {
+              models: [],
+              spot: { fast: { checked: 0, agreed: 0 }, strong: { checked: 0, agreed: 0 } },
+              cutRate: 0
+            } as Output<C>
+          case 'scribe:searchMisses':
+            return {
+              count: 1,
+              recent: [
+                {
+                  id: 'miss-1',
+                  created: '2026-10-13T10:00:00.000Z',
+                  question: 'What happens in chapter 1?',
+                  terms: ['happens'],
+                  nodeId: 'sc-1',
+                  para: 0,
+                  quote: 'Mara watched the quay',
+                  promptVersion: 'agent.v9'
+                }
+              ]
+            } as Output<C>
           default:
             throw new Error(`unexpected ${channel}`)
         }
@@ -918,5 +943,65 @@ describe('AiSettingsTab usage history (AI-BILLING-SPEC E7, C4)', () => {
       expect(screen.getByTestId('ai-usage-total')).toHaveTextContent('$0.75 · 12 requests')
     )
     expect(screen.getByTestId('ai-usage')).not.toHaveTextContent(/token/i)
+  })
+})
+
+describe('AiSettingsTab story memory v2: Ms Scribe (F-16.25, P3 slice 5)', () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      current: {
+        id: 'p-2',
+        name: 'Memory',
+        format: 'novel',
+        path: '/books/Memory.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 37,
+        storyMemory: 'v2'
+      }
+    })
+  })
+  afterEach(() => {
+    useProjectStore.setState({ current: null })
+  })
+
+  it('the Ms Scribe switch writes the chat, its search and its quote check together', async () => {
+    await open()
+    // Use AI on: the switch is locked while it is off.
+    act(() => useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } }))
+    const scribe = screen.getByRole('checkbox', { name: DEFAULT_ASSISTANT_NAME })
+    expect(scribe).toBeChecked()
+    await userEvent.click(scribe)
+    await waitFor(() => expect(lastCall('aiSettings:set')).toBeDefined())
+    expect((lastCall('aiSettings:set')?.input as { features: object }).features).toMatchObject({
+      agent: false,
+      navigator: false,
+      cite: false
+    })
+    await userEvent.click(scribe)
+    await waitFor(() =>
+      expect((lastCall('aiSettings:set')?.input as { features: object }).features).toMatchObject({
+        agent: true,
+        navigator: true,
+        cite: true
+      })
+    )
+  })
+
+  it('lists what the search and the quote check send, and the search misses under Details', async () => {
+    await open()
+    const table = screen.getByRole('table', { name: 'What each AI feature sends' })
+    for (const id of ['navigator', 'cite'] as const) {
+      const label = nameAssistant(AI_DATA_SHARING[id].label, DEFAULT_ASSISTANT_NAME)
+      const row = within(table).getByRole('row', { name: new RegExp(`^${label} `) })
+      expect(row).toHaveTextContent(nameAssistant(dataSharingSends(id, 'v2'), DEFAULT_ASSISTANT_NAME))
+    }
+    const details = await screen.findByTestId('memory-details')
+    expect(within(details).getByText('Details')).toBeInTheDocument()
+    expect(await within(details).findByTestId('search-misses-count')).toHaveTextContent(
+      'Search misses: 1'
+    )
+    expect(within(details).getByTestId('search-miss')).toHaveTextContent('Mara watched the quay')
   })
 })

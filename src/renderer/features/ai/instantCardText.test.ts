@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import type { InstantCard } from '@shared/scribe'
-import { INSTANT_CARD_LABEL, instantCardLine, instantCardText } from './instantCardText'
+import {
+  AGE_CARD_LABEL,
+  AUTHOR_CARD_LABEL,
+  INSTANT_CARD_LABEL,
+  instantCardLabel,
+  instantCardLine,
+  instantCardText
+} from './instantCardText'
 
-/** F-16.24 (plan P3 §4.3): an instant card as the chat turn's plain text until slice 5 draws it. */
+/**
+ * F-16.24 (plan P3 §4.3, §5): an instant card as the chat turn's text, which later requests carry
+ * as history: positive lines only, never the scoped absence line or "checked up to".
+ */
 
 const names: Record<string, string> = { r1: 'Orrin', r2: 'Tomas' }
 const nameOf = (id: string | null): string => (id === null ? '' : (names[id] ?? 'someone'))
@@ -118,11 +128,51 @@ describe('instantCardText (F-16.24)', () => {
       readFirst: null
     }
     expect(instantCardLine(who, nameOf)).toBe(
-      'Who knows the sold map: Orrin: overheard from Tomas (1.1) (checked up to 1.2) · readers since 1.1'
+      'Who knows the sold map: Orrin: overheard from Tomas (1.1) · readers since 1.1'
     )
     expect(instantCardLine({ ...who, holders: [], readersSince: null }, nameOf)).toBe(
-      'Who knows the sold map: No scene shows anyone learning this (checked up to 1.2)'
+      'Who knows the sold map'
     )
+    // The turn's text goes out as history: no absence and no "checked up to" (P2b rule 9).
+    for (const card of [who, { ...who, holders: [] }]) {
+      const text = instantCardText(card, nameOf)
+      expect(text).not.toMatch(/no scene shows|no other scene|checked up to|not checked/i)
+    }
+  })
+
+  it('marks a computed age and the author’s own mark apart from an AI-read value', () => {
+    expect(instantCardLabel(slot)).toBe(INSTANT_CARD_LABEL)
+    expect(
+      instantCardLabel({
+        kind: 'age',
+        recordId: 'm',
+        name: 'Mara',
+        age: 19,
+        born: { year: 1795, source: 'text', claimId: 'b', nodeId: 'n1', ref: '1.1' },
+        year: { kind: 'typed', value: 1814, from: { nodeId: 'n2', ref: '1.2' } },
+        asOfRef: '1.2',
+        readFirst: null
+      })
+    ).toBe(AGE_CARD_LABEL)
+    expect(
+      instantCardLabel({
+        kind: 'knows',
+        secretId: 's',
+        secretLabel: 'the sold map',
+        knowerId: 'r2',
+        knowerName: 'Tomas',
+        how: 'knewBefore',
+        source: 'author',
+        fromName: null,
+        claimId: null,
+        quote: null,
+        ref: null,
+        nodeId: null,
+        para: null,
+        asOfRef: '1.2',
+        readFirst: null
+      })
+    ).toBe(AUTHOR_CARD_LABEL)
   })
 
   it('marks the turn’s text as read by AI from the book, with no AI call now (design §2.6)', () => {

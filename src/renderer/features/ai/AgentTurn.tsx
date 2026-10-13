@@ -43,8 +43,23 @@ const tail = (text: string): string => {
 }
 
 /**
+ * What a finished turn's folded steps say (F-5.22): "Looked up 3 things"; with Ms Scribe's quote
+ * check (F-16.25, `cite.v1`, the `check` step) "Looked up 3 things · checked the quotes", or
+ * "Checked the quotes" alone.
+ */
+function stepsSummary(steps: readonly AgentStep[]): string {
+  const lookups = steps.filter((step) => step.tool !== 'check').length
+  const checked = steps.length > lookups
+  if (lookups === 0) return checked ? 'Checked the quotes' : ''
+  const looked = `Looked up ${lookups === 1 ? 'one thing' : `${lookups} things`}`
+  return checked ? `${looked} · checked the quotes` : looked
+}
+
+/**
  * The lookups of an agent turn (F-5.22): live while the answer is on its way, each line as it
- * starts ("Searching “ledger”…"); folded under "Looked up N things" once the answer is in.
+ * starts ("Searching “ledger”…"; in story memory v2 the navigator's tools, "Reading 7.4…",
+ * "Checking who knows the sold map…", then the answer's, "Checking the quotes…"); folded under
+ * `stepsSummary` once the answer is in.
  */
 export function AgentSteps({
   steps,
@@ -70,9 +85,7 @@ export function AgentSteps({
   if (live) return list
   return (
     <details className="text-xs text-fg-subtle">
-      <summary className="cursor-pointer select-none">
-        Looked up {steps.length === 1 ? 'one thing' : `${steps.length} things`}
-      </summary>
+      <summary className="cursor-pointer select-none">{stepsSummary(steps)}</summary>
       {list}
     </details>
   )

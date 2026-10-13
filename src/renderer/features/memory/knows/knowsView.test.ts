@@ -15,7 +15,8 @@ import {
   revealLines,
   scopeText,
   secretSummary,
-  tensionText
+  tensionText,
+  whoKnowsCardAbsence
 } from './knowsView'
 
 /**
@@ -43,6 +44,13 @@ describe('who knows what, in words (F-16.22)', () => {
     )
     expect(absenceLine('Mara', null)).toBe('No scene shows Mara learning this (not checked yet)')
     expect(scopeText(null)).toBe('(not checked yet)')
+    // The chat's instant who-knows card (F-16.24): beside its holders, then with none.
+    expect(whoKnowsCardAbsence(2, { nodeId: 'sc-9', ref: '14.2' })).toBe(
+      'No other scene shows anyone learning it (checked up to 14.2)'
+    )
+    expect(whoKnowsCardAbsence(0, { nodeId: 'sc-2', ref: '1.2' })).toBe(
+      'No scene shows anyone learning this (checked up to 1.2)'
+    )
   })
 
   it('reads a holder’s line with how, from whom and where; the author’s mark as hers', () => {

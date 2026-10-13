@@ -96,6 +96,17 @@ export const CHAT_REF_NOTES_CHAR_BUDGET = 2_000
 /** How many `#name` references one message may pull in. */
 export const CHAT_MAX_REFS = 4
 
+/**
+ * The requests one chat turn's cost is made of (P3-D23, story memory v2): Ms Scribe's navigator,
+ * the answer, and the quote check. The turn's cost line shows the sum, its title the parts.
+ */
+export const COST_PARTS = ['navigator', 'answer', 'check'] as const
+export const CostPart = z.object({
+  part: z.enum(COST_PARTS),
+  costUsd: z.number().nonnegative()
+})
+export type CostPart = z.infer<typeof CostPart>
+
 export const ChatRole = z.enum(['user', 'assistant'])
 export type ChatRole = z.infer<typeof ChatRole>
 
@@ -150,7 +161,13 @@ export const ChatMessage = z.object({
    * F-16.25 (story memory v2): what Ms Scribe's answer kept (its citations, the unchecked and
    * unsupported sentences, its scope); null for every other turn and for rows written before it.
    */
-  scribe: ScribeTurn.nullable().catch(null).default(null)
+  scribe: ScribeTurn.nullable().catch(null).default(null),
+  /**
+   * P3-D23 (story memory v2): the parts of a turn's cost when it took more than one request (the
+   * navigator, the answer, the quote check), in that order; null for every other turn and for rows
+   * written before it.
+   */
+  costParts: z.array(CostPart).max(COST_PARTS.length).nullable().catch(null).default(null)
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
 

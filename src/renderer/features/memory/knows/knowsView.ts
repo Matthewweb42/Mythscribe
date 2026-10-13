@@ -110,6 +110,16 @@ export function tensionText(
 export const noHoldersText = (checkedUpTo: SceneRefView | null): string =>
   `No scene shows anyone learning this ${scopeText(checkedUpTo)}`
 
+/**
+ * Under the holders of an instant "who knows" card in the chat (F-16.24, plan P3 §5), muted and
+ * scoped: "No other scene shows anyone learning it (checked up to 14.2)"; with no holder,
+ * `noHoldersText`. The chat's only absence words, made here like every other (P2b rule 9).
+ */
+export const whoKnowsCardAbsence = (holders: number, checkedUpTo: SceneRefView | null): string =>
+  holders === 0
+    ? noHoldersText(checkedUpTo)
+    : `No other scene shows anyone learning it ${scopeText(checkedUpTo)}`
+
 /** A secret no scene reveals as of the scene, scoped: "No scene reveals it yet (not checked yet)". */
 export const noRevealText = (checkedUpTo: SceneRefView | null): string =>
   `No scene reveals it yet ${scopeText(checkedUpTo)}`

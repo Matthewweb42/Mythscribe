@@ -666,6 +666,56 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
     expect(useAssistantStore.getState().pending).toEqual({})
   })
 
+  it('keeps a who-knows card’s scoped absence out of the turn’s text, so no later request carries it (P2b rule 9)', async () => {
+    const card: InstantCard = {
+      kind: 'whoKnows',
+      secretId: 's-map',
+      label: 'the sold map',
+      readersSince: { nodeId: 'sc-1', ref: '1.1' },
+      holders: [
+        {
+          knowerId: 'r-orrin',
+          secretId: 's-map',
+          how: 'overheard',
+          fromId: null,
+          source: 'claim',
+          line: 'counts',
+          claimId: 'k1',
+          nodeId: 'sc-1',
+          ref: '1.1',
+          para: 0,
+          voice: 'narration',
+          mode: 'now',
+          speakerId: null,
+          stale: false,
+          later: false
+        }
+      ],
+      checkedUpTo: { nodeId: 'sc-1', ref: '1.1' },
+      asOfRef: '1.1',
+      readFirst: null
+    }
+    navigate = {
+      ok: true,
+      kind: 'instant',
+      card,
+      usage: { inputTokens: 0, outputTokens: 0 },
+      costUsd: 0,
+      cached: false,
+      model: null,
+      requestId: 'r'
+    }
+    await useAssistantStore.getState().send('Who knows about the sold map?')
+    expect(turns()[1]?.card).toEqual(card)
+    expect(turns()[1]?.content).toContain('Who knows the sold map')
+    await useAssistantStore.getState().send('And the ledger?')
+    const history = sent('ai:navigate')[1]?.history ?? []
+    expect(history.map((turn) => turn.content)).toContain(turns()[1]?.content)
+    for (const turn of history) {
+      expect(turn.content).not.toMatch(/no (other )?scene shows|checked up to|not checked/i)
+    }
+  })
+
   it('hands an answer turn to Ms Scribe with the navigation; the steps and the cost are both calls’', async () => {
     const navigation = {
       turn: 'answer' as const,

@@ -95,6 +95,14 @@ import { caretToEnd, clickIntoEditor } from './support'
  * its row 1814 with Mara about 22; moving 1.3 before 1.2 with the Timeline open reorders its rows
  * and carries 1814 into the moved-down scene.
  *
+ * P3 slice 5 (F-16.24, F-16.25, F-16.26), the chat's UI in a new project: "Mara's eyes?",
+ * "Does Orrin know about the sold map?" and "Who knows about the sold map?" draw instant cards (the
+ * line with ⓘ and Not right, the mark, the muted scoped line under the holders) with no request; a
+ * "first" question's chip and source read "happened", quote and sentence checked, with the scope
+ * line and the cost title listing navigator, answer and check; an Ideas answer's source reads "your
+ * idea, not in the book"; a Self-Route turn reads chapter 1 and Settings › AI › Story memory ›
+ * Details counts one search miss. No request carries an absence or "checked up to".
+ *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
  * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
@@ -191,6 +199,12 @@ const IMPROVE_MESSAGE = 'Make this scene better.'
 const FIRST_QUESTION = 'When does Orrin first hear about the map?'
 /** The sentence that answers it, in scene 1.1's first paragraph. */
 const OVERHEARD = 'Orrin overheard Tomas'
+/** P3 slice 5: a question Ms Scribe answers from Mara's Ideas, labelled as the author's idea. */
+const IDEA_QUESTION = "What was my idea about Mara's twin?"
+/** The line on Mara's Ideas that answers it. */
+const TWIN_IDEA = 'Maybe Mara has a twin in the north.'
+/** P3 slice 5: a question the fake answers by asking for chapter 1 first (Self-Route). */
+const NEED_QUESTION = 'What happens in chapter 1?'
 
 /**
  * The fake navigator (F-16.25, `navigator.v1`), from the message in its first user turn and the
@@ -269,6 +283,27 @@ function scribeAnswer(messages: { content: string }[]): string {
     ).exec(last)?.[1]
     return JSON.stringify({
       answer: `In 1.1, ${OVERHEARD}; I searched every scene up to 1.2. [${id ?? 'E1'} "${OVERHEARD}"]`,
+      found: true,
+      edits: []
+    })
+  }
+  if (question === IDEA_QUESTION) {
+    // P3 slice 5: cites the Ideas line the search found, and says it is the author's idea.
+    const id = /^(E\d+) \[your idea[^\]]*\][^\n]*\n[^\n]*twin/mu.exec(last)?.[1]
+    return JSON.stringify({
+      answer: `Your idea, not in the book: Mara has a twin in the north. [${id ?? 'E1'} "Mara has a twin in the north"]`,
+      found: true,
+      edits: []
+    })
+  }
+  if (question === NEED_QUESTION) {
+    // P3 slice 5 (Self-Route): asks for chapter 1 first; with its scenes sent as W items, cites
+    // the eyes paragraph of 1.1, which the turn's search never returned (a search miss).
+    const sent = messages.map((message) => message.content).join('\n')
+    const widened = /^(W\d+) \[happened, 1\.1\b[^\]]*\]/mu.exec(sent)?.[1]
+    if (widened === undefined) return JSON.stringify({ need: 'chapter 1' })
+    return JSON.stringify({
+      answer: `In chapter 1, Mara's eyes were grey. [${widened} "Mara's eyes were grey"]`,
       found: true,
       edits: []
     })
@@ -2699,6 +2734,187 @@ test('story memory v2: the navigator routes and finds, instant cards answer (P3 
       body.messages.some((message) => message.content.includes('No scene shows'))
     )
   ).toBe(false)
+})
+
+test('story memory v2: Ms Scribe in the chat (P3 slice 5)', async () => {
+  // A new project (Use AI on, chat in Ask, the own key at the fake): Mara Vell ("Mara"), Orrin and
+  // Tomas; scene 1.1 has the map sold and overheard, then Mara's eyes; scene 1.2 follows; Mara's
+  // Ideas say she may have a twin. Both scenes are read once.
+  const first = await newV2Project('Chat Novel')
+  const ids: Record<string, string> = {}
+  for (const [name, aliases] of [
+    ['Mara Vell', [{ text: 'Mara' }]],
+    ['Orrin', []],
+    ['Tomas', []]
+  ] as const) {
+    const result = await invoke<{ record?: { id: string } }>('record:create', {
+      name,
+      categoryId: 'character',
+      aliases,
+      force: true
+    })
+    ids[name] = result.record?.id ?? ''
+  }
+  const paragraphs = (lines: string[]): object => ({
+    type: 'doc',
+    content: lines.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] }))
+  })
+  await invoke('record:savePage', {
+    id: ids['Mara Vell'],
+    page: 'ideas',
+    doc: paragraphs([TWIN_IDEA])
+  })
+  await invoke('document:save', {
+    id: first.id,
+    content: paragraphs([`Tomas sold the map. ${OVERHEARD}.`, "Mara's eyes were grey."])
+  })
+  const second = await invoke<TreeNode>('tree:create', {
+    parentId: first.parentId,
+    kind: 'document',
+    hierarchyLevel: 'scene',
+    title: 'The door'
+  })
+  await invoke('document:save', { id: second.id, content: paragraphs(['Orrin waited by the door.']) })
+  for (const [n, nodeId] of [first.id, second.id].entries()) {
+    expect(
+      await invoke('memory:readNow', { nodeId, requestId: `e2e-p3-chat-${n}` })
+    ).toMatchObject({ ok: true })
+  }
+  await reopenProject('Chat Novel')
+  await showSection('Manuscript')
+  const tree = page.getByRole('tree', { name: 'Document tree' })
+  await tree.getByRole('treeitem', { name: first.title }).first().click()
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await expect(editor).toContainText('eyes were grey')
+
+  const scribeButton = page.getByRole('button', { name: 'Ms Scribe', exact: true })
+  if ((await scribeButton.getAttribute('aria-pressed')) !== 'true') await scribeButton.click()
+  const assistant = page.getByTestId('assistant-panel')
+  await expect(assistant).toBeVisible()
+  await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
+  const messageBox = assistant.getByRole('textbox', { name: 'Message' })
+  const turns = assistant.locator('[data-testid="chat-turn"]')
+  const send = async (message: string): Promise<void> => {
+    await messageBox.fill(message)
+    await messageBox.press('Enter')
+  }
+  const opens =
+    (opening: string) =>
+    (body: (typeof providerBodies)[number]): boolean =>
+      body.messages[0]?.content.startsWith(opening) === true
+  const LABEL = 'Read by AI from your book · quote checked · no AI call now'
+
+  // An instant card: drawn with its line, ⓘ, Not right and the mark, and no request at all.
+  const quiet = providerBodies.length
+  await send("Mara's eyes?")
+  await expect(turns).toHaveCount(2)
+  const eyes = turns.nth(1).getByTestId('instant-card')
+  await expect(eyes).toContainText('Eyes: grey (1.1)')
+  await expect(eyes.getByTestId('instant-card-label')).toHaveText(LABEL)
+  await expect(
+    eyes.getByRole('button', { name: 'Where this comes from: Eyes: grey (1.1)' })
+  ).toBeVisible()
+  await expect(eyes.getByRole('button', { name: 'Not right' })).toBeVisible()
+  await expect(turns.nth(1).getByTestId('chat-turn-cost')).toHaveCount(0)
+
+  // Does A know X: only ever a yes, with how and from whom, and the quote.
+  await send('Does Orrin know about the sold map?')
+  await expect(turns).toHaveCount(4)
+  const knows = turns.nth(3).getByTestId('instant-card')
+  await expect(knows).toContainText('Yes: Orrin overheard it from Tomas (1.1)')
+  await expect(knows.getByTestId('instant-card-quote')).toHaveText(OVERHEARD)
+  await expect(knows.getByTestId('instant-card-label')).toHaveText(LABEL)
+
+  // Who knows X: the holders with ⓘ, readers since, then the one muted line scoped by what was read.
+  await send('Who knows about the sold map?')
+  await expect(turns).toHaveCount(6)
+  const who = turns.nth(5).getByTestId('instant-card')
+  await expect(who).toContainText('Who knows the sold map')
+  await expect(who.getByTestId('readers-since')).toHaveText('readers since 1.1')
+  await expect(who.getByTestId('claim-line')).toHaveCount(2)
+  await expect(who).toContainText('Orrin: overheard from Tomas (1.1)')
+  await expect(who.getByTestId('instant-card-absence')).toHaveText(
+    'No other scene shows anyone learning it (checked up to 1.1)'
+  )
+  // Three questions, three cards, not one request.
+  expect(providerBodies).toHaveLength(quiet)
+
+  // A cited answer (scene 1.2 open): its chip names the source as happened, the source reads
+  // "happened" and quote and sentence checked, the scope line says what was searched, and the cost
+  // line sums the navigator, the answer and the check, listing them in its title.
+  await tree.getByRole('treeitem', { name: 'The door' }).first().click()
+  await expect(editor).toContainText('Orrin waited by the door.')
+  await send(FIRST_QUESTION)
+  await expect(turns).toHaveCount(8)
+  const cited = turns.nth(7)
+  await expect(cited.getByTestId('scribe-answer')).toContainText(`In 1.1, ${OVERHEARD}`, {
+    timeout: 15_000
+  })
+  const chip = cited.getByTestId('scribe-cite')
+  await expect(chip).toHaveText('[1]')
+  await expect(chip).toHaveAccessibleName(/^Source 1: happened, 1\.1 ¶1$/)
+  const source = cited.getByTestId('scribe-source')
+  await expect(source.getByTestId('scribe-source-label')).toHaveText('happened')
+  await expect(source).toContainText('1.1 ¶1')
+  await expect(source.getByTestId('scribe-source-checked')).toHaveText(
+    'quote and sentence checked'
+  )
+  await expect(cited.getByTestId('scribe-scope')).toContainText('Searched ')
+  await expect(cited.getByTestId('scribe-scope')).toContainText('overheard')
+  await expect(cited.locator('summary')).toHaveText(/ · checked the quotes$/)
+  await expect(cited.getByTestId('request-cost-parts')).toHaveAttribute(
+    'title',
+    /^navigator \S+¢ · answer \S+¢ · check \S+¢$/
+  )
+
+  // An Ideas answer: its source reads "your idea, not in the book".
+  await send(IDEA_QUESTION)
+  await expect(turns).toHaveCount(10)
+  const idea = turns.nth(9)
+  await expect(idea.getByTestId('scribe-answer')).toContainText('Your idea, not in the book', {
+    timeout: 15_000
+  })
+  await expect(idea.getByTestId('scribe-cite')).toHaveAccessibleName(
+    /^Source 1: your idea, not in the book, /
+  )
+  await expect(idea.getByTestId('scribe-source-label')).toHaveText('your idea, not in the book')
+
+  // Self-Route: the answer asks for chapter 1, then cites its eyes paragraph, which the search never
+  // returned: the turn says it read the chapter, and the search miss is counted in Settings.
+  const needFrom = providerBodies.length
+  await send(NEED_QUESTION)
+  await expect(turns).toHaveCount(12)
+  const widened = turns.nth(11)
+  await expect(widened.getByTestId('scribe-answer')).toContainText("Mara's eyes were grey", {
+    timeout: 15_000
+  })
+  await expect(widened.getByTestId('scribe-widened')).toContainText('Read chapter 1')
+  expect(providerBodies.slice(needFrom).filter(opens(SCRIBE_SENTINEL))).toHaveLength(2)
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' })
+  await page.keyboard.press('Control+,')
+  await expect(settingsDialog).toBeVisible()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  const details = settingsDialog.getByTestId('memory-details')
+  await details.locator('summary').click()
+  await expect(details.getByTestId('search-misses-count')).toHaveText('Search misses: 1')
+  await expect(details.getByTestId('search-miss')).toContainText(NEED_QUESTION)
+  await expect(details.getByTestId('search-miss')).toContainText("Mara's eyes were grey")
+  // The Ms Scribe switch, and the navigator's and the check's data-sharing rows.
+  await expect(settingsDialog.getByRole('checkbox', { name: 'Ms Scribe', exact: true })).toBeChecked()
+  const table = settingsDialog.getByRole('table', { name: 'What each AI feature sends' })
+  await expect(table.getByRole('row', { name: /^Ms Scribe’s search / })).toBeVisible()
+  await expect(table.getByRole('row', { name: /^Ms Scribe’s quote check / })).toBeVisible()
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
+  // No request ever stated an absence or carried what was checked: the cards' scoped line stays in
+  // the renderer, and their text in the conversation's history holds positive lines only.
+  for (const words of ['No scene shows', 'No other scene shows', 'checked up to']) {
+    expect(
+      providerBodies.some((body) => body.messages.some((message) => message.content.includes(words))),
+      words
+    ).toBe(false)
+  }
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

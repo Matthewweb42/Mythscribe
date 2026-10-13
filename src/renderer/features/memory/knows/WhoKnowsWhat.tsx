@@ -124,8 +124,11 @@ function TouchedSecret({
   )
 }
 
-/** One holder: an AI line with ⓘ and *Not right*, or the author's own mark as plain words. */
-function HolderLine({
+/**
+ * One holder: an AI line with ⓘ and *Not right*, or the author's own mark as plain words. The chat's
+ * instant who-knows card (F-16.24) lists its holders with it too.
+ */
+export function HolderLine({
   cell,
   nameOf,
   paused

@@ -37,6 +37,13 @@ describe('assistant name (F-7.13)', () => {
     expect(nameAssistant(USE_AI_MEANING.on, 'Ms Scribe')).toBe(
       'AI features on. Ms Scribe works in the mode picked under the chat box.'
     )
+    // A label that says the default name already (F-16.25's data-sharing rows) takes the author's.
+    expect(nameAssistant('Ms Scribe’s quote check', 'Quill')).toBe('Quill’s quote check')
+    expect(nameAssistant('Ms Scribe’s search', 'Ms Scribe')).toBe('Ms Scribe’s search')
+    // One pass: a name that says "Assistant" is never named twice.
+    expect(nameAssistant('Assistant chat and Ms Scribe’s search', 'Quill Assistant')).toBe(
+      'Quill Assistant chat and Quill Assistant’s search'
+    )
     // "AI" in general stays.
     expect(nameAssistant('Use AI', 'Quill')).toBe('Use AI')
     expect(nameAssistant(USE_AI_MEANING.off, 'Quill')).toBe(USE_AI_MEANING.off)

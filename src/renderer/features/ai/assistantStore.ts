@@ -38,7 +38,8 @@ import {
   titleFor,
   type ChatMessage,
   type ChatMode,
-  type Conversation
+  type Conversation,
+  type CostPart
 } from '@shared/chat'
 import {
   choiceForPass,
@@ -54,7 +55,7 @@ import type {
   AiWhatNextResult,
   Input
 } from '@shared/ipc/contract'
-import type { Navigation } from '@shared/scribe'
+import type { Navigation, ScribeTurn } from '@shared/scribe'
 import type { QuerySceneRef } from '@shared/query'
 import { WHAT_NEXT_QUESTION, directionMessage, recapQuestion } from '@shared/quickActions'
 import { WHAT_NEXT_CHAR_BUDGET, directionsText, type WhatNextDirection } from '@shared/whatNext'
@@ -396,7 +397,8 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   agent: null,
   edit: null,
   card: null,
-  scribe: null
+  scribe: null,
+  costParts: null
 })
 
 /** Records one lookup of an agent turn on its way, under the request it belongs to. */
@@ -1229,6 +1231,25 @@ async function navigateTurn(
   }
 }
 
+/**
+ * P3-D23: the parts of a Ms Scribe answer turn's cost, in request order (the navigator, the answer,
+ * the quote check), those that cost anything; null for a v1 turn or one with a single part.
+ */
+export function costPartsOf(
+  prior: { costUsd: number } | null,
+  result: { costUsd: number; scribe: ScribeTurn | null }
+): CostPart[] | null {
+  if (result.scribe === null) return null
+  const check = result.scribe.checkUsd
+  const all: CostPart[] = [
+    { part: 'navigator', costUsd: prior?.costUsd ?? 0 },
+    { part: 'answer', costUsd: Math.max(0, result.costUsd - check) },
+    { part: 'check', costUsd: check }
+  ]
+  const parts = all.filter((each) => each.costUsd > 0)
+  return parts.length > 1 ? parts : null
+}
+
 /** What the navigator spent and looked up before the answer (P3-D23): summed onto the turn. */
 interface PriorSpend {
   steps: AgentStep[]
@@ -1489,6 +1510,7 @@ async function runAgentTurn(
       query: result.query,
       // F-16.25: a Ms Scribe turn (story memory v2) keeps its checked citations and marks.
       scribe: result.scribe,
+      costParts: costPartsOf(prior, result),
       agent: { access, steps: [...(prior?.steps ?? []), ...result.steps], changes }
     },
     result.cached
