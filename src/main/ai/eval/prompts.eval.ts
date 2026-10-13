@@ -20,7 +20,7 @@ import { renderCostRegistry } from './costRegistry'
 import { WHAT_NEXT_DIRECTIONS } from '@shared/whatNext'
 import { parseAgentReply } from '../agent'
 import { readScribeReply } from '../../scribe/runScribe'
-import { parseCitedAnswer } from '@shared/scribeAnswer'
+import { parseCitedAnswer, quoteHeld } from '@shared/scribeAnswer'
 import { parseBetaReaderAnswerV2 } from '../betaReader'
 import { parsePlanLinksV2Answer } from '../../memory/reading/planLinks'
 import { checkChatFidelity, postProcessChatText } from '../chat'
@@ -965,11 +965,11 @@ function scoreScribe(
   for (const sentence of parsed.sentences) {
     for (const citation of sentence.citations) {
       citations += 1
-      const text = scoring.sent[citation.evidence]
+      const quotable = scoring.sent[citation.evidence]
       if (
-        text === undefined ||
+        quotable === undefined ||
         scoring.maps.includes(citation.evidence) ||
-        !findQuote(text, citation.quote)
+        !quoteHeld(quotable, citation.quote)
       ) {
         bad += 1
       }

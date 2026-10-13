@@ -3,6 +3,8 @@ import { estimateTokens, priceFor } from '@shared/ai'
 import { AGENT_CUT_OFF_MESSAGE, AGENT_RETRY_MAX_TOKENS, type AgentStep } from '@shared/agent'
 import { defaultAiSettings } from '@shared/aiSettings'
 import { emptyCardFields } from '@shared/memory/claims'
+import { normName } from '@shared/memory/names'
+import type { StoryRecordSummary } from '@shared/memory/records'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
 import { directionMessage } from '@shared/quickActions'
 import { SCRIBE_REASONING_TOKENS, type Navigation } from '@shared/scribe'
@@ -13,22 +15,30 @@ import { resetInflight } from '../ai/inflight'
 import {
   AGENT_V9_EDIT_TOOLS,
   AGENT_V9_SENTINEL,
-  AGENT_V9_WIDENED_HEADING
+  AGENT_V9_WIDENED_HEADING,
+  buildAgentPromptV9
 } from '../ai/prompts/agent.v9'
+import { saveDocument } from '../document/documentStore'
 import type { CompletionRequest, CompletionResult, Provider } from '../ai/providers/types'
 import type { AiRequestDeps } from '../ai/request'
+import { loadAgentProject } from '../ai/agentTools'
 import type { UsageEntry } from '../ai/usageStore'
-import { cardAnchorOf } from '../memory/reading/claimFixture'
+import { cardAnchorOf, seedClaims } from '../memory/reading/claimFixture'
 import { upsertCard } from '../memory/reading/cardStore'
 import { savePage } from '../memory/recordStore'
 import { setAiSettings } from '../project/settingsStore'
 import { resetVoiceProfileCache } from '../voice/versionCache'
 import type { EvidenceItem } from './evidence'
 import {
+  CHANGE_READY,
   fitScribePrompt,
   PIN_NO_RECORD,
+  PIN_NOT_ASKED,
+  PIN_NOT_NAMED,
   PIN_SAID,
   PIN_TOPIC,
+  pinRecordOf,
+  PLAN_NO_PIN,
   ShownStream,
   readScribeReply,
   runScribe,
@@ -271,6 +281,54 @@ describe('runScribe (F-16.25): the one answer call', () => {
     expect(spans).toEqual(['He heard about the sale.'])
   })
 
+  it('never marks advice or a question back to the author as the main claim (P3-D13)', async () => {
+    replies(
+      { answer: 'You could open on the storm. Orrin waits at the yard.', found: true },
+      { answer: 'Do you mean the yard? It is unclear.', found: true }
+    )
+    const advice = await run({ message: 'How should the scene open?' })
+    const spans = advice.scribe.notChecked.map(([from, to]) => advice.answer.slice(from, to))
+    expect(spans).toEqual(['Orrin waits at the yard.'])
+    const asked = await run({ message: 'Where was it?' })
+    expect(asked.scribe.notChecked).toEqual([])
+  })
+
+  it('refuses a quote under three words, the fact line above a claim, and a paragraph number', async () => {
+    const [claimId] = seedClaims(
+      book.db,
+      book.one,
+      [{ recordId: book.mara, slot: 'eyes', value: 'grey', quote: 'her grey eyes', para: 0 }],
+      SCRIBE_NOW
+    )
+    replies({
+      answer:
+        'Mara has grey eyes. [E1 "Mara · eyes: grey"] ' +
+        'They are grey. [E1 "Mara"] ' +
+        'She watched the quay. [E1 "Mara watched the quay with her grey eyes"]',
+      found: true
+    })
+    const result = await run({
+      nodeId: book.three,
+      message: 'What colour are Mara’s eyes?',
+      navigation: {
+        turn: 'answer',
+        evidence: [{ kind: 'claim', claimId: claimId ?? '' }],
+        scope: null,
+        terms: [],
+        hits: []
+      }
+    })
+    // The app's own fact line is not the book, and one word proves nothing.
+    expect(lastUser(0)).toContain('E1 [happened, 1.1 ¶0] Scene 1\nMara · eyes: grey\n')
+    expect(result.scribe.citations.map((c) => [c.evidence, c.quote, c.ref])).toEqual([
+      ['E1', 'Mara watched the quay with her grey eyes', '1.1 ¶0']
+    ])
+    expect(result.answer).toBe('Mara has grey eyes. They are grey. She watched the quay.[1]')
+    const spans = result.scribe.notChecked.map(([from, to]) => result.answer.slice(from, to))
+    expect(spans).toEqual(['Mara has grey eyes.'])
+    expect(result.dropped).toBe(2)
+  })
+
   it('asks once more with the larger cap after a cut-off reply, and says so when cut twice', async () => {
     complete.mockResolvedValueOnce(said('{"answer":"Orrin ov', 'length'))
     replies({ answer: 'Orrin heard Tomas.', found: true })
@@ -376,7 +434,8 @@ describe('runScribe: Self-Route and search misses (P3-D15)', () => {
       {
         answer:
           'She waited at the harbour. [W1 "Mara waited at the harbour"] ' +
-          'She suspected it was gone. [W1 "Mara suspected the map was gone"]',
+          'She suspected it was gone. [W1 "Mara suspected the map was gone"] ' +
+          'It was gone. [W1 "¶1 Mara suspected the map"]',
         found: true
       }
     )
@@ -399,8 +458,9 @@ describe('runScribe: Self-Route and search misses (P3-D15)', () => {
     expect(widened).toContain('W1 [happened, 1.2 ¶0–1] Two\n¶0 Mara waited at the harbour')
     expect(result.scribe.widened).toEqual({ ref: '1.2' })
     expect(result.scribe.citations.map((c) => c.ref)).toEqual(['1.2 ¶0', '1.2 ¶1'])
-    // ¶0 was among the hits; ¶1 the search missed.
+    // ¶0 was among the hits; ¶1 the search missed. A quote with the `¶1` prefix is no quote.
     expect(result.scribe.misses).toBe(1)
+    expect(result.dropped).toBe(1)
     const misses = book.db.select().from(searchMiss).all()
     expect(misses.map((row) => [row.nodeId, row.para, row.quote])).toEqual([
       [book.two, 1, 'Mara suspected the map was gone']
@@ -425,6 +485,42 @@ describe('runScribe: Self-Route and search misses (P3-D15)', () => {
     expect(book.db.select().from(searchMiss).all()).toEqual([])
   })
 
+  it('makes no second call when the need names only the open scene', async () => {
+    replies({ need: '1.1' })
+    const result = await run({ message: 'What did Orrin hear?', requestId: 'r-open' })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(steps).toEqual([])
+    expect(result.scribe).toMatchObject({ notFound: true, widened: null })
+  })
+
+  it('reads a scene over the widen budget in part, around the turn’s hit, rather than skipping it', async () => {
+    const long = Array.from({ length: 120 }, (_, i) =>
+      `Line ${i}: Mara walked the harbour wall and counted the ships at anchor.`.repeat(4)
+    )
+    saveDocument(book.db, book.two, doc(...long))
+    replies(
+      { need: '1.2' },
+      { answer: 'She counted ships. [W1 "Line 60: Mara walked the harbour wall"]', found: true }
+    )
+    const result = await run({
+      nodeId: book.three,
+      message: 'What did Mara count?',
+      navigation: {
+        turn: 'answer',
+        evidence: [],
+        scope: null,
+        terms: ['count'],
+        hits: [{ nodeId: book.two, para: 60 }]
+      }
+    })
+    expect(complete).toHaveBeenCalledTimes(2)
+    const widened = lastUser(1)
+    expect(widened).toMatch(/W1 \[happened, 1\.2 ¶\d+–\d+\] Two\n/)
+    expect(widened).toContain('¶60 Line 60:')
+    expect(widened).not.toContain('¶0 Line 0:')
+    expect(result.scribe.citations.map((c) => c.ref)).toEqual(['1.2 ¶60'])
+  })
+
   it('a found:false answer says Not found with what it looked in', async () => {
     replies({ answer: 'The evidence does not say.', found: false })
     const result = await run({ message: 'What did Orrin eat?' })
@@ -436,6 +532,9 @@ describe('runScribe: Self-Route and search misses (P3-D15)', () => {
 describe('runScribe: edits and sheet lines (F-16.26, P3-D16)', () => {
   it('turns pins into sheet lines and says why one cannot be offered', async () => {
     savePage(book.db, book.mara, 'pinned', doc('Hates the sea'), SCRIBE_NOW)
+    const message =
+      'Add these to the sheets: Orrin keeps a knife, Tomas maybe has a twin, the Quay smells of ' +
+      'tar, Mara hates the sea, the Bell is cracked, the sold map went twice.'
     replies({
       answer: 'Done.',
       found: true,
@@ -450,11 +549,7 @@ describe('runScribe: edits and sheet lines (F-16.26, P3-D16)', () => {
       ]
     })
     const before = counts()
-    const result = await run({
-      access: 'write',
-      requestId: 'r-pin',
-      message: 'Add to Orrin’s sheet that he keeps a knife in his boot.'
-    })
+    const result = await run({ access: 'write', requestId: 'r-pin', message })
     expect(result.changes.map((change) => change.edit)).toEqual([
       {
         kind: 'sheetLine',
@@ -490,16 +585,123 @@ describe('runScribe: edits and sheet lines (F-16.26, P3-D16)', () => {
     expect(counts()).toEqual(before)
   })
 
-  it('drops every edit on a read run (Plan)', async () => {
+  it('offers a sheet line only when the message asks for one, on a record it names, by its whole name', async () => {
+    const pin = (name: string): Record<string, string> => ({
+      edit: 'pin',
+      name,
+      text: 'Limps on the left',
+      place: 'pinned'
+    })
+    // A plain question: a pin in the reply is never offered (decision 3: only an explicit ask).
+    replies({ answer: 'He heard the sale.', found: true, edits: [pin('Orrin')] })
+    const plain = await run({ access: 'write', message: 'What did Orrin hear?' })
+    expect(plain.changes).toEqual([])
+    expect(plain.answer).toBe(`He heard the sale.\n\n${PIN_NOT_ASKED}`)
+    // Asked for Orrin's sheet: a pin on Tomas is not offered.
+    replies({ answer: 'Done.', found: true, edits: [pin('Orrin'), pin('Tomas')] })
+    const other = await run({ access: 'write', message: 'Add to Orrin’s sheet that he limps.' })
+    expect(other.changes.map((change) => change.edit)).toEqual([
+      expect.objectContaining({ kind: 'sheetLine', recordId: book.orrin })
+    ])
+    expect(other.answer).toBe(`Done.\n\n${PIN_NOT_NAMED('Tomas')}`)
+    // A part of a name is no record's name: "Rin" is not Orrin, "Tom" not Tomas.
+    replies({ answer: 'Done.', found: true, edits: [pin('Rin'), pin('Tom')] })
+    const part = await run({ access: 'write', message: 'Add to the sheets that they limp.' })
+    expect(part.changes).toEqual([])
+    expect(part.answer).toBe(`Done.\n\n${PIN_NO_RECORD('Rin')} ${PIN_NO_RECORD('Tom')}`)
+  })
+
+  it('keeps an edit turn’s own words when it sets found false, and says it has a change when it has none', async () => {
+    const id = loadAgentProject(book.db, book.one, 'v2').refOf.get(book.one)
+    const insert = { edit: 'insert', id, after: '', brief: 'Orrin says nothing.', words: 80 }
+    replies(
+      { answer: 'I added a quiet beat.', found: false, edits: [insert] },
+      { answer: '', found: false, edits: [insert] }
+    )
+    const message = 'Add a beat where Orrin keeps quiet.'
+    const worded = await run({ access: 'write', message })
+    expect(worded.scribe.notFound).toBe(false)
+    expect(worded.answer).toBe('I added a quiet beat.')
+    expect(worded.scribe.notChecked).toEqual([])
+    expect(worded.changes).toHaveLength(1)
+    const bare = await run({ access: 'write', message })
+    expect(bare.answer).toBe(CHANGE_READY)
+  })
+
+  it('drops every edit on a read run (Plan) and says Plan writes nothing', async () => {
     replies({
-      answer: 'Ask or Auto mode can pin it.',
+      answer: "I would add that to Mara's sheet.",
       found: true,
       edits: [{ edit: 'pin', name: 'Mara', text: 'Hates the sea', place: 'pinned' }]
     })
     const result = await run({ message: 'Add to Mara’s sheet that she hates the sea.' })
     expect(result.changes).toEqual([])
     expect(result.dropped).toBe(1)
+    expect(result.answer).toBe(`I would add that to Mara's sheet.\n\n${PLAN_NO_PIN}`)
     expect(request(0).messages[0]?.content).not.toContain(AGENT_V9_EDIT_TOOLS)
+  })
+})
+
+describe('pinRecordOf (identity rules)', () => {
+  const record = (
+    id: string,
+    names: { text: string; isMain: boolean; caseRule?: 'auto' | 'exact' }[]
+  ): StoryRecordSummary => ({
+    id,
+    categoryId: 'character',
+    kind: 'character',
+    name: names.find((each) => each.isMain)?.text ?? '',
+    image: null,
+    origin: 'author',
+    aliases: names.map((each, i) => ({
+      id: `${id}-${i}`,
+      recordId: id,
+      text: each.text,
+      norm: normName(each.text),
+      isMain: each.isMain,
+      caseRule: each.caseRule ?? 'auto',
+      origin: 'author',
+      shared: true,
+      created: '2026-10-13T00:00:00.000Z'
+    })),
+    created: '2026-10-13T00:00:00.000Z',
+    modified: '2026-10-13T00:00:00.000Z'
+  })
+  const records = [
+    record('joanna', [
+      { text: 'Joanna Harrow', isMain: true },
+      { text: 'Jo', isMain: false }
+    ]),
+    record('will', [{ text: 'Will', isMain: true, caseRule: 'exact' }]),
+    record('harrow', [
+      { text: 'Mr. Harrow', isMain: true },
+      { text: 'Harrow', isMain: false }
+    ]),
+    record('father', [{ text: 'Harrow', isMain: true }])
+  ]
+
+  it('takes a whole name or nickname only, in its exact case where the name asks for it', () => {
+    expect(pinRecordOf(records, 'Jo')).toMatchObject({ id: 'joanna' })
+    expect(pinRecordOf(records, 'joanna harrow')).toMatchObject({ id: 'joanna' })
+    expect(pinRecordOf(records, 'Ann')).toBeUndefined()
+    expect(pinRecordOf(records, 'Joanna')).toBeUndefined()
+    expect(pinRecordOf(records, 'Will')).toMatchObject({ id: 'will' })
+    expect(pinRecordOf(records, 'will')).toBeUndefined()
+  })
+
+  it('a name two records hold is the one whose own name it is, else no one’s', () => {
+    expect(pinRecordOf(records, 'Harrow')).toMatchObject({ id: 'father' })
+    const shared = [
+      record('harrow', [
+        { text: 'Mr. Harrow', isMain: true },
+        { text: 'Harrow', isMain: false }
+      ]),
+      record('aunt', [
+        { text: 'Aunt Harrow', isMain: true },
+        { text: 'Harrow', isMain: false }
+      ])
+    ]
+    expect(pinRecordOf(shared, 'Harrow')).toBe('ambiguous')
   })
 })
 
@@ -511,6 +713,7 @@ describe('fitScribePrompt (token rule 8)', () => {
     ref: '1.1 ¶0',
     title: id,
     text: `${id} ${'word '.repeat(words)}`.trim(),
+    quotable: [],
     citable: true,
     open: null,
     doc: null
@@ -536,6 +739,18 @@ describe('fitScribePrompt (token rule 8)', () => {
       voice: { full: `Voice ${'rule '.repeat(200)}`, bare: 'Voice' },
       budget
     })
+
+  it('keeps the retry of a cut-off reply within the cap, whatever the fit trimmed', () => {
+    const size = (built: { messages: { content: string }[] }): number =>
+      estimateTokens(built.messages.map((message) => message.content).join('\n'))
+    const whole = size(fit(24_000).built)
+    for (let budget = whole + 40; budget > whole - 2_000; budget -= 7) {
+      const fitted = fit(budget)
+      if (fitted.sent.length === 0 && fitted.input.history.length === 0) continue
+      expect(size(buildAgentPromptV9({ ...fitted.input, retry: true }))).toBeLessThanOrEqual(budget)
+      expect(size(fitted.built)).toBeLessThanOrEqual(budget)
+    }
+  })
 
   it('sends everything that fits its own budgets', () => {
     const whole = fit(24_000)

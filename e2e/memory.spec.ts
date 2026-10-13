@@ -181,17 +181,21 @@ const ROUTE_V2_SENTINEL = "You are the router inside a novel-writing app's assis
 /**
  * The fake Ms Scribe (F-16.25, F-16.26), answering from the question at the end of the last user
  * turn: a question naming Orrin cites E0 ("Orrin overheard Tomas"); "Add to <Name>'s sheet that
- * she <words>." pins "<Words>" on that sheet; "Save this for <Name>: <words>." asks idea or canon
- * (place `ask`); anything else is a plain found answer.
+ * she <words>." pins "<Words>" on that sheet (on a read run, without the edit list, it says what
+ * it would add and still sends the pin, which the app drops and says so); "Save this for <Name>:
+ * <words>." asks idea or canon (place `ask`); anything else is a plain found answer.
  */
 function scribeAnswer(messages: { content: string }[]): string {
   const last = messages.at(-1)?.content ?? ''
   const question = last.slice(last.lastIndexOf('Question: ') + 'Question: '.length).trim()
   const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
+  const write = messages[0]?.content.includes(SCRIBE_EDITS_OPENING) === true
   const pin = /^Add to (\w+)['’]s sheet that she (.+)\.$/u.exec(question)
   if (pin !== null) {
     return JSON.stringify({
-      answer: `I put that on ${pin[1] ?? ''}'s sheet.`,
+      answer: write
+        ? `I put that on ${pin[1] ?? ''}'s sheet.`
+        : `I would add that to ${pin[1] ?? ''}'s sheet.`,
       found: true,
       edits: [{ edit: 'pin', name: pin[1], text: capital(pin[2] ?? ''), place: 'pinned' }]
     })
@@ -2405,11 +2409,13 @@ test('story memory v2: Ms Scribe v9 answers and writes sheet lines (P3 slice 2)'
     .poll(() => pageLines(mara, 'ideas'))
     .toEqual([{ text: 'A scar from the fire', written: true }])
 
-  // Plan: the same request goes out without the edit list, and nothing is written.
+  // Plan: the same request goes out without the edit list, nothing is written, and the turn says
+  // Plan writes nothing (the pin the reply still carried was dropped).
   const planBefore = scribeBodies().length
   await send('Plan', "Add to Mara's sheet that she hates the sea.")
   await expect(turns).toHaveCount(8)
-  await expect(turns.nth(7)).toContainText('I put that on Mara', { timeout: 15_000 })
+  await expect(turns.nth(7)).toContainText('I would add that to Mara', { timeout: 15_000 })
+  await expect(turns.nth(7)).toContainText('Plan mode writes nothing; switch to Ask or Auto')
   expect(scribeBodies()).toHaveLength(planBefore + 1)
   expect(scribeBodies().at(-1)?.messages[0]?.content).not.toContain(SCRIBE_EDITS_OPENING)
   await expect(turns.nth(7).getByTestId('agent-change')).toHaveCount(0)

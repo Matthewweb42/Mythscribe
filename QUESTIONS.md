@@ -12,6 +12,23 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-13 · F-16.25, F-16.26 · P3 slice 2 review: what changed in Ms Scribe's answer call and sheet lines
+- Question: The review of slice 2 changed some of the calls below (entries 6 and 8 among them). These are the new ones; confirm or change them.
+- Chosen (decided by Claude, unconfirmed):
+  1. **A sheet line only when you ask for one:** a line Ms Scribe proposes is offered only when your message asks to put something on a sheet (add, put, pin, save, note, keep, jot, file or log, with a sheet, an idea or a record named). Otherwise nothing is offered and she says "I put nothing on a sheet; ask me to put it on one if you want it there." When your message names records, the line goes on one of them only ("You did not name Tomas, so I put nothing on Tomas's sheet."). A reply of "Yes" to her own offer is not such a request: ask again in words.
+  2. **A name must be a record's whole name or nickname:** "Rin" is not Orrin and "Ann" is not Joanna; a name matched in its exact case (Will) must be written so; a name two records share goes to the one whose own name it is, else nowhere ("I could not tell whose sheet that goes on").
+  3. **What a quote must be:** 3 to 25 words copied from the book's own words in the passage: a scene paragraph (never its "¶4" number), a fact's paragraph as it reads now (never the "Mara · eyes: grey" line the app wrote above it, so a stale value cannot pass as quoted), who knows what's quotes (never its lines). A shorter quote, or one running across two paragraphs, is not kept and its sentence is marked "not checked".
+  4. **"Not checked" on edit turns** (replaces entry 6 there): a sentence that names a record or a scene is marked unless it describes her own change ("I added a beat…"); the first-sentence rule stays for answers only, and advice or a question back to you is never the main claim.
+  5. **Plan mode says it wrote nothing:** when a Plan reply still carries a sheet line or a change, the answer adds "Plan mode writes nothing; switch to Ask or Auto to put it on the sheet."
+  6. **"Not found" answers questions only:** an edit or "Write this" turn that sets found to false keeps its own words (or "Here is the change.").
+  7. **Typing on a sheet while a line lands:** what you type on that Pinned or Ideas page during the write is saved first and the line written again after it (three tries; then the line is given up, never your words). Undo finds its line by its words and the turn's mark, so two lines of one turn undo in either order.
+  8. **A long scene asked for whole:** a chapter that is one scene over 8,000 tokens is read in part, around the paragraph the search found (else from its start); a need that names only the open scene, or nothing that fits, ends "Not found…" without a second call.
+  9. **A paragraph over 12,000 tokens alone** (imported text with no breaks) goes as its opening and its end with "(¶n shortened: its middle not shown)".
+  10. **"Does Tomas know about Orrin's brother?"** (a knower and what is known, no secret named) searches every earlier scene for the words, as a secret question does, so "I found no scene where…" has a scope code searched; "What do we know about…" does not.
+  11. **The cost registry's chat row** prices story memory v1's agent.v8 (every project until the switch-over); v2's one call is priced in the story-memory tasks.
+- Alternatives: pins on any write turn (the slice as built); a partial-name match; quotes checked against the whole item as sent; no marks on edit turns; a silent Plan; the Not found line on every turn; reloading the sheet over typing; skipping an over-long scene; the registry pricing agent.v9's fixtures.
+- To change it: `src/main/scribe/runScribe.ts` (1–6, 8), `src/main/scribe/evidence.ts` and `src/shared/scribeAnswer.ts` (3), `src/renderer/features/ai/agentApply.ts` and `src/main/scribe/sheetLines.ts` (7), `src/main/scribe/selfRoute.ts` (8), `src/main/ai/prompts/agent.v9.ts` (9), `src/main/scribe/step0.ts` (10), `src/main/ai/eval/costRegistry.ts` (11).
+
 ## 2026-10-13 · F-16.25, F-16.26 · P3 slice 2 (agent.v9, the one answer call; code quote checks; Self-Route and search misses; sheet writes): calls made while building it
 - Question: Wiring Ms Scribe's answer call into the chat (story memory v2 only; v1's chat is unchanged) needed these calls beyond the plan's P3-D1 to P3-D23. No live run was possible here (no key): the 14 new `agent.v9` eval cases wait for your `OPENROUTER_API_KEY` run.
 - Chosen (decided by Claude, unconfirmed):

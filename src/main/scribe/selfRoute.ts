@@ -1,6 +1,6 @@
 import { normalizeForMatch } from '@shared/critique'
 import { searchableText } from '@shared/search'
-import type { EvidenceKey } from '@shared/scribe'
+import type { EvidenceKey, SearchHit } from '@shared/scribe'
 import { rowTexts } from '../memory/reading/readingFrame'
 import type { EvidenceFrame } from './evidence'
 
@@ -149,11 +149,67 @@ export function resolveNeed(frame: EvidenceFrame, need: string): WidenTarget | n
   return scene === undefined ? null : target(scene.ref, [scene])
 }
 
-/** Each scene of a widening as one whole-scene evidence key (`W1`…), in reading order. */
-export function widenKeys(frame: EvidenceFrame, nodeIds: readonly string[]): EvidenceKey[] {
-  return nodeIds.flatMap((nodeId) => {
+/** What a scene read costs as the prompt shows it (a generous tag), in tokens. */
+function readCost(
+  scene: { ref: string; title: string; lines: readonly string[] },
+  from: number,
+  to: number
+): number {
+  const tag = `W99 [later in the book, ${scene.ref} ¶${from}–${to}, id n0000] ${scene.title}\n`
+  let chars = tag.length
+  for (let i = from; i <= to; i++) chars += (scene.lines[i]?.length ?? 0) + 1
+  return Math.ceil(chars / 4)
+}
+
+/**
+ * The scenes of a widening as evidence keys (`W1`…), in reading order, within `budget` tokens
+ * (`SCRIBE_WIDEN_TOKENS`): each scene whole that fits, a scene that does not left out and the
+ * next still tried. When no scene fits whole (a chapter that is one long scene), the paragraphs of
+ * the first that fit, from the turn's first hit in it (else its start), reading on and back, so a
+ * long scene is never skipped outright. Empty when nothing fits.
+ */
+export function widenKeys(
+  frame: EvidenceFrame,
+  nodeIds: readonly string[],
+  options: { budget: number; hits: readonly SearchHit[] } = { budget: Infinity, hits: [] }
+): EvidenceKey[] {
+  const scenes = nodeIds.flatMap((nodeId) => {
     const row = frame.documents.get(nodeId)
-    const count = row === undefined ? 0 : rowTexts(row).length
-    return count === 0 ? [] : [{ kind: 'scene' as const, nodeId, from: 0, to: count - 1 }]
+    const texts = row === undefined ? [] : rowTexts(row)
+    if (row === undefined || texts.length === 0) return []
+    return [
+      {
+        nodeId,
+        ref: frame.reading.refs.get(nodeId) ?? '',
+        title: searchableText(row.title).trim() || 'Untitled',
+        lines: texts.map((text, i) => `¶${i} ${text}`)
+      }
+    ]
   })
+  const keys: EvidenceKey[] = []
+  let used = 0
+  for (const scene of scenes) {
+    const last = scene.lines.length - 1
+    const cost = readCost(scene, 0, last)
+    if (used + cost > options.budget) continue
+    keys.push({ kind: 'scene', nodeId: scene.nodeId, from: 0, to: last })
+    used += cost
+  }
+  const first = scenes[0]
+  if (keys.length > 0 || first === undefined) return keys
+  const last = first.lines.length - 1
+  const hit = options.hits.find((each) => each.nodeId === first.nodeId && each.para <= last)
+  let from = hit?.para ?? 0
+  let to = from
+  if (readCost(first, from, to) > options.budget) return []
+  for (let step = 0; from > 0 || to < last; step++) {
+    const after = step % 2 === 0
+    const nextFrom = after ? from : from - 1
+    const nextTo = after ? to + 1 : to
+    if (nextFrom < 0 || nextTo > last) continue
+    if (readCost(first, nextFrom, nextTo) > options.budget) break
+    from = nextFrom
+    to = nextTo
+  }
+  return [{ kind: 'scene', nodeId: first.nodeId, from, to }]
 }

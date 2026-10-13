@@ -4,10 +4,13 @@ import { buildAskIndex } from './memory/askParse'
 import { buildNameIndex } from './memory/nameScan'
 import { normName } from './memory/names'
 import {
+  isAdviceOrQuestion,
   markerize,
   needsCitation,
   notFoundLine,
   parseCitedAnswer,
+  quoteHeld,
+  quoteWords,
   scribeHistory,
   stripCitationMarkup,
   type HistoryTurn
@@ -100,6 +103,32 @@ describe('needsCitation (P3-D13)', () => {
     expect(needsCitation('Consider cutting Orrin’s speech.', INDEX)).toBe(false)
     expect(needsCitation('Do you want Mara to know?', INDEX)).toBe(false)
     expect(needsCitation('Should Orrin hear it in 3.1?', INDEX)).toBe(false)
+  })
+})
+
+describe('quoteHeld (the code quote check)', () => {
+  const quotable = ['Orrin overheard Tomas from the yard.', 'Tomas sold the map to a stranger.']
+
+  it('keeps 3 to 25 copied words that lie within one stretch', () => {
+    expect(quoteHeld(quotable, 'Orrin overheard Tomas')).toBe(true)
+    expect(quoteHeld(quotable, 'sold the map to a stranger')).toBe(true)
+  })
+
+  it('refuses one or two words, more than 25, a quote across two stretches, and composed lines', () => {
+    expect(quoteHeld(quotable, 'Orrin')).toBe(false)
+    expect(quoteHeld(quotable, 'the yard')).toBe(false)
+    expect(quoteHeld([`${'word '.repeat(30)}`], 'word '.repeat(26).trim())).toBe(false)
+    expect(quoteHeld(quotable, 'from the yard. Tomas sold')).toBe(false)
+    expect(quoteHeld(quotable, '¶1 Tomas sold the map')).toBe(false)
+    expect(quoteWords('two-and-twenty that spring')).toBe(3)
+  })
+})
+
+describe('isAdviceOrQuestion (P3-D13)', () => {
+  it('reads advice and questions back to the author, never a claim', () => {
+    expect(isAdviceOrQuestion('You could open on the storm.')).toBe(true)
+    expect(isAdviceOrQuestion('Do you mean the yard?')).toBe(true)
+    expect(isAdviceOrQuestion('Orrin overheard Tomas.')).toBe(false)
   })
 })
 

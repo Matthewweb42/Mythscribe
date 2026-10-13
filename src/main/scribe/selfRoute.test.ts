@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { saveDocument } from '../document/documentStore'
 import { getNode } from '../tree/treeStore'
 import { evidenceFrame } from './evidence'
-import { closeScribeBook, scribeBook, type ScribeBook } from './scribeFixture'
+import { closeScribeBook, doc, scribeBook, type ScribeBook } from './scribeFixture'
 import { resolveNeed, widenKeys } from './selfRoute'
 
 /** Self-Route (F-16.25, P3-D15): what one `{"need":…}` names, on the scribe test book (1.1–1.3). */
@@ -45,5 +46,29 @@ describe('resolveNeed', () => {
       { kind: 'scene', nodeId: book.two, from: 0, to: 1 },
       { kind: 'scene', nodeId: book.three, from: 0, to: 1 }
     ])
+  })
+
+  it('leaves out a scene over what is left of the budget, and reads one too long alone in part around the hit', () => {
+    const long = Array.from({ length: 40 }, (_, i) => `Line ${i} ${'harbour '.repeat(20)}`)
+    saveDocument(book.db, book.two, doc(...long))
+    const frame = evidenceFrame(book.db, book.one)
+    // 1.2 is far over 300 tokens; 1.3 fits whole.
+    expect(widenKeys(frame, [book.two, book.three], { budget: 300, hits: [] })).toEqual([
+      { kind: 'scene', nodeId: book.three, from: 0, to: 1 }
+    ])
+    // 1.2 alone: the paragraphs around the turn's hit in it that fit, never nothing.
+    const part = widenKeys(frame, [book.two], {
+      budget: 300,
+      hits: [{ nodeId: book.two, para: 20 }]
+    })
+    expect(part).toHaveLength(1)
+    const key = part[0]
+    expect(key?.kind === 'scene' && key.from <= 20 && key.to >= 20 && key.to - key.from < 39).toBe(
+      true
+    )
+    // Without a hit, from its start.
+    expect(widenKeys(frame, [book.two], { budget: 300, hits: [] })[0]).toMatchObject({ from: 0 })
+    // A paragraph over the whole budget alone: nothing to read.
+    expect(widenKeys(frame, [book.two], { budget: 10, hits: [] })).toEqual([])
   })
 })

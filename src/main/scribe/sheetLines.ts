@@ -111,24 +111,30 @@ export function addSheetLine(db: TreeDb, input: SheetLineAdd, now: Date): SheetL
 }
 
 /**
- * The chat's Undo: takes the line out while the block at `index` still reads `text` and carries
- * this turn's mark; VALIDATION "Edited since; change it on the sheet." otherwise.
+ * The chat's Undo: takes the line out while it still reads `text` and carries this turn's mark.
+ * The line is found by its words and mark, not by its place alone: a line above it removed or
+ * added since (another pin of the same turn undone first) moves it, and it is still the same line.
+ * Of several such lines, the one nearest `index`. VALIDATION "Edited since; change it on the
+ * sheet." when no line reads so any more.
  */
 export function removeSheetLine(db: TreeDb, input: SheetLineRemove, now: Date): StoryRecord {
   const record = sheetRecord(db, input.id)
   const page = pageOf(record, input.page)
-  const found = page === null ? undefined : pageTextBlocks(page)[input.index]
   const top = page?.content ?? []
-  const at = found === undefined ? -1 : top.indexOf(found.block)
-  if (
-    page === null ||
-    found === undefined ||
-    at < 0 ||
-    found.text.trim() !== input.text.trim() ||
-    aiWrittenOf(found.block)?.turn !== input.turn
-  ) {
+  const text = input.text.trim()
+  const candidates = (page === null ? [] : pageTextBlocks(page)).filter(
+    (block) =>
+      block.text.trim() === text &&
+      aiWrittenOf(block.block)?.turn === input.turn &&
+      top.includes(block.block)
+  )
+  const found = candidates.sort(
+    (a, b) => Math.abs(a.index - input.index) - Math.abs(b.index - input.index)
+  )[0]
+  if (page === null || found === undefined) {
     throw new AppError('VALIDATION', 'Edited since; change it on the sheet.', { id: input.id })
   }
+  const at = top.indexOf(found.block)
   return db.transaction((tx) => {
     const saved = savePage(
       tx,

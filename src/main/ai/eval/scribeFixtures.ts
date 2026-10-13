@@ -37,7 +37,10 @@ const ROSTER = scribeRoster(
   new Map()
 )
 
-/** E0: a test-book scene open, its caret on its last paragraph; a write run carries ids. */
+/**
+ * E0: a test-book scene open, its caret on its last paragraph; a write run carries ids.
+ * `paragraphs`: the book's words as sent, what the code quote check reads.
+ */
 function openScene(
   sceneId: string,
   write = false
@@ -52,7 +55,7 @@ function openScene(
     selection: null,
     ...(write ? { id: 'n31', parentId: 'n30' } : {})
   })
-  return { text: rendered.text, paragraphs: rendered.shown.map((n) => scene.paragraphs[n] ?? '') }
+  return { text: rendered.text, paragraphs: rendered.sent.flatMap((line) => line.parts) }
 }
 
 /** One paragraph of a test-book scene as an evidence item. */
@@ -71,6 +74,7 @@ function passage(
     ref: `${refOf(sceneId)} ¶${para}`,
     title: scene.title,
     text: scene.paragraphs[para] ?? '',
+    quotable: [scene.paragraphs[para] ?? ''],
     citable: label !== 'map',
     open: { kind: 'scene', id: sceneId, para },
     doc: null
@@ -88,16 +92,20 @@ function wholeScene(id: string, sceneId: string): EvidenceItem {
     ref: `${refOf(sceneId)} ¶0–${last}`,
     title: scene.title,
     text: scene.paragraphs.map((text, i) => `¶${i} ${text}`).join('\n'),
+    quotable: [...scene.paragraphs],
     citable: true,
     open: { kind: 'scene', id: sceneId, para: 0 },
     doc: null
   }
 }
 
-/** An item that is not a scene paragraph: a claim, who knows what, Ideas, Pinned, the outline. */
+/**
+ * An item that is not a scene paragraph: a claim, who knows what, Ideas, Pinned, the outline,
+ * with the book's words in it as `evidence.ts` keeps them (`quotable`).
+ */
 function item(
   id: string,
-  over: Pick<EvidenceItem, 'key' | 'label' | 'ref' | 'title' | 'text'>
+  over: Pick<EvidenceItem, 'key' | 'label' | 'ref' | 'title' | 'text' | 'quotable'>
 ): EvidenceItem {
   return { id, ...over, citable: over.label !== 'map', open: null, doc: null }
 }
@@ -111,9 +119,9 @@ function scribeCase(
   expect: ScribeExpect
 ): EvalCase {
   const fitted = fitScribePrompt(input)
-  const sent: Record<string, string> = {}
-  if (e0 !== null) sent.E0 = e0.join('\n')
-  for (const each of fitted.sent) sent[each.id] = each.text
+  const sent: Record<string, string[]> = {}
+  if (e0 !== null) sent.E0 = [...e0]
+  for (const each of fitted.sent) sent[each.id] = each.quotable
   return {
     version: fitted.built.version,
     name,
@@ -161,6 +169,15 @@ const fit = (
   voice: null,
   ...over
 })
+
+/**
+ * The stale case's paragraph as it reads now: the test book's h08 ¶1 edited after it was read, so
+ * its age differs from the stale fact line's.
+ */
+const STALE_AGE_NOW = (testBookScene('h08').paragraphs[1] ?? '').replace(
+  'two-and-twenty',
+  'three-and-twenty'
+)
 
 /** The Ideas line the idea case recalls (design §6.1's test-book Ideas). */
 export const SCRIBE_IDEA_LINE = 'Perhaps the Captain was married once before, in Ireland.'
@@ -210,7 +227,7 @@ function longScene(): { text: string; paragraphs: readonly string[] } {
     id: 'n31',
     parentId: 'n30'
   })
-  return { text: rendered.text, paragraphs: rendered.shown.map((n) => paragraphs[n] ?? '') }
+  return { text: rendered.text, paragraphs: rendered.sent.flatMap((line) => line.parts) }
 }
 
 /** Ms Scribe's eval cases; `voice` is the fixture profile's voice block for the edit turns. */
@@ -222,21 +239,20 @@ export function scribeEvalCases(voice: string): EvalCase[] {
   return [
     scribeCase(
       'lookup-stale',
-      'a lookup handed over for a stale claim: Johanna’s age with the paragraph as it reads now',
+      'a stale claim handed over: the fact line says two-and-twenty, the paragraph now three-and-twenty; answers from the paragraph, never cites the fact line',
       fit(base('h09', 'How old is Johanna?', { turn: 'lookup' }), [
         item('E1', {
           key: { kind: 'claim', claimId: 'c-johanna-age' },
           label: 'happened',
           ref: '13.1 ¶1',
           title: 'The letter',
-          text:
-            'Johanna Harrow · age: two-and-twenty · re-checking: the sentence changed since it was read\n' +
-            (testBookScene('h08').paragraphs[1] ?? '')
+          text: `Johanna Harrow · age: two-and-twenty · re-checking: the sentence changed since it was read\n${STALE_AGE_NOW}`,
+          quotable: [STALE_AGE_NOW]
         }),
         passage('E2', 'h08', 0)
       ]),
       openScene('h09').paragraphs,
-      { found: true }
+      { found: true, required: ['three-and-twenty'] }
     ),
     scribeCase(
       'open',
@@ -277,7 +293,11 @@ export function scribeEvalCases(voice: string): EvalCase[] {
             title: 'the Captain’s debt to Varrow',
             text:
               'Liesel Harrow: deduced (18.1): “The Captain owed Mr. Varrow money, and a great deal of it.”\n' +
-              'Johanna Harrow: suspects (18.1): “She had begun to suspect something of the kind herself”'
+              'Johanna Harrow: suspects (18.1): “She had begun to suspect something of the kind herself”',
+            quotable: [
+              'The Captain owed Mr. Varrow money, and a great deal of it.',
+              'She had begun to suspect something of the kind herself'
+            ]
           })
         ]
       ),
@@ -293,7 +313,8 @@ export function scribeEvalCases(voice: string): EvalCase[] {
           label: 'idea',
           ref: 'The Captain’s Ideas',
           title: 'The Captain',
-          text: `¶0 ${SCRIBE_IDEA_LINE}`
+          text: `¶0 ${SCRIBE_IDEA_LINE}`,
+          quotable: [SCRIBE_IDEA_LINE]
         }),
         passage('E2', 'h11', 2, 'ideaScene')
       ]),
@@ -317,7 +338,13 @@ export function scribeEvalCases(voice: string): EvalCase[] {
           label: 'computed',
           ref: '',
           title: 'Outline',
-          text: 'Chapter 17\n  17.1 The regiment hears\nChapter 18\n  18.1 The Captain’s debts'
+          text: 'Chapter 17\n  17.1 The regiment hears\nChapter 18\n  18.1 The Captain’s debts',
+          quotable: [
+            'Chapter 17',
+            '17.1 The regiment hears',
+            'Chapter 18',
+            '18.1 The Captain’s debts'
+          ]
         })
       ]),
       openScene('h13').paragraphs,

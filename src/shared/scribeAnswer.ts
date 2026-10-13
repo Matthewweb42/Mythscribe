@@ -1,4 +1,5 @@
 import { estimateTokens } from './ai'
+import { findQuote } from './critique'
 import { namesInQuestion, SCENE_REF, type AskIndex } from './memory/askParse'
 import { splitSentences } from './memory/sentences'
 import { SCRIBE_HISTORY_TOKENS, type SearchScope, type TextSpan } from './scribe'
@@ -139,16 +140,42 @@ export function stripCitationMarkup(raw: string): string {
 const ADVICE =
   /^(?:you (?:could|might|may|can)|consider|try|perhaps you|maybe you|if you|i (?:suggest|would|could|can)|would you|do you|shall i|let me)\b/iu
 
+/** A question back to the author or advice ("You could…"): it needs no citation (P3-D13). */
+export function isAdviceOrQuestion(sentence: string): boolean {
+  const text = sentence.trim()
+  return text === '' || /\?["')\]]*$/u.test(text) || ADVICE.test(text)
+}
+
 /**
  * Whether a sentence must rest on a citation (P3-D13): it names a record (the roster's names) or a
  * scene reference. A question back to the author and advice ("You could…") need none.
  */
 export function needsCitation(sentence: string, index: AskIndex): boolean {
   const text = sentence.trim()
-  if (text === '' || /\?["')\]]*$/u.test(text) || ADVICE.test(text)) return false
+  if (isAdviceOrQuestion(text)) return false
   if (SCENE_REF.test(text)) return true
   const named = namesInQuestion(text, index)
   return named.records.length > 0 || named.ambiguous.length > 0 || named.topics.length > 0
+}
+
+/** A citation's quote: 3 to 25 copied words (the prompt's rule, enforced in code). */
+export const QUOTE_WORDS_MIN = 3
+export const QUOTE_WORDS_MAX = 25
+
+/** How many words a quote holds (letters or digits, inner apostrophes and hyphens kept). */
+export const quoteWords = (quote: string): number =>
+  quote.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)?.length ?? 0
+
+/**
+ * The code quote check of one citation (P3 §2.3 step 4): the quote is 3 to 25 words, and lies
+ * whole within one of the item's quotable stretches (`EvidenceItem.quotable`: the book's own
+ * words, never a line the app composed). A one-word quote ("Orrin") or one that runs from one
+ * paragraph into the next proves nothing.
+ */
+export function quoteHeld(quotable: readonly string[], quote: string): boolean {
+  const words = quoteWords(quote)
+  if (words < QUOTE_WORDS_MIN || words > QUOTE_WORDS_MAX) return false
+  return quotable.some((text) => findQuote(text, quote))
 }
 
 /** What code decided about one sentence's citations. */

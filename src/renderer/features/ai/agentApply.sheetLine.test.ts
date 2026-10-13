@@ -6,7 +6,7 @@ import type { TiptapNodeT } from '@shared/tiptap'
 import { pageKey, resetPageStore, usePageStore } from '@renderer/features/research/pageStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import { AgentEditError } from '@renderer/features/editor/agentEditing'
-import { applyAgentEdit, SHEET_PLACE_FIRST } from './agentApply'
+import { applyAgentEdit, SHEET_BUSY, SHEET_PLACE_FIRST, SHEET_WRITE_TRIES } from './agentApply'
 
 /**
  * F-16.26 (decision 3 as the author changed it): a sheet line Ms Scribe offers lands on the
@@ -22,6 +22,9 @@ let calls: Channel[]
 let pinned: string[]
 let conflict: { index: number; text: string } | null
 let editedSince: boolean
+/** Runs while `record:addLine` is on the wire: the author typing on the open page meanwhile. */
+let duringAdd: (() => void) | null
+let adds: number
 
 const page = (lines: readonly string[]): TiptapNodeT => ({
   type: 'doc',
@@ -57,6 +60,8 @@ beforeEach(() => {
   pinned = ['Eyes: grey']
   conflict = null
   editedSince = false
+  duringAdd = null
+  adds = 0
   setIpcClient({
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
       calls.push(channel)
@@ -75,6 +80,8 @@ beforeEach(() => {
           return undefined as Output<C>
         case 'record:addLine': {
           const { text } = input as Input<'record:addLine'>
+          adds += 1
+          duringAdd?.()
           pinned = [...pinned, text]
           return { record: record(), index: pinned.length - 1, text, conflict } as Output<C>
         }
@@ -114,6 +121,35 @@ describe('applyAgentEdit: sheetLine (F-16.26)', () => {
     await expect
       .poll(() => textOf(usePageStore.getState().docs[KEY]?.content))
       .toEqual(['Eyes: grey', 'Typed just now'])
+  })
+
+  it('saves what she typed on the open page while the line was written, then writes the line again after it', async () => {
+    await usePageStore.getState().load(KEY)
+    duringAdd = () => {
+      duringAdd = null
+      usePageStore.getState().edit(KEY, page(['Eyes: grey', 'Typed meanwhile']))
+    }
+    await applyAgentEdit(line('pinned'), 'p-1', RUN)
+    expect(adds).toBe(2)
+    // Her words were saved (dropping the first line, which her draft never held), then the line.
+    expect(pinned).toEqual(['Eyes: grey', 'Typed meanwhile', 'Hates the sea'])
+    await expect
+      .poll(() => textOf(usePageStore.getState().docs[KEY]?.content))
+      .toEqual(['Eyes: grey', 'Typed meanwhile', 'Hates the sea'])
+  })
+
+  it('gives the line up, never her words, when she keeps typing through every try', async () => {
+    await usePageStore.getState().load(KEY)
+    let n = 0
+    duringAdd = () => {
+      n += 1
+      usePageStore.getState().edit(KEY, page(['Eyes: grey', `Typed ${n}`]))
+    }
+    await expect(applyAgentEdit(line('pinned'), 'p-1', RUN)).rejects.toThrow(
+      new AgentEditError(SHEET_BUSY)
+    )
+    expect(adds).toBe(SHEET_WRITE_TRIES)
+    expect(pinned).toEqual(['Eyes: grey', `Typed ${SHEET_WRITE_TRIES}`])
   })
 
   it('leaves a closed page closed', async () => {

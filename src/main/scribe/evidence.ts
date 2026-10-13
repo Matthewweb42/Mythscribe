@@ -54,6 +54,14 @@ export interface EvidenceItem {
   ref: string
   title: string
   text: string
+  /**
+   * The book's own words in `text`, each a stretch a citation's quote must lie within (the code
+   * quote check, P3 §2.3 step 4): a scene's paragraphs (without their `¶n` prefix), a claim's
+   * paragraph as it reads now (never the fact line the app composed above it), the quotes of who
+   * knows what (never its composed lines), a page's or a document's paragraph; the lines of an
+   * item computed from the book (labelled so); none for a card (a map).
+   */
+  quotable: string[]
   citable: boolean
   open: CitationTarget | null
   /** For a filed Pinned line, the document it was filed from. */
@@ -158,6 +166,7 @@ export function passageNow(
         ref: `${sceneRefOf(frame, ownerId)} ¶${para}`,
         title: titleOf(row),
         text,
+        quotable: [text],
         citable: citableLabel(label),
         open: { kind: 'scene', id: ownerId, para },
         doc: null
@@ -173,6 +182,7 @@ export function passageNow(
         ref: `${sceneRefOf(frame, ownerId)} notes ¶${para}`,
         title: titleOf(row),
         text: paragraph.text,
+        quotable: [paragraph.text],
         citable: true,
         open: { kind: 'scene', id: ownerId, para: null },
         doc: null
@@ -196,6 +206,7 @@ export function passageNow(
         ref: `${record.name}'s ${pageName} ¶${para}`,
         title: record.name,
         text: block.text,
+        quotable: [block.text],
         citable: true,
         open: { kind: 'record', id: ownerId, page: source === 'pinned' ? 'pinned' : 'ideas', para },
         doc: filed === null ? null : filedFrom === undefined ? 'a document' : titleOf(filedFrom)
@@ -216,6 +227,7 @@ export function passageNow(
         ref: `Research “${titleOf(page.row)}” ¶${para}`,
         title: titleOf(page.row),
         text: paragraph.text,
+        quotable: [paragraph.text],
         citable: true,
         open: { kind: 'research', id: ownerId, para },
         doc: null
@@ -236,6 +248,7 @@ function cardNow(frame: EvidenceFrame, nodeId: string): Omit<EvidenceItem, 'id' 
     ref: sceneRefOf(frame, nodeId),
     title: titleOf(row),
     text: [card.line, card.gist].filter((line) => line.trim() !== '').join('\n'),
+    quotable: [],
     citable: false,
     open: { kind: 'scene', id: nodeId, para: null },
     doc: null
@@ -299,6 +312,8 @@ function claimNow(frame: EvidenceFrame, claimId: string): Omit<EvidenceItem, 'id
     ref: `${sceneRefOf(frame, claim.nodeId)} ¶${claim.para}`,
     title: titleOf(row),
     text: `${fact}\n${paragraph}`,
+    // The fact line is the app's reading, not the book: only the paragraph may be quoted.
+    quotable: [paragraph],
     citable: citableLabel(label),
     open: { kind: 'scene', id: claim.nodeId, para: claim.para },
     doc: null
@@ -314,10 +329,13 @@ function knowsNow(frame: EvidenceFrame, secretId: string): Omit<EvidenceItem, 'i
   const secret = knows.secrets.find((each) => each.recordId === secretId)
   if (secret === undefined) return null
   const lines: string[] = []
+  // Only the book's words may be quoted: the reveal's and each line's quote, never the lines.
+  const quotable: string[] = []
   const now = frame.nowId === null ? -1 : (frame.reading.at.get(frame.nowId) ?? -1)
   const defining = secret.defining
   if (defining !== null && (frame.reading.order.get(defining.nodeId) ?? Infinity) <= now) {
     lines.push(`Revealed in ${defining.ref}: “${defining.quote}”`)
+    quotable.push(defining.quote)
   }
   for (const cell of secret.cells) {
     if (cell.later || cell.line === 'other') continue
@@ -332,6 +350,7 @@ function knowsNow(frame: EvidenceFrame, secretId: string): Omit<EvidenceItem, 'i
     lines.push(
       `${who}: ${HOW_LABEL[cell.how]}${from} (${cell.ref ?? ''}${stale})${quote === null ? '' : `: “${quote}”`}`
     )
+    if (quote !== null) quotable.push(quote)
   }
   if (lines.length === 0) return null
   return {
@@ -339,6 +358,7 @@ function knowsNow(frame: EvidenceFrame, secretId: string): Omit<EvidenceItem, 'i
     ref: secret.readersSince?.ref ?? '',
     title: secret.label,
     text: lines.join('\n'),
+    quotable,
     citable: true,
     open: { kind: 'record', id: secretId, para: null },
     doc: null
@@ -376,11 +396,13 @@ function timelineNow(
     if (record === null) return null
     const age = storedAge(frame.db, recordId, frame.nowId, frame.reading, frame.nodes)
     if (age === null) return null
+    const text = `${record.name}'s age as of ${nowRef || 'the end of the book'}: ${ageText(age)}`
     return {
       label: 'computed',
       ref: nowRef,
       title: `${record.name}'s age`,
-      text: `${record.name}'s age as of ${nowRef || 'the end of the book'}: ${ageText(age)}`,
+      text,
+      quotable: [text],
       citable: true,
       open: { kind: 'record', id: recordId, para: null },
       doc: null
@@ -399,6 +421,7 @@ function timelineNow(
     ref: nowRef,
     title: 'Story years',
     text: lines.join('\n'),
+    quotable: lines,
     citable: true,
     open: null,
     doc: null
@@ -415,6 +438,7 @@ function ideasNow(frame: EvidenceFrame, recordId: string): Omit<EvidenceItem, 'i
     ref: `${record.name}'s Ideas`,
     title: record.name,
     text: paragraphs.map((paragraph) => `¶${paragraph.index} ${paragraph.text}`).join('\n'),
+    quotable: paragraphs.map((paragraph) => paragraph.text),
     citable: true,
     open: { kind: 'record', id: recordId, page: 'ideas', para: null },
     doc: null
@@ -441,11 +465,13 @@ function outlineNow(frame: EvidenceFrame): Omit<EvidenceItem, 'id' | 'key'> | nu
       : []
   })
   if (lines.length === 0) return null
+  const shown = lines.slice(0, OUTLINE_LINES)
   return {
     label: 'computed',
     ref: '',
     title: 'Outline',
-    text: lines.slice(0, OUTLINE_LINES).join('\n'),
+    text: shown.join('\n'),
+    quotable: shown.map((line) => line.trim()),
     citable: true,
     open: null,
     doc: null
@@ -461,6 +487,7 @@ function todosNow(frame: EvidenceFrame): Omit<EvidenceItem, 'id' | 'key'> | null
     ref: '',
     title: 'Your to-dos',
     text: open.map((todo) => `- ${todo.text}`).join('\n'),
+    quotable: open.map((todo) => todo.text),
     citable: true,
     open: null,
     doc: null
@@ -482,14 +509,14 @@ export function itemOf(
       if (from > to) return null
       const label = sceneLabel(frame, key.nodeId)
       const ref = sceneRefOf(frame, key.nodeId)
+      const shown = texts.slice(from, to + 1)
       return {
         label,
         ref: from === to ? `${ref} ¶${from}` : `${ref} ¶${from}–${to}`,
         title: titleOf(row),
-        text: texts
-          .slice(from, to + 1)
-          .map((text, i) => `¶${from + i} ${text}`)
-          .join('\n'),
+        text: shown.map((text, i) => `¶${from + i} ${text}`).join('\n'),
+        // Each paragraph as the book has it: a quote holding the `¶n` prefix is no quote.
+        quotable: [...shown],
         citable: citableLabel(label),
         open: { kind: 'scene', id: key.nodeId, para: from },
         doc: null

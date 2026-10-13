@@ -30,8 +30,19 @@ import type { TokenRow } from './report'
  * history of that file is the log of how each feature's cost changed.
  */
 
-/** The version a feature asks for first: its newest non-regenerate prompt. */
+/**
+ * Features whose newest prompt is story memory v2's alone and costs another shape of use than the
+ * version every story memory v1 project runs: the table prices the v1 version (every project until
+ * the switch-over), and the newer one's calls are priced as shipped rows of the planned section
+ * (`SHIPPED_PLAN_ROWS`). `agent`: v1 runs agent.v8 (up to three calls a message, lookups between);
+ * v2's agent.v9 answers in one call (`agent.v9:open`, `:lookup`, `:need`, `:widened`).
+ */
+const V1_PRICED: Partial<Record<AiFeatureId, PromptVersion>> = { agent: 'agent.v8' }
+
+/** The version a feature asks for first: its newest non-regenerate prompt (`V1_PRICED` aside). */
 function currentVersion(feature: AiFeatureId): PromptVersion | null {
+  const pinned = V1_PRICED[feature]
+  if (pinned !== undefined) return pinned
   const versions = PROMPT_VERSIONS.filter((v) => PROMPT_CATALOGUE[v].feature === feature)
   const primary = versions.filter((v) => !v.includes('Regen'))
   return primary.at(-1) ?? versions.at(-1) ?? null

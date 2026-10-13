@@ -1,3 +1,4 @@
+import { AGENT_CARET_CHARS } from '@shared/agent'
 import { estimateTokens } from '@shared/ai'
 import {
   buildAskIndex,
@@ -62,32 +63,52 @@ export interface Step0Focus {
 
 /**
  * The paragraph the caret is in, from the caret window the chat sends (`AgentFocus.beforeCaret`:
- * the text up to the caret, blocks joined by a blank line, its last 1,500 characters): the last
- * paragraph that starts with the window's last block (or, with the caret at the start of an empty
- * block, the one after the paragraph the block before it is). Null without a window or a match.
+ * the text up to the caret, blocks joined by a blank line, its last `AGENT_CARET_CHARS`). The
+ * window's blocks are matched as a run against the scene's paragraphs, ending in the paragraph
+ * that starts with the window's last block (or, with the caret at the start of an empty block, the
+ * one after the paragraph the block before it is): the place that matches the most blocks wins.
+ * A window shorter than the cap starts at the top of the scene, so among equal matches the one
+ * as many paragraphs down as the window has blocks; a full window is cut, so its first block may
+ * be a paragraph's tail (and a window inside one long paragraph holds its middle). Empty blocks
+ * are skipped, as the saved paragraphs skip them. Null without a window or a match.
  */
 export function caretParaOf(paragraphs: readonly string[], beforeCaret: string): number | null {
   if (beforeCaret.trim() === '' || paragraphs.length === 0) return null
+  const norm = (text: string): string => text.replace(/\s+/gu, ' ').trim()
   const blocks = beforeCaret.split('\n\n')
-  const last = (blocks.at(-1) ?? '').replace(/\s+/g, ' ').trimStart()
-  const flat = paragraphs.map((text) => text.replace(/\s+/g, ' ').trim())
-  if (last.trim() !== '') {
-    for (let i = flat.length - 1; i >= 0; i--) {
-      const text = flat[i] ?? ''
-      // A window cut inside one long paragraph holds its middle, not its start.
-      if (text.startsWith(last.trim()) || (blocks.length === 1 && text.includes(last.trim()))) {
-        return i
-      }
+  const last = norm(blocks.at(-1) ?? '')
+  const earlier = blocks
+    .slice(0, -1)
+    .map(norm)
+    .filter((block) => block !== '')
+  // The run to match: every block before the caret's, then the caret's own (a paragraph's start).
+  const run = last === '' ? earlier : [...earlier, last]
+  if (run.length === 0) return null
+  const fromTop = beforeCaret.length < AGENT_CARET_CHARS
+  const flat = paragraphs.map(norm)
+  const end = run.length - 1
+  const matches = (para: string, k: number): boolean => {
+    const block = run[k] ?? ''
+    const cutFirst = k === 0 && !fromTop
+    if (k === end && last !== '') return cutFirst ? para.includes(block) : para.startsWith(block)
+    return cutFirst ? para.endsWith(block) : para === block
+  }
+  // Where a window from the top expects the run's end: as many paragraphs down as it has blocks.
+  const expected = fromTop ? end : null
+  let best: { at: number; score: number; off: number } | null = null
+  for (let at = 0; at < flat.length; at++) {
+    if (!matches(flat[at] ?? '', end)) continue
+    let score = 1
+    while (score <= end && at - score >= 0 && matches(flat[at - score] ?? '', end - score)) {
+      score += 1
     }
-    return null
+    const off = expected === null ? 0 : Math.abs(at - expected)
+    if (best === null || score > best.score || (score === best.score && off < best.off)) {
+      best = { at, score, off }
+    }
   }
-  const before = (blocks.at(-2) ?? '').replace(/\s+/g, ' ').trim()
-  if (before === '') return null
-  for (let i = flat.length - 1; i >= 0; i--) {
-    const text = flat[i] ?? ''
-    if (text === before || text.endsWith(before)) return Math.min(i + 1, flat.length - 1)
-  }
-  return null
+  if (best === null) return null
+  return last === '' ? Math.min(best.at + 1, flat.length - 1) : best.at
 }
 
 /** E0: the open scene as it is saved (the renderer flushed it first). */
@@ -139,8 +160,9 @@ export interface Step0 {
   terms: string[]
   /**
    * What was searched, for a first/last/ever/never/how-many/learns question (or a knows question
-   * naming a secret): every scene up to now, or the stretch every match of which is in the menu
-   * when the cap cut some; null otherwise, or when there was nothing to search for.
+   * naming a secret, or a record and what it may know): every scene up to now, or the stretch
+   * every match of which is in the menu when the cap cut some; null otherwise, or when there was
+   * nothing to search for.
    */
   scope: SearchScope | null
   /**
@@ -341,24 +363,31 @@ export function gatherStep0(
   })
 
   // The search: the question's words, best first (bm25) over every source but the cards; for a
-  // first/last/ever/learns question (or "does A know" a secret) every earlier scene's best
-  // paragraph for its content words, ranked by them and the names, in reading order (P3-D8), with
-  // the other sources' best beside them (ahead of them for an idea question).
+  // first/last/ever/learns question (or "does A know" a secret or about something) every earlier
+  // scene's best paragraph for its content words, ranked by them and the names, in reading order
+  // (P3-D8), with the other sources' best beside them (ahead of them for an idea question).
   const asked = queryTerms(input.question)
     .map((term) => term.slice(0, NAVIGATION_TERM_MAX))
     .slice(0, NAVIGATION_TERMS_MAX)
   const query = asked.join(' ')
-  const ordinal =
-    cues.scopeAll ||
-    cues.learns ||
-    (cues.knows && names.topics.some((topic) => topic.kind === 'secret'))
+  // A knows question names a secret, or a knower (a record named, never a possessive "Varrow's",
+  // or "who") and what is known ("Does Tomas know about Orrin's brother?"): either way an absence
+  // is stated over a scope code searched (design §2.6). "What do we know about …" is no such one.
+  const search = ordinalSearch(input.question, names)
+  const knower =
+    /\bwho\b/iu.test(input.question) ||
+    names.records.some((name) => !/['’]s?$/u.test(name.text)) ||
+    names.ambiguous.some((name) => !/['’]s?$/u.test(name.text))
+  const knowsAbout =
+    cues.knows &&
+    (names.topics.some((topic) => topic.kind === 'secret') || (knower && search.terms.length > 0))
+  const ordinal = cues.scopeAll || cues.learns || knowsAbout
   let terms = asked
   let scope: SearchScope | null = null
   let scenes: MemoryPassageHit[] = []
   let others: MemoryPassageHit[]
   const baseline: SearchHit[] = []
   if (ordinal) {
-    const search = ordinalSearch(input.question, names)
     // Each named record by every name it has (a nickname in the prose counts), else as written.
     const groups = names.records.map((name) => {
       const words = ask.roster

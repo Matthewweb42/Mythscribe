@@ -183,7 +183,8 @@ describe('dataSharingSends (F-16.4)', () => {
       'each labelled with where',
       'Not canon text, your Ideas',
       'who knows what',
-      'about 8,000 tokens of one chapter',
+      'about 8,000 tokens of one chapter or range of scenes',
+      'prose it drafts (when you apply a change) carries the Story notes block',
       'about 1,500 tokens',
       "records' names for sheet lines"
     ]) {

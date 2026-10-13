@@ -169,16 +169,41 @@ export interface RenderedScene {
   text: string
   /** The paragraph numbers sent, in order: the quote check reads only these. */
   shown: number[]
+  /**
+   * Each paragraph as sent, by number: its whole text, or, for one paragraph alone over the cap,
+   * its opening and its end (`parts`), which the quote check reads one at a time.
+   */
+  sent: { para: number; parts: string[] }[]
 }
 
 /** "¶3–9", "¶4". */
 const paraRange = (from: number, to: number): string =>
   from === to ? `¶${from}` : `¶${from}–${to}`
 
+/** What stands between a shortened paragraph's opening and its end. */
+export const SCENE_CUT_MARK = '[…]'
+
+/**
+ * A paragraph cut to about `tokens` tokens: its opening and its end, each at a word, around the
+ * mark; the parts as the quote check reads them.
+ */
+function shortened(text: string, tokens: number): string[] {
+  const half = Math.max(1, Math.floor((tokens * 4) / 2))
+  const headCut = text.slice(0, half)
+  const headAt = headCut.lastIndexOf(' ')
+  const head = (headAt > half / 2 ? headCut.slice(0, headAt) : headCut).trimEnd()
+  const tailCut = text.slice(-half)
+  const tailAt = tailCut.indexOf(' ')
+  const tail = (tailAt >= 0 && tailAt < half / 2 ? tailCut.slice(tailAt + 1) : tailCut).trimStart()
+  return [head, tail]
+}
+
 /**
  * E0, the whole open scene (P3-D10): its tag, its paragraphs numbered from ¶0, then where the
  * caret is and the selection's opening. Over `maxTokens` (12,000), the paragraphs around the
- * caret (the end, without one) that fit, and a line naming the ones left out.
+ * caret (the end, without one) that fit, and a line naming the ones left out; a paragraph over
+ * the cap alone (imported text with no breaks) is sent as its opening and its end, and the line
+ * says it was shortened.
  */
 export function renderScribeScene(
   scene: ScribeSceneInput,
@@ -192,12 +217,14 @@ export function renderScribeScene(
   const lines = scene.paragraphs.map((text, i) => `¶${i} ${text}`)
   const total = lines.length
   let shown = lines.map((_, i) => i)
+  let cut: number | null = null
   if (estimateTokens(lines.join('\n')) > maxTokens && total > 0) {
     const centre = Math.min(Math.max(scene.caretPara ?? total - 1, 0), total - 1)
     let from = centre
     let to = centre
     let used = estimateTokens(lines[centre] ?? '')
-    for (let step = 0; from > 0 || to < total - 1; step++) {
+    if (used > maxTokens) cut = centre
+    for (let step = 0; cut === null && (from > 0 || to < total - 1); step++) {
       const before = step % 2 === 0
       const next = before ? from - 1 : to + 1
       if (next < 0 || next >= total) continue
@@ -209,6 +236,13 @@ export function renderScribeScene(
     }
     shown = shown.filter((i) => i >= from && i <= to)
   }
+  const sent = shown.map((para) => ({
+    para,
+    parts:
+      para === cut
+        ? shortened(scene.paragraphs[para] ?? '', maxTokens - 20)
+        : [scene.paragraphs[para] ?? '']
+  }))
   const first = shown[0] ?? 0
   const last = shown.at(-1) ?? -1
   const left: string[] = []
@@ -216,14 +250,15 @@ export function renderScribeScene(
   if (last < total - 1) left.push(paraRange(last + 1, total - 1))
   const notes: string[] = []
   if (left.length > 0) notes.push(`(${left.join(' and ')} not shown)`)
+  if (cut !== null) notes.push(`(¶${cut} shortened: its middle not shown)`)
   if (scene.caretPara !== null && scene.caretPara < total) {
     notes.push(`The author's caret is in ¶${scene.caretPara}.`)
   }
   if (scene.selection !== null && scene.selection.trim() !== '') {
     notes.push(`Selected: “${scene.selection.trim()}”`)
   }
-  const body = shown.map((i) => lines[i] ?? '')
-  return { text: [head, ...body, ...notes].join('\n'), shown }
+  const body = sent.map(({ para, parts }) => `¶${para} ${parts.join(` ${SCENE_CUT_MARK} `)}`)
+  return { text: [head, ...body, ...notes].join('\n'), shown, sent }
 }
 
 export interface BuildAgentPromptV9Input {

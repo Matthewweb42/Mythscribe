@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { AGENT_CARET_CHARS } from '@shared/agent'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { listRecords, savePage } from '../memory/recordStore'
 import { seedClaims } from '../memory/reading/claimFixture'
@@ -215,6 +216,15 @@ describe('Step 0 (F-16.24)', () => {
     expect(known.menu.map((item) => item.label)).toContain('idea')
   })
 
+  it('searches every earlier scene for a knows question naming a knower and what is known, so its absence has a scope', () => {
+    const step = ask('Does Liesel know about Varrow’s sister?', 'h09')
+    expect(step.terms).toEqual(['sister'])
+    expect(step.scope).toMatchObject({ allEarlier: true, terms: ['sister'] })
+    expect(ask('Who knows about Varrow’s sister?', 'h09').scope).toMatchObject({
+      terms: ['sister']
+    })
+  })
+
   it('labels E0 by what the open scene is: an Idea scene is never real', () => {
     expect(ask('Varrow’s eyes?', 'h09').e0?.label).toBe('happened')
     expect(ask('Varrow’s eyes?', 'h11').e0).toMatchObject({
@@ -315,8 +325,29 @@ describe('caretParaOf (F-16.25: E0 notes where the caret is)', () => {
   it('finds the paragraph the caret window ends in', () => {
     expect(caretParaOf(paragraphs, 'Mara watched the quay.\n\nTomas sold')).toBe(1)
     expect(caretParaOf(paragraphs, 'Mara watched the quay.')).toBe(0)
-    // A window cut inside one long paragraph holds its middle.
-    expect(caretParaOf(paragraphs, 'overheard')).toBe(2)
+    // A window cut inside one long paragraph (a full window) holds its middle.
+    const long = `${'Orrin waited. '.repeat(150)}Orrin overheard Tomas.`
+    const window = long.slice(-AGENT_CARET_CHARS)
+    expect(caretParaOf([...paragraphs.slice(0, 2), long], window)).toBe(2)
+  })
+
+  it('matches the blocks before the caret too, nearest the window’s own count from the top', () => {
+    // The caret a word into ¶0: a later paragraph opening alike is not it.
+    expect(
+      caretParaOf(
+        ['He ran to the quay.', 'She waited by the door.', 'He laughed at the gulls.'],
+        'He'
+      )
+    ).toBe(0)
+    // The caret in ¶1: the block before it must be ¶0's words.
+    expect(
+      caretParaOf(
+        ['The rain fell.', 'The sea rose.', 'Mara slept.', 'The end came.'],
+        'The rain fell.\n\nThe'
+      )
+    ).toBe(1)
+    // Empty blocks in the editor are no paragraphs.
+    expect(caretParaOf(paragraphs, 'Mara watched the quay.\n\n\n\nTomas sold')).toBe(1)
   })
 
   it('places a caret at the start of an empty block after the paragraph before it', () => {

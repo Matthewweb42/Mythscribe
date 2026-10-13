@@ -132,6 +132,24 @@ describe('addSheetLine and removeSheetLine (F-16.26)', () => {
     expect(blocksOf('pinned').map((block) => block.text)).toEqual(['Born: 1790', 'Loves the sea.'])
   })
 
+  it('undoes two lines of one turn in the order they were added (the second moved up)', () => {
+    const add = (text: string): ReturnType<typeof addSheetLine> =>
+      addSheetLine(book.db, { id: book.mara, page: 'pinned', text, turn: 't1' }, SCRIBE_NOW)
+    const first = add('Hates the sea.')
+    const second = add('Limps on the left.')
+    expect([first.index, second.index]).toEqual([0, 1])
+    const undo = (added: ReturnType<typeof addSheetLine>): void =>
+      void removeSheetLine(
+        book.db,
+        { id: book.mara, page: 'pinned', index: added.index, text: added.text, turn: 't1' },
+        SCRIBE_NOW
+      )
+    undo(first)
+    expect(blocksOf('pinned').map((block) => block.text)).toEqual(['Limps on the left.'])
+    undo(second)
+    expect(blocksOf('pinned')).toEqual([])
+  })
+
   it('writes only on a named record’s sheet', () => {
     expect(() =>
       addSheetLine(

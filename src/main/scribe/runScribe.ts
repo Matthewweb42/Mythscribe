@@ -10,7 +10,8 @@ import {
   type AgentStep
 } from '@shared/agent'
 import { findQuote } from '@shared/critique'
-import type { RecordPage } from '@shared/memory/records'
+import { caseForm, normName } from '@shared/memory/names'
+import type { RecordPage, StoryRecordSummary } from '@shared/memory/records'
 import { isNamedKind } from '@shared/memory/topics'
 import { isDirectionMessage } from '@shared/quickActions'
 import {
@@ -26,10 +27,12 @@ import {
   type ScribeTurnKind
 } from '@shared/scribe'
 import {
+  isAdviceOrQuestion,
   markerize,
   needsCitation,
   notFoundLine,
   parseCitedAnswer,
+  quoteHeld,
   scopeLine,
   scribeHistory,
   stripCitationMarkup,
@@ -49,7 +52,6 @@ import {
   type AgentResult
 } from '../ai/agent'
 import { loadAgentProject, type AgentProject } from '../ai/agentTools'
-import { recordByNameV2 } from '../ai/agentToolsV2'
 import { assertFeatureAllowed } from '../ai/dial'
 import { cancelInflight, registerInflight, releaseInflight } from '../ai/inflight'
 import {
@@ -58,7 +60,8 @@ import {
   renderScribeScene,
   scribeRoster,
   type BuildAgentPromptV9Input,
-  type BuiltAgentPromptV9
+  type BuiltAgentPromptV9,
+  type RenderedScene
 } from '../ai/prompts/agent.v9'
 import { promptInputBudget } from '../ai/prompts/catalogue'
 import type { ChatTurn } from '../ai/prompts/chat.v1'
@@ -129,6 +132,12 @@ export interface ScribeResult extends AgentResult {
   scribe: ScribeTurn
 }
 
+/** What a change turn says when its reply has no words of its own. */
+export const CHANGE_READY = 'Here is the change.'
+
+/** A sentence about Ms Scribe's own change on an edit or draft turn ("I added…", "I've moved…"). */
+const OWN_CHANGE = /^I(?:['’](?:ve|ll|d|m))?\b/u
+
 /** The `aiWritten` turn of a sheet line when the run has no request id (tests). */
 export const SCRIBE_TURN_FALLBACK = 'chat'
 
@@ -141,6 +150,14 @@ export const PIN_TOPIC = (name: string): string =>
   `“${name}” is a secret or a thread, which has no sheet, so I put nothing on it.`
 export const PIN_SAID = (name: string, page: RecordPage): string =>
   `${name}’s ${page === 'pinned' ? 'Pinned' : 'Ideas'} already says that, so I added nothing.`
+export const PIN_NOT_NAMED = (name: string): string =>
+  `You did not name ${name}, so I put nothing on ${name}’s sheet.`
+/** A sheet line the message never asked for (decision 3: only an explicit request writes). */
+export const PIN_NOT_ASKED =
+  'I put nothing on a sheet; ask me to put it on one if you want it there.'
+/** What a read run (Plan) says of a sheet line or a change it dropped. */
+export const PLAN_NO_PIN = 'Plan mode writes nothing; switch to Ask or Auto to put it on the sheet.'
+export const PLAN_NO_EDIT = 'Plan mode changes nothing; switch to Ask or Auto to make the change.'
 
 /** A turn's kind (P3 §2.3 step 1): the navigation's, else a Write this, an edit, or an answer. */
 export function scribeTurnOf(
@@ -241,7 +258,8 @@ const sizeOf = (built: { messages: { content: string }[] }): number =>
  * `agent.v9` within its input cap (P3 §2.2): the evidence to its own budget, the widened scenes to
  * 8,000, then, while the whole is over the cap, the farthest evidence goes first, then the oldest
  * history, then the widened chapter's farthest scene, then the voice block's exemplars. Never the
- * rules, E0 or the question.
+ * rules, E0 or the question. The cap is held with the retry turn counted, so the one retry of a
+ * cut-off reply (the same prompt and `AGENT_RETRY_TURN`) is never over it.
  */
 export function fitScribePrompt(input: ScribeFitInput): FittedScribePrompt {
   const budget = input.budget ?? promptInputBudget('agent', AGENT_PROMPT_V9_VERSION)
@@ -265,18 +283,16 @@ export function fitScribePrompt(input: ScribeFitInput): FittedScribePrompt {
         : { what: input.widened.what, text: renderEvidence(widened, Infinity, input.idOf).text }
   })
   let fitted = inputOf()
-  let built = buildAgentPromptV9(fitted)
-  while (sizeOf(built) > budget) {
+  while (sizeOf(buildAgentPromptV9({ ...fitted, retry: true })) > budget) {
     if (evidence.length > 0) evidence = evidence.slice(0, -1)
     else if (history.length > 0) history = history.slice(1)
     else if (widened.length > 0) widened = widened.slice(0, -1)
     else if (input.voice !== null && voice !== input.voice.bare) voice = input.voice.bare
     else break
     fitted = inputOf()
-    built = buildAgentPromptV9(fitted)
   }
   return {
-    built,
+    built: buildAgentPromptV9(fitted),
     input: fitted,
     sent: [...evidence, ...widened],
     dropped:
@@ -314,18 +330,6 @@ function povName(db: TreeDb, e0: SceneE0 | null): string | null {
   return getRecord(db, id)?.name ?? null
 }
 
-/** The first paragraph among `paragraphs` (numbered by `numbers`) holding `quote`; null for none. */
-function paraOf(
-  paragraphs: readonly string[],
-  numbers: readonly number[],
-  quote: string
-): number | null {
-  for (const n of numbers) {
-    if (findQuote(paragraphs[n] ?? '', quote)) return n
-  }
-  return null
-}
-
 /** A sentence item's paragraphs: `¶4 text` lines (a scene read) as numbers and texts. */
 function numberedLines(text: string): { para: number; text: string }[] {
   return text.split('\n').flatMap((line) => {
@@ -334,11 +338,42 @@ function numberedLines(text: string): { para: number; text: string }[] {
   })
 }
 
-/** A sheet line the answer may offer, or what it says instead (null: nothing to say). */
+/**
+ * The record a sheet line's name is (identity rules, design §2.2): one whose name or nickname is
+ * that name exactly (`normName`; a name matched in its exact case keeps its case), never a part of
+ * a name ("Rin" is not Orrin). A name several records hold is the one whose own name it is, else
+ * no one's: `ambiguous`. Undefined when no record has it.
+ */
+export function pinRecordOf(
+  records: readonly StoryRecordSummary[],
+  name: string
+): StoryRecordSummary | 'ambiguous' | undefined {
+  const norm = normName(name)
+  if (norm === '') return undefined
+  const holds = (record: StoryRecordSummary, main: boolean): boolean =>
+    record.aliases.some(
+      (alias) =>
+        alias.norm === norm &&
+        (!main || alias.isMain) &&
+        (alias.caseRule !== 'exact' || caseForm(alias.text) === caseForm(name))
+    )
+  const exact = records.filter((record) => holds(record, false))
+  if (exact.length === 1) return exact[0]
+  if (exact.length === 0) return undefined
+  const own = exact.filter((record) => holds(record, true))
+  return own.length === 1 ? own[0] : 'ambiguous'
+}
+
+/**
+ * A sheet line the answer may offer, or what it says instead (null: nothing to say). `named`:
+ * the records the message names (with the ones a shared name may mean); when it names any, the
+ * line goes on one of them only, never on a record she did not name.
+ */
 export function pinOf(
   project: AgentProject,
   raw: Record<string, unknown>,
-  turn: string
+  turn: string,
+  named: ReadonlySet<string> = new Set()
 ): { edit: Extract<AgentEdit, { kind: 'sheetLine' }> } | { say: string | null } {
   const name = typeof raw.name === 'string' ? raw.name.trim() : ''
   const text =
@@ -347,9 +382,11 @@ export function pinOf(
       : ''
   if (text === '') return { say: null }
   if (name === '') return { say: PIN_NO_RECORD('') }
-  const summary = recordByNameV2(project, name)
+  const summary = pinRecordOf(listRecords(project.db), name)
+  if (summary === 'ambiguous') return { say: PIN_NO_RECORD('') }
   if (summary === undefined) return { say: PIN_NO_RECORD(name) }
   if (!isNamedKind(summary.kind)) return { say: PIN_TOPIC(summary.name) }
+  if (named.size > 0 && !named.has(summary.id)) return { say: PIN_NOT_NAMED(summary.name) }
   const record = getRecord(project.db, summary.id)
   if (record === null) return { say: PIN_NO_RECORD(name) }
   // "ask" (or anything but a page): the chat asks "Is this an idea or canon?".
@@ -367,29 +404,34 @@ interface SentItem {
   label: EvidenceItem['label']
   ref: string
   title: string
-  text: string
+  /** The book's own words as sent (`EvidenceItem.quotable`): what the quote check reads. */
+  quotable: readonly string[]
   open: EvidenceItem['open']
-  /** For E0 and scene reads: the paragraphs sent, by number. */
-  lines: { para: number; text: string }[] | null
+  /** For E0 and scene reads: the paragraphs sent, by number (a shortened one's parts as sent). */
+  lines: { para: number; parts: readonly string[] }[] | null
   /** The scene a citation of it lands in, for the search-miss log (widened items only). */
   widened: boolean
 }
 
-function sentE0(e0: SceneE0, shown: readonly number[]): SentItem {
+/** E0 as it was sent (`renderScribeScene`'s paragraphs, a shortened one as its two parts). */
+function sentE0(e0: SceneE0, sent: RenderedScene['sent']): SentItem {
   return {
     id: 'E0',
     label: e0.label,
     ref: e0.ref,
     title: e0.title,
-    text: shown.map((n) => e0.paragraphs[n] ?? '').join('\n'),
+    quotable: sent.flatMap((line) => line.parts),
     open: { kind: 'scene', id: e0.nodeId, para: null },
-    lines: shown.map((para) => ({ para, text: e0.paragraphs[para] ?? '' })),
+    lines: sent,
     widened: false
   }
 }
 
 function sentOf(item: EvidenceItem, frame: EvidenceFrame): SentItem {
-  const lines = item.key.kind === 'scene' ? numberedLines(item.text) : null
+  const lines =
+    item.key.kind === 'scene'
+      ? numberedLines(item.text).map((line) => ({ para: line.para, parts: [line.text] }))
+      : null
   return {
     id: item.id,
     label: item.label,
@@ -398,25 +440,22 @@ function sentOf(item: EvidenceItem, frame: EvidenceFrame): SentItem {
         ? item.ref
         : sceneRefOf(frame, item.key.kind === 'scene' ? item.key.nodeId : ''),
     title: item.title,
-    text: item.text,
+    quotable: item.quotable,
     open: item.open,
     lines,
     widened: item.id.startsWith('W')
   }
 }
 
+/** The paragraph of a scene item (E0, a scene read) a quote lies in; null for none or another item. */
+function placeOf(item: SentItem, quote: string): number | null {
+  const line = item.lines?.find((each) => each.parts.some((part) => findQuote(part, quote)))
+  return line?.para ?? null
+}
+
 /** One kept citation in full: its label, the paragraph it lands in, where it opens. */
 function citationOf(n: number, evidence: string, quote: string, item: SentItem): ScribeCitation {
-  const lines = item.lines
-  const para =
-    lines === null
-      ? null
-      : paraOf(
-          lines.map((line) => line.text),
-          lines.map((_, i) => i),
-          quote
-        )
-  const at = para === null || lines === null ? null : (lines[para]?.para ?? null)
+  const at = placeOf(item, quote)
   const ref = at === null ? item.ref : `${item.ref} ¶${at}`
   const open = item.open === null ? null : at === null ? item.open : { ...item.open, para: at }
   return { n, evidence, label: item.label, ref, title: item.title, open, quote, checked: 'quote' }
@@ -494,6 +533,10 @@ export async function runScribe(
   }
   const history = scribeHistory(input.history)
   const evidenceBudget = turn === 'lookup' ? SCRIBE_LOOKUP_EVIDENCE_TOKENS : SCRIBE_EVIDENCE_TOKENS
+  // What the turn's search returned: a widening reads around it, and a citation outside it is a
+  // search miss (P3-D15).
+  const baseline = input.navigation?.hits ?? step0.hits
+  const terms = input.navigation?.terms ?? step0.terms
 
   const outer = input.requestId === undefined ? null : registerInflight(input.requestId)
   let current: string | null = null
@@ -626,15 +669,11 @@ export async function runScribe(
       // P3-D15: one Self-Route a turn, while the turn is under its cost cap.
       const target = costUsd >= AGENT_COST_CAP_USD ? null : resolveNeed(frame, asked.reply.need)
       if (target === null) return notFound(fitted.sent, null)
-      const step: AgentStep = { tool: 'read', label: `Reading ${target.what}…` }
-      steps.push(step)
-      onStep(step)
+      // The open scene is E0 already; a scene too long for the budget is read in part.
       const nodeIds = target.nodeIds.filter((id) => id !== e0?.nodeId)
-      const widened = resolveEvidence(db, widenKeys(frame, nodeIds), step0.nowId, {
-        frame,
-        prefix: 'W'
-      })
-      fitted = fitScribePrompt({
+      const keys = widenKeys(frame, nodeIds, { budget: SCRIBE_WIDEN_TOKENS, hits: baseline })
+      const widened = resolveEvidence(db, keys, step0.nowId, { frame, prefix: 'W' })
+      const wide = fitScribePrompt({
         base,
         evidence: resolved.items,
         evidenceBudget,
@@ -643,6 +682,12 @@ export async function runScribe(
         voice,
         ...(idOf === undefined ? {} : { idOf })
       })
+      // Nothing new to read (the need named the open scene, or nothing fits): no second call.
+      if (!wide.sent.some((item) => item.id.startsWith('W'))) return notFound(fitted.sent, null)
+      const step: AgentStep = { tool: 'read', label: `Reading ${target.what}…` }
+      steps.push(step)
+      onStep(step)
+      fitted = wide
       widenedWhat = target.what
       asked = await ask(fitted, 1)
       if (asked.reply.kind === 'need') return notFound(fitted.sent, widenedWhat)
@@ -663,17 +708,38 @@ export async function runScribe(
       }
     }
 
-    // Edits: Plan drops them all; a pin becomes a sheet line or a sentence saying why not.
+    // Edit and draft turns describe what Ms Scribe changes: a sentence about her own change ("I
+    // added a beat…") is no claim, but one that names a record or a scene is checked as any.
+    const changeTurn = turn === 'edit' || turn === 'draft'
+
+    // Edits: Plan drops them all and says so; a pin becomes a sheet line only when the message
+    // asked for one (decision 3), on a record it named, or a sentence says why not.
     const changes: AgentProposal[] = []
     const notOffered: string[] = []
+    const say = (sentence: string): void => {
+      if (!notOffered.includes(sentence)) notOffered.push(sentence)
+    }
+    const isPin = (raw: unknown): boolean =>
+      typeof raw === 'object' && raw !== null && (raw as Record<string, unknown>).edit === 'pin'
     if (!write) {
       dropped += reply.edits.length
+      if (reply.edits.some(isPin)) say(PLAN_NO_PIN)
+      else if (reply.edits.length > 0) say(PLAN_NO_EDIT)
     } else {
+      const named = new Set([
+        ...step0.names.records.map((name) => name.recordId),
+        ...step0.names.ambiguous.flatMap((name) => name.recordIds)
+      ])
       for (const raw of reply.edits.slice(0, AGENT_MAX_EDITS)) {
         const edit =
           typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : null
+        if (edit?.edit === 'pin' && !step0.cues.sheetWrite) {
+          dropped += 1
+          say(PIN_NOT_ASKED)
+          continue
+        }
         if (edit?.edit === 'pin') {
-          const pin = pinOf(project, edit, turnId)
+          const pin = pinOf(project, edit, turnId, named)
           const duplicate =
             'edit' in pin &&
             changes.some(
@@ -687,9 +753,7 @@ export async function runScribe(
             continue
           }
           dropped += 1
-          if ('say' in pin && pin.say !== null && !notOffered.includes(pin.say)) {
-            notOffered.push(pin.say)
-          }
+          if ('say' in pin && pin.say !== null) say(pin.say)
           continue
         }
         const offered = offerEdit(project, raw, profile)
@@ -699,20 +763,24 @@ export async function runScribe(
       dropped += Math.max(0, reply.edits.length - AGENT_MAX_EDITS)
     }
     const said = notOffered.length === 0 ? '' : `\n\n${notOffered.join(' ')}`
+    /** The answer with what code adds; a change turn whose reply has no words says it has a change. */
+    const withSaid = (text: string): string => {
+      const body = text.trim() === '' && changeTurn && changes.length > 0 ? CHANGE_READY : text
+      return body.trim() === '' ? said.trimStart() : `${body}${said}`
+    }
 
-    if (!reply.found) {
+    // "Not found" answers a question; an edit or draft turn's reply describes its change.
+    if (!reply.found && (turn === 'answer' || turn === 'lookup' || turn === 'idea')) {
       const missing = notFound(fitted.sent, widenedWhat)
       return { ...missing, answer: `${missing.answer}${said}`, changes }
     }
 
     // The code check of every citation (P3 §2.3 step 4).
     const sent = new Map<string, SentItem>()
-    if (e0 !== null && scene !== null) sent.set('E0', sentE0(e0, scene.shown))
+    if (e0 !== null && scene !== null) sent.set('E0', sentE0(e0, scene.sent))
     for (const item of fitted.sent) sent.set(item.id, sentOf(item, frame))
     const parsed = parseCitedAnswer(reply.answer.slice(0, AGENT_ANSWER_MAX))
     const index = askIndexOf(db, listRecords(db))
-    // Edit and draft turns describe what Ms Scribe changes, not the book: no "not checked" marks.
-    const checkable = turn !== 'edit' && turn !== 'draft'
     const kept = new Set<string>()
     let refused = parsed.malformed
     const verdicts: SentenceVerdict[] = parsed.sentences.map((sentence, i) => ({
@@ -722,15 +790,19 @@ export async function runScribe(
         const ok =
           item !== undefined &&
           item.label !== 'map' &&
-          citation.quote.trim() !== '' &&
-          findQuote(item.text, citation.quote) &&
+          quoteHeld(item.quotable, citation.quote) &&
           (kept.has(key) || kept.size < SCRIBE_CITATIONS_MAX)
         if (ok) kept.add(key)
         else refused += 1
         return ok
       }),
-      // The main claim: a found answer's first sentence must rest on a citation (P3-D14).
-      needsCitation: checkable && (i === 0 || needsCitation(sentence.text, index)),
+      needsCitation: changeTurn
+        ? !OWN_CHANGE.test(sentence.text.trim()) && needsCitation(sentence.text, index)
+        : // The main claim: a found answer's first sentence must rest on a citation (P3-D14),
+          // unless it is advice or a question back to the author (P3-D13).
+          i === 0
+          ? !isAdviceOrQuestion(sentence.text)
+          : needsCitation(sentence.text, index),
       unsupported: false
     }))
     const marked = markerize(parsed, verdicts)
@@ -742,15 +814,14 @@ export async function runScribe(
     })
 
     // Search misses (P3-D15): a kept citation into the widened text at a paragraph the turn's
-    // search did not return. Without a search (no words to search for) nothing is a miss.
-    const baseline = input.navigation?.hits ?? step0.hits
-    const terms = input.navigation?.terms ?? step0.terms
+    // search did not return. Without a search (no words to search for) nothing is a miss, and a
+    // citation code could not place in one paragraph is never logged.
     let misses = 0
     if (terms.length > 0) {
       for (const citation of citations) {
         const item = sent.get(citation.evidence)
         const nodeId = citation.open?.kind === 'scene' ? citation.open.id : null
-        const para = citation.open?.para ?? null
+        const para = item === undefined ? null : placeOf(item, citation.quote)
         if (item?.widened !== true || nodeId === null || para === null) continue
         if (baseline.some((hit) => hit.nodeId === nodeId && hit.para === para)) continue
         logSearchMiss(
@@ -771,7 +842,7 @@ export async function runScribe(
 
     return {
       ...totals(),
-      answer: `${marked.text}${said}`,
+      answer: withSaid(marked.text),
       changes,
       dropped: dropped + refused,
       steps,

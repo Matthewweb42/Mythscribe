@@ -20,6 +20,7 @@ import {
   agentV9System,
   buildAgentPromptV9,
   renderScribeScene,
+  SCENE_CUT_MARK,
   scribeRoster,
   scribeRosterLine,
   type BuildAgentPromptV9Input
@@ -221,6 +222,27 @@ describe('renderScribeScene (P3-D10)', () => {
     expect(first).toBeGreaterThan(0)
     expect(last).toBeLessThan(79)
     expect(rendered.text).toContain(`(¶0–${first - 1} and ¶${last + 1}–79 not shown)`)
+    expect(rendered.sent.map((line) => line.para)).toEqual(rendered.shown)
+  })
+
+  it('shortens one paragraph over the cap alone to its opening and end, and says so', () => {
+    const long = Array.from({ length: 12_000 }, (_, i) => `w${i}`).join(' ')
+    const rendered = renderScribeScene({
+      ref: '3.2',
+      label: 'happened',
+      title: 'Imported',
+      paragraphs: ['Short opening.', long],
+      caretPara: 1,
+      selection: null
+    })
+    expect(estimateTokens(rendered.text)).toBeLessThanOrEqual(SCRIBE_SCENE_MAX_TOKENS + 50)
+    expect(rendered.shown).toEqual([1])
+    const [head, tail] = rendered.sent[0]?.parts ?? []
+    expect(long.startsWith(head ?? '?')).toBe(true)
+    expect(long.endsWith(tail ?? '?')).toBe(true)
+    expect(rendered.text).toContain(`¶1 ${head ?? ''} ${SCENE_CUT_MARK} ${tail ?? ''}`)
+    expect(rendered.text).toContain('(¶0 not shown)')
+    expect(rendered.text).toContain('(¶1 shortened: its middle not shown)')
   })
 
   it('labels an Idea scene as one', () => {

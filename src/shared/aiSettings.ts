@@ -628,8 +628,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'source documents, lines filed from a document, Not canon text, your Ideas, synopses and ' +
       'planned scenes, idea scenes): scene paragraphs, the facts read from the book with their ' +
       'quotes, who knows what, story years and ages, scene cards, the outline, your to-dos. When ' +
-      'it needs more, up to about 8,000 tokens of one chapter. When it may edit (Ask, Auto), the ' +
-      "voice profile and your author rules, and your records' names for sheet lines.",
+      'it needs more, up to about 8,000 tokens of one chapter or range of scenes. When it may ' +
+      "edit (Ask, Auto), the voice profile and your author rules, and your records' names for " +
+      `sheet lines; prose it drafts (when you apply a change) carries ${STORY_NOTES_SENDS}.`,
     minDial: 1
   },
   contextImport: {

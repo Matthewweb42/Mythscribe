@@ -175,6 +175,19 @@ describe('resolveEvidence', () => {
     )
     expect(text('E16')).toContain('1.2 Two')
     expect(text('E17')).toBe('- Fix the tide times')
+    // What a quote may be checked against: the book's own words, never a line the app composed.
+    const quotable = (id: string): string[] =>
+      items.find((item) => item.id === id)?.quotable ?? ['missing']
+    expect(quotable('E1')).toEqual([
+      'Tomas sold the map to a stranger.',
+      'Orrin overheard Tomas from the yard.'
+    ])
+    expect(quotable('E4')).toEqual(['Born: 1790'])
+    expect(quotable('E10')).toEqual(['Mara watched the quay with her grey eyes.'])
+    expect(quotable('E11')).toEqual([])
+    expect(quotable('E12')).toEqual(['Tomas sold the map', 'Orrin overheard Tomas'])
+    expect(quotable('E15')).toEqual(['Maybe Mara has a twin in the north.'])
+    expect(quotable('E17')).toEqual(['Fix the tide times'])
     expect(items[16]?.open).toBeNull()
     expect(items[3]?.open).toEqual({ kind: 'record', id: book.mara, page: 'pinned', para: 0 })
     // Research made Not canon reads Not canon everywhere.
@@ -243,6 +256,7 @@ describe('renderEvidence', () => {
       ref: '1.1',
       title: id,
       text: Array.from({ length: words }, () => 'word').join(' '),
+      quotable: [],
       citable: true,
       open: null,
       doc: null

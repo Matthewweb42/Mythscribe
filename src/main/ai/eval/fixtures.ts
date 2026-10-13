@@ -927,11 +927,12 @@ export interface EvalCase {
     | { kind: 'verify'; expected: (boolean | 'notCounted')[] }
     /**
      * Ms Scribe's answer (F-16.25, `agent.v9`): the reply parses (`readScribeReply`); every
-     * citation names an item that was sent (`sent`, by id: the text as sent) and its quote is in
-     * that text, never a map (`maps`); `found` or a `need` as `expect` says; the expected edit and
+     * citation names an item that was sent (`sent`, by id: the book's words in it as sent, its
+     * `quotable` stretches) and its quote of 3 to 25 words lies within one of them, never a map
+     * (`maps`), as the code check holds it (`quoteHeld`); `found` or a `need` as `expect` says; the expected edit and
      * place, or none; no absence stated as fact without "searched"; the required phrases.
      */
-    | { kind: 'scribe'; sent: Record<string, string>; maps: string[]; expect: ScribeExpect }
+    | { kind: 'scribe'; sent: Record<string, string[]>; maps: string[]; expect: ScribeExpect }
 }
 
 /** A test-book label as a reader case scores against it. */
