@@ -76,7 +76,8 @@ export type HealthChoices = z.infer<typeof HealthChoices>
 
 const Asked = z.array(z.string())
 
-function readRow<T>(db: TreeDb, key: string, schema: z.ZodType<T>, fallback: T): T {
+/** A settings row read leniently: one that is missing or no longer parses reads as `fallback`. */
+export function readRow<T>(db: TreeDb, key: string, schema: z.ZodType<T>, fallback: T): T {
   const row = db.select().from(settings).where(eq(settings.key, key)).get()
   if (row === undefined) return fallback
   try {
@@ -87,7 +88,8 @@ function readRow<T>(db: TreeDb, key: string, schema: z.ZodType<T>, fallback: T):
   }
 }
 
-function writeRow(db: TreeDb, key: string, value: unknown): void {
+/** A settings row written whole. */
+export function writeRow(db: TreeDb, key: string, value: unknown): void {
   const json = JSON.stringify(value)
   db.insert(settings)
     .values({ key, value: json })

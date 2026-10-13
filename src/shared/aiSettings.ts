@@ -784,6 +784,22 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'and ages, outline entries and to-dos. Nothing for a question the book already answers (an ' +
       'instant card).',
     minDial: 1
+  },
+  judge: {
+    label: 'Contradiction check',
+    sends:
+      'Story memory v2 only. For each pair of passages that may not fit (two values the book ' +
+      'gives for the same thing, a character present after their death, someone passing on a ' +
+      'secret before learning it, a stated age against a birth year and that scene’s story year, ' +
+      'a plot thread advancing after it was resolved, the book against your notes or a Research ' +
+      'page): the name and what each side says (eyes: grey, brown), the quoted sentences with one ' +
+      'sentence either side, whether each sits earlier or later in the book, in a flashback or a ' +
+      'remembered moment, or in a note, whether it is narration, speech, thought or rumour, the ' +
+      'story years you typed or the book states for those scenes, and any time-skip sentence ' +
+      'between them. Sent after a reading or a note save (at most 10 pairs) and on Check the ' +
+      'book, which also sends up to 20 pairs with three sentences either side to the strong ' +
+      'model.',
+    minDial: 1
   }
 }
 
@@ -818,7 +834,7 @@ export const MEMORY_ONLY_FEATURES: Readonly<Record<StoryMemoryVersion, readonly 
   // F-16.25 (P3-D17): in v2 the navigator routes and Ms Scribe answers, so the router (`route`)
   // and Story Intelligence (`query`) are v1's.
   v1: ['tags', 'summary', 'continuity', 'organise', 'todo', 'sheetSync', 'route', 'query'],
-  v2: ['reader', 'verify', 'cite', 'navigator']
+  v2: ['reader', 'verify', 'cite', 'navigator', 'judge']
 }
 
 /** Several features behind one switch in Settings, which writes them all (P2a-D24). */
@@ -845,7 +861,15 @@ export const FEATURE_GROUPS: readonly FeatureGroup[] = [
     features: ['reader', 'verify'],
     memory: 'v2'
   },
-  { id: 'msScribe', label: 'Assistant', features: ['agent', 'navigator', 'cite'], memory: 'v2' }
+  { id: 'msScribe', label: 'Assistant', features: ['agent', 'navigator', 'cite'], memory: 'v2' },
+  // F-16.27 (design §2.6, P4-D21): the contradiction judge has its own switch; off, nothing is
+  // judged and findings and underlines are hidden (Use AI off keeps judged findings visible).
+  {
+    id: 'contradictionCheck',
+    label: 'Contradiction check',
+    features: ['judge'],
+    memory: 'v2'
+  }
 ]
 
 /** One row of a project's feature toggles: a feature, or a group in its first member's place. */

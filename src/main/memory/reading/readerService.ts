@@ -35,6 +35,7 @@ import {
   cloudCapState,
   cloudLimit,
   markCapNotice,
+  MEMORY_CLOUD_FEATURES,
   monthOf,
   reconcileTally,
   setCap,
@@ -89,6 +90,8 @@ import { linkPlansAfterReading } from './planLinks'
 import { markRebuilt, pickStrongDue, runSpotChecks } from './spotChecks'
 import { detailConflicts, keepMine } from './detailConflicts'
 import { notAbout, wrongValue } from './notRight'
+import { createFindingsService } from '../findings/findingsService'
+import type { FindingCounts } from '../findings/findingsJob'
 import type { RebuildContext } from '../switchover/plan'
 
 /**
@@ -162,6 +165,8 @@ export interface ReaderServiceDeps {
   notices: (notices: MemoryNotice[]) => void
   /** `jobs:changed` (only while a v2 project is open). */
   jobs: (status: IndexQueueStatus) => void
+  /** F-16.27: `memory:findingsChanged` after the contradiction judge stored verdicts. */
+  findingsChanged?: (counts: FindingCounts) => void
   /** The developer tools' log: a strong spot check's deletion (never the claim's text). */
   log?: (message: string) => void
   /** The queue's rate limit; tests pass 0. */
@@ -203,6 +208,13 @@ export interface ReaderService {
   setCloudCap(capUsd: number): CloudCapState
   /** `/credits` answered: the tally is raised to the server's reading spend. */
   reconcileCloud(credits: CreditsResult): void
+  /**
+   * F-16.27: queues a background `judge` run when unjudged pairs wait and the gates allow (the
+   * `findings` job asks after every recompute).
+   */
+  queueJudge(): void
+  /** F-16.27: whether a `judge` or `checkBook` job is queued or running. */
+  judging(): boolean
   queueStatus(): IndexQueueStatus
   cancelAll(): IndexQueueStatus
   resume(): IndexQueueStatus
@@ -234,7 +246,16 @@ const HOLD_MESSAGE: Record<Hold, string> = {
 const HEALTH_NEXT_STEP =
   'Switch the fast model, or choose Keep reading anyway on the story memory notice.'
 
-const READER_KINDS: readonly JobKind[] = ['read', 'rebuild', 'spotCheck', 'backfill']
+const READER_KINDS: readonly JobKind[] = [
+  'read',
+  'rebuild',
+  'spotCheck',
+  'backfill',
+  // F-16.27, F-16.30: the contradiction judge's runs (`findingsService.ts`).
+  'judge',
+  'checkBook'
+]
+const JUDGE_KINDS: readonly JobKind[] = ['judge', 'checkBook']
 /** How long after a write outside the editor the backlog is checked. */
 export const BACKLOG_DELAY_MS = 2_000
 /** How often, at most, the Cloud tally asks `/credits`. */
@@ -399,12 +420,16 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
             .where(eq(reading.draftId, draftId))
             .orderBy(desc(reading.created), sql`rowid DESC`)
             .get()
-    // Today's reading spend from the ledger: readings, their checks and the spot checks.
+    // Today's memory spend from the ledger: readings, their checks, the spot checks and (F-16.27)
+    // the contradiction judge.
     const today = db
       .select({ usd: sql<number>`coalesce(sum(${aiUsage.costUsd}), 0)` })
       .from(aiUsage)
       .where(
-        and(gte(aiUsage.at, startOfDay(now())), inArray(aiUsage.feature, ['reader', 'verify']))
+        and(
+          gte(aiUsage.at, startOfDay(now())),
+          inArray(aiUsage.feature, [...MEMORY_CLOUD_FEATURES])
+        )
       )
       .get()
     const provider = deps.provider(db)
@@ -657,6 +682,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       publish()
       return
     }
+    // F-16.27: the scene just read has its findings judged first.
+    findings.read(nodeId)
     // The secrets and threads the reading made, merged into, revived, gave up or pruned are named
     // too (plan P2b §2.4 step 7), so their views refresh even when no claim on them changed.
     deps.changed({
@@ -733,6 +760,27 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
 
   /** Each request's cost into the Cloud tally as it returns (a run that fails part-way counts). */
   const spender = (db: TreeDb, asked: boolean) => (usd: number) => tally(db, usd, asked)
+
+  /** F-16.27, F-16.30: the contradiction judge's runs, dispatched from this queue. */
+  const findings = createFindingsService({
+    settings: deps.settings,
+    provider: deps.provider,
+    requestDeps: deps.requestDeps,
+    cloudCapped: (db) => isCloud(db) && capReached(deps.cloud.get(), month()),
+    rebuilding: (db) => getRebuild(db)?.finishedAt === null,
+    spend: (db, usd, asked) => tally(db, usd, asked),
+    changed: deps.changed,
+    ...(deps.findingsChanged === undefined ? {} : { findingsChanged: deps.findingsChanged }),
+    now
+  })
+
+  /** Queues a background judge run when one is wanted (and none waits already). */
+  function queueJudge(): void {
+    const db = v2Db()
+    if (db === null || !findings.wanted(db)) return
+    const at = root(db)
+    if (at !== null) queue.indexAll('judge', [at], { afterRunning: true })
+  }
 
   async function runRead(
     db: TreeDb,
@@ -828,6 +876,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       markRebuilt(db, now())
       queue.indexAll('spotCheck', [at])
     }
+    // F-16.27: background judging waited for the rebuild.
+    queueJudge()
   }
 
   async function runSpot(db: TreeDb, requestId: string): Promise<JobRun<ReaderValue>> {
@@ -926,6 +976,16 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
         return runSpot(db, requestId)
       case 'backfill':
         return runBackfill(db, requestId)
+      case 'judge':
+      case 'checkBook': {
+        // F-16.27, F-16.30: the findings service owns both; a background run queues itself again.
+        const result =
+          kind === 'judge'
+            ? await findings.judge(db, requestId)
+            : await findings.checkBook(db, requestId)
+        if (result.again) queue.indexAll('judge', [nodeId], { afterRunning: true })
+        return { requested: result.requested, value: { outcome: null } }
+      }
       default:
         // Not the reader's: never queued here (the queue sees only its own kinds).
         return { requested: false, value: { outcome: null } }
@@ -997,6 +1057,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       // come first (a scene left unread at the last close is read now, P2a-D4).
       scheduleBacklog()
       checkBackfill()
+      queueJudge()
       publish()
     },
 
@@ -1004,6 +1065,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       const db = v2Db()
       if (db === null) return
       if (queue.status().paused !== null && readingAllowed(db)) queue.resume()
+      // F-16.27: the Contradiction check switched on (or a provider set up): judging resumes.
+      queueJudge()
       publish()
     },
 
@@ -1234,6 +1297,18 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       publish()
     },
 
+    queueJudge: () => queueJudge(),
+
+    judging() {
+      const db = v2Db()
+      if (db === null) return false
+      const running = queue.status().running?.kind
+      return (
+        (running !== undefined && JUDGE_KINDS.includes(running)) ||
+        listJobs(db, [...JUDGE_KINDS]).some((job) => job.status === 'queued')
+      )
+    },
+
     queueStatus: () => queue.status(),
 
     cancelAll() {
@@ -1271,6 +1346,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       localCutoff = null
       lastStatus = null
       lastNotices = null
+      findings.clear()
     }
   }
   return service

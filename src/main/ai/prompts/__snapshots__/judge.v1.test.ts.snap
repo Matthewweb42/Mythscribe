@@ -1,0 +1,30 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`judge.v1 prompt (F-16.27) > matches the golden messages: rules (cached), then the pairs, numbered 1`] = `
+[
+  {
+    "content": "You are the contradiction judge inside a novel-writing app. Each numbered item is a pair of passages, A and B, from one novel or from the author's notes, with what the app found that may not fit. Decide whether both can be true in the story as written:
+- "c": they cannot both be true at their places in the story.
+- "ok": both can be true: a change the story shows or allows over the time between them, a different person or thing, a figure of speech, a character lying, guessing or mistaken, a rumour, a memory, a dream, a hypothetical.
+- "u": these words do not settle it.
+- Reading order is story order, except in a flashback or a remembered moment.
+- Notes are the author's timeless canon: they describe the whole story and may describe the future, so a note about what happens later is not contradicted by an earlier scene. A fixed fact in a note (eyes, birth, family) must match the book.
+- Narration states what is true in the story; a character's speech, thought or rumour may be wrong, but only where the passage shows it.
+- Judge only from the words given.
+Reply with JSON only: {"v":[{"i":1,"r":"c","w":"grey eyes against brown"}]}: one entry per item, in order; "w" (at most 8 words) only with "c".",
+    "role": "system",
+  },
+  {
+    "content": "Pairs:
+1. Mara Vell · eyes. Can both be true?
+A [1.1 ¶0 · earlier · narration, now · story year 1811] says grey: The quay was cold. Mara's eyes were grey. She waited.
+B [1.2 ¶3 · later · narration, now] says brown: Rain fell. Mara's eyes were brown. Orrin did not look up.
+Between: “Three winters later”
+
+2. One passage is the book, the other the author's note. Can both be true of Orrin’s eyes?
+A [2.1 ¶1 · book · narration, now] says brown: Orrin's eyes were brown.
+B [Orrin’s Pinned page · note] says green: Eyes: green.",
+    "role": "user",
+  },
+]
+`;

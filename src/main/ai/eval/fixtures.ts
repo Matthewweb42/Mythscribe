@@ -1,4 +1,10 @@
-import { estimateTokens, GHOST_AFTER_CHARS, GHOST_BEFORE_CHARS, inputBudget } from '@shared/ai'
+import {
+  estimateTokens,
+  GHOST_AFTER_CHARS,
+  GHOST_BEFORE_CHARS,
+  inputBudget,
+  type Tier
+} from '@shared/ai'
 import { AUTHOR_RULES_TEXT_MAX, defaultAuthorRules } from '@shared/authorRules'
 import {
   AGENT_CARET_CHARS,
@@ -68,6 +74,8 @@ import { voiceBlock } from '../../voice/voiceBlock'
 import { MEMORY_EVAL_CASES, MEMORY_V2_EVAL_CASES } from './memoryFixtures'
 import { citeEvalCases } from './citeFixtures'
 import { navigatorEvalCases } from './navigatorFixtures'
+import { judgeEvalCases } from './judgeFixtures'
+import type { JudgeVerdict } from '@shared/memory/findings'
 import { scribeEvalCases } from './scribeFixtures'
 import { CARD_GIST_MAX_WORDS, CARD_LINE_MAX_WORDS } from '@shared/memory/claims'
 import type { PromptCard } from '@shared/memory/cardText'
@@ -764,6 +772,11 @@ export interface EvalCase {
   /** F-16.25 (P3-D11): the request's own reasoning, as the feature sends it (Ms Scribe's turns). */
   reasoning?: 'off' | 'low'
   /**
+   * F-16.27: the tier the case goes out on when it is not its catalogue entry's (the stronger
+   * check of *Check the book* sends `judge.v1` on `strong`).
+   */
+  tier?: Tier
+  /**
    * How a live answer is scored: a prose case is post-processed like ghost text and checked
    * against the profile (only when a voice block went out, as `generateGhostText` does); a JSON
    * case must parse and name bank tags only.
@@ -955,6 +968,17 @@ export interface EvalCase {
         kind: 'navigator'
         step: number
         expected: NavigatorExpected
+      }
+    /**
+     * The contradiction judge (F-16.27, `judge.v1`): the reply parses (`parseJudgeAnswer`, or
+     * `parseJudgeConfirm` for the stronger check); each item's verdict is one `accept` lists by
+     * index (null: any verdict, but one); each reason within its word cap (8, with `c` only; the
+     * confirm's 20, with every verdict); no field outside the schema.
+     */
+    | {
+        kind: 'judge'
+        accept: (JudgeVerdict[] | null)[]
+        confirm: boolean
       }
 }
 
@@ -6755,5 +6779,7 @@ export const EVAL_CASES: EvalCase[] = [
   // F-16.25 (P3 slice 3): Ms Scribe's quote check (cite.v1), story memory v2 only.
   ...citeEvalCases(),
   // F-16.25 (P3 slice 4): Ms Scribe's navigator, in place of route.v2 in story memory v2.
-  ...navigatorEvalCases()
+  ...navigatorEvalCases(),
+  // F-16.27 (P4 slice 2): the contradiction judge, its batches and Check the book's stronger check.
+  ...judgeEvalCases()
 ]

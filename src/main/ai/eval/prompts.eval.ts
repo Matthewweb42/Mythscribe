@@ -27,6 +27,13 @@ import { WHAT_NEXT_DIRECTIONS } from '@shared/whatNext'
 import { parseAgentReply } from '../agent'
 import { readScribeReply } from '../../scribe/runScribe'
 import { CITE_SENTINEL, parseCiteReply } from '../prompts/cite.v1'
+import {
+  JUDGE_CONFIRM_WHY_WORDS,
+  JUDGE_SENTINEL,
+  JUDGE_WHY_WORDS,
+  parseJudgeAnswer,
+  parseJudgeConfirm
+} from '../prompts/judge.v1'
 import { NAVIGATOR_SENTINEL, parseNavigatorStep } from '../prompts/navigator.v1'
 import { parseCitedAnswer, quoteHeld, statesAbsenceAsFact, statesScope } from '@shared/scribeAnswer'
 import { parseBetaReaderAnswerV2 } from '../betaReader'
@@ -973,6 +980,74 @@ function scoreCite(
     : { kind: 'json', ok: false, problem: wrong.join(', ') }
 }
 
+/** A reason's words. */
+const wordCount = (text: unknown): number =>
+  typeof text === 'string'
+    ? text
+        .trim()
+        .split(/\s+/u)
+        .filter((word) => word !== '').length
+    : 0
+
+/**
+ * The contradiction judge (F-16.27, `judge.v1`): the reply as the feature reads it
+ * (`parseJudgeAnswer`, or `parseJudgeConfirm` for the stronger check); each item's verdict one the
+ * case accepts (a planted contradiction `c`, a trap `ok` or `u`; null: any, but one); each reason
+ * within its word cap as sent (8 words, with `c` only; the confirm's 20, with every verdict); no
+ * field outside the schema (no prose).
+ */
+function scoreJudge(
+  scoring: Extract<EvalCase['scoring'], { kind: 'judge' }>,
+  answer: string
+): LiveResult['verdict'] {
+  let json: unknown
+  try {
+    json = JSON.parse(unfence(answer))
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not one JSON object' }
+  }
+  const root = typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {}
+  const problems: string[] = []
+  if (scoring.confirm) {
+    const ruling = parseJudgeConfirm(answer)
+    if (ruling === null) return { kind: 'json', ok: false, problem: 'not {"r": ...}' }
+    const extra = Object.keys(root).filter((key) => key !== 'r' && key !== 'w')
+    if (extra.length > 0) problems.push(`fields outside the schema: ${extra.join(', ')}`)
+    if (wordCount(root.w) > JUDGE_CONFIRM_WHY_WORDS) problems.push('reason over 20 words')
+    const want = scoring.accept[0] ?? null
+    if (want !== null && !want.includes(ruling.r)) {
+      problems.push(`${ruling.r}, expected ${want.join(' or ')}`)
+    }
+  } else {
+    const rulings = parseJudgeAnswer(answer)
+    if (rulings.size === 0) return { kind: 'json', ok: false, problem: 'not { v: [...] }' }
+    const extra = Object.keys(root).filter((key) => key !== 'v')
+    if (extra.length > 0) problems.push(`fields outside the schema: ${extra.join(', ')}`)
+    const items = Array.isArray(root.v) ? root.v : []
+    for (const item of items) {
+      const entry =
+        typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : {}
+      const fields = Object.keys(entry).filter((key) => key !== 'i' && key !== 'r' && key !== 'w')
+      if (fields.length > 0) problems.push(`item fields outside the schema: ${fields.join(', ')}`)
+      if (wordCount(entry.w) > JUDGE_WHY_WORDS)
+        problems.push(`item ${String(entry.i)}: reason over 8 words`)
+      if (entry.r !== 'c' && wordCount(entry.w) > 0) {
+        problems.push(`item ${String(entry.i)}: a reason without c`)
+      }
+    }
+    for (const [i, want] of scoring.accept.entries()) {
+      const got = rulings.get(i + 1)
+      if (got === undefined) problems.push(`${i + 1}: no verdict`)
+      else if (want !== null && !want.includes(got.r)) {
+        problems.push(`${i + 1}: ${got.r}, expected ${want.join(' or ')}`)
+      }
+    }
+  }
+  return problems.length === 0
+    ? { kind: 'json', ok: true, problem: null }
+    : { kind: 'json', ok: false, problem: problems.join('; ') }
+}
+
 /** The fields a navigator step may carry: ids, names, words and the request restated, never prose. */
 const NAVIGATOR_FIELDS = new Set([
   'a',
@@ -1148,7 +1223,8 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
     const estimatedIn = tokenRows([c])[0]?.total ?? 0
     const reply = await runAiRequest(run.deps, {
       feature: entry.feature,
-      tier: entry.tier,
+      // F-16.27: a case's own tier (Check the book's stronger check sends judge.v1 on strong).
+      tier: c.tier ?? entry.tier,
       messages: c.messages,
       maxTokens: c.maxTokens,
       json: entry.output === 'json',
@@ -1415,6 +1491,10 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
       })
       continue
     }
+    if (c.scoring.kind === 'judge') {
+      results.push({ ...base, answer: reply.text, verdict: scoreJudge(c.scoring, reply.text) })
+      continue
+    }
     if (c.scoring.kind === 'structure') {
       results.push({
         ...base,
@@ -1494,6 +1574,65 @@ describe('navigator scoring (F-16.25): what the owed live run checks', () => {
   })
 })
 
+describe('judge scoring (F-16.27): what the owed live run checks', () => {
+  const batch = (
+    accept: ('c' | 'ok' | 'u')[][]
+  ): Extract<EvalCase['scoring'], { kind: 'judge' }> => ({ kind: 'judge', accept, confirm: false })
+  it('scores each verdict against what the case accepts, the reasons and the schema', () => {
+    const ok = { kind: 'json', ok: true, problem: null }
+    expect(
+      scoreJudge(
+        batch([['c'], ['ok', 'u']]),
+        '{"v":[{"i":1,"r":"c","w":"grey against brown"},{"i":2,"r":"u"}]}'
+      )
+    ).toEqual(ok)
+    expect(scoreJudge(batch([['c'], ['ok', 'u']]), '{"v":[{"i":1,"r":"ok"}]}')).toMatchObject({
+      ok: false,
+      problem: '1: ok, expected c; 2: no verdict'
+    })
+    expect(
+      scoreJudge(
+        batch([['c']]),
+        '{"v":[{"i":1,"r":"c","w":"one two three four five six seven eight nine"}],"note":"x"}'
+      )
+    ).toMatchObject({
+      ok: false,
+      problem: 'fields outside the schema: note; item 1: reason over 8 words'
+    })
+    expect(scoreJudge(batch([['ok']]), '{"v":[{"i":1,"r":"ok","w":"a change"}]}')).toMatchObject({
+      ok: false,
+      problem: 'item 1: a reason without c'
+    })
+    expect(scoreJudge(batch([['c']]), 'no')).toMatchObject({
+      ok: false,
+      problem: 'not one JSON object'
+    })
+  })
+
+  it('scores the stronger check: one verdict with a reason of 20 words at most', () => {
+    const confirm: Extract<EvalCase['scoring'], { kind: 'judge' }> = {
+      kind: 'judge',
+      accept: [['c']],
+      confirm: true
+    }
+    expect(
+      scoreJudge(confirm, '{"r":"c","w":"grey in 1.1, brown in 1.2, no change shown"}')
+    ).toEqual({
+      kind: 'json',
+      ok: true,
+      problem: null
+    })
+    expect(scoreJudge(confirm, '{"r":"ok","w":"a change"}')).toMatchObject({
+      ok: false,
+      problem: 'ok, expected c'
+    })
+    expect(scoreJudge(confirm, `{"r":"c","w":"${'word '.repeat(25)}"}`)).toMatchObject({
+      ok: false,
+      problem: 'reason over 20 words'
+    })
+  })
+})
+
 describe('the live prompt eval, end to end against a fake OpenRouter (F-16.22; nothing spent)', () => {
   it('starts from OPENROUTER_API_KEY alone and sends every case as the app does', async () => {
     const server = fakeChatServer(() => ({ text: '{}' }))
@@ -1520,6 +1659,16 @@ describe('the live prompt eval, end to end against a fake OpenRouter (F-16.22; n
     )
     expect(memory.length).toBeGreaterThan(0)
     for (const call of memory) expect(call.body.reasoning).toEqual({ enabled: false })
+    // F-16.27: the contradiction judge asks for no reasoning on both tiers, and Check the book's
+    // stronger check goes out on the strong model.
+    const judged = server.calls.filter((call) =>
+      (call.messages[0]?.content ?? '').startsWith(JUDGE_SENTINEL)
+    )
+    expect(judged.length).toBe(EVAL_CASES.filter((c) => c.version === 'judge.v1').length)
+    for (const call of judged) expect(call.body.reasoning).toEqual({ enabled: false })
+    expect(
+      judged.filter((call) => call.body.model === OPENROUTER_DEFAULT_MODELS.strong)
+    ).toHaveLength(EVAL_CASES.filter((c) => c.version === 'judge.v1' && c.tier === 'strong').length)
     expect(
       results.filter((result) => result.costUsd !== 0.0001).map((result) => result.name)
     ).toEqual([])

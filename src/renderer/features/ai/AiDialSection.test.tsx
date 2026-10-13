@@ -188,6 +188,15 @@ describe('AiDialSection (F-14.4, F-5.21)', () => {
     await userEvent.click(scribe)
     await waitFor(() => expect(sets()).toHaveLength(4))
     expect(sets()[3]?.features).toMatchObject({ agent: true, navigator: true, cite: true })
+    // F-16.27 (P4-D21): the contradiction check is its own switch, writing `judge` alone.
+    const check = screen.getByRole('checkbox', { name: 'Contradiction check' })
+    expect(check).toBeChecked()
+    await userEvent.click(check)
+    await waitFor(() => expect(sets()).toHaveLength(5))
+    expect(sets()[4]?.features).toMatchObject({ judge: false, reader: true, agent: true })
+    await userEvent.click(check)
+    await waitFor(() => expect(sets()).toHaveLength(6))
+    expect(sets()[5]?.features.judge).toBe(true)
     // The data-sharing table keeps one row per id.
     const table = screen.getByRole('table', { name: 'What each AI feature sends' })
     expect(within(table).getAllByRole('row').slice(1)).toHaveLength(AI_FEATURE_IDS.length)

@@ -288,6 +288,7 @@ import {
   SheetMemory,
   SplitTopicResult,
   ThreadsMemory,
+  FindingsView,
   TimelineMemory,
   TopicNotRightResult
 } from '../memory/views'
@@ -3580,6 +3581,13 @@ export const contract = {
     input: z.object({ recordId: z.string().nullable() }),
     output: TimelineMemory
   },
+  /**
+   * F-16.27 (plan P4 §2.4): the active draft's contradictions: the open findings (those touching
+   * `nodeId` first, then by rule and reading order) and the unclear ones, both sides resolved for
+   * display, counts by state, how many wait for a verdict, and whether a judge run is queued or
+   * running. Empty while the Contradiction check switch is off. Local and free.
+   */
+  'memory:findings': { input: z.object({ nodeId: z.string().nullable() }), output: FindingsView },
   /**
    * F-16.25 (P3-D15): Ms Scribe's search misses, newest first (at most `SEARCH_MISSES_LIST_MAX`):
    * passages a widened answer cited that the turn's searches had not returned. Local; the count

@@ -1013,6 +1013,43 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     }
   )
 
+  it.each(['fast', 'strong'] as const)(
+    'F-16.27 (design §2.3, P4 slice 2): judge.v1 on the %s tier leaves Cloud, OpenRouter and a direct OpenAI key with reasoning off, and the lowest effort',
+    async (tier) => {
+      for (const id of ['cloud', 'openrouter', 'openai'] as const) {
+        const f = fakes()
+        const seen: CompletionRequest[] = []
+        f.complete.mockImplementation((request) => {
+          seen.push(request)
+          return Promise.resolve({
+            text: '{"v":[]}',
+            model: 'm',
+            usage: { inputTokens: 1, outputTokens: 1 }
+          })
+        })
+        if (f.provider === null) throw new Error('no provider')
+        f.provider = { ...f.provider, id }
+        // Thinking on for both tiers in Settings: never for the contradiction judge.
+        const routing = {
+          ...defaultAiRouting(),
+          reasoning: { fast: 'low' as const, strong: 'default' as const }
+        }
+        f.deps.routing = () => ({ routing, table: autoTable(null) })
+        await runAiRequest(f.deps, {
+          ...input,
+          feature: 'judge',
+          tier,
+          json: true,
+          maxTokens: tier === 'strong' ? 90 : 72,
+          promptVersion: 'judge.v1',
+          contextHash: `${id}-judge-${tier}`
+        })
+        expect(seen.at(-1)?.reasoning, `${id} ${tier}`).toBe('off')
+        if (id !== 'cloud') expect(seen.at(-1)?.lowestEffort, `${id} ${tier}`).toBe(true)
+      }
+    }
+  )
+
   it('F-16.9: sends contextImport.v3 and reviewChat.v3 with reasoning off, and leaves reviewChat.v2 as it was', async () => {
     const f = fakes()
     const seen: CompletionRequest[] = []
@@ -1073,6 +1110,7 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
     ['verify', 'off'],
     ['cite', 'off'],
     ['navigator', 'off'],
+    ['judge', 'off'],
     ['tags', undefined],
     ['agent', undefined]
   ] as const)(

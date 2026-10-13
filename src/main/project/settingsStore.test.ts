@@ -207,17 +207,17 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
   it('keeps a toggle this build does not know through a save, so a newer build reads it back (F-16.2)', () => {
     open('novel')
     setRaw(
-      // `judge` is P4's id (F-16.17 made `reader` one of this build's).
-      JSON.stringify({ dial: 1, features: { chat: false, judge: false, oddValue: 'x' } }),
+      // `oracle` is no id of this build's (F-16.17 made `reader` one, F-16.27 `judge`).
+      JSON.stringify({ dial: 1, features: { chat: false, oracle: false, oddValue: 'x' } }),
       AI_SETTINGS_KEY
     )
     const read = getAiSettings(db)
-    expect(read.features).not.toHaveProperty('judge')
+    expect(read.features).not.toHaveProperty('oracle')
     setAiSettings(db, { ...read, chatMode: 'plan' })
     const stored = JSON.parse(rows(AI_SETTINGS_KEY)[0]?.value ?? '{}') as {
       features: Record<string, unknown>
     }
-    expect(stored.features.judge).toBe(false)
+    expect(stored.features.oracle).toBe(false)
     expect(stored.features.chat).toBe(false)
     // Only booleans are carried over.
     expect(stored.features).not.toHaveProperty('oddValue')

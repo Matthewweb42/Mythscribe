@@ -12,6 +12,24 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-13 · F-16.27 · P4 slice 2 (judge.v1, both orders, the verdict cache, background judging): calls made while building it
+- Question: Building slice 2 (feature `judge`, the Contradiction check switch, `judge.v1`, the two-call batches, the verdict cache keys, the background judge on the reader's queue, `memory:findings`; no UI) needed calls the plan left to the build.
+- Chosen (decided by Claude, unconfirmed):
+  1. **What a pair shows the judge:** each passage line names its place, whether it is earlier, later, in the same scene (earlier or later paragraph), the same paragraph, a note or the book side of a note pair, its voice and mode ("on the page" for a presence), "flashback" and the story year you typed or the scene states (never a carried one), then what code read it as saying ("says grey") and its sentence with one either side. The question names the record and the slot, never which passage is which, so the swapped call reads true.
+  2. **Fitting a pair in 260 tokens:** the passages' context is cut around the quote from 450 characters down to 160 until the pair fits; the cut is measured without the scene numbers, so moving a scene never changes the words the judge reads (or the remembered verdict).
+  3. **The remembered verdict's key** leaves out the pair's number and the scenes' numbers and folds every name and nickname to its record, so a scene move and a Rename in book cost nothing. A secret's or thread's label is not a name: renaming one has its pairs judged again.
+  4. **One "fine" settles a pair:** a run always asks both orders, but a pair left with one "fine" and the other order unanswered (a reply cut off) is closed as fine and not asked again (the plan's "any ok clears it"); a pair left with one "contradiction" waits, and the next run asks only the missing order. The judge's reason shown is the A,B call's, else the B,A call's.
+  5. **What counts against the limits:** pairs settled from remembered verdicts are free and count toward neither the 10 a run nor the 30 a day; a pair sent counts once whichever orders it needed, answered or not. A call's cost is shared equally among the pairs it carried.
+  6. **Quiet holds:** with the Contradiction check off, Use AI off, no provider, a rebuild running, today's 30 pairs used, the daily cap reached or (on Cloud) the monthly cap reached, a judge job goes quietly and the reading queue it shares is never paused; the next change that moves a finding (or turning the switch on, a reopen, a rebuild finishing) queues it again. The daily cap reached in the middle of a run keeps what was judged.
+  7. **After a rebuild,** background judging resumes on its own (at most 10 pairs, then 30 a day) until slice 3 adds the rebuild's own sweep of 60.
+  8. **Check the book's job** exists from this slice: it judges every unjudged pair as spend you asked for (past the Cloud cap and the daily pair limit, never past the daily cap); C7, the stronger check and the report come with slice 3 and its channel.
+  9. **`memory:findings`** answers nothing while the Contradiction check is off; with Use AI off it still lists what was judged ("judging paused", P4-D21).
+  10. **The stronger check's render** uses the same version with its own reply line (a verdict and up to 20 words with every verdict), so the batch rules stay one cached prefix.
+  11. **Costs:** the registry rows keep the design's sizes (1,500 / 300 a call, 600 / 90 for the stronger check) so Check the book and the heavy month stay priced as designed; the eval fixtures measure 420–1,360 tokens a call on the test book (2,683 for ten pairs at the cap) and about 640 for the stronger check.
+- Alternatives: show only the quotes, no values; key the cache with scene numbers; ask the second order even after a "fine"; count free pairs toward the limits; pause the reading queue when judging is off; leave the checkBook job kind for slice 3.
+- To change it: `src/main/ai/prompts/judge.v1.ts` (1, 2, 10), `src/main/memory/findings/judge.ts` (1, 3, 4, 5), `src/main/memory/findings/findingsService.ts` (5, 6, 8), `src/main/memory/reading/readerService.ts` `closeRebuild` (7), `src/main/memory/findings/findingViews.ts` (9), `src/shared/aiCostNotes.ts` (11).
+- Not run: live fidelity for `judge.v1` (8 cases: `MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=… npm run eval:ai`) needs your key; the live contradictions run (false alarms, judge agreement, underline precision) is slice 6's, also yours to run.
+
 ## 2026-10-13 · F-16.27, F-16.29 · P4 slice 1 review: calls made while fixing it
 - Question: The review of slice 1 found false candidates, missed ones, findings that kept verdicts for words the judge never saw, and a slow note check. Fixing them needed these calls.
 - Chosen (decided by Claude, unconfirmed):

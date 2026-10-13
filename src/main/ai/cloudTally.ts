@@ -43,8 +43,11 @@ export function defaultMemoryCloudState(): MemoryCloudState {
   }
 }
 
-/** The features whose Cloud spend is story memory reading (the server's `periodSpend` rows). */
-export const MEMORY_CLOUD_FEATURES: readonly AiFeatureId[] = ['reader', 'verify']
+/**
+ * The features whose Cloud spend is story memory's own (the server's `periodSpend` rows): the
+ * reading and its check, and (F-16.27, P4-D26) the contradiction judge, background or asked.
+ */
+export const MEMORY_CLOUD_FEATURES: readonly AiFeatureId[] = ['reader', 'verify', 'judge']
 
 /** The local calendar month of `now` as `YYYY-MM`. */
 export function monthOf(now: Date): string {
@@ -103,8 +106,8 @@ export function markCapNotice(state: MemoryCloudState, month: string): MemoryClo
 }
 
 /**
- * Raises the month's background tally to the server's reading spend (P2a-D10): the `reader` and
- * `verify` rows of `/credits`'s rolling period, less what this machine counted as asked, but only
+ * Raises the month's background tally to the server's memory spend (P2a-D10): the `reader`,
+ * `verify` and `judge` rows of `/credits`'s rolling period, less what this machine counted as asked, but only
  * when the period's oldest charge falls inside this month (the period is not a calendar month, so
  * otherwise its figure holds last month's spend). Never lowers the tally.
  */

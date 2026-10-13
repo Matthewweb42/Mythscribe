@@ -187,5 +187,7 @@ describe('the findings recompute at novel size (F-16.27)', () => {
     expect(notes.filter((row) => cast.includes(row.recordId))).toHaveLength(CAST + 20)
     const ms = fastest(5, () => recomputeFindings(db, PERF_NOW))
     expect(ms, `recompute with the cast: ${ms.toFixed(1)} ms`).toBeLessThan(BUDGET_MS)
-  })
+    // The budget is the recompute's; seeding 900 claims and indexing the upload takes about 4 s
+    // alone and more under the full suite's load, past Vitest's 5 s default.
+  }, 30_000)
 })

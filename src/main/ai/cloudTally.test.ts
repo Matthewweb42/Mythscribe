@@ -64,7 +64,11 @@ describe('the Cloud monthly tally (F-16.19, P2a §3.6)', () => {
     expect(capReached(state, OCT)).toBe(false)
     expect(cloudCapState(state, OCT)).toMatchObject({ limitUsd: 2, extraUsd: 1, reached: false })
     state = setCap(state, 0.25, OCT)
-    expect(cloudCapState(state, OCT)).toMatchObject({ capUsd: 0.25, limitUsd: 1.25, reached: false })
+    expect(cloudCapState(state, OCT)).toMatchObject({
+      capUsd: 0.25,
+      limitUsd: 1.25,
+      reached: false
+    })
     expect(() => setCap(state, 0.3, OCT)).toThrow()
     // The extra lasts one month.
     expect(cloudCapState(state, '2026-11')).toMatchObject({ extraUsd: 0, limitUsd: 0.25 })
@@ -83,17 +87,21 @@ describe('the Cloud monthly tally (F-16.19, P2a §3.6)', () => {
       periodSpend: [
         { feature: 'reader', micros: readerMicros, requests: 10, tokens: 1 },
         { feature: 'verify', micros: 100_000, requests: 5, tokens: 1 },
+        // F-16.27 (P4-D26): the contradiction judge is memory spend too.
+        { feature: 'judge', micros: 50_000, requests: 2, tokens: 1 },
         { feature: 'chat', micros: 9_000_000, requests: 1, tokens: 1 }
       ],
       periodFirstChargeAt: firstAt === null ? null : firstAt.getTime()
     })
     const inOctober = new Date(2026, 9, 2, 9, 0, 0)
-    // Server: 0.5 + 0.1 = 0.6 of reading, 0.2 of it asked here: background 0.4 > 0.1.
-    expect(reconcileTally(spent(0.1, 0.2), credits(500_000, inOctober), NOW).backgroundUsd).toBeCloseTo(
-      0.4
-    )
+    // Server: 0.5 + 0.1 + 0.05 = 0.65 of memory spend, 0.2 of it asked here: background 0.45 > 0.1.
+    expect(
+      reconcileTally(spent(0.1, 0.2), credits(500_000, inOctober), NOW).backgroundUsd
+    ).toBeCloseTo(0.45)
     // Never lowered.
-    expect(reconcileTally(spent(0.9, 0.2), credits(500_000, inOctober), NOW).backgroundUsd).toBe(0.9)
+    expect(reconcileTally(spent(0.9, 0.2), credits(500_000, inOctober), NOW).backgroundUsd).toBe(
+      0.9
+    )
     // A period reaching into September says nothing about October alone.
     const inSeptember = new Date(2026, 8, 20, 9, 0, 0)
     expect(reconcileTally(spent(0.1), credits(900_000, inSeptember), NOW).backgroundUsd).toBe(0.1)

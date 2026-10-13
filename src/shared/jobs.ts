@@ -62,7 +62,12 @@ export const JobKind = z.enum([
   'backfill',
   // F-16.27 (story memory v2 only): the local recompute of the contradiction candidates, one job per
   // project keyed to the manuscript root, on the mention queue (no AI, nothing sent).
-  'findings'
+  'findings',
+  // F-16.27, F-16.30 (story memory v2 only): the contradiction judge's background run (at most 10
+  // pairs, both orders) and *Check the book* (every uncached pair, then the stronger check), each one
+  // job per project keyed to the manuscript root, on the reader's provider-backed queue.
+  'judge',
+  'checkBook'
 ])
 export type JobKind = z.infer<typeof JobKind>
 

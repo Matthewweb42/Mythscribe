@@ -471,6 +471,7 @@ import {
 } from '../memory/nameIndexer'
 import { anchorsChanged, runAnchors } from '../memory/reading/anchors'
 import { runFindingsJob } from '../memory/findings/findingsJob'
+import { findingsView } from '../memory/findings/findingViews'
 import { isUnderResearch } from '../research/researchTree'
 import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
 import { settleOwnedNames } from '../memory/reading/waiting'
@@ -946,10 +947,13 @@ export function registerHandlers({
         return Promise.resolve({ requested: false, value: { changed, scanned: changed } })
       }
       if (job.kind === 'findings') {
-        // F-16.27: the local recompute of the contradiction candidates (no AI, nothing sent).
+        // F-16.27: the local recompute of the contradiction candidates (no AI, nothing sent); a
+        // pair both of whose orders the verdict cache remembers is settled at no cost, and the
+        // ones still unjudged are handed to the judge on the reader's queue (when the gates allow).
         if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
-        const result = runFindingsJob(db, now)
+        const result = runFindingsJob(db, now, { cachedVerdicts: true })
         if (result.counts !== null) emit(windows(), 'memory:findingsChanged', result.counts)
+        reader.queueJudge()
         return Promise.resolve({
           requested: false,
           value: { changed: result.changed, scanned: result.changed }
@@ -1103,6 +1107,7 @@ export function registerHandlers({
     status: (status) => emit(windows(), 'memory:statusChanged', status),
     notices: (notices) => emit(windows(), 'memory:noticesChanged', notices),
     jobs: (status) => emit(windows(), 'jobs:changed', status),
+    findingsChanged: (counts) => emit(windows(), 'memory:findingsChanged', counts),
     log: (message) => devtools.record('warn', 'ai', message, null)
   })
 
@@ -5392,6 +5397,15 @@ export function registerHandlers({
   register('memory:timeline', ({ recordId }) =>
     timelineMemory(manager.require().connection.orm, recordId)
   )
+
+  // F-16.27: the contradictions found and judged, hidden while the Contradiction check is off.
+  register('memory:findings', ({ nodeId }) => {
+    const db = manager.require().connection.orm
+    return findingsView(db, nodeId, {
+      on: getAiSettings(db).features.judge,
+      judging: reader.judging()
+    })
+  })
 
   // F-16.25 (P3-D15): Ms Scribe's search misses, for Settings and F-16.35.
   register('scribe:searchMisses', ({ limit }) =>

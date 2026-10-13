@@ -40,6 +40,9 @@ import { cardNotRight, dismissClaimsNotRight, restoreNotRight } from './notRight
 import { sceneMemory } from './views'
 import { livePlanLinks } from './planLinkStore'
 import { reading as readingTable } from '../../db/schema'
+import { JUDGE_SENTINEL } from '../../ai/prompts/judge.v1'
+import { findingsOf } from '../findings/findingStore'
+import { runFindingsJob } from '../findings/findingsJob'
 
 let tmp: string
 let session: ProjectSession
@@ -121,8 +124,19 @@ async function drained(reader: ReaderService): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 5))
 }
 
-/** The fake reader's answer: Mara's eyes in every paragraph that states them; the checker passes all. */
+/**
+ * The fake reader's answer: Mara's eyes in every paragraph that states them; the checker passes
+ * all; the contradiction judge (F-16.27) calls every pair a contradiction.
+ */
 function answerReading(request: CompletionRequest): { text: string } {
+  if (request.messages[0]?.content.startsWith(JUDGE_SENTINEL) === true) {
+    const items = [...(request.messages.at(-1)?.content ?? '').matchAll(/^(\d+)\. /gmu)]
+    return {
+      text: JSON.stringify({
+        v: items.map((match) => ({ i: Number(match[1]), r: 'c', w: 'values differ' }))
+      })
+    }
+  }
   if (requestKind(request) === 'verify') {
     return {
       text: JSON.stringify({
@@ -1298,5 +1312,85 @@ describe('typed details against the text (decision 4, F-16.18)', () => {
     expect(reader.status().rebuild).toBeNull()
     reader.rebuild()
     expect(reader.status().rebuild).toMatchObject({ total: 1, done: 0, finishedAt: null })
+  })
+})
+
+describe('the contradiction judge on the reader’s queue (F-16.27, P4 slice 2)', () => {
+  const judgeRequests = (ai: FakeAi): CompletionRequest[] =>
+    ai.requests.filter((request) => request.messages[0]?.content.startsWith(JUDGE_SENTINEL))
+
+  /** Scene 1 says grey; a second scene says brown; both read. */
+  async function twoReadings(reader: ReaderService): Promise<string> {
+    const second = addScene('Second', "Mara's eyes were brown.")
+    for (const nodeId of [scene, second]) {
+      expect(await reader.readNow(nodeId, `read-${nodeId}`)).toMatchObject({ ok: true, read: true })
+    }
+    runFindingsJob(db, NOW, { cachedVerdicts: true })
+    return second
+  }
+
+  it('dispatches the judge job: both orders in two calls, background spend, the scene just read first', async () => {
+    const counts: unknown[] = []
+    const ai = reading({ providerId: 'cloud' })
+    const reader = service(ai, { findingsChanged: (each) => void counts.push(each) })
+    await twoReadings(reader)
+    reader.queueJudge()
+    expect(reader.judging()).toBe(true)
+    await drained(reader)
+    expect(judgeRequests(ai)).toHaveLength(2)
+    expect(findingsOf(db, activeDraftId(db)).map((each) => each.state)).toEqual(['open'])
+    expect(counts.at(-1)).toEqual({ open: 1, unclear: 0, waiting: 0 })
+    expect(reader.judging()).toBe(false)
+    // Background spend on Cloud: the month's tally counts the judge as background.
+    expect(cloud.backgroundUsd).toBeGreaterThan(0)
+    // Nothing left to judge: queueing again does nothing.
+    reader.queueJudge()
+    expect(reader.judging()).toBe(false)
+  })
+
+  it('queues nothing with the Contradiction check off, and a held judge job never stops reading', async () => {
+    settings = { ...settings, features: { ...settings.features, judge: false } }
+    const ai = reading()
+    const reader = service(ai)
+    const second = await twoReadings(reader)
+    reader.queueJudge()
+    expect(reader.judging()).toBe(false)
+    // A judge job left from before (the switch was on then) goes quietly; reading behind it runs.
+    saveDocument(db, second, doc("Mara's eyes were green."))
+    enqueueJob(db, 'judge', scene, new Date(NOW.getTime() - 60_000))
+    reader.opened()
+    expect(await reader.readNow(second, 'read-again')).toMatchObject({ ok: true, read: true })
+    await drained(reader)
+    expect(judgeRequests(ai)).toHaveLength(0)
+    expect(reader.queueStatus().paused).toBeNull()
+    expect(listJobs(db, 'judge')).toEqual([])
+    // Switched on again: judging resumes.
+    settings = { ...settings, features: { ...settings.features, judge: true } }
+    runFindingsJob(db, NOW, { cachedVerdicts: true })
+    reader.settingsChanged()
+    await drained(reader)
+    expect(judgeRequests(ai)).toHaveLength(2)
+  })
+
+  it('never judges in the background while a rebuild runs', async () => {
+    const ai = reading()
+    const reader = service(ai)
+    await twoReadings(reader)
+    const before = ai.requests.length
+    reader.rebuild()
+    reader.queueJudge()
+    expect(reader.judging()).toBe(false)
+    await drained(reader)
+    expect(getRebuild(db)?.finishedAt).not.toBeNull()
+    // Background judging waited for the rebuild, and resumed once it closed: every judge request
+    // came after the rebuild's last reading.
+    const sent = ai.requests.slice(before)
+    const lastRead = sent.map((request) => requestKind(request)).lastIndexOf('reader')
+    const firstJudge = sent.findIndex((request) =>
+      request.messages[0]?.content.startsWith(JUDGE_SENTINEL)
+    )
+    expect(lastRead).toBeGreaterThanOrEqual(0)
+    expect(firstJudge).toBeGreaterThan(lastRead)
+    expect(judgeRequests(ai)).toHaveLength(2)
   })
 })

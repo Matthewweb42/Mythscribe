@@ -255,6 +255,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     typicalOutTokens: 60,
     ideas:
       'Skip a sentence whose quote is the whole sentence word for word; measure the yes rate in the live run and check only the first sentence if it stays near 100 %; the scope item is already left out when the search found nothing before the cited place.'
+  },
+  judge: {
+    trigger: 'background',
+    when: 'Story memory v2 (F-16.27): judge.v1, fast tier, JSON, reasoning off (lowest effort on a direct key), only for the candidate pairs code found under rules C1–C6 (two values for one fixed thing, a death then a presence, a secret passed on before it is learned, a stated age against a birth year and that scene’s story year, a thread advancing after its resolve, the book against a canon note) that no remembered verdict covers. Each batch of at most 10 pairs (≤ 2,500 tokens of pairs) goes twice, as two separate requests, the second with every pair’s passages swapped; only two "contradiction" verdicts make a finding. In the background (the Contradiction check switch on, Use AI on, a provider, under the daily cap and, on Cloud, the monthly cap): after a reading or a note save, at most 10 pairs a run, the scene just read first, at most 30 pairs a day; never during a rebuild; the rest wait for Check the book (F-16.30), which judges every uncached pair and has the strong model confirm at most 20 (one pair at ±3 sentences, 90 out). max_tokens min(300, 20 + 26 per pair); a reply cut off is read up to its last whole verdict and the rest wait for the next run. Every pair-order’s verdict is remembered (`verdict_cache`, scene numbers masked and names folded), so an unchanged pair, a scene move or a Rename in book costs nothing. Figures (plan P4 §7): about 1,200 tokens in and 120 out per call, two calls per batch.',
+    callsPerUse: 2,
+    typicalOutTokens: 120,
+    ideas:
+      'Skip the second order when the first says ok, once the live run shows how often the two orders disagree; drop the context sentences for pairs whose quotes alone settle it (the live run’s unclear rate says when); judge C6 note pairs only on a note save.'
   }
 }
 
@@ -285,32 +293,6 @@ export interface PlannedCostNote {
 }
 
 export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
-  {
-    id: 'judge.v1',
-    prompt: 'judge.v1',
-    feature: 'judge',
-    existing: false,
-    phase: 'P4',
-    tier: 'fast',
-    trigger: 'background',
-    when: 'Up to 10 contradiction pairs per call, each judged twice with the quotes swapped.',
-    typicalInTokens: 1_500,
-    typicalOutTokens: 300,
-    callsPerUse: 1
-  },
-  {
-    id: 'judge.v1:pro',
-    prompt: 'judge.v1',
-    feature: 'judge',
-    existing: false,
-    phase: 'P4',
-    tier: 'strong',
-    trigger: 'on request',
-    when: 'Check the book: the strong model confirms up to 20 pairs called a contradiction both ways.',
-    typicalInTokens: 600,
-    typicalOutTokens: 90,
-    callsPerUse: 1
-  },
   {
     id: 'agent.v9:try',
     prompt: 'agent.v9',
@@ -343,7 +325,7 @@ export const PLANNED_COST_NOTES: readonly PlannedCostNote[] = [
  * The story-memory rows that have shipped (F-16.9, P1 slice 5; F-16.17, P2a slice 2: the reader
  * and verify rows; F-16.22, F-16.23, P2b slice 2: their v2 rows, which the tasks read now, the v1
  * rows kept for the ledger's older readings; F-16.20, F-16.21, P2a slice 5: `synopsis.v2`, `notesSuggest.v4` and
- * `planLinks.v2`; F-16.25, P3 slice 2: `agent.v9`'s open, lookup, need and widened calls; P3 slice 3: `cite.v1`; P3 slice 4: `navigator.v1`): their features' notes are in `AI_COST_NOTES` now (the registry's per-feature
+ * `planLinks.v2`; F-16.25, P3 slice 2: `agent.v9`'s open, lookup, need and widened calls; P3 slice 3: `cite.v1`; P3 slice 4: `navigator.v1`; F-16.27, P4 slice 2: `judge.v1` and its stronger check `judge.v1:pro`): their features' notes are in `AI_COST_NOTES` now (the registry's per-feature
  * table shows them), and these rows keep the design's sizes so the planned tasks that run them
  * ("File a 20,000-word upload, once", "Index the book once") and the switch-over's rebuild price
  * (`plannedRow` in `switchover/plan.ts`) stay priced from the same figures.
@@ -646,6 +628,32 @@ export const SHIPPED_PLAN_ROWS: readonly PlannedCostNote[] = [
     when: 'An open question: up to three steps choosing which passages Ms Scribe reads (reasoning off). Since P3 slice 4 it also routes a v2 message (route.v2’s actions and edit passes); an instant card asks nothing. The eval fixtures measure the cached prefix and a step on the test fixtures; the design’s size stays the planning figure.',
     typicalInTokens: 6_000,
     typicalOutTokens: 150,
+    callsPerUse: 1
+  },
+  {
+    id: 'judge.v1',
+    prompt: 'judge.v1',
+    feature: 'judge',
+    existing: true,
+    phase: 'P4',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'One call of a batch of up to 10 contradiction pairs; each batch goes twice, the second call with every pair’s passages swapped (reasoning off). The eval fixtures measure about 420–1,360 tokens in a call on the test book (one to nine pairs; 2,683 for ten at the cap); the design’s size stays the planning figure.',
+    typicalInTokens: 1_500,
+    typicalOutTokens: 300,
+    callsPerUse: 1
+  },
+  {
+    id: 'judge.v1:pro',
+    prompt: 'judge.v1',
+    feature: 'judge',
+    existing: true,
+    phase: 'P4',
+    tier: 'strong',
+    trigger: 'on request',
+    when: 'Check the book (F-16.30): the strong model confirms up to 20 pairs both orders called a contradiction, one pair per call with three sentences either side, 90 tokens out (reasoning off). The eval fixtures measure about 640 tokens in (976 at the cap); the design’s size stays the planning figure.',
+    typicalInTokens: 600,
+    typicalOutTokens: 90,
     callsPerUse: 1
   }
 ]

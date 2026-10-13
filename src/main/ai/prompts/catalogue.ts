@@ -105,6 +105,7 @@ import { VERIFY_V2_PROMPT_VERSION } from './verify.v2'
 import { AGENT_PROMPT_V9_VERSION } from './agent.v9'
 import { CITE_PROMPT_VERSION } from './cite.v1'
 import { NAVIGATOR_PROMPT_VERSION } from './navigator.v1'
+import { JUDGE_PROMPT_VERSION } from './judge.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -235,7 +236,9 @@ export const PROMPT_VERSIONS = [
   // F-16.25 (story memory v2 only): Ms Scribe's quote check.
   CITE_PROMPT_VERSION,
   // F-16.25 (story memory v2 only): Ms Scribe's navigator; v1 keeps route.v2.
-  NAVIGATOR_PROMPT_VERSION
+  NAVIGATOR_PROMPT_VERSION,
+  // F-16.27 (story memory v2 only): the contradiction judge (and Check the book's stronger check).
+  JUDGE_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -721,7 +724,10 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'F-16.25'
-  }
+  },
+  // F-16.27: the batch is fast; the stronger check of *Check the book* (F-16.30) sends the same
+  // version on the strong tier, one pair at a time.
+  [JUDGE_PROMPT_VERSION]: { feature: 'judge', tier: 'fast', output: 'json', since: 'F-16.27' }
 }
 
 /**

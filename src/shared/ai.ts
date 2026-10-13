@@ -352,7 +352,10 @@ export const AI_FEATURE_IDS = [
   'cite',
   // F-16.25 (story memory v2): Ms Scribe's navigator, which picks what answers a chat message
   // (route.v2's actions) and finds the passages that answer it.
-  'navigator'
+  'navigator',
+  // F-16.27 (story memory v2): the contradiction judge, which rules on each pair of passages code
+  // found that may not fit, twice (the second time with the passages swapped).
+  'judge'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -463,7 +466,10 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   cite: 200,
   // F-16.25: one step of `navigator.v1`: the action, the turn and a restated request, then at most
   // three tool calls or the evidence ids to use; never prose.
-  navigator: 150
+  navigator: 150,
+  // F-16.27: min(300, 20 + 26 per pair) for a batch of at most 10 pairs (`judgeMaxTokens`); the
+  // stronger check's one pair asks 90 (*Check the book*, F-16.30).
+  judge: 300
 }
 
 /**
@@ -558,7 +564,12 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // the story map ≤ 1,100; ≤ 3,000 in all), the tail (Now, the open document, the selection's
   // opening, the last two turns ≤ 300; the question ≤ 260; the evidence menu ≤ 1,000) and steps
   // 2–3 (≤ 1,400); the menu's far items go first.
-  navigator: 6_000
+  navigator: 6_000,
+  // F-16.27: the cached rules (≤ 450) and up to 10 pairs (≤ 2,500), each its question and both
+  // passages (the quote's sentence ±1, cut to 450 characters) with their places, voices and modes;
+  // a batch over 2,500 tokens of pairs is split. The stronger check's one pair at ±3 sentences
+  // stays under 1,000.
+  judge: 3_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

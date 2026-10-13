@@ -94,12 +94,13 @@ describe('defaultAiSettings (F-14.4)', () => {
 
   it('names the toggles a stored row has for ids this build does not know, booleans only', () => {
     expect(
-      unknownFeatureToggles({ features: { judge: false, chat: false, odd: 'x', vectors: true } })
-    ).toEqual({ judge: false, vectors: true })
+      unknownFeatureToggles({ features: { oracle: false, chat: false, odd: 'x', vectors: true } })
+    ).toEqual({ oracle: false, vectors: true })
     // F-16.25: `cite` is this build's own id now, never an unknown one.
     expect(unknownFeatureToggles({ features: { cite: true } })).toEqual({})
-    // F-16.25 (P3 slice 4): so is `navigator`.
+    // F-16.25 (P3 slice 4): so is `navigator`; F-16.27 (P4 slice 2): and `judge`.
     expect(unknownFeatureToggles({ features: { navigator: true } })).toEqual({})
+    expect(unknownFeatureToggles({ features: { judge: false } })).toEqual({})
     expect(unknownFeatureToggles(null)).toEqual({})
     expect(unknownFeatureToggles({ features: 'all' })).toEqual({})
   })
@@ -390,7 +391,9 @@ describe('the toggle list per story memory (F-16.17, P2a-D24)', () => {
     const v2 = featureToggleItems('v2')
     expect(v2.filter((item) => item.kind === 'group').map((item) => item.group.id)).toEqual([
       'msScribe',
-      'storyMemoryReading'
+      'storyMemoryReading',
+      // F-16.27 (P4 slice 2): the contradiction check's own switch, last of the v2 groups.
+      'contradictionCheck'
     ])
     // In the group's place, never beside it.
     expect(v2.some((item) => item.kind === 'feature' && item.id === 'agent')).toBe(false)
@@ -413,6 +416,53 @@ describe('the toggle list per story memory (F-16.17, P2a-D24)', () => {
     expect(ids('v1')).toEqual(expect.arrayContaining(['route', 'query', 'agent']))
     expect(AI_DATA_SHARING.route.sendsV2).toContain('Nothing in this project')
     expect(AI_DATA_SHARING.query.sendsV2).toContain('Nothing in this project')
+  })
+
+  it('F-16.27 (design §2.6, P4-D21): the contradiction check is its own v2 switch, writing judge; v1 hides it', () => {
+    const check = FEATURE_GROUPS.find((group) => group.id === 'contradictionCheck')
+    expect(check).toEqual({
+      id: 'contradictionCheck',
+      label: 'Contradiction check',
+      features: ['judge'],
+      memory: 'v2'
+    })
+    if (check === undefined) throw new Error('no contradiction check group')
+    expect(MEMORY_ONLY_FEATURES.v2).toContain('judge')
+    const v2 = featureToggleItems('v2')
+    expect(v2).toContainEqual({ kind: 'group', group: check })
+    expect(v2.some((item) => item.kind === 'feature' && item.id === 'judge')).toBe(false)
+    const v1 = featureToggleItems('v1').flatMap((item) =>
+      item.kind === 'group' ? item.group.features : [item.id]
+    )
+    expect(v1).not.toContain('judge')
+    const on = defaultAiSettings().features
+    expect(groupEnabled(on, check)).toBe(true)
+    const off = withGroup(on, check, false)
+    expect(off.judge).toBe(false)
+    expect(groupEnabled(off, check)).toBe(false)
+    // Only `judge` moved: the reading and Ms Scribe keep theirs.
+    expect({ ...off, judge: true }).toEqual(on)
+  })
+
+  it('F-16.27: describes what the contradiction check sends: pairs, never a whole scene', () => {
+    expect(AI_DATA_SHARING.judge.label).toBe('Contradiction check')
+    expect(AI_DATA_SHARING.judge.minDial).toBe(AI_DATA_SHARING.reader.minDial)
+    for (const part of [
+      'Story memory v2 only',
+      'the quoted sentences with one sentence either side',
+      'earlier or later in the book',
+      'in a flashback or a remembered moment',
+      'narration, speech, thought or rumour',
+      'the story years you typed or the book states',
+      'time-skip sentence',
+      'at most 10 pairs',
+      'Check the book',
+      'up to 20 pairs with three sentences either side to the strong model',
+      'your notes or a Research page'
+    ]) {
+      expect(AI_DATA_SHARING.judge.sends).toContain(part)
+    }
+    expect(AI_DATA_SHARING.judge.sends).not.toContain('whole scene')
   })
 
   it('F-16.25: describes what the navigator sends, never the whole scene', () => {

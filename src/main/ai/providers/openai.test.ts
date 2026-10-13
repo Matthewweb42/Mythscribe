@@ -665,6 +665,21 @@ describe('the lowest reasoning effort for story-memory requests (F-16.17, P2a-D1
   })
 })
 
+describe('the contradiction judge on a direct OpenAI key (F-16.27, P4 slice 2)', () => {
+  it('asks the fast and the strong model alike for its lowest effort (judge.v1 and its stronger check)', async () => {
+    for (const model of ['gpt-5.4-mini', 'gpt-5.4']) {
+      const direct = answering(() => json(200, completion))
+      await buildOpenAiProvider(KEY, {
+        fetch: direct.fetch,
+        resolveModel: () => model
+      }).complete({ ...request, json: true, maxTokens: 90, lowestEffort: true, reasoning: 'off' })
+      const effort = lowestReasoningEffort(model)
+      expect(effort, model).not.toBeNull()
+      expect(bodyOf(direct.calls[0]).reasoning_effort, model).toBe(effort)
+    }
+  })
+})
+
 describe('low reasoning effort for Ms Scribe’s edit turns (F-16.25, P3-D11)', () => {
   it('names low for a model that takes an effort, and none for one that takes none', () => {
     expect(lowReasoningEffort('gpt-5')).toBe('low')

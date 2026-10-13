@@ -1,6 +1,8 @@
 import { currentDraftId } from '../../draft/draftStore'
 import type { TreeDb } from '../../tree/treeStore'
+import { candidateInputs, findingsFrame } from './candidateInputs'
 import { findingRows } from './findingStore'
+import { cachedPairVerdicts, judgeContext, type JudgeContext } from './judge'
 import { recomputeFindings, type RecomputeOptions, type RecomputeResult } from './recompute'
 
 /**
@@ -30,12 +32,28 @@ export function findingCounts(db: TreeDb): FindingCounts {
   }
 }
 
-/** One run of the job: the recompute, and the counts when anything moved. */
+/**
+ * One run of the job: the recompute, and the counts when anything moved. `cachedVerdicts` (slice
+ * 2): a new or reset finding takes both orders' remembered verdicts from `verdict_cache` at no cost
+ * (its pair rendered as the judge reads it, `judge.ts`), so an unchanged pair is never judged twice.
+ */
 export function runFindingsJob(
   db: TreeDb,
   now: Date,
-  options: RecomputeOptions = {}
+  options: RecomputeOptions & { cachedVerdicts?: boolean } = {}
 ): RecomputeResult & { counts: FindingCounts | null } {
-  const result = recomputeFindings(db, now, options)
+  const { cachedVerdicts, ...recompute } = options
+  const draftId = currentDraftId(db)
+  if (cachedVerdicts === true && draftId !== null && recompute.cached === undefined) {
+    const frame = findingsFrame(db)
+    const inputs = recompute.inputs ?? candidateInputs(db, draftId, frame)
+    let ctx: JudgeContext | null = null
+    recompute.inputs = inputs
+    recompute.cached = (candidate) => {
+      ctx ??= judgeContext(db, draftId, frame, inputs)
+      return cachedPairVerdicts(ctx, candidate, now)
+    }
+  }
+  const result = recomputeFindings(db, now, recompute)
   return { ...result, counts: result.changed ? findingCounts(db) : null }
 }

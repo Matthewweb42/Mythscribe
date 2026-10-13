@@ -103,6 +103,13 @@ import { caretToEnd, clickIntoEditor } from './support'
  * idea, not in the book"; a Self-Route turn reads chapter 1 and Settings › AI › Story memory ›
  * Details counts one search miss. No request carries an absence or "checked up to".
  *
+ * P4 slice 2 (F-16.27), invoke level in a new project: Mara's eyes grey in 1.1 and brown in 1.2,
+ * both read: exactly two `judge.v1` requests (the second with the passages swapped) and one open
+ * C1 finding in `memory:findings`; a third scene read sends no judge request (both orders are
+ * remembered); 1.2 edited to grey and read closes the finding with no request; with the
+ * Contradiction check off a new disagreement sends nothing and nothing is listed, and switching
+ * it on judges it.
+ *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
  * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
@@ -193,6 +200,8 @@ const ROUTE_V2_SENTINEL = "You are the router inside a novel-writing app's assis
 const NAVIGATOR_SENTINEL = "You are the navigator inside a novel-writing app's assistant."
 /** F-14.15: the edit pass's opening (`EDIT_PASS_SENTINEL`); the fake finds nothing to change. */
 const EDIT_PASS_SENTINEL = 'You are the edit-pass feature inside a novel-writing app.'
+/** F-16.27 (P4 slice 2): `judge.v1`'s opening (`JUDGE_SENTINEL`); the fake rules on each pair. */
+const JUDGE_SENTINEL = 'You are the contradiction judge inside a novel-writing app.'
 /** F-5.26: the vague request the fake navigator sends to an edit pass that asks which kind. */
 const IMPROVE_MESSAGE = 'Make this scene better.'
 /** P3 slice 4: the "first" question the fake navigator searches for, then names the hit. */
@@ -329,6 +338,31 @@ function citeAnswer(messages: { content: string }[]): string {
     ok: (match[2] ?? '').includes(PLANTED_UNSUPPORTED) ? 'no' : 'yes'
   }))
   return JSON.stringify({ v: verdicts, scope: user.includes('\nScope: ') ? 'ok' : 'none' })
+}
+
+/**
+ * The fake contradiction judge (F-16.27, `judge.v1`): every numbered pair a contradiction ("values
+ * differ") unless one of its passages holds "remembered" (then fine); the stronger check's one pair
+ * (Check the book) likewise.
+ */
+function judgeAnswer(messages: { content: string }[]): string {
+  const user = messages.at(-1)?.content ?? ''
+  if (user.startsWith('Pair:\n')) {
+    return JSON.stringify(
+      user.includes('remembered') ? { r: 'ok', w: 'a memory' } : { r: 'c', w: 'values differ' }
+    )
+  }
+  const items = user
+    .replace(/^Pairs:\n/u, '')
+    .split('\n\n')
+    .flatMap((block) => {
+      const n = /^(\d+)\. /u.exec(block)?.[1]
+      if (n === undefined) return []
+      return block.includes('remembered')
+        ? [{ i: Number(n), r: 'ok' }]
+        : [{ i: Number(n), r: 'c', w: 'values differ' }]
+    })
+  return JSON.stringify({ v: items })
 }
 
 /**
@@ -575,8 +609,9 @@ let provider: http.Server
 /**
  * A fake OpenAI-compatible provider on loopback: a filing request (its sentinel) gets
  * `FILING_ANSWER`, a reader or checker request (F-16.17) the fake reader's or checker's answer, a
- * plan-link pick (F-16.21) the first scene, a v2 synopsis one sentence, a beta read no items, any
- * other JSON request an empty object, a plain one `GHOST_ANSWER` (streamed when asked);
+ * plan-link pick (F-16.21) the first scene, a v2 synopsis one sentence, a beta read no items, a
+ * contradiction judge (F-16.27) the fake judge's verdicts, any other JSON request an empty
+ * object, a plain one `GHOST_ANSWER` (streamed when asked);
  * `GET /models/<id>` echoes the id.
  */
 function startFakeProvider(): Promise<string> {
@@ -622,9 +657,11 @@ function startFakeProvider(): Promise<string> {
                         ? navigatorAnswer(request.messages)
                         : system.startsWith(EDIT_PASS_SENTINEL)
                           ? JSON.stringify({ changes: [] })
-                          : json
-                            ? '{}'
-                            : GHOST_ANSWER
+                          : system.startsWith(JUDGE_SENTINEL)
+                            ? judgeAnswer(request.messages)
+                            : json
+                              ? '{}'
+                              : GHOST_ANSWER
       const usage = { prompt_tokens: 400, completion_tokens: 40, total_tokens: 440 }
       const base = { id: 'chatcmpl-fake', created: 0, model: request.model }
       if (request.stream === true) {
@@ -2774,11 +2811,14 @@ test('story memory v2: Ms Scribe in the chat (P3 slice 5)', async () => {
     hierarchyLevel: 'scene',
     title: 'The door'
   })
-  await invoke('document:save', { id: second.id, content: paragraphs(['Orrin waited by the door.']) })
+  await invoke('document:save', {
+    id: second.id,
+    content: paragraphs(['Orrin waited by the door.'])
+  })
   for (const [n, nodeId] of [first.id, second.id].entries()) {
-    expect(
-      await invoke('memory:readNow', { nodeId, requestId: `e2e-p3-chat-${n}` })
-    ).toMatchObject({ ok: true })
+    expect(await invoke('memory:readNow', { nodeId, requestId: `e2e-p3-chat-${n}` })).toMatchObject(
+      { ok: true }
+    )
   }
   await reopenProject('Chat Novel')
   await showSection('Manuscript')
@@ -2856,9 +2896,7 @@ test('story memory v2: Ms Scribe in the chat (P3 slice 5)', async () => {
   const source = cited.getByTestId('scribe-source')
   await expect(source.getByTestId('scribe-source-label')).toHaveText('happened')
   await expect(source).toContainText('1.1 ¶1')
-  await expect(source.getByTestId('scribe-source-checked')).toHaveText(
-    'quote and sentence checked'
-  )
+  await expect(source.getByTestId('scribe-source-checked')).toHaveText('quote and sentence checked')
   await expect(cited.getByTestId('scribe-scope')).toContainText('Searched ')
   await expect(cited.getByTestId('scribe-scope')).toContainText('overheard')
   await expect(cited.locator('summary')).toHaveText(/ · checked the quotes$/)
@@ -2900,7 +2938,9 @@ test('story memory v2: Ms Scribe in the chat (P3 slice 5)', async () => {
   await expect(details.getByTestId('search-miss')).toContainText(NEED_QUESTION)
   await expect(details.getByTestId('search-miss')).toContainText("Mara's eyes were grey")
   // The Ms Scribe switch, and the navigator's and the check's data-sharing rows.
-  await expect(settingsDialog.getByRole('checkbox', { name: 'Ms Scribe', exact: true })).toBeChecked()
+  await expect(
+    settingsDialog.getByRole('checkbox', { name: 'Ms Scribe', exact: true })
+  ).toBeChecked()
   const table = settingsDialog.getByRole('table', { name: 'What each AI feature sends' })
   await expect(table.getByRole('row', { name: /^Ms Scribe’s search / })).toBeVisible()
   await expect(table.getByRole('row', { name: /^Ms Scribe’s quote check / })).toBeVisible()
@@ -2911,10 +2951,127 @@ test('story memory v2: Ms Scribe in the chat (P3 slice 5)', async () => {
   // the renderer, and their text in the conversation's history holds positive lines only.
   for (const words of ['No scene shows', 'No other scene shows', 'checked up to']) {
     expect(
-      providerBodies.some((body) => body.messages.some((message) => message.content.includes(words))),
+      providerBodies.some((body) =>
+        body.messages.some((message) => message.content.includes(words))
+      ),
       words
     ).toBe(false)
   }
+})
+
+test('story memory v2: contradictions are found in code and judged twice (P4 slice 2)', async () => {
+  // A new project (Use AI on, the own key at the fake): Mara Vell's eyes, grey in 1.1, brown in 1.2.
+  const first = await newV2Project('Judge Novel')
+  const made = await invoke<{ record?: { id: string } }>('record:create', {
+    name: 'Mara Vell',
+    categoryId: 'character',
+    aliases: [{ text: 'Mara' }],
+    force: true
+  })
+  expect(made.record?.id).toBeDefined()
+  const isJudge = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(JUDGE_SENTINEL) === true
+  const judged = (): (typeof providerBodies)[number][] => providerBodies.filter(isJudge)
+  const judgedBefore = judged().length
+  const write = async (id: string, text: string): Promise<void> => {
+    await invoke('document:save', {
+      id,
+      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
+    })
+  }
+  const scene = async (title: string, text: string): Promise<string> => {
+    const node = await invoke<TreeNode>('tree:create', {
+      parentId: first.parentId,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title
+    })
+    await write(node.id, text)
+    return node.id
+  }
+  let reads = 0
+  const readNow = async (nodeId: string): Promise<void> => {
+    reads += 1
+    expect(await invoke('memory:readNow', { nodeId, requestId: `e2e-p4-${reads}` })).toMatchObject({
+      ok: true,
+      read: true
+    })
+  }
+  interface Side {
+    kind: string
+    value: string
+    nodeId: string | null
+    quote: string
+  }
+  interface View {
+    open: { rule: string; state: string; a: Side; b: Side; verdictAb: string; verdictBa: string }[]
+    waiting: number
+  }
+  const findings = (): Promise<View> => invoke<View>('memory:findings', { nodeId: null })
+  /** The findings job runs 1.5 s after the memory moved, then the judge on the reader's queue. */
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 4_000))
+
+  await write(first.id, "Mara's eyes were grey.")
+  await readNow(first.id)
+  const brown = await scene('Brown', "Mara's eyes were brown.")
+  await readNow(brown)
+
+  // Exactly two judge requests, the second with the passages swapped; one open C1 finding.
+  await expect.poll(() => judged().length - judgedBefore, { timeout: 20_000 }).toBe(2)
+  const [ab, ba] = judged().slice(judgedBefore)
+  const sides = (body: (typeof providerBodies)[number] | undefined): string[] =>
+    (body?.messages.at(-1)?.content ?? '')
+      .split('\n')
+      .filter((line) => /^[AB] \[/u.test(line))
+      .map((line) => /says (\w+):/u.exec(line)?.[1] ?? '')
+  expect(ab?.json).toBe(true)
+  expect(sides(ab)).toEqual(['grey', 'brown'])
+  expect(sides(ba)).toEqual(['brown', 'grey'])
+  expect(ab?.messages.at(-1)?.content).toContain('1. Mara Vell · eyes. Can both be true?')
+  await expect.poll(async () => (await findings()).open.length, { timeout: 15_000 }).toBe(1)
+  const open = (await findings()).open[0]
+  expect(open).toMatchObject({
+    rule: 'C1',
+    state: 'open',
+    verdictAb: 'c',
+    verdictBa: 'c',
+    a: { kind: 'claim', value: 'grey', nodeId: first.id },
+    b: { kind: 'claim', value: 'brown', nodeId: brown }
+  })
+
+  // A third scene read: the recompute runs and sends nothing (both orders are remembered).
+  const third = await scene('Sleep', 'Mara slept.')
+  await readNow(third)
+  await settle()
+  expect(judged().length - judgedBefore).toBe(2)
+  expect((await findings()).open).toHaveLength(1)
+
+  // 1.2 says grey now: read again, the finding closes, with no judge request.
+  await write(brown, "Mara's eyes were grey.")
+  await readNow(brown)
+  await expect.poll(async () => (await findings()).open.length, { timeout: 15_000 }).toBe(0)
+  await settle()
+  expect(judged().length - judgedBefore).toBe(2)
+
+  // The Contradiction check off: a new disagreement sends nothing, and nothing is listed.
+  const settings = await invoke<AiSettings>('aiSettings:get', undefined)
+  await invoke('aiSettings:set', { ...settings, features: { ...settings.features, judge: false } })
+  const green = await scene('Green', "Mara's eyes were green.")
+  await readNow(green)
+  await settle()
+  expect(judged().length - judgedBefore).toBe(2)
+  expect((await findings()).open).toEqual([])
+  // Switched on again, the pair it held back is judged (both orders).
+  await invoke('aiSettings:set', settings)
+  await expect.poll(() => judged().length - judgedBefore, { timeout: 20_000 }).toBe(4)
+  await expect.poll(async () => (await findings()).open.length, { timeout: 15_000 }).toBe(1)
+
+  // No request ever carried an absence.
+  expect(
+    providerBodies.some((body) =>
+      body.messages.some((message) => message.content.includes('No scene shows'))
+    )
+  ).toBe(false)
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

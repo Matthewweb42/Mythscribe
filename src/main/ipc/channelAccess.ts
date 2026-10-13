@@ -388,6 +388,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   // F-16.23: the Book's Threads and Timeline only read.
   'memory:threads': 'read',
   'memory:timeline': 'read',
+  // F-16.27: the contradictions found, only read.
+  'memory:findings': 'read',
   'scribe:searchMisses': 'read',
   'memory:knewBefore': 'write',
   'memory:splitTopic': 'write',
@@ -801,6 +803,7 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'memory:knows': 'v2',
   'memory:threads': 'v2',
   'memory:timeline': 'v2',
+  'memory:findings': 'v2',
   'scribe:searchMisses': 'v2',
   'memory:knewBefore': 'v2',
   'memory:splitTopic': 'v2',

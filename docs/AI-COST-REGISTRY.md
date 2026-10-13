@@ -47,6 +47,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `verify` | Story memory check | background | verify.v2 | fast | 1111 / 1742 | 140 / 400 | $0.000195 · $0.000356 | $0.000243 | $0.00146 | 1 | $0.000195 |
 | `cite` | Ms Scribe’s quote check | every chat message | cite.v1 | fast | 432 / 2435 | 60 / 200 | $0.0000773 · $0.000397 | $0.0000966 | $0.000594 | 1 | $0.0000773 |
 | `navigator` | Ms Scribe’s search | every chat message | navigator.v1 | fast | 1184 / 5585 | 150 / 150 | $0.000208 · $0.000824 | $0.000260 | $0.00156 | 2 | $0.000416 |
+| `judge` | Contradiction check | background | judge.v1 | fast | 777 / 2683 | 120 / 300 | $0.000142 · $0.000460 | $0.000178 | $0.00112 | 2 | $0.000285 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -205,6 +206,11 @@ git history of this file is the log of each feature's cost over time (author req
 - **When:** Story memory v2 (F-16.25): navigator.v1, fast tier, reasoning off, on every chat message an instant card does not answer (none for an instant card, none for a stale or contested lookup, which goes straight to agent.v9, and none for a typed action name). Step 1 classifies the message with route.v2’s actions and edit-pass fields (a routed edit request, “make this scene better”, ends there: about 4,000 tokens in, 60 out) and the turn kind; for a chat or question it then calls up to three local tools per step (search with its own synonyms over the passage index, cards, read, state, knows, timeline, ideas, outline, to-dos) and ends with the evidence ids to use, at most three steps of 150 tokens out each. The cached prefix (rules and tools, the roster of names, secrets and threads, the first line of each Ideas page, the story map: ≤ 3,000 tokens) stays the same within a chapter; the tail is Now, the open document, the selection’s opening, the last two turns, the question and the evidence menu (≤ 1,000), and steps 2–3 add what the tools found (≤ 1,400). Input cap 6,000. Figures (plan P3 §4, design Part 5): about 6,000 tokens in and 150 out per step, two steps for an open question.
 - **Ideas:** Answer step 1 from the tail alone when the live run shows routing is no better with the prefix (a new version); let Step 0’s menu end the search at step 1 more often (`use` at once); cache the prefix per chapter (already stable).
 
+### `judge` — Contradiction check
+
+- **When:** Story memory v2 (F-16.27): judge.v1, fast tier, JSON, reasoning off (lowest effort on a direct key), only for the candidate pairs code found under rules C1–C6 (two values for one fixed thing, a death then a presence, a secret passed on before it is learned, a stated age against a birth year and that scene’s story year, a thread advancing after its resolve, the book against a canon note) that no remembered verdict covers. Each batch of at most 10 pairs (≤ 2,500 tokens of pairs) goes twice, as two separate requests, the second with every pair’s passages swapped; only two "contradiction" verdicts make a finding. In the background (the Contradiction check switch on, Use AI on, a provider, under the daily cap and, on Cloud, the monthly cap): after a reading or a note save, at most 10 pairs a run, the scene just read first, at most 30 pairs a day; never during a rebuild; the rest wait for Check the book (F-16.30), which judges every uncached pair and has the strong model confirm at most 20 (one pair at ±3 sentences, 90 out). max_tokens min(300, 20 + 26 per pair); a reply cut off is read up to its last whole verdict and the rest wait for the next run. Every pair-order’s verdict is remembered (`verdict_cache`, scene numbers masked and names folded), so an unchanged pair, a scene move or a Rename in book costs nothing. Figures (plan P4 §7): about 1,200 tokens in and 120 out per call, two calls per batch.
+- **Ideas:** Skip the second order when the first says ok, once the live run shows how often the two orders disagree; drop the context sentences for pairs whose quotes alone settle it (the live run’s unclear rate says when); judge C6 note pairs only on a note save.
+
 ## Planned: story memory (F-16)
 
 The story-memory redesign (`FEATURES.md` §2.16, design Part 5) priced before it is built, from
@@ -215,8 +221,6 @@ table above when its feature ships. Cached input is not discounted; task totals 
 
 | Request | Feature | Phase | Tier | Trigger | In / out | Own key (OpenRouter) | Hosted | OpenAI key | When |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `judge.v1` | `judge` | P4 | fast | background | 1500 / 300 | $0.000294 | $0.000368 | $0.00248 | Up to 10 contradiction pairs per call, each judged twice with the quotes swapped. |
-| `judge.v1:pro` | `judge` | P4 | strong | on request | 600 / 90 | $0.00136 | $0.00170 | $0.00285 | Check the book: the strong model confirms up to 20 pairs called a contradiction both ways. |
 | `agent.v9:try` | `agent` (existing) | P5 | strong | on request | 7000 / 700 | $0.0146 | $0.0183 | $0.0280 | A Try chat turn (a what-if, after the launch line): reasoning low, never read into memory. |
 | `agent.v9:version` | `agent` (existing) | P5 | strong | on request | 7000 / 1500 | $0.0174 | $0.0217 | $0.0400 | A what-if written out as a scene Version (P5), never read into memory. |
 

@@ -102,6 +102,7 @@ import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
 import { cardAnchorOf, revealIn, seedClaims } from '../memory/reading/claimFixture'
 import { findingRows } from '../memory/findings/findingStore'
 import { recomputeFindings } from '../memory/findings/recompute'
+import { JUDGE_SENTINEL } from '../ai/prompts/judge.v1'
 import { dismiss } from '../memory/dismissedStore'
 import { scanNamesFor } from '../memory/nameIndexer'
 import { createTopic, deleteTopicQuotes, mergeInto } from '../memory/reading/topicStore'
@@ -9290,6 +9291,95 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
           .sort()
       ).toEqual(['C1', 'C6', 'C6'])
       expect(complete).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('judges the candidates in the background, in both orders, and lists them in memory:findings (F-16.27)', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await openV2()
+      // memory:findings is v2's: an empty answer before anything is found.
+      expect(await invoke('memory:findings', { nodeId: scene })).toMatchObject({
+        open: [],
+        unclear: [],
+        waiting: 0,
+        judging: false
+      })
+      const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+      if (!('record' in made)) throw new Error('blocked')
+      const mara = made.record.id
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs("Mara's eyes were grey.", "Mara's eyes were brown.")
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      complete.mockImplementation((request) => {
+        const items = [...(request.messages.at(-1)?.content ?? '').matchAll(/^(\d+)\. /gmu)]
+        return Promise.resolve({
+          text: JSON.stringify({
+            v: items.map((match) => ({ i: Number(match[1]), r: 'c', w: 'values differ' }))
+          }),
+          model: 'gpt-fake',
+          usage: { inputTokens: 600, outputTokens: 30 }
+        })
+      })
+      await invoke('ai:setKey', { key: 'sk-test-judge-1234abcd' })
+      await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+      const db = manager.require().connection.orm
+      seedClaims(
+        db,
+        scene,
+        [
+          { recordId: mara, slot: 'eyes', value: 'grey', quote: "Mara's eyes were grey", para: 0 },
+          { recordId: mara, slot: 'eyes', value: 'brown', quote: "Mara's eyes were brown", para: 1 }
+        ],
+        new Date()
+      )
+      // What the memory holds moved: the recompute finds the pair, the judge rules on it twice.
+      await invoke('sceneDetail:set', {
+        nodeId: scene,
+        details: {
+          povRecordId: mara,
+          place: { recordId: null, text: '' },
+          time: { text: '' },
+          storyYear: null,
+          alsoHere: []
+        }
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      await vi.advanceTimersByTimeAsync(5_000)
+      const judged = complete.mock.calls.filter(([request]) =>
+        request.messages[0]?.content.startsWith(JUDGE_SENTINEL)
+      )
+      expect(judged).toHaveLength(2)
+      const view = await invoke('memory:findings', { nodeId: scene })
+      expect(view.open).toHaveLength(1)
+      expect(view.open[0]).toMatchObject({
+        rule: 'C1',
+        name: 'Mara',
+        slotLabel: 'Eyes',
+        state: 'open',
+        verdictAb: 'c',
+        verdictBa: 'c',
+        why: 'values differ',
+        a: { kind: 'claim', value: 'grey', quote: "Mara's eyes were grey", nodeId: scene, para: 0 },
+        b: { kind: 'claim', value: 'brown', para: 1 },
+        actions: { right: { a: true, b: true }, updateNote: false, notFlashback: null }
+      })
+      expect(view.counts.open).toBe(1)
+      expect(sentOf('memory:findingsChanged')).toContainEqual({ open: 1, unclear: 0, waiting: 0 })
+      // The Contradiction check off: the findings are hidden (and nothing more is judged).
+      const settings = await invoke('aiSettings:get', undefined)
+      await invoke('aiSettings:set', {
+        ...settings,
+        features: { ...settings.features, judge: false }
+      })
+      expect((await invoke('memory:findings', { nodeId: null })).open).toEqual([])
+      // Use AI off with the switch on: judged findings stay visible.
+      await invoke('aiSettings:set', { ...settings, dial: 0 })
+      expect((await invoke('memory:findings', { nodeId: null })).open).toHaveLength(1)
     } finally {
       vi.useRealTimers()
     }
