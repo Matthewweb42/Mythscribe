@@ -204,15 +204,31 @@ export const PIN_NOT_ASKED =
 export const PLAN_NO_PIN = 'Plan mode writes nothing; switch to Ask or Auto to put it on the sheet.'
 export const PLAN_NO_EDIT = 'Plan mode changes nothing; switch to Ask or Auto to make the change.'
 
-/** A turn's kind (P3 §2.3 step 1): the navigation's, else a Write this, an edit, or an answer. */
+/**
+ * A turn's kind (P3 §2.3 step 1): the words decide whether it changes anything, never a fast
+ * model's label (slice 4 review). A Write this is a draft; a change or a sheet line asked for in
+ * words is an edit (a draft when the navigator says so); an edit or draft the words do not ask
+ * for is an answer. Otherwise the kind `named` (`navigator.v1`'s idea, to-do or what-if; Step 0's
+ * lookup), else an answer. A read run (Plan) writes nothing, so it is never a change turn.
+ */
+export function settleTurn(
+  named: ScribeTurnKind | null,
+  input: Pick<ScribeInput, 'access' | 'message'>,
+  cues: Pick<Step0['cues'], 'change' | 'sheetWrite'>
+): ScribeTurnKind {
+  const draft = isDirectionMessage(input.message)
+  if (input.access === 'write' && (draft || cues.change || cues.sheetWrite)) {
+    return draft || named === 'draft' ? 'draft' : 'edit'
+  }
+  return named === null || named === 'edit' || named === 'draft' ? 'answer' : named
+}
+
+/** A turn's kind (`settleTurn`): the navigation's as the words and the access allow. */
 export function scribeTurnOf(
   input: Pick<ScribeInput, 'navigation' | 'access' | 'message'>,
   cues: Pick<Step0['cues'], 'change' | 'sheetWrite'>
 ): ScribeTurnKind {
-  if (input.navigation !== null) return input.navigation.turn
-  if (input.access !== 'write') return 'answer'
-  if (isDirectionMessage(input.message)) return 'draft'
-  return cues.change || cues.sheetWrite ? 'edit' : 'answer'
+  return settleTurn(input.navigation?.turn ?? null, input, cues)
 }
 
 /** One reply of `agent.v9`, read: an answer, one Self-Route need, or unusable. */
@@ -658,16 +674,15 @@ export async function runScribe(
   // Edit and draft turns describe what Ms Scribe changes: a sentence about her own change ("I
   // added a beat…") is no claim, but one that names a record or a scene is checked as any. A Plan
   // run asked for a change or a sheet line is an answer turn to the prompt, but its reply only
-  // describes the change, so it is checked as a change turn's (never turned Not found).
-  const asked =
-    input.navigation === null && !write
-      ? scribeTurnOf({ ...input, access: 'write' }, step0.cues)
-      : turn
+  // describes the change, so it is checked as a change turn's (never turned Not found). Which
+  // checks run comes from the words alone, whatever kind the navigator named (slice 4 review).
+  const asked = settleTurn(null, { access: 'write', message: input.message }, step0.cues)
   const changeTurn = asked === 'edit' || asked === 'draft'
-  const answerTurn = !changeTurn && (turn === 'answer' || turn === 'lookup' || turn === 'idea')
   // The main-claim rules (P3-D14) hold for questions that ask for a fact from the book; an opinion,
   // what-if or brainstorm answer is shown with its naming sentences marked "not checked".
-  const claimRules = answerTurn && asksForFact(input.message, step0.cues)
+  const claimRules = !changeTurn && asksForFact(input.message, step0.cues)
+  const answerTurn =
+    !changeTurn && (claimRules || turn === 'answer' || turn === 'lookup' || turn === 'idea')
   const knowsAsked = step0.cues.knows || step0.cues.learns
   const ordinal = step0.cues.scopeAll
   const latest = ordinalSearch(input.message, step0.names).latest

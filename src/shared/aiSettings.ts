@@ -778,9 +778,10 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       '200 characters of a selected passage; the names and nicknames of your records and the ' +
       'labels of the secrets and threads found; the first line of each record’s Ideas; a map of ' +
       'the book (one line per scene near the open chapter, one per chapter elsewhere, from the ' +
-      'scene cards); and, as it searches, short snippets of the passages, facts, cards, ' +
-      'who-knows-what lines, story years and ages, outline entries and to-dos its search finds, ' +
-      'each labelled with where it is. Nothing for a question the book already answers (an ' +
+      'scene cards); and, as it searches, short snippets of what it finds, each labelled with ' +
+      'where it is: manuscript passages, your notes and Pinned lines, Research documents, Not ' +
+      'canon text, your Ideas and idea scenes, facts, cards, who-knows-what lines, story years ' +
+      'and ages, outline entries and to-dos. Nothing for a question the book already answers (an ' +
       'instant card).',
     minDial: 1
   }

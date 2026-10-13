@@ -9523,6 +9523,57 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     expect(complete).toHaveBeenCalledTimes(3)
   })
 
+  // F-16.24 (slice 4 review): the read-first checks the scene's anchors through the anchors job's
+  // own run, so a value whose sentence changed is pushed stale even when the read cannot run.
+  it('F-16.24: the read-first pushes a stale value with memory:changed when the reader is off', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await openV2()
+      const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+      if (!('record' in made)) throw new Error('blocked')
+      const mara = made.record.id
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs('The ridge was cold.', "Mara's eyes were grey. She waited.")
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      const db = manager.require().connection.orm
+      const [id = ''] = seedClaims(
+        db,
+        scene,
+        [{ recordId: mara, slot: 'eyes', value: 'grey', quote: "Mara's eyes were grey", para: 1 }],
+        new Date()
+      )
+      const settings = defaultAiSettings()
+      await invoke('aiSettings:set', {
+        ...settings,
+        dial: 1,
+        features: { ...settings.features, reader: false }
+      })
+      await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
+      // Edited and asked at once: the anchors job has not run yet.
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs('The ridge was cold.', "Mara's eyes were brown. She waited.")
+      })
+      expect(getClaim(db, id)?.state).toBe('live')
+      vi.mocked(fakeWin.webContents.send).mockClear()
+      const asked = await invoke('ai:navigate', {
+        nodeId: scene,
+        message: 'Mara’s eyes?',
+        history: [],
+        focus: { beforeCaret: '', selection: '' },
+        requestId: 'nv-rf'
+      })
+      expect(asked).toMatchObject({ ok: true, kind: 'answer', navigation: { turn: 'lookup' } })
+      expect(getClaim(db, id)?.state).toBe('stale')
+      expect(sentOf('memory:changed')).toContainEqual({ nodeIds: [scene], recordIds: [mara] })
+      expect(complete).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   // F-16.17 (plan P2a §3.7): nothing is summarised in v2, so the v1 conversion never comes up.
   it('never summarises in v2, and never opens the v1 conversion dialog', async () => {
     const scene = await openV2()

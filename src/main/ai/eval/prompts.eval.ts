@@ -8,6 +8,7 @@ import {
   OPENROUTER_DEFAULT_MODELS,
   outputBudget
 } from '@shared/ai'
+import { settleRoute } from '@shared/assistantRoute'
 import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote, normalizeForMatch } from '@shared/critique'
 import type { EditPassType } from '@shared/editPass'
@@ -44,7 +45,13 @@ import { parseVoiceNotesAnswer } from '../voiceNotes'
 import { parseRefileAnswer, parseWriteUpAnswer } from '../sheetSync'
 import { parseWhatNextAnswer } from '../whatNext'
 import { parseTodoAnswer, parseTodoSuggestAnswer } from '../todoPass'
-import { EVAL_CASES, FIXTURE_PROFILE, STORY_NOTES_GHOST_CASE, type EvalCase } from './fixtures'
+import {
+  EVAL_CASES,
+  FIXTURE_PROFILE,
+  STORY_NOTES_GHOST_CASE,
+  type EvalCase,
+  type NavigatorExpected
+} from './fixtures'
 import { STORY_NOTES_IDEA_TEXT, STORY_NOTES_NOT_CANON_TEXT } from './storyNotesFixture'
 import { runAiRequest, sha256 } from '../request'
 import { fakeChatServer } from './fakeChatServer'
@@ -982,9 +989,10 @@ const NAVIGATOR_FIELDS = new Set([
 
 /**
  * Ms Scribe's navigator (F-16.25, `navigator.v1`): the step as the feature reads it
- * (`parseNavigatorStep`); at step 1 the expected action, pass and target (route.v2's, settled by
- * the same readers); the expected first tool, or ids to use; at most 150 output tokens; no field
- * outside the schema (no prose).
+ * (`parseNavigatorStep`); at step 1 the expected action, pass, target and chapter (route.v2's, read
+ * by the same readers), the turn kind, whether "i" is empty, and the decision as `settleRoute`
+ * settles it (what F-5.26 runs); the expected first tool, or ids to use; at most 150 output
+ * tokens; no field outside the schema (no prose).
  */
 function scoreNavigator(
   scoring: Extract<EvalCase['scoring'], { kind: 'navigator' }>,
@@ -1008,6 +1016,31 @@ function scoreNavigator(
   }
   if (want.target !== undefined && step.route?.edit?.target !== want.target) {
     problems.push(`target ${step.route?.edit?.target ?? 'none'}, expected ${want.target}`)
+  }
+  if (want.chapter !== undefined && step.route?.edit?.chapter !== want.chapter) {
+    problems.push(`chapter ${step.route?.edit?.chapter ?? 'none'}, expected ${want.chapter}`)
+  }
+  if (want.turn !== undefined && step.turn !== want.turn) {
+    problems.push(`turn ${step.turn ?? 'none'}, expected ${want.turn}`)
+  }
+  const instruction = step.route?.instruction ?? null
+  if (want.instruction !== undefined && (instruction === null) !== (want.instruction === 'empty')) {
+    problems.push(
+      `instruction ${instruction === null ? 'empty' : 'given'}, expected ${want.instruction}`
+    )
+  }
+  if (want.settled !== undefined) {
+    // What F-5.26 runs: the decision as `ai:navigate` settles it for the case's situation.
+    const settled = settleRoute(
+      step.route ?? { action: 'chat', instruction: null, edit: null },
+      want.settled.situation
+    )
+    if (settled.action !== want.settled.action) {
+      problems.push(`settled action ${settled.action}, expected ${want.settled.action}`)
+    }
+    if (want.settled.pass !== undefined && settled.edit?.pass !== want.settled.pass) {
+      problems.push(`settled pass ${settled.edit?.pass ?? 'none'}, expected ${want.settled.pass}`)
+    }
   }
   if (want.tool !== undefined && step.calls[0]?.tool !== want.tool) {
     problems.push(`first tool ${step.calls[0]?.tool ?? 'none'}, expected ${want.tool}`)
@@ -1418,6 +1451,48 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
   }
   return results
 }
+
+describe('navigator scoring (F-16.25): what the owed live run checks', () => {
+  const scoring = (
+    expected: NavigatorExpected
+  ): Extract<EvalCase['scoring'], { kind: 'navigator' }> => ({
+    kind: 'navigator',
+    step: 1,
+    expected
+  })
+  it('scores the settled decision, "i", the chapter and the turn kind', () => {
+    const vague = scoring({
+      instruction: 'empty',
+      settled: {
+        situation: { hasNode: true, hasSelection: false },
+        action: 'editPass',
+        pass: 'ask'
+      }
+    })
+    expect(scoreNavigator(vague, '{"a":"rewrite","t":"edit","i":""}')).toEqual({
+      kind: 'json',
+      ok: true,
+      problem: null
+    })
+    // A restated "i" on a vague rewrite skips F-5.26's quick picks: a custom pass.
+    expect(scoreNavigator(vague, '{"a":"rewrite","t":"edit","i":"Rewrite the scene."}')).toEqual({
+      kind: 'json',
+      ok: false,
+      problem: 'instruction given, expected empty; settled pass custom, expected ask'
+    })
+    const chapter = scoring({ action: 'editPass', chapter: '3' })
+    expect(
+      scoreNavigator(
+        chapter,
+        '{"a":"editPass","t":"edit","pass":"proofread","target":"chapter","chapter":"4"}'
+      )
+    ).toMatchObject({ ok: false, problem: 'chapter 4, expected 3' })
+    expect(scoreNavigator(scoring({ turn: 'edit' }), '{"a":"query","t":"answer"}')).toMatchObject({
+      ok: false,
+      problem: 'turn answer, expected edit'
+    })
+  })
+})
 
 describe('the live prompt eval, end to end against a fake OpenRouter (F-16.22; nothing spent)', () => {
   it('starts from OPENROUTER_API_KEY alone and sends every case as the app does', async () => {

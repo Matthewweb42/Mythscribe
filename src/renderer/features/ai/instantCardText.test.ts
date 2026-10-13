@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InstantCard } from '@shared/scribe'
-import { instantCardText } from './instantCardText'
+import { INSTANT_CARD_LABEL, instantCardLine, instantCardText } from './instantCardText'
 
 /** F-16.24 (plan P3 §4.3): an instant card as the chat turn's plain text until slice 5 draws it. */
 
@@ -27,15 +27,15 @@ const slot: InstantCard = {
 
 describe('instantCardText (F-16.24)', () => {
   it('words a value with where the book says it: fixed, lasting since, transient last stated', () => {
-    expect(instantCardText(slot, nameOf)).toBe('Mara · Eyes: grey (1.1)')
+    expect(instantCardLine(slot, nameOf)).toBe('Mara · Eyes: grey (1.1)')
     expect(
-      instantCardText(
+      instantCardLine(
         { ...slot, slot: 'role', label: 'Role', value: 'captain', since: '12.1' },
         nameOf
       )
     ).toBe('Mara · Role: captain (since 12.1)')
     expect(
-      instantCardText(
+      instantCardLine(
         {
           ...slot,
           slot: 'location',
@@ -51,7 +51,7 @@ describe('instantCardText (F-16.24)', () => {
 
   it('words a computed age, a yes, and who knows a secret (scoped, never a bare absence)', () => {
     expect(
-      instantCardText(
+      instantCardLine(
         {
           kind: 'age',
           recordId: 'm',
@@ -82,11 +82,11 @@ describe('instantCardText (F-16.24)', () => {
       asOfRef: '1.2',
       readFirst: null
     }
-    expect(instantCardText(knows, nameOf)).toBe('Yes: Orrin overheard it from Tomas (1.1)')
-    expect(instantCardText({ ...knows, how: 'told' }, nameOf)).toBe(
+    expect(instantCardLine(knows, nameOf)).toBe('Yes: Orrin overheard it from Tomas (1.1)')
+    expect(instantCardLine({ ...knows, how: 'told' }, nameOf)).toBe(
       'Yes: Orrin was told it by Tomas (1.1)'
     )
-    expect(instantCardText({ ...knows, source: 'author', fromName: null, ref: null }, nameOf)).toBe(
+    expect(instantCardLine({ ...knows, source: 'author', fromName: null, ref: null }, nameOf)).toBe(
       'Yes: Orrin knew it before the book'
     )
     const who: InstantCard = {
@@ -117,11 +117,16 @@ describe('instantCardText (F-16.24)', () => {
       asOfRef: '1.2',
       readFirst: null
     }
-    expect(instantCardText(who, nameOf)).toBe(
-      'Who knows the sold map: Orrin: overheard from Tomas (1.1) · readers since 1.1'
+    expect(instantCardLine(who, nameOf)).toBe(
+      'Who knows the sold map: Orrin: overheard from Tomas (1.1) (checked up to 1.2) · readers since 1.1'
     )
-    expect(instantCardText({ ...who, holders: [], readersSince: null }, nameOf)).toBe(
+    expect(instantCardLine({ ...who, holders: [], readersSince: null }, nameOf)).toBe(
       'Who knows the sold map: No scene shows anyone learning this (checked up to 1.2)'
     )
+  })
+
+  it('marks the turn’s text as read by AI from the book, with no AI call now (design §2.6)', () => {
+    expect(INSTANT_CARD_LABEL).toBe('Read by AI from your book · quote checked · no AI call now')
+    expect(instantCardText(slot, nameOf)).toBe(`Mara · Eyes: grey (1.1)\n\n${INSTANT_CARD_LABEL}`)
   })
 })

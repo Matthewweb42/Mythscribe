@@ -46,7 +46,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `reader` | Story memory reading | background | reader.v2 | fast | 1626 / 5848 | 320 / 720 | $0.000317 · $0.00102 | $0.000397 | $0.00266 | 1 | $0.000317 |
 | `verify` | Story memory check | background | verify.v2 | fast | 1111 / 1742 | 140 / 400 | $0.000195 · $0.000356 | $0.000243 | $0.00146 | 1 | $0.000195 |
 | `cite` | Ms Scribe’s quote check | every chat message | cite.v1 | fast | 432 / 2435 | 60 / 200 | $0.0000773 · $0.000397 | $0.0000966 | $0.000594 | 1 | $0.0000773 |
-| `navigator` | Ms Scribe’s search | every chat message | navigator.v1 | fast | 1177 / 5578 | 150 / 150 | $0.000207 · $0.000823 | $0.000258 | $0.00156 | 2 | $0.000414 |
+| `navigator` | Ms Scribe’s search | every chat message | navigator.v1 | fast | 1184 / 5585 | 150 / 150 | $0.000208 · $0.000824 | $0.000260 | $0.00156 | 2 | $0.000416 |
 
 ## When each runs, and ideas to make it cheaper
 

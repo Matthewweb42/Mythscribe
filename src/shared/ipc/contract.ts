@@ -2836,23 +2836,13 @@ export const contract = {
     output: AiWhatNextResult
   },
   /**
-   * The assistant router (F-5.19): which feature answers this chat message. The renderer sends
-   * the open document (null with none), the message, the recent turns (main reads the last two),
-   * and the selection as its first `ROUTE_SELECTION_PREVIEW_CHARS` characters (null with none).
-   * Main short-circuits a blank-ish message or an exact action / quick-action id without a
-   * request, otherwise asks the fast tier for JSON (route.v2); an unreadable answer is `chat`, a
-   * scene action without an open document falls back to `chat`, and a `rewrite` without a
-   * selection is an `editPass` on the open scene (F-5.26). The
-   * renderer then calls the chosen feature's own channel. AI failures come back as data with
-   * the echoed `requestId` (DISABLED when the router is off: fall back to `ai:chat`).
-   */
-  /**
    * Ms Scribe's navigation (F-16.24, F-16.25; story memory v2 only, in place of `ai:route`): Step 0
    * (local), then an instant card with no AI call, or `navigator.v1` (fast, at most three steps,
    * each step's lookups arriving first as `ai:agentStep` events for `requestId`): a route action
    * the renderer runs as before (F-5.26), or an answer turn whose navigation the renderer hands to
    * `ai:agent`. `history` is the recent turns (main reads the last two); `focus` the caret window
-   * and selection. DISABLED when the chat is off; other AI failures come back as data.
+   * and selection. `ai:cancel` on `requestId` stops the read-first and every step. DISABLED when
+   * the chat is off; other AI failures come back as data.
    */
   'ai:navigate': {
     input: z.object({
@@ -2866,6 +2856,18 @@ export const contract = {
     }),
     output: AiNavigateResult
   },
+  /**
+   * The assistant router (F-5.19; story memory v1 only since F-16.25, where `ai:navigate` takes
+   * its place): which feature answers this chat message. The renderer sends
+   * the open document (null with none), the message, the recent turns (main reads the last two),
+   * and the selection as its first `ROUTE_SELECTION_PREVIEW_CHARS` characters (null with none).
+   * Main short-circuits a blank-ish message or an exact action / quick-action id without a
+   * request, otherwise asks the fast tier for JSON (route.v2); an unreadable answer is `chat`, a
+   * scene action without an open document falls back to `chat`, and a `rewrite` without a
+   * selection is an `editPass` on the open scene (F-5.26). The
+   * renderer then calls the chosen feature's own channel. AI failures come back as data with
+   * the echoed `requestId` (DISABLED when the router is off: fall back to `ai:chat`).
+   */
   'ai:route': {
     input: z.object({
       nodeId: z.string().nullable(),

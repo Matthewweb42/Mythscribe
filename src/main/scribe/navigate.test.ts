@@ -7,17 +7,25 @@ import { InstantCard } from '@shared/scribe'
 import { claim, card, reading } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
 import { defaultAiUsageState, dayOf } from '../ai/dailyCap'
-import { resetInflight } from '../ai/inflight'
+import { cancelInflight, registerInflight, releaseInflight, resetInflight } from '../ai/inflight'
 import { NAVIGATOR_SENTINEL } from '../ai/prompts/navigator.v1'
 import { ROUTE_RULES_V2 } from '../ai/prompts/route.v2'
 import type { CompletionRequest, CompletionResult, Provider } from '../ai/providers/types'
-import { AiRateLimitError } from '../ai/providers/types'
+import { AiCancelledError, AiRateLimitError } from '../ai/providers/types'
 import type { AiRequestDeps } from '../ai/request'
 import type { UsageEntry } from '../ai/usageStore'
+import { runAnchors } from '../memory/reading/anchors'
 import { seedClaims } from '../memory/reading/claimFixture'
 import { getClaim } from '../memory/reading/claimStore'
 import { setAiSettings } from '../project/settingsStore'
-import { READING_FIRST, runNavigate, turnOfWords, type NavigateInput } from './navigate'
+import {
+  answerAction,
+  navigationTurn,
+  READING_FIRST,
+  runNavigate,
+  withOrderedHits,
+  type NavigateInput
+} from './navigate'
 import { gatherStep0 } from './step0'
 import {
   closeScribeBook,
@@ -41,6 +49,7 @@ type Complete = (request: CompletionRequest) => Promise<CompletionResult>
 let book: ScribeBook
 let complete: ReturnType<typeof vi.fn<Complete>>
 let readNow: ReturnType<typeof vi.fn<(nodeId: string, requestId: string) => Promise<ReadNowResult>>>
+let checkAnchors: ReturnType<typeof vi.fn<(nodeId: string) => void>>
 let deps: AiRequestDeps
 let ledger: UsageEntry[]
 let steps: AgentStep[]
@@ -65,7 +74,7 @@ const run = (over: Partial<NavigateInput> = {}): ReturnType<typeof runNavigate> 
   runNavigate(
     book.db,
     deps,
-    { readNow },
+    { readNow, checkAnchors },
     {
       nodeId: book.two,
       message: 'What did Orrin hear?',
@@ -92,6 +101,7 @@ beforeEach(() => {
   complete = vi.fn<Complete>()
   complete.mockResolvedValue(said({ a: 'chat', t: 'answer', use: ['E1'] }))
   readNow = vi.fn()
+  checkAnchors = vi.fn((nodeId: string) => void runAnchors(book.db, nodeId, SCRIBE_NOW))
   ledger = []
   steps = []
   const provider: Provider = {
@@ -232,7 +242,68 @@ describe('no request (F-16.24): a typed action, an instant card, a lookup handed
     })
     await run({ message: 'Mara’s eyes?' })
     expect(readNow).toHaveBeenCalledTimes(1)
+    // Through the anchors job's own check (its counts and its memory:changed, handlers.test).
+    expect(checkAnchors).toHaveBeenCalledWith(book.two)
     expect(seen).toEqual(['stale'])
+  })
+
+  it('hands over, never the old card, when the read leaves the change unread', async () => {
+    grey()
+    saveDocument(book.db, book.two, doc('Mara’s eyes had turned brown.', 'Mara sat down.'))
+    // A reply the reader could not use: read, but the sentence is still unread.
+    readNow.mockResolvedValue({
+      ok: true,
+      read: true,
+      reason: null,
+      readingId: 'x',
+      costUsd: 0.002
+    })
+    const result = await run({ message: 'Mara’s eyes?' })
+    expect(readNow).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      kind: 'answer',
+      action: 'query',
+      navigation: { turn: 'lookup' },
+      costUsd: 0.002
+    })
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it('stops the read-first on Stop: its own request is cancelled and nothing more starts', async () => {
+    grey()
+    saveDocument(book.db, book.two, doc('Mara’s eyes had turned brown.', 'Mara sat down.'))
+    const cancelled: boolean[] = []
+    readNow.mockImplementation((_nodeId, readId) => {
+      const own = registerInflight(readId)
+      // The author presses Stop: ai:cancel on the turn's id.
+      cancelInflight('r1')
+      cancelled.push(own.signal.aborted)
+      releaseInflight(readId)
+      return Promise.resolve({ ok: false, code: 'CANCELLED', message: 'stopped', nextStep: '' })
+    })
+    await expect(run({ message: 'Mara’s eyes?' })).rejects.toBeInstanceOf(AiCancelledError)
+    expect(cancelled).toEqual([true])
+    expect(readNow).toHaveBeenCalledTimes(1)
+    expect(complete).not.toHaveBeenCalled()
+    // Released: the same id can run again.
+    readNow.mockResolvedValue({ ok: false, code: 'DISABLED', message: 'off', nextStep: '' })
+    expect((await run({ message: 'Mara’s eyes?' })).kind).toBe('answer')
+  })
+
+  it('sends a slot with no value, and a knows question that is not a yes, to the navigator', async () => {
+    replies({ a: 'query', t: 'lookup', call: [{ search: ['eyes', 'gaze'] }] }, { use: ['E1'] })
+    const none = await run({ message: 'Mara’s eyes?' })
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(none).toMatchObject({
+      kind: 'answer',
+      routedBy: 'model',
+      // A navigator's lookup is an answer: the lookup kind and its budgets are Step 0's own.
+      navigation: { turn: 'answer' }
+    })
+    replies({ a: 'query', t: 'answer', call: [{ knows: 'the sold map' }] }, { use: ['E1'] })
+    const no = await run({ message: 'Does Mara know about the sold map?', requestId: 'r2' })
+    expect(complete).toHaveBeenCalledTimes(4)
+    expect(no).toMatchObject({ kind: 'answer', routedBy: 'model' })
   })
 
   it('hands a read the reader cannot make now to Ms Scribe as a lookup (E0 has the change)', async () => {
@@ -391,12 +462,11 @@ describe('finding the evidence (F-16.25)', () => {
     expect(result.steps).toEqual(steps)
     expect(result.navigation?.turn).toBe('answer')
     expect(result.navigation?.terms).toEqual(expect.arrayContaining(['stranger', 'buyer']))
-    expect(result.navigation?.hits).toEqual(
-      expect.arrayContaining([
-        { nodeId: book.one, para: 1 },
-        { nodeId: book.one, para: 2 }
-      ])
-    )
+    // The navigator's own paragraphs lead the search-miss baseline, Step 0's after them.
+    expect(result.navigation?.hits.slice(0, 2)).toEqual([
+      { nodeId: book.one, para: 1 },
+      { nodeId: book.one, para: 2 }
+    ])
     // E99 names nothing: only E2 is used.
     expect(result.navigation?.evidence).toHaveLength(1)
     expect(result.costUsd).toBeGreaterThan(0)
@@ -454,17 +524,75 @@ describe('finding the evidence (F-16.25)', () => {
     const result = await run({ message: "Add to Mara's sheet that she hates the sea." })
     if (result.kind !== 'answer') throw new Error('no answer')
     expect(result.navigation?.turn).toBe('edit')
-    expect(
-      turnOfWords({
-        change: false,
-        sheetWrite: false,
-        idea: true,
-        scopeAll: false,
-        knows: false,
-        learns: false,
-        wholeBook: false
-      })
-    ).toBe('idea')
+    const cues = {
+      change: false,
+      sheetWrite: false,
+      idea: true,
+      scopeAll: false,
+      knows: false,
+      learns: false,
+      wholeBook: false
+    }
+    expect(navigationTurn(null, 'What were my ideas for Mara?', cues)).toBe('idea')
+    // The words decide a change, never the navigator's label.
+    expect(navigationTurn('edit', 'Does Tomas know about the map?', { ...cues, idea: false })).toBe(
+      'answer'
+    )
+    expect(navigationTurn('answer', 'Fix the typo.', { ...cues, change: true })).toBe('edit')
+    expect(navigationTurn('whatIf', 'What if Mara stayed?', cues)).toBe('whatIf')
+    expect(answerAction('query', 'edit')).toBe('chat')
+    expect(answerAction('query', 'answer')).toBe('query')
+  })
+
+  it('runs an explicit sheet request the navigator called a query with write access (decision 3)', async () => {
+    replies({ a: 'query', t: 'edit', use: ['E1'] })
+    const pin = await run({ message: "Put on Mara's sheet that she was born in 1712." })
+    expect(pin).toMatchObject({ kind: 'answer', action: 'chat', navigation: { turn: 'edit' } })
+    // A question the navigator called an edit stays a read-only question.
+    replies({ a: 'query', t: 'edit', use: ['E1'] })
+    const asked = await run({ message: 'Who sold the map to a stranger?', requestId: 'r2' })
+    expect(asked).toMatchObject({ kind: 'answer', action: 'query', navigation: { turn: 'answer' } })
+  })
+
+  it('keeps the earliest ordered hit when the navigator uses a later one for a first question', async () => {
+    const question = 'When is the map first sold?'
+    const step0 = gatherStep0(book.db, {
+      nodeId: book.three,
+      question,
+      focus: { caretPara: null, selection: null }
+    })
+    expect(step0.ordinal).toBe(true)
+    const sceneOf = (nodeId: string): string | undefined =>
+      step0.menu.find(
+        (item) =>
+          item.key.kind === 'passage' && item.key.source === 'scene' && item.key.ownerId === nodeId
+      )?.id
+    const later = sceneOf(book.three)
+    expect(sceneOf(book.one)).toBeDefined()
+    replies({ a: 'query', t: 'answer', use: [later] })
+    const result = await run({ nodeId: book.three, message: question })
+    if (result.kind !== 'answer') throw new Error('no answer')
+    const owners = (result.navigation?.evidence ?? []).flatMap((key) =>
+      key.kind === 'passage' && key.source === 'scene' ? [key.ownerId] : []
+    )
+    // The earlier scenes the navigator passed over come first, in reading order, then its pick.
+    expect(owners).toEqual([book.one, book.two, book.three])
+    // A last question keeps the later ones it passed over instead, latest first.
+    const keys = step0.menu.map((item) => item.key)
+    const order = new Map([
+      [book.one, 0],
+      [book.two, 1],
+      [book.three, 2]
+    ])
+    const first = keys.filter(
+      (key) => key.kind === 'passage' && key.source === 'scene' && key.ownerId === book.one
+    )
+    const latest = withOrderedHits(first, step0.menu, (id) => order.get(id), true)
+    expect(latest.flatMap((key) => (key.kind === 'passage' ? [key.ownerId] : []))).toEqual([
+      book.three,
+      book.two,
+      book.one
+    ])
   })
 
   it('never sends an absence: no navigator request says someone does not know', async () => {
@@ -491,6 +619,8 @@ describe('finding the evidence (F-16.25)', () => {
       { use: ['E1'] }
     )
     await run({ message: 'Does Mara know about the sold map?' })
+    // Not a yes: the navigator looks (P3-D5 sends only stale or contested values straight on).
+    expect(complete).toHaveBeenCalledTimes(2)
     for (const call of complete.mock.calls) {
       const text = call[0].messages.map((m) => m.content).join('\n')
       expect(text).not.toMatch(

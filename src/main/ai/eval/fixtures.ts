@@ -947,14 +947,36 @@ export interface EvalCase {
       }
     /**
      * Ms Scribe's navigator (F-16.25, `navigator.v1`): step `step`'s reply parses through
-     * `parseNavigatorStep`; at step 1 the expected action, and an edit pass's pass and target; the
-     * expected first tool, or ids to use; at most 150 output tokens; no prose field.
+     * `parseNavigatorStep`; at step 1 the expected action, an edit pass's pass, target and
+     * chapter, the turn kind, whether "i" is empty, and the decision as `settleRoute` settles it;
+     * the expected first tool, or ids to use; at most 150 output tokens; no prose field.
      */
     | {
         kind: 'navigator'
         step: number
-        expected: { action?: string; pass?: string; target?: string; tool?: string; use?: boolean }
+        expected: NavigatorExpected
       }
+}
+
+/** What a navigator case expects of its step (a field left out: anything). */
+export interface NavigatorExpected {
+  action?: string
+  pass?: string
+  target?: string
+  /** The chapter an edit pass names ("3"). */
+  chapter?: string
+  /** The turn kind `t` (F-16.25: the words still decide a change, `settleTurn`). */
+  turn?: string
+  /** "i" empty (a vague request: F-5.26's quick picks) or holding the request. */
+  instruction?: 'empty' | 'given'
+  /** The decision as `settleRoute` settles it in the case's situation (what F-5.26 runs). */
+  settled?: {
+    situation: { hasNode: boolean; hasSelection: boolean }
+    action: string
+    pass?: string
+  }
+  tool?: string
+  use?: boolean
 }
 
 /** A test-book label as a reader case scores against it. */

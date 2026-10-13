@@ -12,7 +12,7 @@ import { normName } from '@shared/memory/names'
 import type { StoryRecordSummary } from '@shared/memory/records'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
 import { directionMessage } from '@shared/quickActions'
-import { SCRIBE_REASONING_TOKENS, type Navigation } from '@shared/scribe'
+import { SCRIBE_REASONING_TOKENS, type Navigation, type ScribeTurnKind } from '@shared/scribe'
 import { parseCitedAnswer } from '@shared/scribeAnswer'
 import { claim, card, reading, searchMiss } from '../db/schema'
 import { activeDraftId } from '../draft/draftStore'
@@ -427,15 +427,29 @@ describe('runScribe (F-16.25): the one answer call', () => {
         cues
       )
     ).toBe('draft')
+    const named = (turn: ScribeTurnKind): Navigation => ({
+      turn,
+      evidence: [],
+      scope: null,
+      terms: [],
+      hits: []
+    })
+    expect(scribeTurnOf({ ...base, navigation: named('lookup') }, cues)).toBe('lookup')
+    // The words decide a change, never the navigator's label (slice 4 review); Plan never edits.
+    expect(scribeTurnOf({ ...base, navigation: named('edit') }, cues)).toBe('answer')
+    expect(scribeTurnOf({ ...base, navigation: named('whatIf') }, cues)).toBe('whatIf')
+    expect(
+      scribeTurnOf({ ...base, navigation: named('answer') }, { change: true, sheetWrite: false })
+    ).toBe('edit')
+    expect(
+      scribeTurnOf({ ...base, navigation: named('draft') }, { change: true, sheetWrite: false })
+    ).toBe('draft')
     expect(
       scribeTurnOf(
-        {
-          ...base,
-          navigation: { turn: 'lookup', evidence: [], scope: null, terms: [], hits: [] }
-        },
-        cues
+        { ...base, access: 'read', navigation: named('edit') },
+        { change: true, sheetWrite: false }
       )
-    ).toBe('lookup')
+    ).toBe('answer')
   })
 
   it('an edit turn goes out with reasoning low, a larger cap, the voice block and ids on E0', async () => {
@@ -1052,6 +1066,24 @@ describe('runScribe: which answers the main-claim rule holds (P3 slice 3 review)
     const stands = await run({ message: knows })
     expect(complete).toHaveBeenCalledTimes(1)
     expect(stands.answer).toBe(scoped)
+  })
+
+  it('keeps the fact checks on the words whatever kind the navigator named (slice 4 review)', async () => {
+    const answer = 'Tomas does not know about the map.'
+    for (const turn of ['whatIf', 'edit', 'todo'] as const) {
+      complete.mockReset()
+      cite.mockReset()
+      cite.mockResolvedValue(verdicts(['yes']))
+      replies({ answer, found: true }, { answer, found: true })
+      const result = await run({
+        message: 'Does Tomas know about the sold map?',
+        access: 'write',
+        navigation: { turn, evidence: [], scope: null, terms: [], hits: [] }
+      })
+      expect(complete).toHaveBeenCalledTimes(2)
+      expect(request(1).messages.at(-1)?.content).toContain(UNSUPPORTED_REASONS.absence)
+      expect(result.scribe).toMatchObject({ retried: true, notFound: true })
+    }
   })
 
   it('a retry that fails ends Not found, never the turn; a cancel still stops it', async () => {

@@ -21,20 +21,24 @@ import {
   type NavigatorTail
 } from '../prompts/navigator.v1'
 import type { ChatTurn } from '../prompts/chat.v1'
-import type { EvalCase } from './fixtures'
+import type { EvalCase, NavigatorExpected } from './fixtures'
 
 /**
  * Ms Scribe's navigator cases (F-16.25; plan P3 §4.4), from the test book (`memory/testBook`): the
  * roster of its records, secrets and threads, two Ideas, the story map of its chapters, and the
  * message as `ai:navigate` sends it. **Route parity**: route.v2's eight cases replayed through
  * the navigator's tail (the same messages, open document and selection), plus Editor's notes,
- * What next and a synopsis, so F-5.26's edit passes and every other route action keep routing.
- * **Search**: a first question (a search with synonyms), a knows question (the `knows` tool), an
- * idea recall (`ideas`), a structure edit (`outline`), a follow-up ("do it again" after an edit
- * pass), a menu that already answers (`use` at step 1), step 3 (must end with `use`), and every
- * cap at once. Live (`MYTHSCRIBE_EVAL_LIVE=1`, owed by the author), they score as kind
- * `navigator`: the reply parses through `parseNavigatorStep`, the expected action, pass and
- * target, the expected first tool or `use`, at most 150 output tokens, and no prose field.
+ * What next and a synopsis, and a vague and a specific rewrite with nothing selected (scored as
+ * `settleRoute` settles them: the quick picks, or a custom pass), so F-5.26's edit passes and
+ * every other route action keep routing. **Search**: a first question (a search with synonyms), a
+ * knows question (the `knows` tool), an idea recall (`ideas`), a structure edit (`outline`), a
+ * follow-up ("do it again" after an edit pass), a menu that already answers (`use` at step 1),
+ * step 3 (must end with `use`), and every cap at once. **Sheet requests** (decision 3): an
+ * explicit "add this to X's sheet" and "save this idea for X" are edit turns. Live
+ * (`MYTHSCRIBE_EVAL_LIVE=1`, owed by the author), they score as kind `navigator`: the reply parses
+ * through `parseNavigatorStep`, the expected action, pass, target, chapter, turn kind, "i" and
+ * settled decision, the expected first tool or `use`, at most 150 output tokens, and no prose
+ * field.
  */
 
 /** Now: chapter 9's scene, "Bel's news". */
@@ -137,17 +141,11 @@ const MENU: NavigatorMenuLine[] = [
   bookLine('E4', 'h03', 0)
 ]
 
+/** A scene open and nothing selected, as `settleRoute` reads the cases' tail. */
+const OPEN = { hasNode: true, hasSelection: false }
+
 function tail(message: string, over: Partial<NavigatorTail> = {}): NavigatorTail {
   return { now: NOW_REF, active: ACTIVE, selection: null, history: [], message, ...over }
-}
-
-/** What a case expects of a step (null: anything). */
-interface NavigatorExpect {
-  action?: string
-  pass?: string
-  target?: string
-  tool?: string
-  use?: boolean
 }
 
 function navigatorCase(
@@ -159,7 +157,7 @@ function navigatorCase(
     steps?: NavigatorStepTurn[]
     prefix?: NavigatorPrefix
   },
-  expected: NavigatorExpect
+  expected: NavigatorExpected
 ): EvalCase {
   const steps = input.steps ?? []
   const built = buildNavigatorPrompt({
@@ -266,7 +264,13 @@ export function navigatorEvalCases(): EvalCase[] {
       'vague-scene',
       '"make this scene better" with the scene open and nothing selected: ask which edit',
       { tail: tail('Make this scene better.') },
-      { action: 'editPass', pass: 'ask', target: 'scene' }
+      {
+        action: 'editPass',
+        pass: 'ask',
+        target: 'scene',
+        turn: 'edit',
+        settled: { situation: OPEN, action: 'editPass', pass: 'ask' }
+      }
     ),
     navigatorCase(
       'vague-selection',
@@ -290,7 +294,7 @@ export function navigatorEvalCases(): EvalCase[] {
       'proofread-chapter',
       '"proofread chapter 3": a proofread pass on the chapter it names',
       { tail: tail('Proofread chapter 3.') },
-      { action: 'editPass', pass: 'proofread', target: 'chapter' }
+      { action: 'editPass', pass: 'proofread', target: 'chapter', chapter: '3' }
     ),
     navigatorCase(
       'rewrite-voice',
@@ -342,30 +346,55 @@ export function navigatorEvalCases(): EvalCase[] {
       { tail: tail("Write this scene's synopsis.") },
       { action: 'synopsis' }
     ),
+    navigatorCase(
+      'rewrite-vague',
+      '"rewrite this scene" with nothing selected: "i" empty, so it settles to the quick picks',
+      { tail: tail('Rewrite this scene.') },
+      { instruction: 'empty', settled: { situation: OPEN, action: 'editPass', pass: 'ask' } }
+    ),
+    navigatorCase(
+      'rewrite-specific',
+      'a specific rewrite with nothing selected: "i" holds it, so it settles to a custom pass',
+      { tail: tail('Rewrite this scene so Liesel sounds angrier with Mr. Varrow.') },
+      { instruction: 'given', settled: { situation: OPEN, action: 'editPass', pass: 'custom' } }
+    ),
     // Search.
     navigatorCase(
       'first-distrust',
       'a first question: search every earlier scene with its own synonyms',
       { tail: tail('When does Liesel first distrust Mr. Varrow?'), menu: MENU },
-      { action: 'query', tool: 'search' }
+      { action: 'query', turn: 'answer', tool: 'search' }
     ),
     navigatorCase(
       'knows',
       'a knows question: the knows tool on the secret',
       { tail: tail("Does Mr. Harrow know about the Captain's debts?"), menu: MENU.slice(2) },
-      { action: 'query', tool: 'knows' }
+      { action: 'query', turn: 'answer', tool: 'knows' }
     ),
     navigatorCase(
       'idea-recall',
       "the author's idea about a record: the ideas tool",
       { tail: tail("What was my idea about the Captain's past?") },
-      { tool: 'ideas' }
+      { turn: 'idea', tool: 'ideas' }
     ),
     navigatorCase(
       'structure',
       'a structure edit: the outline first',
       { tail: tail('Move 7.1 after 8.1.') },
-      { action: 'chat', tool: 'outline' }
+      { action: 'chat', turn: 'edit', tool: 'outline' }
+    ),
+    // Sheet requests (decision 3 as the author changed it): written there, so never read-only.
+    navigatorCase(
+      'pin-explicit',
+      'an explicit "add this to X\'s sheet": an edit turn',
+      { tail: tail("Add to Mr. Varrow's sheet that he limps after the fall."), menu: MENU },
+      { action: 'chat', turn: 'edit' }
+    ),
+    navigatorCase(
+      'save-idea',
+      '"save this idea for X": an edit turn',
+      { tail: tail('Save this idea for Liesel: she was a smuggler once.') },
+      { action: 'chat', turn: 'edit' }
     ),
     navigatorCase(
       'follow-up',

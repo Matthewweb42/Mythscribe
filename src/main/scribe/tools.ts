@@ -78,13 +78,31 @@ export function recordsOf(project: AgentProject): StoryRecordSummary[] {
   return project.records
 }
 
+/** A name's words, as a whole-word match reads them. */
+const wordsOf = (text: string): string[] =>
+  text.split(/[^\p{L}\p{N}'’]+/u).filter((word) => word !== '')
+
+/** Whether `part`'s words are words of `whole`, next to each other ("voss" in "mara voss"). */
+function holdsWords(whole: string, part: string): boolean {
+  const all = wordsOf(whole)
+  const want = wordsOf(part)
+  if (want.length === 0) return false
+  for (let at = 0; at + want.length <= all.length; at++) {
+    if (want.every((word, i) => all[at + i] === word)) return true
+  }
+  return false
+}
+
 /**
  * The record a name points at: one whose name or nickname is the name (after `normName`), else
- * the only one whose name holds it.
+ * the only one whose name holds it. `words` (the navigator's tools, which read names a model
+ * wrote) takes only a whole-word part of a name or nickname, so "Ann" is never "Joanna"; agent.v8's
+ * v2 tools keep the loose fallback until F-16.31.
  */
 export function recordByNameV2(
   project: AgentProject,
-  name: unknown
+  name: unknown,
+  partial: 'any' | 'words' = 'any'
 ): StoryRecordSummary | undefined {
   if (typeof name !== 'string') return undefined
   const norm = normName(name)
@@ -94,8 +112,15 @@ export function recordByNameV2(
   if (exact.length === 1) return exact[0]
   const main = exact.find((each) => normName(each.name) === norm)
   if (main !== undefined) return main
-  const partial = records.filter((each) => normName(each.name).includes(norm))
-  return partial.length === 1 ? partial[0] : undefined
+  const holds =
+    partial === 'words'
+      ? records.filter((each) =>
+          [normName(each.name), ...each.aliases.map((alias) => alias.norm)].some((whole) =>
+            holdsWords(whole, norm)
+          )
+        )
+      : records.filter((each) => normName(each.name).includes(norm))
+  return holds.length === 1 ? holds[0] : undefined
 }
 
 /** Whether a scene is an Idea scene or one left out of compile (design §2.2: never real). */
@@ -246,6 +271,24 @@ const clip = (text: string): string =>
 const added = (items: readonly (MenuItem | null)[]): MenuItem[] =>
   items.filter((item): item is MenuItem => item !== null)
 
+/**
+ * Adds candidates in order until `cap` were new: one already on the menu (or gone now) is skipped,
+ * and none past the cap reaches the menu, so every E id a call makes is one the navigator is shown.
+ */
+function addUpTo<T>(
+  candidates: readonly T[],
+  cap: number,
+  add: (each: T) => MenuItem | null
+): MenuItem[] {
+  const out: MenuItem[] = []
+  for (const each of candidates) {
+    if (out.length >= cap) break
+    const item = add(each)
+    if (item !== null) out.push(item)
+  }
+  return out
+}
+
 /** The Research document a title names, or undefined. */
 function researchByTitle(world: NavigatorWorld, title: string): string | undefined {
   const want = title
@@ -262,7 +305,7 @@ function researchByTitle(world: NavigatorWorld, title: string): string | undefin
 
 /** A record a tool names, with its pages; null when the name is no record. */
 function recordNamed(world: NavigatorWorld, name: string): StoryRecord | null {
-  const summary = recordByNameV2(world.project, name)
+  const summary = recordByNameV2(world.project, name, 'words')
   return summary === undefined ? null : frameRecord(world.frame, summary.id)
 }
 
@@ -324,16 +367,15 @@ function scenesNamed(world: NavigatorWorld, text: string): string[] {
 function cards(world: NavigatorWorld, arg: string): ToolRun {
   let nodeIds = scenesNamed(world, arg)
   if (nodeIds.length === 0) {
-    const record = recordByNameV2(world.project, arg)
+    const record = recordByNameV2(world.project, arg, 'words')
     if (record !== undefined) {
       nodeIds = scenesNaming(world.project, record.id)
         .filter((each) => each.real)
         .map((each) => each.nodeId)
     }
   }
-  const items = added(nodeIds.map((nodeId) => world.menu.addKey({ kind: 'card', nodeId }))).slice(
-    0,
-    NAVIGATOR_TOOL_ITEMS
+  const items = addUpTo(nodeIds, NAVIGATOR_TOOL_ITEMS, (nodeId) =>
+    world.menu.addKey({ kind: 'card', nodeId })
   )
   const step: AgentStep = {
     tool: 'cards',
@@ -371,17 +413,13 @@ function read(world: NavigatorWorld, arg: string): ToolRun {
         note: item === null ? `${record.name}'s Ideas are empty.` : null
       }
     }
-    const items = added(
-      pageParagraphs(record.pinned)
-        .slice(0, NAVIGATOR_TOOL_ITEMS)
-        .map((paragraph) =>
-          world.menu.addKey({
-            kind: 'passage',
-            source: 'pinned',
-            ownerId: record.id,
-            para: paragraph.index
-          })
-        )
+    const items = addUpTo(pageParagraphs(record.pinned), NAVIGATOR_TOOL_ITEMS, (paragraph) =>
+      world.menu.addKey({
+        kind: 'passage',
+        source: 'pinned',
+        ownerId: record.id,
+        para: paragraph.index
+      })
     )
     return {
       step,
@@ -399,12 +437,8 @@ function read(world: NavigatorWorld, arg: string): ToolRun {
     const row = world.frame.nodes.find((each) => each.id === researchId)
     const doc = row === undefined ? null : parseDoc(row.content)
     const paragraphs = doc === null ? [] : markedParagraphs(doc)
-    const items = added(
-      paragraphs
-        .slice(0, NAVIGATOR_TOOL_ITEMS)
-        .map((paragraph) =>
-          world.menu.addKey({ kind: 'passage', source, ownerId: researchId, para: paragraph.index })
-        )
+    const items = addUpTo(paragraphs, NAVIGATOR_TOOL_ITEMS, (paragraph) =>
+      world.menu.addKey({ kind: 'passage', source, ownerId: researchId, para: paragraph.index })
     )
     return { step, added: items, note: items.length === 0 ? `"${arg}" is empty.` : null }
   }
@@ -452,17 +486,19 @@ function state(world: NavigatorWorld, arg: string): ToolRun {
   }
   const sheet = sheetMemory(world.frame.db, record.id, world.step0.nowId)
   const digest = recordDigest(sheet, record, nameOf(world))
-  const items: (MenuItem | null)[] = digest.lines.map((line) =>
-    world.menu.add(
-      line.key,
-      line.key.kind === 'timeline' ? 'computed' : 'happened',
-      record.name,
-      `${record.name} · ${line.text}`
-    )
+  // Each candidate is added only while the call is under its cap (`addUpTo`).
+  const candidates: (() => MenuItem | null)[] = digest.lines.map(
+    (line) => () =>
+      world.menu.add(
+        line.key,
+        line.key.kind === 'timeline' ? 'computed' : 'happened',
+        record.name,
+        `${record.name} · ${line.text}`
+      )
   )
   const known = recordState(world.project, record)
   for (const paragraph of known.pinned.slice(0, 4)) {
-    items.push(
+    candidates.push(() =>
       world.menu.addKey({
         kind: 'passage',
         source: 'pinned',
@@ -476,7 +512,7 @@ function state(world: NavigatorWorld, arg: string): ToolRun {
     const para =
       each === undefined ? undefined : each === upToNow[0] ? each.paras[0] : each.paras.at(-1)
     if (each === undefined || para === undefined) continue
-    items.push(
+    candidates.push(() =>
       world.menu.addHit({
         source: 'scene',
         ownerId: each.nodeId,
@@ -485,10 +521,11 @@ function state(world: NavigatorWorld, arg: string): ToolRun {
       })
     )
   }
-  if (known.seen !== null && promptCard(world.frame.db, known.seen) !== null) {
-    items.push(world.menu.addKey({ kind: 'card', nodeId: known.seen }))
+  const seen = known.seen
+  if (seen !== null && promptCard(world.frame.db, seen) !== null) {
+    candidates.push(() => world.menu.addKey({ kind: 'card', nodeId: seen }))
   }
-  const kept = added(items).slice(0, NAVIGATOR_TOOL_ITEMS * 2)
+  const kept = addUpTo(candidates, NAVIGATOR_TOOL_ITEMS * 2, (each) => each())
   return { step, added: kept, note: kept.length === 0 ? `Nothing new on ${record.name}.` : null }
 }
 
@@ -523,20 +560,17 @@ function knows(world: NavigatorWorld, arg: string): ToolRun {
     return { step, added: [], note: `No secret or person is called "${arg}".` }
   }
   const sheet = sheetMemory(world.frame.db, record.id, world.step0.nowId)
-  const items = added(
-    (sheet.knows?.lines ?? []).flatMap((line) => {
-      const text = knowsLineText(line, nameOf(world))
-      if (text === null) return []
-      return [
-        world.menu.add(
+  const items = addUpTo(sheet.knows?.lines ?? [], NAVIGATOR_TOOL_ITEMS, (line) => {
+    const text = knowsLineText(line, nameOf(world))
+    return text === null
+      ? null
+      : world.menu.add(
           { kind: 'knows', secretId: line.secretId },
           'happened',
           record.name,
           `${record.name} · ${text}`
         )
-      ]
-    })
-  ).slice(0, NAVIGATOR_TOOL_ITEMS)
+  })
   return { step, added: items, note: items.length === 0 ? `No new line for ${record.name}.` : null }
 }
 
@@ -574,9 +608,8 @@ function ideas(world: NavigatorWorld, arg: string): ToolRun {
       : recordsOf(world.project)
           .filter((each) => (frameRecord(world.frame, each.id)?.ideas ?? null) !== null)
           .map((each) => each.id)
-  const items = added(ids.map((recordId) => world.menu.addKey({ kind: 'ideas', recordId }))).slice(
-    0,
-    NAVIGATOR_TOOL_ITEMS
+  const items = addUpTo(ids, NAVIGATOR_TOOL_ITEMS, (recordId) =>
+    world.menu.addKey({ kind: 'ideas', recordId })
   )
   return { step, added: items, note: items.length === 0 ? 'No new ideas.' : null }
 }

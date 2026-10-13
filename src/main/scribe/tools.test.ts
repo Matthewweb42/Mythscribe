@@ -8,7 +8,7 @@ import { navigatorMenuLine } from '../ai/prompts/navigator.v1'
 import { cardAnchorOf, seedClaims } from '../memory/reading/claimFixture'
 import { upsertCard } from '../memory/reading/cardStore'
 import { indexOwner } from '../memory/passageIndexer'
-import { savePage } from '../memory/recordStore'
+import { createRecord, savePage } from '../memory/recordStore'
 import { ensureResearchRoot } from '../project/seed'
 import { createResearchNote } from '../research/researchStore'
 import { evidenceFrame } from './evidence'
@@ -263,6 +263,48 @@ describe('knows, timeline, ideas, outline, todos (F-16.25)', () => {
       const text = [...run.added.map((item) => item.snippet), run.note ?? ''].join(' ')
       expect(text).not.toMatch(/does not know|doesn't know|never learns|checked up to/iu)
     }
+  })
+
+  it('adds at most a call’s cap to the menu: every E id is one the navigator is shown', () => {
+    const made = Array.from({ length: 12 }, (_, i) => {
+      const result = createRecord(
+        book.db,
+        { name: `Sailor ${String.fromCharCode(65 + i)}`, categoryId: 'character', force: true },
+        SCRIBE_NOW
+      )
+      if (!('record' in result)) throw new Error('blocked')
+      savePage(book.db, result.record.id, 'ideas', doc(`Idea ${i}.`), SCRIBE_NOW)
+      return result.record.id
+    })
+    const world = worldFor('What should I fix?')
+    const before = world.menu.items.length
+    const run = runNavigatorTool(world, { tool: 'ideas', arg: '' })
+    expect(run.added).toHaveLength(8)
+    expect(world.menu.items.length - before).toBe(8)
+    // The next call adds the ones it did not reach, never one already on the menu.
+    const next = runNavigatorTool(world, { tool: 'ideas', arg: '' })
+    expect(next.added).toHaveLength(made.length - 8)
+    expect(world.menu.items.length - before).toBe(made.length)
+  })
+
+  it('reads a name the navigator wrote as a whole name or a whole word of one, never letters inside', () => {
+    const made = createRecord(
+      book.db,
+      { name: 'Joanna Reyes', categoryId: 'character', force: true },
+      SCRIBE_NOW
+    )
+    if (!('record' in made)) throw new Error('blocked')
+    const world = worldFor('Tell me more.')
+    expect(runNavigatorTool(world, { tool: 'state', arg: 'Ann' }).note).toBe(
+      'No record is called "Ann".'
+    )
+    expect(runNavigatorTool(world, { tool: 'state', arg: 'Reyes' }).note).toBe(
+      'Nothing new on Joanna Reyes.'
+    )
+    // agent.v8's v2 tools keep the loose fallback until F-16.31.
+    const project = loadAgentProject(book.db, book.three, 'v2')
+    expect(recordByNameV2(project, 'Ann')?.id).toBe(made.record.id)
+    expect(recordByNameV2(project, 'Ann', 'words')).toBeUndefined()
   })
 
   it('reads the story years or an age, the Ideas, the outline and the to-dos', () => {

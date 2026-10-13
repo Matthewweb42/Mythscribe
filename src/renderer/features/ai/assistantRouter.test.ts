@@ -48,6 +48,7 @@ import {
 } from './assistantStore'
 import { resetContinuityStore } from './continuityStore'
 import { resetProposalStore } from './proposalStore'
+import { INSTANT_CARD_LABEL } from './instantCardText'
 
 const SCENE = 'Mara climbed the ridge as the storm broke over the valley behind her. '.repeat(4)
 
@@ -657,7 +658,7 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
     await useAssistantStore.getState().send('Mara’s eyes?')
     expect(sent('ai:agent')).toHaveLength(0)
     expect(turns()[1]).toMatchObject({
-      content: 'Mara · Eyes: grey (1.1)',
+      content: `Mara · Eyes: grey (1.1)\n\n${INSTANT_CARD_LABEL}`,
       card,
       costUsd: 0,
       action: 'query'

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
 import { ROUTE_EDIT_PASSES, ROUTE_EDIT_TARGETS } from '@shared/assistantRoute'
-import { ROUTE_RULES_V2, ROUTE_V2_ACTION_LINES, ROUTE_V2_EDIT_FIELDS } from './route.v2'
+import {
+  ROUTE_RULES_V2,
+  ROUTE_V2_ACTION_LINES,
+  ROUTE_V2_EDIT_FIELDS,
+  routeV2InstructionRule
+} from './route.v2'
 import {
   buildNavigatorPrompt,
   NAVIGATOR_IDEAS_HEADING,
@@ -116,6 +121,9 @@ describe('navigator.v1 prompt (F-16.25)', () => {
     // The same words route.v2 sends, so the navigator routes F-5.26's edit passes as it did.
     expect(ROUTE_RULES_V2).toContain(ROUTE_V2_ACTION_LINES)
     expect(ROUTE_RULES_V2).toContain(ROUTE_V2_EDIT_FIELDS)
+    // route.v2's instruction rule too ("" when there is none: F-5.26's quick picks), as "i".
+    expect(ROUTE_RULES_V2).toContain(routeV2InstructionRule('instruction'))
+    expect(NAVIGATOR_RULES).toContain(routeV2InstructionRule('i'))
     for (const pass of ROUTE_EDIT_PASSES) expect(NAVIGATOR_RULES).toContain(`"${pass}"`)
     for (const target of ROUTE_EDIT_TARGETS) expect(NAVIGATOR_RULES).toContain(`"${target}"`)
     for (const tool of [
@@ -136,7 +144,7 @@ describe('navigator.v1 prompt (F-16.25)', () => {
     expect(NAVIGATOR_RULES).toContain('Never write prose')
     expect(estimateTokens(NAVIGATOR_RULES)).toBeLessThanOrEqual(NAVIGATOR_RULES_TOKENS)
     // The golden estimate: a change here means the prompt changed and needs a new version.
-    expect(estimateTokens(NAVIGATOR_RULES)).toBe(688)
+    expect(estimateTokens(NAVIGATOR_RULES)).toBe(695)
   })
 
   it('orders the cached prefix rules → roster → Ideas → map, within 3,000, and the same for two messages in one chapter', () => {

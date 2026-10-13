@@ -669,7 +669,7 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'ai:chat': 'any',
   'ai:agent': 'any',
   'ai:agentDraft': 'any',
-  'ai:query': 'any',
+  'ai:query': 'v1',
   'ai:rewrite': 'any',
   'ai:critique': 'any',
   'ai:continuity': 'v1',

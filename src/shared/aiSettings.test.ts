@@ -424,7 +424,12 @@ describe('the toggle list per story memory (F-16.17, P2a-D24)', () => {
       'names and nicknames of your records',
       'first line of each record’s Ideas',
       'a map of the book',
-      'short snippets'
+      'short snippets',
+      // Design §2.6: labels and Research passages are named in the rows (slice 4 review).
+      'Research documents',
+      'Not canon text',
+      'your Ideas and idea scenes',
+      'Pinned lines'
     ]) {
       expect(AI_DATA_SHARING.navigator.sends).toContain(part)
     }

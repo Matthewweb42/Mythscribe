@@ -905,6 +905,28 @@ export function registerHandlers({
     emit(windows(), 'questions:changed', questions)
   }
 
+  /**
+   * F-16.17: a scene's claims checked against its sentences now (the anchors job's run, and Ms
+   * Scribe's read-first before it reads, F-16.24); a claim that broke an invariant was demoted, and
+   * only its kind is counted (P2a-D19). F-16.18: a line that went stale (or came back) dims at once
+   * in True now, a shown sheet and ⓘ, with no reading in between; a scene with a card is looked at
+   * again too, since Here, the card and decision 4's conflicts read its fields against the text as
+   * it is now. Answers whether rows moved.
+   */
+  const checkAnchorsNow = (db: TreeDb, nodeId: string, now: Date): boolean => {
+    const result = runAnchors(db, nodeId, now)
+    for (const kind of result.violations) {
+      const counter = memoryInvariantCounter(kind)
+      if (counter !== null) diagnostics.count(counter)
+    }
+    const changed = anchorsChanged(result)
+    if (changed || result.card) {
+      emit(windows(), 'memory:changed', { nodeIds: [nodeId], recordIds: result.recordIds })
+      if (result.card) reader.detailsChanged()
+    }
+    return changed
+  }
+
   /** The value the mention queue's runs answer: whether rows moved, and whether the text was read. */
   const NO_SCAN = { changed: false, scanned: false }
   const mentionQueue = createIndexQueue<{ changed: boolean; scanned: boolean }>({
@@ -918,24 +940,7 @@ export function registerHandlers({
       const v2 = memory() === 'v2'
       if (job.kind === 'anchors') {
         if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
-        // F-16.17: the scene's claims checked against its sentences; a claim that broke an
-        // invariant was demoted, and only its kind is counted (P2a-D19).
-        const result = runAnchors(db, job.nodeId, now)
-        for (const kind of result.violations) {
-          const counter = memoryInvariantCounter(kind)
-          if (counter !== null) diagnostics.count(counter)
-        }
-        const changed = anchorsChanged(result)
-        // F-16.18: a line that went stale (or came back) dims at once in True now, a shown sheet
-        // and ⓘ, with no reading in between; a scene with a card is looked at again too, since
-        // Here, the card and decision 4's conflicts read its fields against the text as it is now.
-        if (changed || result.card) {
-          emit(windows(), 'memory:changed', {
-            nodeIds: [job.nodeId],
-            recordIds: result.recordIds
-          })
-          if (result.card) reader.detailsChanged()
-        }
+        const changed = checkAnchorsNow(db, job.nodeId, now)
         return Promise.resolve({ requested: false, value: { changed, scanned: changed } })
       }
       if (job.kind === 'names') {
@@ -3881,7 +3886,10 @@ export function registerHandlers({
         const result = await runNavigate(
           db,
           requestDeps(db),
-          { readNow: (id, readId) => reader.readNow(id, readId) },
+          {
+            readNow: (id, readId) => reader.readNow(id, readId),
+            checkAnchors: (id) => void checkAnchorsNow(db, id, new Date())
+          },
           { nodeId, message, history, focus, requestId },
           (step) => emit(windows(), 'ai:agentStep', { requestId, step })
         )

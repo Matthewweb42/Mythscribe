@@ -45,14 +45,22 @@ export const ROUTE_V2_EDIT_FIELDS =
   'a passage is selected and the message does not name the scene or a chapter; "chapter" for a ' +
   'chapter, with "chapter" set to the chapter it names ("" for this chapter); otherwise "scene".'
 
+/**
+ * route.v2's instruction rule, naming the field (F-5.26 settles on it: "" for a vague request, so
+ * the quick picks show); `navigator.v1` keeps it word for word with the field "i".
+ */
+export const routeV2InstructionRule = (field: string): string =>
+  `Set "${field}" to the specific request restated in one short sentence for that action, ` +
+  'or "" when there is none. '
+
 /** The opening sentence is v1's, so a fake provider in tests keys on it for either version. */
 export const ROUTE_RULES_V2 =
   "You are the router inside a novel-writing app's assistant. Read the author's message and " +
   'pick the one action that answers it. Reply with JSON only: ' +
   '{"action":"chat","instruction":""}. Actions:\n' +
   ROUTE_V2_ACTION_LINES +
-  'Set "instruction" to the specific request restated in one short sentence for that action, ' +
-  'or "" when there is none. For editPass also set "pass", "target", and "chapter": ' +
+  routeV2InstructionRule('instruction') +
+  'For editPass also set "pass", "target", and "chapter": ' +
   '{"action":"editPass","instruction":"","pass":"ask","target":"scene","chapter":""}. ' +
   ROUTE_V2_EDIT_FIELDS +
   ' Never answer the message itself.'

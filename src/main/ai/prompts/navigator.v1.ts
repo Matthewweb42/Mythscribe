@@ -15,13 +15,14 @@ import type { AiMessage } from '../providers/types'
 import { matchId, readRouteFields } from '../routeFields'
 import { scribeRoster, type ScribeRosterRecord } from './agent.v9'
 import type { ChatTurn } from './chat.v1'
-import { ROUTE_V2_ACTION_LINES, ROUTE_V2_EDIT_FIELDS } from './route.v2'
+import { ROUTE_V2_ACTION_LINES, ROUTE_V2_EDIT_FIELDS, routeV2InstructionRule } from './route.v2'
 
 /**
  * Ms Scribe's navigator (F-16.25; plan P3 §4.2, design §2.6), version 1: fast tier, JSON, reasoning
  * off, story memory v2 only. It replaces `route.v2` there: step 1 picks route.v2's action (its
- * action list and edit-pass fields word for word, so F-5.26's edit passes and every other route
- * action stay as they were) and the turn's kind; for a chat or a question about the book it then
+ * action list, instruction rule and edit-pass fields word for word, so F-5.26's edit passes and
+ * every other route action stay as they were) and the turn's kind (never lookup: that is Step 0's
+ * own handover); for a chat or a question about the book it then
  * calls local tools (search with its own synonyms, cards, read, state, knows, timeline, ideas,
  * outline, to-dos), at most three per step and three steps, and ends with the evidence ids the
  * answer needs. It never writes prose: `agent.v9` answers from what it picked.
@@ -45,9 +46,10 @@ export const NAVIGATOR_RULES =
   ROUTE_V2_ACTION_LINES +
   'For editPass also set "pass", "target" and "chapter": ' +
   ROUTE_V2_EDIT_FIELDS +
-  '\n"i" is "instruction": the request in one short sentence, or "". "t", the turn: answer, ' +
-  'lookup (one fact about one record), idea (her ideas), todo (her to-dos), edit (change the ' +
-  'book or a sheet), draft (new prose), whatIf. For any action but chat and query, stop there.\n' +
+  '\n"i" is "instruction". ' +
+  routeV2InstructionRule('i') +
+  '"t", the turn: answer, idea (her ideas), todo (her to-dos), edit (change the book or a ' +
+  'sheet), draft (new prose), whatIf. For any action but chat and query, stop there.\n' +
   'Tools, at most 3 calls a step: {"search":["distrust","suspicion","lied"]} (your own ' +
   'synonyms and word forms, 8 at most); {"cards":"7.1-7.6"} or {"cards":"Mara"}; {"read":"7.4"}, ' +
   '{"read":"7.4 ¶3-8"} or {"read":"Mara\'s Pinned"} (2 reads a message); {"state":"Mara"}; ' +

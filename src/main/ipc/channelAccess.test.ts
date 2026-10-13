@@ -178,6 +178,9 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
     expect(CHANNEL_MEMORY['ai:route']).toBe('v1')
     expect(() => assertChannelMemory('ai:route', 'v2')).toThrow(OTHER_MEMORY_MESSAGE)
     expect(() => assertChannelMemory('ai:route', 'v1')).not.toThrow()
+    // Story Intelligence (query.v4) is v1's too: Ms Scribe answers questions in v2.
+    expect(CHANNEL_MEMORY['ai:query']).toBe('v1')
+    expect(() => assertChannelMemory('ai:query', 'v2')).toThrow(OTHER_MEMORY_MESSAGE)
     // Ms Scribe's answer stays one channel for both memories.
     expect(CHANNEL_MEMORY['ai:agent']).toBe('any')
   })
