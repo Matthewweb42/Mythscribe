@@ -260,11 +260,13 @@ describe('no request (F-16.24): a typed action, an instant card, a lookup handed
     })
     const result = await run({ message: 'Mara’s eyes?' })
     expect(readNow).toHaveBeenCalledTimes(1)
+    // The read's cost is the turn's, reported apart: no navigator request ran.
     expect(result).toMatchObject({
       kind: 'answer',
       action: 'query',
       navigation: { turn: 'lookup' },
-      costUsd: 0.002
+      costUsd: 0.002,
+      readUsd: 0.002
     })
     expect(complete).not.toHaveBeenCalled()
   })
@@ -298,7 +300,9 @@ describe('no request (F-16.24): a typed action, an instant card, a lookup handed
       kind: 'answer',
       routedBy: 'model',
       // A navigator's lookup is an answer: the lookup kind and its budgets are Step 0's own.
-      navigation: { turn: 'answer' }
+      navigation: { turn: 'answer' },
+      // Nothing was read first: the whole cost is the navigator's.
+      readUsd: 0
     })
     replies({ a: 'query', t: 'answer', call: [{ knows: 'the sold map' }] }, { use: ['E1'] })
     const no = await run({ message: 'Does Mara know about the sold map?', requestId: 'r2' })

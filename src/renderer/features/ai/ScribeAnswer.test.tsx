@@ -2,6 +2,9 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { QuerySceneRef } from '@shared/query'
 import type { ScribeCitation, ScribeTurn } from '@shared/scribe'
+import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
+import { researchTreeFixture } from '@renderer/features/manuscript/treeFixture'
+import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { installFakeMain } from '@renderer/features/memory/memoryFixture'
 import { recordFixture } from '@renderer/features/records/recordFixture'
 import { resetRecordStore, useRecordStore } from '@renderer/features/records/recordStore'
@@ -59,13 +62,17 @@ beforeEach(async () => {
   resetAssistantStore()
   resetRecordStore()
   resetLayoutStore()
+  resetFocusStore()
+  useTreeStore.getState().clear()
   installFakeMain({
     'record:list': () => [
       recordFixture('r-mara', 'character', ['Mara']),
       recordFixture('s-map', 'secret', ['the sold map'])
     ],
-    'layout:set': (input) => input
+    'layout:set': (input) => input,
+    'window:setFullScreen': (input) => input
   })
+  useTreeStore.setState({ ...buildIndex(researchTreeFixture), loaded: true })
   await act(async () => await useRecordStore.getState().load())
   openScene = vi.fn(async () => {})
   useAssistantStore.setState({ openScene })
@@ -75,6 +82,8 @@ afterEach(() => {
   resetAssistantStore()
   resetRecordStore()
   resetLayoutStore()
+  resetFocusStore()
+  useTreeStore.getState().clear()
   setIpcClient(null)
 })
 
@@ -205,13 +214,21 @@ describe('ScribeAnswer (F-16.25)', () => {
   it('opens a scene at the quote, a record’s sheet, and a Research page', async () => {
     render(
       <ScribeAnswer
-        answer="Orrin heard.[1] A twin.[2]"
+        answer="Orrin heard.[1] A twin.[2] Tides.[3]"
         scribe={turn({
           citations: [
             citation(1),
             citation(2, {
               label: 'idea',
               open: { kind: 'record', id: 'r-mara', page: 'ideas', para: 0 }
+            }),
+            citation(3, {
+              evidence: 'E8',
+              label: 'research',
+              ref: 'Research “Coast survey” ¶0',
+              title: 'Coast survey',
+              open: { kind: 'research', id: 'r-upload', para: 0 },
+              quote: 'The tide turns at noon'
             })
           ]
         })}
@@ -222,9 +239,61 @@ describe('ScribeAnswer (F-16.25)', () => {
       { nodeId: 'sc-1', title: 'The quay' },
       'Orrin overheard Tomas'
     )
-    fireEvent.click(screen.getAllByTestId('scribe-source')[1]!)
+    await act(async () => fireEvent.click(screen.getAllByTestId('scribe-source')[1]!))
     expect(useRecordStore.getState().selectedId).toBe('r-mara')
     expect(useLayoutStore.getState().layout.sidebar.open).toBe(true)
+    // A Research page opens with the Research tab, as search opens one; no passage wait.
+    const research = screen.getAllByTestId('scribe-source')[2]!
+    // Its reference names the page: the title is not repeated.
+    expect(research).toHaveTextContent(/^\[3\] Research “Coast survey” ¶1source document/)
+    fireEvent.click(research)
+    expect(useTreeStore.getState().selectedId).toBe('r-upload')
+    expect(useLayoutStore.getState().layout.sidebar.tab).toBe('research')
+    expect(openScene).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens a scene’s notes with the Notes panel, never searching the scene for the quote', () => {
+    render(
+      <ScribeAnswer
+        answer="Mara is to learn of it.[1]"
+        scribe={turn({
+          citations: [
+            citation(1, {
+              evidence: 'E3',
+              label: 'planned',
+              ref: '1.2 notes ¶0',
+              title: 'Scene 2',
+              open: { kind: 'scene', id: 'sc-2', para: null, notes: true },
+              quote: 'Mara learns of the sale'
+            })
+          ]
+        })}
+      />
+    )
+    fireEvent.click(screen.getByTestId('scribe-source'))
+    expect(openScene).not.toHaveBeenCalled()
+    expect(useTreeStore.getState().selectedId).toBe('sc-2')
+    expect(useLayoutStore.getState().layout.notes.open).toBe(true)
+  })
+
+  it('leaves focus mode before opening a record’s sheet, which has no focus view', async () => {
+    useFocusStore.setState({ active: true })
+    render(
+      <ScribeAnswer
+        answer="A twin.[1]"
+        scribe={turn({
+          citations: [
+            citation(1, {
+              label: 'idea',
+              open: { kind: 'record', id: 'r-mara', page: 'ideas', para: 0 }
+            })
+          ]
+        })}
+      />
+    )
+    await act(async () => fireEvent.click(screen.getByTestId('scribe-source')))
+    expect(useFocusStore.getState().active).toBe(false)
+    expect(useRecordStore.getState().selectedId).toBe('r-mara')
   })
 
   it('reads Not found in the not-found style, with no chips or sources', () => {

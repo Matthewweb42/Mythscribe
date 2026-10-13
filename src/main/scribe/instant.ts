@@ -22,8 +22,9 @@ import { askIndexOf } from './step0'
  * Instant cards (F-16.24; design §2.6, plan P3 §1.3): a question the memory already answers gets
  * its card with no AI call, from a live and uncontested claim as of now. A record's slot ("Mara's
  * eyes?"), "does A know X" (only ever yes: a partial line or none hands over, the card never says
- * no), and "who knows X" (the counted holders, readers-since and `checkedUpTo`, from which the
- * renderer alone words the scoped absence line, P2b rule 9). Before any card, an unread finished
+ * no), and "who knows X" (the holders as of now, a partial line among them as the sheet lists it,
+ * readers-since and `checkedUpTo`, from which the renderer alone words the scoped absence line,
+ * P2b rule 9). Before any card, an unread finished
  * sentence that bears on the question asks for that window to be read first (P3-D4); a stale or
  * contested value hands over to Ms Scribe as a lookup turn with that slot's evidence (P3-D5).
  * Read-only: nothing here writes.
@@ -323,8 +324,14 @@ export function instantCard(
   const knows = storedKnows(db, nowId, frame.reading, frame.nodes)
   const secret = knows.secrets.find((each) => each.recordId === shape.secretId)
   if (secret === undefined) return { handover: 'none', keys }
-  const holders = secret.cells.filter((cell) => !cell.later && cell.line === 'counts')
+  // Every holder as of now, as the secret's sheet lists them: a partial line (suspects, believes
+  // otherwise) too, which the card draws muted; the scoped absence line covers the rest only.
+  const holders = secret.cells.filter((cell) => !cell.later)
   if (holders.some((cell) => cell.stale)) return { handover: 'stale', keys }
+  // Readers-since resting on evidence being re-checked is no instant value either (P3-D5).
+  if (secret.known && (secret.knownStale || secret.readersSince?.stale === true)) {
+    return { handover: 'stale', keys }
+  }
   // Nobody shown knowing it and nothing checked yet: Ms Scribe looks instead.
   if (holders.length === 0 && knows.checkedUpTo === null) return { handover: 'none', keys }
   return {

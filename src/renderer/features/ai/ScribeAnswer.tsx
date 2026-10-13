@@ -1,8 +1,9 @@
 import { sourceLabelWords, type ScribeCitation, type ScribeTurn } from '@shared/scribe'
-import { locateText } from '@renderer/features/editor/locateText'
-import { openPassage } from '@renderer/features/editor/openPassage'
+import { openNotesOf } from '@renderer/features/editor/openNotes'
+import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { openRecordSheet } from '@renderer/features/records/openRecord'
 import { useRecordStore } from '@renderer/features/records/recordStore'
+import { openResearchPage } from '@renderer/features/research/openResearch'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { useAssistantStore } from './assistantStore'
@@ -18,9 +19,12 @@ export const NOT_CHECKED_TITLE = 'Not checked against the book'
 export const UNSUPPORTED_TITLE = 'Its quote does not say this'
 
 /**
- * Opens what a citation rests on (plan P3 §5): a scene at the quoted passage (or a Research page,
- * which opens the same way), a record's sheet for its Pinned, Ideas or who-knows line. Null when
- * there is nothing to open (computed lines, the outline, a record gone since).
+ * Opens what a citation rests on (plan P3 §5): a scene at the quoted passage; a scene's notes (a
+ * plan, whose quote is in the notes, not the scene) with the Notes panel; a Research page with the
+ * Research tab (the page editor takes no passage jump yet, as with a search hit); a record's sheet
+ * for its Pinned, Ideas, who-knows or age line, leaving focus mode first because a sheet has no
+ * focus view (the sheet opens at its top: no jump to the paragraph yet). Null when there is
+ * nothing to open (computed lines, the outline, a record gone since).
  */
 function openerOf(
   citation: ScribeCitation,
@@ -30,21 +34,29 @@ function openerOf(
   if (open === null) return null
   switch (open.kind) {
     case 'scene':
+      if (open.notes === true) return () => openNotesOf(open.id)
       return () =>
         void useAssistantStore
           .getState()
           .openScene({ nodeId: open.id, title: citation.title }, citation.quote)
     case 'research':
-      return () => {
-        openPassage(open.id, (doc) => locateText(doc, citation.quote)).catch((err: unknown) =>
-          toast.error(describeError(err))
-        )
-      }
+      return () => openResearchPage(open.id)
     case 'record': {
       const categoryId = categoryOf(open.id)
-      return categoryId === null ? null : () => openRecordSheet(open.id, categoryId)
+      return categoryId === null
+        ? null
+        : () => {
+            openSheet(open.id, categoryId).catch((err: unknown) => toast.error(describeError(err)))
+          }
     }
   }
+}
+
+/** A record's sheet from the chat, which focus mode hosts too: the sheet has no focus view. */
+async function openSheet(recordId: string, categoryId: string): Promise<void> {
+  const focus = useFocusStore.getState()
+  if (focus.active) await focus.exit()
+  openRecordSheet(recordId, categoryId)
 }
 
 /**
@@ -55,10 +67,10 @@ function openerOf(
  * in words ("happened", "later in the book", "your notes", "source document", "filed from <doc>",
  * "not canon", "planned", "idea scene", "computed from your book", "your to-do", and an Idea "your
  * idea, not in the book"), where it is, its quote and "quote checked" or "quote and sentence
- * checked"; a click opens the scene at the passage, the record's sheet or the Research page. Under
- * them the scope line ("Searched every scene up to 14.2 for distrust, suspicion") and "Read chapter
- * 9 (9.1–9.6) too" when Self-Route widened. A Not found answer reads in the not-found style.
- * Nothing here enters the manuscript.
+ * checked"; a click opens the scene at the passage, its notes, the record's sheet or the Research
+ * page. Under them the scope line ("Searched every scene up to 14.2 for distrust, suspicion") and
+ * "Read chapter 9 (9.1–9.6) too" when Self-Route widened. A Not found answer reads in the
+ * not-found style. Nothing here enters the manuscript.
  */
 export function ScribeAnswer({
   answer,
@@ -176,8 +188,14 @@ function Source({
   open: (() => void) | null
 }): React.JSX.Element {
   const where = shownRef(citation.ref)
-  // A page's reference names its record already ("Mara's Ideas ¶1"): its title would repeat it.
-  const title = citation.title === '' || where.startsWith(citation.title) ? '' : citation.title
+  // A page's reference names its owner already ("Mara's Ideas ¶1", "Research “Harbour notes” ¶1"):
+  // its title would repeat it.
+  const title =
+    citation.title === '' ||
+    where.startsWith(citation.title) ||
+    where.includes(`“${citation.title}”`)
+      ? ''
+      : citation.title
   const body = (
     <>
       <span className="block font-medium text-fg">

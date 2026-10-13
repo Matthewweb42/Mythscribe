@@ -97,10 +97,11 @@ export const CHAT_REF_NOTES_CHAR_BUDGET = 2_000
 export const CHAT_MAX_REFS = 4
 
 /**
- * The requests one chat turn's cost is made of (P3-D23, story memory v2): Ms Scribe's navigator,
- * the answer, and the quote check. The turn's cost line shows the sum, its title the parts.
+ * The requests one chat turn's cost is made of (P3-D23, story memory v2), in request order: the
+ * latest change read first (`read`, the reader's), Ms Scribe's navigator, the answer, and the
+ * quote check. The turn's cost line shows the sum, its title the parts.
  */
-export const COST_PARTS = ['navigator', 'answer', 'check'] as const
+export const COST_PARTS = ['read', 'navigator', 'answer', 'check'] as const
 export const CostPart = z.object({
   part: z.enum(COST_PARTS),
   costUsd: z.number().nonnegative()

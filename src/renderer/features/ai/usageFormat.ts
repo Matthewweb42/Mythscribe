@@ -81,9 +81,17 @@ export const describeRequest = (
   return `${request.model} · ${formatRequestCost(request.costUsd)}${tokens}${request.cached ? ' · cached' : ''}`
 }
 
+/** A cost part in words: the read-first is the reader's request, named as the chat shows it. */
+const COST_PART_WORDS: Record<CostPart['part'], string> = {
+  read: 'read first',
+  navigator: 'navigator',
+  answer: 'answer',
+  check: 'check'
+}
+
 /**
- * The parts of a turn's cost as its title lists them (P3-D23): "navigator 0.18¢ · answer 1.25¢ ·
- * check 0.02¢".
+ * The parts of a turn's cost as its title lists them (P3-D23): "read first 0.1¢ · navigator
+ * 0.18¢ · answer 1.25¢ · check 0.02¢".
  */
 export const describeCostParts = (parts: readonly CostPart[]): string =>
-  parts.map((each) => `${each.part} ${formatCents(each.costUsd)}`).join(' · ')
+  parts.map((each) => `${COST_PART_WORDS[each.part]} ${formatCents(each.costUsd)}`).join(' · ')

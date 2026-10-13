@@ -13,7 +13,7 @@ import { recordFixture } from '@renderer/features/records/recordFixture'
 import { resetRecordStore, useRecordStore } from '@renderer/features/records/recordStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import { InstantCard } from './InstantCard'
-import { AGE_CARD_LABEL, AUTHOR_CARD_LABEL, INSTANT_CARD_LABEL } from './instantCardText'
+import { AGE_READ_CARD_LABEL, AUTHOR_CARD_LABEL, INSTANT_CARD_LABEL } from './instantCardText'
 
 /**
  * F-16.24 (plan P3 §5): an instant card in the chat, drawn from the turn's `card` with no AI call:
@@ -203,6 +203,29 @@ describe('InstantCard (F-16.24)', () => {
       'No other scene shows anyone learning it (checked up to 14.2)'
     )
     expect(absence).toHaveClass('text-fg-muted')
+    // A partial line (suspects) is listed, muted, as the secret's sheet lists it: the scoped line
+    // covers only the scenes the card leaves out.
+    rerender(
+      <InstantCard
+        card={{
+          ...WHO,
+          holders: [
+            knowsCellFixture('r-orrin', { fromId: 'r-tomas', claimId: 'k-orrin', para: 0 }),
+            knowsCellFixture('r-mara', {
+              how: 'suspects',
+              line: 'partial',
+              claimId: 'k-mara',
+              ref: '1.2'
+            })
+          ]
+        }}
+      />
+    )
+    const partial = within(screen.getByTestId('instant-card')).getAllByTestId('claim-line')
+    expect(within(partial[1]!).getByText('Mara: suspects (1.2)')).toHaveClass('text-fg-muted')
+    expect(within(partial[0]!).getByText('Orrin: overheard from Tomas (1.1)')).not.toHaveClass(
+      'text-fg-muted'
+    )
     // No holder: the sheets' own scoped words; nothing read yet: "not checked yet".
     rerender(<InstantCard card={{ ...WHO, holders: [], checkedUpTo: null }} />)
     expect(screen.getByTestId('instant-card-absence')).toHaveTextContent(
@@ -210,7 +233,7 @@ describe('InstantCard (F-16.24)', () => {
     )
   })
 
-  it('marks a computed age as computed from the book', () => {
+  it('marks a computed age as computed from the book, its AI-read birth year with ⓘ and Not right', () => {
     render(
       <InstantCard
         card={{
@@ -225,9 +248,14 @@ describe('InstantCard (F-16.24)', () => {
         }}
       />
     )
-    expect(screen.getByTestId('instant-card')).toHaveTextContent(
-      'Age: about 19 (born 1795; year 1814 from 1.2)'
-    )
-    expect(screen.getByTestId('instant-card-label')).toHaveTextContent(AGE_CARD_LABEL)
+    const card = screen.getByTestId('instant-card')
+    expect(card).toHaveTextContent('Age: about 19 (born 1795; year 1814 from 1.2)')
+    // The birth year was read by AI: its line, as the sheet's Age shows it, can be disputed here.
+    expect(within(card).getByTestId('claim-line')).toHaveTextContent('Born: 1795')
+    expect(within(card).getByRole('button', { name: 'Not right' })).toBeInTheDocument()
+    expect(
+      within(card).getByRole('button', { name: /^Where this comes from: Born: 1795/ })
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('instant-card-label')).toHaveTextContent(AGE_READ_CARD_LABEL)
   })
 })

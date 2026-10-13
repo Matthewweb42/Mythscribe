@@ -847,6 +847,8 @@ export const AiNavigateResult = z.union([
     navigation: Navigation.nullable(),
     steps: z.array(AgentStep).max(NAVIGATOR_TOOL_STEPS_MAX),
     routedBy: z.enum(['local', 'model']),
+    /** What reading the latest change first cost, of `costUsd` (P3-D23): not the navigator's. */
+    readUsd: z.number().nonnegative(),
     ...NavigateSpend
   }),
   AiFailureWithRequest

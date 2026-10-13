@@ -42,6 +42,7 @@ import { resetEntityStore, useEntityStore } from '@renderer/features/entities/en
 import { resetTagStore } from '@renderer/features/tags/tagStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import {
+  costPartsOf,
   NEW_CONVERSATION_TITLE,
   NO_SCENE_MESSAGE,
   PLAN_NO_EDITS_MESSAGE,
@@ -1615,5 +1616,29 @@ describe('useAssistantStore sheet lines (F-16.26, decision 3 as the author chang
     expect(turn?.costParts?.map((part) => part.part)).toEqual(['answer', 'check'])
     expect(turn?.costParts?.[0]?.costUsd).toBeCloseTo(0.0002, 10)
     expect(turn?.costParts?.[1]?.costUsd).toBeCloseTo(0.0001, 10)
+  })
+
+  it('lists a read-first apart from the navigator, which may have run no request at all', () => {
+    const scribe = {
+      turn: 'lookup' as const,
+      citations: [],
+      notChecked: [],
+      unsupported: [],
+      scope: null,
+      notFound: false,
+      retried: false,
+      widened: null,
+      misses: 0,
+      checkUsd: 0.0001
+    }
+    // A stale value handed over after reading the latest change: no navigator request ran.
+    const lookup = costPartsOf({ costUsd: 0.001, readUsd: 0.001 }, { costUsd: 0.0131, scribe })
+    expect(lookup?.map((part) => part.part)).toEqual(['read', 'answer', 'check'])
+    expect(lookup?.[0]?.costUsd).toBeCloseTo(0.001, 10)
+    expect(lookup?.[1]?.costUsd).toBeCloseTo(0.013, 10)
+    // Read first, then the navigator: each its own share.
+    const both = costPartsOf({ costUsd: 0.003, readUsd: 0.001 }, { costUsd: 0.0131, scribe })
+    expect(both?.map((part) => part.part)).toEqual(['read', 'navigator', 'answer', 'check'])
+    expect(both?.[1]?.costUsd).toBeCloseTo(0.002, 10)
   })
 })

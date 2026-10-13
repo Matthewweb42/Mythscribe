@@ -7,16 +7,41 @@ import { holderLine, readersSinceText, type NameOf } from '@renderer/features/me
  * AI call for this answer (AI rule 1's exception: derived data is marked as AI-made).
  */
 export const INSTANT_CARD_LABEL = 'Read by AI from your book · quote checked · no AI call now'
-/** A computed age's mark: worked out from a birth year and a story year, not read as one value. */
+/**
+ * A computed age's mark: worked out from a birth year and a story year, not read as one value;
+ * from the author's own Pinned birth year and a typed year.
+ */
 export const AGE_CARD_LABEL = 'Computed from your book · no AI call now'
-/** The author's own *Knew before the book* mark answering "does A know X": nothing AI-read. */
+/** A computed age whose birth year or story year the AI read (quote checked): still AI-made. */
+export const AGE_READ_CARD_LABEL =
+  'Computed from your book (read by AI · quote checked) · no AI call now'
+/** The author's own *Knew before the book* marks answering "does A know X": nothing AI-read. */
 export const AUTHOR_CARD_LABEL = 'From what you marked · no AI call now'
+/** Who knows a secret, some holders from the author's marks and the rest read by AI. */
+export const MIXED_CARD_LABEL =
+  'Read by AI from your book (quote checked) and what you marked · no AI call now'
 
-/** The mark under a card: AI-read and quote checked, computed, or the author's own mark. */
+/**
+ * The mark under a card: AI-read and quote checked, computed (AI-made when a year in it was read),
+ * the author's own marks, or both for a who-knows card whose holders are some of each.
+ */
 export function instantCardLabel(card: InstantCard): string {
-  if (card.kind === 'age') return AGE_CARD_LABEL
-  if (card.kind === 'knows' && card.source === 'author') return AUTHOR_CARD_LABEL
-  return INSTANT_CARD_LABEL
+  switch (card.kind) {
+    case 'age':
+      return card.born.source === 'text' || card.year.kind !== 'typed'
+        ? AGE_READ_CARD_LABEL
+        : AGE_CARD_LABEL
+    case 'knows':
+      return card.source === 'author' ? AUTHOR_CARD_LABEL : INSTANT_CARD_LABEL
+    case 'whoKnows': {
+      const marked = card.holders.some((cell) => cell.source === 'author')
+      const read = card.readersSince !== null || card.holders.some((cell) => cell.source !== 'author')
+      if (!marked) return INSTANT_CARD_LABEL
+      return read ? MIXED_CARD_LABEL : AUTHOR_CARD_LABEL
+    }
+    case 'slot':
+      return INSTANT_CARD_LABEL
+  }
 }
 
 /** A value with where the book says it: "Eyes: grey (1.1)", "(since 12.1)", "(last stated in 13.4)". */
@@ -52,7 +77,9 @@ export function knowsLine(card: Extract<InstantCard, { kind: 'knows' }>): string
  * "Yes: Orrin overheard it from Tomas (1.1)", who knows a secret with its holders and
  * readers-since. The turn's text rides along with later requests as conversation history, so it
  * holds positive lines only: never the scoped absence line nor `checkedUpTo` (P2b rule 9, P3
- * rule 5), which only the drawn card shows (`InstantCard.tsx`). Pure.
+ * rule 5), which only the drawn card shows (`InstantCard.tsx`); a who-knows card with no holder
+ * is no "Who knows" heading with nothing under it (that would read as nobody), just the secret
+ * and its readers-since. Pure.
  */
 export function instantCardLine(card: InstantCard, nameOf: NameOf): string {
   switch (card.kind) {
@@ -63,15 +90,12 @@ export function instantCardLine(card: InstantCard, nameOf: NameOf): string {
     case 'knows':
       return knowsLine(card)
     case 'whoKnows': {
-      const holders =
-        card.holders.length === 0
-          ? ''
-          : `: ${card.holders.map((cell) => holderLine(cell, nameOf)).join('; ')}`
+      // Readers-since on a card rests on live evidence only (`instant.ts` hands a stale one over).
       const since =
-        card.readersSince === null
-          ? ''
-          : ` · ${readersSinceText({ ...card.readersSince, stale: false })}`
-      return `Who knows ${card.label}${holders}${since}`
+        card.readersSince === null ? null : readersSinceText({ ...card.readersSince, stale: false })
+      if (card.holders.length === 0) return since === null ? card.label : `${card.label}: ${since}`
+      const holders = card.holders.map((cell) => holderLine(cell, nameOf)).join('; ')
+      return `Who knows ${card.label}: ${holders}${since === null ? '' : ` · ${since}`}`
     }
   }
 }

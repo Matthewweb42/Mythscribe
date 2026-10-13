@@ -3916,6 +3916,7 @@ export function registerHandlers({
               navigation: result.navigation,
               steps: result.steps,
               routedBy: result.routedBy,
+              readUsd: result.readUsd,
               ...spend
             }
         }

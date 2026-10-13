@@ -131,6 +131,11 @@ export type NavigateResult =
       steps: AgentStep[]
       /** Tool calls the navigator named that were skipped (an unknown tool, past the cap). */
       skipped: number
+      /**
+       * What reading the latest change first cost, of `costUsd` (P3-D23): the chat's cost title
+       * lists it apart from the navigator's own requests, which may be none.
+       */
+      readUsd: number
     } & Spend)
 
 /** The request id of the navigator's step `n` of run `requestId`, so `ai:cancel` stops it too. */
@@ -373,7 +378,8 @@ async function instantTurn(
       steps: [],
       skipped: 0,
       ...NONE,
-      costUsd
+      costUsd,
+      readUsd: costUsd
     }
   })
   let outcome = instantCard(db, shape, step0.nowId, { caretPara })
@@ -508,7 +514,16 @@ async function navigateSteps(
     spend: Spend,
     steps: AgentStep[] = [],
     skipped = 0
-  ): NavigateResult => ({ kind: 'answer', action, navigation, routedBy, steps, skipped, ...spend })
+  ): NavigateResult => ({
+    kind: 'answer',
+    action,
+    navigation,
+    routedBy,
+    steps,
+    skipped,
+    ...spend,
+    readUsd: handover.costUsd
+  })
 
   // The navigator off: Step 0's evidence answers (as v1's router off falls back to chat).
   if (!isFeatureAllowed(settings, 'navigator')) {

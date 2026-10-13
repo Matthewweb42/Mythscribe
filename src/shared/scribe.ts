@@ -280,8 +280,9 @@ export type Navigation = z.infer<typeof Navigation>
  * `readFirst` when the latest change was read first. `age`: a character's age as of now computed
  * from a birth year and the scene's story year (decision 5, P2b-D15), labelled "computed from your
  * book". `knows`: "does A know X", only ever yes (`source` `author` for her *Knew before the
- * book*). `whoKnows`: the counted holders as of now, readers-since, and `checkedUpTo`, from which
- * the renderer alone words the scoped absence line (P2b rule 9).
+ * book*). `whoKnows`: the holders as of now (a partial line among them, drawn muted, as the
+ * secret's sheet lists it), readers-since (only while it rests on live evidence), and
+ * `checkedUpTo`, from which the renderer alone words the scoped absence line (P2b rule 9).
  */
 export const InstantCard = z.discriminatedUnion('kind', [
   z.object({
@@ -347,12 +348,17 @@ export const SCRIBE_CITATIONS_MAX = 8
 /** An evidence id as an answer cites it: `E0` the open scene, `E7` an item, `W2` a widened one. */
 export const EVIDENCE_ID = /^[EW]\d{1,3}$/
 
-/** Where a citation opens: a scene at its paragraph, a record's Pinned or Ideas, a Research page. */
+/**
+ * Where a citation opens: a scene at its paragraph, a record's Pinned or Ideas, a Research page.
+ * `notes`: a scene's notes paragraph (a plan), which opens the scene with its Notes panel; its
+ * quote is in the notes, never in the scene's text.
+ */
 export const CitationTarget = z.object({
   kind: z.enum(['scene', 'record', 'research']),
   id: z.string(),
   page: RecordPage.optional(),
-  para: Para.nullable()
+  para: Para.nullable(),
+  notes: z.literal(true).optional()
 })
 export type CitationTarget = z.infer<typeof CitationTarget>
 

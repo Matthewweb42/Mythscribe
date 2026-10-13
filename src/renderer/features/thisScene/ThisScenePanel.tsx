@@ -46,6 +46,7 @@ import { openRecordSheet } from '@renderer/features/records/openRecord'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 import { namedInLabel } from '@renderer/features/records/recordView'
 import { RenameInBook } from '@renderer/features/records/RenameInBook'
+import { openResearchPage } from '@renderer/features/research/openResearch'
 import { DockPanelControls, PANEL_TITLE } from '@renderer/features/shell/Dock'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -1139,10 +1140,7 @@ function ConflictRow({ conflict }: { conflict: FiledConflict }): React.JSX.Eleme
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(conflict.line)
   const [busy, setBusy] = useState(false)
-  const goThere = (): void => {
-    useLayoutStore.getState().setSidebarTab('research')
-    useTreeStore.getState().select(conflict.docId)
-  }
+  const goThere = (): void => openResearchPage(conflict.docId)
   const keep = async (): Promise<void> => {
     setBusy(true)
     await useFiledConflictStore.getState().keep(conflict)

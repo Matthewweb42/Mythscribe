@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatCents,
+  describeCostParts,
   describeRequest,
   describeTotals,
   formatCount,
@@ -86,5 +87,20 @@ describe('formatCents (F-16.16, F-16.19)', () => {
     expect(formatCents(1.004)).toBe('$1')
     expect(formatCents(1.006)).toBe('$1.01')
     expect(formatCents(20)).toBe('$20')
+  })
+})
+
+describe('describeCostParts (P3-D23)', () => {
+  it('names each part of a turn’s cost, the read-first as the chat shows it', () => {
+    expect(
+      describeCostParts([
+        { part: 'read', costUsd: 0.001 },
+        { part: 'navigator', costUsd: 0.0018 },
+        { part: 'answer', costUsd: 0.0126 },
+        { part: 'check', costUsd: 0.0001 }
+      ])
+    ).toBe(
+      `read first ${formatCents(0.001)} · navigator ${formatCents(0.0018)} · answer ${formatCents(0.0126)} · check ${formatCents(0.0001)}`
+    )
   })
 })

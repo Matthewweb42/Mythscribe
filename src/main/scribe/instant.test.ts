@@ -4,6 +4,7 @@ import { saveDocument } from '../document/documentStore'
 import { activeDraftId } from '../draft/draftStore'
 import { seedClaims } from '../memory/reading/claimFixture'
 import { setKnewBefore } from '../memory/reading/knewBeforeStore'
+import { recordTopicQuotes, setTopicQuotesState } from '../memory/reading/topicStore'
 import { setSceneSettled } from '../memory/reading/sceneReadStore'
 import { savePage } from '../memory/recordStore'
 import { setSceneDetails } from '../memory/sceneDetailStore'
@@ -383,10 +384,48 @@ describe('does A know X, who knows X (F-16.22 data, P3-D2)', () => {
       }
     })
     const card = 'card' in outcome ? outcome.card : null
-    expect(card?.kind === 'whoKnows' ? card.holders.map((cell) => cell.knowerId) : []).toEqual([
-      book.orrin
+    // Mara suspects it in 1.2: a partial line is a holder too, as the secret's sheet lists it, so
+    // the chat's scoped line never contradicts the sheet.
+    expect(
+      card?.kind === 'whoKnows'
+        ? card.holders.map((cell) => [cell.knowerId, cell.line, cell.how])
+        : []
+    ).toEqual([
+      [book.orrin, 'counts', 'overheard'],
+      [book.mara, 'partial', 'suspects']
     ])
     expect(JSON.stringify(outcome)).not.toMatch(/doesn.t know|does not know|No scene shows/)
+  })
+
+  it('hands readers-since over as stale while the reveal it rests on is re-checked', () => {
+    const reveals = recordTopicQuotes(book.db, book.map).map((quote) => quote.id)
+    expect(reveals.length).toBeGreaterThan(0)
+    const whoKnows = (nowId: string): ReturnType<typeof instantCard> =>
+      instantCard(book.db, { kind: 'whoKnows', secretId: book.map }, nowId)
+    expect(whoKnows(book.two)).toMatchObject({ card: { readersSince: { ref: '1.1' } } })
+    setTopicQuotesState(book.db, reveals, 'stale')
+    // Readers know it only through the re-checked reveal: no instant answer.
+    expect(whoKnows(book.two)).toMatchObject({ handover: 'stale' })
+    // Mara's live line in 1.3 keeps readers knowing it, but "since 1.1" still rests on the
+    // re-checked reveal alone: never drawn as checked.
+    seedClaims(
+      book.db,
+      book.three,
+      [
+        {
+          recordId: book.mara,
+          slot: 'knows',
+          value: 'told',
+          how: 'told',
+          objectId: book.map,
+          quote: 'Mara learned the map was sold',
+          para: 1,
+          proof: 'verified'
+        }
+      ],
+      SCRIBE_NOW
+    )
+    expect(whoKnows(book.three)).toMatchObject({ handover: 'stale' })
   })
 
   it('reads an unread sentence that holds the secret’s words first', () => {

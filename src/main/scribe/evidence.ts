@@ -185,7 +185,8 @@ export function passageNow(
         text: paragraph.text,
         quotable: [paragraph.text],
         citable: true,
-        open: { kind: 'scene', id: ownerId, para: null },
+        // The scene's notes, not its text: the chat opens the Notes panel (`ScribeAnswer`).
+        open: { kind: 'scene', id: ownerId, para: null, notes: true },
         doc: null
       }
     }

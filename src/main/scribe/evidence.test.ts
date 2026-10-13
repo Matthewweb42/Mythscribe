@@ -165,6 +165,8 @@ describe('resolveEvidence', () => {
       '¶1 Tomas sold the map to a stranger.\n¶2 Orrin overheard Tomas from the yard.'
     )
     expect(items[4]?.doc).toBe('Harbour notes')
+    // A scene's notes open the scene with its Notes panel: the quote is not in the scene's text.
+    expect(items[2]?.open).toEqual({ kind: 'scene', id: book.two, para: null, notes: true })
     expect(text('E10')).toBe('Mara · eyes: grey\nMara watched the quay with her grey eyes.')
     expect(text('E12')).toBe(
       'Revealed in 1.1: “Tomas sold the map”\nOrrin: overheard from Tomas (1.1): “Orrin overheard Tomas”'

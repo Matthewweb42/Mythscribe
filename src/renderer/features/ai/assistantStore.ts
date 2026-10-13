@@ -1223,7 +1223,7 @@ async function navigateTurn(
         id,
         routed(result.action, null, null, cost, {
           navigation: result.navigation,
-          prior: { steps, costUsd: result.costUsd, usage: result.usage }
+          prior: { steps, costUsd: result.costUsd, readUsd: result.readUsd, usage: result.usage }
         })
       )
       return
@@ -1232,17 +1232,21 @@ async function navigateTurn(
 }
 
 /**
- * P3-D23: the parts of a Ms Scribe answer turn's cost, in request order (the navigator, the answer,
- * the quote check), those that cost anything; null for a v1 turn or one with a single part.
+ * P3-D23: the parts of a Ms Scribe answer turn's cost, in request order (the latest change read
+ * first, the navigator, the answer, the quote check), those that cost anything; null for a v1
+ * turn or one with a single part. The read-first is the reader's spend, never the navigator's: a
+ * lookup handed over after it ran no navigator request at all.
  */
 export function costPartsOf(
-  prior: { costUsd: number } | null,
+  prior: Pick<PriorSpend, 'costUsd' | 'readUsd'> | null,
   result: { costUsd: number; scribe: ScribeTurn | null }
 ): CostPart[] | null {
   if (result.scribe === null) return null
   const check = result.scribe.checkUsd
+  const read = prior?.readUsd ?? 0
   const all: CostPart[] = [
-    { part: 'navigator', costUsd: prior?.costUsd ?? 0 },
+    { part: 'read', costUsd: read },
+    { part: 'navigator', costUsd: Math.max(0, (prior?.costUsd ?? 0) - read) },
     { part: 'answer', costUsd: Math.max(0, result.costUsd - check) },
     { part: 'check', costUsd: check }
   ]
@@ -1254,6 +1258,8 @@ export function costPartsOf(
 interface PriorSpend {
   steps: AgentStep[]
   costUsd: number
+  /** The latest change read first, of `costUsd`: listed apart from the navigator's requests. */
+  readUsd: number
   usage: { inputTokens: number; outputTokens: number }
 }
 

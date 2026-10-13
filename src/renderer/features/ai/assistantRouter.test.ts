@@ -731,6 +731,7 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
       navigation,
       steps: [{ tool: 'search', label: "Searching 'ridge'…" }],
       routedBy: 'model',
+      readUsd: 0,
       usage: { inputTokens: 2_000, outputTokens: 40 },
       costUsd: 0.0005,
       cached: false,
