@@ -226,6 +226,13 @@ import { UiScale, ViewSettings, ZoomStep } from '../zoom'
 import { CustomThemeId, CustomThemeInput, ThemeId } from '../themes'
 import { AssistantNameInput } from '../assistantName'
 import { StoryMemoryVersion } from '../storyMemory'
+import {
+  SEARCH_MISSES_LIST_MAX,
+  SearchMisses,
+  SheetLineAdd,
+  SheetLineRemove,
+  SheetLineResult
+} from '../scribe'
 import { AuthorTodo, AuthorTodoCreate, AuthorTodoPatch } from '../memory/authorTodo'
 import { Dismissed, DismissedList } from '../memory/dismissed'
 import { NameAnswer, NameAnswerResult, NameQuestion } from '../memory/nameQuestions'
@@ -3224,6 +3231,18 @@ export const contract = {
     }),
     output: z.object({ from: StoryRecord, into: StoryRecord })
   },
+  /**
+   * F-16.26 (decision 3 as the author changed it): a line the author asked Ms Scribe to put on a
+   * record's sheet, at the end of its Pinned or Ideas page, marked `aiWritten` (the chat turn and
+   * the day) until she edits it. A line the page says already is ALREADY_EXISTS; a secret or
+   * thread is VALIDATION. Re-indexes the record; pushes `record:changed`.
+   */
+  'record:addLine': { input: SheetLineAdd, output: SheetLineResult },
+  /**
+   * F-16.26: the chat's Undo of `record:addLine`: takes the line out while it still reads as
+   * written and carries the turn's mark; VALIDATION "Edited since; change it on the sheet."
+   */
+  'record:removeLine': { input: SheetLineRemove, output: StoryRecord },
   /** The twin gate for a name being typed (`exceptId`: the record being renamed). */
   'record:gate': {
     input: z.object({ name: z.string().max(RECORD_NAME_MAX), exceptId: z.string().optional() }),
@@ -3474,6 +3493,15 @@ export const contract = {
   'memory:timeline': {
     input: z.object({ recordId: z.string().nullable() }),
     output: TimelineMemory
+  },
+  /**
+   * F-16.25 (P3-D15): Ms Scribe's search misses, newest first (at most `SEARCH_MISSES_LIST_MAX`):
+   * passages a widened answer cited that the turn's searches had not returned. Local; the count
+   * Settings shows and the trigger for F-16.35.
+   */
+  'scribe:searchMisses': {
+    input: z.object({ limit: z.number().int().min(0).max(SEARCH_MISSES_LIST_MAX).default(10) }),
+    output: SearchMisses
   },
   /**
    * F-16.22: *Knew before the book* (`knew: true`) or *Remove* (`false`): the author says a

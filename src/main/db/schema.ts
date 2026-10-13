@@ -1426,3 +1426,30 @@ export const memoryBackfill = sqliteTable(
 )
 export type MemoryBackfillRow = typeof memoryBackfill.$inferSelect
 export type MemoryBackfillInsert = typeof memoryBackfill.$inferInsert
+
+/**
+ * Ms Scribe's search misses (F-16.25; plan P3 §1.1, migration `0037_search_miss`, additive):
+ * a passage a widened answer (Self-Route) cited that the turn's searches had not returned. Local
+ * and derived, never sent anywhere: the trigger for meaning search with embeddings (F-16.35) and
+ * the count Settings shows. `question` is the author's message cut to 300 characters; `terms` the
+ * navigator's search terms as JSON (at most 8); `prompt_version` the answer's. At most
+ * `SEARCH_MISS_MAX` rows: an insert prunes the oldest (`searchMissStore.ts`).
+ */
+export const searchMiss = sqliteTable(
+  'search_miss',
+  {
+    id: text('id').primaryKey(),
+    created: text('created').notNull(),
+    question: text('question').notNull(),
+    terms: text('terms').notNull().default('[]'),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => node.id, { onDelete: 'cascade' }),
+    para: integer('para').notNull(),
+    quote: text('quote').notNull(),
+    promptVersion: text('prompt_version').notNull()
+  },
+  (t) => [index('search_miss_created_idx').on(t.created)]
+)
+export type SearchMissRow = typeof searchMiss.$inferSelect
+export type SearchMissInsert = typeof searchMiss.$inferInsert

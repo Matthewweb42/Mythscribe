@@ -102,6 +102,7 @@ import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
 import { cardAnchorOf, revealIn, seedClaims } from '../memory/reading/claimFixture'
 import { scanNamesFor } from '../memory/nameIndexer'
 import { createTopic, deleteTopicQuotes, mergeInto } from '../memory/reading/topicStore'
+import { logSearchMiss } from '../scribe/searchMissStore'
 import { upsertCard } from '../memory/reading/cardStore'
 import { emptyCardFields } from '@shared/memory/claims'
 import { getClaim } from '../memory/reading/claimStore'
@@ -9092,6 +9093,86 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     access.refresh()
     expect((await invoke('memory:threads', { asOf: null })).threads).toHaveLength(1)
     expect((await invoke('memory:timeline', { recordId: mara })).rows).toHaveLength(2)
+  })
+
+  it('F-16.26, F-16.25: puts a line on a sheet, takes it back, and lists the search misses (P3 slice 1)', async () => {
+    const scene = await openV2()
+    const db = manager.require().connection.orm
+    const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+    if (!('record' in made)) throw new Error('blocked')
+    const mara = made.record.id
+    const line = { id: mara, page: 'pinned' as const, text: 'Hates the sea.', turn: 'm1' }
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    const added = await invoke('record:addLine', line)
+    expect(added).toMatchObject({ index: 0, text: 'Hates the sea.' })
+    expect(added.record.pinned?.content?.[0]?.attrs).toMatchObject({ aiWritten: { turn: 'm1' } })
+    expect(sentOf('record:changed')).toEqual([{ recordIds: [mara], roster: false }])
+    expect((await invoke('passages:search', { query: 'sea' })).map((hit) => hit.source)).toEqual([
+      'pinned'
+    ])
+    await expect(invoke('record:addLine', { ...line, turn: 'm2' })).rejects.toThrow(
+      /^ALREADY_EXISTS: /
+    )
+    await expect(
+      invoke('record:addLine', { ...line, text: 'x'.repeat(601), turn: 'm3' })
+    ).rejects.toThrow(/^VALIDATION: /)
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    const removed = await invoke('record:removeLine', { ...line, index: 0 })
+    expect(removed.pinned).toBeNull()
+    expect(sentOf('record:changed')).toEqual([{ recordIds: [mara], roster: false }])
+    await expect(invoke('record:removeLine', { ...line, index: 0 })).rejects.toThrow(
+      'VALIDATION: Edited since; change it on the sheet.'
+    )
+
+    expect(await invoke('scribe:searchMisses', { limit: 10 })).toEqual({ count: 0, recent: [] })
+    logSearchMiss(
+      db,
+      {
+        question: 'When does Mara first see the sea?',
+        terms: ['sea'],
+        nodeId: scene,
+        para: 0,
+        quote: 'the sea',
+        promptVersion: 'agent.v9'
+      },
+      new Date()
+    )
+    expect(await invoke('scribe:searchMisses', { limit: 10 })).toMatchObject({
+      count: 1,
+      recent: [{ nodeId: scene, terms: ['sea'], promptVersion: 'agent.v9' }]
+    })
+
+    // After the trial the misses still read; a sheet line is refused like every write.
+    accessNow += 31 * 24 * 60 * 60_000
+    access.refresh()
+    expect((await invoke('scribe:searchMisses', { limit: 1 })).count).toBe(1)
+    for (const [channel, input] of [
+      ['record:addLine', line],
+      ['record:removeLine', { ...line, index: 0 }]
+    ] as const) {
+      const refused = await handlerFor(channel)(null, input)
+      expect(refused.ok, channel).toBe(false)
+      if (!refused.ok) expect(refused.error.message).toBe(TRIAL_ENDED_MESSAGE)
+    }
+  })
+
+  it('refuses the sheet-line and search-miss channels in a v1 project (P3 rule 1)', async () => {
+    await invoke('project:create', { name: 'Plain', format: 'novel', directory: tmp })
+    await expect(
+      invoke('record:addLine', { id: 'x', page: 'pinned', text: 'A line.', turn: 'm1' })
+    ).rejects.toThrow('VALIDATION: This project uses the other story memory')
+    await expect(
+      invoke('record:removeLine', {
+        id: 'x',
+        page: 'pinned',
+        index: 0,
+        text: 'A line.',
+        turn: 'm1'
+      })
+    ).rejects.toThrow('VALIDATION: This project uses the other story memory')
+    await expect(invoke('scribe:searchMisses', { limit: 5 })).rejects.toThrow(
+      'VALIDATION: This project uses the other story memory'
+    )
   })
 
   it('opens without v1’s steps: no tag proposals, and the name questions are published instead', async () => {

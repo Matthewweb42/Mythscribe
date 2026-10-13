@@ -25,6 +25,9 @@ import { fakeAi, requestKind } from './readingFixture'
 import { writeSceneRead } from './sceneReadStore'
 import { createTopic } from './topicStore'
 import { sceneMemory } from './views'
+import { renderEvidence, resolveEvidence } from '../../scribe/evidence'
+import { gatherStep0 } from '../../scribe/step0'
+import type { EvidenceKey } from '@shared/scribe'
 
 /**
  * Absence is never a fact (F-16.22; plan P2b rule 9, §4.1): whatever the book holds (secrets,
@@ -194,6 +197,39 @@ describe('absence is never a fact on any surface that reaches a model (P2b rule 
       expect(result, `${tool} ${JSON.stringify(args)}`).not.toMatch(ABSENCE)
       expect(result, `${tool} ${JSON.stringify(args)}`).not.toMatch(NOT_KNOWING)
     }
+  })
+
+  it('keeps Ms Scribe’s Step 0 and its evidence free of absences (F-16.24, F-16.25)', () => {
+    for (const question of [
+      'Does Mara know about the sold map?',
+      'Who knows about the sold map?',
+      'When does Mara first learn of the map?',
+      'Mara’s eyes?'
+    ]) {
+      const step = gatherStep0(db, {
+        nodeId: two,
+        question,
+        focus: { caretPara: null, selection: null }
+      })
+      const sent = JSON.stringify([step.e0, step.records, step.menu])
+      expect(sent, question).not.toMatch(ABSENCE)
+      expect(sent, question).not.toMatch(NOT_KNOWING)
+      const keys: EvidenceKey[] = [
+        ...step.menu.map((item) => item.key),
+        { kind: 'knows', secretId: secret },
+        { kind: 'timeline', recordId: mara },
+        { kind: 'ideas', recordId: mara }
+      ]
+      const { items } = resolveEvidence(db, keys, two)
+      const rendered = renderEvidence(items, 10_000).text
+      expect(rendered, question).not.toMatch(ABSENCE)
+      expect(rendered, question).not.toMatch(NOT_KNOWING)
+    }
+    // Mara, Here with no line, gets no line; Orrin and Tomas do.
+    const knows = resolveEvidence(db, [{ kind: 'knows', secretId: secret }], two).items[0]?.text
+    expect(knows).toContain('Orrin: overheard from Tomas')
+    expect(knows).toContain('Tomas: knew before the book')
+    expect(knows).not.toContain('Mara')
   })
 
   it('keeps reader.v2 and verify.v2 requests free of absences', async () => {

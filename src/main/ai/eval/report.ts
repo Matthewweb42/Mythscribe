@@ -1,6 +1,6 @@
-import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
+import { estimateTokens, outputBudget } from '@shared/ai'
 import type { CompletionUsage } from '../providers/types'
-import { PROMPT_CATALOGUE, type PromptVersion } from '../prompts/catalogue'
+import { PROMPT_CATALOGUE, promptInputBudget, type PromptVersion } from '../prompts/catalogue'
 import type { EvalCase } from './fixtures'
 
 /**
@@ -32,7 +32,7 @@ export function tokenRows(cases: EvalCase[]): TokenRow[] {
     const system = c.messages.filter((m) => m.role === 'system')
     const rest = c.messages.filter((m) => m.role !== 'system')
     const total = estimateTokens(c.messages.map((m) => m.content).join('\n'))
-    const budget = inputBudget(entry.feature)
+    const budget = promptInputBudget(entry.feature, c.version)
     return {
       version: c.version,
       since: entry.since,

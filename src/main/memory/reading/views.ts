@@ -24,6 +24,7 @@ import type {
 import { KNOWER_KINDS } from '@shared/memory/knows'
 import { sceneSecrets } from '@shared/memory/whoKnows'
 import { searchableText } from '@shared/search'
+import type { NodeRow } from '../../db/schema'
 import { currentDraftId } from '../../draft/draftStore'
 import { getNode, listNodes, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
@@ -33,10 +34,11 @@ import { storedSceneDetails } from '../sceneDetailStore'
 import { getCard } from './cardStore'
 import { draftClaims, getClaim, recordClaims, sceneClaims } from './claimStore'
 import { secretTopic, sheetKnows, storedGrid, storedKnows } from './knowsViews'
+import type { KnowsAsOf } from '@shared/memory/whoKnows'
 import { getReading, lastReading } from './readingStore'
 import { getSceneRead } from './sceneReadStore'
 import { heldCard, hereChips, readingOrder, rowTexts } from './readingFrame'
-import { sheetTime } from './timeViews'
+import { sheetTime, timeFrame, type TimeFrame } from './timeViews'
 
 /**
  * What the reading shows (F-16.18), built from the stores: the This scene panel's
@@ -281,17 +283,55 @@ export function knowsGridMemory(db: TreeDb, asOf: string | null): KnowsGrid {
 
 const sheetLine = (line: SheetLine): SheetLineView => ({ ...line, label: slotLabel(line.slot) })
 
-/** One record's sheet "From the book, as of" scene `asOf` (null: the end of the book). */
-export function sheetMemory(db: TreeDb, recordId: string, asOf: string | null): SheetMemory {
+/**
+ * What several sheets read as of one scene share (F-16.24: Step 0 digests up to three records of
+ * a question at once): the book's order, who knows what and the threads and years as of `asOf`.
+ */
+export interface SheetFrame {
+  asOf: string | null
+  nodes: NodeRow[]
+  reading: ReadingOrder
+  knows: KnowsAsOf
+  time: TimeFrame
+}
+
+/** The shared reads of `sheetMemory` as of scene `asOf`, for several sheets read together. */
+export function sheetFrame(
+  db: TreeDb,
+  asOf: string | null,
+  nodes: NodeRow[] = listNodes(db),
+  reading: ReadingOrder = readingOrder(db, nodes)
+): SheetFrame {
+  return {
+    asOf,
+    nodes,
+    reading,
+    knows: storedKnows(db, asOf, reading, nodes),
+    time: timeFrame(db, asOf, reading, nodes)
+  }
+}
+
+/**
+ * One record's sheet "From the book, as of" scene `asOf` (null: the end of the book). `frame`,
+ * read as of the same scene (`sheetFrame`), is shared by several sheets read together.
+ */
+export function sheetMemory(
+  db: TreeDb,
+  recordId: string,
+  asOf: string | null,
+  frame?: SheetFrame
+): SheetMemory {
   const draftId = currentDraftId(db)
-  const nodes = listNodes(db)
-  const reading = readingOrder(db, nodes)
+  const shared = frame?.asOf === asOf ? frame : undefined
+  const nodes = shared?.nodes ?? listNodes(db)
+  const reading = shared?.reading ?? readingOrder(db, nodes)
   // F-16.22: a knower's Knows, a secret's own view; F-16.23: a named record's Threads, a
   // character's Age, a thread's own view; all as of the same scene.
   const kind = getRecord(db, recordId)?.kind ?? null
   const knower = kind !== null && KNOWER_KINDS.includes(kind)
-  const knows = knower || kind === 'secret' ? storedKnows(db, asOf, reading, nodes) : null
-  const time = sheetTime(db, recordId, kind, asOf, reading, nodes)
+  const knows =
+    knower || kind === 'secret' ? (shared?.knows ?? storedKnows(db, asOf, reading, nodes)) : null
+  const time = sheetTime(db, recordId, kind, asOf, reading, nodes, shared?.time)
   const sheet = sheetAsOf(
     draftId === null ? [] : asOfClaims(db, recordClaims(db, recordId, draftId)),
     reading,

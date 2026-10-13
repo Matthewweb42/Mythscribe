@@ -5,6 +5,7 @@ import type { AssistantMode } from './aiSettings'
 import { RouteAction } from './assistantRoute'
 import { EditTurn } from './editRequest'
 import { QueryTurn } from './query'
+import { InstantCard, ScribeTurn } from './scribe'
 import { toTagName } from './tags'
 import { WhatNextDirection } from './whatNext'
 
@@ -138,7 +139,18 @@ export const ChatMessage = z.object({
    * F-5.26: an edit request's target, its choices, and what was picked and started; null for
    * every other turn and for rows written before it.
    */
-  edit: EditTurn.nullable().catch(null).default(null)
+  edit: EditTurn.nullable().catch(null).default(null),
+  /**
+   * F-16.24 (story memory v2): the instant card a question was answered with, no AI call; null
+   * for every other turn, for rows written before it, and for a card kind this build does not
+   * know (P3-D19: the turn keeps its text).
+   */
+  card: InstantCard.nullable().catch(null).default(null),
+  /**
+   * F-16.25 (story memory v2): what Ms Scribe's answer kept (its citations, the unchecked and
+   * unsupported sentences, its scope); null for every other turn and for rows written before it.
+   */
+  scribe: ScribeTurn.nullable().catch(null).default(null)
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
 

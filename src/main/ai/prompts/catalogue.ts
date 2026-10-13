@@ -1,4 +1,4 @@
-import type { AiFeatureId, Tier } from '@shared/ai'
+import { inputBudget, type AiFeatureId, type Tier } from '@shared/ai'
 import { BETA_READER_PROMPT_VERSION } from './betaReader.v1'
 import { BETA_READER_REGEN_PROMPT_VERSION } from './betaReaderRegen.v1'
 import { BRIEF_PROMPT_VERSION } from './brief.v1'
@@ -705,6 +705,22 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   },
   [READER_V2_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.22' },
   [VERIFY_V2_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.22' }
+}
+
+/**
+ * F-16.25 (P3-D10): a prompt version whose input cap is its own rather than its feature's, so a
+ * new version may carry more (Ms Scribe's `agent.v9` sends the whole open scene, 24,000) while the
+ * feature's older versions and every v1 request keep the cap they had. Slice 2 adds `agent.v9`.
+ */
+export const PROMPT_INPUT_BUDGETS: Partial<Record<PromptVersion, number>> = {}
+
+/** The input cap a request built from `version` is checked against: its own, else its feature's. */
+export function promptInputBudget(
+  feature: AiFeatureId,
+  version: PromptVersion,
+  budgets: Partial<Record<PromptVersion, number>> = PROMPT_INPUT_BUDGETS
+): number {
+  return budgets[version] ?? inputBudget(feature)
 }
 
 /** Whether a string (a ledger row's, a proposal's) names a catalogued prompt version. */

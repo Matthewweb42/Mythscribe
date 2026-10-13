@@ -4,6 +4,7 @@ import { DEFAULT_MODELS, OPENROUTER_BASE_URL, type Tier } from '@shared/ai'
 import {
   buildOpenAiProvider,
   lowestReasoningEffort,
+  lowReasoningEffort,
   mapOpenAiError,
   usageOf,
   type FetchLike
@@ -661,5 +662,40 @@ describe('the lowest reasoning effort for story-memory requests (F-16.17, P2a-D1
       resolveModel: () => 'gpt-5.4-mini'
     }).complete({ ...request, lowestEffort: true })
     expect(bodyOf(local.calls[0])).not.toHaveProperty('reasoning_effort')
+  })
+})
+
+describe('low reasoning effort for Ms Scribe’s edit turns (F-16.25, P3-D11)', () => {
+  it('names low for a model that takes an effort, and none for one that takes none', () => {
+    expect(lowReasoningEffort('gpt-5')).toBe('low')
+    expect(lowReasoningEffort('gpt-5.4')).toBe('low')
+    expect(lowReasoningEffort('o3')).toBe('low')
+    expect(lowReasoningEffort('gpt-5-chat-latest')).toBeNull()
+    expect(lowReasoningEffort('gpt-4.1-mini')).toBeNull()
+  })
+
+  it('sends reasoning_effort low only on a direct OpenAI key; the lowest effort wins', async () => {
+    const direct = answering(() => json(200, completion))
+    const provider = buildOpenAiProvider(KEY, { fetch: direct.fetch })
+    await provider.complete({ ...request, lowEffort: true })
+    await provider.complete({ ...request, lowEffort: true, lowestEffort: true })
+    expect(bodyOf(direct.calls[0]).reasoning_effort).toBe('low')
+    expect(bodyOf(direct.calls[1]).reasoning_effort).toBe('none')
+    const older = answering(() => json(200, completion))
+    await buildOpenAiProvider(KEY, {
+      fetch: older.fetch,
+      resolveModel: () => 'gpt-4.1-mini'
+    }).complete({ ...request, lowEffort: true })
+    expect(bodyOf(older.calls[0])).not.toHaveProperty('reasoning_effort')
+    // OpenRouter reads the request's mode as its own parameter: low is `{ effort: 'low' }`.
+    const routed = answering(() => json(200, completion))
+    await buildOpenAiProvider(KEY, {
+      fetch: routed.fetch,
+      baseURL: OPENROUTER_BASE_URL,
+      openRouter: true,
+      resolveModel: () => 'deepseek/deepseek-v4-pro'
+    }).complete({ ...request, lowEffort: true, reasoning: 'low' })
+    expect(bodyOf(routed.calls[0])).not.toHaveProperty('reasoning_effort')
+    expect(bodyOf(routed.calls[0]).reasoning).toEqual({ effort: 'low' })
   })
 })

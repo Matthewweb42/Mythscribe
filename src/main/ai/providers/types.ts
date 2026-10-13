@@ -60,6 +60,11 @@ export interface CompletionRequest {
    * direct OpenAI key reads it (`lowestReasoningEffort`); every other route ignores it.
    */
   lowestEffort?: boolean
+  /**
+   * F-16.25 (P3-D11): ask for `low` reasoning effort, where the model takes one. Only the OpenAI
+   * adapter on a direct OpenAI key reads it (`lowReasoningEffort`); `lowestEffort` wins over it.
+   */
+  lowEffort?: boolean
 }
 
 /** `usage` is on every result so the ledger (F-5.14) can price it. */

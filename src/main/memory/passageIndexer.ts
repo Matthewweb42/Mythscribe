@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, sql, type SQL } from 'drizzle-orm'
 import { passageParagraphs } from '@shared/mentions'
 import { markedParagraphs } from '@shared/memory/pageMarks'
 import {
@@ -344,8 +344,7 @@ interface LiveOwners {
   records: ReadonlySet<string>
 }
 
-function liveOwners(db: TreeDb): LiveOwners {
-  const nodes = listNodes(db)
+function liveOwners(db: TreeDb, nodes: NodeRow[] = listNodes(db)): LiveOwners {
   return {
     scenes: new Set(manuscriptDocuments(db, nodes).map((row) => row.id)),
     research: new Set(researchDocumentIds(nodes)),
@@ -412,21 +411,18 @@ export function pruneMemoryIndex(db: TreeDb): number {
 export function searchMemoryPassages(
   db: TreeDb,
   query: string,
-  options: { sources?: readonly PassageSource[]; limit?: number } = {}
+  options: {
+    sources?: readonly PassageSource[]
+    limit?: number
+    /** The project's nodes, when the caller has them (F-16.24: Step 0 reads them once). */
+    nodes?: NodeRow[]
+  } = {}
 ): MemoryPassageHit[] {
   const match = ftsQuery(query)
   const max = Math.min(Math.max(0, Math.floor(options.limit ?? 10)), MEMORY_PASSAGE_SEARCH_MAX)
   if (match === null || max === 0) return []
-  const live = liveOwners(db)
-  // Card lines are a map (F-16.18): searched only when asked for by name.
-  const sources =
-    options.sources === undefined || options.sources.length === 0
-      ? DEFAULT_PASSAGE_SOURCES
-      : options.sources
-  const filter = sql` AND source IN (${sql.join(
-    sources.map((source) => sql`${source}`),
-    sql`, `
-  )})`
+  const live = liveOwners(db, options.nodes)
+  const filter = sourceFilter(options.sources)
   const rows = db.all<{
     source: PassageSource
     owner_id: string
@@ -453,4 +449,103 @@ export function searchMemoryPassages(
       snippet: row.snippet,
       score: -row.rank
     }))
+}
+
+/** The SQL filter for `sources` (none: every source but the card lines, a map, F-16.18). */
+function sourceFilter(sources: readonly PassageSource[] | undefined): SQL {
+  const wanted = sources === undefined || sources.length === 0 ? DEFAULT_PASSAGE_SOURCES : sources
+  return sql` AND source IN (${sql.join(
+    wanted.map((source) => sql`${source}`),
+    sql`, `
+  )})`
+}
+
+/** The most matches `searchMemoryPassagesInOrder` reads before ordering them. */
+export const MEMORY_PASSAGE_PLACES_MAX = 20_000
+
+/**
+ * Every match of `query` placed by the caller (F-16.25, P3-D8: a first / last / ever question reads
+ * the earliest matches in reading order, not bm25's best): `orderOf` answers a scene's place, or
+ * undefined to leave it out (after now, not readable); the first `max` by (place, paragraph) come
+ * back with their snippets. Snippets are made only for those, in a second pass over the match.
+ */
+export function searchMemoryPassagesInOrder(
+  db: TreeDb,
+  query: string,
+  options: {
+    sources?: readonly PassageSource[]
+    max: number
+    orderOf: (ownerId: string) => number | undefined
+    nodes?: NodeRow[]
+  }
+): MemoryPassageHit[] {
+  const match = ftsQuery(query)
+  if (match === null || options.max <= 0) return []
+  const live = liveOwners(db, options.nodes)
+  const filter = sourceFilter(options.sources)
+  const places = db.all<{
+    id: number
+    source: PassageSource
+    owner_id: string
+    para: number
+    canon: PassageCanon
+  }>(
+    sql`SELECT rowid AS id, source, owner_id, para, canon
+        FROM memory_passage_fts WHERE memory_passage_fts MATCH ${match}${filter}
+        LIMIT ${MEMORY_PASSAGE_PLACES_MAX}`
+  )
+  const picked = places
+    .flatMap((row) => {
+      if (!isAlive(live, ownerKindOf(row.source), row.owner_id)) return []
+      const order = options.orderOf(row.owner_id)
+      return order === undefined ? [] : [{ row, order, para: Number(row.para) }]
+    })
+    .sort((a, b) => a.order - b.order || a.para - b.para)
+    .slice(0, options.max)
+  if (picked.length === 0) return []
+  // The picked rows' text by rowid (no second MATCH: making FTS snippets re-reads every match).
+  const texts = new Map(
+    db
+      .all<{ id: number; text: string }>(
+        sql`SELECT rowid AS id, text FROM memory_passage_fts WHERE rowid IN (${sql.join(
+          picked.map((each) => sql`${each.row.id}`),
+          sql`, `
+        )})`
+      )
+      .map((row) => [Number(row.id), row.text])
+  )
+  const words =
+    query
+      .normalize('NFC')
+      .toLowerCase()
+      .match(/[\p{L}\p{N}]+/gu) ?? []
+  return picked.map(({ row, para, order }) => ({
+    source: row.source,
+    ownerId: row.owner_id,
+    para,
+    canon: row.canon,
+    label: passageLabel(row.source, row.canon),
+    snippet: snippetAround(texts.get(Number(row.id)) ?? '', words),
+    // Reading order, not relevance: the earliest place scores highest.
+    score: -order
+  }))
+}
+
+/**
+ * About `SNIPPET_TOKENS` words of `text` around the first word one of `terms` starts (or that
+ * starts one of them: the index stems words, "counted" for "count"), `…` where it was cut.
+ */
+export function snippetAround(text: string, terms: readonly string[]): string {
+  const tokens = [...text.matchAll(/\S+/gu)]
+  if (tokens.length <= SNIPPET_TOKENS) return text.replace(/\s+/g, ' ').trim()
+  const hit = tokens.findIndex((token) => {
+    const word = token[0].toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
+    return word !== '' && terms.some((term) => word.startsWith(term) || term.startsWith(word))
+  })
+  const from = Math.max(
+    0,
+    Math.min((hit < 0 ? 0 : hit) - Math.floor(SNIPPET_TOKENS / 2), tokens.length - SNIPPET_TOKENS)
+  )
+  const kept = tokens.slice(from, from + SNIPPET_TOKENS).map((token) => token[0])
+  return `${from > 0 ? '…' : ''}${kept.join(' ')}${from + SNIPPET_TOKENS < tokens.length ? '…' : ''}`
 }

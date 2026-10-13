@@ -173,9 +173,11 @@ describe('openProject writes the backup before an upgrade (F-8.7)', () => {
       'research_filed',
       'story_reading',
       'plan_link_draft',
-      'story_knows'
+      'story_knows',
+      'search_miss'
     ])
     for (const table of [
+      'search_miss',
       'topic_quote',
       'knew_before',
       'claim',
@@ -234,7 +236,7 @@ describe('openProject writes the backup before an upgrade (F-8.7)', () => {
     expect(asked[0]?.id).toBe(session.info.id)
     const [file] = listPreMigrationBackups(backups)
     if (file === undefined) throw new Error('no backup written')
-    expect(path.basename(file)).toMatch(/^pre-migration-21-37-/)
+    expect(path.basename(file)).toMatch(/^pre-migration-21-38-/)
     const copy = new Database(file, { readonly: true })
     const tables = copy.prepare("SELECT name FROM sqlite_master WHERE name = 'passage_fts'").all()
     expect(tables).toEqual([])

@@ -237,7 +237,9 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       directions: null,
       action: null,
       agent: null,
-      edit: null
+      edit: null,
+      card: null,
+      scribe: null
     },
     {
       id: 'm-2',
@@ -253,7 +255,9 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       directions: null,
       action: null,
       agent: null,
-      edit: null
+      edit: null,
+      card: null,
+      scribe: null
     }
   ],
   created: '2026-09-15T10:00:00.000Z',
@@ -558,7 +562,9 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
       directions: null,
       action: null,
       agent: null,
-      edit: null
+      edit: null,
+      card: null,
+      scribe: null
     }))
     setIpcClient(
       deferredClient({

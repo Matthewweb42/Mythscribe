@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(37)
+    expect(result.version).toBe(38)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1563,7 +1563,7 @@ describe('who knows what (0036, F-16.22, F-16.23) leaves every older row and col
     const claimColumns = columnsOf('claim').map((column) => column.name)
     const readColumns = columnsOf('scene_read').map((column) => column.name)
 
-    expect(migrate(db).applied).toEqual(['0036_story_knows'])
+    expect(migrate(db, loadMigrations().slice(0, 37)).applied).toEqual(['0036_story_knows'])
 
     // Every table but the two that gained a column is byte-identical, definition and rows.
     const widened = new Set(['claim', 'scene_read'])
@@ -1692,5 +1692,73 @@ describe('who knows what (0036, F-16.22, F-16.23) leaves every older row and col
     expect(n('topic_quote')).toBe(1)
     db.prepare("DELETE FROM node WHERE id = 's1'").run()
     expect(n('topic_quote')).toBe(0)
+  })
+})
+
+describe('search misses (0037, F-16.25) leave every older row and column', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, loadMigrations().slice(0, 37))
+    fillEveryTable(db)
+  })
+  afterEach(() => db.close())
+
+  it('keeps every older table and value byte for byte and adds one empty table', () => {
+    const tablesBefore = tableNamesOf(db)
+    for (const table of tablesBefore) {
+      if (table === 'schema_migrations' || table.startsWith('memory_passage_fts_')) continue
+      expect(
+        (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n,
+        table
+      ).toBeGreaterThan(0)
+    }
+    const objectsBefore = schemaOf(db)
+    const kept = tablesBefore.filter((table) => table !== 'schema_migrations')
+    const rowsBefore = dumpOf(db, kept)
+
+    expect(migrate(db).applied).toEqual(['0037_search_miss'])
+
+    const old = schemaOf(db).filter((object) =>
+      objectsBefore.some((before) => before.type === object.type && before.name === object.name)
+    )
+    expect(JSON.stringify(old)).toBe(JSON.stringify(objectsBefore))
+    expect(JSON.stringify(dumpOf(db, kept))).toBe(JSON.stringify(rowsBefore))
+    expect(tableNamesOf(db).filter((table) => !tablesBefore.includes(table))).toEqual([
+      'search_miss'
+    ])
+    expect(db.prepare('SELECT COUNT(*) AS n FROM search_miss').get()).toEqual({ n: 0 })
+    const added = schemaOf(db)
+      .filter(
+        (object) =>
+          !objectsBefore.some(
+            (before) => before.type === object.type && before.name === object.name
+          )
+      )
+      .map((object) => `${object.type} ${object.name}`)
+    expect(added.sort()).toEqual([
+      'index search_miss_created_idx',
+      'index sqlite_autoindex_search_miss_1',
+      'table search_miss'
+    ])
+  })
+
+  it('drops a miss with its scene', () => {
+    migrate(db)
+    db.pragma('foreign_keys = ON')
+    db.prepare(
+      `INSERT INTO node (id, parent_id, section_type, kind, title, position, content, created, modified)
+       VALUES ('s9', 'ms', NULL, 'document', 'Nine', 0, NULL, '2026-10-13', '2026-10-13')`
+    ).run()
+    db.prepare(
+      `INSERT INTO search_miss (id, created, question, node_id, para, quote, prompt_version)
+       VALUES ('m1', '2026-10-13', 'When does Orrin first hear?', 's9', 2, 'Orrin heard', 'agent.v9')`
+    ).run()
+    expect(db.prepare("SELECT terms FROM search_miss WHERE id = 'm1'").get()).toEqual({
+      terms: '[]'
+    })
+    db.prepare("DELETE FROM node WHERE id = 's9'").run()
+    expect(db.prepare('SELECT COUNT(*) AS n FROM search_miss').get()).toEqual({ n: 0 })
   })
 })

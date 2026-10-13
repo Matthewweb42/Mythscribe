@@ -29,6 +29,7 @@ import {
   type AiRequestObserver,
   type AiRequestTrace
 } from './request'
+import { PROMPT_INPUT_BUDGETS, promptInputBudget } from './prompts/catalogue'
 import { createSessionUsage, type SessionUsage } from './sessionUsage'
 import { listUsage, type UsageEntry } from './usageStore'
 
@@ -1062,4 +1063,103 @@ describe('answers that are not cached, and the reasoning mode (2026-10-07)', () 
       expect(seen.at(-1)?.reasoning).toBe(expected)
     }
   )
+})
+
+describe('a request’s own reasoning (F-16.25, P3-D11)', () => {
+  const seenBy = (f: Fakes): CompletionRequest[] => {
+    const seen: CompletionRequest[] = []
+    f.complete.mockImplementation((request) => {
+      seen.push(request)
+      return Promise.resolve({ text: '{}', model: 'm', usage: { inputTokens: 1, outputTokens: 1 } })
+    })
+    return seen
+  }
+  const agent = { ...input, feature: 'agent' as const, tier: 'strong' as const }
+
+  it('lowers what an own key would ask, never raises it, and asks a direct key for its effort', async () => {
+    const f = fakes()
+    const seen = seenBy(f)
+    // A routed model on its default: off goes out off, low goes out low.
+    f.deps.routing = () => ({ routing: defaultAiRouting(), table: autoTable(null) })
+    await runAiRequest(f.deps, { ...agent, reasoning: 'off', contextHash: 'off' })
+    expect(seen.at(-1)).toMatchObject({ reasoning: 'off', lowestEffort: true })
+    expect(seen.at(-1)).not.toHaveProperty('lowEffort')
+    await runAiRequest(f.deps, { ...agent, reasoning: 'low', contextHash: 'low' })
+    expect(seen.at(-1)).toMatchObject({ reasoning: 'low', lowEffort: true })
+    expect(seen.at(-1)).not.toHaveProperty('lowestEffort')
+    // A tier whose Settings say off stays off when the request asks for low.
+    const off = { ...defaultAiRouting(), reasoning: { strong: 'off' as const } }
+    f.deps.routing = () => ({ routing: off, table: autoTable(null) })
+    await runAiRequest(f.deps, { ...agent, reasoning: 'low', contextHash: 'low-off' })
+    expect(seen.at(-1)).toMatchObject({ reasoning: 'off', lowestEffort: true })
+    // A feature that never thinks stays off.
+    f.deps.routing = () => ({ routing: defaultAiRouting(), table: autoTable(null) })
+    await runAiRequest(f.deps, {
+      ...input,
+      feature: 'summary',
+      reasoning: 'low',
+      contextHash: 'summary-low'
+    })
+    expect(seen.at(-1)?.reasoning).toBe('off')
+    // No routing table: the request's own mode.
+    f.deps.routing = undefined
+    await runAiRequest(f.deps, { ...agent, reasoning: 'low', contextHash: 'bare-low' })
+    expect(seen.at(-1)).toMatchObject({ reasoning: 'low', lowEffort: true })
+  })
+
+  it('sends Cloud the lower of the feature’s mode and the request’s', async () => {
+    const f = fakes()
+    const seen = seenBy(f)
+    if (f.provider === null) throw new Error('no provider')
+    f.provider = { ...f.provider, id: 'cloud' }
+    f.deps.routing = () => ({ routing: defaultAiRouting(), table: autoTable(null) })
+    await runAiRequest(f.deps, { ...agent, reasoning: 'off', contextHash: 'c-off' })
+    expect(seen.at(-1)?.reasoning).toBe('off')
+    await runAiRequest(f.deps, { ...agent, reasoning: 'low', contextHash: 'c-low' })
+    expect(seen.at(-1)?.reasoning).toBe('low')
+    await runAiRequest(f.deps, {
+      ...input,
+      feature: 'reader',
+      reasoning: 'low',
+      contextHash: 'c-reader'
+    })
+    expect(seen.at(-1)?.reasoning).toBe('off')
+  })
+
+  it('changes nothing for a request without its own reasoning', async () => {
+    const f = fakes()
+    const seen = seenBy(f)
+    const low = { ...defaultAiRouting(), reasoning: { strong: 'low' as const } }
+    f.deps.routing = () => ({ routing: low, table: autoTable(null) })
+    await runAiRequest(f.deps, { ...agent, contextHash: 'none' })
+    expect(seen.at(-1)?.reasoning).toBe('low')
+    expect(seen.at(-1)).not.toHaveProperty('lowEffort')
+    expect(seen.at(-1)).not.toHaveProperty('lowestEffort')
+    f.deps.routing = () => ({ routing: defaultAiRouting(), table: autoTable(null) })
+    await runAiRequest(f.deps, { ...agent, contextHash: 'none-default' })
+    expect(seen.at(-1)).not.toHaveProperty('reasoning')
+    // The cache key is the one a request always had; a request's own reasoning is part of it.
+    expect(cacheKey({ ...input, reasoning: 'off' }, 'gpt-5.4-mini')).not.toBe(
+      cacheKey(input, 'gpt-5.4-mini')
+    )
+    expect(cacheKey({ ...input, reasoning: 'off' }, 'gpt-5.4-mini')).not.toBe(
+      cacheKey({ ...input, reasoning: 'low' }, 'gpt-5.4-mini')
+    )
+  })
+})
+
+describe('per-version input budgets (F-16.25, P3-D10)', () => {
+  it('checks a request against its feature’s cap while no version has its own', async () => {
+    expect(promptInputBudget('agent', 'agent.v8')).toBe(inputBudget('agent'))
+    expect(promptInputBudget('agent', 'agent.v8', { 'agent.v8': 24_000 })).toBe(24_000)
+    expect(promptInputBudget('agent', 'agent.v7', { 'agent.v8': 24_000 })).toBe(
+      inputBudget('agent')
+    )
+    expect(Object.keys(PROMPT_INPUT_BUDGETS)).toEqual([])
+    const f = fakes()
+    const over = 'x'.repeat((inputBudget('tags') + 10) * 4)
+    await expect(
+      runAiRequest(f.deps, { ...input, messages: [{ role: 'user', content: over }] })
+    ).rejects.toThrow(/over the tags budget/)
+  })
 })

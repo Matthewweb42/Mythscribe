@@ -47,7 +47,9 @@ describe('chat model (F-5.4)', () => {
               directions: null,
               action: null,
               agent: null,
-              edit: null
+              edit: null,
+              card: null,
+              scribe: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',
@@ -104,7 +106,9 @@ describe('chat model (F-5.4)', () => {
       directions: null,
       action: null,
       agent: null,
-      edit: null
+      edit: null,
+      card: null,
+      scribe: null
     })
     const conversation = (id: string, messages: Record<string, unknown>[]): unknown => ({
       id,
@@ -153,6 +157,93 @@ describe('chat model (F-5.4)', () => {
     expect(kept?.[0]?.action).toBeNull()
     expect(kept?.[0]?.agent).toBeNull()
     expect(kept?.[0]?.model).toBe('deepseek/deepseek-v4-pro')
+  })
+
+  it('reads an instant card and a Ms Scribe part leniently (F-16.24, F-16.25; P3-D19)', () => {
+    const base = {
+      id: 'm1',
+      role: 'assistant',
+      content: 'Eyes: grey (1.1)',
+      created: '2026-10-13T10:00:00.000Z',
+      proposalId: null,
+      model: null,
+      costUsd: 0,
+      usage: null,
+      mode: 'plan'
+    }
+    const card = {
+      kind: 'slot',
+      recordId: 'mara',
+      name: 'Mara',
+      slot: 'eyes',
+      label: 'Eyes',
+      value: 'grey',
+      claimId: 'c1',
+      quote: 'Mara’s grey eyes',
+      ref: '1.1',
+      nodeId: 'n1',
+      para: 0,
+      since: null,
+      lastStated: false,
+      asOfRef: '1.1',
+      readFirst: null
+    }
+    const scribe = {
+      turn: 'answer',
+      citations: [
+        {
+          n: 1,
+          evidence: 'E3',
+          label: 'happened',
+          ref: '1.1 ¶0',
+          title: 'The quay',
+          open: { kind: 'scene', id: 'n1', para: 0 },
+          quote: 'Orrin overheard Tomas',
+          checked: 'quote'
+        }
+      ],
+      notChecked: [[0, 5]],
+      unsupported: [],
+      scope: null,
+      notFound: false,
+      retried: false,
+      widened: null,
+      misses: 0
+    }
+    const conversation = (messages: unknown[]): unknown => ({
+      active: 'c1',
+      items: [
+        {
+          id: 'c1',
+          title: 'c1',
+          paragraphs: 1,
+          messages,
+          created: '2026-10-13T10:00:00.000Z',
+          modified: '2026-10-13T10:00:00.000Z'
+        }
+      ]
+    })
+    // A v1 row, written before either part existed.
+    const v1 = parseStoredConversations(conversation([base])).items[0]?.messages[0]
+    expect(v1?.card).toBeNull()
+    expect(v1?.scribe).toBeNull()
+    const kept = parseStoredConversations(conversation([{ ...base, card, scribe }])).items[0]
+      ?.messages[0]
+    expect(kept?.card).toEqual(card)
+    expect(kept?.scribe).toEqual(scribe)
+    // A card kind or a citation this build does not know: the turn keeps its text.
+    const odd = parseStoredConversations(
+      conversation([
+        {
+          ...base,
+          card: { kind: 'retiredCard', recordId: 'mara' },
+          scribe: { ...scribe, citations: [{ n: 0, evidence: 'X9' }] }
+        }
+      ])
+    ).items[0]?.messages[0]
+    expect(odd?.content).toBe('Eyes: grey (1.1)')
+    expect(odd?.card).toBeNull()
+    expect(odd?.scribe).toBeNull()
   })
 
   it('keeps the chat history when a turn’s mode is retired or one turn is broken (F-16.2)', () => {
@@ -221,7 +312,9 @@ describe('chat model (F-5.4)', () => {
               directions: null,
               action: null,
               agent: null,
-              edit: null
+              edit: null,
+              card: null,
+              scribe: null
               // no `usage` field at all, as a turn written before F-5.9 has.
             }
           ],
@@ -258,7 +351,9 @@ describe('chat model (F-5.4)', () => {
               directions: null,
               action: null,
               agent: null,
-              edit: null
+              edit: null,
+              card: null,
+              scribe: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',

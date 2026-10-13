@@ -158,6 +158,19 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
     for (const channel of channels.slice(1)) expect(isWriteChannel(channel), channel).toBe(true)
   })
 
+  it('F-16.25, F-16.26: sheet lines are v2 writes; the search misses a v2 read', () => {
+    for (const channel of ['record:addLine', 'record:removeLine', 'scribe:searchMisses'] as const) {
+      expect(CHANNEL_MEMORY[channel], channel).toBe('v2')
+      expect(() => assertChannelMemory(channel, 'v1'), channel).toThrow(OTHER_MEMORY_MESSAGE)
+    }
+    for (const channel of ['record:addLine', 'record:removeLine'] as const) {
+      expect(CHANNEL_ACCESS[channel], channel).toBe('write')
+      expect(isWriteChannel(channel), channel).toBe(true)
+    }
+    expect(CHANNEL_ACCESS['scribe:searchMisses']).toBe('read')
+    expect(isWriteChannel('scribe:searchMisses')).toBe(false)
+  })
+
   it('F-16.23: the Threads and the Timeline are v2 and only read', () => {
     for (const channel of ['memory:threads', 'memory:timeline'] as const) {
       expect(CHANNEL_MEMORY[channel], channel).toBe('v2')

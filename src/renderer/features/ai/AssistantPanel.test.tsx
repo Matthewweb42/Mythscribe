@@ -217,6 +217,8 @@ const message = (
   action: null,
   agent: null,
   edit: null,
+  card: null,
+  scribe: null,
   ...over
 })
 

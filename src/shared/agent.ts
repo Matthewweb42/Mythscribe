@@ -120,7 +120,21 @@ export const AGENT_TOOLS_V6 = [
  * Every read tool any version names, so a step stored with an older turn still parses; which of
  * them one run may call is the version's own list (`AGENT_TOOLS_V6` for the run that ships).
  */
-export const AGENT_TOOLS = [...AGENT_TOOLS_V5, 'lookup', 'cards', 'find_passages'] as const
+export const AGENT_TOOLS = [
+  ...AGENT_TOOLS_V5,
+  'lookup',
+  'cards',
+  'find_passages',
+  // F-16.25 (P3): the navigator's tools beside `search`, `cards` and `outline`, and the quote check
+  // (`cite.v1`), so a step stored with a v2 turn parses.
+  'read',
+  'state',
+  'knows',
+  'timeline',
+  'ideas',
+  'todos',
+  'check'
+] as const
 export const AgentTool = z.enum(AGENT_TOOLS)
 export type AgentTool = z.infer<typeof AgentTool>
 

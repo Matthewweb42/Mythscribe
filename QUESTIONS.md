@@ -12,6 +12,27 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-13 · F-16.24–16.26 · P3 slice 1 (Step 0, instant rules, evidence, sheet lines, search misses, reasoning per request): calls made while building it
+- Question: Building the local half of Ms Scribe (no prompt, no UI, nothing wired into the chat yet) needed these calls beyond the plan's P3-D1 to P3-D23. Nothing changes in v1; no request changed (token report unchanged).
+- Chosen (decided by Claude, unconfirmed):
+  1. **"Does Tomas know?" when you marked him *Knew before the book*:** an instant yes, with no quote (the card says it came from you, `source: 'author'`); slice 5 must not label it "Read by AI from your book · quote checked".
+  2. **"Who knows X?" when nobody is shown knowing it and nothing is checked yet** goes to Ms Scribe rather than a card that only says "not checked yet". Readers-since shows on the card only once readers know it as of the open scene, so a later reveal is never shown early.
+  3. **A stale line of any kind counts against a card** (P3-D3 says "any claim of the record and slot"), even a dialogue line; a value later in the book never does.
+  4. **Read first** looks at the open scene even if it was never read, and at the two latest earlier scenes the reader left unsettled; an earlier scene never read at all is not read first (the question goes on to the card or to Ms Scribe). For "does A know X" and "who knows X" the cue is any word of the secret's label that is not a name.
+  5. **Questions with "know", "learn", "find out" or "heard"** take the every-earlier-scene search too (P3-D8 names knows questions), and that search reads the manuscript's own scenes only (no Pinned, Ideas or Research hits on that path).
+  6. **Labels:** your Pinned lines and a Research page you wrote read "your notes"; an uploaded Research page "source document"; scene notes "planned"; a scene left out of compile "cut from the book"; the outline (chapters and scenes with references, at most 80 lines) and years and ages "computed from your book", both citable.
+  7. **Sheet lines** go only on a person, place, thing, group or term (never a secret's or thread's sheet: VALIDATION); "already says that" compares against the whole page (Pinned or Ideas, Not canon lines included); a line is at most 600 characters (the filed-line limit); the mark keeps the day (2026-10-13).
+  8. **A question with a knows word** ("know", "heard") is a knows question or nothing: it never gets a slot card. A secret is named by its label or by at least half its label's words, one of them not a name. The record's own name never counts as a slot cue ("Hope's age" when a detail is called hope).
+  9. **"Save it" after "brainstorm"** counts as a request to put something on a sheet (it goes to Ideas in slice 2), as "pin" and "add … to Mara's sheet" do.
+  10. **E0 only for a scene you have open** (a chapter opens its last scene); with nothing open, or a Research page or a sheet open, there is no E0 and now is the latest written scene.
+  11. **Reasoning per request on a direct OpenAI key:** low asks for `reasoning_effort: low` where the model takes one (new `lowEffort`); a request's own reasoning is part of its cache key (a request without it keeps the key it had).
+  12. **Where the per-version input cap lives:** `PROMPT_INPUT_BUDGETS` and `promptInputBudget` are in `src/main/ai/prompts/catalogue.ts` (the plan said `src/shared/ai.ts`, but prompt versions are main's), read by the request path and the token report; empty until `agent.v9`.
+  13. **Speed:** to keep Step 0 under 50 ms with three records named, the sheets it digests share one read of who knows what, threads and years (`sheetFrame`), a sheet skips the mention lookup when the book has no thread steps, the passage search takes the caller's nodes, and a first / ever question places every match before making snippets for the 20 it keeps (from their text, not FTS's own snippets, which re-read every match). About 29 ms on the 90-scene book (the timeViews perf test's book, now `perfFixture.ts`).
+  14. **History:** a "turn" is one message, so the newest two messages go whole (up to 400 tokens each).
+  15. **A search miss goes with its scene** (deleting the scene deletes its misses).
+- Alternatives: no card for an author's mark (always Ms Scribe); a "not checked yet" card; only narration-now stale lines counting; reading never-read earlier scenes first; a sheet line on a secret's sheet; Ideas lines allowed to repeat; cache keys without the reasoning.
+- To change it: `src/main/scribe/instant.ts` (1–4), `src/main/scribe/step0.ts` (5, 10, 13), `src/main/scribe/evidence.ts` and `src/shared/scribe.ts` `labelOf` (6), `src/main/scribe/sheetLines.ts` (7), `src/shared/memory/askParse.ts` (8, 9), `src/main/ai/request.ts` and `providers/openai.ts` (11), `catalogue.ts` (12), `src/shared/scribeAnswer.ts` `scribeHistory` (14), migration 0037's foreign key (15).
+
 ## 2026-10-13 · F-16.24–16.26 · P3 plan: the calls the design left open
 - Question: Planning P3, Ms Scribe on the new memory (`docs/research/story-memory-2026-10-11/plans/P3.md`, six slices, nothing built yet), needed calls the design did not make. Details are in the plan's §8 (P3-D1 to P3-D23).
 - Chosen (decided by Claude, unconfirmed):

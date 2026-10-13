@@ -170,7 +170,7 @@ export function storedYears(
 }
 
 /** What the age rules read for every record: its `born` and `age` claims and its Pinned page. */
-interface AgeSources {
+export interface AgeSources {
   born: Map<string, AgeClaim[]>
   ages: Map<string, AgeClaim[]>
   pinned: (recordId: string) => string[]
@@ -286,7 +286,7 @@ export function timelineMemory(db: TreeDb, recordId: string | null): TimelineMem
 }
 
 /** Every thread as of a scene, with "checked up to" (P2b-D9), over the active draft. */
-interface StoredThreads {
+export interface StoredThreads {
   threads: ThreadMemoryView[]
   checkedUpTo: SceneRefView | null
   /** The step claims by id (their quotes and speakers: whom a first-person step is about). */
@@ -354,6 +354,31 @@ export function threadsMemory(db: TreeDb, asOf: string | null): ThreadsMemory {
     asOfRef: asOf === null || !reading.at.has(asOf) ? null : (reading.refs.get(asOf) ?? null),
     checkedUpTo: checked,
     threads
+  }
+}
+
+/**
+ * What every sheet read as of one scene shares (F-16.24): the threads, the story years and the
+ * age rules' sources, read once when Step 0 digests several records' sheets in one question
+ * (`sheetFrame`).
+ */
+export interface TimeFrame {
+  threads: StoredThreads
+  years: StoryYear[]
+  ages: AgeSources
+}
+
+/** The threads, the story years and the age sources as of scene `atId`, for several sheets read together. */
+export function timeFrame(
+  db: TreeDb,
+  atId: string | null,
+  reading: ReadingOrder,
+  nodes: readonly NodeRow[]
+): TimeFrame {
+  return {
+    threads: storedThreads(db, atId, reading, nodes),
+    years: storedYears(db, reading, nodes),
+    ages: ageSources(db)
   }
 }
 
@@ -430,10 +455,11 @@ export function sheetTime(
   kind: RecordKind | null,
   atId: string | null,
   reading: ReadingOrder,
-  nodes: readonly NodeRow[]
+  nodes: readonly NodeRow[],
+  frame?: TimeFrame
 ): SheetTime {
   if (kind === null || kind === 'secret') return { threads: null, age: null, thread: null }
-  const stored = storedThreads(db, atId, reading, nodes)
+  const stored = frame?.threads ?? storedThreads(db, atId, reading, nodes)
   if (kind === 'thread') {
     const thread = stored.threads.find((each) => each.recordId === recordId) ?? null
     return {
@@ -442,7 +468,8 @@ export function sheetTime(
       thread: thread === null ? null : { thread, checkedUpTo: stored.checkedUpTo }
     }
   }
-  const named = recordMentionParas(db, recordId)
+  // A book with no thread steps has nothing to narrow (F-16.24: Step 0 reads sheets per question).
+  const named = stored.threads.length === 0 ? new Set<string>() : recordMentionParas(db, recordId)
   const unnamed = stored.threads.flatMap((thread) =>
     thread.steps.filter((step) => !named.has(`${step.nodeId}|${step.para}`))
   )
@@ -463,7 +490,10 @@ export function sheetTime(
     age:
       kind === 'character'
         ? {
-            age: storedAge(db, recordId, atId, reading, nodes),
+            age:
+              frame === undefined
+                ? storedAge(db, recordId, atId, reading, nodes)
+                : ageOf(frame.ages, recordId, frame.years, reading, atId),
             checkedUpTo: stored.checkedUpTo
           }
         : null,

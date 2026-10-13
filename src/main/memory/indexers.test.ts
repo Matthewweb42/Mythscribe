@@ -28,6 +28,8 @@ import {
   indexStaleRecords,
   pruneMemoryIndex,
   searchMemoryPassages,
+  searchMemoryPassagesInOrder,
+  snippetAround,
   stalePassageOwners
 } from './passageIndexer'
 import { createRecord, deleteRecord, savePage, setAliases } from './recordStore'
@@ -259,6 +261,29 @@ describe('nameIndexer (F-16.5)', () => {
 })
 
 describe('passageIndexer (F-16.5)', () => {
+  it('F-16.25: places every match in the caller’s order and makes snippets for the first only', () => {
+    saveDocument(db, scene(0), doc('The rope was frayed.', 'Ropes everywhere on the quay.'))
+    indexScene(db, scene(0), at(1))
+    const hits = searchMemoryPassagesInOrder(db, 'rope', {
+      sources: ['scene'],
+      max: 5,
+      // Paragraph order within the one scene; a scene left out answers undefined.
+      orderOf: (ownerId) => (ownerId === scene(0) ? 0 : undefined)
+    })
+    expect(hits.map((hit) => [hit.para, hit.snippet])).toEqual([
+      [0, 'The rope was frayed.'],
+      [1, 'Ropes everywhere on the quay.']
+    ])
+    expect(searchMemoryPassagesInOrder(db, 'rope', { max: 5, orderOf: () => undefined })).toEqual(
+      []
+    )
+    expect(searchMemoryPassagesInOrder(db, 'rope', { max: 1, orderOf: () => 0 })).toHaveLength(1)
+    const long = Array.from({ length: 40 }, (_, i) => `w${i}`)
+    long[30] = 'Counted'
+    expect(snippetAround(long.join(' '), ['count'])).toBe(`…${long.slice(22, 38).join(' ')}…`)
+    expect(snippetAround(long.join(' '), ['zzz'])).toBe(`${long.slice(0, 16).join(' ')}…`)
+  })
+
   it('labels scene, Idea scene, excluded scene and note paragraphs, and skips an unchanged owner', () => {
     saveDocument(db, scene(0), doc('The lantern swung over the harbour.'))
     saveNotes(db, scene(0), doc('Plan: the lantern goes out here.'))

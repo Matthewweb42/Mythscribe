@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
   estimateTokens,
-  inputBudget,
   outputBudget,
   priceFor,
   type AiFeatureId,
@@ -28,7 +27,7 @@ import {
   type CompletionUsage,
   type Provider
 } from './providers/types'
-import type { PromptVersion } from './prompts/catalogue'
+import { promptInputBudget, type PromptVersion } from './prompts/catalogue'
 import { CONTEXT_IMPORT_PROMPT_V3_VERSION } from './prompts/contextImport.v3'
 import { REVIEW_CHAT_PROMPT_V3_VERSION } from './prompts/reviewChat.v3'
 import { PLAN_LINKS_PROMPT_V2_VERSION } from './prompts/planLinks.v2'
@@ -101,6 +100,18 @@ function reasoningOff(input: Pick<AiRequestInput, 'feature' | 'promptVersion'>):
   return NO_REASONING_FEATURES.has(input.feature) || NO_REASONING_PROMPTS.has(input.promptVersion)
 }
 
+/** Reasoning modes from least to most: a request's own `reasoning` may only move left (P3-D11). */
+const REASONING_ORDER: readonly ReasoningMode[] = ['off', 'low', 'default']
+
+/** The lower of the mode the request would ask for and the one its caller asked for. */
+export function lowerReasoning(
+  mode: ReasoningMode,
+  asked: AiRequestInput['reasoning']
+): ReasoningMode {
+  if (asked === undefined) return mode
+  return REASONING_ORDER.indexOf(asked) < REASONING_ORDER.indexOf(mode) ? asked : mode
+}
+
 export interface AiRequestInput {
   feature: AiFeatureId
   tier: Tier
@@ -127,6 +138,14 @@ export interface AiRequestInput {
    * answer `cacheable` allows is cached, as before.
    */
   cacheIf?: (text: string) => boolean
+  /**
+   * F-16.25 (P3-D11): this request's own reasoning, which only ever lowers what it would ask
+   * (`off` < `low` < `default`): Ms Scribe's answer turns go out with reasoning off, its edit turns
+   * with low. On Cloud it is sent as the wire's `reasoning` (the Worker honours only lowering); on
+   * a direct OpenAI key `off` asks for the model's lowest effort and `low` for `low` where the model
+   * takes one. Absent, the request asks what it always did.
+   */
+  reasoning?: Extract<ReasoningMode, 'off' | 'low'>
 }
 
 export interface AiRequestResult {
@@ -262,7 +281,8 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
   // 2026-10-07: the own-key reasoning mode (Settings, else the bundled table). MythScribe Cloud
   // decides its own on the server; F-16.2: a feature that never thinks asks it for `off` (the
   // Worker honours only a request that lowers its table's mode), and every other one asks nothing.
-  const reasoning: ReasoningMode =
+  // F-16.25: a request's own `reasoning` lowers that, never raises it (P3-D11).
+  const reasoning: ReasoningMode = lowerReasoning(
     provider.id === 'cloud'
       ? reasoningOff(input)
         ? 'off'
@@ -271,7 +291,9 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
         ? 'default'
         : reasoningOff(input)
           ? 'off'
-          : resolveReasoning(routed.routing, tier, model)
+          : resolveReasoning(routed.routing, tier, model),
+    input.reasoning
+  )
   // Called through a closure rather than passed as a method reference: the provider owns it.
   const providerPrice = provider.price
   const price: typeof priceFor = providerPrice
@@ -279,7 +301,8 @@ function prepare(deps: AiRequestDeps, input: AiRequestInput): PreparedRequest {
     : deps.price
 
   const estimatedIn = estimateTokens(input.messages.map((m) => m.content).join('\n'))
-  const promptBudget = inputBudget(input.feature)
+  // F-16.25 (P3-D10): a prompt version may carry its own cap (`PROMPT_INPUT_BUDGETS`).
+  const promptBudget = promptInputBudget(input.feature, input.promptVersion)
   if (estimatedIn > promptBudget) {
     throw new AiBudgetError(
       `This request is over the ${input.feature} budget (about ${estimatedIn} of ${promptBudget} tokens).`
@@ -437,6 +460,24 @@ async function withInflight<T>(
   }
 }
 
+/**
+ * What a direct OpenAI key is asked for (the adapter knows which effort each model takes): the
+ * lowest effort for the story-memory features and prompts that ask for it (P2a-D15), and for a
+ * request whose own `reasoning` came out `off`; `low` for one whose own `reasoning` came out `low`
+ * (P3-D11). A request without its own `reasoning` asks exactly what it did before.
+ */
+function effortOf(
+  input: Pick<AiRequestInput, 'feature' | 'promptVersion' | 'reasoning'>,
+  reasoning: ReasoningMode
+): { lowestEffort?: true; lowEffort?: true } {
+  if (LOWEST_EFFORT_FEATURES.has(input.feature) || LOWEST_EFFORT_PROMPTS.has(input.promptVersion)) {
+    return { lowestEffort: true }
+  }
+  if (input.reasoning === undefined) return {}
+  if (reasoning === 'off') return { lowestEffort: true }
+  return reasoning === 'low' ? { lowEffort: true } : {}
+}
+
 /** The provider request both paths send; `signal` only when the caller registered an id, so a fake sees the exact shape. */
 function completionRequest(
   input: AiRequestInput,
@@ -451,9 +492,7 @@ function completionRequest(
     json: input.json,
     ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
     ...(prepared.reasoning === 'default' ? {} : { reasoning: prepared.reasoning }),
-    ...(LOWEST_EFFORT_FEATURES.has(input.feature) || LOWEST_EFFORT_PROMPTS.has(input.promptVersion)
-      ? { lowestEffort: true }
-      : {}),
+    ...effortOf(input, prepared.reasoning),
     ...(signal === undefined ? {} : { signal })
   }
 }
@@ -596,7 +635,10 @@ export function runAiStream(
 
 /** The stored cache key: the feature, prompt version, model, context hash, and the messages themselves. */
 export function cacheKey(
-  input: Pick<AiRequestInput, 'feature' | 'promptVersion' | 'contextHash' | 'messages' | 'json'>,
+  input: Pick<
+    AiRequestInput,
+    'feature' | 'promptVersion' | 'contextHash' | 'messages' | 'json' | 'reasoning'
+  >,
   model: string
 ): string {
   const messages = sha256(JSON.stringify(input.messages))
@@ -607,7 +649,9 @@ export function cacheKey(
       model,
       input.contextHash,
       messages,
-      input.json ? 'json' : 'text'
+      input.json ? 'json' : 'text',
+      // F-16.25: a request's own reasoning is part of what shaped the answer (none: as before).
+      ...(input.reasoning === undefined ? [] : [`reasoning:${input.reasoning}`])
     ].join('|')
   )
 }

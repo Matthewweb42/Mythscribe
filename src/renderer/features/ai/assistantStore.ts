@@ -375,7 +375,9 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   directions: null,
   action: null,
   agent: null,
-  edit: null
+  edit: null,
+  card: null,
+  scribe: null
 })
 
 /** Records one lookup of an agent turn on its way, under the request it belongs to. */

@@ -77,6 +77,14 @@ export function lowestReasoningEffort(model: string): 'minimal' | 'none' | 'low'
   return gpt5[1] === undefined ? 'minimal' : 'none'
 }
 
+/**
+ * F-16.25 (P3-D11): `low` for a direct OpenAI model that takes a `reasoning_effort` (the gpt-5
+ * family and the o-series), or null for one that takes none.
+ */
+export function lowReasoningEffort(model: string): 'low' | null {
+  return lowestReasoningEffort(model) === null ? null : 'low'
+}
+
 /** OpenRouter's optional attribution headers: the app's site and name on its dashboard. */
 const OPENROUTER_HEADERS = { 'HTTP-Referer': 'https://mythscribe.app', 'X-Title': 'MythScribe' }
 
@@ -171,10 +179,15 @@ export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions 
         ? reasoningParam(request.reasoning)
         : undefined
     // F-16.17: a story-memory request on a direct OpenAI key asks for the model's lowest effort.
-    const effort =
-      !compatible && options.openRouter !== true && request.lowestEffort === true
+    // F-16.25: a Ms Scribe edit turn on a direct OpenAI key asks for `low` (P3-D11).
+    const direct = !compatible && options.openRouter !== true
+    const effort = !direct
+      ? null
+      : request.lowestEffort === true
         ? lowestReasoningEffort(base.model)
-        : null
+        : request.lowEffort === true
+          ? lowReasoningEffort(base.model)
+          : null
     return {
       ...base,
       ...(effort === null ? {} : { reasoning_effort: effort }),

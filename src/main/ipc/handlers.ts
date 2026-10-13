@@ -515,6 +515,8 @@ import {
   updateRecord,
   withTopicRelabels
 } from '../memory/recordStore'
+import { searchMisses } from '../scribe/searchMissStore'
+import { addSheetLine, removeSheetLine } from '../scribe/sheetLines'
 import { getSceneDetails, setSceneDetails } from '../memory/sceneDetailStore'
 
 /** The parts of a BrowserWindow the handlers need; structural so tests can pass a fake. */
@@ -1507,11 +1509,7 @@ export function registerHandlers({
    * of P2b slice 5): a Pinned "Born: 1792" line is a birth year, so when the record's Born lines
    * moved, its sheet's Age and the Timeline are read again (`memory:changed` naming it).
    */
-  const saveRecordPageWith = (
-    db: TreeDb,
-    recordId: string,
-    write: (db: TreeDb) => StoryRecord
-  ): StoryRecord => {
+  const saveRecordPageWith = <T>(db: TreeDb, recordId: string, write: (db: TreeDb) => T): T => {
     const v2 = memory() === 'v2'
     const before = v2 ? pinnedBorn(db, recordId) : []
     const saved = write(db)
@@ -4891,6 +4889,25 @@ export function registerHandlers({
     return result
   })
 
+  // F-16.26 (decision 3 as the author changed it): the lines Ms Scribe puts on a sheet when the
+  // author asks, and the chat's Undo. The page's sheet editor reads the record again on
+  // `record:changed`; the line is indexed at once (`sheetLines.ts`).
+  register('record:addLine', (input) => {
+    const db = manager.require().connection.orm
+    const added = saveRecordPageWith(db, input.id, (each) => addSheetLine(each, input, new Date()))
+    emit(windows(), 'record:changed', { recordIds: [input.id], roster: false })
+    return added
+  })
+
+  register('record:removeLine', (input) => {
+    const db = manager.require().connection.orm
+    const removed = saveRecordPageWith(db, input.id, (each) =>
+      removeSheetLine(each, input, new Date())
+    )
+    emit(windows(), 'record:changed', { recordIds: [input.id], roster: false })
+    return removed
+  })
+
   register('record:gate', ({ name, exceptId }) =>
     gateName(manager.require().connection.orm, name, exceptId)
   )
@@ -5215,6 +5232,11 @@ export function registerHandlers({
   register('memory:threads', ({ asOf }) => threadsMemory(manager.require().connection.orm, asOf))
   register('memory:timeline', ({ recordId }) =>
     timelineMemory(manager.require().connection.orm, recordId)
+  )
+
+  // F-16.25 (P3-D15): Ms Scribe's search misses, for Settings and F-16.35.
+  register('scribe:searchMisses', ({ limit }) =>
+    searchMisses(manager.require().connection.orm, limit)
   )
 
   register('memory:knewBefore', ({ secretId, recordId, knew }) => {
