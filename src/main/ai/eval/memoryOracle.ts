@@ -20,6 +20,7 @@ import {
 } from '@shared/memory/topics'
 import type { CompletionRequest } from '../providers/types'
 import { fakeChatServer, type ChatServer } from './fakeChatServer'
+import { liveProviderError } from './liveProvider'
 import type { AiRequestDeps } from '../request'
 import { activeDraftId } from '../../draft/draftStore'
 import { invariantIndexed } from '../../memory/nameIndexer'
@@ -568,9 +569,15 @@ export function oracleChatServer(truth?: OracleTruth): ChatServer {
 /** The order a replay reads the book in. */
 export type ReadOrder = 'book' | 'reverse'
 
+/** The outcome a live run records for the scene a provider error stopped it on. */
+export const PROVIDER_ERROR = 'error: '
+
 /**
  * Reads every readable scene of the book in `order` (and the never-read ones, which the pipeline
- * refuses; the inactive draft's h10 is h09's node: read once).
+ * refuses; the inactive draft's h10 is h09's node: read once). A live run passes
+ * `providerErrors: 'stop'`: a provider error (a 429, a 402, a 5xx) is recorded as that scene's
+ * outcome (`error: <code>: <copy>`) and reading stops, so the run still reports what it read and
+ * what it cost; the replays let it throw (no provider error is expected offline).
  */
 export async function readBook(
   book: TestBookProject,
@@ -579,6 +586,7 @@ export async function readBook(
     order?: ReadOrder
     observe?: (event: ReadingItemEvent, sceneId: string) => void
     stopAt?: () => boolean
+    providerErrors?: 'throw' | 'stop'
   } = {}
 ): Promise<Map<string, string>> {
   const outcomes = new Map<string, string>()
@@ -588,21 +596,39 @@ export async function readBook(
     if (options.stopAt?.() === true) break
     const nodeId = book.scenes.get(scene.id) ?? ''
     const observe = options.observe
-    const outcome = await runReading(
-      book.db,
-      { ai },
-      {
-        nodeId,
-        caretPara: null,
-        requestId: `eval-${scene.id}`,
-        ...(observe === undefined
-          ? {}
-          : { observe: (event: ReadingItemEvent) => observe(event, scene.id) })
-      }
-    )
-    outcomes.set(scene.id, outcome.read ? 'read' : outcome.reason)
+    try {
+      const outcome = await runReading(
+        book.db,
+        { ai },
+        {
+          nodeId,
+          caretPara: null,
+          requestId: `eval-${scene.id}`,
+          ...(observe === undefined
+            ? {}
+            : { observe: (event: ReadingItemEvent) => observe(event, scene.id) })
+        }
+      )
+      outcomes.set(scene.id, outcome.read ? 'read' : outcome.reason)
+    } catch (err) {
+      const said = options.providerErrors === 'stop' ? liveProviderError(err) : null
+      if (said === null) throw err
+      outcomes.set(scene.id, `${PROVIDER_ERROR}${said}`)
+      break
+    }
   }
   return outcomes
+}
+
+/**
+ * The provider error that stopped a live reading, as the report says it ("h07: RATE_LIMIT: …
+ * after 6 scenes read"), or null when none did.
+ */
+export function readingStop(outcomes: ReadonlyMap<string, string>): string | null {
+  const stop = [...outcomes].find(([, outcome]) => outcome.startsWith(PROVIDER_ERROR))
+  if (stop === undefined) return null
+  const read = [...outcomes.values()].filter((outcome) => outcome === 'read').length
+  return `${stop[0]}: ${stop[1].slice(PROVIDER_ERROR.length)} after ${read} scenes read`
 }
 
 export const liveClaims = (book: TestBookProject): Claim[] =>

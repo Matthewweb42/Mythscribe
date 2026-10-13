@@ -944,7 +944,7 @@ function scoreVerify(
  * it.
  */
 export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> {
-  const run = liveRequestDeps(live.provider)
+  const run = liveRequestDeps(live)
   const results: LiveResult[] = []
   for (const c of EVAL_CASES) {
     const entry = PROMPT_CATALOGUE[c.version]
@@ -956,7 +956,15 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
       maxTokens: c.maxTokens,
       json: entry.output === 'json',
       ...(c.temperature === undefined ? {} : { temperature: c.temperature }),
-      contextHash: sha256(JSON.stringify(c.messages)),
+      // Everything the request carries, so two cases apart only in temperature or cap never
+      // share the run's cache: each case reaches the provider once.
+      contextHash: sha256(
+        JSON.stringify({
+          messages: c.messages,
+          temperature: c.temperature ?? null,
+          maxTokens: c.maxTokens
+        })
+      ),
       promptVersion: c.version
     })
     // The cost OpenRouter reported when it did, else the price table's (the request path's).
@@ -1235,8 +1243,8 @@ describe('the live prompt eval, end to end against a fake OpenRouter (F-16.22; n
     const live = liveProviderFromEnv({ OPENROUTER_API_KEY: 'sk-or-fake' }, { fetch: server.fetch })
     const results = await runLivePrompts(live)
     expect(results).toHaveLength(EVAL_CASES.length)
-    // Identical cases answer from the run's cache; every other one reached OpenRouter once.
-    expect(server.calls.length).toBeGreaterThan(EVAL_CASES.length / 2)
+    // Every case reached OpenRouter once: none was answered from the run's cache.
+    expect(server.calls).toHaveLength(EVAL_CASES.length)
     for (const call of server.calls) {
       expect(call.url).toBe(`${OPENROUTER_BASE_URL}/chat/completions`)
       expect(call.headers.get('authorization')).toBe('Bearer sk-or-fake')
@@ -1248,7 +1256,9 @@ describe('the live prompt eval, end to end against a fake OpenRouter (F-16.22; n
     )
     expect(memory.length).toBeGreaterThan(0)
     for (const call of memory) expect(call.body.reasoning).toEqual({ enabled: false })
-    expect(results.every((result) => result.costUsd === 0.0001 || result.costUsd === 0)).toBe(true)
+    expect(
+      results.filter((result) => result.costUsd !== 0.0001).map((result) => result.name)
+    ).toEqual([])
   }, 120_000)
 })
 

@@ -50,6 +50,7 @@ import {
   oracleVerify,
   overlaps,
   readBook,
+  readingStop,
   requestScene,
   sceneOf,
   storedFor,
@@ -208,8 +209,21 @@ export interface KnowsScore {
   knows: { labels: number; found: number; missed: string[] }
   /** Labelled suspects and believes-otherwise lines found live and partial. */
   partial: { labels: number; found: number; missed: string[] }
-  /** Stored counted lines whose learner, secret and how class a label in that scene has. */
-  attribution: { counted: number; right: number; wrong: string[] }
+  /**
+   * Stored counted and partial lines (the grid's cells) whose learner, secret and how class a
+   * label in that scene has, and whose source ("told by X"), when the line names one, that label
+   * names too. Each wrong line is listed under what made it wrong.
+   */
+  attribution: {
+    lines: number
+    right: number
+    /** Counted lines no label has (learner, secret, how class). */
+    wrong: string[]
+    /** Partial lines (suspects, believes otherwise) no label has: still cells in the grid. */
+    wrongPartial: string[]
+    /** Lines a label has, but with a source no label names (an invented "told by"). */
+    wrongFrom: string[]
+  }
   /** Of the labels found on their sentence: the how, and (where labelled) the source. */
   how: { matched: number; right: number }
   from: { matched: number; right: number }
@@ -225,7 +239,7 @@ export interface KnowsScore {
     /** Topic records no label stands for, listed for the author to read. */
     extra: string[]
   }
-  /** Counted knows lines a negative forbids (a dream, town talk, Mr. Harrow). */
+  /** Counted or partial knows lines a negative forbids (a dream, town talk, Mr. Harrow). */
   negatives: string[]
   /** Reveals or lines from scenes never read (the Idea scene, the cut one, the inactive draft). */
   neverRead: string[]
@@ -238,10 +252,19 @@ export interface KnowsScore {
 /** Scores one replayed or live-read book against the labels. */
 export function scoreKnows(book: TestBookProject): KnowsScore {
   const topics = topicMap(book)
+  const labels = labelsOf(book)
   const stored = storedLines(book, topics)
   const counted = stored.filter((each) => each.line === 'counts')
+  // The grid's cells: counted and partial lines (rumour, dream and the like sit apart, uncounted).
+  const cells = stored.filter((each) => each.line === 'counts' || each.line === 'partial')
   const describe = (label: KnowsLabel): string =>
     `${label.scene} ${label.learner} ${label.how} ${label.secret}`
+  const said = (each: StoredLine): string =>
+    `${each.scene} ${each.learner ?? '?'} ${each.claim.how ?? '?'} ${each.secret ?? '?'}${
+      each.claim.fromId === null
+        ? ''
+        : ` from ${labels.get(each.claim.fromId) ?? each.claim.fromId}`
+    } ← “${each.claim.quote}”`
 
   const holding = TEST_BOOK_LABELS.knows.filter((label) => !PARTIAL.includes(label.how))
   const missedKnows = holding.filter((label) => !counted.some((each) => onLabel(each, label)))
@@ -250,21 +273,30 @@ export function scoreKnows(book: TestBookProject): KnowsScore {
     (label) => !stored.some((each) => each.line === 'partial' && onLabel(each, label))
   )
 
-  const wrong = counted.filter(
-    (each) =>
-      !TEST_BOOK_LABELS.knows.some(
-        (label) =>
-          label.scene === each.scene &&
-          label.learner === each.learner &&
-          label.secret === each.secret &&
-          howClass(label.how) === howClass(each.claim.how)
-      )
-  )
+  // A line's labels: the ones in its scene with its learner, secret and how class.
+  const labelsFor = (each: StoredLine): KnowsLabel[] =>
+    TEST_BOOK_LABELS.knows.filter(
+      (label) =>
+        label.scene === each.scene &&
+        label.learner === each.learner &&
+        label.secret === each.secret &&
+        howClass(label.how) === howClass(each.claim.how)
+    )
+  const unlabelled = cells.filter((each) => labelsFor(each).length === 0)
+  // A source the line names that none of its labels names (h13's regiment "told by" someone).
+  const wrongFrom = cells.filter((each) => {
+    const fromId = each.claim.fromId
+    const own = labelsFor(each)
+    return (
+      fromId !== null &&
+      own.length > 0 &&
+      !own.some((label) => label.from !== null && labels.get(fromId) === label.from)
+    )
+  })
   const matched = TEST_BOOK_LABELS.knows.flatMap((label) => {
     const hit = stored.find((each) => onLabel(each, label))
     return hit === undefined ? [] : [{ label, hit }]
   })
-  const labels = labelsOf(book)
   const withFrom = matched.filter(({ label }) => label.from !== null)
 
   const steps = liveSlot(book, 'thread')
@@ -320,22 +352,20 @@ export function scoreKnows(book: TestBookProject): KnowsScore {
       }`
     })
 
-  const negatives = TEST_BOOK_LABELS.negatives
-    .filter((negative) => negative.kind === 'knows')
-    .flatMap((negative) =>
-      counted
-        .filter(
-          (each) =>
+  // Each cell a knows negative forbids, once (Mr. Harrow's h14 line falls under two).
+  const negatives = cells
+    .filter(
+      (each) =>
+        !TEST_BOOK_LABELS.knows.some((label) => onLabel(each, label)) &&
+        TEST_BOOK_LABELS.negatives.some(
+          (negative) =>
+            negative.kind === 'knows' &&
             each.scene === negative.scene &&
             (negative.record === undefined || each.learner === negative.record) &&
-            (negative.secret === undefined || each.secret === negative.secret) &&
-            !TEST_BOOK_LABELS.knows.some((label) => onLabel(each, label))
-        )
-        .map(
-          (each) =>
-            `${each.scene} ${each.learner ?? '?'} ${each.claim.how ?? '?'} ${each.secret ?? '?'} ← “${each.claim.quote}”`
+            (negative.secret === undefined || each.secret === negative.secret)
         )
     )
+    .map(said)
 
   const idea = book.scenes.get('h11')
   const cut = book.scenes.get('h12')
@@ -376,12 +406,11 @@ export function scoreKnows(book: TestBookProject): KnowsScore {
       missed: missedPartial.map(describe)
     },
     attribution: {
-      counted: counted.length,
-      right: counted.length - wrong.length,
-      wrong: wrong.map(
-        (each) =>
-          `${each.scene} ${each.learner ?? '?'} ${each.claim.how ?? '?'} ${each.secret ?? '?'} ← “${each.claim.quote}”`
-      )
+      lines: cells.length,
+      right: cells.length - unlabelled.length - wrongFrom.length,
+      wrong: unlabelled.filter((each) => each.line === 'counts').map(said),
+      wrongPartial: unlabelled.filter((each) => each.line === 'partial').map(said),
+      wrongFrom: wrongFrom.map(said)
     },
     how: {
       matched: matched.length,
@@ -567,7 +596,8 @@ for (const readOrder of ['book', 'reverse'] as const) {
     it('stores every labelled knows line as the labels give it, and nothing else counts', () => {
       expect(score.knows.missed).toEqual([])
       expect(score.partial.missed).toEqual([])
-      expect(score.attribution.wrong).toEqual([])
+      expect(score.attribution).toMatchObject({ wrong: [], wrongPartial: [], wrongFrom: [] })
+      expect(score.attribution.right).toBe(score.attribution.lines)
       expect(score.how.right).toBe(score.how.matched)
       expect(score.how.matched).toBe(TEST_BOOK_LABELS.knows.length)
       expect(score.from.right).toBe(score.from.matched)
@@ -682,6 +712,67 @@ for (const readOrder of ['book', 'reverse'] as const) {
       }
     })
 
+    it.runIf(readOrder === 'book')(
+      'scores a partial line on the wrong character and an invented source as wrong',
+      () => {
+        const book = run?.book ?? fail()
+        const sqlite = book.session.connection.sqlite
+        const lineOf = (learner: string, scene: string): Claim => {
+          const found = liveSlot(book, 'knows').find(
+            (claim) =>
+              claim.recordId === book.records.get(learner) && sceneOf(book, claim.nodeId) === scene
+          )
+          return found ?? fail()
+        }
+        // Johanna's suspicion in h14 moved onto Mr. Harrow (a stored "believes otherwise"-style
+        // cell the labels forbid), and the regiment "told by" Mrs. Pocock in h13 (no source given).
+        const suspects = lineOf('johanna', 'h14')
+        const regiment = lineOf('regiment', 'h13')
+        sqlite.exec('SAVEPOINT knows_score_probe')
+        try {
+          sqlite
+            .prepare('UPDATE claim SET record_id = ? WHERE id = ?')
+            .run(book.records.get('harrow-mr'), suspects.id)
+          sqlite
+            .prepare('UPDATE claim SET from_id = ? WHERE id = ?')
+            .run(book.records.get('pocock'), regiment.id)
+          const probe = scoreKnows(book)
+          expect(probe.attribution.wrong).toEqual([])
+          expect(probe.attribution.wrongPartial).toEqual([
+            expect.stringMatching(/^h14 harrow-mr suspects secret-debts ← /)
+          ])
+          expect(probe.attribution.wrongFrom).toEqual([
+            expect.stringMatching(/^h13 regiment told secret-engagement from pocock ← /)
+          ])
+          expect(probe.attribution.right).toBe(probe.attribution.lines - 2)
+          expect(probe.negatives).toEqual([
+            expect.stringMatching(/^h14 harrow-mr suspects secret-debts/)
+          ])
+          expect(probe.partial.missed).toEqual(['h14 johanna suspects secret-debts'])
+          const report = knowsReport(
+            [
+              {
+                order: 'book',
+                score: probe,
+                costUsd: 0,
+                requests: 0,
+                stopped: false,
+                error: null,
+                costUnknown: null
+              }
+            ],
+            { models: OPENROUTER_DEFAULT_MODELS, route: 'OpenRouter (test)', stopUsd: 0.5 }
+          )
+          expect(report.failures).toContain('book order: 1 negatives as grid cells')
+          expect(report.markdown).toContain('Partial lines no label has')
+          expect(report.markdown).toContain('Lines with a source no label names')
+        } finally {
+          sqlite.exec('ROLLBACK TO knows_score_probe; RELEASE knows_score_probe')
+        }
+        expect(scoreKnows(book).attribution).toMatchObject({ wrongPartial: [], wrongFrom: [] })
+      }
+    )
+
     it('keeps the invariants, reads nothing it may not, and never states an absence', () => {
       const book = run?.book ?? fail()
       expect(invariants(book)).toEqual([])
@@ -700,15 +791,39 @@ for (const readOrder of ['book', 'reverse'] as const) {
   })
 }
 
+/** h06 ¶2, inside Lise's dream. */
+const DREAM_QUOTE = 'Lottie was not there'
+/** h07 ¶3, Lise passing on the town's talk. */
+const TOWN_TALK_QUOTE = 'Mrs. Pocock had it from the curate’s wife'
+
 /**
  * What the text shows for each adversarial plant that no label lists (the honest checker's answer
  * beside the labels): Lottie's letter says Bel knew all along, though Bel is not in h08; the town's
  * talk of the Captain's cards is his own secret, but only as rumour, and he is at the table; the
- * rumour in h07 and the dream in h06 reveal something only as rumour and dream; the new label
- * for the engagement in h08 reveals it.
+ * rumour in h07 and the dream in h06 reveal something only as rumour and dream, and what Lise is
+ * passed off as told of the listed engagement there she has only in a dream and as town talk
+ * (plan P2b §3.2); the new label for the engagement in h08 reveals it.
  */
 const PLANT_TRUTH: OracleTruth = {
   knows: [
+    {
+      learner: 'liesel',
+      secret: 'secret-engagement',
+      quote: DREAM_QUOTE,
+      how: 'told',
+      from: null,
+      voice: 'narration',
+      mode: 'dream'
+    },
+    {
+      learner: 'liesel',
+      secret: 'secret-engagement',
+      quote: TOWN_TALK_QUOTE,
+      how: 'told',
+      from: null,
+      voice: 'rumour',
+      mode: 'now'
+    },
     {
       learner: 'bel',
       secret: 'secret-engagement',
@@ -771,7 +886,8 @@ const DISMISSED_REVEAL = 'Lottie was eighteen now, and married'
 
 /**
  * The adversarial reader: the oracle's answer plus, where their paragraphs are sent, a learner not
- * on the page, a rumour and a dream passed off as told and saw, a rumoured line kept apart, a
+ * on the page, a rumour and a dream passed off as told of the listed engagement (and as new
+ * secrets, told and saw), a rumoured line kept apart, a
  * group its sentence never names, a fourth new secret on one page, a duplicate of a listed secret
  * under a new label, a secret on a dismissed reveal, a step on a secret's id, and a line saying
  * Mr. Harrow does not know.
@@ -821,6 +937,30 @@ function plantedRead(request: CompletionRequest): FakeAnswer {
       3,
       'We are engaged, and have been since before Christmas'
     )
+  }
+  if (scene === 'h07' && has(3, TOWN_TALK_QUOTE)) {
+    // The town's talk passed off as Lise being told of the listed engagement (plan P2b §3.2).
+    line({
+      p: 3,
+      r: id('liesel'),
+      s: 'knows',
+      o: topic('secret-engagement'),
+      how: 'told',
+      v: 'told',
+      q: TOWN_TALK_QUOTE
+    })
+  }
+  if (scene === 'h06' && has(2, DREAM_QUOTE)) {
+    // The dream passed off as Lise being told of the listed engagement (plan P2b §3.2).
+    line({
+      p: 2,
+      r: id('liesel'),
+      s: 'knows',
+      o: topic('secret-engagement'),
+      how: 'told',
+      v: 'told',
+      q: DREAM_QUOTE
+    })
   }
   if (scene === 'h07' && has(3, 'out of spite')) {
     const q =
@@ -975,6 +1115,39 @@ describe('who knows what over the test book: the adversarial replay (F-16.22)', 
     expect(reveals.some((text) => text.includes('the horses'))).toBe(false)
   })
 
+  it('stores the dream and the town talk passed off as told with their mode and voice, uncounted', () => {
+    const book = run?.book ?? fail()
+    const liesel = book.records.get('liesel')
+    const engagement = recordFor(book, 'secret-engagement')[0]
+    const planted = liveSlot(book, 'knows').filter(
+      (claim) =>
+        claim.recordId === liesel &&
+        claim.objectId === engagement &&
+        ['h06', 'h07'].includes(sceneOf(book, claim.nodeId))
+    )
+    expect(
+      planted
+        .map((claim) => [sceneOf(book, claim.nodeId), claim.voice, claim.mode, knowsLine(claim)])
+        .sort()
+    ).toEqual([
+      ['h06', 'narration', 'dream', 'other'],
+      ['h07', 'rumour', 'now', 'other']
+    ])
+    // Lise's cell is still her own overhearing in h05; the dream and the talk sit apart.
+    const view = storedKnows(book, 'h14').secrets.find((each) => each.recordId === engagement)
+    expect(
+      view?.cells.filter((cell) => cell.knowerId === liesel).map((cell) => cell.nodeId)
+    ).toEqual([book.scenes.get('h05')])
+    expect(
+      view?.others
+        .filter((cell) => cell.knowerId === liesel)
+        .map((cell) => sceneOf(book, cell.nodeId ?? ''))
+        .sort()
+    ).toEqual(['h06', 'h07'])
+    // Neither is a negative: nothing in h06 or h07 counts.
+    expect(score.negatives).toEqual([])
+  })
+
   it('merges the duplicate under its new label, and keeps the rumoured line apart, uncounted', () => {
     const book = run?.book ?? fail()
     const engagement = recordFor(book, 'secret-engagement')
@@ -997,7 +1170,7 @@ describe('who knows what over the test book: the adversarial replay (F-16.22)', 
     const book = run?.book ?? fail()
     expect(score.knows.missed).toEqual([])
     expect(score.partial.missed).toEqual([])
-    expect(score.attribution.wrong).toEqual([])
+    expect(score.attribution).toMatchObject({ wrong: [], wrongPartial: [], wrongFrom: [] })
     expect(score.negatives).toEqual([])
     expect(score.steps.missed).toEqual([])
     expect(score.status.wrong).toEqual([])
@@ -1017,6 +1190,10 @@ export interface KnowsPass {
   requests: number
   /** The 50¢ stop came before the book's last scene. */
   stopped: boolean
+  /** The provider error that stopped the pass (where, and after how many scenes), or null. */
+  error: string | null
+  /** Why the 50¢ stop could not hold (`LiveRequestDeps.costUnknown`), or null. */
+  costUnknown: string | null
 }
 
 export interface KnowsLiveReport {
@@ -1029,7 +1206,9 @@ export interface KnowsLiveReport {
 /**
  * The live knows run (plan P2b §3.3): two passes on fresh copies of the test book, in book order
  * and then in reverse order (late creation and merges), with the real `reader.v2` and `verify.v2`
- * through `live`; reading stops once the reported cost passes `stopUsd` (both passes together).
+ * through `live`; reading stops once the reported cost passes `stopUsd` (both passes together),
+ * once a cost cannot be known (nothing more is read), or, for that pass, at a provider error (a
+ * 429, a 402, a 5xx). The report is written either way, with what was read and what it cost.
  */
 export async function runLiveKnows(
   live: LiveProvider,
@@ -1039,23 +1218,30 @@ export async function runLiveKnows(
   const scenes = TEST_BOOK.filter((scene) => scene.source !== 'inactiveDraft').length
   const passes: KnowsPass[] = []
   let spentBefore = 0
+  let unknownBefore: string | null = null
   for (const readOrder of ['book', 'reverse'] as const) {
-    const run = liveRequestDeps(live.provider)
+    const run = liveRequestDeps(live)
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `mythscribe-knows-live-${readOrder}-`))
     const book = buildTestBookProject(tmp, options.now ?? new Date())
     try {
+      const over = (): boolean => spentBefore + run.spent() > stopUsd
       const outcomes = await readBook(book, run.deps, {
         order: readOrder,
-        stopAt: () => spentBefore + run.spent() > stopUsd
+        stopAt: () => over() || unknownBefore !== null || run.costUnknown() !== null,
+        providerErrors: 'stop'
       })
+      const costUnknown: string | null = unknownBefore ?? run.costUnknown()
       passes.push({
         order: readOrder,
         score: scoreKnows(book),
         costUsd: run.spent(),
         requests: run.ledger.length,
-        stopped: outcomes.size < scenes
+        stopped: outcomes.size < scenes && over(),
+        error: readingStop(outcomes),
+        costUnknown
       })
       spentBefore += run.spent()
+      unknownBefore = costUnknown
     } finally {
       book.session.close()
       fs.rmSync(tmp, { recursive: true, force: true })
@@ -1091,7 +1277,7 @@ export function knowsReport(
     bar(
       'attribution precision',
       score.attribution.right,
-      score.attribution.counted,
+      score.attribution.lines,
       bars.attributionPrecision
     )
     bar('how accuracy', score.how.right, score.how.matched, bars.howAccuracy)
@@ -1102,7 +1288,7 @@ export function knowsReport(
       )
     }
     if (score.negatives.length > 0) {
-      failures.push(`${pass.order} order: ${score.negatives.length} counted negatives`)
+      failures.push(`${pass.order} order: ${score.negatives.length} negatives as grid cells`)
     }
     if (score.neverRead.length > 0) {
       failures.push(`${pass.order} order: ${score.neverRead.length} from never-read scenes`)
@@ -1110,6 +1296,10 @@ export function knowsReport(
     if (pass.stopped) {
       failures.push(`${pass.order} order: stopped at the ${run.stopUsd} USD cap before the end`)
     }
+    if (pass.error !== null) {
+      failures.push(`${pass.order} order: stopped by a provider error (${pass.error})`)
+    }
+    if (pass.costUnknown !== null) failures.push(`${pass.order} order: ${pass.costUnknown}`)
   }
   const cost = passes.reduce((sum, pass) => sum + pass.costUsd, 0)
   const requests = passes.reduce((sum, pass) => sum + pass.requests, 0)
@@ -1139,8 +1329,8 @@ export function knowsReport(
       'no bar'
     ),
     row(
-      'Attribution precision (counted lines a label has)',
-      (pass) => percent(pass.score.attribution.right, pass.score.attribution.counted),
+      'Attribution precision (counted and partial lines a label has, with its source)',
+      (pass) => percent(pass.score.attribution.right, pass.score.attribution.lines),
       `≥ ${bars.attributionPrecision * 100} %`
     ),
     row(
@@ -1170,7 +1360,11 @@ export function knowsReport(
       `≤ ${bars.duplicateRate}`
     ),
     row('Extra topics (no label)', (pass) => String(pass.score.topics.extra.length), 'read each'),
-    row('Counted negatives', (pass) => String(pass.score.negatives.length), '0'),
+    row(
+      'Negatives as grid cells (counted or partial)',
+      (pass) => String(pass.score.negatives.length),
+      '0'
+    ),
     row('From never-read scenes', (pass) => String(pass.score.neverRead.length), '0'),
     row(
       'Cut off at the cap',
@@ -1178,6 +1372,7 @@ export function knowsReport(
       'no bar'
     ),
     row('Cost (USD)', (pass) => pass.costUsd.toFixed(4), `stops at ${run.stopUsd}`),
+    row('Stopped by a provider error', (pass) => pass.error ?? 'no', 'no'),
     '',
     failures.length === 0 ? '**Passed.**' : `**Failed:** ${failures.join('; ')}.`,
     ''
@@ -1189,9 +1384,16 @@ export function knowsReport(
       '',
       ...listed('Knows lines missed', score.knows.missed),
       ...listed('Partial lines missed', score.partial.missed),
+      ...(pass.error === null ? [] : [`**Stopped by a provider error:** ${pass.error}.`, '']),
+      ...(pass.costUnknown === null ? [] : [`**Cost unknown:** ${pass.costUnknown}.`, '']),
       ...listed('Counted lines no label has (attribution)', score.attribution.wrong),
+      ...listed(
+        'Partial lines no label has (attribution; still cells in the grid)',
+        score.attribution.wrongPartial
+      ),
+      ...listed('Lines with a source no label names (attribution)', score.attribution.wrongFrom),
       ...listed('Extra topics (read each against its sentence)', score.topics.extra),
-      ...listed('Counted negatives', score.negatives),
+      ...listed('Negatives as grid cells (counted or partial)', score.negatives),
       ...listed('From never-read scenes', score.neverRead),
       ...listed('Thread steps missed', score.steps.missed),
       ...listed('Thread status not as labelled', score.status.wrong),
@@ -1268,6 +1470,59 @@ describe('the live knows run, end to end against a fake OpenRouter (F-16.22; not
     expect(report.failures.some((failure) => failure.includes('stopped at the 0.5 USD cap'))).toBe(
       true
     )
+  }, 120_000)
+})
+
+describe('the live knows run stops and still reports (F-16.22; nothing spent)', () => {
+  it('stops a pass at a provider error and reports what it read and what it cost', async () => {
+    const server = fakeChatServer((messages) =>
+      server.calls.length > 6
+        ? { text: 'Rate limit exceeded', status: 429 }
+        : {
+            text:
+              requestKind({ messages }) === 'verify'
+                ? oracleVerify({ messages })
+                : oracleRead({ messages })
+          }
+    )
+    const live = liveProviderFromEnv({ OPENROUTER_API_KEY: 'sk-or-fake' }, { fetch: server.fetch })
+    const report = await runLiveKnows(live, { now: NOW })
+    expect(report.passes.map((pass) => pass.error)).toEqual([
+      expect.stringMatching(/^\w+: RATE_LIMIT: .* after \d+ scenes read$/),
+      expect.stringMatching(/^h14: RATE_LIMIT: .* after 0 scenes read$/)
+    ])
+    expect(report.passes.map((pass) => pass.stopped)).toEqual([false, false])
+    // The six answered requests were paid for: the report counts them.
+    expect(report.passes.reduce((sum, pass) => sum + pass.costUsd, 0)).toBeCloseTo(0.0006, 6)
+    expect(report.failures).toContain(
+      `book order: stopped by a provider error (${report.passes[0]?.error ?? ''})`
+    )
+    expect(report.markdown).toContain(`**Stopped by a provider error:** ${report.passes[0]?.error}`)
+    expect(report.markdown).not.toContain('sk-or-fake')
+  }, 120_000)
+
+  it('stops when a cost cannot be known, and says why', async () => {
+    const server = fakeChatServer((messages) => ({
+      text:
+        requestKind({ messages }) === 'verify'
+          ? oracleVerify({ messages })
+          : oracleRead({ messages }),
+      costUsd: null
+    }))
+    const live = liveProviderFromEnv(
+      { OPENROUTER_API_KEY: 'sk-or-fake', MYTHSCRIBE_EVAL_FAST_MODEL: 'vendor/unlisted-model' },
+      { fetch: server.fetch }
+    )
+    const report = await runLiveKnows(live, { now: NOW })
+    // One scene is read before the stop can see it; the second pass reads nothing.
+    expect(report.passes[0]?.requests).toBeGreaterThan(0)
+    expect(report.passes[1]?.requests).toBe(0)
+    expect(report.passes.map((pass) => pass.costUnknown)).toEqual([
+      expect.stringMatching(/^cost unknown for vendor\/unlisted-model/),
+      expect.stringMatching(/^cost unknown for vendor\/unlisted-model/)
+    ])
+    expect(report.failures.some((failure) => failure.includes('cost unknown'))).toBe(true)
+    expect(report.markdown).toContain('**Cost unknown:**')
   }, 120_000)
 })
 

@@ -34,7 +34,13 @@ import {
 import { TEST_BOOK } from '../../memory/testBook/book'
 import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
 import { buildTestBookProject, type TestBookProject } from '../../memory/testBook/project'
-import { liveProviderFromEnv, liveRequestDeps, type LiveProvider } from './liveProvider'
+import { fakeChatServer } from './fakeChatServer'
+import {
+  liveProviderError,
+  liveProviderFromEnv,
+  liveRequestDeps,
+  type LiveProvider
+} from './liveProvider'
 import {
   invariants,
   liveClaims,
@@ -47,6 +53,7 @@ import {
   overlaps,
   proposal,
   readBook,
+  readingStop,
   sceneOf,
   sentLabels,
   slotOf,
@@ -330,15 +337,19 @@ export async function runLivePlanted(
   live: LiveProvider
 ): Promise<{ markdown: string; json: unknown; failures: string[] }> {
   const { models, openRouter } = live
-  const { deps: ai, ledger, spent } = liveRequestDeps(live.provider)
+  const { deps: ai, ledger, spent, costUnknown } = liveRequestDeps(live)
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-memory-live-'))
   const book = buildTestBookProject(tmp, NOW)
   try {
     const events: (ReadingItemEvent & { scene: string })[] = []
+    // A provider error (a 429, a 402, a 5xx) stops the run, which still reports what it read
+    // and what it cost; so does a cost the 50¢ stop cannot see.
     const outcomes = await readBook(book, ai, {
       observe: (event, scene) => events.push({ ...event, scene }),
-      stopAt: () => spent() > LIVE_STOP_USD
+      stopAt: () => spent() > LIVE_STOP_USD || costUnknown() !== null,
+      providerErrors: 'stop'
     })
+    let error = readingStop(outcomes)
 
     // The spot checks: up to 50 literal claims on the fast tier (batches of 10), up to 20
     // verified ones on the strong tier, one per call with three sentences either side. Each is
@@ -369,9 +380,20 @@ export async function runLivePlanted(
     let stopped = spent() > LIVE_STOP_USD
     const over = (): boolean => {
       stopped ||= spent() > LIVE_STOP_USD
-      return stopped
+      return stopped || error !== null || costUnknown() !== null
     }
-    if (!stopped) {
+    /** One spot check's answer, or null once a provider error stopped the run (recorded). */
+    const ask = async (input: Parameters<typeof runAiRequest>[1]): Promise<string | null> => {
+      try {
+        return (await runAiRequest(ai, input)).text
+      } catch (err) {
+        const said = liveProviderError(err)
+        if (said === null) throw err
+        error = `spot checks: ${said}`
+        return null
+      }
+    }
+    if (!over()) {
       const literal = claims
         .filter((claim) => claim.proof === 'literal')
         .flatMap((claim) => check(claim, 1) ?? [])
@@ -381,7 +403,7 @@ export async function runLivePlanted(
       for (const batch of batches) {
         if (over()) break
         const prompt = buildVerifyV2Prompt({ items: batch.map((entry) => entry.check) })
-        const result = await runAiRequest(ai, {
+        const text = await ask({
           feature: 'verify',
           tier: 'fast',
           messages: prompt.messages,
@@ -390,7 +412,8 @@ export async function runLivePlanted(
           contextHash: sha256(JSON.stringify(prompt.messages)),
           promptVersion: prompt.version
         })
-        const verdicts = parseVerifyAnswer(result.text)
+        if (text === null) break
+        const verdicts = parseVerifyAnswer(text)
         spot.fastChecked += batch.length
         spot.fastAgree += batch.filter((entry, i) => agreed(entry, verdicts.get(i + 1))).length
       }
@@ -401,7 +424,7 @@ export async function runLivePlanted(
       for (const entry of strong) {
         if (over()) break
         const prompt = buildVerifyV2Prompt({ items: [entry.check], strong: true })
-        const result = await runAiRequest(ai, {
+        const text = await ask({
           feature: 'verify',
           tier: 'strong',
           messages: prompt.messages,
@@ -410,8 +433,9 @@ export async function runLivePlanted(
           contextHash: sha256(JSON.stringify(prompt.messages)),
           promptVersion: prompt.version
         })
+        if (text === null) break
         spot.strongChecked += 1
-        if (agreed(entry, parseVerifyAnswer(result.text).get(1))) spot.strongAgree += 1
+        if (agreed(entry, parseVerifyAnswer(text).get(1))) spot.strongAgree += 1
       }
     }
 
@@ -419,6 +443,8 @@ export async function runLivePlanted(
       models,
       costUsd: spent(),
       stopped,
+      error,
+      costUnknown: costUnknown(),
       requests: ledger.length,
       openRouter,
       route: live.describe
@@ -447,6 +473,30 @@ describe('the live planted-error run, end to end against a fake OpenRouter (F-16
     expect(new Set(server.calls.map((call) => call.body.model))).toEqual(
       new Set([OPENROUTER_DEFAULT_MODELS.fast, OPENROUTER_DEFAULT_MODELS.strong])
     )
+  }, 120_000)
+
+  it('stops at a provider error and still reports what it read and what it cost', async () => {
+    const server = fakeChatServer((messages) =>
+      server.calls.length > 4
+        ? { text: 'Payment required', status: 402 }
+        : {
+            text:
+              requestKind({ messages }) === 'verify'
+                ? oracleVerify({ messages })
+                : oracleRead({ messages })
+          }
+    )
+    const live = liveProviderFromEnv({ OPENROUTER_API_KEY: 'sk-or-fake' }, { fetch: server.fetch })
+    const report = await runLivePlanted(live)
+    expect(report.failures).toContainEqual(
+      expect.stringMatching(
+        /^stopped by a provider error \(\w+: [A-Z_]+: .* after \d+ scenes read\)$/
+      )
+    )
+    expect(report.markdown).toContain('**Stopped by a provider error:**')
+    expect(report.markdown).toContain('reported cost: 0.0004 USD')
+    // Nothing more was asked after the error: no spot check.
+    expect(server.calls).toHaveLength(5)
   }, 120_000)
 })
 
@@ -477,6 +527,10 @@ function scoreLive(
     models: Record<Tier, string>
     costUsd: number
     stopped: boolean
+    /** The provider error that stopped the run (where, and after how many scenes), or null. */
+    error: string | null
+    /** Why the 50¢ stop could not hold (`LiveRequestDeps.costUnknown`), or null. */
+    costUnknown: string | null
     requests: number
     openRouter: boolean
     /** The route and the key's variable (`LiveProvider.describe`), never the key. */
@@ -599,6 +653,8 @@ function scoreLive(
   )
   if (strays.length > 0) failures.push(`${strays.length} claims from never-read scenes`)
   if (falseAlarms.length > 0) failures.push(`${falseAlarms.length} negatives stored live`)
+  if (run.error !== null) failures.push(`stopped by a provider error (${run.error})`)
+  if (run.costUnknown !== null) failures.push(run.costUnknown)
 
   const lines = [
     `# Story memory: the live planted-error run (${new Date().toISOString()})`,
@@ -606,6 +662,8 @@ function scoreLive(
     `Models: fast \`${run.models.fast}\`, strong \`${run.models.strong}\`, on ${run.route}. ` +
       `Scenes read: ${readCount}; requests: ${run.requests}; reported cost: ${run.costUsd.toFixed(4)} USD` +
       `${run.stopped ? ` (stopped at the ${LIVE_STOP_USD} USD cap)` : ''}.`,
+    ...(run.error === null ? [] : ['', `**Stopped by a provider error:** ${run.error}.`]),
+    ...(run.costUnknown === null ? [] : ['', `**Cost unknown:** ${run.costUnknown}.`]),
     '',
     '## Pass bars (decided by Claude, unconfirmed)',
     '',
@@ -653,6 +711,8 @@ function scoreLive(
       models: run.models,
       costUsd: run.costUsd,
       stopped: run.stopped,
+      error: run.error,
+      costUnknown: run.costUnknown,
       requests: run.requests,
       scenesRead: readCount,
       quotesFound: { found, proposed },

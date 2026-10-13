@@ -38,6 +38,13 @@ export interface OpenAiProviderOptions {
    * `max_completion_tokens` is not universal).
    */
   baseURL?: string
+  /**
+   * F-16.22 (the live evals): OpenAI itself, pinned to this URL. Only the destination is set, so
+   * requests keep OpenAI's own fields (`max_completion_tokens`, `reasoning_effort`), and the SDK's
+   * fallback to the shell's `OPENAI_BASE_URL` (which the e2e relies on in the app) cannot move
+   * them. Ignored when `baseURL` is set.
+   */
+  openAiURL?: string
   id?: AiProviderId
   label?: string
   /**
@@ -134,11 +141,12 @@ export function usageOf(
  * This is the only file that imports the `openai` package.
  */
 export function buildOpenAiProvider(key: string, options: OpenAiProviderOptions = {}): Provider {
+  const destination = options.baseURL ?? options.openAiURL
   const client = new OpenAI({
     apiKey: key,
     fetch: options.fetch,
     maxRetries: 0,
-    ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL }),
+    ...(destination === undefined ? {} : { baseURL: destination }),
     ...(options.openRouter ? { defaultHeaders: OPENROUTER_HEADERS } : {})
   })
   const resolveModel = options.resolveModel ?? ((tier: Tier): string => DEFAULT_MODELS[tier])

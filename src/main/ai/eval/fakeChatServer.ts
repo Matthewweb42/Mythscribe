@@ -5,7 +5,8 @@ import type { AiMessage } from '../providers/types'
  * A fake OpenAI-compatible chat server behind a `fetch` (F-16.22): the live paths' tests point
  * `liveProviderFromEnv` at it, so a live run is driven end to end from `OPENROUTER_API_KEY` alone
  * without a request leaving the machine or a cent being spent. It answers every chat completion
- * with `answer`, reports OpenRouter's `usage.cost`, and records each call (URL, headers, body).
+ * with `answer` (or the HTTP error status it names), reports OpenRouter's `usage.cost`, and records
+ * each call (URL, headers, body).
  * Test support only: nothing in the app imports it.
  */
 
@@ -21,8 +22,10 @@ export interface ChatServerReply {
   finishReason?: string
   /** Tokens in and out the server reports (defaults: 1,000 and 100). */
   usage?: { inputTokens: number; outputTokens: number }
-  /** OpenRouter's reported cost in USD (default 0.0001). */
-  costUsd?: number
+  /** OpenRouter's reported cost in USD (default 0.0001); null reports none. */
+  costUsd?: number | null
+  /** An HTTP error status (429, 402, 500…) answered instead of the completion. */
+  status?: number
 }
 
 export interface ChatServer {
@@ -50,6 +53,14 @@ export function fakeChatServer(
     const messages = Array.isArray(body.messages) ? body.messages.filter(isMessage) : []
     calls.push({ url, headers: new Headers(init?.headers), body, messages })
     const reply = answer(messages, body)
+    if (reply.status !== undefined) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: { message: reply.text, code: reply.status } }), {
+          status: reply.status,
+          headers: { 'content-type': 'application/json' }
+        })
+      )
+    }
     const usage = reply.usage ?? { inputTokens: 1_000, outputTokens: 100 }
     return Promise.resolve(
       new Response(
@@ -69,7 +80,7 @@ export function fakeChatServer(
             prompt_tokens: usage.inputTokens,
             completion_tokens: usage.outputTokens,
             total_tokens: usage.inputTokens + usage.outputTokens,
-            cost: reply.costUsd ?? 0.0001
+            ...(reply.costUsd === null ? {} : { cost: reply.costUsd ?? 0.0001 })
           }
         }),
         { status: 200, headers: { 'content-type': 'application/json' } }

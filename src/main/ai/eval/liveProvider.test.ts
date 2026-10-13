@@ -1,11 +1,15 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MODELS, OPENROUTER_BASE_URL, OPENROUTER_DEFAULT_MODELS } from '@shared/ai'
 import { resetInflight } from '../inflight'
 import { runAiRequest, sha256 } from '../request'
 import { fakeChatServer, type ChatCall } from './fakeChatServer'
+import { AiRateLimitError } from '../providers/types'
 import {
   LIVE_KEY_MISSING,
+  OPENAI_API_URL,
+  isLoopbackUrl,
   isOpenRouterUrl,
+  liveProviderError,
   liveProviderFromEnv,
   liveRequestDeps,
   liveSettingsFromEnv,
@@ -25,6 +29,10 @@ const OPENAI_KEY = 'sk-test-key'
 
 beforeEach(() => {
   resetInflight()
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
 })
 
 describe('liveSettingsFromEnv: every environment shape (F-16.22)', () => {
@@ -141,6 +149,15 @@ describe('liveSettingsFromEnv: every environment shape (F-16.22)', () => {
     expect(() => liveProviderFromEnv({ OPENROUTER_API_KEY: '' })).toThrow(LIVE_KEY_MISSING)
   })
 
+  it('tells this machine’s servers from others', () => {
+    expect(isLoopbackUrl('http://localhost:11434/v1')).toBe(true)
+    expect(isLoopbackUrl('http://127.0.0.1:1234/v1')).toBe(true)
+    expect(isLoopbackUrl('http://[::1]:8080/v1')).toBe(true)
+    expect(isLoopbackUrl(OPENROUTER_BASE_URL)).toBe(false)
+    expect(isLoopbackUrl('http://localhost.example.com/v1')).toBe(false)
+    expect(isLoopbackUrl(undefined)).toBe(false)
+  })
+
   it('tells OpenRouter base URLs from others', () => {
     expect(isOpenRouterUrl(OPENROUTER_BASE_URL)).toBe(true)
     expect(isOpenRouterUrl('https://eu.openrouter.ai/api/v1')).toBe(true)
@@ -167,14 +184,17 @@ describe('openRouterKeyFromEnv: the price probe’s key (F-16.1, F-16.22)', () =
 
 describe('liveProviderFromEnv: a request leaves as the app sends it (F-16.22)', () => {
   /** A `reader.v2` request through the request path, as the knows and planted runs send it. */
-  async function readerRequest(env: LiveEnv): Promise<{ call: ChatCall; costUsd: number }> {
+  async function readerRequest(
+    env: LiveEnv,
+    reported: number | null = 0.0042
+  ): Promise<{ call: ChatCall; costUsd: number; costUnknown: string | null }> {
     const { fetch, calls } = fakeChatServer(() => ({
       text: '{"c":[]}',
       usage: { inputTokens: 100, outputTokens: 10 },
-      costUsd: 0.0042
+      costUsd: reported
     }))
     const live = liveProviderFromEnv(env, { fetch })
-    const run = liveRequestDeps(live.provider)
+    const run = liveRequestDeps(live)
     const messages = [
       { role: 'system' as const, content: 'You are the story-memory reader.' },
       { role: 'user' as const, content: 'Paragraphs:\n¶0 Mara sold the map.' }
@@ -192,7 +212,7 @@ describe('liveProviderFromEnv: a request leaves as the app sends it (F-16.22)', 
     if (call === undefined) throw new Error('no request')
     expect(calls).toHaveLength(1)
     expect(run.ledger).toHaveLength(1)
-    return { call, costUsd: run.spent() }
+    return { call, costUsd: run.spent(), costUnknown: run.costUnknown() }
   }
 
   it('OPENROUTER_API_KEY alone: OpenRouter, V4 Flash, reasoning off, the reported cost', async () => {
@@ -227,11 +247,25 @@ describe('liveProviderFromEnv: a request leaves as the app sends it (F-16.22)', 
       'openai'
     ])
     const { call } = await readerRequest({ OPENAI_API_KEY: OPENAI_KEY })
-    expect(call.url).toBe('https://api.openai.com/v1/chat/completions')
+    expect(call.url).toBe(`${OPENAI_API_URL}/chat/completions`)
     expect(call.headers.get('authorization')).toBe(`Bearer ${OPENAI_KEY}`)
-    expect(call.body).toMatchObject({ model: DEFAULT_MODELS.fast, reasoning_effort: 'none' })
+    expect(call.body).toMatchObject({
+      model: DEFAULT_MODELS.fast,
+      reasoning_effort: 'none',
+      max_completion_tokens: 200
+    })
+    expect(call.body.max_tokens).toBeUndefined()
     expect(call.body.reasoning).toBeUndefined()
     expect(call.body.usage).toBeUndefined()
+  })
+
+  it('OPENAI_API_KEY alone: OpenAI itself even when the shell exports OPENAI_BASE_URL', async () => {
+    // The SDK reads `process.env.OPENAI_BASE_URL` on its own; the route comes from `env` only.
+    vi.stubEnv('OPENAI_BASE_URL', OPENROUTER_BASE_URL)
+    const { call } = await readerRequest({ OPENAI_API_KEY: OPENAI_KEY })
+    expect(call.url).toBe(`${OPENAI_API_URL}/chat/completions`)
+    expect(call.body).toMatchObject({ reasoning_effort: 'none', max_completion_tokens: 200 })
+    expect(call.body.reasoning).toBeUndefined()
   })
 
   it('OPENAI_API_KEY on an OpenRouter base URL: still OpenRouter', async () => {
@@ -254,5 +288,51 @@ describe('liveProviderFromEnv: a request leaves as the app sends it (F-16.22)', 
     expect(call.url).toBe('http://localhost:11434/v1/chat/completions')
     expect(call.body.max_tokens).toBe(200)
     expect(call.body.reasoning).toBeUndefined()
+  })
+
+  it('says when the cost stop cannot hold: no reported cost on a model the tables lack', async () => {
+    // V4 Flash is on the tables: no reported cost falls back to its price, and the stop holds.
+    expect((await readerRequest({ OPENROUTER_API_KEY: OR_KEY }, null)).costUnknown).toBeNull()
+    const unlisted = {
+      OPENROUTER_API_KEY: OR_KEY,
+      MYTHSCRIBE_EVAL_FAST_MODEL: 'vendor/unlisted-model'
+    }
+    // Reported: the cost is known whatever the model.
+    expect((await readerRequest(unlisted)).costUnknown).toBeNull()
+    const unknown = await readerRequest(unlisted, null)
+    expect(unknown.costUsd).toBe(0)
+    expect(unknown.costUnknown).toMatch(/cost unknown for vendor\/unlisted-model/)
+    // A server on this machine charges nothing: its unpriced models stop nothing.
+    const local = {
+      OPENAI_API_KEY: OPENAI_KEY,
+      OPENAI_BASE_URL: 'http://localhost:11434/v1',
+      MYTHSCRIBE_EVAL_FAST_MODEL: 'llama3'
+    }
+    expect(liveProviderFromEnv(local).local).toBe(true)
+    expect((await readerRequest(local, null)).costUnknown).toBeNull()
+  })
+})
+
+describe('liveProviderError: what a live run stops on (F-16.22)', () => {
+  it('names a provider error by its code and copy, and lets anything else throw', async () => {
+    expect(liveProviderError(new AiRateLimitError('OpenRouter is rate limiting requests.'))).toBe(
+      'RATE_LIMIT: OpenRouter is rate limiting requests.'
+    )
+    expect(liveProviderError(new Error('a bug'))).toBeNull()
+    // A 429 from the server comes back through the adapter as a provider error.
+    const { fetch } = fakeChatServer(() => ({ text: 'slow down', status: 429 }))
+    const live = liveProviderFromEnv({ OPENROUTER_API_KEY: OR_KEY }, { fetch })
+    const run = liveRequestDeps(live)
+    const messages = [{ role: 'user' as const, content: 'hello' }]
+    const failed = await runAiRequest(run.deps, {
+      feature: 'reader',
+      tier: 'fast',
+      messages,
+      maxTokens: 10,
+      contextHash: sha256('hello'),
+      promptVersion: 'reader.v2'
+    }).catch((err: unknown) => err)
+    expect(liveProviderError(failed)).toMatch(/^RATE_LIMIT: /)
+    expect(liveProviderError(failed)).not.toContain(OR_KEY)
   })
 })

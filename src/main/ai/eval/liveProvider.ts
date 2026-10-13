@@ -9,7 +9,7 @@ import { autoTable, defaultAiRouting } from '@shared/aiRouting'
 import type { CachedResponse } from '../cacheStore'
 import { dayOf, defaultAiUsageState } from '../dailyCap'
 import { buildOpenAiProvider, type FetchLike } from '../providers/openai'
-import type { Provider } from '../providers/types'
+import { AiProviderError, type Provider } from '../providers/types'
 import type { AiRequestDeps } from '../request'
 import type { UsageEntry } from '../usageStore'
 
@@ -31,6 +31,12 @@ import type { UsageEntry } from '../usageStore'
  * OpenRouter). Neither: one error naming both. Developer tools only: nothing in the app imports
  * this, and no key is ever written to a report.
  */
+
+/**
+ * OpenAI's own API root. The OpenAI-itself route pins it, so a shell's `OPENAI_BASE_URL` (which the
+ * SDK would otherwise read on its own) never moves a run that says it is on OpenAI.
+ */
+export const OPENAI_API_URL = 'https://api.openai.com/v1'
 
 /** The environment the live paths read (`process.env` in a run, a literal in tests). */
 export type LiveEnv = Readonly<Record<string, string | undefined>>
@@ -63,6 +69,17 @@ export function isOpenRouterUrl(url: string | undefined): boolean {
   try {
     const host = new URL(url).hostname
     return host === 'openrouter.ai' || host.endsWith('.openrouter.ai')
+  } catch {
+    return false
+  }
+}
+
+/** Whether a base URL is this machine's (a local server, which charges nothing). */
+export function isLoopbackUrl(url: string | undefined): boolean {
+  if (url === undefined) return false
+  try {
+    const host = new URL(url).hostname
+    return host === 'localhost' || host === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(host)
   } catch {
     return false
   }
@@ -126,6 +143,8 @@ export interface LiveProvider {
   openRouter: boolean
   /** "OpenRouter (OPENROUTER_API_KEY)": the route and the variable the key came from. */
   describe: string
+  /** A server on this machine (`OPENAI_BASE_URL` on localhost): nothing it answers is charged. */
+  local: boolean
 }
 
 /** The live provider the environment gives (no request is made); throws when it holds no key. */
@@ -138,7 +157,9 @@ export function liveProviderFromEnv(
   const label = openRouter ? 'OpenRouter' : 'OpenAI'
   const provider = buildOpenAiProvider(settings.key, {
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-    ...(settings.baseURL === undefined ? {} : { baseURL: settings.baseURL }),
+    ...(settings.baseURL === undefined
+      ? { openAiURL: OPENAI_API_URL }
+      : { baseURL: settings.baseURL }),
     openRouter,
     id: openRouter ? 'openrouter' : 'openai',
     label,
@@ -146,7 +167,13 @@ export function liveProviderFromEnv(
   })
   const where =
     !openRouter && settings.baseURL !== undefined ? ` at ${new URL(settings.baseURL).host}` : ''
-  return { provider, models, openRouter, describe: `${label}${where} (${settings.keyVar})` }
+  return {
+    provider,
+    models,
+    openRouter,
+    describe: `${label}${where} (${settings.keyVar})`,
+    local: isLoopbackUrl(settings.baseURL)
+  }
 }
 
 /** Request deps for a live run, with its ledger and what it has spent. */
@@ -156,6 +183,12 @@ export interface LiveRequestDeps {
   ledger: UsageEntry[]
   /** What the run has spent so far, in USD. */
   spent(): number
+  /**
+   * Why the run's cost stop cannot hold, or null: a request on a charged route came back with no
+   * reported cost on a model the price tables do not list, so its row counts 0 USD and `spent()`
+   * no longer bounds what the run costs. The live runs stop on it and say so in their reports.
+   */
+  costUnknown(): string | null
 }
 
 /**
@@ -163,7 +196,8 @@ export interface LiveRequestDeps {
  * and the Auto routing, so every request leaves as the app sends it (the reader and the checker
  * with no reasoning; OpenRouter's reported cost in the ledger).
  */
-export function liveRequestDeps(provider: Provider): LiveRequestDeps {
+export function liveRequestDeps(live: Pick<LiveProvider, 'provider' | 'local'>): LiveRequestDeps {
+  const { provider } = live
   const ledger: UsageEntry[] = []
   const cache = new Map<string, CachedResponse>()
   const deps: AiRequestDeps = {
@@ -182,9 +216,38 @@ export function liveRequestDeps(provider: Provider): LiveRequestDeps {
     price: priceFor,
     routing: () => ({ routing: defaultAiRouting(), table: autoTable(null) })
   }
+  const costUnknown = (): string | null => {
+    if (live.local) return null
+    const models = [
+      ...new Set(
+        ledger
+          .filter(
+            (entry) =>
+              !entry.cached &&
+              (entry.reportedCostUsd ?? null) === null &&
+              !priceFor(entry.model, 0, 0).priced
+          )
+          .map((entry) => entry.model)
+      )
+    ].sort()
+    return models.length === 0
+      ? null
+      : `cost unknown for ${models.join(', ')} (no reported cost, not on the price tables): ` +
+          'the cost stop cannot hold, so the run stopped'
+  }
   return {
     deps,
     ledger,
-    spent: () => ledger.reduce((sum, entry) => sum + entry.costUsd, 0)
+    spent: () => ledger.reduce((sum, entry) => sum + entry.costUsd, 0),
+    costUnknown
   }
+}
+
+/**
+ * A provider error a live run stops on and reports (a 429, a 402 when the credit runs out, a 5xx,
+ * a bad key), as its code and fixed copy (never the key or the request); null for anything else,
+ * which is a bug and still throws.
+ */
+export function liveProviderError(err: unknown): string | null {
+  return err instanceof AiProviderError ? `${err.code}: ${err.message}` : null
 }
