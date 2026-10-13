@@ -12,6 +12,12 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-13 · F-16.22, F-16.23 · P2b ticked before your checks in the app
+- Question: P2b's final verification passed on the reviewed code (full gates; `e2e/memory.spec.ts` drives P2b at the fake provider: knows lines and thread steps read with *Read now*, a planted duplicate merged by the checker's "same as" and undone with *Split* into Dismissed, readers-since, the scoped "no scene shows … learning it (checked up to …)" line kept out of every request, the who-knows-what grid with *Knew before the book*, *Not a secret* and its *Undo*, Book › Threads, the Timeline's carried and ended years, Mara's ages computed and stated, a typed year and a reorder with the Timeline open; the v1 smoke passes unchanged). Tick now, or wait for your checks?
+- Chosen (decided by Claude, unconfirmed): F-16.22 and F-16.23 stay ticked (ticked 2026-10-13 after the slice 5 review, P2a-D18's rule, as P1 and P2a were), each entry naming the check still owed. v2 is not in installed builds, so the checks run in a development build: `MYTHSCRIBE_STORY_MEMORY=v2 npm run dev` with a new project or a copy. **Owed before the switch-over:** the live knows run (F-16.22's merge condition: `MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- knows`, two passes, stops at 50¢, about 3¢ expected, report in `test-results/eval-knows/`) and live fidelity for `reader.v2` and `verify.v2` (`… npm run eval:ai -- prompts`); no build session had a key. The typed Flashback switch stays your call (P2b slice 5 review, item 10).
+- Alternatives: leave them unticked until you have checked each one and the live runs pass.
+- To change it: untick the entries in `FEATURES.md` §2.16 and the M8 row.
+
 ## 2026-10-13 · F-16.22, F-16.23 · P2b slice 5 review: calls made fixing threads, the timeline and ages
 - Question: The review of slice 5 found the Timeline and every character sheet re-reading the whole book's text in Electron main after each pause in typing (100–230 ms on a 90-scene book), the elapsed hint shown in the reader's words as if quoted, a known birth year reported as "no birth year", a thread its reveal stands for called "not yet in the book", the Timeline and the Threads not following a reorder or a Pinned "Born:" line, the *Ages of* choice lost on every row click, and AI-read years with no ⓘ. These are the calls made fixing them (nothing changes in v1; no prompt, no migration).
 - Chosen (decided by Claude, unconfirmed):
