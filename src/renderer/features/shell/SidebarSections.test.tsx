@@ -316,12 +316,14 @@ describe('buildSections (F-9.11)', () => {
     for (const gone of ['tags', 'timeline', 'library', 'todo', 'changes']) {
       expect(ids).not.toContain(gone)
     }
-    // Every category is a record list in the story bible, Threads included, then the strays.
+    // Every category is a record list in the story bible, Threads included, then the strays,
+    // then Secrets (F-16.22).
     const bible = v2.filter((s) => s.group === 'bible')
     expect(bible.map((s) => s.id)).toEqual([
       ...ALL_BUILTIN_CATEGORIES.map((c) => c.id),
       'c-ships',
-      'c-gone'
+      'c-gone',
+      'secret'
     ])
     expect(v2.find((s) => s.id === 'character')).toMatchObject({ count: 2, used: true })
     expect(v2.find((s) => s.id === 'thread')).toMatchObject({ count: 1, used: true })
@@ -342,5 +344,27 @@ describe('buildSections (F-9.11)', () => {
       'research',
       'edits'
     ])
+  })
+
+  it('F-16.22: lists Secrets after the categories once a secret exists, never as a stray', () => {
+    const row = (sections: SidebarSection[]): (string | number | boolean | null)[][] =>
+      sections.map((s) => [s.id, s.label, s.group, s.count, s.used])
+    const without = buildSections(ALL_BUILTIN_CATEGORIES, { ...counts, research: 1 }, 'v2')
+    const withSecrets = buildSections(
+      ALL_BUILTIN_CATEGORIES,
+      { ...counts, research: 1, records: { character: 3, secret: 2 } },
+      'v2'
+    )
+    expect(row(without)).toMatchSnapshot('v2 without secrets')
+    expect(row(withSecrets)).toMatchSnapshot('v2 with secrets')
+    const secrets = withSecrets.find((s) => s.id === 'secret')
+    expect(secrets).toMatchObject({ label: 'Secrets', count: 2, used: true, group: 'bible' })
+    expect(without.find((s) => s.id === 'secret')).toMatchObject({ count: 0, used: false })
+    expect(withSecrets.filter((s) => s.id === 'secret')).toHaveLength(1)
+    const ids = withSecrets.map((s) => s.id)
+    expect(ids.indexOf('secret')).toBe(ids.indexOf('research') - 1)
+    const panel = secrets?.render('novel')
+    expect(isValidElement(panel) ? panel.type : null).toBe(RecordTab)
+    expect(isValidElement(panel) ? panel.props : null).toEqual({ categoryId: 'secret' })
   })
 })

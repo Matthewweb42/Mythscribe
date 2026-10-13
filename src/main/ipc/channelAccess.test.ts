@@ -142,4 +142,19 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
       expect(CHANNEL_MEMORY[channel], channel).toBe('any')
     }
   })
+
+  it('F-16.22: who knows what is v2; the grid reads, the author’s answers on secrets write', () => {
+    const channels = [
+      'memory:knows',
+      'memory:knewBefore',
+      'memory:splitTopic',
+      'memory:topicNotRight'
+    ] as const
+    for (const channel of channels) {
+      expect(CHANNEL_MEMORY[channel], channel).toBe('v2')
+      expect(() => assertChannelMemory(channel, 'v1'), channel).toThrow(OTHER_MEMORY_MESSAGE)
+    }
+    expect(CHANNEL_ACCESS['memory:knows']).toBe('read')
+    for (const channel of channels.slice(1)) expect(isWriteChannel(channel), channel).toBe(true)
+  })
 })

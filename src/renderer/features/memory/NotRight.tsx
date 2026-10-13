@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import type { RecordKind } from '@shared/memory/records'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useMemoryStore } from './memoryStore'
@@ -17,11 +18,14 @@ const SMALL =
 export function NotRightChoices({
   claimId,
   recordId,
+  kinds = null,
   onDone
 }: {
   claimId: string
   /** Whose line it is now; null for a line still waiting on its subject. */
   recordId: string | null
+  /** The kinds *Not about* may pick (a knows line: a character or group); null for any. */
+  kinds?: readonly RecordKind[] | null
   onDone: () => void
 }): React.JSX.Element {
   const pickId = useId()
@@ -30,7 +34,9 @@ export function NotRightChoices({
     useShallow((s) =>
       s.ids
         .flatMap((id) => s.byId[id] ?? [])
-        .filter((record) => record.id !== recordId)
+        .filter(
+          (record) => record.id !== recordId && (kinds === null || kinds.includes(record.kind))
+        )
         .sort((a, b) => a.name.localeCompare(b.name))
     )
   )

@@ -379,6 +379,12 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'memory:cardLines': 'read',
   'memory:claim': 'read',
   'memory:sheet': 'read',
+  // F-16.22: the grid only reads; Knew before the book, Split and Not a secret change what the
+  // author said (Dismissed rows and her own marks), so they are refused after the trial.
+  'memory:knows': 'read',
+  'memory:knewBefore': 'write',
+  'memory:splitTopic': 'write',
+  'memory:topicNotRight': 'write',
   'memory:notRight': 'ai',
   // F-16.18: a card value the author says is not right is a Dismissed row, like Not a mention.
   'memory:cardNotRight': 'write',
@@ -782,6 +788,10 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'memory:cardLines': 'v2',
   'memory:claim': 'v2',
   'memory:sheet': 'v2',
+  'memory:knows': 'v2',
+  'memory:knewBefore': 'v2',
+  'memory:splitTopic': 'v2',
+  'memory:topicNotRight': 'v2',
   'memory:notRight': 'v2',
   'memory:cardNotRight': 'v2',
   'memory:settle': 'v2',

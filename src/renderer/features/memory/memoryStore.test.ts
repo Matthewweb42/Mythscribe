@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Input } from '@shared/ipc/contract'
+import type { Dismissed } from '@shared/memory/dismissed'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetDismissedStore, useDismissedStore } from '@renderer/features/thisScene/dismissedStore'
@@ -8,12 +9,19 @@ import { setIpcClient } from '@renderer/lib/ipc'
 import {
   claimViewFixture,
   installFakeMain,
+  knowsGridFixture,
   memoryStatusFixture,
   sceneMemoryFixture,
   sheetMemoryFixture,
   type FakeMain
 } from './memoryFixture'
-import { resetMemoryStore, useMemoryStore, useSceneMemory, useSheetMemory } from './memoryStore'
+import {
+  resetMemoryStore,
+  useKnowsGrid,
+  useMemoryStore,
+  useSceneMemory,
+  useSheetMemory
+} from './memoryStore'
 
 /**
  * F-16.18 (plan P2a §4): the renderer's one owner of what the reader shows: scenes and sheets read
@@ -22,6 +30,16 @@ import { resetMemoryStore, useMemoryStore, useSceneMemory, useSheetMemory } from
  */
 
 let main: FakeMain
+const tombstone = (id: string, kind: 'split' | 'notRight'): Dismissed => ({
+  id,
+  kind,
+  key: id,
+  recordId: null,
+  nodeId: null,
+  label: id,
+  quote: null,
+  created: '2026-10-13T10:00:00.000Z'
+})
 const flush = (): Promise<void> => act(async () => await Promise.resolve())
 
 beforeEach(() => {
@@ -56,7 +74,11 @@ beforeEach(() => {
         created: '2026-10-12T10:00:00.000Z'
       }
     }),
-    'memory:readNow': () => ({ ok: true, read: true, reason: null, readingId: 'r', costUsd: 0 })
+    'memory:readNow': () => ({ ok: true, read: true, reason: null, readingId: 'r', costUsd: 0 }),
+    'memory:knows': (input) => knowsGridFixture({ asOf: (input as Input<'memory:knows'>).asOf }),
+    'memory:knewBefore': () => ({ changed: true }),
+    'memory:splitTopic': () => ({ recordId: 's-new', dismissed: tombstone('d-split', 'split') }),
+    'memory:topicNotRight': () => ({ dismissed: [tombstone('d-gone', 'notRight')] })
   })
   useMemoryStore.getState().subscribe()
 })
@@ -150,5 +172,27 @@ describe('useMemoryStore (F-16.18)', () => {
     useMemoryStore.getState().clear()
     await flush()
     expect(useMemoryStore.getState().scenes).toEqual({})
+  })
+
+  it('F-16.22: keeps a who-knows-what grid per as-of scene, read again on any change', async () => {
+    const { result, unmount } = renderHook(() => useKnowsGrid('sc-2'))
+    await flush()
+    expect(result.current?.asOf).toBe('sc-2')
+    main.calls.length = 0
+    act(() => main.emit('memory:changed', { nodeIds: ['sc-9'], recordIds: [] }))
+    await flush()
+    expect(main.sent('memory:knows')).toEqual([{ asOf: 'sc-2' }])
+    unmount()
+    expect(useMemoryStore.getState().knows).toEqual({})
+  })
+
+  it('F-16.22: sends Knew before, Split and Not a secret, adding their Dismissed rows', async () => {
+    expect(await useMemoryStore.getState().knewBefore('s-map', 'r-mara', true)).toBe(true)
+    expect(main.sent('memory:knewBefore')).toEqual([
+      { secretId: 's-map', recordId: 'r-mara', knew: true }
+    ])
+    expect(await useMemoryStore.getState().splitTopic('tq-1')).toBe('s-new')
+    expect(await useMemoryStore.getState().topicNotRight('s-new')).toBe(true)
+    expect(useDismissedStore.getState().items.map((row) => row.id)).toEqual(['d-gone', 'd-split'])
   })
 })

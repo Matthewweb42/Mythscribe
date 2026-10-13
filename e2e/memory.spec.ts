@@ -75,6 +75,16 @@ import { caretToEnd, clickIntoEditor } from './support'
  * is judged the same by the checker's same-as item and merged, and the thread resolves; the
  * reader request lists both topics after the record roster, and no request carries an absence.
  *
+ * P2b slice 4 (F-16.22), the UI in a new project (so the scenes are 1.1–1.3): scene 1.1 ("Mara
+ * watched from the stair. Tomas sold the map. Orrin overheard Tomas.", Mara the POV) shows the
+ * sold map with "readers since 1.1", Orrin overheard from Tomas, Tomas knew before and, muted, "No
+ * scene shows Mara learning this (checked up to 1.1)"; scene 1.2 shows the POV's tension line and
+ * "+ 1 more in Book" opens the Book's grid, where Mara's empty cell takes *Knew before the book*
+ * and the tension line goes; the secret's sheet lists the reveal merged from 1.3, *Split* makes it
+ * a secret of its own (Secrets lists two, Dismissed one more), *Not a secret* takes it away and
+ * its *Undo* brings it back; a ghost-text request from 1.2 carries a Story notes block with no
+ * absence and no who-knows-what line.
+ *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
  * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
@@ -1801,6 +1811,213 @@ test('story memory v2: who knows what and threads are read (P2b slice 2)', async
       body.messages.some((message) => message.content.includes('No scene shows'))
     )
   ).toBe(false)
+})
+
+test('story memory v2: who knows what in the panel, the grid and sheets (P2b slice 4)', async () => {
+  // A new project (Use AI on, the wizard's default; the own key at the fake), so its scenes are
+  // 1.1, 1.2 and 1.3 and "checked up to" counts from the book's first scene.
+  await page.getByRole('button', { name: 'Close project' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
+  const projectPath = path.join(tmp, 'Knows Novel.mythscribe')
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
+  }, projectPath)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const wizard = page.getByRole('dialog')
+  await wizard.getByRole('textbox', { name: 'Project name' }).fill('Knows Novel')
+  for (let step = 0; step < 4; step += 1) {
+    await wizard.getByRole('button', { name: 'Next' }).click()
+  }
+  await wizard.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByTestId('project-name')).toHaveText('Knows Novel')
+  expect((await invoke<ProjectInfo | null>('project:current', undefined))?.storyMemory).toBe('v2')
+
+  // Mara (the POV of every scene), Orrin and Tomas; three scenes, each read once.
+  const ids: Record<string, string> = {}
+  for (const name of ['Mara', 'Orrin', 'Tomas']) {
+    const result = await invoke<{ record?: { id: string } }>('record:create', {
+      name,
+      categoryId: 'character',
+      aliases: [],
+      force: true
+    })
+    ids[name] = result.record?.id ?? ''
+  }
+  const mara = ids.Mara ?? ''
+  // A Pinned line, so the ghost text's Story notes block has something to carry.
+  await invoke('record:savePage', {
+    id: mara,
+    page: 'pinned',
+    doc: {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Eyes: grey' }] }]
+    }
+  })
+  const first = (await invoke<TreeNode[]>('tree:list', undefined)).find(
+    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
+  )
+  if (!first) throw new Error('the new project has no scene')
+  const write = async (id: string, text: string): Promise<void> => {
+    await invoke('document:save', {
+      id,
+      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
+    })
+    await invoke('sceneDetail:set', {
+      nodeId: id,
+      details: {
+        povRecordId: mara,
+        place: { recordId: null, text: '' },
+        time: { text: '' },
+        storyYear: null,
+        alsoHere: []
+      }
+    })
+  }
+  const scene = async (title: string, text: string): Promise<string> => {
+    const node = await invoke<TreeNode>('tree:create', {
+      parentId: first.parentId,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title
+    })
+    await write(node.id, text)
+    return node.id
+  }
+  await write(first.id, 'Mara watched from the stair. Tomas sold the map. Orrin overheard Tomas.')
+  const quay = await scene('Quay', 'Mara waited at the quay.')
+  const sale = await scene('Sale', 'The map had been sold by Tomas.')
+  for (const [i, nodeId] of [first.id, quay, sale].entries()) {
+    expect(await invoke('memory:readNow', { nodeId, requestId: `e2e-p2b4-${i}` })).toMatchObject({
+      ok: true
+    })
+  }
+  // The planted duplicate merged into the one secret.
+  const secretsNow = async (): Promise<{ id: string; name: string }[]> =>
+    (await invoke<{ id: string; name: string; kind: string }[]>('record:list', undefined)).filter(
+      (each) => each.kind === 'secret'
+    )
+  await expect
+    .poll(async () => (await secretsNow()).map((each) => each.name))
+    .toEqual(['the sold map'])
+
+  // Open it again, so the tree holds the scenes made above.
+  await page.getByRole('button', { name: 'Close project' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+  await page
+    .getByRole('list', { name: 'Recent projects' })
+    .getByRole('button', { name: 'Knows Novel', exact: true })
+    .click()
+  await expect(page.getByTestId('project-name')).toHaveText('Knows Novel')
+
+  // F-16.22: scene 1.1 shows the secret, its holders Here and, muted, Mara's scoped line.
+  await showSection('Manuscript')
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  await bookTree.getByRole('treeitem', { name: first.title }).first().click()
+  const panel = page.getByTestId('this-scene-panel')
+  if ((await panel.count()) === 0) {
+    await page.getByRole('button', { name: 'This scene', exact: true }).click()
+  }
+  await panel.getByRole('tab', { name: 'This scene' }).click()
+  const who = panel.getByRole('region', { name: 'Who knows what' })
+  const map = who.getByRole('group', { name: 'Who knows the sold map' })
+  await expect(map).toBeVisible({ timeout: 15_000 })
+  await expect(map.getByTestId('readers-since')).toHaveText('readers since 1.1')
+  await expect(
+    map.getByTestId('claim-line').filter({ hasText: 'Orrin: overheard from Tomas (1.1)' })
+  ).toBeVisible()
+  await expect(
+    map.getByTestId('claim-line').filter({ hasText: 'Tomas: knew before (1.1)' })
+  ).toBeVisible()
+  await expect(map.getByTestId('absence-line')).toHaveText(
+    'No scene shows Mara learning this (checked up to 1.1)'
+  )
+
+  // Scene 1.2: the POV's tension line, and "+ 1 more in Book" opens the grid.
+  await bookTree.getByRole('treeitem', { name: 'Quay', exact: true }).click()
+  const tension = who.getByTestId('tension-line')
+  await expect(tension).toHaveText(
+    'Readers know the sold map (since 1.1); no scene shows Mara (POV) learning it (checked up to 1.2)',
+    { timeout: 15_000 }
+  )
+  await who.getByRole('button', { name: '+ 1 more in Book' }).click()
+  await expect(panel.getByRole('tab', { name: 'Book' })).toHaveAttribute('aria-selected', 'true')
+  const grid = panel.getByTestId('knows-grid')
+  const maraCell = grid.getByRole('button', {
+    name: 'Mara, the sold map: No scene shows Mara learning this (checked up to 1.2)'
+  })
+  await expect(maraCell).toHaveText('—', { timeout: 15_000 })
+  await maraCell.click()
+  await grid
+    .getByTestId('knows-cell-detail')
+    .getByRole('button', { name: 'Knew before the book' })
+    .click()
+  await expect(
+    grid.getByRole('button', { name: 'Mara, the sold map: knew before the book (you)' })
+  ).toBeVisible({ timeout: 15_000 })
+  // The tension line goes: she knew it before the book.
+  await panel.getByRole('tab', { name: 'This scene' }).click()
+  await expect(panel.getByTestId('tension-line')).toHaveCount(0, { timeout: 15_000 })
+
+  // The secret's sheet lists the reveal merged into it from 1.3; Split makes it a secret of its
+  // own, and the split goes to Dismissed.
+  const dismissedBefore = (await invoke<{ count: number }>('dismissed:list', undefined)).count
+  await panel.getByRole('tab', { name: 'Book' }).click()
+  await grid.getByRole('button', { name: 'the sold map', exact: true }).click()
+  const sheet = page.getByTestId('record-sheet')
+  const theSecret = sheet.getByRole('region', { name: 'The secret' })
+  await expect(theSecret.getByTestId('topic-reveal').nth(1)).toContainText(
+    'also read as “the map sale” in 1.3: judged the same by a second AI read',
+    { timeout: 15_000 }
+  )
+  await theSecret.getByRole('button', { name: 'Split “the map sale” off' }).click()
+  const secretsList = page.getByRole('list', { name: 'Secrets' })
+  await expect(secretsList.getByRole('listitem')).toHaveCount(2, { timeout: 15_000 })
+  await expect(
+    panel.getByRole('button', { name: `Dismissed (${dismissedBefore + 1})` })
+  ).toBeVisible({ timeout: 15_000 })
+
+  // Not a secret on the split one takes it away; Undo in Dismissed brings it back.
+  await secretsList.getByRole('button', { name: /^the map sale/ }).click()
+  await sheet
+    .getByRole('region', { name: 'The secret' })
+    .getByRole('button', { name: 'Not a secret' })
+    .click()
+  await expect(secretsList.getByRole('listitem')).toHaveCount(1, { timeout: 15_000 })
+  const dismissedButton = panel.getByRole('button', { name: `Dismissed (${dismissedBefore + 2})` })
+  await expect(dismissedButton).toBeVisible({ timeout: 15_000 })
+  await dismissedButton.click()
+  const dismissedDialog = page.getByRole('dialog', { name: /^Dismissed \(/ })
+  await dismissedDialog.getByRole('button', { name: 'Undo: Not a secret: the map sale' }).click()
+  await expect(dismissedDialog.getByRole('heading')).toHaveText(
+    `Dismissed (${dismissedBefore + 1})`
+  )
+  await dismissedDialog.getByRole('button', { name: 'Close' }).click()
+  await expect(secretsList.getByRole('listitem')).toHaveCount(2, { timeout: 15_000 })
+
+  // Ghost text in 1.2: its Story notes block carries no absence and no who-knows-what line.
+  await showSection('Manuscript')
+  await bookTree.getByRole('treeitem', { name: 'Quay', exact: true }).click()
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  const vibeWrite = page.getByRole('button', { name: 'VibeWrite' })
+  await expect(vibeWrite).toBeEnabled()
+  if ((await vibeWrite.getAttribute('aria-pressed')) !== 'true') await vibeWrite.click()
+  await expect(vibeWrite).toHaveAttribute('aria-pressed', 'true')
+  const ghostsBefore = providerBodies.filter((body) => !body.json).length
+  await caretToEnd(editor)
+  await page.keyboard.type(' Mara looked back at the stair.')
+  await expect(editor.locator('.ghost-text')).toHaveText(GHOST_ANSWER, { timeout: 15_000 })
+  const ghost = providerBodies
+    .filter((body) => !body.json)
+    .slice(ghostsBefore)
+    .at(-1)
+  const ghostText = ghost?.messages.map((message) => message.content).join('\n') ?? ''
+  expect(ghostText).toContain(STORY_NOTES_HEADING)
+  expect(ghostText).toContain('Eyes: grey')
+  expect(ghostText).not.toContain('No scene shows')
+  expect(ghostText).not.toContain('checked up to')
+  expect(ghostText).not.toContain('the sold map')
+  expect(ghostText).not.toMatch(/knew before|overheard/i)
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

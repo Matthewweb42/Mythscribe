@@ -468,7 +468,14 @@ import {
 import { anchorsChanged, runAnchors } from '../memory/reading/anchors'
 import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
 import { settleOwnedNames } from '../memory/reading/waiting'
-import { claimInfo, sceneMemory, sheetMemory } from '../memory/reading/views'
+import { claimInfo, knowsGridMemory, sceneMemory, sheetMemory } from '../memory/reading/views'
+import { setKnewBefore } from '../memory/reading/knewBeforeStore'
+import {
+  restoreTopicNotRight,
+  splitReveal,
+  topicNotRight,
+  type TopicChange
+} from '../memory/reading/topicActions'
 import { cardLines } from '../memory/reading/cardContext'
 import { keepPlanLink, restoreUnlinked, unlinkPlanV2 } from '../memory/reading/planLinks'
 import { planLinkViewV2 } from '../memory/reading/planLinkStore'
@@ -4723,6 +4730,15 @@ export function registerHandlers({
     void syncSpelling()
   }
 
+  /** F-16.22: a secret or thread made, gone or put back: its list, its sheets and the scenes it touched. */
+  const topicsChanged = (change: TopicChange): void => {
+    emit(windows(), 'record:changed', { recordIds: change.topicIds, roster: true })
+    emit(windows(), 'memory:changed', {
+      nodeIds: change.nodeIds,
+      recordIds: [...change.topicIds, ...change.recordIds]
+    })
+  }
+
   register('record:list', () => listRecords(manager.require().connection.orm))
 
   register('record:get', ({ id }) => requireRecord(manager.require().connection.orm, id))
@@ -4872,6 +4888,12 @@ export function registerHandlers({
     // job then checks them against the text as it is now. A typed-detail *Keep mine* undone may
     // be asked again.
     if (undone.kind === 'notRight') {
+      // F-16.22: a secret or thread *Not a secret* took away comes back as it was.
+      const topic = restoreTopicNotRight(db, undone.id)
+      if (topic !== null) {
+        if (topic.nodeIds.length > 0) mentionQueue.indexAll('anchors', topic.nodeIds)
+        topicsChanged(topic)
+      }
       const restored = restoreNotRight(db, undone.id)
       // The anchors job's own `memory:changed` follows once it has checked them.
       if (restored.nodeIds.length > 0) mentionQueue.indexAll('anchors', restored.nodeIds)
@@ -5128,6 +5150,30 @@ export function registerHandlers({
   register('memory:sheet', ({ recordId, asOf }) =>
     sheetMemory(manager.require().connection.orm, recordId, asOf)
   )
+
+  // F-16.22: who knows what (the Book's grid), and the author's answers on secrets.
+  register('memory:knows', ({ asOf }) => knowsGridMemory(manager.require().connection.orm, asOf))
+
+  register('memory:knewBefore', ({ secretId, recordId, knew }) => {
+    const db = manager.require().connection.orm
+    const changed = setKnewBefore(db, secretId, recordId, knew, new Date())
+    if (changed) emit(windows(), 'memory:changed', { nodeIds: [], recordIds: [secretId, recordId] })
+    return { changed }
+  })
+
+  register('memory:splitTopic', ({ topicQuoteId }) => {
+    const db = manager.require().connection.orm
+    const { recordId, dismissed: row, change } = splitReveal(db, topicQuoteId, new Date())
+    topicsChanged(change)
+    return { recordId, dismissed: row }
+  })
+
+  register('memory:topicNotRight', ({ recordId }) => {
+    const db = manager.require().connection.orm
+    const { dismissed: rows, change } = topicNotRight(db, recordId, new Date())
+    topicsChanged(change)
+    return { dismissed: rows }
+  })
 
   register('memory:notRight', ({ claimId, choice, requestId }) => {
     // *Wrong value* writes a Dismissed row and runs no model, so the AI path cannot refuse it:

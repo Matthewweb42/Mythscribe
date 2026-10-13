@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import {
   ClaimPending,
@@ -394,6 +394,31 @@ export function claimRows(db: TreeDb, ids: readonly string[]): ClaimRow[] {
     .from(claim)
     .where(inArray(claim.id, [...ids]))
     .all()
+}
+
+/**
+ * Every claim of every draft a secret or thread stands behind (*Not a secret*'s snapshot): the
+ * knows lines about a secret (its object) and a topic's own lines (a thread's steps).
+ */
+export function topicClaimRows(db: TreeDb, recordId: string): ClaimRow[] {
+  return db
+    .select()
+    .from(claim)
+    .where(
+      or(and(eq(claim.slot, 'knows'), eq(claim.objectId, recordId)), eq(claim.recordId, recordId))
+    )
+    .orderBy(asc(claim.created), sql`rowid`)
+    .all()
+}
+
+/** The claims a merged reveal brought with it (tagged with it): what *Split* moves back. */
+export function taggedClaimRows(db: TreeDb, topicQuoteId: string): ClaimRow[] {
+  return db.select().from(claim).where(eq(claim.topicQuoteId, topicQuoteId)).all()
+}
+
+/** Puts claim rows back as they were stored (*Undo* of *Not a secret*); one already there stays. */
+export function insertClaimRows(db: TreeDb, rows: readonly ClaimRow[]): void {
+  for (const row of rows) db.insert(claim).values(row).onConflictDoNothing().run()
 }
 
 /** The raw rows of one scene in one draft. */

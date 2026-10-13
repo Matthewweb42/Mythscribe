@@ -304,12 +304,19 @@ describe('sceneSecrets (P2b-D21)', () => {
     expect(scene.touched.map((each) => each.secret.recordId)).toEqual(['debts'])
     expect(scene.tension.length).toBe(3)
     expect(scene.tension.slice(0, 3).every((line) => line.kind === 'readersKnow')).toBe(true)
-    expect(scene.tension[0]).toEqual({
+    expect(scene.tension[0]).toMatchObject({
       kind: 'readersKnow',
       secretId: 'debts',
       recordId: 'mara',
       stale: false
     })
+    // The line carries the secret's label and "readers since", for one not touched here too.
+    expect(scene.tension[0]?.label).toBe(
+      view.secrets.find((each) => each.recordId === 'debts')?.label
+    )
+    expect(scene.tension[0]?.since).toEqual(
+      view.secrets.find((each) => each.recordId === 'debts')?.readersSince
+    )
     expect(scene.more).toBe(2)
   })
 
@@ -346,7 +353,7 @@ describe('sceneSecrets (P2b-D21)', () => {
       })
     )
     expect([view.secrets[0]?.known, view.secrets[0]?.knownStale]).toEqual([true, true])
-    expect(sceneSecrets(view, 's2', ['mara', 'orrin', 'lise'], 'mara').tension).toEqual([
+    expect(sceneSecrets(view, 's2', ['mara', 'orrin', 'lise'], 'mara').tension).toMatchObject([
       { kind: 'readersKnow', secretId: 'map', recordId: 'mara', stale: true },
       { kind: 'hereKnows', secretId: 'map', holderId: 'orrin', recordId: 'lise', stale: true }
     ])
@@ -355,7 +362,7 @@ describe('sceneSecrets (P2b-D21)', () => {
   it('names someone Here who holds it and another Here who has none', () => {
     const view = knowsAsOf(input({ secrets: secrets.slice(0, 1), claims, quotes, atId: 's2' }))
     const scene = sceneSecrets(view, 's2', ['lise', 'orrin'], null)
-    expect(scene.tension).toEqual([
+    expect(scene.tension).toMatchObject([
       { kind: 'hereKnows', secretId: 'map', holderId: 'orrin', recordId: 'lise', stale: false }
     ])
   })

@@ -10,7 +10,10 @@ import { STORY_BIBLE_HEADING, STORY_BIBLE_PLANS_HEADING } from '@shared/storyBib
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
-import { listRecords, savePage } from '../memory/recordStore'
+import { revealIn, seedClaims } from '../memory/reading/claimFixture'
+import { setKnewBefore } from '../memory/reading/knewBeforeStore'
+import { createTopic } from '../memory/reading/topicStore'
+import { createRecord, listRecords, savePage } from '../memory/recordStore'
 import {
   SEEDED_CANON_LINE,
   SEEDED_IDEA_TEXT,
@@ -329,5 +332,102 @@ describe('the prose features by story memory (F-16.14)', () => {
     await run('v2')
     expect(sent()).not.toContain('Referenced notes')
     expect(sent()).not.toContain('TAGGED-NOTE Mara fears')
+  })
+})
+
+describe('who knows what never reaches a prose prompt (F-16.22, P2b rule 9)', () => {
+  it('sends no secret, knows line, knew-before or scoped absence in any v2 prose request', async () => {
+    const mara = listRecords(db).find((record) => record.name === 'Mara Vell')?.id ?? ''
+    const tomas = createRecord(db, { name: 'Tomas', categoryId: 'character', force: true }, NOW)
+    if (!('record' in tomas)) throw new Error('blocked')
+    const secret = createTopic(
+      db,
+      {
+        kind: 'secret',
+        label: 'the missing ferryman',
+        quote: revealIn(db, scene, {
+          para: 0,
+          quote: 'the ferryman had not come',
+          label: 'the missing ferryman'
+        })
+      },
+      NOW
+    ).recordId
+    seedClaims(
+      db,
+      scene,
+      [
+        {
+          recordId: mara,
+          slot: 'knows',
+          value: 'saw',
+          how: 'saw',
+          objectId: secret,
+          quote: 'the ferryman had not come',
+          para: 0,
+          proof: 'verified'
+        }
+      ],
+      NOW
+    )
+    setKnewBefore(db, secret, tomas.record.id, true, NOW)
+    const runs: (() => Promise<unknown>)[] = [
+      () =>
+        runRewrite(
+          db,
+          deps,
+          { nodeId: scene, text: SCENE_TEXT.slice(0, 120), before: '', after: '', memory: 'v2' },
+          () => undefined
+        ),
+      () =>
+        runChat(
+          db,
+          deps,
+          {
+            nodeId: scene,
+            mode: 'plan',
+            paragraphs: 1,
+            message: 'Who knows about the ferryman?',
+            history: [],
+            memory: 'v2'
+          },
+          () => undefined
+        ),
+      () =>
+        draftForAgent(
+          db,
+          deps,
+          {
+            nodeId: scene,
+            brief: 'Tomas arrives.',
+            words: 90,
+            before: SCENE_TEXT,
+            after: '',
+            passage: null,
+            memory: 'v2'
+          },
+          () => undefined
+        ),
+      () => runCritique(db, deps, { nodeId: scene, memory: 'v2' }),
+      () => runWhatNext(db, deps, { nodeId: scene, memory: 'v2' }),
+      () => runSuggestNotes(db, deps, { nodeId: scene, memory: 'v2' }),
+      () =>
+        editScene(db, deps, {
+          passId: 'p-k',
+          memory: 'v2',
+          type: 'continuity',
+          instruction: null,
+          nodeId: scene,
+          requestPrefix: 'epk',
+          signal: new AbortController().signal
+        })
+    ]
+    for (const run of runs) await run().catch(() => undefined)
+    const text = sent()
+    expect(text).toContain(STORY_NOTES_HEADING)
+    expect(text).not.toMatch(/No scene shows|checked up to|not checked yet/i)
+    expect(text).not.toMatch(/(doesn['’]t|does not) know/i)
+    expect(text).not.toContain('the missing ferryman')
+    expect(text).not.toMatch(/knew before/i)
   })
 })

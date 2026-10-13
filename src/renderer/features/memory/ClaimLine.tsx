@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Info } from 'lucide-react'
+import type { RecordKind } from '@shared/memory/records'
 import { ClaimInfoCard } from './ClaimInfo'
 import { NotRightChoices } from './NotRight'
 
@@ -18,6 +19,8 @@ export function ClaimLine({
   stale = false,
   staleNote = null,
   recordId,
+  notAboutKinds = null,
+  muted = false,
   as: Tag = 'li'
 }: {
   claimId: string
@@ -28,6 +31,10 @@ export function ClaimLine({
   staleNote?: string | null
   /** Whose line it is (Not about offers the others). */
   recordId: string | null
+  /** The kinds *Not about* offers (a knows line: characters and groups); null for any. */
+  notAboutKinds?: readonly RecordKind[] | null
+  /** Shown muted (a half-knowing line: suspects, believes otherwise). */
+  muted?: boolean
   as?: 'li' | 'div'
 }): React.JSX.Element {
   const [open, setOpen] = useState<'info' | 'notRight' | null>(null)
@@ -39,7 +46,9 @@ export function ClaimLine({
       data-stale={stale ? 'true' : undefined}
       className="flex min-w-0 flex-wrap items-baseline gap-x-1 py-0.5 text-sm"
     >
-      <span className={stale ? 'text-fg-muted opacity-60' : undefined}>{text}</span>
+      <span className={stale ? 'text-fg-muted opacity-60' : muted ? 'text-fg-muted' : undefined}>
+        {text}
+      </span>
       {note === null ? null : <span className="text-xs text-fg-muted">{note}</span>}
       {stale && staleNote !== null ? (
         <span className="text-xs text-fg-subtle italic">{staleNote}</span>
@@ -66,7 +75,12 @@ export function ClaimLine({
       </span>
       {open === 'info' ? <ClaimInfoCard claimId={claimId} /> : null}
       {open === 'notRight' ? (
-        <NotRightChoices claimId={claimId} recordId={recordId} onDone={() => setOpen(null)} />
+        <NotRightChoices
+          claimId={claimId}
+          recordId={recordId}
+          kinds={notAboutKinds}
+          onDone={() => setOpen(null)}
+        />
       ) : null}
     </Tag>
   )

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { TopicQuoteRole, TopicQuoteState } from '@shared/memory/claims'
-import { dismissedKey } from '@shared/memory/dismissed'
+import { dismissedKey, type Dismissed } from '@shared/memory/dismissed'
 import type { RecordOrigin } from '@shared/memory/records'
 import { topicLabel, type TopicKind } from '@shared/memory/topics'
 import type { InvariantTopic } from '@shared/memory/invariants'
@@ -166,6 +166,21 @@ export function topicQuoteRows(db: TreeDb, ids: readonly string[]): TopicQuoteRo
     .all()
 }
 
+/** One topic's reveal rows in every draft, as stored (*Not a secret*'s snapshot). */
+export function recordTopicQuoteRows(db: TreeDb, recordId: string): TopicQuoteRow[] {
+  return db
+    .select()
+    .from(topicQuote)
+    .where(eq(topicQuote.recordId, recordId))
+    .orderBy(asc(topicQuote.created), sql`rowid`)
+    .all()
+}
+
+/** Puts reveal rows back as they were stored (*Undo* of *Not a secret*); one already there stays. */
+export function insertTopicQuoteRows(db: TreeDb, rows: readonly TopicQuoteRow[]): void {
+  for (const row of rows) db.insert(topicQuote).values(row).onConflictDoNothing().run()
+}
+
 /** Every reveal row of one scene in every draft (Rename in book's rewrite). */
 export function sceneTopicQuoteRows(db: TreeDb, nodeId: string): TopicQuoteRow[] {
   return db.select().from(topicQuote).where(eq(topicQuote.nodeId, nodeId)).all()
@@ -319,7 +334,7 @@ export function splitTopic(
   topicQuoteId: string,
   now: Date,
   ref?: () => string | null
-): { recordId: string } {
+): { recordId: string; dismissed: Dismissed } {
   const merged = getTopicQuote(db, topicQuoteId)
   if (merged === null) {
     throw new AppError('NOT_FOUND', 'That reveal is no longer there', { topicQuoteId })
@@ -333,6 +348,7 @@ export function splitTopic(
     throw new AppError('VALIDATION', 'Only a secret or a thread splits by reveal')
   }
   let recordId = ''
+  let row: Dismissed | null = null
   db.transaction((tx) => {
     const made = insertTopicRecord(
       tx,
@@ -351,7 +367,7 @@ export function splitTopic(
       .all()
       .map((row) => row.id)
     pointClaimsAt(tx, recordId, tagged, null)
-    dismiss(
+    row = dismiss(
       tx,
       {
         kind: 'split',
@@ -363,7 +379,8 @@ export function splitTopic(
       now
     )
   })
-  return { recordId }
+  if (row === null) throw new AppError('VALIDATION', 'The reveal could not be split off')
+  return { recordId, dismissed: row }
 }
 
 /**

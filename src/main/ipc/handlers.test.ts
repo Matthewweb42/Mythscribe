@@ -100,7 +100,7 @@ import {
 } from '../project/settingsStore'
 import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
 import { cardAnchorOf, revealIn, seedClaims } from '../memory/reading/claimFixture'
-import { createTopic, deleteTopicQuotes } from '../memory/reading/topicStore'
+import { createTopic, deleteTopicQuotes, mergeInto } from '../memory/reading/topicStore'
 import { upsertCard } from '../memory/reading/cardStore'
 import { emptyCardFields } from '@shared/memory/claims'
 import { getClaim } from '../memory/reading/claimStore'
@@ -8865,6 +8865,112 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       recordIds: [tomas.record.id, held.recordId],
       roster: true
     })
+  })
+
+  it('answers who knows what, and the author’s Knew before, Split and Not a secret with Undo (F-16.22)', async () => {
+    const scene = await openV2()
+    const db = manager.require().connection.orm
+    await invoke('document:save', {
+      id: scene,
+      content: paragraphs('Tomas sold the map.', 'The map had been sold by Tomas.')
+    })
+    const made = async (name: string): Promise<string> => {
+      const result = await invoke('record:create', { name, categoryId: 'character' })
+      if (!('record' in result)) throw new Error('blocked')
+      return result.record.id
+    }
+    const tomas = await made('Tomas')
+    const mara = await made('Mara')
+    const map = createTopic(
+      db,
+      {
+        kind: 'secret',
+        label: 'the sold map',
+        quote: revealIn(db, scene, { para: 0, quote: 'Tomas sold the map', label: 'x' })
+      },
+      new Date()
+    )
+    seedClaims(
+      db,
+      scene,
+      [
+        {
+          recordId: tomas,
+          slot: 'knows',
+          value: 'knewBefore',
+          how: 'knewBefore',
+          objectId: map.recordId,
+          quote: 'Tomas sold the map',
+          para: 0,
+          proof: 'verified'
+        }
+      ],
+      new Date()
+    )
+    const merged = mergeInto(
+      db,
+      map.recordId,
+      revealIn(db, scene, {
+        para: 1,
+        quote: 'The map had been sold by Tomas',
+        label: 'the map sale'
+      }),
+      [],
+      new Date()
+    )
+
+    const grid = await invoke('memory:knows', { asOf: scene })
+    expect(grid.rows.map((row) => row.label)).toEqual(['the sold map'])
+    expect(grid.columns).toContain(tomas)
+    expect((await invoke('memory:scene', { nodeId: scene })).secrets.touched).toHaveLength(1)
+
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    expect(
+      await invoke('memory:knewBefore', { secretId: map.recordId, recordId: mara, knew: true })
+    ).toEqual({ changed: true })
+    expect(sentOf('memory:changed')).toContainEqual({
+      nodeIds: [],
+      recordIds: [map.recordId, mara]
+    })
+    await expect(
+      invoke('memory:knewBefore', { secretId: mara, recordId: tomas, knew: true })
+    ).rejects.toThrow('VALIDATION: Only a secret is known before')
+
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    const split = await invoke('memory:splitTopic', { topicQuoteId: merged })
+    expect(split.dismissed.kind).toBe('split')
+    expect(sentOf('record:changed')).toContainEqual({
+      recordIds: [map.recordId, split.recordId],
+      roster: true
+    })
+    expect(listRecords(db).filter((each) => each.kind === 'secret')).toHaveLength(2)
+
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    const gone = await invoke('memory:topicNotRight', { recordId: split.recordId })
+    expect(gone.dismissed).toHaveLength(1)
+    expect(listRecords(db).some((each) => each.id === split.recordId)).toBe(false)
+    expect(sentOf('record:changed')).toContainEqual({ recordIds: [split.recordId], roster: true })
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    await invoke('dismissed:undo', { id: gone.dismissed[0]?.id ?? '' })
+    expect(listRecords(db).find((each) => each.id === split.recordId)?.name).toBe('the map sale')
+    expect(sentOf('record:changed')).toContainEqual({ recordIds: [split.recordId], roster: true })
+    await expect(invoke('memory:topicNotRight', { recordId: mara })).rejects.toThrow(
+      'VALIDATION: Only a secret or a thread can be said not to be one'
+    )
+
+    // After the trial the grid still reads; the author's answers are refused.
+    accessNow += 31 * 24 * 60 * 60_000
+    access.refresh()
+    expect((await invoke('memory:knows', { asOf: null })).rows).toHaveLength(2)
+    for (const [channel, input] of [
+      ['memory:knewBefore', { secretId: map.recordId, recordId: mara, knew: false }],
+      ['memory:splitTopic', { topicQuoteId: merged }],
+      ['memory:topicNotRight', { recordId: map.recordId }]
+    ] as const) {
+      const refused = await handlerFor(channel)(null, input)
+      expect(refused.ok, channel).toBe(false)
+      if (!refused.ok) expect(refused.error.message).toBe(TRIAL_ENDED_MESSAGE)
+    }
   })
 
   it('opens without v1’s steps: no tag proposals, and the name questions are published instead', async () => {

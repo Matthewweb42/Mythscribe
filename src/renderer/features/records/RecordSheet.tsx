@@ -2,6 +2,8 @@ import { useId, useMemo, useState } from 'react'
 import { ImagePlus, Trash2, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { entityImageUrl } from '@shared/entities'
+import { KNOWER_KINDS } from '@shared/memory/knows'
+import { isTopicKind } from '@shared/memory/topics'
 import {
   CASE_RULES,
   RECORD_ALIAS_MAX,
@@ -22,6 +24,8 @@ import { describeError } from '@renderer/lib/errors'
 import { namedInOf, useNameMentionStore } from './nameMentionStore'
 import { useRecordStore, type AliasesInput } from './recordStore'
 import { FromTheBook } from './FromTheBook'
+import { KnowsSection } from './KnowsSection'
+import { TopicSection } from './TopicSection'
 import { RenameInBook } from './RenameInBook'
 import {
   aliasesInputOf,
@@ -50,7 +54,10 @@ const HEADING = 'm-0 text-xs font-semibold tracking-wide text-fg-muted uppercase
  * that name it, from the local name scan; a click selects the first mention). *Rename in book…*
  * (F-16.13) renames one of its names everywhere the manuscript writes it, with one Undo.
  * **From the book, as of [scene]** (F-16.18) shows what the prose states, each line with ⓘ and
- * *Not right*. Knows, Relationships, Threads and Age arrive with their phases.
+ * *Not right*. F-16.22: a character's or group's **Knows, as of [scene]**; a secret's sheet has
+ * **The secret** in place of From the book, and a secret's or thread's sheet keeps its one label
+ * (no nicknames, Named in, Rename in book or nickname Split; *Same as…* only with its own kind).
+ * Relationships, Threads and Age arrive with their phases.
  */
 export function RecordSheet({ id }: { id: string }): React.JSX.Element | null {
   const record = useRecordStore((s) => s.byId[id])
@@ -60,6 +67,9 @@ export function RecordSheet({ id }: { id: string }): React.JSX.Element | null {
 
 function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
   const assistant = useAssistantName()
+  // P2b-D1, D2: a secret or thread is a topic, not a name: one label, a fixed category, no
+  // nicknames, no Rename in book and no nickname Split (it splits by reveal in its own section).
+  const topic = isTopicKind(record.kind)
   const category = useCategory(record.categoryId)
   const categories = useCategoryStore((s) => s.categories)
   const [busy, setBusy] = useState(false)
@@ -123,7 +133,7 @@ function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
               <select
                 aria-label="Category"
                 value={record.categoryId}
-                disabled={busy}
+                disabled={busy || topic}
                 onChange={(event) =>
                   void run(async () => {
                     await useRecordStore
@@ -152,9 +162,9 @@ function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
           </button>
         </header>
 
-        <Names record={record} busy={busy} run={run} saveNames={saveNames} />
+        {topic ? null : <Names record={record} busy={busy} run={run} saveNames={saveNames} />}
         <SameAsAndSplit record={record} busy={busy} run={run} />
-        <RenameInBook record={record} busy={busy} />
+        {topic ? null : <RenameInBook record={record} busy={busy} />}
 
         <section aria-label="Pinned" className="flex flex-col gap-1">
           <h3 className={HEADING}>Pinned</h3>
@@ -187,10 +197,16 @@ function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
           </div>
         </section>
 
-        {/* F-16.18: what the prose states, as of a scene. */}
-        <FromTheBook recordId={record.id} />
+        {/* F-16.18: what the prose states, as of a scene; F-16.22: a secret's own section. */}
+        {record.kind === 'secret' ? (
+          <TopicSection recordId={record.id} />
+        ) : topic ? null : (
+          <FromTheBook recordId={record.id} />
+        )}
+        {/* F-16.22: what a character or group knows, as of a scene. */}
+        {KNOWER_KINDS.includes(record.kind) ? <KnowsSection recordId={record.id} /> : null}
 
-        <NamedIn record={record} />
+        {topic ? null : <NamedIn record={record} />}
       </div>
     </div>
   )
@@ -492,12 +508,23 @@ function SameAsAndSplit({
   const [mergeId, setMergeId] = useState('')
   const [splitting, setSplitting] = useState<string[]>([])
   const pickId = useId()
+  // P2b: two secrets, or two threads, merge; a topic never merges with a named record.
   const others = useRecordStore(
-    useShallow((s) => s.ids.flatMap((id) => (id === record.id ? [] : (s.byId[id] ?? []))))
+    useShallow((s) =>
+      s.ids.flatMap((id) => {
+        const other = id === record.id ? undefined : s.byId[id]
+        if (other === undefined) return []
+        const sameFamily = isTopicKind(record.kind)
+          ? other.kind === record.kind
+          : !isTopicKind(other.kind)
+        return sameFamily ? [other] : []
+      })
+    )
   )
   const namedIn = useNameMentionStore((s) => s.namedIn)
   const merging = others.find((other) => other.id === mergeId)
   const nicknames = nicknamesOf(record)
+  const topic = isTopicKind(record.kind)
 
   const merge = (): Promise<boolean> =>
     run(async () => {
@@ -537,15 +564,17 @@ function SameAsAndSplit({
         >
           Same as…
         </button>
-        <button
-          type="button"
-          aria-expanded={open === 'split'}
-          disabled={busy || nicknames.length === 0}
-          onClick={() => setOpen(open === 'split' ? null : 'split')}
-          className={BUTTON}
-        >
-          Split…
-        </button>
+        {topic ? null : (
+          <button
+            type="button"
+            aria-expanded={open === 'split'}
+            disabled={busy || nicknames.length === 0}
+            onClick={() => setOpen(open === 'split' ? null : 'split')}
+            className={BUTTON}
+          >
+            Split…
+          </button>
+        )}
       </div>
       {open === 'sameAs' ? (
         <div className="flex flex-col gap-2 rounded-md border border-line p-2 text-sm">

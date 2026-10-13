@@ -1,10 +1,10 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, or, sql } from 'drizzle-orm'
 import { KNOWER_KINDS } from '@shared/memory/knows'
 import type { KnewBeforeInput } from '@shared/memory/whoKnows'
-import { knewBefore } from '../../db/schema'
+import { knewBefore, type KnewBeforeRow } from '../../db/schema'
 import { AppError } from '../../ipc/errors'
 import type { TreeDb } from '../../tree/treeStore'
-import { requireRecord } from '../recordStore'
+import { getRecord, requireRecord } from '../recordStore'
 
 /**
  * *Knew before the book* (F-16.22; design §2.5): the one writer of `knew_before`. Author-owned:
@@ -47,4 +47,25 @@ export function listKnewBefore(db: TreeDb): KnewBeforeInput[] {
     .from(knewBefore)
     .orderBy(asc(knewBefore.created), sql`rowid`)
     .all()
+}
+
+/** The marks of one secret (or of one knower), as stored (*Not a secret*'s snapshot). */
+export function knewBeforeRowsOf(db: TreeDb, recordId: string): KnewBeforeRow[] {
+  return db
+    .select()
+    .from(knewBefore)
+    .where(or(eq(knewBefore.secretId, recordId), eq(knewBefore.recordId, recordId)))
+    .orderBy(asc(knewBefore.created), sql`rowid`)
+    .all()
+}
+
+/**
+ * Puts marks back as they were stored (*Undo* of *Not a secret*), where both records are still
+ * there; one already there stays.
+ */
+export function insertKnewBeforeRows(db: TreeDb, rows: readonly KnewBeforeRow[]): void {
+  for (const row of rows) {
+    if (getRecord(db, row.secretId) === null || getRecord(db, row.recordId) === null) continue
+    db.insert(knewBefore).values(row).onConflictDoNothing().run()
+  }
 }

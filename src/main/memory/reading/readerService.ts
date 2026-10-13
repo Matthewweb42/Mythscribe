@@ -1206,9 +1206,14 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     rebuildAction(action) {
       const db = requireDb()
       const result = applyRebuildAction(db, action, now())
-      if (result.nodeIds.length > 0 || result.recordIds.length > 0) {
-        deps.changed({ nodeIds: result.nodeIds, recordIds: result.recordIds })
+      if (result.nodeIds.length > 0 || result.recordIds.length > 0 || result.topicIds.length > 0) {
+        deps.changed({
+          nodeIds: result.nodeIds,
+          recordIds: [...result.recordIds, ...result.topicIds]
+        })
       }
+      // F-16.22: the secrets and threads *Not right* took away leave the sidebar's lists.
+      if (result.topicIds.length > 0) deps.recordsChanged?.(result.topicIds)
       if (result.names) deps.questions()
       return { changed: result.changed }
     },

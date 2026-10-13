@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { HEALTH_WINDOW } from '@shared/memory/health'
 import { ParaRange, type Reading, type ReadingYields } from '@shared/memory/claims'
@@ -95,6 +95,31 @@ export function insertReading(db: TreeDb, next: NewReading, now: Date): string {
 export function getReading(db: TreeDb, id: string): Reading | null {
   const row = db.select().from(reading).where(eq(reading.id, id)).get()
   return row === undefined ? null : toReading(row)
+}
+
+/**
+ * What ⓘ says of the readings that proved these (F-16.22: a secret's reveals): model, cost and
+ * when, by reading id. A reading that is gone is not in the map.
+ */
+export function readingSummaries(
+  db: TreeDb,
+  ids: readonly string[]
+): Map<string, { model: string; costUsd: number; created: string }> {
+  const wanted = [...new Set(ids)]
+  if (wanted.length === 0) return new Map()
+  return new Map(
+    db
+      .select({
+        id: reading.id,
+        model: reading.model,
+        costUsd: reading.costUsd,
+        created: reading.created
+      })
+      .from(reading)
+      .where(inArray(reading.id, wanted))
+      .all()
+      .map((row) => [row.id, { model: row.model, costUsd: row.costUsd, created: row.created }])
+  )
 }
 
 /** A scene's newest reading in a draft. */

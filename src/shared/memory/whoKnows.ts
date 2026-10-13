@@ -11,6 +11,7 @@ import type {
   SecretView,
   SinceView,
   TensionLine,
+  TopicQuoteReading,
   TopicQuoteView
 } from './views'
 
@@ -52,6 +53,8 @@ export interface TopicQuoteInput {
   label: string
   quote: string
   state: TopicQuoteState
+  /** The reading that proved it, for ⓘ (the views give it; the rules never read it). */
+  reading?: TopicQuoteReading | null
 }
 
 /** A secret record. */
@@ -199,7 +202,8 @@ const quoteView = (quote: TopicQuoteInput, reading: ReadingOrder): TopicQuoteVie
   nodeId: quote.nodeId,
   ref: reading.refs.get(quote.nodeId) ?? '',
   para: quote.para,
-  stale: quote.state === 'stale'
+  stale: quote.state === 'stale',
+  reading: quote.reading ?? null
 })
 
 /** A topic's reveals as of nothing in particular: its defining one and the merged ones, in order. */
@@ -450,6 +454,8 @@ export function sceneSecrets(
         tension.push({
           kind: 'readersKnow',
           secretId: secret.recordId,
+          label: secret.label,
+          since: secret.readersSince,
           recordId: pov,
           stale: secret.knownStale
         })
@@ -472,6 +478,8 @@ export function sceneSecrets(
       tension.push({
         kind: 'hereKnows',
         secretId: secret.recordId,
+        label: secret.label,
+        since: secret.readersSince,
         holderId: holder,
         recordId: without,
         stale: secret.knownStale || cell?.stale === true

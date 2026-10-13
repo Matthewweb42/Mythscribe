@@ -1,9 +1,13 @@
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import type {
   ClaimView,
+  KnowsCellView,
+  KnowsGrid,
   MemoryStatus,
   SceneMemory,
+  SecretView,
   SheetMemory,
+  TopicQuoteView,
   TypedComparisonView
 } from '@shared/memory/views'
 import { setIpcClient } from '@renderer/lib/ipc'
@@ -28,6 +32,7 @@ export function sceneMemoryFixture(nodeId: string, over: Partial<SceneMemory> = 
     unread: 0,
     paused: null,
     claims: [],
+    secrets: { touched: [], tension: [], more: 0, checkedUpTo: null },
     ...over
   }
 }
@@ -65,6 +70,85 @@ export function sheetMemoryFixture(recordId: string, over: Partial<SheetMemory> 
     transient: [],
     accumulating: [],
     others: [],
+    later: 0,
+    knows: null,
+    topic: null,
+    ...over
+  }
+}
+
+/** F-16.22: a knower's line about a secret, as main's views carry it (a claim by default). */
+export function knowsCellFixture(
+  knowerId: string,
+  over: Partial<KnowsCellView> = {}
+): KnowsCellView {
+  return {
+    knowerId,
+    secretId: 's-map',
+    how: 'overheard',
+    fromId: null,
+    source: 'claim',
+    line: 'counts',
+    claimId: `k-${knowerId}`,
+    nodeId: 'sc-1',
+    ref: '1.1',
+    para: 1,
+    voice: 'narration',
+    mode: 'now',
+    speakerId: null,
+    stale: false,
+    later: false,
+    ...over
+  }
+}
+
+/** F-16.22: a secret's reveal. */
+export function topicQuoteFixture(id: string, over: Partial<TopicQuoteView> = {}): TopicQuoteView {
+  return {
+    topicQuoteId: id,
+    role: 'defining',
+    label: 'the sold map',
+    quote: 'Tomas sold the map',
+    nodeId: 'sc-1',
+    ref: '1.1',
+    para: 1,
+    stale: false,
+    reading: { model: 'flash', costUsd: 0.001, created: '2026-10-13T10:00:00.000Z' },
+    ...over
+  }
+}
+
+/** F-16.22: a secret as of a scene, revealed in 1.1 and known by then. */
+export function secretViewFixture(
+  recordId: string,
+  label: string,
+  over: Partial<SecretView> = {}
+): SecretView {
+  return {
+    recordId,
+    label,
+    origin: 'ai',
+    readersSince: { nodeId: 'sc-1', ref: '1.1', stale: false },
+    known: true,
+    knownStale: false,
+    defining: topicQuoteFixture(`tq-${recordId}`, { label }),
+    merged: [],
+    cells: [],
+    others: [],
+    knewBefore: [],
+    touchedIn: ['sc-1'],
+    ...over
+  }
+}
+
+/** F-16.22: the Book's grid. */
+export function knowsGridFixture(over: Partial<KnowsGrid> = {}): KnowsGrid {
+  return {
+    asOf: null,
+    asOfRef: null,
+    checkedUpTo: null,
+    columns: [],
+    rows: [],
     later: 0,
     ...over
   }

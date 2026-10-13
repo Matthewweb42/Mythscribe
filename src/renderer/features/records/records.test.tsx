@@ -12,7 +12,13 @@ import {
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { locateText } from '@renderer/features/editor/locateText'
 import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
-import { sheetMemoryFixture } from '@renderer/features/memory/memoryFixture'
+import {
+  knowsCellFixture,
+  knowsGridFixture,
+  secretViewFixture,
+  sheetMemoryFixture,
+  topicQuoteFixture
+} from '@renderer/features/memory/memoryFixture'
 import { resetMemoryStore } from '@renderer/features/memory/memoryStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -26,6 +32,7 @@ import { GATE_DEBOUNCE_MS, RecordCreateDialog } from './RecordCreateDialog'
 import { recordFixture, withPages } from './recordFixture'
 import { RecordList } from './RecordList'
 import { RecordSheet } from './RecordSheet'
+import { RecordTab } from './RecordTab'
 import { resetRecordStore, useRecordStore } from './recordStore'
 import {
   aliasesInputOf,
@@ -730,5 +737,225 @@ describe('RecordSheet (F-16.6)', () => {
         .getAllByRole('button')
         .map((row) => row.textContent)
     ).toEqual(['Scene 1×3', 'Scene 4×1'])
+  })
+})
+
+describe('sheets of who knows what (F-16.22)', () => {
+  const MAP = recordFixture('s-map', 'secret', ['the sold map'], { origin: 'ai' })
+  const SALE = recordFixture('s-sale', 'secret', ['the map sale'], { origin: 'ai' })
+  const sheetOf = async (id: string): Promise<void> => {
+    await loaded()
+    act(() => useRecordStore.getState().select(id))
+    render(<RecordSheet id={id} />)
+    await waitFor(() => expect(sent('memory:sheet')).toContainEqual({ recordId: id, asOf: null }))
+  }
+  const secretSheet = (recordId: string): unknown =>
+    sheetMemoryFixture(recordId, {
+      topic: {
+        kind: 'secret',
+        secret: secretViewFixture(recordId, 'the sold map', {
+          merged: [
+            topicQuoteFixture('tq-merged', {
+              role: 'merged',
+              label: 'the map sale',
+              quote: 'The map had been sold by Tomas',
+              ref: '1.3'
+            })
+          ],
+          cells: [
+            knowsCellFixture('r-tomas', { how: 'knewBefore' }),
+            knowsCellFixture('r-mara', { source: 'author', claimId: null, how: 'knewBefore' }),
+            knowsCellFixture('r-ella', { later: true, ref: '1.4' })
+          ],
+          knewBefore: ['r-mara']
+        })
+      }
+    })
+
+  function installSecrets(overrides: Partial<Record<Channel, Handler>> = {}): void {
+    install({
+      'record:list': () => [ELLA, MAP, MARA, QUAY, SALE, TOMAS],
+      'record:get': (input) => {
+        const { id } = input as Input<'record:get'>
+        return withPages([MAP, SALE, MARA].find((record) => record.id === id) ?? MARA)
+      },
+      'memory:sheet': (input) => {
+        const { recordId, asOf } = input as Input<'memory:sheet'>
+        if (recordId === 's-map') return secretSheet(recordId)
+        return sheetMemoryFixture(recordId, {
+          asOf,
+          knows: {
+            lines: [
+              {
+                secretId: 's-map',
+                label: 'the sold map',
+                cell: knowsCellFixture('r-mara', { fromId: 'r-tomas' })
+              },
+              {
+                secretId: 's-debts',
+                label: 'the debts',
+                cell: knowsCellFixture('r-mara', {
+                  source: 'author',
+                  claimId: null,
+                  how: 'knewBefore',
+                  secretId: 's-debts'
+                })
+              },
+              {
+                secretId: 's-will',
+                label: 'the will',
+                cell: knowsCellFixture('r-mara', { how: 'suspects', line: 'partial' })
+              }
+            ],
+            others: [
+              {
+                secretId: 's-map',
+                label: 'the sold map',
+                cell: knowsCellFixture('r-mara', {
+                  claimId: 'k-rumour',
+                  voice: 'rumour',
+                  line: 'other'
+                })
+              }
+            ],
+            later: 2
+          }
+        })
+      },
+      'memory:splitTopic': () => ({ recordId: 's-new', dismissed: TOMBSTONE }),
+      'memory:topicNotRight': () => ({ dismissed: [TOMBSTONE] }),
+      'memory:knewBefore': () => ({ changed: true }),
+      ...overrides
+    })
+  }
+  const TOMBSTONE = {
+    id: 'd-split',
+    kind: 'split' as const,
+    key: 's-map|s-new',
+    recordId: 's-map',
+    nodeId: null,
+    label: 'the sold map and the map sale are different',
+    quote: null,
+    created: '2026-10-13T10:00:00.000Z'
+  }
+
+  it('gives a secret The secret in place of From the book, with no nicknames or Rename in book', async () => {
+    installSecrets()
+    await sheetOf('s-map')
+    const section = await screen.findByRole('region', { name: 'The secret' })
+    expect(screen.queryByRole('region', { name: 'From the book' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Names' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Rename in book/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Split…' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Knows' })).toBeNull()
+    expect(screen.getByRole('combobox', { name: 'Category' })).toBeDisabled()
+    expect(within(section).getByTestId('topic-readers-since')).toHaveTextContent(
+      'readers since 1.1'
+    )
+    const who = within(section).getByRole('group', { name: 'Who knows it' })
+    expect(within(who).getByTestId('claim-line')).toHaveTextContent(
+      'Tomas Harrow: knew before (1.1)'
+    )
+    expect(who).toHaveTextContent('Mara Vell: knew before the book (you said)')
+    expect(who).toHaveTextContent('1 more learns it later in the book')
+    // Same as… offers only other secrets.
+    fireEvent.click(screen.getByRole('button', { name: 'Same as…' }))
+    expect(
+      within(screen.getByRole('combobox', { name: 'Which record is the same as the sold map?' }))
+        .getAllByRole('option')
+        .map((option) => option.textContent)
+    ).toEqual(['Pick a record', 'the map sale'])
+  })
+
+  it('splits a merged reveal, says Not a secret, and marks someone who knew before the book', async () => {
+    installSecrets()
+    await sheetOf('s-map')
+    const section = await screen.findByRole('region', { name: 'The secret' })
+    expect(within(section).getAllByTestId('topic-reveal')[1]).toHaveTextContent(
+      'also read as “the map sale” in 1.3: judged the same by a second AI read'
+    )
+    fireEvent.click(within(section).getByRole('button', { name: 'Split “the map sale” off' }))
+    await waitFor(() => expect(sent('memory:splitTopic')).toEqual([{ topicQuoteId: 'tq-merged' }]))
+    fireEvent.click(within(section).getByRole('button', { name: 'Not a secret' }))
+    await waitFor(() => expect(sent('memory:topicNotRight')).toEqual([{ recordId: 's-map' }]))
+    fireEvent.click(within(section).getByRole('button', { name: '+ Someone knew before the book' }))
+    const pick = within(section).getByRole('combobox', { name: 'Knew it before the book:' })
+    // Mara is marked already; only characters and groups are offered.
+    expect(
+      within(pick)
+        .getAllByRole('option')
+        .map((option) => option.textContent)
+    ).toEqual(['Choose…', 'Ella Harrow', 'Tomas Harrow'])
+    fireEvent.change(pick, { target: { value: 'r-ella' } })
+    fireEvent.click(within(section).getByRole('button', { name: 'Add' }))
+    await waitFor(() =>
+      expect(sent('memory:knewBefore')).toEqual([
+        { secretId: 's-map', recordId: 'r-ella', knew: true }
+      ])
+    )
+    // The author's own mark is removed from the list of who knows it.
+    fireEvent.click(within(section).getByRole('button', { name: 'Remove' }))
+    await waitFor(() =>
+      expect(sent('memory:knewBefore')).toContainEqual({
+        secretId: 's-map',
+        recordId: 'r-mara',
+        knew: false
+      })
+    )
+  })
+
+  it('gives a character Knows, as of a scene: lines, her marks with Remove, others apart, later', async () => {
+    installSecrets()
+    await sheetOf('r-mara')
+    const knows = await screen.findByRole('region', { name: 'Knows' })
+    await waitFor(() => expect(within(knows).getAllByTestId('claim-line').length).toBe(3))
+    const [map, will, rumour] = within(knows).getAllByTestId('claim-line')
+    expect(map).toHaveTextContent('the sold map: overheard from Tomas Harrow')
+    expect(map).toHaveTextContent('1.1')
+    expect(will).toHaveTextContent('the will: suspects')
+    expect(rumour).toHaveTextContent('the sold map: as rumour (overheard)')
+    expect(within(knows).getByRole('group', { name: 'Not counted as knowing' })).toContainElement(
+      rumour ?? null
+    )
+    expect(knows).toHaveTextContent('the debts: knew before the book (you said)')
+    expect(within(knows).getByTestId('knows-later-lines')).toHaveTextContent(
+      '2 more later in the book'
+    )
+    fireEvent.click(within(knows).getByRole('button', { name: 'Remove' }))
+    await waitFor(() =>
+      expect(sent('memory:knewBefore')).toEqual([
+        { secretId: 's-debts', recordId: 'r-mara', knew: false }
+      ])
+    )
+    // Not about on a knows line offers only characters and groups.
+    fireEvent.click(within(map!).getByRole('button', { name: 'Not right' }))
+    fireEvent.click(within(map!).getByRole('button', { name: 'Not about Mara Vell' }))
+    expect(
+      within(within(map!).getByRole('combobox'))
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['Choose…', 'Ella Harrow', 'Tomas Harrow'])
+  })
+
+  it('lists the Secrets section with "readers since · N know", the AI mark, and New secret', async () => {
+    installSecrets({
+      'memory:knows': () =>
+        knowsGridFixture({
+          rows: [
+            secretViewFixture('s-map', 'the sold map', {
+              cells: [knowsCellFixture('r-tomas'), knowsCellFixture('r-ella')]
+            })
+          ]
+        })
+    })
+    await loaded()
+    render(<RecordTab categoryId="secret" />)
+    const list = await screen.findByRole('list', { name: 'Secrets' })
+    const map = within(list).getByRole('button', { name: /^the sold map/ })
+    await waitFor(() => expect(map).toHaveTextContent('readers since 1.1 · 2 know'))
+    expect(within(map).getByTitle('Found by the AI in your book')).toHaveTextContent('AI')
+    expect(sent('memory:knows')).toEqual([{ asOf: null }])
+    fireEvent.click(screen.getByRole('button', { name: 'New secret…' }))
+    expect(useRecordStore.getState().creating).toBe('secret')
   })
 })

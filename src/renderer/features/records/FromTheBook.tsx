@@ -1,10 +1,9 @@
-import { useId, useMemo, useState } from 'react'
 import type { SheetLineView, SheetMemory } from '@shared/memory/views'
-import { isManuscriptDocument, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { ClaimLine } from '@renderer/features/memory/ClaimLine'
 import { useMemoryStore, useSheetMemory } from '@renderer/features/memory/memoryStore'
 import { lineText, otherLineText, staleNote } from '@renderer/features/memory/memoryView'
-import { listOutline } from '@renderer/features/outline/outlineRows'
+import { AsOfPicker } from './AsOfPicker'
+import { useAsOf } from './asOf'
 import { useRecordStore } from './recordStore'
 
 const HEADING = 'm-0 text-xs font-semibold tracking-wide text-fg-muted uppercase'
@@ -35,47 +34,13 @@ function noteOf(group: (typeof GROUPS)[number]['key'], line: SheetLineView): str
  * main (`memory:sheet`), again when a reading names the record.
  */
 export function FromTheBook({ recordId }: { recordId: string }): React.JSX.Element {
-  const pickId = useId()
-  const open = useTreeStore((s) =>
-    s.selectedId !== null && isManuscriptDocument(s, s.selectedId) ? s.selectedId : null
-  )
-  const [asOf, setAsOf] = useState<string | null>(open)
-  const rootIds = useTreeStore((s) => s.rootIds)
-  const childrenOf = useTreeStore((s) => s.childrenOf)
-  const sectionOf = useTreeStore((s) => s.sectionOf)
-  const byId = useTreeStore((s) => s.byId)
-  const scenes = useMemo(
-    () =>
-      listOutline(rootIds, childrenOf, sectionOf).flatMap(({ id }) => {
-        const node = byId[id]
-        return node !== undefined && isManuscriptDocument({ byId, sectionOf }, id)
-          ? [{ id, title: node.title.trim() === '' ? 'Untitled scene' : node.title }]
-          : []
-      }),
-    [rootIds, childrenOf, sectionOf, byId]
-  )
-  const picked = asOf !== null && scenes.some((scene) => scene.id === asOf) ? asOf : null
-  const sheet = useSheetMemory(recordId, picked)
+  const { asOf, scenes, setAsOf } = useAsOf()
+  const sheet = useSheetMemory(recordId, asOf)
   return (
     <section aria-label="From the book" className="flex flex-col gap-1" data-testid="from-the-book">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className={HEADING}>From the book</h3>
-        <label htmlFor={pickId} className="text-xs text-fg-muted">
-          as of
-        </label>
-        <select
-          id={pickId}
-          value={picked ?? ''}
-          onChange={(event) => setAsOf(event.target.value === '' ? null : event.target.value)}
-          className="max-w-56 min-w-0 rounded-md border border-line bg-bg px-1 py-0.5 text-xs"
-        >
-          <option value="">the end of the book</option>
-          {scenes.map((scene) => (
-            <option key={scene.id} value={scene.id}>
-              {scene.title}
-            </option>
-          ))}
-        </select>
+        <AsOfPicker scenes={scenes} value={asOf} onChange={setAsOf} />
       </div>
       {sheet === undefined ? (
         <p className="m-0 text-xs text-fg-muted">Reading…</p>

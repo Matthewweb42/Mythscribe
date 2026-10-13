@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { ArrowDown, ArrowUp, ScanEye, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import type { FiledConflict } from '@shared/filing'
@@ -31,11 +31,16 @@ import {
   typedNote
 } from '@renderer/features/memory/memoryView'
 import { CardValueInfo } from '@renderer/features/memory/CardValue'
+import { KnowsGrid } from '@renderer/features/memory/knows/KnowsGrid'
+import { WhoKnowsWhat } from '@renderer/features/memory/knows/WhoKnowsWhat'
 import { RebuildMemory } from '@renderer/features/memory/RebuildMemory'
 import { useNow } from '@renderer/features/memory/useNow'
 import { openPassage } from '@renderer/features/editor/openPassage'
 import { locateText } from '@renderer/features/editor/locateText'
+import { AsOfPicker } from '@renderer/features/records/AsOfPicker'
+import { useAsOf } from '@renderer/features/records/asOf'
 import { sceneCounts, useNameMentionStore } from '@renderer/features/records/nameMentionStore'
+import { openRecordSheet } from '@renderer/features/records/openRecord'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 import { namedInLabel } from '@renderer/features/records/recordView'
 import { RenameInBook } from '@renderer/features/records/RenameInBook'
@@ -106,8 +111,11 @@ export function ThisSceneToggleButton(): React.JSX.Element {
  * over a typed one that differs and "you typed: Tomas" dimmed; characters on the page, each saying
  * where; *+ also here*), *Mentioned* (the local name scan's chips, each saying why it is there,
  * with *Go there* and *Not a mention*; an ambiguous span dimmed; headed *Named in this scene*
- * until the scene has a card, P2a-D21), **True now** and **Needs a look** (its reading notices and
- * the typed-detail conflicts among them). **Book**: the Cast and *Rebuild memory*. The footer:
+ * until the scene has a card, P2a-D21), **True now**, **Who knows what** (F-16.22: the secrets the
+ * scene touches, their holders Here, the scoped "No scene shows …" lines and the tension lines, with
+ * "+ N more in Book") and **Needs a look** (its reading notices and the typed-detail conflicts
+ * among them). **Book**: *As of [scene ▾]*, the Cast, the who-knows-what grid and *Rebuild
+ * memory*. The footer:
  * "Read 3 min ago · Read now · today 0.3¢ · Cloud 12¢ of $1 · Dismissed (n)". `id` is the open
  * manuscript scene, or null.
  */
@@ -127,6 +135,12 @@ export function ThisSceneColumn({ id }: { id: string | null }): React.JSX.Elemen
 
 export function ThisScenePanel({ sceneId }: { sceneId: string | null }): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('scene')
+  // F-16.22: "+ N more in Book" opens the Book tab at the who-knows-what grid.
+  const [toGrid, setToGrid] = useState(false)
+  const openBook = (): void => {
+    setToGrid(true)
+    setTab('book')
+  }
   const panelId = useId()
   const tabs: { id: Tab; label: string }[] = [
     { id: 'scene', label: 'This scene' },
@@ -145,7 +159,10 @@ export function ThisScenePanel({ sceneId }: { sceneId: string | null }): React.J
               id={`${panelId}-${each.id}`}
               aria-selected={tab === each.id}
               aria-controls={panelId}
-              onClick={() => setTab(each.id)}
+              onClick={() => {
+                setToGrid(false)
+                setTab(each.id)
+              }}
               className="rounded-md px-2 py-0.5 text-sm text-fg-muted hover:text-fg aria-selected:bg-surface-raised aria-selected:font-medium aria-selected:text-fg"
             >
               {each.label}
@@ -159,14 +176,24 @@ export function ThisScenePanel({ sceneId }: { sceneId: string | null }): React.J
         aria-labelledby={`${panelId}-${tab}`}
         className="min-h-0 flex-1 overflow-y-auto px-3 pb-3"
       >
-        {tab === 'scene' ? <SceneTab sceneId={sceneId} /> : <BookTab />}
+        {tab === 'scene' ? (
+          <SceneTab sceneId={sceneId} onOpenBook={openBook} />
+        ) : (
+          <BookTab key={sceneId ?? ''} sceneId={sceneId} toGrid={toGrid} />
+        )}
       </div>
       <PanelFooter sceneId={sceneId} />
     </>
   )
 }
 
-function SceneTab({ sceneId }: { sceneId: string | null }): React.JSX.Element {
+function SceneTab({
+  sceneId,
+  onOpenBook
+}: {
+  sceneId: string | null
+  onOpenBook: () => void
+}): React.JSX.Element {
   const memory = useSceneMemory(sceneId)
   // P2a-D21: Here and Mentioned once the scene has a card; until then the AI-off form.
   const read = memory?.card !== null && memory?.card !== undefined
@@ -184,6 +211,7 @@ function SceneTab({ sceneId }: { sceneId: string | null }): React.JSX.Element {
             heading={read ? 'Mentioned' : 'Named in this scene'}
           />
           {memory === undefined ? null : <TrueNow entry={memory} />}
+          {memory === undefined ? null : <WhoKnowsWhat entry={memory} onOpenBook={onOpenBook} />}
         </>
       )}
       <NeedsALook sceneId={sceneId} />
@@ -820,20 +848,32 @@ function QuestionList({ questions }: { questions: NameQuestion[] }): React.JSX.E
   )
 }
 
-/** The Book tab: the Cast, a view of the Characters category, most-named first; *Rebuild memory*. */
-function BookTab(): React.JSX.Element {
+/**
+ * The Book tab: **As of [scene ▾]** (the open scene by default), the Cast (a view of the Characters
+ * category, most-named first), **Who knows what** as of that scene (F-16.22) and *Rebuild memory*.
+ * `toGrid`: opened from "+ N more in Book", so the grid is scrolled into view.
+ */
+function BookTab({
+  sceneId,
+  toGrid
+}: {
+  sceneId: string | null
+  toGrid: boolean
+}): React.JSX.Element {
   const headingId = useId()
+  const gridRef = useRef<HTMLDivElement>(null)
   const records = useRecordStore(useShallow((s) => s.ids.flatMap((id) => s.byId[id] ?? [])))
   const scenes = useNameMentionStore(useShallow((s) => sceneCounts(s.namedIn)))
   const cast = castOf(records, scenes)
-  const open = (recordId: string, categoryId: string): void => {
-    useRecordStore.getState().select(recordId)
-    const layout = useLayoutStore.getState()
-    layout.setSidebarTab(categoryId)
-    if (!layout.layout.sidebar.open) layout.toggle('sidebar')
-  }
+  const asOf = useAsOf(sceneId)
+  useEffect(() => {
+    if (toGrid) gridRef.current?.scrollIntoView?.({ block: 'start' })
+  }, [toGrid])
   return (
     <>
+      <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="book-as-of">
+        <AsOfPicker scenes={asOf.scenes} value={asOf.asOf} onChange={asOf.setAsOf} />
+      </div>
       <section aria-labelledby={headingId}>
         <h3 id={headingId} className={HEADING}>
           Cast
@@ -846,7 +886,7 @@ function BookTab(): React.JSX.Element {
               <li key={record.id}>
                 <button
                   type="button"
-                  onClick={() => open(record.id, record.categoryId)}
+                  onClick={() => openRecordSheet(record.id, record.categoryId)}
                   className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1 py-0.5 text-left text-sm hover:bg-surface-raised"
                 >
                   <span className="min-w-0 flex-1 truncate">{record.name}</span>
@@ -859,6 +899,9 @@ function BookTab(): React.JSX.Element {
           </ul>
         )}
       </section>
+      <div ref={gridRef}>
+        <KnowsGrid asOf={asOf.asOf} />
+      </div>
       <RebuildMemory />
     </>
   )

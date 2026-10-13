@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import type {
   CardNotRight,
   ClaimView,
+  KnowsGrid,
   MemoryNotice,
   MemoryNoticeAction,
   MemoryStatus,
@@ -33,6 +34,11 @@ import { ipc } from '@renderer/lib/ipc'
  * and pushes the status and the notices whole. F-16.20: the active draft's card lines by scene
  * (`cardLines`, what the Outline and the cork board show in grey), read on open and again when a
  * reading moved a scene. Loaded on a v2 open; reset in tests.
+ *
+ * F-16.22: the Book's who-knows-what grids by as-of scene (`knows`, `useKnowsGrid`), read while
+ * shown like the sheets and read again on any `memory:changed` (a reading, a knew-before mark,
+ * *Split*, *Not a secret*), and the author's answers on secrets: *Knew before the book* and its
+ * *Remove*, *Split*, *Not a secret* (their Dismissed rows join the list at once).
  */
 
 /** A scene's memory as stored here: its lines by id. */
@@ -43,6 +49,8 @@ interface MemoryState {
   scenes: Record<string, SceneEntry>
   /** By `sheetKey(recordId, asOf)`. */
   sheets: Record<string, SheetMemory>
+  /** F-16.22: the who-knows-what grids, by `knowsKey(asOf)`. */
+  knows: Record<string, KnowsGrid>
   status: MemoryStatus | null
   notices: MemoryNotice[]
   /** F-16.20: each scene's card line (the AI's one-line map of it), by node. */
@@ -58,9 +66,20 @@ interface MemoryState {
   loadCardLines: () => Promise<void>
   loadScene: (nodeId: string) => Promise<void>
   loadSheet: (recordId: string, asOf: string | null) => Promise<void>
+  loadKnows: (asOf: string | null) => Promise<void>
   /** Counts a view showing the scene and reads it; answers the release. */
   watchScene: (nodeId: string) => () => void
   watchSheet: (recordId: string, asOf: string | null) => () => void
+  watchKnows: (asOf: string | null) => () => void
+  /**
+   * F-16.22: *Knew before the book* (`knew: true`) or its *Remove*; main's `memory:changed` reads
+   * the grids, scenes and sheets again. Answers whether main took it.
+   */
+  knewBefore: (secretId: string, recordId: string, knew: boolean) => Promise<boolean>
+  /** F-16.22: *Split* on a merged reveal; answers the new secret's or thread's id, or null. */
+  splitTopic: (topicQuoteId: string) => Promise<string | null>
+  /** F-16.22: *Not a secret* / *Not a thread* on an AI-made topic; answers whether it went. */
+  topicNotRight: (recordId: string) => Promise<boolean>
   /**
    * *Read now* (F-16.16): pending saves flushed first, then the scene read ahead of the queue.
    * Answers main's result, or null when the call itself failed (toasted).
@@ -83,11 +102,15 @@ interface MemoryState {
 export const sheetKey = (recordId: string, asOf: string | null): string =>
   `${recordId}|${asOf ?? ''}`
 
+/** A grid's key: its as-of scene, or the end of the book. */
+export const knowsKey = (asOf: string | null): string => asOf ?? ''
+
 let generation = 0
 let counter = 0
 const nextRequestId = (): string => `mem-${Date.now().toString(36)}-${++counter}`
 const sceneWatchers = new Map<string, number>()
 const sheetWatchers = new Map<string, { recordId: string; asOf: string | null; count: number }>()
+const knowsWatchers = new Map<string, { asOf: string | null; count: number }>()
 let unsubscribers: (() => void)[] = []
 
 const report = (err: unknown): void => {
@@ -110,12 +133,19 @@ function withoutLine(sheet: SheetMemory, claimId: string): SheetMemory {
   }
 }
 
-/** Whether a shown scene's memory names any of these records. */
+/** Whether a shown scene's memory names any of these records (its secrets and holders too). */
 function namesAny(entry: SceneEntry, recordIds: ReadonlySet<string>): boolean {
   return (
     entry.here.some((chip) => recordIds.has(chip.recordId)) ||
     entry.mentioned.some((chip) => recordIds.has(chip.recordId)) ||
-    entry.trueNow.some((line) => recordIds.has(line.recordId))
+    entry.trueNow.some((line) => recordIds.has(line.recordId)) ||
+    entry.secrets.touched.some(
+      ({ secret }) =>
+        recordIds.has(secret.recordId) || secret.cells.some((cell) => recordIds.has(cell.knowerId))
+    ) ||
+    entry.secrets.tension.some(
+      (line) => recordIds.has(line.secretId) || recordIds.has(line.recordId)
+    )
   )
 }
 
@@ -131,12 +161,15 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
     for (const sheet of sheetWatchers.values()) {
       if (sheets(sheet.recordId)) get().loadSheet(sheet.recordId, sheet.asOf).catch(report)
     }
+    // The grids hold every secret and knower: any change may move them.
+    for (const grid of knowsWatchers.values()) get().loadKnows(grid.asOf).catch(report)
   }
 
   return {
     claims: {},
     scenes: {},
     sheets: {},
+    knows: {},
     status: null,
     notices: [],
     cardLines: {},
@@ -184,6 +217,14 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
       set({ sheets: { ...get().sheets, [key]: sheet } })
     },
 
+    async loadKnows(asOf) {
+      const mine = generation
+      const key = knowsKey(asOf)
+      const grid = await ipc().invoke('memory:knows', { asOf })
+      if (mine !== generation || !knowsWatchers.has(key)) return
+      set({ knows: { ...get().knows, [key]: grid } })
+    },
+
     watchScene(nodeId) {
       sceneWatchers.set(nodeId, (sceneWatchers.get(nodeId) ?? 0) + 1)
       if (sceneWatchers.get(nodeId) === 1) get().loadScene(nodeId).catch(report)
@@ -225,6 +266,63 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         const sheets = { ...get().sheets }
         delete sheets[key]
         set({ sheets })
+      }
+    },
+
+    watchKnows(asOf) {
+      const key = knowsKey(asOf)
+      const was = knowsWatchers.get(key)
+      knowsWatchers.set(key, { asOf, count: (was?.count ?? 0) + 1 })
+      if (was === undefined) get().loadKnows(asOf).catch(report)
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        const entry = knowsWatchers.get(key)
+        if (entry !== undefined && entry.count > 1) {
+          knowsWatchers.set(key, { ...entry, count: entry.count - 1 })
+          return
+        }
+        knowsWatchers.delete(key)
+        const knows = { ...get().knows }
+        delete knows[key]
+        set({ knows })
+      }
+    },
+
+    async knewBefore(secretId, recordId, knew) {
+      try {
+        await ipc().invoke('memory:knewBefore', { secretId, recordId, knew })
+        return true
+      } catch (err) {
+        report(err)
+        return false
+      }
+    },
+
+    async splitTopic(topicQuoteId) {
+      const mine = generation
+      try {
+        const result = await ipc().invoke('memory:splitTopic', { topicQuoteId })
+        if (mine === generation) useDismissedStore.getState().add(result.dismissed)
+        return result.recordId
+      } catch (err) {
+        report(err)
+        return null
+      }
+    },
+
+    async topicNotRight(recordId) {
+      const mine = generation
+      try {
+        const result = await ipc().invoke('memory:topicNotRight', { recordId })
+        if (mine === generation) {
+          for (const row of result.dismissed) useDismissedStore.getState().add(row)
+        }
+        return true
+      } catch (err) {
+        report(err)
+        return false
       }
     },
 
@@ -341,10 +439,12 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
       generation++
       sceneWatchers.clear()
       sheetWatchers.clear()
+      knowsWatchers.clear()
       set({
         claims: {},
         scenes: {},
         sheets: {},
+        knows: {},
         status: null,
         notices: [],
         cardLines: {},
@@ -374,4 +474,10 @@ export function useSceneMemory(nodeId: string | null): SceneEntry | undefined {
 export function useSheetMemory(recordId: string, asOf: string | null): SheetMemory | undefined {
   useEffect(() => useMemoryStore.getState().watchSheet(recordId, asOf), [recordId, asOf])
   return useMemoryStore((s) => s.sheets[sheetKey(recordId, asOf)])
+}
+
+/** F-16.22: the who-knows-what grid as of a scene (null: the end of the book) while shown. */
+export function useKnowsGrid(asOf: string | null): KnowsGrid | undefined {
+  useEffect(() => useMemoryStore.getState().watchKnows(asOf), [asOf])
+  return useMemoryStore((s) => s.knows[knowsKey(asOf)])
 }

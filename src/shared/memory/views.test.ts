@@ -30,7 +30,8 @@ describe('the reading views (F-16.18)', () => {
         lastRead: null,
         unread: 3,
         paused: null,
-        claims: []
+        claims: [],
+        secrets: { touched: [], tension: [], more: 0, checkedUpTo: null }
       }).success
     ).toBe(true)
     expect(
@@ -43,7 +44,9 @@ describe('the reading views (F-16.18)', () => {
         transient: [],
         accumulating: [],
         others: [],
-        later: 0
+        later: 0,
+        knows: { lines: [], others: [], later: 2 },
+        topic: null
       }).success
     ).toBe(true)
   })

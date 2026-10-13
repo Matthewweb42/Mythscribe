@@ -18,7 +18,13 @@ import {
   resetNameMentionStore,
   useNameMentionStore
 } from '@renderer/features/records/nameMentionStore'
-import { memoryStatusFixture, sceneMemoryFixture } from '@renderer/features/memory/memoryFixture'
+import {
+  knowsCellFixture,
+  knowsGridFixture,
+  memoryStatusFixture,
+  sceneMemoryFixture,
+  secretViewFixture
+} from '@renderer/features/memory/memoryFixture'
 import { resetMemoryStore, useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { recordFixture } from '@renderer/features/records/recordFixture'
 import { resetRecordStore, useRecordStore } from '@renderer/features/records/recordStore'
@@ -175,6 +181,11 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
         // F-16.20: the card lines the memory store reads with the status and the notices.
         case 'memory:cardLines':
           return {} as Output<C>
+        // F-16.22: the Book tab's who-knows-what grid, empty until a test says otherwise.
+        case 'memory:knows':
+          return knowsGridFixture({
+            asOf: (input as Input<'memory:knows'>).asOf
+          }) as Output<C>
         default:
           throw new Error(`unexpected ${channel}`)
       }
@@ -873,5 +884,145 @@ describe('the reading in the panel (F-16.18, F-16.16, F-16.19)', () => {
       'The text changed since: this is looked at again once the scene is read.'
     )
     expect(screen.queryByRole('group', { name: 'Conflicts' })).toBeNull()
+  })
+})
+
+describe('Who knows what in the panel (F-16.22)', () => {
+  /** Scene 1.1: Mara (POV), Ella and Tomas on the page; Ella overheard Tomas, who knew before. */
+  const touched = (): SceneMemory =>
+    sceneMemoryFixture('sc-1', {
+      card: {
+        line: 'Tomas sells the map.',
+        gist: 'Tomas sells the map.',
+        fields: {
+          where: null,
+          when: null,
+          pov: null,
+          year: null,
+          flashback: null,
+          elapsed: null
+        },
+        stale: [],
+        mood: null,
+        theme: null,
+        readingId: 'rd-1',
+        created: '2026-10-13T10:00:00.000Z'
+      },
+      here: [
+        { recordId: 'r-mara', why: 'pov', quote: null, p: null, typedPov: null },
+        { recordId: 'r-ella', why: 'onPage', quote: 'Ella heard', p: 1, typedPov: null },
+        { recordId: 'r-tomas', why: 'onPage', quote: 'Tomas sold', p: 0, typedPov: null }
+      ],
+      secrets: {
+        touched: [
+          {
+            secret: secretViewFixture('s-map', 'the sold map', {
+              cells: [
+                knowsCellFixture('r-tomas', { how: 'knewBefore' }),
+                knowsCellFixture('r-ella', { fromId: 'r-tomas' }),
+                // Not Here: not a holder line in this scene.
+                knowsCellFixture('r-quay', { how: 'saw' })
+              ]
+            }),
+            without: ['r-mara']
+          }
+        ],
+        tension: [],
+        more: 0,
+        checkedUpTo: { nodeId: 'sc-1', ref: '1.1' }
+      }
+    })
+
+  it('shows the secret, its holders Here with ⓘ, and the muted scoped line for Mara', async () => {
+    install({
+      'memory:scene': () => touched(),
+      'memory:topicNotRight': () => ({ dismissed: [tombstone('d-topic', 'Not a secret')] })
+    })
+    await open()
+    const section = await screen.findByRole('region', { name: 'Who knows what' })
+    const secret = within(section).getByRole('group', { name: 'Who knows the sold map' })
+    expect(within(secret).getByTestId('readers-since')).toHaveTextContent('readers since 1.1')
+    expect(
+      within(secret)
+        .getAllByTestId('claim-line')
+        .map((line) => line.firstChild?.textContent)
+    ).toEqual(['Tomas Harrow: knew before (1.1)', 'Ella Harrow: overheard from Tomas Harrow (1.1)'])
+    expect(within(secret).getByTestId('absence-line')).toHaveTextContent(
+      'No scene shows Mara Vell learning this (checked up to 1.1)'
+    )
+    expect(within(secret).queryByText(/North Quay/)).toBeNull()
+    // ⓘ on the secret: its reveal, how it was checked, and Not a secret.
+    fireEvent.click(
+      within(secret).getByRole('button', { name: 'Where this comes from: the sold map' })
+    )
+    const info = within(secret).getByTestId('topic-info')
+    expect(info).toHaveTextContent('Tomas sold the map')
+    expect(info).toHaveTextContent('checked by a second AI read')
+    fireEvent.click(within(info).getByRole('button', { name: 'Not a secret' }))
+    await waitFor(() => expect(sent('memory:topicNotRight')).toEqual([{ recordId: 's-map' }]))
+    await waitFor(() =>
+      expect(useDismissedStore.getState().items.map((row) => row.id)).toContain('d-topic')
+    )
+  })
+
+  it('shows tension lines and "+ N more in Book", which opens the grid as of the scene', async () => {
+    const since = { nodeId: 'sc-1', ref: '1.1', stale: false }
+    install({
+      'memory:scene': () =>
+        sceneMemoryFixture('sc-1', {
+          here: [{ recordId: 'r-mara', why: 'pov', quote: null, p: null, typedPov: null }],
+          secrets: {
+            touched: [],
+            tension: [
+              {
+                kind: 'readersKnow',
+                secretId: 's-map',
+                label: 'the sold map',
+                since,
+                recordId: 'r-mara',
+                stale: false
+              },
+              {
+                kind: 'hereKnows',
+                secretId: 's-debts',
+                label: 'the debts',
+                since,
+                holderId: 'r-tomas',
+                recordId: 'r-mara',
+                stale: true
+              }
+            ],
+            more: 2,
+            checkedUpTo: { nodeId: 'sc-1', ref: '1.2' }
+          }
+        })
+    })
+    await open()
+    const section = await screen.findByRole('region', { name: 'Who knows what' })
+    const lines = within(section).getAllByTestId('tension-line')
+    expect(lines.map((line) => line.textContent)).toEqual([
+      'Readers know the sold map (since 1.1); no scene shows Mara Vell (POV) learning it (checked up to 1.2)',
+      'Tomas Harrow knows the debts; no scene shows Mara Vell learning it (checked up to 1.2)'
+    ])
+    expect(lines[1]).toHaveAttribute('data-stale', 'true')
+    fireEvent.click(within(section).getByRole('button', { name: '+ 2 more in Book' }))
+    expect(screen.getByRole('tab', { name: 'Book' })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByRole('region', { name: 'Who knows what' })).toHaveAttribute(
+      'data-testid',
+      'knows-grid'
+    )
+    expect(sent('memory:knows')).toEqual([{ asOf: 'sc-1' }])
+  })
+
+  it('shows nothing when the scene touches no secret and has no tension', async () => {
+    install({
+      'memory:scene': () =>
+        sceneMemoryFixture('sc-1', {
+          secrets: { touched: [], tension: [], more: 4, checkedUpTo: null }
+        })
+    })
+    await open()
+    await waitFor(() => expect(sent('memory:scene')).toHaveLength(1))
+    expect(screen.queryByRole('region', { name: 'Who knows what' })).toBeNull()
   })
 })

@@ -27,6 +27,7 @@ import { usePlanLinksStore } from './planLinksStore'
 import { AiSummaryLine, StatusDot } from './status'
 import { useStructureStore } from './structureStore'
 import { ThreadBoard } from './ThreadsView'
+import { AiMark } from '@renderer/features/ai/AiMark'
 
 /** F-11.1d: a planned row reads as a plan (dashed, muted); written rows are solid. */
 const PROGRESS_CLASS: Record<SceneProgress, string> = {
@@ -298,15 +299,6 @@ function beatName(link: PlanLinkSuggestion): string {
   if (link.plan.kind !== 'beat') return ''
   const { template, beatId } = link.plan
   return templateBeats(template).find((beat) => beat.id === beatId)?.name ?? beatId
-}
-
-/** The small "AI" mark on a link the job applied itself (CLAUDE.md, AI rule 1). */
-function AiMark({ title }: { title: string }): React.JSX.Element {
-  return (
-    <span title={title} className="rounded border border-line px-0.5 text-[10px] font-medium">
-      AI
-    </span>
-  )
 }
 
 /**

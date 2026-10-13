@@ -596,6 +596,48 @@ export function pruneTopics(db: TreeDb): string[] {
   return ids
 }
 
+/** A secret's or thread's stored rows (its record and its names): what *Not a secret* keeps. */
+export function topicRecordRows(
+  db: TreeDb,
+  id: string
+): { record: RecordRow; aliases: AliasRow[] } | null {
+  const row = db.select().from(record).where(eq(record.id, id)).get()
+  if (row === undefined || !isTopicCategory(row.categoryId)) return null
+  return {
+    record: row,
+    aliases: db.select().from(alias).where(eq(alias.recordId, id)).orderBy(asc(alias.created)).all()
+  }
+}
+
+/**
+ * Puts back a secret or thread *Not a secret* / *Not a thread* took away, as it was stored
+ * (P2b-D13, its *Undo*): its record and its label. A label another record took since gets
+ * " (secret)" / " (thread)" added, as a topic made now would; another name whose norm is taken is
+ * left out. Answers whether it was put back (false when the record is there already, or the rows
+ * are no secret's or thread's). The caller holds the transaction.
+ */
+export function restoreTopicRecord(
+  db: TreeDb,
+  rows: { record: RecordRow; aliases: readonly AliasRow[] }
+): boolean {
+  const kind = recordKindOf(rows.record.categoryId)
+  if (!isTopicKind(kind) || getRecord(db, rows.record.id) !== null) return false
+  db.insert(record).values(rows.record).run()
+  const taken = takenNorms(db)
+  for (const row of rows.aliases) {
+    if (!taken(row.norm)) {
+      db.insert(alias).values(row).run()
+      continue
+    }
+    if (!row.isMain) continue
+    const text = uniqueTopicLabel(row.text, kind, null, taken)
+    db.insert(alias)
+      .values({ ...row, text, norm: normName(text), caseRule: defaultCaseRule(text) })
+      .run()
+  }
+  return true
+}
+
 /** A record made from v1 or v0 data (F-16.15: the switch-over, and the v0 import in v2). */
 export interface ConvertedRecordInput {
   name: string

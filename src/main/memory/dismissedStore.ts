@@ -123,3 +123,16 @@ export function forgetDismissed(db: TreeDb, kind: DismissedKind, key: string): v
     .where(and(eq(dismissed.kind, kind), eq(dismissed.key, key)))
     .run()
 }
+
+/** The rows that name a record (they go with it): what *Not a secret*'s snapshot keeps. */
+export function dismissedRowsOf(db: TreeDb, recordId: string): DismissedRow[] {
+  return db.select().from(dismissed).where(eq(dismissed.recordId, recordId)).all()
+}
+
+/** Puts rows back as they were stored (*Undo* of *Not a secret*); a key already there stays. */
+export function insertDismissedRows(db: TreeDb, rows: readonly DismissedRow[]): void {
+  for (const row of rows) {
+    if (getDismissedByKey(db, row.kind, row.key) !== null) continue
+    db.insert(dismissed).values(row).onConflictDoNothing().run()
+  }
+}

@@ -335,6 +335,21 @@ export const THREAD_CATEGORY: StoryCategory = builtin({
   ]
 })
 
+/**
+ * Secrets (F-16.22, P2b-D1; story memory v2 only): what the reader finds readers learn and the
+ * characters know, and the author's own. Not in the library above nor in any picker: its records
+ * are made by the reader or with *New secret* in its own sidebar section, and nothing moves into or
+ * out of it. `categoryOf('secret')` names it.
+ */
+export const SECRET_CATEGORY: StoryCategory = builtin({
+  id: 'secret',
+  name: 'Secrets',
+  noun: 'secret',
+  icon: 'scroll',
+  hint: 'what readers learn and who in the story knows it',
+  fields: [DESCRIPTION, NOTES]
+})
+
 /** Every built-in category in picker order: the library, then Threads. */
 export const ALL_BUILTIN_CATEGORIES: readonly StoryCategory[] = [
   ...BUILTIN_CATEGORIES,
@@ -374,7 +389,9 @@ function fallbackCategory(id: string): StoryCategory {
  */
 export function categoryOf(id: string, categories: readonly StoryCategory[] = []): StoryCategory {
   return (
-    categories.find((category) => category.id === id) ?? builtinCategory(id) ?? fallbackCategory(id)
+    categories.find((category) => category.id === id) ??
+    builtinCategory(id) ??
+    (id === SECRET_CATEGORY.id ? SECRET_CATEGORY : fallbackCategory(id))
   )
 }
 

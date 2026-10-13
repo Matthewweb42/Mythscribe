@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
+import { SECRET_CATEGORY_ID } from '@shared/memory/topics'
 import { useCategory } from '@renderer/features/entities/categoryStore'
+import { secretSummary } from '@renderer/features/memory/knows/knowsView'
+import { useKnowsGrid } from '@renderer/features/memory/memoryStore'
 import { RecordList } from './RecordList'
 import { recordsIn, useRecordStore } from './recordStore'
 import { matchesRecordQuery } from './recordView'
@@ -9,7 +12,8 @@ import { matchesRecordQuery } from './recordView'
 /**
  * One category's section of the sidebar in story memory v2 (F-16.6): the search box (names and
  * nicknames), the records of the category, and *New …* at the foot, which opens the creation
- * dialog with its twin-gate warning. Kept beside v1's `EntityTab`, which v2 never shows.
+ * dialog with its twin-gate warning (none for a secret or thread, P2b-D19). Kept beside v1's
+ * `EntityTab`, which v2 never shows. F-16.22: the Secrets section is this tab over `secret`.
  */
 export function RecordTab({ categoryId }: { categoryId: string }): React.JSX.Element {
   const [query, setQuery] = useState('')
@@ -33,7 +37,11 @@ export function RecordTab({ categoryId }: { categoryId: string }): React.JSX.Ele
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <RecordList categoryId={categoryId} ids={visibleIds} filtered={records.length > 0} />
+        {categoryId === SECRET_CATEGORY_ID ? (
+          <SecretList ids={visibleIds} filtered={records.length > 0} />
+        ) : (
+          <RecordList categoryId={categoryId} ids={visibleIds} filtered={records.length > 0} />
+        )}
       </div>
       <div className="flex shrink-0 border-t border-line p-2">
         <button
@@ -46,4 +54,16 @@ export function RecordTab({ categoryId }: { categoryId: string }): React.JSX.Ele
       </div>
     </>
   )
+}
+
+/**
+ * F-16.22: the Secrets section's list, each secret with "readers since 5.2 · 3 know" as of the
+ * end of the book (the who-knows-what grid's rows).
+ */
+function SecretList({ ids, filtered }: { ids: string[]; filtered: boolean }): React.JSX.Element {
+  const grid = useKnowsGrid(null)
+  const notes = Object.fromEntries(
+    ids.map((id) => [id, secretSummary(grid?.rows.find((row) => row.recordId === id))])
+  )
+  return <RecordList categoryId={SECRET_CATEGORY_ID} ids={ids} filtered={filtered} notes={notes} />
 }

@@ -39,7 +39,11 @@ const FINISHED = { ...RUNNING, done: 90, finishedAt: '2026-10-12T10:04:00.000Z' 
 const SUMMARY: RebuildSummary = {
   progress: FINISHED,
   sheets: [{ recordId: 'r-mara', name: 'Mara Vell', lines: 5, claimIds: ['a', 'b'] }],
-  waiting: [{ norm: 'hesk', text: 'Hesk', lines: 2 }]
+  waiting: [{ norm: 'hesk', text: 'Hesk', lines: 2 }],
+  topics: [
+    { recordId: 's-map', kind: 'secret', label: 'the sold map' },
+    { recordId: 't-heir', kind: 'thread', label: 'the missing heir' }
+  ]
 }
 
 let main: FakeMain
@@ -111,9 +115,20 @@ describe('Rebuild memory (F-16.19)', () => {
     await act(async () => {
       fireEvent.click(within(summary).getByRole('button', { name: 'Not names' }))
     })
+    // F-16.22: the secrets and threads it made, one Not right for them all.
+    const topics = within(summary).getByRole('group', { name: 'New secrets and threads' })
+    expect(topics).toHaveTextContent('New secrets and threads (2):')
+    expect(topics).toHaveTextContent('the sold map (secret)')
+    expect(topics).toHaveTextContent('the missing heir (thread)')
+    await act(async () => {
+      fireEvent.click(
+        within(topics).getByRole('button', { name: 'Not right: the new secrets and threads' })
+      )
+    })
     expect(main.sent('memory:rebuildAction')).toEqual([
       { action: 'notRightAll', recordId: 'r-mara' },
-      { action: 'notNames' }
+      { action: 'notNames' },
+      { action: 'notTopics' }
     ])
   })
 

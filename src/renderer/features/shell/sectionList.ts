@@ -4,6 +4,7 @@ import {
   CalendarRange,
   FilePenLine,
   History,
+  KeyRound,
   Library,
   ListTodo,
   ListTree,
@@ -15,6 +16,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { ALWAYS_SHOWN_CATEGORIES, categoryOf, type StoryCategory } from '@shared/categories'
 import type { NovelFormat } from '@shared/ipc/contract'
 import type { SidebarToolId } from '@shared/sidebarTabs'
+import { SECRET_CATEGORY_ID } from '@shared/memory/topics'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { THREAD_KIND } from '@shared/threads'
 import { ChangesTab } from '@renderer/features/changes/ChangesTab'
@@ -57,7 +59,8 @@ import { useTimelineStore } from '@renderer/features/timeline/timelineStore'
  * (`tags` is the Index, `thread` is Threads), so a stored section still opens.
  *
  * F-16.6 (story memory v2, decision P1-D8): Manuscript | the categories as record lists |
- * Research | Outline | Edits. A stored section v2 does not list opens on Manuscript.
+ * Secrets (F-16.22) | Research | Outline | Edits. A stored section v2 does not list opens on
+ * Manuscript.
  */
 export type SectionGroup = 'manuscript' | 'bible' | 'tools'
 
@@ -232,15 +235,37 @@ function withStrays(
  */
 const V2_TOOLS: readonly SidebarToolId[] = ['outline', 'edits']
 
+/**
+ * F-16.22 (P2b-D1): the Secrets section, after the categories: the `secret` records as a list
+ * (each with "readers since 5.2 · 3 know") and *New secret*. Listed in the picker once a secret
+ * exists; one click away under "Show unused sections" before that.
+ */
+function secretsSection(records: number): SidebarSection {
+  return {
+    id: SECRET_CATEGORY_ID,
+    label: 'Secrets',
+    icon: KeyRound,
+    group: 'bible',
+    count: records,
+    used: records > 0,
+    render: () => createElement(RecordTab, { categoryId: SECRET_CATEGORY_ID })
+  }
+}
+
 function buildV2Sections(
   categories: readonly StoryCategory[],
   counts: SectionCounts
 ): SidebarSection[] {
+  // Secrets have their own section, never a stray category's.
+  const named = Object.fromEntries(
+    Object.entries(counts.records).filter(([id]) => id !== SECRET_CATEGORY_ID)
+  )
   return [
     toolSection(MANUSCRIPT, counts, 'manuscript'),
-    ...withStrays(categories, counts.records).map((category) =>
+    ...withStrays(categories, named).map((category) =>
       recordSection(category, counts.records[category.id] ?? 0)
     ),
+    secretsSection(counts.records[SECRET_CATEGORY_ID] ?? 0),
     toolSection(RESEARCH, counts, 'tools'),
     ...TOOLS.filter((tool) => V2_TOOLS.includes(tool.id)).map((tool) =>
       toolSection(tool, counts, 'tools')

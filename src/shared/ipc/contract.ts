@@ -261,6 +261,7 @@ import { TwinGateBlocked, TwinGateVerdict } from '../memory/twinGate'
 import {
   CardNotRight,
   ClaimInfo,
+  KnowsGrid,
   MemoryHealthReport,
   MemoryNotice,
   MemoryNoticeAction,
@@ -273,7 +274,9 @@ import {
   RebuildSummary,
   SceneMemory,
   SettleResult,
-  SheetMemory
+  SheetMemory,
+  SplitTopicResult,
+  TopicNotRightResult
 } from '../memory/views'
 import { Label, LabelColour, LabelKind, LabelLink, LabelName } from '../storyLabels'
 
@@ -3448,6 +3451,36 @@ export const contract = {
   'memory:sheet': {
     input: z.object({ recordId: z.string(), asOf: z.string().nullable() }),
     output: SheetMemory
+  },
+  /**
+   * F-16.22: the Book's who-knows-what grid as of scene `asOf` (null: the end of the book): the
+   * secrets readers know then, the knowers with a line or a knew-before mark plus the scene's POV,
+   * and "checked up to". Local and free; nothing here ever reaches a prompt.
+   */
+  'memory:knows': { input: z.object({ asOf: z.string().nullable() }), output: KnowsGrid },
+  /**
+   * F-16.22: *Knew before the book* (`knew: true`) or *Remove* (`false`): the author says a
+   * character or group knew a secret before the story starts. Author-owned; VALIDATION for any
+   * other record. Answers whether anything changed; pushes `memory:changed`.
+   */
+  'memory:knewBefore': {
+    input: z.object({ secretId: z.string(), recordId: z.string(), knew: z.boolean() }),
+    output: z.object({ changed: z.boolean() })
+  },
+  /**
+   * F-16.22 (P2b-D5): *Split* on a reveal the checker merged into a secret or thread: a topic of
+   * its own again with the lines that came with it, and a `split` Dismissed row. NOT_FOUND when
+   * the reveal is gone; VALIDATION when it is no merged one.
+   */
+  'memory:splitTopic': { input: z.object({ topicQuoteId: z.string() }), output: SplitTopicResult },
+  /**
+   * F-16.22 (P2b-D13): *Not a secret* / *Not a thread* on an AI-made topic: it goes with its
+   * reveals and lines, one `notRight` row per reveal; *Undo* on any brings it all back. VALIDATION
+   * for a named record or a topic the author made.
+   */
+  'memory:topicNotRight': {
+    input: z.object({ recordId: z.string() }),
+    output: TopicNotRightResult
   },
   /**
    * F-16.18: *Not right* on an AI line. *Wrong value* writes a `notRight` Dismissed row and the

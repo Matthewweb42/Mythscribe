@@ -7,10 +7,23 @@ import {
   CLAIM_VOICES,
   PLAN_LINK_ORIGINS,
   SPOT_TIERS,
-  SPOT_VERDICTS
+  SPOT_VERDICTS,
+  TOPIC_QUOTE_ROLES,
+  TOPIC_QUOTE_STATES
 } from '@shared/memory/claims'
+import { DISMISSED_KINDS } from '@shared/memory/dismissed'
+import { ALIAS_ORIGINS, CASE_RULES, RECORD_ORIGINS } from '@shared/memory/records'
 import { RebuildProgress } from '@shared/memory/views'
-import { dismissed, settings, type ClaimRow } from '../../db/schema'
+import {
+  dismissed,
+  settings,
+  type AliasRow,
+  type ClaimRow,
+  type DismissedRow,
+  type KnewBeforeRow,
+  type RecordRow,
+  type TopicQuoteRow
+} from '../../db/schema'
 import type { TreeDb } from '../../tree/treeStore'
 
 /**
@@ -34,6 +47,10 @@ import type { TreeDb } from '../../tree/treeStore'
  * - `memoryUnlinked`: the plan link each *Unlink* took off (F-16.21), by the Dismissed row's id:
  *   whose it was (the author's `fulfilledBy`, or one applied automatically, with its score, reason
  *   and draft), so *Undo* in Dismissed puts it back as it was.
+ * - `memoryTopicNotRight`: each AI-made secret or thread *Not a secret* / *Not a thread* took away
+ *   (F-16.22, P2b-D13), as it was stored (its record and label, reveals, claims, knew-before
+ *   marks and the Dismissed rows that went with it), with the `notRight` rows it wrote, so *Undo*
+ *   on any of them brings it all back.
  */
 
 export const MEMORY_REBUILD_KEY = 'memoryRebuild'
@@ -43,6 +60,7 @@ export const MEMORY_ASKED_KEY = 'memoryAsked'
 export const MEMORY_NOT_RIGHT_KEY = 'memoryNotRight'
 export const MEMORY_NOT_ABOUT_KEY = 'memoryNotAbout'
 export const MEMORY_UNLINKED_KEY = 'memoryUnlinked'
+export const MEMORY_TOPIC_NOT_RIGHT_KEY = 'memoryTopicNotRight'
 
 export const SpotState = z.object({
   rebuiltAt: z.string().nullable().default(null),
@@ -114,7 +132,7 @@ export function setAsked(db: TreeDb, nodeIds: ReadonlySet<string>): void {
 }
 
 /** A claim row as a *Not right* keeps it (the `claim` table's columns). */
-const StashedClaim = z.object({
+export const StashedClaim = z.object({
   id: z.string(),
   nodeId: z.string(),
   draftId: z.string(),
@@ -213,4 +231,95 @@ export function getUnlinkedStash(db: TreeDb): UnlinkedStash {
 
 export function setUnlinkedStash(db: TreeDb, stash: UnlinkedStash): void {
   writeRow(db, MEMORY_UNLINKED_KEY, stash)
+}
+
+/** The `record` table's columns. */
+const StashedRecord = z.object({
+  id: z.string(),
+  categoryId: z.string(),
+  image: z.string().nullable(),
+  origin: z.enum(RECORD_ORIGINS),
+  pinned: z.string().nullable(),
+  ideas: z.string().nullable(),
+  legacyEntityId: z.string().nullable(),
+  legacyTagId: z.string().nullable(),
+  created: z.string(),
+  modified: z.string()
+}) satisfies z.ZodType<RecordRow>
+
+/** The `alias` table's columns. */
+const StashedAlias = z.object({
+  id: z.string(),
+  recordId: z.string(),
+  text: z.string(),
+  norm: z.string(),
+  isMain: z.boolean(),
+  caseRule: z.enum(CASE_RULES),
+  origin: z.enum(ALIAS_ORIGINS),
+  shared: z.boolean(),
+  created: z.string()
+}) satisfies z.ZodType<AliasRow>
+
+/** The `topic_quote` table's columns. */
+const StashedTopicQuote = z.object({
+  id: z.string(),
+  recordId: z.string(),
+  draftId: z.string(),
+  nodeId: z.string(),
+  role: z.enum(TOPIC_QUOTE_ROLES),
+  label: z.string(),
+  para: z.number().int(),
+  quote: z.string(),
+  anchor: z.string(),
+  stating: z.string(),
+  readingId: z.string().nullable(),
+  state: z.enum(TOPIC_QUOTE_STATES),
+  created: z.string(),
+  proved: z.string()
+}) satisfies z.ZodType<TopicQuoteRow>
+
+/** The `knew_before` table's columns. */
+const StashedKnewBefore = z.object({
+  secretId: z.string(),
+  recordId: z.string(),
+  created: z.string()
+}) satisfies z.ZodType<KnewBeforeRow>
+
+/** The `dismissed` table's columns. */
+const StashedDismissed = z.object({
+  id: z.string(),
+  kind: z.enum(DISMISSED_KINDS),
+  key: z.string(),
+  recordId: z.string().nullable(),
+  nodeId: z.string().nullable(),
+  label: z.string(),
+  quote: z.string().nullable(),
+  created: z.string()
+}) satisfies z.ZodType<DismissedRow>
+
+/**
+ * One topic *Not a secret* / *Not a thread* took away, as it was stored (P2b-D13): `rows` are the
+ * `notRight` Dismissed rows it wrote (one per reveal), `todos` the author's to-dos that pointed at
+ * it.
+ */
+export const TopicSnapshot = z.object({
+  rows: z.array(z.string()),
+  record: StashedRecord,
+  aliases: z.array(StashedAlias),
+  quotes: z.array(StashedTopicQuote),
+  claims: z.array(StashedClaim),
+  knewBefore: z.array(StashedKnewBefore),
+  dismissed: z.array(StashedDismissed),
+  todos: z.array(z.string())
+})
+export type TopicSnapshot = z.infer<typeof TopicSnapshot>
+
+const TopicSnapshots = z.array(TopicSnapshot)
+
+export function getTopicSnapshots(db: TreeDb): TopicSnapshot[] {
+  return readRow(db, MEMORY_TOPIC_NOT_RIGHT_KEY, TopicSnapshots, [])
+}
+
+export function setTopicSnapshots(db: TreeDb, snapshots: readonly TopicSnapshot[]): void {
+  writeRow(db, MEMORY_TOPIC_NOT_RIGHT_KEY, snapshots)
 }

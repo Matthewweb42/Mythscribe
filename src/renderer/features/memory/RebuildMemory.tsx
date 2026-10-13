@@ -68,8 +68,9 @@ type Stage =
 /**
  * The *Rebuild memory* dialog (F-16.19): the price first (`memory:rebuildEstimate`, nothing sent),
  * then, confirmed, the rebuild (`memory:rebuild`) with its progress and *Stop* (the queue's Stop),
- * then one summary grouped by sheet with its bulk actions: *Not right* for a sheet's new lines and
- * *Not names* for the names whose lines wait. Mounted in the project screen (v2); open while the
+ * then one summary grouped by sheet with its bulk actions: *Not right* for a sheet's new lines,
+ * *Not right* for the new secrets and threads (F-16.22: each goes to Dismissed as *Not a secret*
+ * would) and *Not names* for the names whose lines wait. Mounted in the project screen (v2); open while the
  * memory store says so.
  */
 export function RebuildDialog(): React.JSX.Element | null {
@@ -231,7 +232,7 @@ function Summary(): React.JSX.Element {
     <div data-testid="rebuild-summary">
       <p className="m-0">
         Read {progress.done} of {progress.total} scenes.
-        {summary.sheets.length === 0 && summary.waiting.length === 0
+        {summary.sheets.length === 0 && summary.waiting.length === 0 && summary.topics.length === 0
           ? ' Nothing new: the memory already held what the book states.'
           : ''}
       </p>
@@ -254,6 +255,27 @@ function Summary(): React.JSX.Element {
             </li>
           ))}
         </ul>
+      )}
+      {summary.topics.length === 0 ? null : (
+        <div className="mt-2" role="group" aria-label="New secrets and threads">
+          <p className="m-0 text-fg-muted">New secrets and threads ({summary.topics.length}):</p>
+          <ul className="m-0 list-none p-0">
+            {summary.topics.map((topic) => (
+              <li key={topic.recordId}>
+                {topic.label} <span className="text-fg-muted">({topic.kind})</span>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            className={SMALL}
+            aria-label="Not right: the new secrets and threads"
+            disabled={busy}
+            onClick={() => void act({ action: 'notTopics' })}
+          >
+            Not right
+          </button>
+        </div>
       )}
       {summary.waiting.length === 0 ? null : (
         <div className="mt-2" role="group" aria-label="Names to answer">

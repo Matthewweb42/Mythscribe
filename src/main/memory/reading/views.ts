@@ -20,11 +20,14 @@ import type {
   ClaimInfo,
   ClaimView,
   HereChip,
+  KnowsGrid,
   MentionedChip,
   SceneMemory,
   SheetLineView,
   SheetMemory
 } from '@shared/memory/views'
+import { KNOWER_KINDS } from '@shared/memory/knows'
+import { sceneSecrets } from '@shared/memory/whoKnows'
 import { searchableText } from '@shared/search'
 import { EMPTY_DOC } from '@shared/tiptap'
 import type { NodeRow } from '../../db/schema'
@@ -35,10 +38,11 @@ import { documentJson, manuscriptDocuments } from '../../voice/profile'
 import { dismissedKeys } from '../dismissedStore'
 import { listNameMentions, nameScanShared } from '../nameIndexer'
 import { sceneStatuses } from '../passageIndexer'
-import { listRecords } from '../recordStore'
+import { getRecord, listRecords } from '../recordStore'
 import { storedSceneDetails } from '../sceneDetailStore'
 import { getCard } from './cardStore'
 import { draftClaims, getClaim, recordClaims, sceneClaims } from './claimStore'
+import { secretTopic, sheetKnows, storedGrid, storedKnows } from './knowsViews'
 import { getReading, lastReading } from './readingStore'
 import { getSceneRead } from './sceneReadStore'
 
@@ -312,7 +316,8 @@ function unreadCount(db: TreeDb, nodeId: string, draftId: string | null): number
  */
 export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
   const draftId = currentDraftId(db)
-  const reading = readingOrder(db)
+  const nodes = listNodes(db)
+  const reading = readingOrder(db, nodes)
   const details = storedSceneDetails(db, nodeId)
   const card = draftId === null ? null : getCard(db, nodeId, draftId)
   const held = card === null ? null : heldCard(db, card, reading.order.has(nodeId))
@@ -370,8 +375,37 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
     claims:
       draftId === null
         ? []
-        : sceneClaims(db, nodeId, draftId).map((each) => claimView(each, reading))
+        : sceneClaims(db, nodeId, draftId).map((each) => claimView(each, reading)),
+    // F-16.22: the secrets the scene touches and its tension lines, as of the scene.
+    secrets: sceneSecrets(
+      storedKnows(db, nodeId, reading, nodes),
+      nodeId,
+      here.map((chip) => chip.recordId),
+      povOf(here)
+    )
   }
+}
+
+/** The POV among a scene's Here chips, or null. */
+const povOf = (here: readonly HereChip[]): string | null =>
+  here.find((chip) => chip.why === 'pov')?.recordId ?? null
+
+/**
+ * The Book's who-knows-what grid (`memory:knows`, F-16.22) as of scene `asOf` (null: the end of
+ * the book), with that scene's POV as a column.
+ */
+export function knowsGridMemory(db: TreeDb, asOf: string | null): KnowsGrid {
+  const nodes = listNodes(db)
+  const reading = readingOrder(db, nodes)
+  let pov: string | null = null
+  if (asOf !== null && reading.at.has(asOf)) {
+    const draftId = currentDraftId(db)
+    const card = draftId === null ? null : getCard(db, asOf, draftId)
+    const held = card === null ? null : heldCard(db, card, reading.order.has(asOf))
+    const records = new Map(listRecords(db).map((each) => [each.id, each]))
+    pov = povOf(hereChips(storedSceneDetails(db, asOf), held, records))
+  }
+  return storedGrid(storedKnows(db, asOf, reading, nodes), db, pov)
 }
 
 const sheetLine = (line: SheetLine): SheetLineView => ({ ...line, label: slotLabel(line.slot) })
@@ -379,7 +413,12 @@ const sheetLine = (line: SheetLine): SheetLineView => ({ ...line, label: slotLab
 /** One record's sheet "From the book, as of" scene `asOf` (null: the end of the book). */
 export function sheetMemory(db: TreeDb, recordId: string, asOf: string | null): SheetMemory {
   const draftId = currentDraftId(db)
-  const reading = readingOrder(db)
+  const nodes = listNodes(db)
+  const reading = readingOrder(db, nodes)
+  // F-16.22: a knower's Knows, a secret's own view, as of the same scene.
+  const kind = getRecord(db, recordId)?.kind ?? null
+  const knower = kind !== null && KNOWER_KINDS.includes(kind)
+  const knows = knower || kind === 'secret' ? storedKnows(db, asOf, reading, nodes) : null
   const sheet = sheetAsOf(
     draftId === null ? [] : asOfClaims(db, recordClaims(db, recordId, draftId)),
     reading,
@@ -395,7 +434,9 @@ export function sheetMemory(db: TreeDb, recordId: string, asOf: string | null): 
     transient: sheet.transient.map(sheetLine),
     accumulating: sheet.accumulating.map(sheetLine),
     others: sheet.others.map((line) => ({ ...line, label: slotLabel(line.slot) })),
-    later: sheet.later
+    later: sheet.later,
+    knows: knows !== null && knower ? sheetKnows(knows, recordId) : null,
+    topic: knows !== null && kind === 'secret' ? secretTopic(knows, recordId) : null
   }
 }
 

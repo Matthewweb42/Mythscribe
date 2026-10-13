@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import { AUTHOR_TODOS_MAX, type AuthorTodo, type AuthorTodoPatch } from '@shared/memory/authorTodo'
 import { authorTodo, node, record, type AuthorTodoRow } from '../db/schema'
 import { AppError } from '../ipc/errors'
@@ -132,4 +132,26 @@ export function reorderAuthorTodos(db: TreeDb, ids: readonly string[]): AuthorTo
     })
   })
   return listAuthorTodos(db)
+}
+
+/** The to-dos that point at a record (*Not a secret*'s snapshot keeps them). */
+export function todoIdsOf(db: TreeDb, recordId: string): string[] {
+  return db
+    .select({ id: authorTodo.id })
+    .from(authorTodo)
+    .where(eq(authorTodo.recordId, recordId))
+    .all()
+    .map((row) => row.id)
+}
+
+/**
+ * Points these to-dos at a record again (*Undo* of *Not a secret*), where the to-do is still
+ * there and points at nothing.
+ */
+export function repointTodos(db: TreeDb, ids: readonly string[], recordId: string): void {
+  if (ids.length === 0) return
+  db.update(authorTodo)
+    .set({ recordId })
+    .where(and(inArray(authorTodo.id, [...ids]), isNull(authorTodo.recordId)))
+    .run()
 }
