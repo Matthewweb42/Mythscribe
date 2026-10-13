@@ -27,7 +27,7 @@ import {
   recordTopicQuoteRows,
   splitTopic
 } from './topicStore'
-import { readingOrder } from './views'
+import { readingOrder } from './readingFrame'
 
 /**
  * The author's answers on secrets and threads (F-16.22; plan P2b §4.1, P2b-D5, D13), local and

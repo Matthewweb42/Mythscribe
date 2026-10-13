@@ -85,6 +85,14 @@ import { caretToEnd, clickIntoEditor } from './support'
  * its *Undo* brings it back; a ghost-text request from 1.2 carries a Story notes block with no
  * absence and no who-knows-what line.
  *
+ * P2b slice 5 (F-16.23), the UI in a new project: scene 1.1 (typed 1811) "Mara was born in 1792.
+ * Mara swore to find the heir.", 1.2 "Mara was nineteen.", 1.3 "Three winters later, Mara found
+ * the heir."; Book › Threads shows "the missing heir · resolved in 1.3" with its two steps; the
+ * Timeline reads 1811, "1811 · from 1.1" and "year not known since “Three winters later” (1.3)"
+ * with Mara about 19 in 1.1 and 1.2; her sheet's Age as of 1.2 is "about 19 · year from 1.1", as
+ * of 1.3 "19, stated in 1.2 · since then: “Three winters later” (1.3)"; typing 1814 as 1.3's
+ * story year makes its row 1814 with Mara about 22.
+ *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
  * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
@@ -148,6 +156,10 @@ const PLAN_LINKS_V2_SENTINEL =
   'You are the plan-link feature inside a novel-writing app, choosing which drafted scene'
 /** What the fake's plan-link pick says (F-16.21); the Outline shows it beside the AI mark. */
 const PLAN_LINK_WHY = 'She waits at the quay there.'
+/** P2b slice 5: the stated ages the fake reader reads, in words. */
+const AGE_WORDS: Readonly<Record<string, number>> = { eighteen: 18, nineteen: 19, twenty: 20 }
+/** P2b slice 5: the elapsed hint a paragraph may open with (it crosses a year). */
+const ELAPSED_HINT = 'Three winters later'
 /** The paragraph slice P2a types; the fake reads Mara's eyes and where she walked from it. */
 const READ_PARAGRAPH = "Mara's eyes were grey. She walked to the quay."
 
@@ -164,6 +176,10 @@ const READ_PARAGRAPH = "Mara's eyes were grey. She walked to the quay."
  * resolves the listed one; `The <thing> had been sold by <A>.` proposes a new secret "the <thing>
  * sale" (a planted duplicate of the sold one). Every roster character such a paragraph names is on
  * the card's page.
+ *
+ * P2b slice 5 (F-16.23): `<A> was born in <year>.` is A's `born` line, `<A> was <number word>.`
+ * A's stated `age` (in digits), and a paragraph opening "Three winters later" gives the card that
+ * elapsed hint.
  */
 function readerAnswer(messages: { content: string }[]): string {
   const system = messages[0]?.content ?? ''
@@ -173,6 +189,7 @@ function readerAnswer(messages: { content: string }[]): string {
   const topics: Record<string, unknown>[] = []
   const present: [string, number, string][] = []
   let place: [string, number, string] | null = null
+  let elapsed: [string, number, string] | null = null
   // P2b: the roster's names (every name and nickname, to its id) and the listed topics.
   const people = new Map<string, string>()
   for (const match of system.matchAll(/^(r\d+) (.+?)(?: \((.*)\))? · character$/gm)) {
@@ -234,6 +251,31 @@ function readerAnswer(messages: { content: string }[]): string {
       const q = `${found[1] ?? ''} found the heir`
       fact({ r: thread, s: 'thread', how: 'resolves', v: 'finds the heir', q })
     }
+    // P2b slice 5: a birth year, a stated age, an elapsed hint the card quotes.
+    const born = /(\w+) was born in (\d{3,4})\./.exec(text)
+    if (born !== null && people.has(born[1] ?? '')) {
+      p2b = true
+      fact({
+        r: people.get(born[1] ?? ''),
+        s: 'born',
+        v: born[2],
+        o: null,
+        q: `${born[1] ?? ''} was born in ${born[2] ?? ''}`
+      })
+    }
+    const stated = /(\w+) was (\w+)\./.exec(text)
+    const years = AGE_WORDS[stated?.[2] ?? '']
+    if (stated !== null && years !== undefined && people.has(stated[1] ?? '')) {
+      p2b = true
+      fact({
+        r: people.get(stated[1] ?? ''),
+        s: 'age',
+        v: String(years),
+        o: null,
+        q: `${stated[1] ?? ''} was ${stated[2] ?? ''}`
+      })
+    }
+    if (text.startsWith(ELAPSED_HINT)) elapsed = [ELAPSED_HINT, p, ELAPSED_HINT]
     const sale = /The (\w+) had been sold by (\w+)\./.exec(text)
     if (sale !== null) {
       p2b = true
@@ -298,7 +340,7 @@ function readerAnswer(messages: { content: string }[]): string {
           where: place,
           when: null,
           year: null,
-          elapsed: null,
+          elapsed,
           pov: null,
           flash: null,
           present:
@@ -496,6 +538,45 @@ async function showSection(name: string): Promise<void> {
   }
   await option.click()
   await expect(list).toHaveCount(0)
+}
+
+/**
+ * Closes the open project and makes a new one through the wizard (Use AI on, its default; the own
+ * key already saved), so its scenes are 1.1, 1.2, … and "checked up to" counts from its first.
+ */
+async function newV2Project(name: string): Promise<TreeNode> {
+  await page.getByRole('button', { name: 'Close project' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+  await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
+  const projectPath = path.join(tmp, `${name}.mythscribe`)
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
+  }, projectPath)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const wizard = page.getByRole('dialog')
+  await wizard.getByRole('textbox', { name: 'Project name' }).fill(name)
+  for (let step = 0; step < 4; step += 1) {
+    await wizard.getByRole('button', { name: 'Next' }).click()
+  }
+  await wizard.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByTestId('project-name')).toHaveText(name)
+  expect((await invoke<ProjectInfo | null>('project:current', undefined))?.storyMemory).toBe('v2')
+  const first = (await invoke<TreeNode[]>('tree:list', undefined)).find(
+    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
+  )
+  if (!first) throw new Error('the new project has no scene')
+  return first
+}
+
+/** Closes the project and opens it again from Recent projects (the tree then holds invoked scenes). */
+async function reopenProject(name: string): Promise<void> {
+  await page.getByRole('button', { name: 'Close project' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+  await page
+    .getByRole('list', { name: 'Recent projects' })
+    .getByRole('button', { name, exact: true })
+    .click()
+  await expect(page.getByTestId('project-name')).toHaveText(name)
 }
 
 /** The paragraphs of a stored page, each with its Not canon mark. */
@@ -1816,22 +1897,7 @@ test('story memory v2: who knows what and threads are read (P2b slice 2)', async
 test('story memory v2: who knows what in the panel, the grid and sheets (P2b slice 4)', async () => {
   // A new project (Use AI on, the wizard's default; the own key at the fake), so its scenes are
   // 1.1, 1.2 and 1.3 and "checked up to" counts from the book's first scene.
-  await page.getByRole('button', { name: 'Close project' }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
-  await expect(page.getByRole('button', { name: 'New project' })).toBeVisible()
-  const projectPath = path.join(tmp, 'Knows Novel.mythscribe')
-  await app.evaluate(({ dialog }, filePath) => {
-    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
-  }, projectPath)
-  await page.getByRole('button', { name: 'New project' }).click()
-  const wizard = page.getByRole('dialog')
-  await wizard.getByRole('textbox', { name: 'Project name' }).fill('Knows Novel')
-  for (let step = 0; step < 4; step += 1) {
-    await wizard.getByRole('button', { name: 'Next' }).click()
-  }
-  await wizard.getByRole('button', { name: 'Create' }).click()
-  await expect(page.getByTestId('project-name')).toHaveText('Knows Novel')
-  expect((await invoke<ProjectInfo | null>('project:current', undefined))?.storyMemory).toBe('v2')
+  const first = await newV2Project('Knows Novel')
 
   // Mara (the POV of every scene), Orrin and Tomas; three scenes, each read once.
   const ids: Record<string, string> = {}
@@ -1854,10 +1920,6 @@ test('story memory v2: who knows what in the panel, the grid and sheets (P2b sli
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Eyes: grey' }] }]
     }
   })
-  const first = (await invoke<TreeNode[]>('tree:list', undefined)).find(
-    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
-  )
-  if (!first) throw new Error('the new project has no scene')
   const write = async (id: string, text: string): Promise<void> => {
     await invoke('document:save', {
       id,
@@ -1902,13 +1964,7 @@ test('story memory v2: who knows what in the panel, the grid and sheets (P2b sli
     .toEqual(['the sold map'])
 
   // Open it again, so the tree holds the scenes made above.
-  await page.getByRole('button', { name: 'Close project' }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
-  await page
-    .getByRole('list', { name: 'Recent projects' })
-    .getByRole('button', { name: 'Knows Novel', exact: true })
-    .click()
-  await expect(page.getByTestId('project-name')).toHaveText('Knows Novel')
+  await reopenProject('Knows Novel')
 
   // F-16.22: scene 1.1 shows the secret, its holders Here and, muted, Mara's scoped line.
   await showSection('Manuscript')
@@ -2018,6 +2074,141 @@ test('story memory v2: who knows what in the panel, the grid and sheets (P2b sli
   expect(ghostText).not.toContain('checked up to')
   expect(ghostText).not.toContain('the sold map')
   expect(ghostText).not.toMatch(/knew before|overheard/i)
+})
+
+test('story memory v2: threads, the timeline and ages (P2b slice 5)', async () => {
+  // A new project (Use AI on, the own key at the fake): scenes 1.1–1.3, Mara the POV of each.
+  const first = await newV2Project('Time Novel')
+  const made = await invoke<{ record?: { id: string } }>('record:create', {
+    name: 'Mara',
+    categoryId: 'character',
+    aliases: [],
+    force: true
+  })
+  const mara = made.record?.id ?? ''
+  const write = async (id: string, text: string, storyYear: number | null): Promise<void> => {
+    await invoke('document:save', {
+      id,
+      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
+    })
+    await invoke('sceneDetail:set', {
+      nodeId: id,
+      details: {
+        povRecordId: mara,
+        place: { recordId: null, text: '' },
+        time: { text: '' },
+        storyYear,
+        alsoHere: []
+      }
+    })
+  }
+  const scene = async (title: string, text: string): Promise<string> => {
+    const node = await invoke<TreeNode>('tree:create', {
+      parentId: first.parentId,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title
+    })
+    await write(node.id, text, null)
+    return node.id
+  }
+  await write(first.id, 'Mara was born in 1792. Mara swore to find the heir.', 1811)
+  const nineteen = await scene('Nineteen', 'Mara was nineteen.')
+  const heir = await scene('Heir', `${ELAPSED_HINT}, Mara found the heir.`)
+  for (const [i, nodeId] of [first.id, nineteen, heir].entries()) {
+    expect(await invoke('memory:readNow', { nodeId, requestId: `e2e-p2b5-${i}` })).toMatchObject({
+      ok: true
+    })
+  }
+  await reopenProject('Time Novel')
+
+  // Book › Threads as of 1.3 (the open scene): resolved, with its two steps.
+  await showSection('Manuscript')
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  await bookTree.getByRole('treeitem', { name: 'Heir', exact: true }).click()
+  const panel = page.getByTestId('this-scene-panel')
+  if ((await panel.count()) === 0) {
+    await page.getByRole('button', { name: 'This scene', exact: true }).click()
+  }
+  await panel.getByRole('tab', { name: 'Book' }).click()
+  const thread = panel.getByRole('group', { name: 'Thread: the missing heir' })
+  await expect(thread.getByTestId('thread-head')).toHaveText('the missing heir · resolved in 1.3', {
+    timeout: 15_000
+  })
+  await expect(thread.getByTestId('claim-line')).toHaveCount(2)
+  await expect(thread.getByTestId('claim-line').first()).toContainText(
+    'opens 1.1: swears to find the heir'
+  )
+  await expect(thread.getByTestId('claim-line').nth(1)).toContainText(
+    'resolves 1.3: finds the heir'
+  )
+
+  // Book › Timeline: the typed year, carried, then ended by the hint; Mara about 19 in 1.1 and 1.2.
+  const timeline = panel.getByTestId('timeline')
+  const row = (name: string) => timeline.getByRole('listitem', { name })
+  await expect(row(`1.1 ${first.title}`).getByTestId('timeline-year')).toHaveText('1811', {
+    timeout: 15_000
+  })
+  await expect(row('1.2 Nineteen').getByTestId('timeline-year')).toHaveText('1811 · from 1.1')
+  await expect(row('1.3 Heir').getByTestId('timeline-year')).toHaveText(
+    `year not known since “${ELAPSED_HINT}” (1.3)`
+  )
+  await expect(row(`1.1 ${first.title}`).getByTestId('timeline-age')).toContainText(
+    'Mara about 19'
+  )
+  await expect(row('1.2 Nineteen').getByTestId('timeline-age')).toContainText('Mara about 19')
+
+  // Mara's sheet: her Age as of 1.2 counts from the year; as of 1.3 the last stated age stands,
+  // with the hint since listed and never added up.
+  await panel
+    .getByRole('region', { name: 'Cast' })
+    .getByRole('button', { name: /^Mara/ })
+    .click()
+  const sheet = page.getByTestId('record-sheet')
+  const age = sheet.getByRole('region', { name: 'Age' })
+  await age.getByRole('combobox', { name: 'as of' }).selectOption(nineteen)
+  await expect(age.getByTestId('age-line')).toHaveText('about 19 · year from 1.1', {
+    timeout: 15_000
+  })
+  await expect(age.getByTestId('claim-line')).toContainText('Born: 1792')
+  await age.getByRole('combobox', { name: 'as of' }).selectOption(heir)
+  await expect(age.getByTestId('age-line')).toHaveText(
+    `19, stated in 1.2 · since then: “${ELAPSED_HINT}” (1.3)`,
+    { timeout: 15_000 }
+  )
+  // Her Threads: the steps whose paragraph names her.
+  await expect(
+    sheet
+      .getByRole('region', { name: 'Threads' })
+      .getByRole('group', { name: 'Thread: the missing heir' })
+  ).toBeVisible()
+
+  // Typing 1814 as 1.3's story year: its row reads 1814, and Mara about 22 there.
+  await showSection('Manuscript')
+  await bookTree.getByRole('treeitem', { name: 'Heir', exact: true }).click()
+  await expect(sheet).toHaveCount(0)
+  const notesColumn = page.getByTestId('notes-panel')
+  if ((await notesColumn.count()) === 0) {
+    await page.getByRole('button', { name: 'Notes', exact: true }).click()
+  }
+  const detailsToggle = notesColumn.getByRole('button', { name: 'Scene details' })
+  if ((await detailsToggle.getAttribute('aria-expanded')) !== 'true') await detailsToggle.click()
+  const storyYear = notesColumn
+    .getByRole('group', { name: 'Scene metadata' })
+    .getByRole('textbox', { name: 'Story year' })
+  await storyYear.fill('1814')
+  await storyYear.press('Enter')
+  await panel.getByRole('tab', { name: 'Book' }).click()
+  await expect(row('1.3 Heir').getByTestId('timeline-year')).toHaveText('1814', {
+    timeout: 15_000
+  })
+  await expect(row('1.3 Heir').getByTestId('timeline-age')).toContainText('Mara about 22')
+  // Nothing about years or threads was sent anywhere: all of it is local.
+  expect(
+    providerBodies.some((body) =>
+      body.messages.some((message) => message.content.includes('year not known'))
+    )
+  ).toBe(false)
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

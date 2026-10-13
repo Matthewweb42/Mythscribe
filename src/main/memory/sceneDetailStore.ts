@@ -91,6 +91,20 @@ export function storedSceneDetails(db: TreeDb, nodeId: string): SceneDetails {
   return row === undefined ? emptySceneDetails() : toDetails(row)
 }
 
+/**
+ * Every node's stored details, by node, in one read (the Timeline reads the typed year, time and
+ * Here of every scene, F-16.23); a node with none is not in the map.
+ */
+export function allSceneDetails(db: TreeDb): Map<string, SceneDetails> {
+  return new Map(
+    db
+      .select()
+      .from(sceneDetail)
+      .all()
+      .map((row) => [row.nodeId, toDetails(row)])
+  )
+}
+
 /** A node's details (empty when it has none), with the "+ also here" ids whose record is gone. */
 export function getSceneDetails(db: TreeDb, nodeId: string): SceneDetailsView {
   requireTarget(db, nodeId)

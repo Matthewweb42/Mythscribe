@@ -125,15 +125,19 @@ export const noKnowsText = (name: string, checkedUpTo: SceneRefView | null): str
 export const moreText = (more: number): string => `+ ${more} more in Book`
 
 /**
+ * A sidebar row's note for an AI-made secret or thread no readable scene of the active draft holds
+ * now: the reader leaves it out, and the note says where it may still be.
+ */
+export const NOT_IN_BOOK_NOW = 'not in the book now (another draft, or an Idea or left-out scene)'
+
+/**
  * A sidebar row's note for a secret, as of the end of the book: "readers since 5.2 · 3 know"; "not
  * in the book yet" (the author's own, not revealed). An AI-made secret that is no row of the grid
  * (`aiMade`, `secret` undefined) has no reveal in a readable scene of the active draft: the reader
  * leaves it out, and the note says where it may still be.
  */
 export function secretSummary(secret: SecretView | undefined, aiMade = false): string {
-  if (secret === undefined) {
-    return aiMade ? 'not in the book now (another draft, or an Idea or left-out scene)' : ''
-  }
+  if (secret === undefined) return aiMade ? NOT_IN_BOOK_NOW : ''
   const holders = secret.cells.filter((cell) => !cell.later && cell.line === 'counts').length
   const since =
     secret.readersSince === null ? 'not in the book yet' : readersSinceText(secret.readersSince)

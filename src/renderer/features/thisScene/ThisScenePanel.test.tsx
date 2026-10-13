@@ -23,7 +23,11 @@ import {
   knowsGridFixture,
   memoryStatusFixture,
   sceneMemoryFixture,
-  secretViewFixture
+  secretViewFixture,
+  threadsMemoryFixture,
+  threadViewFixture,
+  timelineFixture,
+  timelineRowFixture
 } from '@renderer/features/memory/memoryFixture'
 import { resetMemoryStore, useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { recordFixture } from '@renderer/features/records/recordFixture'
@@ -185,6 +189,15 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
         case 'memory:knows':
           return knowsGridFixture({
             asOf: (input as Input<'memory:knows'>).asOf
+          }) as Output<C>
+        // F-16.23: the Book tab's Threads and Timeline, empty until a test says otherwise.
+        case 'memory:threads':
+          return threadsMemoryFixture({
+            asOf: (input as Input<'memory:threads'>).asOf
+          }) as Output<C>
+        case 'memory:timeline':
+          return timelineFixture({
+            recordId: (input as Input<'memory:timeline'>).recordId
           }) as Output<C>
         default:
           throw new Error(`unexpected ${channel}`)
@@ -509,6 +522,31 @@ describe('ThisScenePanel (F-16.12)', () => {
     ])
     fireEvent.click(rows[0]!)
     expect(useRecordStore.getState().selectedId).toBe('r-mara')
+  })
+
+  it('orders the Book tab: Cast, Who knows what, Threads, Timeline, Rebuild memory (F-16.23)', async () => {
+    install({
+      'memory:threads': (input) =>
+        threadsMemoryFixture({
+          asOf: (input as Input<'memory:threads'>).asOf,
+          threads: [threadViewFixture('t-heir', 'the missing heir')]
+        }),
+      'memory:timeline': () => timelineFixture({ rows: [timelineRowFixture('sc-1')] })
+    })
+    await open()
+    fireEvent.click(screen.getByRole('tab', { name: 'Book' }))
+    await screen.findByRole('group', { name: 'Thread: the missing heir' })
+    await screen.findAllByTestId('timeline-row')
+    const panel = screen.getByRole('tabpanel')
+    expect(
+      within(panel)
+        .getAllByRole('heading', { level: 3 })
+        .map((heading) => heading.textContent)
+    ).toEqual(['Cast', 'Who knows what', 'Threads', 'Timeline', 'Memory'])
+    expect(within(panel).getByRole('button', { name: 'Rebuild memory…' })).toBeVisible()
+    // The Threads are as of the open scene, like the grid; the Timeline lists every scene.
+    expect(sent('memory:threads')).toEqual([{ asOf: 'sc-1' }])
+    expect(sent('memory:timeline')).toEqual([{ recordId: null }])
   })
 
   it('asks for a scene when none is open, and still shows Needs a look', async () => {

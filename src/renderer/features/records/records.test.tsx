@@ -13,10 +13,14 @@ import { buildExtensions } from '@renderer/features/editor/extensions'
 import { locateText } from '@renderer/features/editor/locateText'
 import { resetCategoryStore } from '@renderer/features/entities/categoryStore'
 import {
+  computedAgeFixture,
   knowsCellFixture,
   knowsGridFixture,
   secretViewFixture,
   sheetMemoryFixture,
+  threadsMemoryFixture,
+  threadStepFixture,
+  threadViewFixture,
   topicQuoteFixture
 } from '@renderer/features/memory/memoryFixture'
 import { resetMemoryStore } from '@renderer/features/memory/memoryStore'
@@ -1026,5 +1030,229 @@ describe('sheets of who knows what (F-16.22)', () => {
     expect(sent('memory:knows')).toEqual([{ asOf: null }])
     fireEvent.click(screen.getByRole('button', { name: 'New secret…' }))
     expect(useRecordStore.getState().creating).toBe('secret')
+  })
+})
+
+describe('sheets of threads, years and ages (F-16.23)', () => {
+  const HEIR = recordFixture('t-heir', 'thread', ['the missing heir'], { origin: 'ai' })
+  const ASHBY = recordFixture('t-ashby', 'thread', ['Ashby’s return'])
+  const CHECKED = { nodeId: 'sc-2', ref: '1.2' }
+  const heir = threadViewFixture('t-heir', 'the missing heir', {
+    status: 'resolved',
+    resolved: { nodeId: 'sc-3', ref: '1.3' },
+    last: { nodeId: 'sc-3', ref: '1.3' },
+    steps: [
+      threadStepFixture('st-open'),
+      threadStepFixture('st-found', {
+        step: 'resolves',
+        value: 'finds the heir',
+        nodeId: 'sc-3',
+        ref: '1.3'
+      })
+    ]
+  })
+  const sheetOf = async (id: string): Promise<void> => {
+    await loaded()
+    act(() => useRecordStore.getState().select(id))
+    render(<RecordSheet id={id} />)
+    await waitFor(() => expect(sent('memory:sheet')).toContainEqual({ recordId: id, asOf: null }))
+  }
+
+  function installThreads(sheet: (recordId: string, asOf: string | null) => unknown): void {
+    install({
+      'record:list': () => [ASHBY, ELLA, HEIR, MARA, QUAY, TOMAS],
+      'record:get': (input) => {
+        const { id } = input as Input<'record:get'>
+        return withPages([HEIR, ASHBY, MARA, QUAY].find((record) => record.id === id) ?? MARA)
+      },
+      'memory:sheet': (input) => {
+        const { recordId, asOf } = input as Input<'memory:sheet'>
+        return sheet(recordId, asOf)
+      },
+      'memory:threads': () =>
+        threadsMemoryFixture({
+          checkedUpTo: CHECKED,
+          threads: [
+            heir,
+            threadViewFixture('t-ashby', 'Ashby’s return', {
+              origin: 'author',
+              status: 'notYet',
+              opened: null,
+              last: null,
+              steps: [],
+              defining: null
+            })
+          ]
+        }),
+      'memory:topicNotRight': () => ({ dismissed: [] })
+    })
+  }
+
+  it('gives a character Age and Threads, each as of its own scene', async () => {
+    installThreads((recordId, asOf) =>
+      sheetMemoryFixture(recordId, {
+        asOf,
+        age:
+          asOf === 'sc-3'
+            ? {
+                kind: 'stated',
+                value: '19',
+                claimId: 'c-age',
+                nodeId: 'sc-2',
+                ref: '1.2',
+                since: [{ text: 'Three winters later', nodeId: 'sc-3', ref: '1.3', breaks: true }]
+              }
+            : computedAgeFixture(19),
+        threads: { threads: [heir], checkedUpTo: CHECKED }
+      })
+    )
+    await sheetOf('r-mara')
+    const age = await screen.findByRole('region', { name: 'Age' })
+    await waitFor(() =>
+      expect(within(age).getByTestId('age-line')).toHaveTextContent('about 19 · year from 1.1')
+    )
+    // The birth year it counts from, with ⓘ and Not right.
+    const born = within(age).getByTestId('claim-line')
+    expect(born).toHaveTextContent('Born: 1792')
+    expect(born).toHaveTextContent('1.1')
+    expect(within(born).getByRole('button', { name: 'Not right' })).toBeVisible()
+    fireEvent.change(within(age).getByRole('combobox', { name: 'as of' }), {
+      target: { value: 'sc-3' }
+    })
+    await waitFor(() =>
+      expect(within(age).getByTestId('age-line')).toHaveTextContent(
+        '19, stated in 1.2 · since then: “Three winters later” (1.3)'
+      )
+    )
+    expect(within(age).getByTestId('claim-line')).toHaveTextContent('Age: 19')
+
+    const threads = screen.getByRole('region', { name: 'Threads' })
+    const item = within(threads).getByRole('group', { name: 'Thread: the missing heir' })
+    expect(within(item).getByTestId('thread-head')).toHaveTextContent(
+      'the missing heir · resolved in 1.3'
+    )
+    expect(
+      within(item)
+        .getAllByTestId('claim-line')
+        .map((line) => line.firstChild?.textContent)
+    ).toEqual(['opens 1.1: swears to find the heir', 'resolves 1.3: finds the heir'])
+    // A step is about its thread: Not right offers no other record.
+    const [first] = within(item).getAllByTestId('claim-line')
+    fireEvent.click(within(first!).getByRole('button', { name: 'Not right' }))
+    expect(within(first!).queryByRole('button', { name: /^Not about/ })).toBeNull()
+    expect(within(first!).getByRole('button', { name: 'Wrong value' })).toBeVisible()
+  })
+
+  it('says when no age is known, and scopes a sheet with no thread step naming it', async () => {
+    installThreads((recordId, asOf) =>
+      sheetMemoryFixture(recordId, { asOf, threads: { threads: [], checkedUpTo: CHECKED } })
+    )
+    await sheetOf('r-mara')
+    const age = await screen.findByRole('region', { name: 'Age' })
+    await waitFor(() =>
+      expect(within(age).getByTestId('age-none')).toHaveTextContent(
+        'No birth year or stated age as of this scene.'
+      )
+    )
+    expect(
+      within(screen.getByRole('region', { name: 'Threads' })).getByTestId('threads-none')
+    ).toHaveTextContent('No scene shows a thread step naming Mara Vell (checked up to 1.2)')
+  })
+
+  it('gives a place Threads but no Age', async () => {
+    installThreads((recordId, asOf) =>
+      sheetMemoryFixture(recordId, { asOf, threads: { threads: [heir], checkedUpTo: CHECKED } })
+    )
+    await sheetOf('r-quay')
+    await screen.findByRole('region', { name: 'Threads' })
+    expect(screen.queryByRole('region', { name: 'Age' })).toBeNull()
+  })
+
+  it('gives a thread The thread in place of From the book, with Not a thread when the AI made it', async () => {
+    installThreads((recordId, asOf) =>
+      sheetMemoryFixture(recordId, {
+        asOf,
+        topic:
+          recordId === 't-heir'
+            ? { kind: 'thread', thread: heir, checkedUpTo: CHECKED }
+            : {
+                kind: 'thread',
+                thread: threadViewFixture(recordId, 'Ashby’s return', {
+                  origin: 'author',
+                  status: 'notYet',
+                  opened: null,
+                  last: null,
+                  steps: [],
+                  defining: null
+                }),
+                checkedUpTo: CHECKED
+              }
+      })
+    )
+    await sheetOf('t-heir')
+    const section = await screen.findByRole('region', { name: 'The thread' })
+    expect(screen.queryByRole('region', { name: 'From the book' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Age' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Threads' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Rename in book/ })).toBeNull()
+    await waitFor(() =>
+      expect(within(section).getByTestId('topic-thread-status')).toHaveTextContent(
+        'resolved in 1.3'
+      )
+    )
+    expect(within(section).getAllByTestId('claim-line')).toHaveLength(2)
+    expect(within(section).getByTestId('topic-reveal')).toHaveTextContent('Opened in 1.1')
+    fireEvent.click(within(section).getByRole('button', { name: 'Not a thread' }))
+    await waitFor(() => expect(sent('memory:topicNotRight')).toEqual([{ recordId: 't-heir' }]))
+  })
+
+  it('scopes an author’s thread with no step', async () => {
+    installThreads((recordId, asOf) =>
+      sheetMemoryFixture(recordId, {
+        asOf,
+        topic: {
+          kind: 'thread',
+          thread: threadViewFixture(recordId, 'Ashby’s return', {
+            origin: 'author',
+            status: 'notYet',
+            opened: null,
+            last: null,
+            steps: [],
+            defining: null
+          }),
+          checkedUpTo: CHECKED
+        }
+      })
+    )
+    await sheetOf('t-ashby')
+    const section = await screen.findByRole('region', { name: 'The thread' })
+    await waitFor(() =>
+      expect(within(section).getByTestId('thread-no-steps')).toHaveTextContent(
+        'No scene shows this thread yet (checked up to 1.2)'
+      )
+    )
+    expect(within(section).getByTestId('topic-thread-status')).toHaveTextContent(
+      'not yet in the book'
+    )
+    expect(within(section).queryByRole('button', { name: 'Not a thread' })).toBeNull()
+    expect(within(section).getByTestId('topic-info')).toHaveTextContent('You made this thread.')
+  })
+
+  it('lists the Threads section with each thread’s status, and New thread', async () => {
+    installThreads((recordId, asOf) => sheetMemoryFixture(recordId, { asOf }))
+    await loaded()
+    render(<RecordTab categoryId="thread" />)
+    const list = await screen.findByRole('list', { name: 'Threads' })
+    await waitFor(() =>
+      expect(within(list).getByRole('button', { name: /^the missing heir/ })).toHaveTextContent(
+        'resolved in 1.3'
+      )
+    )
+    expect(within(list).getByRole('button', { name: /^Ashby’s return/ })).toHaveTextContent(
+      'not yet in the book'
+    )
+    expect(sent('memory:threads')).toEqual([{ asOf: null }])
+    fireEvent.click(screen.getByRole('button', { name: 'New thread…' }))
+    expect(useRecordStore.getState().creating).toBe('thread')
   })
 })

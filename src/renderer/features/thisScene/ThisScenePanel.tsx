@@ -32,6 +32,8 @@ import {
 } from '@renderer/features/memory/memoryView'
 import { CardValueInfo } from '@renderer/features/memory/CardValue'
 import { KnowsGrid } from '@renderer/features/memory/knows/KnowsGrid'
+import { ThreadsList } from '@renderer/features/memory/threads/ThreadsList'
+import { TimelineView } from '@renderer/features/memory/timeline/TimelineView'
 import { WhoKnowsWhat } from '@renderer/features/memory/knows/WhoKnowsWhat'
 import { RebuildMemory } from '@renderer/features/memory/RebuildMemory'
 import { useNow } from '@renderer/features/memory/useNow'
@@ -114,8 +116,8 @@ export function ThisSceneToggleButton(): React.JSX.Element {
  * until the scene has a card, P2a-D21), **True now**, **Who knows what** (F-16.22: the secrets the
  * scene touches, their holders Here, the scoped "No scene shows …" lines and the tension lines, with
  * "+ N more in Book") and **Needs a look** (its reading notices and the typed-detail conflicts
- * among them). **Book**: *As of [scene ▾]*, the Cast, the who-knows-what grid and *Rebuild
- * memory*. The footer:
+ * among them). **Book**: *As of [scene ▾]*, the Cast, the who-knows-what grid, Threads, the
+ * Timeline (F-16.23) and *Rebuild memory*. The footer:
  * "Read 3 min ago · Read now · today 0.3¢ · Cloud 12¢ of $1 · Dismissed (n)". `id` is the open
  * manuscript scene, or null.
  */
@@ -850,8 +852,9 @@ function QuestionList({ questions }: { questions: NameQuestion[] }): React.JSX.E
 
 /**
  * The Book tab: **As of [scene ▾]** (the open scene by default), the Cast (a view of the Characters
- * category, most-named first), **Who knows what** as of that scene (F-16.22) and *Rebuild memory*.
- * `toGrid`: opened from "+ N more in Book", so the grid is scrolled into view.
+ * category, most-named first), **Who knows what** as of that scene (F-16.22), **Threads** as of
+ * that scene and the **Timeline** with years and ages (F-16.23), and *Rebuild memory*. `toGrid`:
+ * opened from "+ N more in Book", so the grid is scrolled into view.
  */
 function BookTab({
   sceneId,
@@ -902,6 +905,8 @@ function BookTab({
       <div ref={gridRef}>
         <KnowsGrid asOf={asOf.asOf} />
       </div>
+      <ThreadsList asOf={asOf.asOf} />
+      <TimelineView />
       <RebuildMemory />
     </>
   )

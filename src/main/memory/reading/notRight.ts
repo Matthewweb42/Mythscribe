@@ -40,7 +40,7 @@ import {
 import { knowsThinker } from './recordEvidence'
 import { readerRoster } from './rosterCache'
 import { topicItemLines } from './topicContext'
-import { heldCard, hereChips, readingOrder } from './views'
+import { heldCard, hereChips, readingOrder } from './readingFrame'
 
 /**
  * *Not right* on an AI line (F-16.18; design §2.7 "Dismissed", plan P2a §4). Two choices:

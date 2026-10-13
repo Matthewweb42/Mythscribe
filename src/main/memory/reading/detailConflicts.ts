@@ -7,7 +7,8 @@ import { dismiss, dismissedKeys } from '../dismissedStore'
 import { listRecords } from '../recordStore'
 import { storedSceneDetails } from '../sceneDetailStore'
 import { draftCards } from './cardStore'
-import { heldCard, readingOrder, typedNames } from './views'
+import { typedNames } from './views'
+import { heldCard, readingOrder } from './readingFrame'
 
 /**
  * Decision 4's one question (F-16.18, P2a-D13; design §2.7 "Typed details"): where a scene's

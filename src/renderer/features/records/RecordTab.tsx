@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { SECRET_CATEGORY_ID } from '@shared/memory/topics'
+import { SECRET_CATEGORY_ID, THREAD_CATEGORY_ID } from '@shared/memory/topics'
 import { useCategory } from '@renderer/features/entities/categoryStore'
 import { secretSummary } from '@renderer/features/memory/knows/knowsView'
-import { useKnowsGrid } from '@renderer/features/memory/memoryStore'
+import { useKnowsGrid, useThreads } from '@renderer/features/memory/memoryStore'
+import { threadSummary } from '@renderer/features/memory/threads/threadsView'
 import { RecordList } from './RecordList'
 import { recordsIn, useRecordStore } from './recordStore'
 import { matchesRecordQuery } from './recordView'
@@ -14,6 +15,7 @@ import { matchesRecordQuery } from './recordView'
  * nicknames), the records of the category, and *New …* at the foot, which opens the creation
  * dialog with its twin-gate warning (none for a secret or thread, P2b-D19). Kept beside v1's
  * `EntityTab`, which v2 never shows. F-16.22: the Secrets section is this tab over `secret`.
+ * F-16.23: the Threads section lists each thread's status ("open since 2.1").
  */
 export function RecordTab({ categoryId }: { categoryId: string }): React.JSX.Element {
   const [query, setQuery] = useState('')
@@ -39,6 +41,8 @@ export function RecordTab({ categoryId }: { categoryId: string }): React.JSX.Ele
       <div className="min-h-0 flex-1 overflow-y-auto">
         {categoryId === SECRET_CATEGORY_ID ? (
           <SecretList ids={visibleIds} filtered={records.length > 0} />
+        ) : categoryId === THREAD_CATEGORY_ID ? (
+          <ThreadList ids={visibleIds} filtered={records.length > 0} />
         ) : (
           <RecordList categoryId={categoryId} ids={visibleIds} filtered={records.length > 0} />
         )}
@@ -77,4 +81,27 @@ function SecretList({ ids, filtered }: { ids: string[]; filtered: boolean }): Re
     ])
   )
   return <RecordList categoryId={SECRET_CATEGORY_ID} ids={ids} filtered={filtered} notes={notes} />
+}
+
+/**
+ * F-16.23: the Threads section's list, each thread with its status as of the end of the book
+ * ("open since 2.1 · last 7.3", "resolved in 20.1"; the Book's Threads, `useThreads(null)`). An
+ * AI-made thread the Threads do not hold is held only where the reader no longer reads and says
+ * so; nothing is said until they have loaded.
+ */
+function ThreadList({ ids, filtered }: { ids: string[]; filtered: boolean }): React.JSX.Element {
+  const memory = useThreads(null)
+  const byId = useRecordStore((s) => s.byId)
+  const notes = Object.fromEntries(
+    ids.map((id) => [
+      id,
+      memory === undefined
+        ? ''
+        : threadSummary(
+            memory.threads.find((thread) => thread.recordId === id),
+            byId[id]?.origin === 'ai'
+          )
+    ])
+  )
+  return <RecordList categoryId={THREAD_CATEGORY_ID} ids={ids} filtered={filtered} notes={notes} />
 }

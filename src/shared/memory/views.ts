@@ -318,8 +318,8 @@ export const ThreadsMemory = z.object({
 export type ThreadsMemory = z.infer<typeof ThreadsMemory>
 
 /**
- * A topic's sheet section: a secret's or a thread's view. A secret's carries `checkedUpTo`, which
- * scopes "no one has a line" (P2b rule 9).
+ * A topic's sheet section: a secret's or a thread's view. Each carries `checkedUpTo`, which scopes
+ * "no one has a line" and "no scene shows this thread yet" (P2b rule 9).
  */
 export const TopicView = z.discriminatedUnion('kind', [
   z.object({
@@ -327,9 +327,25 @@ export const TopicView = z.discriminatedUnion('kind', [
     secret: SecretView,
     checkedUpTo: SceneRefView.nullable()
   }),
-  z.object({ kind: z.literal('thread'), thread: ThreadMemoryView })
+  z.object({
+    kind: z.literal('thread'),
+    thread: ThreadMemoryView,
+    checkedUpTo: SceneRefView.nullable()
+  })
 ])
 export type TopicView = z.infer<typeof TopicView>
+
+/**
+ * A named record's **Threads, as of [scene]** (F-16.23, plan P2b §5.2): the threads with a step as
+ * of the scene whose quote's paragraph names the record for certain, each with its own status and
+ * its steps narrowed to those, in story order; with none, `checkedUpTo` scopes the empty state
+ * (P2b rule 9).
+ */
+export const SheetThreadsView = z.object({
+  threads: z.array(ThreadMemoryView),
+  checkedUpTo: SceneRefView.nullable()
+})
+export type SheetThreadsView = z.infer<typeof SheetThreadsView>
 
 /** One line of a sheet's Knows: the secret and the knower's cell for it. */
 export const KnowsSheetLine = z.object({
@@ -353,6 +369,78 @@ export const KnowsSheetView = z.object({
   checkedUpTo: SceneRefView.nullable()
 })
 export type KnowsSheetView = z.infer<typeof KnowsSheetView>
+
+/** An elapsed hint the card quoted ("Three winters later"), where, and whether it crosses a year. */
+export const ElapsedHintView = z.object({
+  text: z.string(),
+  nodeId: z.string(),
+  ref: z.string(),
+  breaks: z.boolean()
+})
+export type ElapsedHintView = z.infer<typeof ElapsedHintView>
+
+/**
+ * A scene's story year (decision 5): typed in its details, quoted in its own text (verified, its
+ * scene only), carried from the last typed year (`from`), or not known (with the hint that ended
+ * the carry, when one did).
+ */
+export const YearView = z.union([
+  z.object({
+    kind: z.enum(['typed', 'quoted', 'carried']),
+    value: z.number().int(),
+    from: SceneRefView
+  }),
+  z.object({ kind: z.literal('unknown'), hint: ElapsedHintView.nullable() })
+])
+export type YearView = z.infer<typeof YearView>
+export type KnownYearView = Extract<YearView, { value: number }>
+
+/** Where a birth year came from: a quoted `born` line in the book, or the record's Pinned page. */
+export const BornView = z.object({
+  year: z.number().int(),
+  source: z.enum(['text', 'pinned']),
+  claimId: z.string().nullable(),
+  nodeId: z.string().nullable(),
+  ref: z.string().nullable()
+})
+export type BornView = z.infer<typeof BornView>
+
+/**
+ * A character's age as of a scene (decision 5, P2b-D15): computed from a birth year and the
+ * scene's year ("about 19 · year from 1.1"), not born yet, or the last stated age with the
+ * year-crossing hints since listed and never added up ("19, stated in 2.1 · since then: 'Three
+ * winters later' (14.1)").
+ */
+export const AgeView = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('computed'),
+    age: z.number().int().nonnegative(),
+    born: BornView,
+    year: z.object({
+      kind: z.enum(['typed', 'quoted', 'carried']),
+      value: z.number().int(),
+      from: SceneRefView
+    })
+  }),
+  z.object({
+    kind: z.literal('notBorn'),
+    born: BornView,
+    year: z.object({
+      kind: z.enum(['typed', 'quoted', 'carried']),
+      value: z.number().int(),
+      from: SceneRefView
+    })
+  }),
+  z.object({
+    kind: z.literal('stated'),
+    value: z.string(),
+    claimId: z.string(),
+    nodeId: z.string(),
+    ref: z.string(),
+    since: z.array(ElapsedHintView)
+  })
+])
+export type AgeView = z.infer<typeof AgeView>
 
 export const SceneMemory = z.object({
   nodeId: z.string(),
@@ -480,7 +568,11 @@ export const SheetMemory = z.object({
   later: z.number().int().nonnegative(),
   /** F-16.22: a character's or group's Knows as of the scene; null for any other record. */
   knows: KnowsSheetView.nullable(),
-  /** F-16.22: a secret's own view as of the scene (threads in slice 5); null for a named record. */
+  /** F-16.23: a named record's Threads as of the scene; null for a secret or a thread. */
+  threads: SheetThreadsView.nullable(),
+  /** F-16.23: a character's age as of the scene (decision 5); null when none is known or for any other record. */
+  age: AgeView.nullable(),
+  /** F-16.22, F-16.23: a secret's or a thread's own view as of the scene; null for a named record. */
   topic: TopicView.nullable()
 })
 export type SheetMemory = z.infer<typeof SheetMemory>
@@ -756,78 +848,6 @@ export type SplitTopicResult = z.infer<typeof SplitTopicResult>
  */
 export const TopicNotRightResult = z.object({ dismissed: z.array(Dismissed) })
 export type TopicNotRightResult = z.infer<typeof TopicNotRightResult>
-
-/** An elapsed hint the card quoted ("Three winters later"), where, and whether it crosses a year. */
-export const ElapsedHintView = z.object({
-  text: z.string(),
-  nodeId: z.string(),
-  ref: z.string(),
-  breaks: z.boolean()
-})
-export type ElapsedHintView = z.infer<typeof ElapsedHintView>
-
-/**
- * A scene's story year (decision 5): typed in its details, quoted in its own text (verified, its
- * scene only), carried from the last typed year (`from`), or not known (with the hint that ended
- * the carry, when one did).
- */
-export const YearView = z.union([
-  z.object({
-    kind: z.enum(['typed', 'quoted', 'carried']),
-    value: z.number().int(),
-    from: SceneRefView
-  }),
-  z.object({ kind: z.literal('unknown'), hint: ElapsedHintView.nullable() })
-])
-export type YearView = z.infer<typeof YearView>
-export type KnownYearView = Extract<YearView, { value: number }>
-
-/** Where a birth year came from: a quoted `born` line in the book, or the record's Pinned page. */
-export const BornView = z.object({
-  year: z.number().int(),
-  source: z.enum(['text', 'pinned']),
-  claimId: z.string().nullable(),
-  nodeId: z.string().nullable(),
-  ref: z.string().nullable()
-})
-export type BornView = z.infer<typeof BornView>
-
-/**
- * A character's age as of a scene (decision 5, P2b-D15): computed from a birth year and the
- * scene's year ("about 19 · year from 1.1"), not born yet, or the last stated age with the
- * year-crossing hints since listed and never added up ("19, stated in 2.1 · since then: 'Three
- * winters later' (14.1)").
- */
-export const AgeView = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('computed'),
-    age: z.number().int().nonnegative(),
-    born: BornView,
-    year: z.object({
-      kind: z.enum(['typed', 'quoted', 'carried']),
-      value: z.number().int(),
-      from: SceneRefView
-    })
-  }),
-  z.object({
-    kind: z.literal('notBorn'),
-    born: BornView,
-    year: z.object({
-      kind: z.enum(['typed', 'quoted', 'carried']),
-      value: z.number().int(),
-      from: SceneRefView
-    })
-  }),
-  z.object({
-    kind: z.literal('stated'),
-    value: z.string(),
-    claimId: z.string(),
-    nodeId: z.string(),
-    ref: z.string(),
-    since: z.array(ElapsedHintView)
-  })
-])
-export type AgeView = z.infer<typeof AgeView>
 
 /**
  * One row of the Book's Timeline (decision 5): a readable scene with its year, whether it is a

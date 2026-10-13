@@ -10,13 +10,10 @@ import { HOLDS, LEARNS, PARTIAL, knowsLine, parseHow } from '@shared/memory/know
 import { normName } from '@shared/memory/names'
 import { stepCounts, threadsAsOf } from '@shared/memory/threadsAsOf'
 import type { KnowsAsOf } from '@shared/memory/whoKnows'
-import { recordAge, storyYears, type AgeClaim, type StoryYear } from '@shared/memory/years'
 import type { ThreadStatus } from '@shared/memory/views'
 import { activeDraftId } from '../../draft/draftStore'
 import { dismiss } from '../../memory/dismissedStore'
 import { nameScanShared } from '../../memory/nameIndexer'
-import { storedSceneDetails } from '../../memory/sceneDetailStore'
-import { getCard } from '../../memory/reading/cardStore'
 import { draftClaims, slotClaims } from '../../memory/reading/claimStore'
 import { storedKnows as storedKnowsView } from '../../memory/reading/knowsViews'
 import { lastReading } from '../../memory/reading/readingStore'
@@ -30,7 +27,8 @@ import {
   type FakeAnswer
 } from '../../memory/reading/readingFixture'
 import { listTopicQuotes, listTopics } from '../../memory/reading/topicStore'
-import { heldCard, readingOrder } from '../../memory/reading/views'
+import { readingOrder } from '../../memory/reading/readingFrame'
+import { storedAge, storedYears } from '../../memory/reading/timeViews'
 import type { CompletionRequest } from '../providers/types'
 import { listNodes } from '../../tree/treeStore'
 import { TEST_BOOK } from '../../memory/testBook/book'
@@ -492,45 +490,6 @@ function gridCells(book: TestBookProject, secret: string, atScene: string): Map<
     )
 }
 
-/** Decision 5 over the stored book: typed years and the held cards' verified fields. */
-function bookYears(book: TestBookProject): StoryYear[] {
-  const draftId = activeDraftId(book.db)
-  const reading = readingOrder(book.db)
-  const nodes = [...reading.order].sort((a, b) => a[1] - b[1]).map(([nodeId]) => nodeId)
-  return storyYears(
-    nodes.map((nodeId) => {
-      const card = getCard(book.db, nodeId, draftId)
-      const held = card === null ? null : heldCard(book.db, card, true)
-      const year = held?.fields.year ?? null
-      const flash = held?.fields.flashback ?? null
-      return {
-        nodeId,
-        ref: reading.refs.get(nodeId) ?? '',
-        typedYear: storedSceneDetails(book.db, nodeId).storyYear,
-        quotedYear: year?.verified === true ? year.value : null,
-        flashback: flash?.verified === true && flash.value === 'yes',
-        elapsed: held?.fields.elapsed?.value ?? null
-      }
-    })
-  )
-}
-
-/** A record's live narration `born` and `age` claims as the age rules read them. */
-function ageClaims(book: TestBookProject, record: string, slot: 'age' | 'born'): AgeClaim[] {
-  const recordId = book.records.get(record)
-  return draftClaims(book.db, activeDraftId(book.db))
-    .filter((claim) => claim.recordId === recordId && claim.slot === slot)
-    .map((claim) => ({
-      id: claim.id,
-      value: claim.value,
-      voice: claim.voice,
-      mode: claim.mode,
-      state: claim.state,
-      nodeId: claim.nodeId,
-      para: claim.para
-    }))
-}
-
 /** The scoped absence line and its scope: composed in the renderer only, never sent (P2b rule 9). */
 const SCOPED = /no scene shows|checked up to/i
 /** Words that would store someone's not knowing as a fact (P2b rule 9). */
@@ -645,7 +604,8 @@ for (const readOrder of ['book', 'reverse'] as const) {
 
     it('gives the story years and ages the labels give (decision 5)', () => {
       const book = run?.book ?? fail()
-      const years = bookYears(book)
+      // Read through the app's own views (timeViews.ts), as the Timeline and the sheets read them.
+      const years = storedYears(book.db)
       expect(
         years.map((row) => {
           const scene = sceneOf(book, row.nodeId)
@@ -675,16 +635,12 @@ for (const readOrder of ['book', 'reverse'] as const) {
               : null
         ])
       )
-      const reading = readingOrder(book.db)
       for (const label of TEST_BOOK_LABELS.ages) {
-        const age = recordAge({
-          born: ageClaims(book, label.record, 'born'),
-          ages: ageClaims(book, label.record, 'age'),
-          pinned: [],
-          years,
-          reading,
-          atId: book.scenes.get(label.scene) ?? null
-        })
+        const age = storedAge(
+          book.db,
+          book.records.get(label.record) ?? '',
+          book.scenes.get(label.scene) ?? null
+        )
         const at = `${label.record} as of ${label.scene}`
         const expected = label.expect
         if (expected.kind === 'stated') {

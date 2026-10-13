@@ -469,6 +469,7 @@ import { anchorsChanged, runAnchors } from '../memory/reading/anchors'
 import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
 import { settleOwnedNames } from '../memory/reading/waiting'
 import { claimInfo, knowsGridMemory, sceneMemory, sheetMemory } from '../memory/reading/views'
+import { threadsMemory, timelineMemory } from '../memory/reading/timeViews'
 import { setKnewBefore } from '../memory/reading/knewBeforeStore'
 import {
   restoreTopicNotRight,
@@ -5161,6 +5162,12 @@ export function registerHandlers({
 
   // F-16.22: who knows what (the Book's grid), and the author's answers on secrets.
   register('memory:knows', ({ asOf }) => knowsGridMemory(manager.require().connection.orm, asOf))
+
+  // F-16.23: the Book's Threads and Timeline (years and ages), local and free.
+  register('memory:threads', ({ asOf }) => threadsMemory(manager.require().connection.orm, asOf))
+  register('memory:timeline', ({ recordId }) =>
+    timelineMemory(manager.require().connection.orm, recordId)
+  )
 
   register('memory:knewBefore', ({ secretId, recordId, knew }) => {
     const db = manager.require().connection.orm

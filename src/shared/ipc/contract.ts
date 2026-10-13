@@ -276,6 +276,8 @@ import {
   SettleResult,
   SheetMemory,
   SplitTopicResult,
+  ThreadsMemory,
+  TimelineMemory,
   TopicNotRightResult
 } from '../memory/views'
 import { Label, LabelColour, LabelKind, LabelLink, LabelName } from '../storyLabels'
@@ -3458,6 +3460,21 @@ export const contract = {
    * and "checked up to". Local and free; nothing here ever reaches a prompt.
    */
   'memory:knows': { input: z.object({ asOf: z.string().nullable() }), output: KnowsGrid },
+  /**
+   * F-16.23: the Book's Threads as of scene `asOf` (null: the end of the book): every thread the
+   * author made and every AI-made one a readable scene still holds, each with its status (not yet,
+   * open, resolved), its steps and reveals, and "checked up to". Local and free.
+   */
+  'memory:threads': { input: z.object({ asOf: z.string().nullable() }), output: ThreadsMemory },
+  /**
+   * F-16.23: the Book's Timeline (decision 5): one row per readable scene with its story year
+   * (typed, carried, stated in the scene, or not known since a hint), the elapsed hint, the typed
+   * time and ages: the characters Here, or `recordId`'s in every row. Local and free.
+   */
+  'memory:timeline': {
+    input: z.object({ recordId: z.string().nullable() }),
+    output: TimelineMemory
+  },
   /**
    * F-16.22: *Knew before the book* (`knew: true`) or *Remove* (`false`): the author says a
    * character or group knew a secret before the story starts. Author-owned; VALIDATION for any

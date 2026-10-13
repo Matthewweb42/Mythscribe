@@ -48,7 +48,7 @@ import {
   sceneTopicQuotes,
   splitTopic
 } from './topicStore'
-import { readingOrder } from './views'
+import { readingOrder } from './readingFrame'
 
 let tmp: string
 let session: ProjectSession

@@ -9,7 +9,7 @@ import { listRecords } from '../recordStore'
 import { storedSceneDetails } from '../sceneDetailStore'
 import { draftCards, getCard } from './cardStore'
 import { claimSources } from './claimStore'
-import { heldCard, hereChips } from './views'
+import { heldCard, hereChips } from './readingFrame'
 
 /**
  * The v2 card as the readers that used to read stored summaries take it (F-16.20, plan P2a §5.1):

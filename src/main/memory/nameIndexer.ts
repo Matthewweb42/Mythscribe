@@ -128,6 +128,21 @@ export function listNameMentions(db: TreeDb, nodeId: string): (NameMention & { i
 }
 
 /**
+ * The paragraphs that name a record for certain (an ambiguous span names nobody yet), as
+ * `nodeId|para` keys: what a sheet's Threads read (F-16.23: the steps whose paragraph names it).
+ */
+export function recordMentionParas(db: TreeDb, recordId: string): Set<string> {
+  return new Set(
+    db
+      .select({ nodeId: nameMention.nodeId, para: nameMention.para })
+      .from(nameMention)
+      .where(and(eq(nameMention.recordId, recordId), eq(nameMention.ambiguous, false)))
+      .all()
+      .map((row) => `${row.nodeId}|${row.para}`)
+  )
+}
+
+/**
  * How often each scene names each record, certain mentions only (an ambiguous span names nobody
  * yet): one row per record and scene, by record then scene id. What *Named in* and the lists'
  * "named in N scenes" read. Only scenes in the manuscript count: a scene moved to front or end

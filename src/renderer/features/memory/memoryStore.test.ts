@@ -13,6 +13,8 @@ import {
   memoryStatusFixture,
   sceneMemoryFixture,
   sheetMemoryFixture,
+  threadsMemoryFixture,
+  timelineFixture,
   type FakeMain
 } from './memoryFixture'
 import {
@@ -20,7 +22,9 @@ import {
   useKnowsGrid,
   useMemoryStore,
   useSceneMemory,
-  useSheetMemory
+  useSheetMemory,
+  useThreads,
+  useTimeline
 } from './memoryStore'
 
 /**
@@ -60,7 +64,9 @@ beforeEach(() => {
         later: asOf === null ? 0 : 2,
         // A knower's sheet reads the whole book (F-16.22).
         knows:
-          recordId === 'r-orrin' ? { lines: [], others: [], later: 0, checkedUpTo: null } : null
+          recordId === 'r-orrin' ? { lines: [], others: [], later: 0, checkedUpTo: null } : null,
+        // A place's Threads read the whole book too (F-16.23).
+        threads: recordId === 'r-harbour' ? { threads: [], checkedUpTo: null } : null
       })
     },
     'memory:status': () => memoryStatusFixture({ todayUsd: 0.01 }),
@@ -82,6 +88,10 @@ beforeEach(() => {
     }),
     'memory:readNow': () => ({ ok: true, read: true, reason: null, readingId: 'r', costUsd: 0 }),
     'memory:knows': (input) => knowsGridFixture({ asOf: (input as Input<'memory:knows'>).asOf }),
+    'memory:threads': (input) =>
+      threadsMemoryFixture({ asOf: (input as Input<'memory:threads'>).asOf }),
+    'memory:timeline': (input) =>
+      timelineFixture({ recordId: (input as Input<'memory:timeline'>).recordId }),
     'memory:knewBefore': () => ({ changed: true }),
     'memory:splitTopic': () => ({ recordId: 's-new', dismissed: tombstone('d-split', 'split') }),
     'memory:topicNotRight': () => ({ dismissed: [tombstone('d-gone', 'notRight')] })
@@ -204,6 +214,28 @@ describe('useMemoryStore (F-16.18)', () => {
     expect(main.sent('memory:knows')).toEqual([{ asOf: 'sc-2' }])
     unmount()
     expect(useMemoryStore.getState().knows).toEqual({})
+  })
+
+  it('F-16.23: keeps the Threads per as-of scene and the Timeline per "Ages of", read again on any change', async () => {
+    const threads = renderHook(() => useThreads('sc-2'))
+    const timeline = renderHook(() => useTimeline('r-mara'))
+    const sheet = renderHook(() => useSheetMemory('r-harbour', null))
+    await flush()
+    expect(threads.result.current?.asOf).toBe('sc-2')
+    expect(timeline.result.current?.recordId).toBe('r-mara')
+    main.calls.length = 0
+    // A story year typed in another scene names no record: everything that reads the whole book
+    // is read again, the place's Threads among them.
+    act(() => main.emit('memory:changed', { nodeIds: ['sc-9'], recordIds: [] }))
+    await flush()
+    expect(main.sent('memory:threads')).toEqual([{ asOf: 'sc-2' }])
+    expect(main.sent('memory:timeline')).toEqual([{ recordId: 'r-mara' }])
+    expect(main.sent('memory:sheet')).toEqual([{ recordId: 'r-harbour', asOf: null }])
+    threads.unmount()
+    timeline.unmount()
+    sheet.unmount()
+    expect(useMemoryStore.getState().threads).toEqual({})
+    expect(useMemoryStore.getState().timeline).toEqual({})
   })
 
   it('F-16.22: sends Knew before, Split and Not a secret, adding their Dismissed rows', async () => {

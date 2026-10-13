@@ -46,6 +46,8 @@ describe('the reading views (F-16.18)', () => {
         others: [],
         later: 0,
         knows: { lines: [], others: [], later: 2, checkedUpTo: null },
+        threads: { threads: [], checkedUpTo: null },
+        age: null,
         topic: null
       }).success
     ).toBe(true)

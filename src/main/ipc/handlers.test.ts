@@ -100,6 +100,7 @@ import {
 } from '../project/settingsStore'
 import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
 import { cardAnchorOf, revealIn, seedClaims } from '../memory/reading/claimFixture'
+import { scanNamesFor } from '../memory/nameIndexer'
 import { createTopic, deleteTopicQuotes, mergeInto } from '../memory/reading/topicStore'
 import { upsertCard } from '../memory/reading/cardStore'
 import { emptyCardFields } from '@shared/memory/claims'
@@ -8971,6 +8972,85 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       expect(refused.ok, channel).toBe(false)
       if (!refused.ok) expect(refused.error.message).toBe(TRIAL_ENDED_MESSAGE)
     }
+  })
+
+  it('answers the Threads and the Timeline with years and ages, read-only and v2 (F-16.23)', async () => {
+    const scene = await openV2()
+    const db = manager.require().connection.orm
+    await invoke('document:save', {
+      id: scene,
+      content: paragraphs('Mara was born in 1792.', 'Mara swore to find the heir.')
+    })
+    const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+    if (!('record' in made)) throw new Error('blocked')
+    const mara = made.record.id
+    await invoke('sceneDetail:set', {
+      nodeId: scene,
+      details: {
+        povRecordId: mara,
+        place: { recordId: null, text: '' },
+        time: { text: 'dawn' },
+        storyYear: 1811,
+        alsoHere: []
+      }
+    })
+    const heir = createTopic(
+      db,
+      {
+        kind: 'thread',
+        label: 'the missing heir',
+        quote: revealIn(db, scene, { para: 1, quote: 'Mara swore to find the heir', label: 'x' })
+      },
+      new Date()
+    ).recordId
+    seedClaims(
+      db,
+      scene,
+      [
+        {
+          recordId: heir,
+          slot: 'thread',
+          value: 'swears to find the heir',
+          how: 'opens',
+          quote: 'Mara swore to find the heir',
+          para: 1,
+          proof: 'verified'
+        },
+        { recordId: mara, slot: 'born', value: '1792', quote: 'Mara was born in 1792', para: 0 }
+      ],
+      new Date()
+    )
+
+    // The name scan runs on a debounce after a save; here it is run at once (a sheet's Threads
+    // are the steps whose paragraph names the record).
+    scanNamesFor(db, scene, new Date())
+
+    const threads = await invoke('memory:threads', { asOf: scene })
+    expect(threads.threads.map((each) => [each.label, each.status])).toEqual([
+      ['the missing heir', 'open']
+    ])
+    const timeline = await invoke('memory:timeline', { recordId: null })
+    expect(timeline.rows).toHaveLength(1)
+    expect(timeline.rows[0]).toMatchObject({
+      nodeId: scene,
+      time: 'dawn',
+      year: { kind: 'typed', value: 1811 },
+      ages: [{ recordId: mara, age: { kind: 'computed', age: 19 } }]
+    })
+    expect((await invoke('memory:timeline', { recordId: heir })).rows[0]?.ages).toEqual([])
+    const sheet = await invoke('memory:sheet', { recordId: mara, asOf: scene })
+    expect(sheet.age).toMatchObject({ kind: 'computed', age: 19 })
+    expect(sheet.threads?.threads.map((each) => each.recordId)).toEqual([heir])
+    expect((await invoke('memory:sheet', { recordId: heir, asOf: null })).topic).toMatchObject({
+      kind: 'thread',
+      thread: { status: 'open' }
+    })
+
+    // After the trial both still read.
+    accessNow += 31 * 24 * 60 * 60_000
+    access.refresh()
+    expect((await invoke('memory:threads', { asOf: null })).threads).toHaveLength(1)
+    expect((await invoke('memory:timeline', { recordId: mara })).rows).toHaveLength(1)
   })
 
   it('opens without v1’s steps: no tag proposals, and the name questions are published instead', async () => {

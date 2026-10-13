@@ -35,7 +35,8 @@ import {
 } from './claimStore'
 import { getReading, insertReading, lastReading, recentReadings } from './readingStore'
 import { getSceneRead, writeSceneRead } from './sceneReadStore'
-import { claimInfo, readingOrder, sceneMemory, sheetMemory } from './views'
+import { claimInfo, sceneMemory, sheetMemory } from './views'
+import { readingOrder } from './readingFrame'
 
 let tmp: string
 let session: ProjectSession

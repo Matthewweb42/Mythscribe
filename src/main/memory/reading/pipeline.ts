@@ -134,7 +134,7 @@ import {
   sceneTopicQuotes,
   type NewTopicQuote
 } from './topicStore'
-import { heldCard, hereChips, readingOrder } from './views'
+import { heldCard, hereChips, readingOrder } from './readingFrame'
 
 /**
  * The reading pipeline (F-16.17, F-16.16's gate; design §2.3, plan P2a §2.4): `runReading` reads

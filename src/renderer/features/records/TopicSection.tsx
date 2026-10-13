@@ -1,7 +1,8 @@
 import { useId, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { KNOWER_KINDS } from '@shared/memory/knows'
-import type { SceneRefView, SecretView } from '@shared/memory/views'
+import type { TopicKind } from '@shared/memory/topics'
+import type { SceneRefView, SecretView, ThreadMemoryView } from '@shared/memory/views'
 import { ClaimLine } from '@renderer/features/memory/ClaimLine'
 import { TopicInfoCard } from '@renderer/features/memory/knows/TopicInfo'
 import {
@@ -14,6 +15,8 @@ import {
 import { useNameOf } from '@renderer/features/memory/knows/useNameOf'
 import { useMemoryStore, useSheetMemory } from '@renderer/features/memory/memoryStore'
 import { staleNote } from '@renderer/features/memory/memoryView'
+import { ThreadSteps } from '@renderer/features/memory/threads/ThreadsList'
+import { threadStatusText } from '@renderer/features/memory/threads/threadsView'
 import { AsOfPicker } from './AsOfPicker'
 import { useAsOf } from './asOf'
 import { useRecordStore } from './recordStore'
@@ -24,32 +27,68 @@ const SMALL =
   'rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40'
 
 /**
- * A secret's sheet's **The secret** (F-16.22; plan P2b §4.2), in place of From the book: "readers
- * since 1.1"; its defining reveal with *Go there* and how it was checked, every reveal merged into
- * it with *Split*, and *Not a secret* when the AI made it (`TopicInfoCard`); then who knows it as
- * of [scene ▾] (each line with ⓘ and *Not right*; the author's marks with *Remove*; the lines that
- * never count apart; how many learn it later; with no line, the scoped "No scene shows anyone
- * learning this (checked up to 1.2)", P2b rule 9) and *+ Someone knew before the book* with a
- * picker of the characters and groups.
+ * A secret's or thread's own section on its sheet, in place of From the book, as of [scene ▾].
+ *
+ * **The secret** (F-16.22; plan P2b §4.2): "readers since 1.1"; its defining reveal with *Go
+ * there* and how it was checked, every reveal merged into it with *Split*, and *Not a secret* when
+ * the AI made it (`TopicInfoCard`); then who knows it (each line with ⓘ and *Not right*; the
+ * author's marks with *Remove*; the lines that never count apart; how many learn it later; with no
+ * line, the scoped "No scene shows anyone learning this (checked up to 1.2)", P2b rule 9) and *+
+ * Someone knew before the book* with a picker of the characters and groups.
+ *
+ * **The thread** (F-16.23; plan P2b §5.2): its status ("open since 2.1 · last 7.3", "resolved in
+ * 20.1", "not yet in the book"), its reveals with *Split* and *Not a thread* when the AI made it,
+ * and its steps as lines with ⓘ and *Not right* (muted when remembered or rumoured); with none,
+ * the scoped "No scene shows this thread yet (checked up to 14.2)".
  */
-export function TopicSection({ recordId }: { recordId: string }): React.JSX.Element {
+export function TopicSection({
+  recordId,
+  kind
+}: {
+  recordId: string
+  kind: TopicKind
+}): React.JSX.Element {
   const { asOf, scenes, setAsOf } = useAsOf()
   const sheet = useSheetMemory(recordId, asOf)
   const topic = sheet?.topic ?? null
+  const title = kind === 'secret' ? 'The secret' : 'The thread'
   return (
-    <section aria-label="The secret" className="flex flex-col gap-1" data-testid="topic-section">
+    <section aria-label={title} className="flex flex-col gap-1" data-testid="topic-section">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className={HEADING}>The secret</h3>
+        <h3 className={HEADING}>{title}</h3>
         <AsOfPicker scenes={scenes} value={asOf} onChange={setAsOf} />
       </div>
       {sheet === undefined ? (
         <p className="m-0 text-xs text-fg-muted">Reading…</p>
-      ) : topic?.kind !== 'secret' ? (
-        <p className="m-0 text-xs text-fg-muted">Nothing read about this secret yet.</p>
-      ) : (
+      ) : topic?.kind !== kind ? (
+        <p className="m-0 text-xs text-fg-muted">Nothing read about this {kind} yet.</p>
+      ) : topic.kind === 'secret' ? (
         <SecretBody secret={topic.secret} checkedUpTo={topic.checkedUpTo} />
+      ) : (
+        <ThreadBody thread={topic.thread} checkedUpTo={topic.checkedUpTo} />
       )}
     </section>
+  )
+}
+
+function ThreadBody({
+  thread,
+  checkedUpTo
+}: {
+  thread: ThreadMemoryView
+  checkedUpTo: SceneRefView | null
+}): React.JSX.Element {
+  return (
+    <>
+      <p className="m-0 text-xs text-fg-muted" data-testid="topic-thread-status">
+        {threadStatusText(thread)}
+      </p>
+      <TopicInfoCard topic={thread} kind="thread" />
+      <div role="group" aria-label="Steps">
+        <h4 className={GROUP}>Steps</h4>
+        <ThreadSteps thread={thread} checkedUpTo={checkedUpTo} />
+      </div>
+    </>
   )
 }
 

@@ -12,7 +12,9 @@ import type {
   ReadNowResult,
   SceneMemory,
   SheetLineView,
-  SheetMemory
+  SheetMemory,
+  ThreadsMemory,
+  TimelineMemory
 } from '@shared/memory/views'
 import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -40,6 +42,11 @@ import { ipc } from '@renderer/lib/ipc'
  * shown like the sheets and read again on any `memory:changed` (a reading, a knew-before mark,
  * *Split*, *Not a secret*), and the author's answers on secrets: *Knew before the book* and its
  * *Remove*, *Split*, *Not a secret* (their Dismissed rows join the list at once).
+ *
+ * F-16.23: the Book's Threads by as-of scene (`threads`, `useThreads`; the sidebar's Threads list
+ * reads them as of the end of the book) and the Timeline by "Ages of" record (`timeline`,
+ * `useTimeline`), read while shown and again on any `memory:changed` (a reading, typed details:
+ * a story year moves every later row) or roster change, as the grids are.
  */
 
 /** A scene's memory as stored here: its lines by id. */
@@ -52,6 +59,10 @@ interface MemoryState {
   sheets: Record<string, SheetMemory>
   /** F-16.22: the who-knows-what grids, by `knowsKey(asOf)`. */
   knows: Record<string, KnowsGrid>
+  /** F-16.23: the Book's Threads, by `knowsKey(asOf)`. */
+  threads: Record<string, ThreadsMemory>
+  /** F-16.23: the Timeline, by `timelineKey(recordId)` ("Ages of" a record, or who is Here). */
+  timeline: Record<string, TimelineMemory>
   status: MemoryStatus | null
   notices: MemoryNotice[]
   /** F-16.20: each scene's card line (the AI's one-line map of it), by node. */
@@ -68,10 +79,14 @@ interface MemoryState {
   loadScene: (nodeId: string) => Promise<void>
   loadSheet: (recordId: string, asOf: string | null) => Promise<void>
   loadKnows: (asOf: string | null) => Promise<void>
+  loadThreads: (asOf: string | null) => Promise<void>
+  loadTimeline: (recordId: string | null) => Promise<void>
   /** Counts a view showing the scene and reads it; answers the release. */
   watchScene: (nodeId: string) => () => void
   watchSheet: (recordId: string, asOf: string | null) => () => void
   watchKnows: (asOf: string | null) => () => void
+  watchThreads: (asOf: string | null) => () => void
+  watchTimeline: (recordId: string | null) => () => void
   /**
    * F-16.22: *Knew before the book* (`knew: true`) or its *Remove*; main's `memory:changed` reads
    * the grids, scenes and sheets again. Answers whether main took it.
@@ -103,15 +118,53 @@ interface MemoryState {
 export const sheetKey = (recordId: string, asOf: string | null): string =>
   `${recordId}|${asOf ?? ''}`
 
-/** A grid's key: its as-of scene, or the end of the book. */
+/** A grid's (or the Threads') key: its as-of scene, or the end of the book. */
 export const knowsKey = (asOf: string | null): string => asOf ?? ''
+
+/** The Timeline's key: the record whose age every row shows, or who is Here. */
+export const timelineKey = (recordId: string | null): string => recordId ?? ''
 
 let generation = 0
 let counter = 0
 const nextRequestId = (): string => `mem-${Date.now().toString(36)}-${++counter}`
 const sceneWatchers = new Map<string, number>()
 const sheetWatchers = new Map<string, { recordId: string; asOf: string | null; count: number }>()
-const knowsWatchers = new Map<string, { asOf: string | null; count: number }>()
+/** A view of the whole book read while shown (grids, Threads, Timeline): its argument and count. */
+interface BookWatch {
+  arg: string | null
+  count: number
+}
+const knowsWatchers = new Map<string, BookWatch>()
+const threadsWatchers = new Map<string, BookWatch>()
+const timelineWatchers = new Map<string, BookWatch>()
+
+/**
+ * Counts a view showing a whole-book view by key, reads it when the first one comes, and answers
+ * the release, which drops it (`drop`) when the last one goes.
+ */
+function watchBook(
+  watchers: Map<string, BookWatch>,
+  key: string,
+  arg: string | null,
+  load: () => void,
+  drop: () => void
+): () => void {
+  const was = watchers.get(key)
+  watchers.set(key, { arg, count: (was?.count ?? 0) + 1 })
+  if (was === undefined) load()
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const entry = watchers.get(key)
+    if (entry !== undefined && entry.count > 1) {
+      watchers.set(key, { ...entry, count: entry.count - 1 })
+      return
+    }
+    watchers.delete(key)
+    drop()
+  }
+}
 let unsubscribers: (() => void)[] = []
 
 const report = (err: unknown): void => {
@@ -136,10 +189,13 @@ function withoutLine(sheet: SheetMemory, claimId: string): SheetMemory {
 
 /**
  * Whether a shown sheet reads whole-book state as of its scene (F-16.22: a knower's Knows, a
- * secret's own view, each with "checked up to"), so a change anywhere in the book may move it.
+ * secret's own view, each with "checked up to"; F-16.23: Threads, a thread's own view, an age,
+ * which a story year typed in any earlier scene moves), so a change anywhere in the book may move
+ * it.
  */
 const readsWholeBook = (sheet: SheetMemory | undefined): boolean =>
-  sheet !== undefined && (sheet.knows !== null || sheet.topic !== null)
+  sheet !== undefined &&
+  (sheet.knows !== null || sheet.topic !== null || sheet.threads !== null || sheet.age !== null)
 
 export const useMemoryStore = create<MemoryState>((set, get) => {
   /** Reads again every shown scene and sheet that `pick` chooses. */
@@ -155,8 +211,12 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         get().loadSheet(sheet.recordId, sheet.asOf).catch(report)
       }
     }
-    // The grids hold every secret and knower: any change may move them.
-    for (const grid of knowsWatchers.values()) get().loadKnows(grid.asOf).catch(report)
+    // The grids, the Threads and the Timeline read the whole book: any change may move them.
+    for (const grid of knowsWatchers.values()) get().loadKnows(grid.arg).catch(report)
+    for (const threads of threadsWatchers.values()) get().loadThreads(threads.arg).catch(report)
+    for (const timeline of timelineWatchers.values()) {
+      get().loadTimeline(timeline.arg).catch(report)
+    }
   }
 
   return {
@@ -164,6 +224,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
     scenes: {},
     sheets: {},
     knows: {},
+    threads: {},
+    timeline: {},
     status: null,
     notices: [],
     cardLines: {},
@@ -219,6 +281,22 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
       set({ knows: { ...get().knows, [key]: grid } })
     },
 
+    async loadThreads(asOf) {
+      const mine = generation
+      const key = knowsKey(asOf)
+      const threads = await ipc().invoke('memory:threads', { asOf })
+      if (mine !== generation || !threadsWatchers.has(key)) return
+      set({ threads: { ...get().threads, [key]: threads } })
+    },
+
+    async loadTimeline(recordId) {
+      const mine = generation
+      const key = timelineKey(recordId)
+      const timeline = await ipc().invoke('memory:timeline', { recordId })
+      if (mine !== generation || !timelineWatchers.has(key)) return
+      set({ timeline: { ...get().timeline, [key]: timeline } })
+    },
+
     watchScene(nodeId) {
       sceneWatchers.set(nodeId, (sceneWatchers.get(nodeId) ?? 0) + 1)
       if (sceneWatchers.get(nodeId) === 1) get().loadScene(nodeId).catch(report)
@@ -265,23 +343,47 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
 
     watchKnows(asOf) {
       const key = knowsKey(asOf)
-      const was = knowsWatchers.get(key)
-      knowsWatchers.set(key, { asOf, count: (was?.count ?? 0) + 1 })
-      if (was === undefined) get().loadKnows(asOf).catch(report)
-      let released = false
-      return () => {
-        if (released) return
-        released = true
-        const entry = knowsWatchers.get(key)
-        if (entry !== undefined && entry.count > 1) {
-          knowsWatchers.set(key, { ...entry, count: entry.count - 1 })
-          return
+      return watchBook(
+        knowsWatchers,
+        key,
+        asOf,
+        () => void get().loadKnows(asOf).catch(report),
+        () => {
+          const knows = { ...get().knows }
+          delete knows[key]
+          set({ knows })
         }
-        knowsWatchers.delete(key)
-        const knows = { ...get().knows }
-        delete knows[key]
-        set({ knows })
-      }
+      )
+    },
+
+    watchThreads(asOf) {
+      const key = knowsKey(asOf)
+      return watchBook(
+        threadsWatchers,
+        key,
+        asOf,
+        () => void get().loadThreads(asOf).catch(report),
+        () => {
+          const threads = { ...get().threads }
+          delete threads[key]
+          set({ threads })
+        }
+      )
+    },
+
+    watchTimeline(recordId) {
+      const key = timelineKey(recordId)
+      return watchBook(
+        timelineWatchers,
+        key,
+        recordId,
+        () => void get().loadTimeline(recordId).catch(report),
+        () => {
+          const timeline = { ...get().timeline }
+          delete timeline[key]
+          set({ timeline })
+        }
+      )
     },
 
     async knewBefore(secretId, recordId, knew) {
@@ -438,11 +540,15 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
       sceneWatchers.clear()
       sheetWatchers.clear()
       knowsWatchers.clear()
+      threadsWatchers.clear()
+      timelineWatchers.clear()
       set({
         claims: {},
         scenes: {},
         sheets: {},
         knows: {},
+        threads: {},
+        timeline: {},
         status: null,
         notices: [],
         cardLines: {},
@@ -478,4 +584,16 @@ export function useSheetMemory(recordId: string, asOf: string | null): SheetMemo
 export function useKnowsGrid(asOf: string | null): KnowsGrid | undefined {
   useEffect(() => useMemoryStore.getState().watchKnows(asOf), [asOf])
   return useMemoryStore((s) => s.knows[knowsKey(asOf)])
+}
+
+/** F-16.23: the Book's Threads as of a scene (null: the end of the book) while shown. */
+export function useThreads(asOf: string | null): ThreadsMemory | undefined {
+  useEffect(() => useMemoryStore.getState().watchThreads(asOf), [asOf])
+  return useMemoryStore((s) => s.threads[knowsKey(asOf)])
+}
+
+/** F-16.23: the Timeline ("Ages of" a record, or null: who is Here in each row) while shown. */
+export function useTimeline(recordId: string | null): TimelineMemory | undefined {
+  useEffect(() => useMemoryStore.getState().watchTimeline(recordId), [recordId])
+  return useMemoryStore((s) => s.timeline[timelineKey(recordId)])
 }

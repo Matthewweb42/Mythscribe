@@ -25,6 +25,8 @@ import { namedInOf, useNameMentionStore } from './nameMentionStore'
 import { useRecordStore, type AliasesInput } from './recordStore'
 import { FromTheBook } from './FromTheBook'
 import { KnowsSection } from './KnowsSection'
+import { AgeSection } from './AgeSection'
+import { ThreadsSection } from './ThreadsSection'
 import { TopicSection } from './TopicSection'
 import { RenameInBook } from './RenameInBook'
 import {
@@ -57,7 +59,9 @@ const HEADING = 'm-0 text-xs font-semibold tracking-wide text-fg-muted uppercase
  * *Not right*. F-16.22: a character's or group's **Knows, as of [scene]**; a secret's sheet has
  * **The secret** in place of From the book, and a secret's or thread's sheet keeps its one label
  * (no nicknames, Named in, Rename in book or nickname Split; *Same as…* only with its own kind).
- * Relationships, Threads and Age arrive with their phases.
+ * F-16.23: a character's **Age, as of [scene]**, a named record's **Threads, as of [scene]** (the
+ * steps naming it), and a thread's **The thread** in place of From the book. Relationships arrive
+ * with their phase.
  */
 export function RecordSheet({ id }: { id: string }): React.JSX.Element | null {
   const record = useRecordStore((s) => s.byId[id])
@@ -205,14 +209,18 @@ function Sheet({ record }: { record: StoryRecordSummary }): React.JSX.Element {
           </div>
         </section>
 
-        {/* F-16.18: what the prose states, as of a scene; F-16.22: a secret's own section. */}
-        {record.kind === 'secret' ? (
-          <TopicSection recordId={record.id} />
-        ) : topic ? null : (
+        {/* F-16.18: what the prose states, as of a scene; F-16.22, F-16.23: a topic's own section. */}
+        {isTopicKind(record.kind) ? (
+          <TopicSection recordId={record.id} kind={record.kind} />
+        ) : (
           <FromTheBook recordId={record.id} />
         )}
+        {/* F-16.23: a character's age, as of a scene. */}
+        {record.kind === 'character' ? <AgeSection recordId={record.id} /> : null}
         {/* F-16.22: what a character or group knows, as of a scene. */}
         {KNOWER_KINDS.includes(record.kind) ? <KnowsSection recordId={record.id} /> : null}
+        {/* F-16.23: the thread steps that name it, as of a scene. */}
+        {topic ? null : <ThreadsSection recordId={record.id} />}
 
         {topic ? null : <NamedIn record={record} />}
       </div>

@@ -1,5 +1,10 @@
 import type { ReadingOrder } from '@shared/memory/asOf'
-import { knowsAsOf, knowsGrid, type KnowsAsOf } from '@shared/memory/whoKnows'
+import {
+  knowsAsOf,
+  knowsGrid,
+  type KnowsAsOf,
+  type TopicQuoteInput
+} from '@shared/memory/whoKnows'
 import type { KnowsGrid, KnowsSheetLine, KnowsSheetView, TopicView } from '@shared/memory/views'
 import type { NodeRow } from '../../db/schema'
 import { currentDraftId } from '../../draft/draftStore'
@@ -39,11 +44,7 @@ export function storedKnows(
     label,
     origin
   }))
-  const empty = new Set(
-    nodes
-      .filter((row) => row.kind === 'document' && row.wordCount === 0 && reading.order.has(row.id))
-      .map((row) => row.id)
-  )
+  const empty = emptyScenes(nodes, reading)
   const knewBefore = listKnewBefore(db)
   if (draftId === null) {
     return knowsAsOf({
@@ -57,24 +58,41 @@ export function storedKnows(
       atId
     })
   }
-  const quotes = listTopicQuotes(db, draftId)
-  const readings = readingSummaries(
-    db,
-    quotes.flatMap((quote) => (quote.readingId === null ? [] : [quote.readingId]))
-  )
   return knowsAsOf({
     secrets,
     claims: slotClaims(db, 'knows', draftId),
-    quotes: quotes.map((quote) => ({
-      ...quote,
-      reading: quote.readingId === null ? null : (readings.get(quote.readingId) ?? null)
-    })),
+    quotes: quotesWithReadings(db, draftId),
     knewBefore,
     reading,
     flags: sceneReadFlags(db, draftId),
     empty,
     atId
   })
+}
+
+/**
+ * The readable scenes with no words yet: nothing to read, so "checked up to" counts them as they
+ * stand (`checkedUpTo`'s `empty`). Who knows what and the Threads (F-16.23) read the same set.
+ */
+export function emptyScenes(nodes: readonly NodeRow[], reading: ReadingOrder): Set<string> {
+  return new Set(
+    nodes
+      .filter((row) => row.kind === 'document' && row.wordCount === 0 && reading.order.has(row.id))
+      .map((row) => row.id)
+  )
+}
+
+/** The draft's reveals (`topic_quote`), each with the reading that proved it (ⓘ's model and cost). */
+export function quotesWithReadings(db: TreeDb, draftId: string): TopicQuoteInput[] {
+  const quotes = listTopicQuotes(db, draftId)
+  const readings = readingSummaries(
+    db,
+    quotes.flatMap((quote) => (quote.readingId === null ? [] : [quote.readingId]))
+  )
+  return quotes.map((quote) => ({
+    ...quote,
+    reading: quote.readingId === null ? null : (readings.get(quote.readingId) ?? null)
+  }))
 }
 
 /**

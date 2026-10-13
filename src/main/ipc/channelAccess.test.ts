@@ -157,4 +157,13 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
     expect(CHANNEL_ACCESS['memory:knows']).toBe('read')
     for (const channel of channels.slice(1)) expect(isWriteChannel(channel), channel).toBe(true)
   })
+
+  it('F-16.23: the Threads and the Timeline are v2 and only read', () => {
+    for (const channel of ['memory:threads', 'memory:timeline'] as const) {
+      expect(CHANNEL_MEMORY[channel], channel).toBe('v2')
+      expect(() => assertChannelMemory(channel, 'v1'), channel).toThrow(OTHER_MEMORY_MESSAGE)
+      expect(CHANNEL_ACCESS[channel], channel).toBe('read')
+      expect(isWriteChannel(channel), channel).toBe(false)
+    }
+  })
 })

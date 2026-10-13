@@ -1,5 +1,6 @@
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import type {
+  AgeView,
   ClaimView,
   KnowsCellView,
   KnowsGrid,
@@ -7,6 +8,11 @@ import type {
   SceneMemory,
   SecretView,
   SheetMemory,
+  ThreadMemoryView,
+  ThreadsMemory,
+  ThreadStepView,
+  TimelineMemory,
+  TimelineRow,
   TopicQuoteView,
   TypedComparisonView
 } from '@shared/memory/views'
@@ -72,6 +78,8 @@ export function sheetMemoryFixture(recordId: string, over: Partial<SheetMemory> 
     others: [],
     later: 0,
     knows: null,
+    threads: null,
+    age: null,
     topic: null,
     ...over
   }
@@ -152,6 +160,83 @@ export function knowsGridFixture(over: Partial<KnowsGrid> = {}): KnowsGrid {
     later: 0,
     ...over
   }
+}
+
+/** F-16.23: a thread step (an opening in 1.1 that counts, by default). */
+export function threadStepFixture(
+  claimId: string,
+  over: Partial<ThreadStepView> = {}
+): ThreadStepView {
+  return {
+    claimId,
+    step: 'opens',
+    value: 'swears to find the heir',
+    nodeId: 'sc-1',
+    ref: '1.1',
+    para: 0,
+    voice: 'narration',
+    mode: 'now',
+    counted: true,
+    stale: false,
+    ...over
+  }
+}
+
+/** F-16.23: a thread as of a scene, opened in 1.1 and open by then. */
+export function threadViewFixture(
+  recordId: string,
+  label: string,
+  over: Partial<ThreadMemoryView> = {}
+): ThreadMemoryView {
+  return {
+    recordId,
+    label,
+    origin: 'ai',
+    status: 'open',
+    opened: { nodeId: 'sc-1', ref: '1.1' },
+    last: { nodeId: 'sc-1', ref: '1.1' },
+    resolved: null,
+    steps: [threadStepFixture(`st-${recordId}`)],
+    later: 0,
+    defining: topicQuoteFixture(`tq-${recordId}`, { label, quote: 'Mara swore to find the heir' }),
+    merged: [],
+    ...over
+  }
+}
+
+/** F-16.23: the Book's Threads. */
+export function threadsMemoryFixture(over: Partial<ThreadsMemory> = {}): ThreadsMemory {
+  return { asOf: null, asOfRef: null, checkedUpTo: null, threads: [], ...over }
+}
+
+/** F-16.23: an age computed from a birth year in 1.1 and the year typed in 1.1. */
+export function computedAgeFixture(age = 19): AgeView {
+  return {
+    kind: 'computed',
+    age,
+    born: { year: 1811 - age, source: 'text', claimId: 'c-born', nodeId: 'sc-1', ref: '1.1' },
+    year: { kind: 'typed', value: 1811, from: { nodeId: 'sc-1', ref: '1.1' } }
+  }
+}
+
+/** F-16.23: a Timeline row (1.1, typed 1811, no ages). */
+export function timelineRowFixture(nodeId: string, over: Partial<TimelineRow> = {}): TimelineRow {
+  return {
+    nodeId,
+    ref: '1.1',
+    title: 'The stair',
+    year: { kind: 'typed', value: 1811, from: { nodeId, ref: '1.1' } },
+    flashback: false,
+    elapsed: null,
+    time: '',
+    ages: [],
+    ...over
+  }
+}
+
+/** F-16.23: the Timeline. */
+export function timelineFixture(over: Partial<TimelineMemory> = {}): TimelineMemory {
+  return { recordId: null, rows: [], ...over }
 }
 
 export function memoryStatusFixture(over: Partial<MemoryStatus> = {}): MemoryStatus {
