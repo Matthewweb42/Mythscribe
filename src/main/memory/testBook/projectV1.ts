@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { changeRunId } from '@shared/changes'
+import { PROJECT_NOTES_NAME } from '@shared/contextLibrary'
 import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
 import { normName } from '@shared/memory/names'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -36,10 +37,12 @@ import { layOutTestBook, TEST_BOOK_CATEGORY } from './project'
  *   default replacement gives the test book's prose back byte for byte;
  * - scene meta POV and location strings and the scene's time, and timeline events with years:
  *   one over the run of 1811 scenes (s01–h07, and the flashback h16), one per later year;
- * - the Captain's sheet as a Plan sheet holding his Ideas line (P3's page); an AI-made sheet
- *   (the Widow Marsh, from a library run); an AI-written field (Ned Ashby's personality, from an
- *   Organise run); AI facts and observed facts; two scene summaries; a snapshot of a scene with
- *   an inline tag; the dismissed names;
+ * - the author's sheet text, as a v1 author keeps it: the labels' Pinned pages and notes (the
+ *   Bell's note, P4's notes on Anne Fenwick and her father) as sheet text, their Ideas lines (the
+ *   Captain's and Lottie's) as Plan sheets, and the Research page (P4's "The Fenwicks") as v1's
+ *   Project notes; an AI-made sheet (the Widow Marsh, from a library run); an AI-written field
+ *   (Ned Ashby's personality, from an Organise run); AI facts and observed facts; two scene
+ *   summaries; a snapshot of a scene with an inline tag; the dismissed names;
  * - the Idea scene (h11), the cut scene (h12), h10 in an inactive draft and the planned card
  *   (h17) laid out as the v2 builder lays them (`layOutTestBook`).
  *
@@ -68,14 +71,39 @@ export interface TestBookV1Project {
   /** The sheet text an Organise run wrote (Ned Ashby's personality), and the sheet the AI made. */
   aiWritten: { label: string; text: string }
   aiSheet: string
+  /** The AI's rows the switch-over leaves in the old tables: the made sheet's text, a summary. */
+  aiFrozen: string[]
 }
 
 /** The label whose sheet keeps the shared surname without a tag (F-4.14: one tag per name). */
 const UNTAGGED = 'harrow-mrs'
 /** The split pair: Callum Varrow's sheet and the tag of his surname alone. */
 const SPLIT = { label: 'varrow', tag: 'varrow', name: 'Varrow' } as const
-/** The Plan sheet: the Captain's, holding his Ideas line (P3's labelled page). */
-const PLAN = 'captain'
+/** The AI-made sheet's text and the old summaries' text: frozen in v1's tables by the switch. */
+const AI_SHEET_BODY = 'Keeps the Bell and lets rooms to officers.'
+const AI_SUMMARY = 'A scene of the test book, summarised by the old background reading.'
+
+/** A sheet's text as v1 stores it: one paragraph a line. */
+const bodyOf = (lines: readonly string[]): string => lines.join('\n\n')
+
+/**
+ * The labels' pages and notes as a v1 author keeps them (P3's pages, P4's notes): a Pinned page or
+ * a note as the record's sheet text (canon), an Ideas page as a Plan sheet's text (the Captain's
+ * and Lottie's), which the switch-over files under Ideas.
+ */
+function sheetTextOf(label: string): { body?: string; plan: boolean } {
+  const ideas = TEST_BOOK_LABELS.pages.filter(
+    (page) => page.record === label && page.page === 'ideas'
+  )
+  if (ideas.length > 0) return { body: bodyOf(ideas.flatMap((page) => page.lines)), plan: true }
+  const pinned = [
+    ...TEST_BOOK_LABELS.pages
+      .filter((page) => page.record === label && page.page === 'pinned')
+      .flatMap((page) => page.lines),
+    ...TEST_BOOK_LABELS.notes.filter((note) => note.record === label).flatMap((note) => note.lines)
+  ]
+  return pinned.length === 0 ? { plan: false } : { body: bodyOf(pinned), plan: false }
+}
 /** The sheet an Organise run wrote a field of, and what it wrote. */
 const AI_FIELD = { label: 'ashby', field: 'personality', text: 'Cheerful and easily led' } as const
 /** The sheet a library run made (dropped by the switch-over). */
@@ -146,11 +174,12 @@ export function buildTestBookV1Project(dir: string, now: Date): TestBookV1Projec
   const sheets = new Map<string, string>()
   const tags = new Map<string, string>()
   const tagNames = new Map<string, string>()
-  const ideas = TEST_BOOK_LABELS.pages.find((page) => page.record === PLAN && page.page === 'ideas')
+  const plans: string[] = []
   for (const label of TEST_BOOK_LABELS.records) {
     const kind = TEST_BOOK_CATEGORY[label.kind]
     if (kind === undefined) continue
     const untagged = label.id === UNTAGGED
+    const text = sheetTextOf(label.id)
     const made = createEntity(
       db,
       {
@@ -158,11 +187,12 @@ export function buildTestBookV1Project(dir: string, now: Date): TestBookV1Projec
         name: label.name,
         // A structured sheet where an AI run wrote a field; a blank page elsewhere.
         template: label.id === AI_FIELD.label ? 'structured' : 'blank',
-        ...(label.id === PLAN && ideas !== undefined ? { body: ideas.lines.join('\n\n') } : {})
+        ...(text.body === undefined ? {} : { body: text.body })
       },
       'author',
       untagged ? { tag: false } : {}
     ).entity
+    if (text.plan) plans.push(made.id)
     sheets.set(label.id, made.id)
     const main = normName(label.name)
     const others = label.aliases
@@ -181,8 +211,20 @@ export function buildTestBookV1Project(dir: string, now: Date): TestBookV1Projec
   }
   const split = createTag(db, { name: SPLIT.tag, category: 'character' })
   tagNames.set(split.id, split.name)
-  const plan = sheets.get(PLAN)
-  if (plan !== undefined) updateEntity(db, plan, { status: 'plan' })
+  for (const plan of plans) updateEntity(db, plan, { status: 'plan' })
+  // The Research page as v1 kept a book's notes: its Project notes (the switch files it under
+  // that title, canon).
+  const research = TEST_BOOK_LABELS.notes.flatMap((note) =>
+    note.record === undefined ? note.lines : []
+  )
+  if (research.length > 0) {
+    createEntity(
+      db,
+      { kind: 'world', name: PROJECT_NOTES_NAME, template: 'blank', body: bodyOf(research) },
+      'author',
+      { tag: false }
+    )
+  }
 
   // ---- Inline tags: about a third of the scenes, and the earlier draft of chapter 14.
   const nameOf = new Map(TEST_BOOK_LABELS.records.map((label) => [label.id, label.name]))
@@ -336,7 +378,7 @@ export function buildTestBookV1Project(dir: string, now: Date): TestBookV1Projec
       kind: 'character',
       name: AI_SHEET,
       template: 'blank',
-      body: 'Keeps the Bell and lets rooms to officers.'
+      body: AI_SHEET_BODY
     },
     'ai'
   )
@@ -374,7 +416,7 @@ export function buildTestBookV1Project(dir: string, now: Date): TestBookV1Projec
     if (nodeId === undefined) continue
     upsertSummary(db, {
       nodeId,
-      summary: 'A scene of the test book, summarised by the old background reading.',
+      summary: AI_SUMMARY,
       keyPoints: ['Thornmere is let'],
       characters: ['Mr. Harrow', 'Mrs. Harrow'],
       contentHash: `test-book-${id}`,
@@ -410,6 +452,7 @@ export function buildTestBookV1Project(dir: string, now: Date): TestBookV1Projec
     inlineTags,
     snapshotId,
     aiWritten: { label: AI_FIELD.label, text: AI_FIELD.text },
-    aiSheet: AI_SHEET
+    aiSheet: AI_SHEET,
+    aiFrozen: [AI_SHEET_BODY, AI_SUMMARY]
   }
 }

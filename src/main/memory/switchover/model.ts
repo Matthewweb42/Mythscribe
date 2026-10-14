@@ -36,7 +36,7 @@ import {
   textParagraphs,
   type PageLine
 } from '@shared/memory/switchoverMapping'
-import { twinGate, twinPairs } from '@shared/memory/twinGate'
+import { eachHasOwnName, twinGate, twinPairs, type TwinPair } from '@shared/memory/twinGate'
 import { parseStoredSceneMeta, type SceneMeta } from '@shared/sceneMeta'
 import { paragraphKey, pageEdits, sheetFieldDefs } from '@shared/sheetSync'
 import { RELATION_LABEL, relationTypeOf } from '@shared/relations'
@@ -982,19 +982,40 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
     })
   }
 
-  const merges: SwitchoverMerge[] = twinPairs(roster)
-    .filter((pair) => !notSame.has([pair.a, pair.b].sort().join('|')))
-    .map((pair) => ({
-      keep: pair.a,
-      keepName: nameOfKey.get(pair.a) ?? pair.a,
-      keepCategory: categoryOfKey(pair.a),
-      merge: pair.b,
-      mergeName: nameOfKey.get(pair.b) ?? pair.b,
-      mergeCategory: categoryOfKey(pair.b),
-      rule: pair.rule,
-      name: pair.name,
-      matched: pair.matched
-    }))
+  // The merge list (SW-D15): a nickname the conversion marks shared on each holder is two records
+  // on purpose (identity rule 4), so it is left out of the test (a record's own name stays in: two
+  // records of one name are the likeliest twins); two records of different kinds (a character and
+  // a place) are never offered; and two records that each have a name part of their own, matched
+  // only by folding titles out or by a word subset (Mr. Harrow and Mrs. Harrow, Johanna Harrow and
+  // Mr. Harrow), are a family, not a twin. The pairs a kept spelling keeps apart stay out too.
+  const mergeRoster = records.map((planned) => ({
+    id: planned.key,
+    names: [planned.name, ...planned.aliases.filter((name) => !sharedNorms.has(normName(name)))]
+  }))
+  const rosterOf = new Map(mergeRoster.map((entry) => [entry.id, entry]))
+  const kindOfKey = (key: string): string => {
+    const planned = recordOfKey.get(key)
+    return planned === undefined ? '' : recordKindOf(planned.categoryId)
+  }
+  const offered = (pair: TwinPair): boolean => {
+    if (notSame.has([pair.a, pair.b].sort().join('|'))) return false
+    if (kindOfKey(pair.a) !== kindOfKey(pair.b)) return false
+    if (pair.rule !== 'alias' && pair.rule !== 'subset') return true
+    const a = rosterOf.get(pair.a)
+    const b = rosterOf.get(pair.b)
+    return a === undefined || b === undefined || !eachHasOwnName(a, b)
+  }
+  const merges: SwitchoverMerge[] = twinPairs(mergeRoster, offered).map((pair) => ({
+    keep: pair.a,
+    keepName: nameOfKey.get(pair.a) ?? pair.a,
+    keepCategory: categoryOfKey(pair.a),
+    merge: pair.b,
+    mergeName: nameOfKey.get(pair.b) ?? pair.b,
+    mergeCategory: categoryOfKey(pair.b),
+    rule: pair.rule,
+    name: pair.name,
+    matched: pair.matched
+  }))
 
   // ---- The report.
   const docs = scenes.filter((row) => row.content !== null)

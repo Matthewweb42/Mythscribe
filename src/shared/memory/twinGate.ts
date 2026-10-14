@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { editDistance } from '../storyNames'
-import { foldTitles, gateWords } from './names'
+import { foldTitles, gateWords, isTitle } from './names'
 
 /**
  * The twin gate (F-16.4, design §2.2 identity rule 5): the check every new record and every new
@@ -169,8 +169,15 @@ export interface TwinPair {
  * The pairs of existing records the gate blocks between them (each name of every record tested
  * against the others), one pair per two records, in roster order. A shared alias (identity rule
  * 4) is two records on purpose, so names marked shared are left out of the test by the caller.
+ * `allowed` leaves out a pair the caller knows is two records (the switch-over's rules, SW-D15).
+ * As with a pair already listed, the name's first hit decides: a pair left out is not looked past
+ * for a later record the same name would run into, so the list errs toward fewer offers (the
+ * author can still merge two records with *Same as…* after the switch).
  */
-export function twinPairs(roster: readonly TwinRosterRecord[]): TwinPair[] {
+export function twinPairs(
+  roster: readonly TwinRosterRecord[],
+  allowed: (pair: TwinPair) => boolean = () => true
+): TwinPair[] {
   const pairs: TwinPair[] = []
   const seen = new Set<string>()
   for (const record of roster) {
@@ -181,15 +188,50 @@ export function twinPairs(roster: readonly TwinRosterRecord[]): TwinPair[] {
       if (result.rule === 'dismissed') continue
       const key = [record.id, result.recordId].sort().join('|')
       if (seen.has(key)) continue
-      seen.add(key)
-      pairs.push({
+      const pair: TwinPair = {
         a: record.id,
         b: result.recordId,
         rule: result.rule,
         name,
         matched: result.matched
-      })
+      }
+      if (!allowed(pair)) continue
+      seen.add(key)
+      pairs.push(pair)
     }
   }
   return pairs
+}
+
+/** A record's name parts as the gate folds them: its words with titles out, and its titles. */
+function nameParts(record: TwinRosterRecord): { words: Set<string>; titles: Set<string> } {
+  const words = new Set<string>()
+  const titles = new Set<string>()
+  for (const name of record.names) {
+    const all = gateWords(name)
+    for (const word of foldTitles(all)) words.add(word)
+    for (const word of all) if (isTitle(word)) titles.add(word)
+  }
+  return { words, titles }
+}
+
+/**
+ * Whether each of two records carries a name part the other has nowhere among its names: a word
+ * of its own ("Johanna" of Johanna Harrow, "Ned" of Ned Ashby) or a title of its own ("Mr." of
+ * Mr. Harrow beside Mrs. Harrow or Bel Harrow). Two such records that the gate matched only by
+ * folding titles out (`alias`) or by a word subset (`subset`), the surname they share, are most
+ * likely two people of one family, and the switch-over's merge list leaves them out (SW-D15). A
+ * record whose names add nothing to the other's ("Varrow" beside Callum Varrow, "Mrs Harrow"
+ * beside Mrs. Harrow, "Brand" beside Captain Brand) is not, and stays offered.
+ */
+export function eachHasOwnName(a: TwinRosterRecord, b: TwinRosterRecord): boolean {
+  const left = nameParts(a)
+  const right = nameParts(b)
+  const owns = (
+    x: { words: Set<string>; titles: Set<string> },
+    y: { words: Set<string>; titles: Set<string> }
+  ): boolean =>
+    [...x.words].some((word) => !y.words.has(word)) ||
+    [...x.titles].some((title) => !y.titles.has(title))
+  return owns(left, right) && owns(right, left)
 }

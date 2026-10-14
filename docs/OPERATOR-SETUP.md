@@ -109,15 +109,18 @@ MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- memory   
 MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- knows     # who knows what, two passes (stops at 50¢)
 MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- scribe    # Ms Scribe's 31 test-book questions (stops at $1)
 MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- findings  # contradictions: judge.v1 both ways, Check the book (stops at 50¢)
+MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- switchover # the test book built on v1, switched over and rebuilt live (stops at 50¢, about 3–5¢)
 ```
-`MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai` runs the five eval runs together. The Ms Scribe and
+`MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai` runs the six eval runs together. The Ms Scribe and
 contradictions runs read the test book's memory with the oracle (free) unless `MYTHSCRIBE_EVAL_READ=live` is set, which reads it with the live
 reader and checker first (about 13¢ more; an environment variable because vitest refuses unknown flags such as `--read`). They use V4 Flash
 and V4 Pro unless `MYTHSCRIBE_EVAL_FAST_MODEL` / `MYTHSCRIBE_EVAL_STRONG_MODEL` name others; `OPENAI_API_KEY` (with
 `OPENAI_BASE_URL` for OpenRouter or another OpenAI-compatible server) still works when `OPENROUTER_API_KEY` is not set.
 Reports: `test-results/eval-ai/live-report.md`, `test-results/eval-memory/planted-<date>.md`,
-`test-results/eval-knows/knows-<date>.md`, `test-results/eval-scribe/scribe-<date>.md` and
-`test-results/eval-findings/findings-<date>.md` (each with a `.json`); copy the
+`test-results/eval-knows/knows-<date>.md`, `test-results/eval-scribe/scribe-<date>.md`,
+`test-results/eval-findings/findings-<date>.md` and `test-results/eval-switchover/switchover-<date>.md` (each with a
+`.json`; the switch-over run writes its report even when it stops early, and a run that fails before its rebuild writes
+what failed); copy the
 story-memory ones into `docs/research/story-memory-2026-10-11/eval/` and commit them. In a cloud session the key is an environment secret, and
 `openrouter.ai` must be allowed in the environment's network access.
 

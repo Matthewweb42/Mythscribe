@@ -7,7 +7,10 @@ import { PLANNED_COST_NOTES, SHIPPED_PLAN_ROWS } from '@shared/aiCostNotes'
 import type { SwitchoverPlan } from '@shared/memory/switchover'
 import { sweepCalls } from '../findings/findingsService'
 import { rebuildEstimate } from '../reading/backlog'
+import { createEntity, updateEntity } from '../../entity/entityStore'
+import { createProject } from '../../project/projectStore'
 import { getStoryMemory } from '../../project/settingsStore'
+import { updateTag } from '../../tag/tagStore'
 import { convertSwitchover, prepareSwitchover } from './convert'
 import { buildFixtureV1, type FixtureV1 } from './fixtureV1'
 import {
@@ -137,11 +140,11 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
   it('offers the twin-gate merges unticked, never a pair a kept spelling keeps apart', () => {
     expect(
       plan.merges.map((pair) => `${pair.keepName} ← ${pair.mergeName} (${pair.rule})`)
-    ).toEqual(['Mara Vell ← Vell (subset)', 'Harrow ← Harrow (alias)'])
-    // Each side carries its category, so two records of one name can be told apart.
+    ).toEqual(['Mara Vell ← Vell (subset)'])
+    // Each side carries its category, so two records of one name can be told apart; the two
+    // Harrows, a character and a place, are never offered (SW-D15).
     expect(plan.merges.map((pair) => `${pair.keepCategory}/${pair.mergeCategory}`)).toEqual([
-      'character/character',
-      'character/place'
+      'character/character'
     ])
     expect(
       plan.merges.some((pair) => pair.mergeName === 'Tomaz' || pair.keepName === 'Tomaz')
@@ -195,6 +198,63 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
       costUsd: 0,
       minutes: 0
     })
+  })
+})
+
+describe('the merge list leaves out a family and a pair of two kinds (F-16.31, SW-D15)', () => {
+  it('offers only the twins: no shared nickname, no character with a place, no two people of one surname', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-plan-merges-'))
+    const session = createProject(path.join(dir, 'Merges.mythscribe'), 'Merges', 'novel', {
+      storyMemoryOverride: 'v1'
+    })
+    try {
+      const db = session.connection.orm
+      const sheet = (
+        name: string,
+        kind: 'character' | 'setting' = 'character',
+        aliases: string[] = [],
+        tag = true
+      ): void => {
+        const made = createEntity(
+          db,
+          { kind, name, template: 'blank' },
+          'author',
+          tag ? {} : { tag: false }
+        ).entity
+        if (aliases.length === 0) return
+        if (made.tagId === null) updateEntity(db, made.id, { aliases })
+        else updateTag(db, made.tagId, { aliases })
+      }
+      // A family: titles of their own, given names of their own, one surname.
+      sheet('Mr. Lowther')
+      sheet('Mrs. Lowther')
+      sheet('Johanna Harrow', 'character', ['Miss Harrow'])
+      sheet('Mr. Harrow')
+      // A nickname two people share (marked shared on each): never the reason for a merge.
+      sheet('Wren', 'character', ['Bird'])
+      sheet('Lark', 'character', ['Bird'], false)
+      // A character and a place the prefix rule would pair.
+      sheet('Bel Harrow')
+      sheet('The Bell', 'setting')
+      // The twins: a surname alone beside the full name, a misspelling, one name spelled twice.
+      sheet('Callum Varrow', 'character', ['Mr. Varrow'])
+      sheet('Varrow')
+      sheet('Liesel Fenwick')
+      sheet('Liesl')
+      sheet('Mrs. Tull')
+      sheet('Mrs Tull', 'character', [], false)
+      const merges = planSwitchover(db, CONTEXT).merges.map(
+        (pair) => `${pair.keepName} ← ${pair.mergeName} (${pair.rule})`
+      )
+      expect(merges).toEqual([
+        'Callum Varrow ← Varrow (subset)',
+        'Liesl ← Liesel Fenwick (edit)',
+        'Mrs. Tull ← Mrs Tull (alias)'
+      ])
+    } finally {
+      session.close()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

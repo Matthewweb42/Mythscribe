@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { twinGate, twinPairs, type TwinRosterRecord } from './twinGate'
+import { eachHasOwnName, twinGate, twinPairs, type TwinRosterRecord } from './twinGate'
 
 const ROSTER: TwinRosterRecord[] = [
   { id: 'rynna', names: ['Rynna Falsire', 'Rynna'] },
@@ -73,5 +73,40 @@ describe('twinGate (F-16.4, identity rule 5)', () => {
       ['harrow-mrs', 'liesel', 'subset', 'Mrs. Harrow'],
       ['liesel', 'liesl', 'edit', 'Liesel']
     ])
+  })
+
+  it('leaves out a pair the caller keeps apart, and lists the pair from the other side when it allows it', () => {
+    const roster = [...ROSTER, { id: 'liesl', names: ['Liesl'] }]
+    const pairs = (allowed: Parameters<typeof twinPairs>[1]): string[][] =>
+      twinPairs(roster, allowed).map((pair) => [pair.a, pair.b, pair.rule])
+    expect(pairs((pair) => pair.rule !== 'subset')).toEqual([['liesel', 'liesl', 'edit']])
+    // Refused from Liesel's side only: Liesl's own test finds the pair.
+    expect(pairs((pair) => pair.a !== 'liesel')).toEqual([
+      ['harrow-mrs', 'liesel', 'subset'],
+      ['liesl', 'liesel', 'edit']
+    ])
+  })
+})
+
+describe('eachHasOwnName (the switch-over merge list, SW-D15)', () => {
+  const record = (id: string, ...names: string[]): TwinRosterRecord => ({ id, names })
+
+  it('holds for two people of one family: a word or a title each has of its own', () => {
+    expect(eachHasOwnName(record('a', 'Mr. Harrow'), record('b', 'Mrs. Harrow'))).toBe(true)
+    expect(eachHasOwnName(record('a', 'Mr. Harrow'), record('b', 'Johanna Harrow'))).toBe(true)
+    expect(eachHasOwnName(record('a', 'Ned Ashby', 'Ashby'), record('b', 'Celia Ashby'))).toBe(true)
+    expect(eachHasOwnName(record('a', 'Lady Pell'), record('b', 'Clara Pell', 'Miss Pell'))).toBe(
+      true
+    )
+  })
+
+  it('fails when one record’s names add nothing to the other’s: a twin to offer', () => {
+    expect(eachHasOwnName(record('a', 'Callum Varrow', 'Mr. Varrow'), record('b', 'Varrow'))).toBe(
+      false
+    )
+    // Titles in one spelling: "Mrs" is "Mrs.".
+    expect(eachHasOwnName(record('a', 'Mrs. Harrow'), record('b', 'Mrs Harrow'))).toBe(false)
+    expect(eachHasOwnName(record('a', 'Captain Brand'), record('b', 'Brand'))).toBe(false)
+    expect(eachHasOwnName(record('a', 'Liesel Harrow'), record('b', 'Liesel'))).toBe(false)
   })
 })

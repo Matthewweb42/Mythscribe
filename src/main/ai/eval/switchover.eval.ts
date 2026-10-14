@@ -10,9 +10,12 @@ import {
   type Tier
 } from '@shared/ai'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
+import { PROJECT_NOTES_NAME } from '@shared/contextLibrary'
 import { docToText } from '@shared/docText'
 import { containsInlineTag } from '@shared/memory/inlineTagReplace'
 import { normName } from '@shared/memory/names'
+import { pageTextBlocks } from '@shared/memory/pageMarks'
+import { isTopicKind } from '@shared/memory/topics'
 import type {
   SwitchoverConsent,
   SwitchoverOutcome,
@@ -25,8 +28,10 @@ import { BackupService } from '../../backups/backupService'
 import { draftText, node, snapshot, snapshotText } from '../../db/schema'
 import { rollbackSnapshot } from '../../db/snapshot'
 import { activeDraftId } from '../../draft/draftStore'
+import { dismissedKeys } from '../../memory/dismissedStore'
+import { findingsFrame } from '../../memory/findings/candidateInputs'
 import { sweepCalls } from '../../memory/findings/findingsService'
-import { findingsOf } from '../../memory/findings/findingStore'
+import { findingsOf, invariantFindings } from '../../memory/findings/findingStore'
 import { scanNamesFor, staleNameScans } from '../../memory/nameIndexer'
 import {
   indexNodePassages,
@@ -55,6 +60,8 @@ import {
 import { TEST_BOOK, testBookScene } from '../../memory/testBook/book'
 import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
 import {
+  addTestBookNotes,
+  addTestBookPages,
   buildTestBookProject,
   TEST_BOOK_CATEGORY,
   type TestBookProject
@@ -64,8 +71,9 @@ import { ProjectManager } from '../../project/manager'
 import { getStoryMemory } from '../../project/settingsStore'
 import { researchDocumentIds } from '../../research/researchTree'
 import type { Schedule } from '../../schedule'
-import { listNodes, type TreeDb } from '../../tree/treeStore'
+import { listNodes, renameNode, type TreeDb } from '../../tree/treeStore'
 import { defaultMemoryCloudState, type MemoryCloudState } from '../cloudTally'
+import { jobOutcome } from '../../jobs/indexQueue'
 import { cancelInflight } from '../inflight'
 import { AiBudgetError, type AiMessage, type Provider } from '../providers/types'
 import { fakeChatServer, type ChatServer, type ChatServerReply } from './fakeChatServer'
@@ -98,7 +106,8 @@ import {
  *   what the AI made, a snapshot, h10 in an inactive draft) in a temporary "My Drive" folder,
  *   opened through a `ProjectManager` that sees Google Drive (the author's set-up). The dry run
  *   lists every labelled record as converted, the AI-written field under Filed by AI, the AI's
- *   facts and summaries as dropped, and offers the split pair (Callum Varrow and the `varrow` tag);
+ *   facts and summaries as dropped, and offers the split pair (Callum Varrow and the `varrow` tag)
+ *   and no other (SW-D15: the book's families and places are never offered);
  *   then `switchoverSafety` and `runConvert` with the default words and that merge ticked, as the
  *   dialog sends them. After the reopen on v2: the prose is the test book's, byte for byte, in
  *   both drafts; the snapshot is byte-identical; no inline tag is left; the records are the labels'
@@ -107,8 +116,10 @@ import {
  *   (the notice while it waits, the ask, the reading, the spot checks, the contradiction sweep),
  *   answered by the oracle reader and checker (`memoryOracle.ts`) and the oracle judge
  *   (`judgeOracle.ts`) behind a fake OpenRouter: the claims and findings are the same as the same
- *   rebuild of the v2-built book (`buildTestBookProject`), the author's pages are byte-identical
- *   before and after, the record ends `started` and the notice goes.
+ *   rebuild of the v2-built book (`buildTestBookProject` with the same pages and notes, which the
+ *   v1 book keeps as sheet text), the author's pages (every named record's, converted ones
+ *   included, and every Research page) are byte-identical before and after, the invariants hold
+ *   with the findings in, the record ends `started` and the notice goes.
  * - **The adversarial replay**: a paragraph lost inside the conversion (planted with a temporary
  *   trigger) is refused by `checkConverted`; the project stays v1, its bytes as they were.
  * - **The live switch-over run** (`runLiveSwitchover`; `MYTHSCRIBE_EVAL_LIVE=1`; part A's live test,
@@ -126,8 +137,10 @@ import {
  *   (`SWITCHOVER_PASS_BARS`): the actual cost within 0.5–1.5× of the price the dry run asked, the
  *   time reported against its minutes, the memory bars of `-- memory` (`plantedScore.ts`) met on
  *   the converted book, the author's pages untouched, and no request carrying sheet text the AI
- *   wrote or an Ideas line. Offline tests drive it end to end against a fake OpenRouter: the
- *   report, the 50¢ stop, a provider error, an unpriced model.
+ *   wrote, an Ideas line or an AI row the switch leaves in v1's tables. A rate limit or a network
+ *   error is retried as the app's queue retries it. Offline tests drive it end to end against a
+ *   fake OpenRouter: the report, the 50¢ stop, a rate limit retried, a hard provider error, an
+ *   unpriced model.
  */
 
 const LIVE = process.env.MYTHSCRIBE_EVAL_LIVE === '1'
@@ -146,7 +159,10 @@ export const SWITCHOVER_PASS_BARS = {
   costRatioMax: 1.5,
   /** Author pages (Pinned, Ideas, Research) whose stored text the rebuild changed. */
   pagesChanged: 0,
-  /** Requests that carried sheet text the AI wrote (Filed by AI earlier) or an Ideas line. */
+  /**
+   * Requests that carried sheet text the AI wrote (Filed by AI earlier), an Ideas line, or a v1 AI
+   * row the switch leaves frozen (the sheet it made, an old scene summary).
+   */
   notCanonSent: 0
 } as const
 
@@ -160,14 +176,18 @@ const contextFor = (models: Record<Tier, string>): RebuildContext => ({
 
 const noSchedule: Schedule = () => () => undefined
 
-/** Waits until `ready` holds, polling (the reader's queue works on timers). */
-async function until(ready: () => boolean, what: string, limitMs = 120_000): Promise<void> {
+/** Waits until `ready` holds, polling (the reader's queue works on timers); false at the limit. */
+async function waitFor(ready: () => boolean, limitMs: number): Promise<boolean> {
   const end = Date.now() + limitMs
   while (!ready()) {
-    if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`)
+    if (Date.now() > end) return false
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
+  return true
 }
+
+/** How long *Rebuild memory* may take before the run stops it and reports so (25 minutes). */
+const REBUILD_LIMIT_MS = 1_500_000
 
 // ---- The switch on a temporary Google Drive folder -------------------------------------------
 
@@ -475,12 +495,17 @@ export function storedRecords(db: TreeDb): RecordShape[] {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** Every page the author owns, as stored: each record's Pinned and Ideas, each Research page. */
+/**
+ * Every page the author owns, as stored: each named record's Pinned and Ideas (hers or the
+ * switch-over's, whose pages hold her v1 sheets' text and the Filed-by-AI block; never a record
+ * or a secret the reading made), each Research page.
+ */
 export function authorPages(db: TreeDb): Map<string, string> {
   const pages = new Map<string, string>()
   for (const row of listRecords(db)) {
+    if (row.origin === 'ai' || isTopicKind(row.kind)) continue
     const full = getRecord(db, row.id)
-    if (full === null || row.origin !== 'author') continue
+    if (full === null) continue
     pages.set(`${row.name} · Pinned`, JSON.stringify(full.pinned))
     pages.set(`${row.name} · Ideas`, JSON.stringify(full.ideas))
   }
@@ -512,7 +537,7 @@ export interface RebuildRun {
   seconds: number
   /** The cost stop (or an unknown cost) ended it. */
   stopped: boolean
-  /** A provider error ended it, as a report says it. */
+  /** What ended it early, as a report says it: a hard provider error, a missing notice, the limit. */
   error: string | null
 }
 
@@ -520,8 +545,8 @@ export interface RebuildRun {
  * The provider with every request refused once `over()` says so, as the request path refuses one
  * past the daily cap (`AiBudgetError`, before anything is sent): the reader's queue pauses on it,
  * and the run then stops the queue as the app's Stop does. (An `AiCancelledError` here, before the
- * queue is stopped, would leave its job queued and run it again at once.) The first provider error
- * is kept for the report.
+ * queue is stopped, would leave its job queued and run it again at once.) Every error the provider
+ * throws goes to `failed`, which tells the hard ones from those the queue retries.
  */
 function stoppingProvider(
   provider: Provider,
@@ -550,8 +575,10 @@ function stoppingProvider(
  * *Rebuild memory* as the app runs it after the switch (F-16.31; SW-D8): the reader service over
  * the book, Use AI on, the open (whose backlog check raises the switch-over's notice while the
  * record waits), the rebuild asked with its price, then the reading, the spot checks and the
- * contradiction sweep on the reader's queue until it is idle. `over` (the cost cap) and
- * `providerError` stop it with the queue's Stop.
+ * contradiction sweep on the reader's queue until it is idle. A transient provider error (a rate
+ * limit, the network) is the queue's to retry, as in the app. `over` (the cost cap), a hard
+ * `providerError` (one that pauses the app's queue) and `limitMs` stop it with the queue's Stop;
+ * nothing here throws on its own limits, so a run always has its report.
  */
 export async function rebuildMemory(
   book: TestBookProject,
@@ -562,6 +589,7 @@ export async function rebuildMemory(
     minIntervalMs?: number
     over?: () => boolean
     providerError?: () => string | null
+    limitMs?: number
   }
 ): Promise<RebuildRun> {
   let cloud: MemoryCloudState = defaultMemoryCloudState()
@@ -599,14 +627,17 @@ export async function rebuildMemory(
     reader.opened()
     const noticeOf = (): MemoryNotice | null =>
       reader.notices().find((each) => each.kind === 'switchoverRebuild') ?? null
-    if (switched) await until(() => noticeOf() !== null, 'the switch-over notice', 10_000)
+    let error: string | null = null
+    if (switched && !(await waitFor(() => noticeOf() !== null, 10_000))) {
+      error = 'the switch-over notice never showed'
+    }
     const notice = noticeOf()
     const at = Date.now()
     const started = reader.rebuild()
     let stopped = false
-    let error: string | null = null
-    if (started.ok) {
-      const end = Date.now() + 1_800_000
+    if (started.ok && error === null) {
+      const limitMs = options.limitMs ?? REBUILD_LIMIT_MS
+      const end = Date.now() + limitMs
       for (;;) {
         if (options.over?.() === true) {
           reader.cancelAll()
@@ -624,7 +655,11 @@ export async function rebuildMemory(
         if (status.running === null && status.queued === 0 && !reader.judging() && finished) {
           break
         }
-        if (Date.now() > end) throw new Error('Rebuild memory did not finish in 30 minutes')
+        if (Date.now() > end) {
+          error = `Rebuild memory did not finish in ${Math.round(limitMs / 60_000)} minutes`
+          reader.cancelAll()
+          break
+        }
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
       // The queue's last change lands a moment after its last job.
@@ -734,16 +769,24 @@ export function memoryLines(book: TestBookProject): { claims: string[]; findings
  * The oracle reader and checker (`memoryOracle.ts`) and the oracle judge (`judgeOracle.ts`) behind
  * a fake OpenRouter. By default each reply reports the tokens it would take (the request's and the
  * reply's, estimated as the app estimates them) and no cost, so the ledger prices it from the
- * price table as it would a live request; `costUsd` reports a cost instead, and `failAfter`
- * answers an HTTP error from the request after that many.
+ * price table as it would a live request; `costUsd` reports a cost instead, `failAfter` answers
+ * an HTTP error from the request after that many, and `failAt` answers one on that call only.
  */
 export function switchoverOracleServer(
-  options: { costUsd?: number; failAfter?: { calls: number; status: number } } = {}
+  options: {
+    costUsd?: number
+    failAfter?: { calls: number; status: number }
+    failAt?: { call: number; status: number }
+  } = {}
 ): ChatServer {
   const server: ChatServer = fakeChatServer((messages: AiMessage[]): ChatServerReply => {
     const failAfter = options.failAfter
     if (failAfter !== undefined && server.calls.length > failAfter.calls) {
       return { text: 'Payment required', status: failAfter.status }
+    }
+    const failAt = options.failAt
+    if (failAt?.call === server.calls.length) {
+      return { text: 'Rate limited', status: failAt.status }
     }
     const judged = judgeOracleReply(messages)
     const text =
@@ -782,8 +825,10 @@ export interface SwitchoverLiveRun {
   requests: number
   /** The cost stop came before the run's end. */
   stopped: boolean
-  /** The provider error that stopped the run, or null. */
+  /** What stopped the run (a hard provider error, the time limit), or null. */
   error: string | null
+  /** Transient provider errors (rate limits, the network) the queue retried, as the app does. */
+  retried: number
   costUnknown: string | null
   at?: Date
 }
@@ -794,7 +839,7 @@ export interface SwitchoverScore {
   conversion: string[]
   /** Author pages the rebuild changed. */
   pagesChanged: string[]
-  /** Requests that carried sheet text the AI wrote or an Ideas line. */
+  /** Requests that carried sheet text the AI wrote, an Ideas line or a frozen v1 AI row. */
   notCanonSent: number
   /** The planted-error run's measures on the converted book. */
   memory: PlantedMeasures
@@ -836,11 +881,23 @@ export function switchoverReport(
     failures.push(`the rebuild changed ${score.pagesChanged.length} author pages`)
   }
   if (score.notCanonSent > bars.notCanonSent) {
-    failures.push(`${score.notCanonSent} requests carried AI-written sheet text or an Ideas line`)
+    failures.push(
+      `${score.notCanonSent} requests carried AI-written sheet text, an Ideas line or a frozen v1 AI row`
+    )
   }
   if (run.stopped) failures.push(`stopped at the ${run.stopUsd} USD cap before the end`)
   if (run.error !== null) failures.push(`stopped by a provider error (${run.error})`)
   if (run.costUnknown !== null) failures.push(run.costUnknown)
+  if (
+    !run.stopped &&
+    run.error === null &&
+    run.costUnknown === null &&
+    score.scenesRead < score.scenes
+  ) {
+    failures.push(
+      `only ${score.scenesRead} of ${score.scenes} scenes were read (${run.retried} transient errors retried)`
+    )
+  }
   const lines = [
     `# Story memory: the live switch-over run (${(run.at ?? new Date()).toISOString()})`,
     '',
@@ -854,9 +911,10 @@ export function switchoverReport(
     `- The price asked: ${run.price.priced ? cents(run.price.costUsd) : 'not known'} for ${run.price.requests} requests, about ${run.price.minutes} min; ` +
       `actual ${cents(run.costUsd)}${ratio === null ? '' : ` (${ratio.toFixed(2)}×; bar ${bars.costRatioMin}–${bars.costRatioMax}×)`}`,
     `- Time: ${run.seconds.toFixed(0)} s against the ${run.price.minutes} min the dry run said (no bar)`,
+    `- Transient provider errors (rate limits, the network) the queue retried, as the app does: ${run.retried} (no bar)`,
     `- The conversion's checks (prose, snapshot, inline tags, records): ${score.conversion.length === 0 ? 'clean' : score.conversion.join('; ')}`,
     `- Author pages changed by the rebuild: ${score.pagesChanged.length} (bar ${bars.pagesChanged})${score.pagesChanged.length > 0 ? `: ${score.pagesChanged.join(', ')}` : ''}`,
-    `- Requests carrying AI-written sheet text or an Ideas line: ${score.notCanonSent} (bar ${bars.notCanonSent})`,
+    `- Requests carrying AI-written sheet text, an Ideas line or a frozen v1 AI row (the sheet it made, an old summary): ${score.notCanonSent} (bar ${bars.notCanonSent})`,
     '',
     '### The memory bars of the planted-error run (`-- memory`), on the converted book',
     '',
@@ -897,11 +955,16 @@ export function conversionProblems(switched: SwitchedTestBook): string[] {
   return problems
 }
 
-/** The texts no request may carry: the sheet text the AI wrote, the Ideas lines. */
+/**
+ * The texts no request may carry: the sheet text the AI wrote (Filed by AI earlier), the Ideas
+ * lines, and the AI's rows the switch leaves frozen in v1's tables until P9 (the sheet it made, the
+ * old scene summaries), which no v2 path may read.
+ */
 function notCanonTexts(switched: SwitchedTestBook): string[] {
   return [
     switched.v1.aiWritten.text,
-    ...TEST_BOOK_LABELS.pages.filter((page) => page.page === 'ideas').flatMap((page) => page.lines)
+    ...TEST_BOOK_LABELS.pages.filter((page) => page.page === 'ideas').flatMap((page) => page.lines),
+    ...switched.v1.aiFrozen
   ]
 }
 
@@ -909,19 +972,23 @@ function notCanonTexts(switched: SwitchedTestBook): string[] {
  * The live switch-over run (plan `Switchover.md` §5.3): the test book built on v1 and switched
  * over in place (`switchTestBook`, priced on the run's own models), then *Rebuild memory* through
  * the reader service with the live reader, checker and sweep judge, at the app's own pace
- * (`minIntervalMs`, the queue's default unless given). It stops once the reported cost passes
- * `stopUsd` (the queue's Stop: what was read stays), once a cost cannot be known, or at a provider
- * error; the report is written either way, with what was read and what it cost.
+ * (`minIntervalMs`, the queue's default unless given). A transient provider error (a rate limit,
+ * the network) is retried by the queue as in the app and counted. It stops once the reported cost
+ * passes `stopUsd` (the queue's Stop: what was read stays), once a cost cannot be known, at a hard
+ * provider error (one that pauses the app's queue: a bad key, no credit) or after `limitMs`; the
+ * report then says so, with what was read and what it cost. (A failure before the rebuild, in the
+ * conversion, throws; the live test writes that as its report.)
  */
 export async function runLiveSwitchover(
   live: LiveProvider,
-  options: { stopUsd?: number; now?: Date; minIntervalMs?: number } = {}
+  options: { stopUsd?: number; now?: Date; minIntervalMs?: number; limitMs?: number } = {}
 ): Promise<SwitchoverLiveReport> {
   const stopUsd = options.stopUsd ?? LIVE_STOP_USD
   const now = options.now ?? new Date()
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-switchover-live-'))
   const captured: CapturedCall<'any'>[] = []
   let firstError: string | null = null
+  let retried = 0
   const holder: { run: LiveRequestDeps | null } = { run: null }
   const over = (): boolean =>
     holder.run !== null && (holder.run.spent() > stopUsd || holder.run.costUnknown() !== null)
@@ -929,7 +996,14 @@ export async function runLiveSwitchover(
     recordingProvider(live.provider, captured, () => 'any'),
     over,
     (err) => {
-      firstError ??= liveProviderError(err)
+      // The queue's own sorting: a hard error pauses it in the app, so it stops the run; the
+      // rest (rate limits, the network) the queue retries after its backoff.
+      const outcome = jobOutcome(err)
+      if (outcome === 'hard') {
+        firstError ??= liveProviderError(err) ?? (err instanceof Error ? err.message : String(err))
+      } else if (outcome === 'transient') {
+        retried += 1
+      }
     }
   )
   const run = liveRequestDeps({ provider, local: live.local })
@@ -943,7 +1017,8 @@ export async function runLiveSwitchover(
       now: () => new Date(),
       ...(options.minIntervalMs === undefined ? {} : { minIntervalMs: options.minIntervalMs }),
       over,
-      providerError: () => firstError
+      providerError: () => firstError,
+      ...(options.limitMs === undefined ? {} : { limitMs: options.limitMs })
     })
     const banned = notCanonTexts(switched)
     const readable = TEST_BOOK.filter(
@@ -980,6 +1055,7 @@ export async function runLiveSwitchover(
         requests: run.ledger.filter((entry) => !entry.cached).length,
         stopped: rebuilt.stopped && costUnknown === null,
         error: rebuilt.error ?? started,
+        retried,
         costUnknown,
         at: now
       }
@@ -1036,9 +1112,12 @@ describe('the v1 test book switched over in place (F-16.31 part A, F-16.3)', () 
     expect(dropped.get('Facts the AI read')).toBe('Callum Varrow 1')
     expect(dropped.get('Observed facts')).toMatch(/^1 fact;/)
     expect(dropped.get('Scene summaries and cards')).toMatch(/^2 scenes;/)
-    expect(plan.merges).toContainEqual(
-      expect.objectContaining({ keepName: 'Callum Varrow', mergeName: 'Varrow', rule: 'subset' })
-    )
+    // Only the split pair: the Harrows, the Ashbys, the Lowthers and the Pells are families
+    // (each has a name or a title of its own), the Bell and Pell House are places, and the shared
+    // "Harrow" is never a reason to merge (SW-D15).
+    expect(plan.merges.map((pair) => [pair.keepName, pair.mergeName, pair.rule])).toEqual([
+      ['Callum Varrow', 'Varrow', 'subset']
+    ])
     // The Plan sheet's text goes to Ideas; the shared surname is named in the notes.
     expect(plan.converted.find((item) => item.name === 'the Captain')?.detail).toContain(
       '1 Ideas line'
@@ -1073,8 +1152,32 @@ describe('the v1 test book switched over in place (F-16.31 part A, F-16.3)', () 
   it('makes the labels’ records: names, nicknames, the shared surname, the split pair merged', () => {
     expect(storedRecords(switched.book.db)).toEqual(labelledRecords())
     expect(invariants(switched.book)).toEqual([])
-    const ashby = getRecord(switched.book.db, switched.book.records.get('ashby') ?? '')
-    expect(docToText(ashby?.pinned ?? { type: 'doc' })).toContain(switched.v1.aiWritten.text)
+    const pageOf = (
+      label: string,
+      page: 'pinned' | 'ideas'
+    ): { text: string; notCanon: boolean }[] =>
+      pageTextBlocks(
+        getRecord(switched.book.db, switched.book.records.get(label) ?? '')?.[page] ?? {
+          type: 'doc'
+        }
+      ).map((block) => ({ text: block.text, notCanon: block.notCanon }))
+    // The field an Organise run wrote is filed under its heading, Not canon, never as canon.
+    expect(pageOf('ashby', 'pinned')).toEqual([
+      { text: 'Filed by AI earlier: please check', notCanon: true },
+      { text: `Personality: ${switched.v1.aiWritten.text}`, notCanon: true }
+    ])
+    // Her sheet text is her canon Pinned lines; a Plan sheet's text is Ideas.
+    for (const page of TEST_BOOK_LABELS.pages) {
+      expect(pageOf(page.record, page.page), `${page.record} ${page.page}`).toEqual(
+        page.lines.map((text) => ({ text, notCanon: false }))
+      )
+    }
+    for (const note of TEST_BOOK_LABELS.notes) {
+      if (note.record === undefined) continue
+      expect(pageOf(note.record, 'pinned'), note.record).toEqual(
+        note.lines.map((text) => ({ text, notCanon: false }))
+      )
+    }
     const captain = getRecord(switched.book.db, switched.book.records.get('captain') ?? '')
     const captainIdeas = TEST_BOOK_LABELS.pages.find((page) => page.record === 'captain')
     expect(docToText(captain?.ideas ?? { type: 'doc' })).toBe(captainIdeas?.lines.join('\n'))
@@ -1131,6 +1234,18 @@ describe('the v1 test book switched over in place (F-16.31 part A, F-16.3)', () 
       })
       v2tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-switchover-v2-'))
       v2 = buildTestBookProject(v2tmp, NOW)
+      // The author's pages and notes, as the v1 book keeps them in its sheets, so the note rules
+      // read the same canon on both; the Research page under the title the switch gives v1's
+      // Project notes, so its ids compare.
+      addTestBookPages(v2, NOW)
+      addTestBookNotes(v2, NOW)
+      const rows = listNodes(v2.db)
+      for (const id of researchDocumentIds(rows)) {
+        const research = TEST_BOOK_LABELS.notes.find((note) => note.research !== undefined)
+        if (rows.find((row) => row.id === id)?.title === research?.research) {
+          renameNode(v2.db, id, PROJECT_NOTES_NAME)
+        }
+      }
       indexOnOpen(v2.db, NOW)
       const v2live = fakeLive(switchoverOracleServer())
       baseline = await rebuildMemory(v2, v2live, liveRequestDeps(v2live), {
@@ -1170,17 +1285,36 @@ describe('the v1 test book switched over in place (F-16.31 part A, F-16.3)', () 
       expect(ours.findings.length).toBeGreaterThan(0)
       expect(ours.claims).toEqual(theirs.claims)
       expect(ours.findings).toEqual(theirs.findings)
+      // Her converted sheet text is canon the note rules read: a note against the book (C6).
+      expect(ours.findings.filter((line) => line.includes('"rule":"C6"')).length).toBeGreaterThan(0)
       expect(baseline.summary?.progress).toMatchObject({ done: 18, total: 18 })
     })
 
-    it('leaves the author’s pages byte-identical and the invariants clean', () => {
+    it('leaves the author’s pages byte-identical and the invariants clean, findings included', () => {
+      // The pages compared are the converted records' too: never an empty check.
+      expect([...pagesBefore.keys()]).toEqual(
+        expect.arrayContaining([
+          'Ned Ashby · Pinned',
+          'the Captain · Ideas',
+          'The Bell · Pinned',
+          'Anne Fenwick · Pinned',
+          `Research · ${PROJECT_NOTES_NAME}`
+        ])
+      )
       expect(pagesChanged(pagesBefore, authorPages(switched.book.db))).toEqual([])
       expect(
         JSON.stringify(
           getRecord(switched.book.db, switched.book.records.get('captain') ?? '')?.ideas ?? null
         )
       ).toBe(ideasBefore)
-      expect(invariants(switched.book)).toEqual([])
+      const { db } = switched.book
+      const { reading } = findingsFrame(db)
+      expect(
+        invariants(switched.book, [], {
+          findings: invariantFindings(db, activeDraftId(db), (nodeId) => reading.order.has(nodeId)),
+          dismissedFindings: dismissedKeys(db, 'notProblem')
+        })
+      ).toEqual([])
     })
 
     it('never sends the AI’s sheet text or an Ideas line, and sends as the app does', () => {
@@ -1298,6 +1432,18 @@ describe('the live switch-over run, end to end against a fake OpenRouter (F-16.3
     expect(report.score.pagesChanged).toEqual([])
   }, 300_000)
 
+  it('retries a rate limit as the app’s queue does, reads every scene, and counts it', async () => {
+    const server = switchoverOracleServer({ failAt: { call: 3, status: 429 } })
+    const report = await runLiveSwitchover(fakeLive(server), { now: NOW, minIntervalMs: 0 })
+    expect(report.run.error).toBeNull()
+    expect(report.run.retried).toBe(1)
+    expect(report.score.scenesRead).toBe(18)
+    expect(report.failures).toEqual([])
+    expect(report.markdown).toContain(
+      '- Transient provider errors (rate limits, the network) the queue retried, as the app does: 1 (no bar)'
+    )
+  }, 300_000)
+
   it('says so when the models are not priced: the dry run’s price unknown, and the run stopped', async () => {
     const server = switchoverOracleServer()
     const live = fakeLive(server, {
@@ -1346,6 +1492,7 @@ describe('the switch-over report (F-16.31, SW-D13)', () => {
     requests: 60,
     stopped: false,
     error: null,
+    retried: 0,
     costUnknown: null,
     at: NOW
   })
@@ -1380,18 +1527,29 @@ describe('the switch-over report (F-16.31, SW-D13)', () => {
       'conversion: a snapshot changed',
       'support precision 80.0 % < 90 %',
       'the rebuild changed 1 author pages',
-      '1 requests carried AI-written sheet text or an Ideas line'
+      '1 requests carried AI-written sheet text, an Ideas line or a frozen v1 AI row'
     ])
   })
 })
 
 describe.skipIf(!LIVE)('the live switch-over run (MYTHSCRIBE_EVAL_LIVE=1)', () => {
   it('switches the test book over, rebuilds it with the real reader, checker and judge, and writes the report', async () => {
-    // One key: OPENROUTER_API_KEY, else OPENAI_API_KEY (and OPENAI_BASE_URL).
-    const report = await runLiveSwitchover(liveProviderFromEnv())
     const dir = path.resolve('test-results/eval-switchover')
     fs.mkdirSync(dir, { recursive: true })
     const stamp = new Date().toISOString().slice(0, 10)
+    let report: SwitchoverLiveReport
+    try {
+      // One key: OPENROUTER_API_KEY, else OPENAI_API_KEY (and OPENAI_BASE_URL).
+      report = await runLiveSwitchover(liveProviderFromEnv())
+    } catch (err) {
+      // A failure before the rebuild (the conversion, the key) still leaves a report.
+      const message = err instanceof Error ? err.message : String(err)
+      fs.writeFileSync(
+        path.join(dir, `switchover-${stamp}.md`),
+        `# Story memory: the live switch-over run\n\n**Failed before the report:** ${message}\n`
+      )
+      throw err
+    }
     fs.writeFileSync(path.join(dir, `switchover-${stamp}.md`), report.markdown)
     fs.writeFileSync(
       path.join(dir, `switchover-${stamp}.json`),
@@ -1399,5 +1557,7 @@ describe.skipIf(!LIVE)('the live switch-over run (MYTHSCRIBE_EVAL_LIVE=1)', () =
     )
     process.stdout.write(`\n${report.markdown}\n`)
     expect(report.failures).toEqual([])
-  }, 1_800_000)
+    // Above the rebuild's own 25-minute limit and the switch before it, so the run's report is
+    // always written before the test's time runs out.
+  }, 2_400_000)
 })
