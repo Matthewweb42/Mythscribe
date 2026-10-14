@@ -697,6 +697,7 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
       confirmed: false,
       why: 'values differ',
       costUsd: 0.0001,
+      year: null,
       actions: { right: { a: true, b: true }, updateNote: false, notFlashback: null }
     }
     // One elsewhere in the book is not this scene's.
@@ -714,6 +715,16 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
     expect(found?.contradictions?.findings.map((each) => each.id)).toEqual(['f1'])
     expect(contradictionsScoped(found?.contradictions ?? NO_TURN)).toEqual([])
     expect(sent('ai:navigate')).toHaveLength(2)
+  })
+
+  it('answers a consistency check locally in Plan too: nothing is sent to the agent (P4-D23)', async () => {
+    useAiSettingsStore.setState({ settings: settings({ chatMode: 'plan' }) })
+    navigate = routedV2('continuity')
+    await useAssistantStore.getState().send('Check this scene for consistency')
+    expect(sent('memory:findings')).toEqual([{ nodeId: 'sc-1' }])
+    expect(sent('ai:agent')).toHaveLength(0)
+    expect(turns()[1]).toMatchObject({ action: 'continuity', content: CHECK_THE_BOOK_HINT })
+    expect(turns()[1]?.contradictions).toMatchObject({ nodeId: 'sc-1', on: true })
   })
 
   it('never states an absence it did not check: the switch off, an unread scene, unread sentences, pairs waiting', async () => {

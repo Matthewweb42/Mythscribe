@@ -304,6 +304,7 @@ export function findingViewFixture(id: string, over: Partial<FindingView> = {}):
     confirmed: false,
     why: 'grey eyes against brown',
     costUsd: 0.0002,
+    year: null,
     actions: { right: { a: true, b: true }, updateNote: false, notFlashback: null },
     ...over
   }

@@ -297,7 +297,14 @@ describe('Check the book (F-16.30)', () => {
     expect(spent.every((each) => each.asked)).toBe(true)
     expect(ai.requests.filter(isConfirm).every((request) => request.tier === 'strong')).toBe(true)
     // Progress for the activity bar.
-    expect(service.progress()).toMatchObject({ judged: 3, toJudge: 3, confirmed: 3, toConfirm: 3 })
+    expect(service.progress()).toMatchObject({
+      judged: 3,
+      toJudge: 3,
+      confirmed: 3,
+      toConfirm: 3,
+      stopped: false,
+      reason: null
+    })
     expect(service.progress()?.finishedAt).toEqual(NOW.toISOString())
     expect(progressed).toBeGreaterThan(0)
 
@@ -456,6 +463,13 @@ describe('Check the book (F-16.30)', () => {
     expect(held.askedHold(db)).toBe(HOLD.dailyCap)
     await expect(held.checkBook(db, 'check-daily')).rejects.toThrow(JobSkippedError)
     expect(capped.requests).toEqual([])
+    // Ended as it began, with the hold: the dialog waiting on it says why.
+    expect(held.progress()).toMatchObject({
+      finishedAt: NOW.toISOString(),
+      judged: 0,
+      stopped: true,
+      reason: HOLD.dailyCap
+    })
   })
 
   it('keeps what was judged when it is stopped, and says so', async () => {
@@ -471,6 +485,8 @@ describe('Check the book (F-16.30)', () => {
     expect(rows.every((each) => each.confirm === null)).toBe(true)
     expect(checkReport(db)).toMatchObject({ stopped: true })
     expect(checkReport(db)?.notChecked.pastConfirm).toBeGreaterThan(0)
+    // A Stop has no cause to state.
+    expect(service.progress()).toMatchObject({ stopped: true, reason: null })
   })
 
   it('lists no secret once someone learns it', async () => {

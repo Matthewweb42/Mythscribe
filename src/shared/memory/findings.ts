@@ -212,6 +212,15 @@ export const FindingView = z.object({
   confirmed: z.boolean(),
   why: z.string().nullable(),
   costUsd: z.number().nonnegative(),
+  /**
+   * C4's birth variant: the scene's year the stated age was checked against, typed in its details
+   * or stated in its text (the third value the rule rests on); null for every other finding. A
+   * stored chat turn from before it reads as null.
+   */
+  year: z
+    .object({ value: z.number().int(), source: z.enum(['typed', 'quoted']) })
+    .nullable()
+    .default(null),
   actions: z.object({
     /**
      * *This one's right* under each side: it marks the other side not right, so it is offered only

@@ -31,9 +31,17 @@ export function lastCheckedLine(report: CheckReport | null, now: Date): string {
   return `Last checked ${checkedAgo(report.at, now)} · ${report.found.length} found`
 }
 
-/** The price, first: "About 3¢, at most 5¢", on Cloud "from your Balance"; free when nothing changed. */
-export function checkPriceLine(estimate: CheckEstimate): string {
-  if (estimate.free) return 'Nothing changed since your last check: free'
+/**
+ * The price, first: "About 3¢, at most 5¢", on Cloud "from your Balance"; free when nothing is
+ * left to judge ("since your last check" only when there was one: background judging may have
+ * judged every pair before a first check).
+ */
+export function checkPriceLine(estimate: CheckEstimate, checkedBefore: boolean): string {
+  if (estimate.free) {
+    return checkedBefore
+      ? 'Nothing changed since your last check: free'
+      : 'Nothing new to judge: free'
+  }
   const price =
     estimate.mostUsd > estimate.aboutUsd
       ? `About ${formatCents(estimate.aboutUsd)}, at most ${formatCents(estimate.mostUsd)}`
@@ -58,7 +66,7 @@ export function checkWorkLine(estimate: CheckEstimate): string {
 
 /** What *Check the book* looks for (design §2.4's rules, in words). */
 export const CHECK_COVERS =
-  'It looks for two values for one fixed fact (eyes, birth, family), the book against your notes and canon Research, someone on the page after their death, a secret passed on before it is learned, a stated age against a birth year and the year, a plot thread advanced after it was resolved, and history lines that disagree.'
+  'It looks for two values for one fixed fact (eyes, birth, family), the book against your notes and canon Research, someone on the page after their death, a lasting change to someone’s body (a scar, a lost hand) with no scene saying it changed, a secret passed on before it is learned, a stated age against a birth year and the year, a stated age lower than an earlier one, a plot thread advanced after it was resolved, and history lines that disagree.'
 
 /** What no rule covers, with the scenes not read yet (they are not checked). */
 export function checkSkipsLine(
@@ -70,6 +78,17 @@ export function checkSkipsLine(
       ? ''
       : ` Not read yet, so not checked: ${unread.map((scene) => scene.ref).join(', ')}.`
   return `It does not check ${fixed.join(', ')}.${scenes}`
+}
+
+/**
+ * What the dialog says when a check it waits on ended early with no new report: a hold met as it
+ * began, with its cause and next step; or a Stop.
+ */
+export function checkEndedLine(progress: CheckProgress): string {
+  if (progress.reason !== null) return `The check did not run: ${progress.reason}`
+  return progress.toJudge === 0
+    ? 'The check was stopped.'
+    : `The check was stopped after ${progress.judged} of ${plural(progress.toJudge, 'pair')}.`
 }
 
 /** The activity bar's and the dialog's progress: "Judging 3 of 10 pairs", then the confirmations. */

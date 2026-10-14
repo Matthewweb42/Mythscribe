@@ -1,12 +1,12 @@
 import { z } from 'zod'
-import type { AiProviderId } from '@shared/ai'
+import { AI_NEXT_STEP, type AiProviderId } from '@shared/ai'
 import { isFeatureAllowed, type AiSettings } from '@shared/aiSettings'
 import { RULE_ORDER, type Finding, type FindingSide } from '@shared/memory/findings'
 import type { CheckProgress } from '@shared/memory/views'
 import { dayOf, rollIfNewDay } from '../../ai/dailyCap'
 import { JUDGE_PAIRS_MAX } from '../../ai/prompts/judge.v1'
 import { registerInflight, releaseInflight } from '../../ai/inflight'
-import { AiBudgetError, AiCancelledError } from '../../ai/providers/types'
+import { AiBudgetError, AiCancelledError, AiProviderError } from '../../ai/providers/types'
 import type { AiRequestDeps } from '../../ai/request'
 import { currentDraftId } from '../../draft/draftStore'
 import { JobSkippedError, jobOutcome } from '../../jobs/indexQueue'
@@ -122,6 +122,14 @@ export const HOLD = {
 } as const
 
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+/** What ended a check early, with the next step (the dialog and the activity bar say it); null for a Stop. */
+function checkFailure(err: unknown): string | null {
+  if (err instanceof AiCancelledError) return null
+  if (err instanceof AiBudgetError) return HOLD.dailyCap
+  if (err instanceof AiProviderError) return `${err.message} ${AI_NEXT_STEP[err.code]}`.trim()
+  return errorText(err)
+}
 
 export interface FindingsServiceDeps {
   settings: (db: TreeDb) => AiSettings
@@ -412,7 +420,22 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
   /** *Check the book*: recompute with C7, judge every unjudged pair, confirm, report. */
   const checkBook = async (db: TreeDb, requestId: string): Promise<FindingsJobResult> => {
     const hold = holdOf(db, 'check')
-    if (hold !== null) throw new JobSkippedError(hold)
+    if (hold !== null) {
+      // Met as it began (since *Check*: the cap reached by queued work, the switch turned off, the
+      // provider removed): it ends at once with the hold, so the dialog waiting on it says why.
+      const at = deps.now().toISOString()
+      setProgress({
+        startedAt: at,
+        finishedAt: at,
+        judged: 0,
+        toJudge: 0,
+        confirmed: 0,
+        toConfirm: 0,
+        stopped: true,
+        reason: hold
+      })
+      throw new JobSkippedError(hold)
+    }
     const draftId = currentDraftId(db)
     if (draftId === null) return { requested: false, again: false, run: null, confirm: null }
     const startedAt = deps.now()
@@ -422,7 +445,9 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
       judged: 0,
       toJudge: 0,
       confirmed: 0,
-      toConfirm: 0
+      toConfirm: 0,
+      stopped: false,
+      reason: null
     })
     const unread = unreadScenes(db, findingsFrame(db), draftId)
     recomputeFirst(db, 'check')
@@ -470,7 +495,14 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
         stopped: failed !== null,
         unreadScenes: unread
       })
-      if (check !== null) setProgress({ ...check, finishedAt: deps.now().toISOString() })
+      if (check !== null) {
+        setProgress({
+          ...check,
+          finishedAt: deps.now().toISOString(),
+          stopped: failed !== null,
+          reason: failed === null ? null : checkFailure(failed.err)
+        })
+      }
     }
     if (failed !== null) {
       // A Stop keeps what was judged and its report; nothing else to say.

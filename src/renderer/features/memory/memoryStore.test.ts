@@ -5,7 +5,7 @@ import type { Dismissed } from '@shared/memory/dismissed'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetDismissedStore, useDismissedStore } from '@renderer/features/thisScene/dismissedStore'
-import { setIpcClient } from '@renderer/lib/ipc'
+import { IpcRequestError, setIpcClient } from '@renderer/lib/ipc'
 import {
   checkEstimateFixture,
   checkReportFixture,
@@ -355,13 +355,31 @@ describe('useMemoryStore: findings, loose ends and Check the book (F-16.27, F-16
 
   it('reads the report when a check ends, once', async () => {
     const running = memoryStatusFixture({
-      check: { startedAt: 'a', finishedAt: null, judged: 0, toJudge: 2, confirmed: 0, toConfirm: 2 }
+      check: {
+        startedAt: 'a',
+        finishedAt: null,
+        judged: 0,
+        toJudge: 2,
+        confirmed: 0,
+        toConfirm: 2,
+        stopped: false,
+        reason: null
+      }
     })
     act(() => main.emit('memory:statusChanged', running))
     await flush()
     expect(main.sent('memory:checkReport')).toEqual([])
     const done = memoryStatusFixture({
-      check: { startedAt: 'a', finishedAt: 'b', judged: 2, toJudge: 2, confirmed: 2, toConfirm: 2 }
+      check: {
+        startedAt: 'a',
+        finishedAt: 'b',
+        judged: 2,
+        toJudge: 2,
+        confirmed: 2,
+        toConfirm: 2,
+        stopped: false,
+        reason: null
+      }
     })
     act(() => main.emit('memory:statusChanged', done))
     await flush()
@@ -399,6 +417,55 @@ describe('useMemoryStore: findings, loose ends and Check the book (F-16.27, F-16
     expect(await useMemoryStore.getState().undoRightMark('f-2')).toBe(true)
     expect(main.sent('dismissed:undo')).toEqual([{ id: 'd-f-2' }])
     expect(useMemoryStore.getState().rightMarks).toEqual([])
+  })
+
+  it('drops This one’s right’s line when its Dismissed row is undone from the Dismissed dialog', async () => {
+    await act(async () => {
+      await useMemoryStore.getState().loadFindings()
+    })
+    await useMemoryStore.getState().findingAction({ findingId: 'f-2', action: 'right', side: 'a' })
+    expect(useMemoryStore.getState().rightMarks.map((mark) => mark.dismissedId)).toEqual(['d-f-2'])
+    // The dialog's Undo: the row goes, and the line with it.
+    expect(await useDismissedStore.getState().undo('d-f-2')).toBe(true)
+    expect(useMemoryStore.getState().rightMarks).toEqual([])
+    // A stale line (its row gone some other way) closes on its own Undo with nothing sent again.
+    useMemoryStore.setState({
+      rightMarks: [
+        {
+          findingId: 'f-9',
+          value: 'blue',
+          ref: '1.3',
+          nodeId: 'sc-3',
+          quote: 'blue',
+          dismissedId: 'd-gone'
+        }
+      ]
+    })
+    main.calls.length = 0
+    expect(await useMemoryStore.getState().undoRightMark('f-9')).toBe(true)
+    expect(main.sent('dismissed:undo')).toEqual([])
+    expect(useMemoryStore.getState().rightMarks).toEqual([])
+  })
+
+  it('reads loose ends again when main refuses a Not a problem on one gone since', async () => {
+    await act(async () => {
+      await useMemoryStore.getState().loadLooseEnds()
+    })
+    installFakeMain({
+      'memory:looseEndAction': () => {
+        throw new IpcRequestError({
+          code: 'NOT_FOUND',
+          message: 'That loose end is no longer there'
+        })
+      },
+      'memory:looseEnds': () => looseEndsFixture({ items: [] })
+    })
+    expect(await useMemoryStore.getState().looseEndNotProblem(looseEndFixture())).toBe(false)
+    await flush()
+    expect(useMemoryStore.getState().looseEnds?.items).toEqual([])
+    expect(useDialogStore.getState().toasts.map((toast) => toast.message)).toEqual([
+      'That loose end is no longer there'
+    ])
   })
 
   it('takes a loose end away on Not a problem, and prices and starts a check', async () => {

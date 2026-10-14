@@ -139,6 +139,10 @@ export function findingView(ctx: JudgeContext, finding: Finding): FindingView | 
     confirmed: finding.confirm === 'c',
     why: finding.why,
     costUsd: finding.costUsd,
+    year:
+      finding.extra?.year === undefined
+        ? null
+        : { value: finding.extra.year.value, source: finding.extra.year.source },
     actions: {
       // P4-D17: *This one's right* marks the other side not right; on a note conflict the book is
       // canon (answer 1), so neither side offers it (the panel offers *Update my note*).

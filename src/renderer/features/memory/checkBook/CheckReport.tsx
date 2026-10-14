@@ -27,7 +27,14 @@ const HEADING = 'm-0 mt-3 mb-1 text-xs font-medium tracking-wide text-fg-muted u
  * flashback marked not right, so it is judged next); and the secrets readers know that no scene
  * shows anyone learning, muted and scoped.
  */
-export function CheckReportView({ report }: { report: CheckReport }): React.JSX.Element {
+export function CheckReportView({
+  report,
+  onNavigate
+}: {
+  report: CheckReport
+  /** Closes the dialog the report is drawn in before a row opens a scene or a note behind it. */
+  onNavigate: () => void
+}): React.JSX.Element {
   const extras = notCheckedExtras(report)
   return (
     <div className="text-sm" data-testid="check-report">
@@ -41,14 +48,14 @@ export function CheckReportView({ report }: { report: CheckReport }): React.JSX.
         <ul className="m-0 list-none space-y-2 p-0 text-xs">
           {report.found.map((finding) =>
             finding.rule === 'C6' ? (
-              <NoteConflictRow key={finding.id} finding={finding} />
+              <NoteConflictRow key={finding.id} finding={finding} onNavigate={onNavigate} />
             ) : (
-              <FindingRow key={finding.id} finding={finding} />
+              <FindingRow key={finding.id} finding={finding} onNavigate={onNavigate} />
             )
           )}
         </ul>
       )}
-      <UnclearFindings findings={report.unclear} />
+      <UnclearFindings findings={report.unclear} onNavigate={onNavigate} />
       {report.cleared.length === 0 ? null : (
         <div className="mt-2 text-xs text-fg-muted" role="group" aria-label="Cleared">
           <p className="m-0">The stronger check found no contradiction in:</p>

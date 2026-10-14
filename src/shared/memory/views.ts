@@ -643,7 +643,8 @@ export type RebuildProgress = z.infer<typeof RebuildProgress>
 /**
  * F-16.30: *Check the book* while it runs or as it last ended in this session (the activity bar's
  * progress, as *Rebuild memory*'s): the pairs judged of those due, then the stronger check's
- * confirmations of those due. Null before a check this session.
+ * confirmations of those due; once ended, whether it ended early and why. Null before a check this
+ * session.
  */
 export const CheckProgress = z.object({
   startedAt: z.string(),
@@ -651,7 +652,14 @@ export const CheckProgress = z.object({
   judged: z.number().int().nonnegative(),
   toJudge: z.number().int().nonnegative(),
   confirmed: z.number().int().nonnegative(),
-  toConfirm: z.number().int().nonnegative()
+  toConfirm: z.number().int().nonnegative(),
+  /**
+   * It ended before it judged everything: a Stop, a failure, or a hold met as it began (the cap
+   * reached, the switch turned off, the provider removed since *Check*: nothing judged, no report).
+   */
+  stopped: z.boolean(),
+  /** What ended it early, with the next step (a failure's cause or the hold); null for a Stop. */
+  reason: z.string().nullable()
 })
 export type CheckProgress = z.infer<typeof CheckProgress>
 

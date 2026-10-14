@@ -23,10 +23,18 @@ export const NOTE_BUSY = 'Your note was being edited; save it again in a moment'
  * sheet or the Research page), *Update my note* when offered (P4-D18: the book side is narration
  * in the present): the proposal made in code (`memory:notePatch`, no AI) in an editable field,
  * saved through `memory:applyNotePatch` behind the page store (pending typing on that page saved
- * first, the page read again after, `writeBehindPage`), refused when the line changed since; and
+ * first, the page read again after, `writeBehindPage`, once: typing during the save keeps her
+ * draft and shows `NOTE_BUSY`), refused when the line changed since; and
  * *Not a problem*. The manuscript is canon (answer 1): no *This one's right* here.
  */
-export function NoteConflictRow({ finding }: { finding: FindingView }): React.JSX.Element {
+export function NoteConflictRow({
+  finding,
+  onNavigate
+}: {
+  finding: FindingView
+  /** Drawn in *Check the book*'s report: closes it before *Go there* or *Open my note*. */
+  onNavigate?: () => void
+}): React.JSX.Element {
   const sides = noteSides(finding)
   const [busy, setBusy] = useState(false)
   const [patch, setPatch] = useState<NotePatch | null>(null)
@@ -70,7 +78,9 @@ export function NoteConflictRow({ finding }: { finding: FindingView }): React.JS
             before: patch.before,
             text
           }),
-        () => new Error(NOTE_BUSY)
+        () => new Error(NOTE_BUSY),
+        // Once: the apply closes the finding, so it cannot run again on her saved draft.
+        1
       )
       setPatch(null)
       toast.info(`Your note on ${patch.owner.name} now reads “${text.trim()}”.`)
@@ -78,6 +88,13 @@ export function NoteConflictRow({ finding }: { finding: FindingView }): React.JS
       await useMemoryStore.getState().loadFindings()
     } catch (err) {
       toast.error(describeError(err))
+      // Her draft was saved over the patch (her words win): the proposal is stale.
+      if (err instanceof Error && err.message === NOTE_BUSY) setPatch(null)
+      // Closed, or found again under a new id: the list as main holds it now.
+      useMemoryStore
+        .getState()
+        .loadFindings()
+        .catch((reload: unknown) => toast.error(describeError(reload)))
     } finally {
       setBusy(false)
     }
@@ -106,10 +123,24 @@ export function NoteConflictRow({ finding }: { finding: FindingView }): React.JS
         <div className="mt-1 flex flex-wrap gap-1">
           {sides === null ? null : (
             <>
-              <button type="button" className={SMALL} onClick={() => openSide(sides.book)}>
+              <button
+                type="button"
+                className={SMALL}
+                onClick={() => {
+                  onNavigate?.()
+                  openSide(sides.book)
+                }}
+              >
                 Go there
               </button>
-              <button type="button" className={SMALL} onClick={() => openSide(sides.note)}>
+              <button
+                type="button"
+                className={SMALL}
+                onClick={() => {
+                  onNavigate?.()
+                  openSide(sides.note)
+                }}
+              >
                 Open my note
               </button>
             </>

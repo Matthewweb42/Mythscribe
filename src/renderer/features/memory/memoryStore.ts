@@ -484,6 +484,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         return true
       } catch (err) {
         report(err)
+        // Gone or moved since (main refused it): the list as main holds it now.
+        if (mine === generation) get().loadLooseEnds().catch(report)
         return false
       }
     },
@@ -498,8 +500,13 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
     async undoRightMark(findingId) {
       const mark = get().rightMarks.find((each) => each.findingId === findingId)
       if (mark === undefined) return false
-      if (mark.dismissedId !== null) {
-        const undone = await useDismissedStore.getState().undo(mark.dismissedId)
+      const { dismissedId } = mark
+      // A row already undone (from the Dismissed dialog) leaves nothing to undo: the line goes.
+      if (
+        dismissedId !== null &&
+        useDismissedStore.getState().items.some((each) => each.id === dismissedId)
+      ) {
+        const undone = await useDismissedStore.getState().undo(dismissedId)
         if (!undone) return false
       }
       get().dropRightMark(findingId)
@@ -823,7 +830,18 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
           // The report reads the findings again: a finding closed since drops out of it.
           if (get().check.report !== null) get().loadCheckReport().catch(report)
         }),
-        ipc().on('memory:noticesChanged', (notices) => set({ notices }))
+        ipc().on('memory:noticesChanged', (notices) => set({ notices })),
+        // A *This one's right* line lasts only as long as its Dismissed row: undone from the
+        // Dismissed dialog, the finding is back and the line goes.
+        useDismissedStore.subscribe((dismissed) => {
+          const marks = get().rightMarks
+          if (marks.length === 0) return
+          const ids = new Set(dismissed.items.map((each) => each.id))
+          const kept = marks.filter(
+            (each) => each.dismissedId === null || ids.has(each.dismissedId)
+          )
+          if (kept.length !== marks.length) set({ rightMarks: kept })
+        })
       ]
     },
 

@@ -399,6 +399,20 @@ export function outcomeOf(job: ActivityJob, snap: ActivitySnapshot): ActivityNot
     case 'checkBook': {
       const { check } = snap.memory
       if (typeof check?.finishedAt !== 'string') return null
+      if (check.stopped) {
+        // A Stop keeps what was judged; a failure or a hold says its cause and the next step.
+        const judged =
+          check.toJudge === 0 ? '' : `Judged ${check.judged} of ${plural(check.toJudge, 'pair')}.`
+        const detail = [check.reason ?? '', judged].filter((part) => part !== '').join(' ')
+        return {
+          ...base,
+          status: check.reason === null ? 'done' : 'failed',
+          title: 'Check the book stopped',
+          detail: detail === '' ? null : detail,
+          canOpen: true,
+          canRetry: false
+        }
+      }
       return {
         ...base,
         status: 'done',

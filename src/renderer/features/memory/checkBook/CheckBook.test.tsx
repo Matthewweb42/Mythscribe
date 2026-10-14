@@ -2,6 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Dismissed } from '@shared/memory/dismissed'
 import type { CheckEstimate, CheckReport } from '@shared/memory/views'
+import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import { treeFixture } from '@renderer/features/manuscript/treeFixture'
+import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetDismissedStore } from '@renderer/features/thisScene/dismissedStore'
@@ -43,6 +46,9 @@ beforeEach(() => {
   resetMemoryStore()
   resetDismissedStore()
   resetPendingSaves()
+  // A jump one test starts must not land in the next one's editor.
+  resetActiveEditorStore()
+  useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
   useDialogStore.setState({ modals: [], toasts: [] })
   estimate = checkEstimateFixture()
   report = null
@@ -57,6 +63,8 @@ beforeEach(() => {
 afterEach(() => {
   resetMemoryStore()
   resetDismissedStore()
+  resetActiveEditorStore()
+  useTreeStore.getState().clear()
   setIpcClient(null)
 })
 
@@ -82,13 +90,14 @@ describe('Check the book (F-16.30)', () => {
     expect(screen.queryByTestId('check-dialog')).toBeNull()
   })
 
-  it('says free when nothing changed, runs, shows its progress, then the report', async () => {
+  it('says free when nothing is left to judge, runs, shows its progress, then the report', async () => {
     estimate = checkEstimateFixture({ free: true, confirms: { about: 0, most: 0 } })
     useMemoryStore.getState().setCheckOpen('start')
     render(<CheckBookDialog />)
     const dialog = await screen.findByTestId('check-dialog')
+    // Never checked before: no "since your last check".
     expect(await within(dialog).findByTestId('check-price')).toHaveTextContent(
-      'Nothing changed since your last check: free'
+      'Nothing new to judge: free'
     )
     fireEvent.click(within(dialog).getByRole('button', { name: 'Check' }))
     await waitFor(() => expect(main.sent('memory:checkBook')).toEqual([{ nodeId: null }]))
@@ -103,7 +112,9 @@ describe('Check the book (F-16.30)', () => {
             judged: 0,
             toJudge: 2,
             confirmed: 0,
-            toConfirm: 0
+            toConfirm: 0,
+            stopped: false,
+            reason: null
           }
         })
       )
@@ -120,7 +131,9 @@ describe('Check the book (F-16.30)', () => {
             judged: 2,
             toJudge: 2,
             confirmed: 0,
-            toConfirm: 0
+            toConfirm: 0,
+            stopped: false,
+            reason: null
           }
         })
       )
@@ -174,5 +187,46 @@ describe('Check the book (F-16.30)', () => {
       ])
     )
     await waitFor(() => expect(main.sent('memory:checkReport').length).toBeGreaterThan(1))
+  })
+
+  it('says why when the check it started ended before it began (a hold met since Check)', async () => {
+    useMemoryStore.getState().setCheckOpen('start')
+    render(<CheckBookDialog />)
+    const dialog = await screen.findByTestId('check-dialog')
+    await within(dialog).findByTestId('check-price')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Check' }))
+    expect(await within(dialog).findByTestId('check-progress')).toHaveTextContent('Checking…')
+    act(() =>
+      main.emit(
+        'memory:statusChanged',
+        memoryStatusFixture({
+          check: {
+            startedAt: 'z',
+            finishedAt: 'z',
+            judged: 0,
+            toJudge: 0,
+            confirmed: 0,
+            toConfirm: 0,
+            stopped: true,
+            reason: 'The contradiction check is off.'
+          }
+        })
+      )
+    )
+    expect(await within(dialog).findByTestId('check-ended')).toHaveTextContent(
+      'The check did not run: The contradiction check is off.'
+    )
+    expect(within(dialog).queryByTestId('check-progress')).toBeNull()
+  })
+
+  it('closes before Go there opens the scene behind it', async () => {
+    report = checkReportFixture()
+    useMemoryStore.getState().setCheckOpen('report')
+    render(<CheckBookDialog />)
+    const shown = await screen.findByTestId('check-report')
+    fireEvent.click(within(shown).getByRole('button', { name: 'Go there: 1.2' }))
+    expect(useMemoryStore.getState().checkOpen).toBeNull()
+    expect(screen.queryByTestId('check-dialog')).toBeNull()
+    expect(useTreeStore.getState().selectedId).toBe('sc-2')
   })
 })

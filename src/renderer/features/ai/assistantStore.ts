@@ -212,7 +212,9 @@ interface AssistantState {
    * Sends one turn in the active conversation in the project's chat mode; ignored while one is
    * in flight or for a blank message. `override.agent` skips the router and runs the agent with
    * that access (the recap reads; Write this writes). An agent turn always carries the open
-   * document, so the recap of F-5.17 needs nothing more to be about it.
+   * document, so the recap of F-5.17 needs nothing more to be about it. Any override (an empty
+   * one too: a loose end's question, F-16.29) is its own message, so the composer's attachment
+   * stays staged.
    */
   send: (message: string, override?: SendOverride) => Promise<void>
   /**
@@ -281,11 +283,11 @@ interface AssistantState {
 }
 
 /**
- * A turn that skips the router and runs the agent with `agent` access. A turn with an override
- * never carries the composer's attachment.
+ * A message the app words itself, never carrying the composer's attachment: with `agent` it skips
+ * the router and runs the agent with that access; without it (a loose end's question) it is routed.
  */
 export interface SendOverride {
-  agent: AgentAccess
+  agent?: AgentAccess
 }
 
 /** The project's chat mode now; Ask until the AI settings load. */
@@ -678,7 +680,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
 
   async send(message, override) {
     const value = get().conversations
-    // The composer's attachment rides on a plain send only; an override (recap, Write this) is its own message.
+    // The composer's attachment rides on a plain send only; an override (recap, Write this, a
+    // loose end's question) is its own message.
     const attachment = override === undefined ? get().attachment : null
     const text = withAttachment(message.trim(), attachment)
     if (value?.active == null || !message.trim()) return
@@ -692,8 +695,9 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     setPending(id, requestId)
     // A direct agent turn is labelled now (a cited lookup reads as Query, an edit turn as chat);
     // a routed one once the router has picked.
+    const agent = override?.agent
     const turnMode: ChatMode | null =
-      override === undefined ? null : override.agent === 'read' ? 'query' : 'plan'
+      agent === undefined ? null : agent === 'read' ? 'query' : 'plan'
     commit(
       patchOne(value, id, (c) => ({
         ...c,
@@ -703,9 +707,9 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
         )
       }))
     )
-    if (override !== undefined) {
+    if (agent !== undefined) {
       const nodeId = useActiveEditorStore.getState().active?.id ?? null
-      await runAgentTurn(id, requestId, override.agent, appliesEditsItself(mode), {
+      await runAgentTurn(id, requestId, agent, appliesEditsItself(mode), {
         nodeId,
         message: text,
         history
@@ -1170,7 +1174,7 @@ async function navigateTurn(
     cost: Partial<ChatMessage>,
     answer: Pick<RoutedTurn, 'navigation' | 'prior'> = { navigation: null, prior: null }
   ): RoutedTurn => ({
-    action: routeActionFor(mode, action),
+    action: routeActionFor(mode, action, 'v2'),
     instruction,
     edit,
     cost,

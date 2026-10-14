@@ -427,6 +427,8 @@ describe('Check the book as a job (F-16.30)', () => {
     toJudge: 6,
     confirmed: 0,
     toConfirm: 2,
+    stopped: false,
+    reason: null,
     ...over
   })
   const memory = (check: CheckProgress | null, checkOpen = false): ActivitySnapshot['memory'] => ({
@@ -462,6 +464,41 @@ describe('Check the book as a job (F-16.30)', () => {
       canOpen: true
     })
     expect(outcomeOf(job!, running)).toBeNull()
+  })
+
+  it('says a stopped check stopped, and a failed one why', () => {
+    const job = readJobs(snapshot({ memory: memory(progress()) }))[0]!
+    const ended = (over: Partial<CheckProgress>) =>
+      outcomeOf(
+        job,
+        snapshot({
+          memory: memory(progress({ finishedAt: '2026-10-14T10:01:00.000Z', ...over }))
+        })
+      )
+    // Stopped by the author: what was judged is kept.
+    expect(ended({ stopped: true })).toMatchObject({
+      status: 'done',
+      title: 'Check the book stopped',
+      detail: 'Judged 2 of 6 pairs.'
+    })
+    // Ended by a failure: its cause and next step.
+    expect(
+      ended({ stopped: true, reason: 'Rate limited. Wait a moment and retry.' })
+    ).toMatchObject({
+      status: 'failed',
+      title: 'Check the book stopped',
+      detail: 'Rate limited. Wait a moment and retry. Judged 2 of 6 pairs.'
+    })
+    // A hold met as it began: nothing was due, the hold alone.
+    expect(
+      ended({
+        stopped: true,
+        reason: 'The contradiction check is off.',
+        judged: 0,
+        toJudge: 0,
+        toConfirm: 0
+      })
+    ).toMatchObject({ status: 'failed', detail: 'The contradiction check is off.' })
   })
 
   it('drops its note once the report shows or another check runs', () => {

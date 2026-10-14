@@ -9493,6 +9493,21 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
 
       // Loose ends: local and free.
       expect(await invoke('memory:looseEnds', undefined)).toMatchObject({ items: [], more: 0 })
+      // Undo of a loose end's Not a problem tells the renderer, which reads loose ends again on it.
+      const loose = dismiss(
+        db,
+        {
+          kind: 'notProblem',
+          key: 'loose|character|r-gone|',
+          recordId: mara,
+          label: 'Loose end: Mara: not a problem',
+          quote: null
+        },
+        new Date()
+      )
+      const changes = sentOf('memory:changed').length
+      await invoke('dismissed:undo', { id: loose.id })
+      expect(sentOf('memory:changed').slice(changes)).toEqual([{ nodeIds: [], recordIds: [mara] }])
     } finally {
       vi.useRealTimers()
     }

@@ -7,6 +7,7 @@ import { EditTurn } from './editRequest'
 import { FindingView } from './memory/findings'
 import { QueryTurn } from './query'
 import { InstantCard, ScribeTurn } from './scribe'
+import type { StoryMemoryVersion } from './storyMemory'
 import { toTagName } from './tags'
 import { WhatNextDirection } from './whatNext'
 
@@ -71,9 +72,18 @@ export const PLAN_ROUTE_ACTIONS: readonly RouteAction[] = [
   'betaReader'
 ]
 
-/** The action a routed turn runs in `mode`: the router's pick, or chat where Plan forbids it. */
-export function routeActionFor(mode: AssistantMode, action: RouteAction): RouteAction {
-  return mode === 'plan' && !PLAN_ROUTE_ACTIONS.includes(action) ? 'chat' : action
+/**
+ * The action a routed turn runs in `mode`: the router's pick, or chat where Plan forbids it. In
+ * story memory v2 a consistency check is answered locally from the scene's findings, sends nothing
+ * and proposes no fix (P4-D23), so Plan runs it as it is too.
+ */
+export function routeActionFor(
+  mode: AssistantMode,
+  action: RouteAction,
+  storyMemory: StoryMemoryVersion = 'v1'
+): RouteAction {
+  if (mode !== 'plan' || PLAN_ROUTE_ACTIONS.includes(action)) return action
+  return storyMemory === 'v2' && action === 'continuity' ? action : 'chat'
 }
 
 export const CHAT_PARAGRAPHS_MIN = 1

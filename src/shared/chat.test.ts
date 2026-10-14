@@ -444,6 +444,7 @@ describe('chat modes (decided by the author 2026-10-07)', () => {
       'notes'
     ] as const) {
       expect(routeActionFor('plan', action)).toBe('chat')
+      expect(routeActionFor('plan', action, 'v2')).toBe(action === 'continuity' ? action : 'chat')
     }
   })
 

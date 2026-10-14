@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { findingViewFixture } from '@renderer/features/memory/memoryFixture'
@@ -14,10 +15,13 @@ import { ContradictionsTurn } from './ContradictionsTurn'
 
 beforeEach(() => {
   resetMemoryStore()
+  // A jump one test starts must not land in the next one's editor.
+  resetActiveEditorStore()
   useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
 })
 afterEach(() => {
   resetMemoryStore()
+  resetActiveEditorStore()
   useTreeStore.getState().clear()
 })
 

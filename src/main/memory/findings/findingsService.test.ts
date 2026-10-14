@@ -415,5 +415,10 @@ describe('runs cut short or half answered (P4 slice 2 review)', () => {
     await expect(service.judge(db, 'busy-2')).rejects.toThrow(HOLD.transient)
     await expect(service.checkBook(db, 'busy-3')).rejects.toThrow(AiRateLimitError)
     expect(state()).toEqual(['unjudged'])
+    // The check's end says the cause and the next step (the activity bar shows it).
+    expect(service.progress()).toMatchObject({
+      stopped: true,
+      reason: 'Too many requests Wait a moment and retry.'
+    })
   })
 })

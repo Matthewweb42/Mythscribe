@@ -8,6 +8,7 @@ import { useNow } from '@renderer/features/memory/useNow'
 import { CheckReportView } from './CheckReport'
 import {
   CHECK_COVERS,
+  checkEndedLine,
   checkPriceLine,
   checkProgressLine,
   checkSkipsLine,
@@ -70,8 +71,12 @@ type Stage =
   | { kind: 'confirm'; estimate: CheckEstimate }
   | { kind: 'starting'; estimate: CheckEstimate }
   | { kind: 'failed'; message: string }
-  /** Started: its progress, then its report once one newer than `past` (the last one's time) lands. */
-  | { kind: 'watching'; past: string | null }
+  /**
+   * Started: its progress, then its report once one newer than `past` (the last one's time) lands;
+   * or, when a run newer than `pastStart` (the last progress's start) ended early with no report
+   * (a hold met as it began), why.
+   */
+  | { kind: 'watching'; past: string | null; pastStart: string | null }
   /** Opened on the report (or the run's progress). */
   | { kind: 'report' }
 
@@ -132,7 +137,12 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
       setStage({ kind: 'failed', message: `${result.message} ${result.nextStep}`.trim() })
       return
     }
-    setStage({ kind: 'watching', past: useMemoryStore.getState().check.report?.at ?? null })
+    const store = useMemoryStore.getState()
+    setStage({
+      kind: 'watching',
+      past: store.check.report?.at ?? null,
+      pastStart: store.status?.check?.startedAt ?? null
+    })
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -143,8 +153,18 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
   }
 
   const pricing = stage.kind === 'confirm' || stage.kind === 'starting'
+  const noNewReport = stage.kind === 'watching' && (report?.at ?? null) === stage.past
+  // The run it started ended early and wrote no report (a hold met as it began): say why.
+  const ended =
+    noNewReport &&
+    progress !== null &&
+    progress.finishedAt !== null &&
+    progress.stopped &&
+    progress.startedAt !== stage.pastStart
+      ? progress
+      : null
   // Started, and neither its progress nor its report has landed yet.
-  const waiting = stage.kind === 'watching' && !running && (report?.at ?? null) === stage.past
+  const waiting = noNewReport && !running && ended === null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
       <div
@@ -166,7 +186,7 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
           ) : pricing ? (
             <>
               <p className="m-0 font-medium tabular-nums" data-testid="check-price">
-                {checkPriceLine(stage.estimate)}
+                {checkPriceLine(stage.estimate, report !== null)}
               </p>
               <p className="m-0 mt-1 text-xs text-fg-muted">{checkWorkLine(stage.estimate)}</p>
               <p className="m-0 mt-2">{CHECK_COVERS}</p>
@@ -185,6 +205,10 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
             <p role="alert" className="m-0 text-danger">
               {stage.message}
             </p>
+          ) : ended !== null ? (
+            <p role="alert" className="m-0" data-testid="check-ended">
+              {checkEndedLine(ended)}
+            </p>
           ) : running || waiting ? (
             <p className={`m-0 ${AI_WAIT_CLASS}`} role="status" data-testid="check-progress">
               {running ? checkProgressLine(progress) : 'Checking…'}
@@ -192,7 +216,7 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
           ) : report === null ? (
             <p className="m-0 text-fg-muted">The book has not been checked yet.</p>
           ) : (
-            <CheckReportView report={report} />
+            <CheckReportView report={report} onNavigate={close} />
           )}
         </div>
         <div className="mt-4 flex justify-end gap-2">

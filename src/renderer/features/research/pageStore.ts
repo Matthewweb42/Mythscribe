@@ -111,17 +111,19 @@ export const PAGE_WRITE_TRIES = 3
  * Writes behind the page store (the one writer of an open page): flush the author's typing, run
  * `write` in main, then read the page again (`reload`, which drops the store's draft of it). When
  * she typed on that page while `write` was on the wire, her draft predates the write: it is saved
- * first (her words win) and `write` runs again on the saved text, at most `PAGE_WRITE_TRIES`
- * times; then her draft is saved and the write given up (`busy()` is thrown), never her words.
- * Used by Ms Scribe's sheet lines (F-16.26) and *Update my note* (F-16.29).
+ * first (her words win) and `write` runs again on the saved text, at most `tries` times (default
+ * `PAGE_WRITE_TRIES`); then her draft is saved and the write given up (`busy()` is thrown), never
+ * her words. A write that cannot run twice passes `tries` 1. Used by Ms Scribe's sheet lines
+ * (F-16.26) and *Update my note* (F-16.29, once: the apply closes its finding).
  */
 export async function writeBehindPage<R>(
   key: string,
   write: () => Promise<R>,
-  busy: () => Error
+  busy: () => Error,
+  tries: number = PAGE_WRITE_TRIES
 ): Promise<R> {
   const pages = usePageStore.getState
-  for (let tries = 1; ; tries++) {
+  for (let attempt = 1; ; attempt++) {
     await pages().flush()
     const result = await write()
     // Nothing was typed on the page meanwhile: the reload drops no words of hers.
@@ -129,7 +131,7 @@ export async function writeBehindPage<R>(
       await pages().reload([key])
       return result
     }
-    if (tries >= PAGE_WRITE_TRIES) {
+    if (attempt >= tries) {
       await pages().flush()
       throw busy()
     }

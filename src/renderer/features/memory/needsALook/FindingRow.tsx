@@ -18,15 +18,18 @@ const ICON_BUTTON =
  * quotes each with *Go there*, *This one's right* under each side whose other side is a book
  * passage (P4-D17: it marks the other side not right and never edits the manuscript), *Not a
  * problem* (the one Dismissed list, with Undo) and ⓘ (how it was found, judged and confirmed, and
- * what judging it cost). `unclear`: an unclear finding, muted, with *Go there* and *Not a problem*
- * only (never counted, never underlined). `report`: drawn in *Check the book*'s report.
+ * what judging it cost). `unclear`: an unclear finding, muted, with *Go there*, ⓘ and *Not a
+ * problem* only (never counted, never underlined). `onNavigate`: drawn in *Check the book*'s
+ * report, which closes before *Go there* opens the scene behind it.
  */
 export function FindingRow({
   finding,
-  unclear = false
+  unclear = false,
+  onNavigate
 }: {
   finding: FindingView
   unclear?: boolean
+  onNavigate?: () => void
 }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
   const info = useFindingInfo()
@@ -48,7 +51,7 @@ export function FindingRow({
     >
       <div className="flex items-start gap-1">
         <p className="m-0 min-w-0 flex-1 font-medium">{line}</p>
-        {unclear ? null : <FindingInfoButton info={info} line={line} />}
+        <FindingInfoButton info={info} line={line} />
       </div>
       <ul className="m-0 mt-1 list-none space-y-1 p-0">
         {(['a', 'b'] as const).map((key) => (
@@ -57,6 +60,7 @@ export function FindingRow({
             side={finding[key]}
             right={!unclear && finding.actions.right[key]}
             busy={busy}
+            onNavigate={onNavigate}
             onRight={() =>
               void act(() =>
                 store().findingAction({ findingId: finding.id, action: 'right', side: key })
@@ -128,12 +132,14 @@ function FindingSide({
   side,
   right,
   busy,
-  onRight
+  onRight,
+  onNavigate
 }: {
   side: FindingSideView
   right: boolean
   busy: boolean
   onRight: () => void
+  onNavigate: (() => void) | undefined
 }): React.JSX.Element {
   return (
     <li className="flex flex-wrap items-baseline gap-1 text-fg-muted">
@@ -143,7 +149,10 @@ function FindingSide({
         type="button"
         className={SMALL}
         aria-label={`Go there: ${side.label}`}
-        onClick={() => openSide(side)}
+        onClick={() => {
+          onNavigate?.()
+          openSide(side)
+        }}
       >
         Go there
       </button>
@@ -164,12 +173,15 @@ function FindingSide({
 
 /**
  * The unclear findings (design §2.4: "unclear is shown as unclear"): a collapsed "Unclear (n)"
- * line under Conflicts, each row muted with *Go there* and *Not a problem*; never counted.
+ * line under Conflicts, each row muted with *Go there*, ⓘ and *Not a problem*; never counted.
  */
 export function UnclearFindings({
-  findings
+  findings,
+  onNavigate
 }: {
   findings: readonly FindingView[]
+  /** Drawn in *Check the book*'s report: closes it before *Go there*. */
+  onNavigate?: () => void
 }): React.JSX.Element | null {
   if (findings.length === 0) return null
   return (
@@ -177,7 +189,7 @@ export function UnclearFindings({
       <summary className="cursor-pointer text-fg-muted">Unclear ({findings.length})</summary>
       <ul className="m-0 mt-1 list-none space-y-2 p-0">
         {findings.map((finding) => (
-          <FindingRow key={finding.id} finding={finding} unclear />
+          <FindingRow key={finding.id} finding={finding} unclear onNavigate={onNavigate} />
         ))}
       </ul>
     </details>

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Input } from '@shared/ipc/contract'
 import type { Dismissed } from '@shared/memory/dismissed'
+import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -50,6 +51,8 @@ let main: FakeMain
 beforeEach(async () => {
   resetMemoryStore()
   resetDismissedStore()
+  // A jump one test starts must not land in the next one's editor.
+  resetActiveEditorStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
   main = installFakeMain({
@@ -77,6 +80,7 @@ beforeEach(async () => {
 afterEach(() => {
   resetMemoryStore()
   resetDismissedStore()
+  resetActiveEditorStore()
   useTreeStore.getState().clear()
   setIpcClient(null)
 })
@@ -181,6 +185,11 @@ describe('FindingRow (F-16.27)', () => {
     expect(within(muted).queryByRole('button', { name: /^This one's right/ })).toBeNull()
     expect(within(muted).getAllByRole('button', { name: /^Go there/ })).toHaveLength(2)
     expect(within(muted).getByRole('button', { name: /^Not a problem/ })).toBeInTheDocument()
+    // ⓘ on an unclear one too: how it was judged and what judging it cost.
+    fireEvent.click(within(muted).getByRole('button', { name: /^How this was found/ }))
+    const info = within(muted).getByTestId('finding-info')
+    expect(info).toHaveTextContent('the stronger check could not settle it')
+    expect(info).toHaveTextContent('judging it cost 0.02¢')
   })
 
   it('draws nothing for no unclear findings', () => {

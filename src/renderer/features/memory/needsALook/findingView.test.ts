@@ -81,6 +81,23 @@ describe('a finding in its rule’s words', () => {
         })
       )
     ).toBe('Lottie is 17 in 19.1; born 1795 (Lottie’s Pinned page)')
+    // The scene's year the rule rests on, typed in its details or stated in its text.
+    const born = findingViewFixture('c4y', {
+      rule: 'C4',
+      variant: 'birth',
+      name: 'Lottie',
+      slot: 'age',
+      slotLabel: 'Age',
+      year: { value: 1810, source: 'typed' },
+      a: findingSideFixture('17', '19.1', 'sc-19'),
+      b: findingSideFixture('1795', 'Lottie’s Pinned page', 'sc-0', { kind: 'note' })
+    })
+    expect(findingRuleLine(born)).toBe(
+      'Lottie is 17 in 19.1 (year 1810, typed in its details); born 1795 (Lottie’s Pinned page)'
+    )
+    expect(findingInfoLines({ ...born, year: { value: 1810, source: 'quoted' } })[0]).toBe(
+      'Found in code: a stated age against a birth year and that scene’s year (year 1810, stated in its text)'
+    )
     expect(
       findingRuleLine(
         findingViewFixture('c4f', {
@@ -132,10 +149,54 @@ describe('a finding in its rule’s words', () => {
         open: { kind: 'research', id: 'doc-1', para: 0 }
       }
     })
+    // A Research page is no record's own page: the subject is named.
     expect(noteConflictLine(research)).toBe(
-      'Your Research page “Harbour notes” says born 1790; the book says 1792 (1.1)'
+      'Your Research page “Harbour notes” says of Orrin: born 1790; the book says 1792 (1.1)'
     )
+    // A sentence on another record's Pinned page that names the subject: whose value it is.
+    const crossPage = noteFindingFixture('m', {
+      recordId: 'r-mara',
+      name: 'Mara Vell',
+      slot: 'eyes',
+      slotLabel: 'Eyes',
+      a: findingSideFixture('brown', '1.2', 'sc-2'),
+      b: { ...noteFindingFixture('x').b, value: 'green', quote: 'Mara Vell has green eyes.' }
+    })
+    expect(noteConflictLine(crossPage)).toBe(
+      'Your note on Orrin says of Mara Vell: green eyes; the book says brown (1.2)'
+    )
+    // The chat's text, which later requests carry as history, names her too.
+    expect(
+      contradictionsText(contradictionsTurnOf(findingsViewFixture({ open: [crossPage] }), 'sc-2'))
+    ).toContain('- Your note on Orrin says of Mara Vell: green eyes; the book says brown (1.2)')
     expect(noteConflictLine(findingViewFixture('c1'))).toBeNull()
+  })
+
+  it('keeps the other person in a kinship line, and their name as written', () => {
+    const kin = findingViewFixture('k', {
+      slot: 'kinship:r-orrin',
+      slotLabel: 'Family (Orrin)',
+      a: findingSideFixture('sister', '1.1', 'sc-1'),
+      b: findingSideFixture('cousin', '2.1', 'sc-2')
+    })
+    expect(findingRuleLine(kin)).toBe('Mara Vell’s family (to Orrin): sister (1.1) · cousin (2.1)')
+    expect(findingInfoLines(kin)[0]).toBe('Found in code: two values for family (to Orrin)')
+    const note = noteFindingFixture('kn', {
+      recordId: 'r-mara',
+      name: 'Mara',
+      slot: 'kinship:r-orrin',
+      slotLabel: 'Family (Orrin)',
+      a: findingSideFixture('cousin', '2.1', 'sc-2'),
+      b: {
+        ...noteFindingFixture('x').b,
+        ref: 'Mara',
+        value: 'sister',
+        open: { kind: 'record', id: 'r-mara', para: 0 }
+      }
+    })
+    expect(noteConflictLine(note)).toBe(
+      'Your note on Mara says sister to Orrin; the book says cousin (2.1)'
+    )
   })
 
   it('says how it was found, judged and confirmed, and what it cost', () => {
@@ -151,8 +212,12 @@ describe('a finding in its rule’s words', () => {
       'confirmed by a stronger AI read',
       'judging it cost 0.02¢'
     ])
-    expect(findingInfoLines(findingViewFixture('u', { state: 'unclear', why: null }))[1]).toBe(
-      'the AI judged it twice and the words did not settle it'
+    expect(
+      findingInfoLines(findingViewFixture('u', { state: 'unclear', verdictAb: 'u', why: null }))[1]
+    ).toBe('the AI judged it twice and the words did not settle it')
+    // Both fast orders said contradiction; the stronger check could not settle it.
+    expect(findingInfoLines(findingViewFixture('uc', { state: 'unclear', why: null }))[1]).toBe(
+      'judged a contradiction both ways by AI; the stronger check could not settle it'
     )
   })
 })

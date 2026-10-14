@@ -5171,7 +5171,16 @@ export function registerHandlers({
       reader.detailsChanged()
       // F-16.27: a finding the author had said is not a problem is found again (a C7 one too).
       restoreFindings.add(undone.key)
-      queueFindings(db)
+      // F-16.29: a loose end's comes back in Needs a look as marking it took it away
+      // (`memory:looseEndAction`): the renderer reads loose ends again on `memory:changed`.
+      if (undone.key.startsWith('loose|')) {
+        memoryChanged({
+          nodeIds: undone.nodeId === null ? [] : [undone.nodeId],
+          recordIds: undone.recordId === null ? [] : [undone.recordId]
+        })
+      } else {
+        queueFindings(db)
+      }
     }
     // F-16.21: *Undo* of an *Unlink* puts the plan link back as it was (the author's or automatic).
     if (undone.kind === 'unlink') {

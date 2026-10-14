@@ -125,6 +125,18 @@ describe('LooseEnds (F-16.29)', () => {
     )
   })
 
+  it('Ask Ms Scribe leaves a passage staged in the composer where it is', async () => {
+    useAssistantStore.setState({ attachment: 'Mara climbed the stair.' })
+    show()
+    const [planned] = screen.getAllByTestId('loose-end')
+    fireEvent.click(within(planned!).getByRole('button', { name: 'Ask Ms Scribe' }))
+    await waitFor(() => expect(main.sent('ai:navigate')).toHaveLength(1))
+    expect((main.sent('ai:navigate')[0] as Input<'ai:navigate'>).message).toBe(
+      "Which drafted scene covers the plan 'The duel at dawn'?"
+    )
+    expect(useAssistantStore.getState().attachment).toBe('Mara climbed the stair.')
+  })
+
   it('disables Ask Ms Scribe with its reason while Ms Scribe is off', () => {
     useAiSettingsStore.setState({
       settings: settings({

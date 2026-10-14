@@ -16,9 +16,28 @@ import { formatCents } from '@renderer/features/ai/usageFormat'
 
 export const possessive = (name: string): string => (/s$/iu.test(name) ? `${name}’` : `${name}’s`)
 
+/**
+ * A finding's slot inside a sentence: the base word in lower case, a name in it kept as written
+ * ("eyes", "family (to Orrin)" for kinship, "knows: Orrin’s debt").
+ */
+export function slotWords(slotLabel: string): string {
+  const family = /^Family \((.+)\)$/u.exec(slotLabel)
+  if (family !== null) return `family (to ${family[1]})`
+  const knows = /^Knows: (.+)$/u.exec(slotLabel)
+  if (knows !== null) return `knows: ${knows[1]}`
+  return slotLabel.toLowerCase()
+}
+
 /** One finding as a line of its values: "Mara Vell’s eyes: grey (1.1) · brown (1.2)". */
 export function findingLine(view: FindingView): string {
-  return `${possessive(view.name)} ${view.slotLabel.toLowerCase()}: ${view.a.value} (${view.a.label}) · ${view.b.value} (${view.b.label})`
+  return `${possessive(view.name)} ${slotWords(view.slotLabel)}: ${view.a.value} (${view.a.label}) · ${view.b.value} (${view.b.label})`
+}
+
+/** C4's scene year as the line names it: "year 1810, typed in its details"; null when none. */
+function yearWords(view: FindingView): string | null {
+  if (view.year === null) return null
+  const where = view.year.source === 'typed' ? 'typed in its details' : 'stated in its text'
+  return `year ${view.year.value}, ${where}`
 }
 
 /** A C3 finding's secret, from its slot label ("Knows: the secret engagement"). */
@@ -27,9 +46,10 @@ const secretOf = (view: FindingView): string => view.slotLabel.replace(/^Knows: 
 /**
  * A finding in its rule's words (plan P4 §4): C1, C2's body change and C7 as their values
  * (`findingLine`); C2's death "Hobb dies in 4.3 and is here in 9.1"; C3 "Bel passes on the secret
- * engagement in 5.2 before learning it in 5.3"; C4 "Lottie is 17 in 19.1; born 1795 (Lottie’s
- * Pinned page)" or "Lottie’s stated age falls: 18 (3.1) · 16 (5.2)"; C5 "Lottie’s match: resolved
- * in 9.1, advanced again in 19.1"; a note conflict as `noteConflictLine`.
+ * engagement in 5.2 before learning it in 5.3"; C4 "Lottie is 17 in 19.1 (year 1810, typed in its
+ * details); born 1795 (Lottie’s Pinned page)" or "Lottie’s stated age falls: 18 (3.1) · 16 (5.2)";
+ * C5 "Lottie’s match: resolved in 9.1, advanced again in 19.1"; a note conflict as
+ * `noteConflictLine`.
  */
 export function findingRuleLine(view: FindingView): string {
   const { a, b, name } = view
@@ -40,10 +60,13 @@ export function findingRuleLine(view: FindingView): string {
         : findingLine(view)
     case 'C3':
       return `${name} passes on ${secretOf(view)} in ${a.label} before learning it in ${b.label}`
-    case 'C4':
-      return view.variant === 'falls'
-        ? `${possessive(name)} stated age falls: ${a.value} (${a.label}) · ${b.value} (${b.label})`
-        : `${name} is ${a.value} in ${a.label}; born ${b.value} (${b.label})`
+    case 'C4': {
+      if (view.variant === 'falls') {
+        return `${possessive(name)} stated age falls: ${a.value} (${a.label}) · ${b.value} (${b.label})`
+      }
+      const year = yearWords(view)
+      return `${name} is ${a.value} in ${a.label}${year === null ? '' : ` (${year})`}; born ${b.value} (${b.label})`
+    }
     case 'C5':
       return `${name}: resolved in ${a.label}, advanced again in ${b.label}`
     case 'C6':
@@ -66,17 +89,23 @@ export function noteSides(
 /** Slots whose value reads before the noun ("green eyes", "dark hair"). */
 const VALUE_FIRST = new Set(['Eyes', 'Hair', 'Scars'])
 
-/** A value as a note or the book says it: "born 1790", "green eyes", "last seen at the quay". */
+/**
+ * A value as a note or the book says it: "born 1790", "green eyes", "last seen at the quay",
+ * "sister to Orrin" for kinship.
+ */
 function says(slotLabel: string, value: string): string {
   if (VALUE_FIRST.has(slotLabel)) return `${value} ${slotLabel.toLowerCase()}`
-  if (slotLabel.startsWith('Family')) return value
+  const family = /^Family \((.+)\)$/u.exec(slotLabel)
+  if (family !== null) return `${value} to ${family[1]}`
+  if (slotLabel === 'Family') return value
   return `${slotLabel.charAt(0).toLowerCase()}${slotLabel.slice(1)} ${value}`
 }
 
 /**
  * A book-against-note finding (design Part 1): "Your note on Orrin says born 1790; the book says
- * 1792 (1.1)", or for a Research page "Your Research page “Harbour notes” says …". Null when it is
- * not one.
+ * 1792 (1.1)". A note not on the subject's own Pinned page (another record's, or a Research page)
+ * names the subject: "Your note on Orrin says of Mara Vell: green eyes; …", "Your Research page
+ * “Harbour notes” says of Orrin: born 1790; …". Null when it is not one.
  */
 export function noteConflictLine(view: FindingView): string | null {
   const sides = noteSides(view)
@@ -84,39 +113,48 @@ export function noteConflictLine(view: FindingView): string | null {
   const { note, book } = sides
   const where =
     note.open.kind === 'research' ? `Your Research page “${note.ref}”` : `Your note on ${note.ref}`
-  return `${where} says ${says(view.slotLabel, note.value)}; the book says ${book.value} (${book.label})`
+  const own = note.open.kind === 'record' && note.open.id === view.recordId
+  const of = own ? '' : `of ${view.name}: `
+  return `${where} says ${of}${says(view.slotLabel, note.value)}; the book says ${book.value} (${book.label})`
 }
 
 /** Why code paired the two (ⓘ's first line), by rule. */
 const FOUND: Record<FindingRule, (view: FindingView) => string> = {
-  C1: (view) => `two values for ${view.slotLabel.toLowerCase()}`,
+  C1: (view) => `two values for ${slotWords(view.slotLabel)}`,
   C2: (view) =>
     view.variant === 'dead'
       ? 'on the page after a death'
-      : `${view.slotLabel.toLowerCase()} differs between two appearances`,
+      : `${slotWords(view.slotLabel)} differs between two appearances`,
   C3: () => 'a secret passed on before it is learned',
-  C4: (view) =>
-    view.variant === 'falls'
-      ? 'a stated age lower than an earlier one'
-      : 'a stated age against a birth year and that scene’s year',
+  C4: (view) => {
+    if (view.variant === 'falls') return 'a stated age lower than an earlier one'
+    const year = yearWords(view)
+    return `a stated age against a birth year and that scene’s year${year === null ? '' : ` (${year})`}`
+  },
   C5: () => 'a plot thread advanced after it was resolved',
-  C6: (view) => `the book against your note on ${view.slotLabel.toLowerCase()}`,
+  C6: (view) => `the book against your note on ${slotWords(view.slotLabel)}`,
   C7: () => 'two history lines about one thing'
+}
+
+/** How the AI judged it (ⓘ's second line), by state and verdicts. */
+function judgedLine(view: FindingView): string {
+  if (view.state !== 'unclear') return 'judged a contradiction both ways by AI'
+  // Both fast orders said contradiction; *Check the book*'s stronger read could not settle it.
+  if (view.verdictAb === 'c' && view.verdictBa === 'c') {
+    return 'judged a contradiction both ways by AI; the stronger check could not settle it'
+  }
+  return 'the AI judged it twice and the words did not settle it'
 }
 
 /**
  * ⓘ on a finding (plan P4 §4): "Found in code: two values for eyes", how the AI judged it ("judged
- * a contradiction both ways by AI", or for an unclear one that the words did not settle it), the
- * judge's reason, "confirmed by a stronger AI read" when *Check the book* confirmed it, and what
- * judging it cost.
+ * a contradiction both ways by AI", or for an unclear one that the words, or the stronger check,
+ * did not settle it), the judge's reason, "confirmed by a stronger AI read" when *Check the book*
+ * confirmed it, and what judging it cost.
  */
 export function findingInfoLines(view: FindingView): string[] {
   const lines = [`Found in code: ${FOUND[view.rule](view)}`]
-  lines.push(
-    view.state === 'unclear'
-      ? 'the AI judged it twice and the words did not settle it'
-      : 'judged a contradiction both ways by AI'
-  )
+  lines.push(judgedLine(view))
   if (view.why !== null && view.why !== '') lines.push(`the AI’s reason: ${view.why}`)
   if (view.confirmed) lines.push('confirmed by a stronger AI read')
   lines.push(`judging it cost ${formatCents(view.costUsd)}`)

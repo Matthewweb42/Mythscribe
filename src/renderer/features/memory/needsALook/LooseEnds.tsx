@@ -79,7 +79,8 @@ function LooseEndRow({
           title={reason ?? end.ask}
           onClick={() => {
             openAssistant()
-            void useAssistantStore.getState().send(end.ask)
+            // Its own message: a passage staged in the composer stays there.
+            void useAssistantStore.getState().send(end.ask, {})
           }}
         >
           {ask}
