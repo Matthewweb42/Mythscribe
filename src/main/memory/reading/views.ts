@@ -7,16 +7,19 @@ import {
 } from '@shared/memory/asOf'
 import type { Claim } from '@shared/memory/claims'
 import {
+  finishedSentences,
+  gateHash,
   gateSentences,
+  gateText,
   readSetOf,
   unreadSentences,
   type GateSentence
 } from '@shared/memory/gate'
+import type { NameIndex } from '@shared/memory/nameScan'
 import { locateInText } from '@shared/memory/quote'
 import { slotLabel, type Slot } from '@shared/memory/slots'
 import type { StoryRecordSummary } from '@shared/memory/records'
 import { compareTyped, detailsAgree, type TypedNames } from '@shared/memory/typedVsText'
-import type { UnderlineView } from '@shared/memory/underlines'
 import type {
   ClaimInfo,
   ClaimView,
@@ -171,13 +174,52 @@ function sceneGate(
   draftId: string | null
 ): { read: boolean; unread: GateSentence[] } | null {
   const row = manuscriptDocuments(db).find((document) => document.id === nodeId)
-  if (row === undefined) return null
+  return row === undefined ? null : rowGate(db, row, draftId)
+}
+
+/** `sceneGate` for a scene row the caller already holds. */
+function rowGate(
+  db: TreeDb,
+  row: NodeRow,
+  draftId: string | null
+): { read: boolean; unread: GateSentence[] } {
   const texts = rowTexts(row)
   const names = nameScanShared(db).index
   const current = gateSentences(texts, { caretPara: null, names })
-  const read = draftId === null ? null : getSceneRead(db, nodeId, draftId)
+  const read = draftId === null ? null : getSceneRead(db, row.id, draftId)
   if (read === null) return { read: false, unread: current }
   return { read: true, unread: unreadSentences(current, readSetOf(read.entries, names)) }
+}
+
+/**
+ * F-16.28: which of paragraphs `paras` (`passageParagraphs` numbering) of manuscript scene `row`
+ * hold a finished sentence the active draft `draftId` has not read yet; those are never
+ * underlined. The caller holds the row and the roster's names (the editor's underlines read many
+ * scenes in one call), and only the asked paragraphs are gated: a sentence stored read with the very same words is
+ * read under any roster, so the read set is hashed again only for a sentence that differs.
+ */
+export function unreadParagraphs(
+  db: TreeDb,
+  row: NodeRow,
+  draftId: string | null,
+  paras: ReadonlySet<number>,
+  names: NameIndex = nameScanShared(db).index
+): Set<number> {
+  if (paras.size === 0) return new Set()
+  const texts = rowTexts(row).map((text, para) => (paras.has(para) ? text : ''))
+  // `gateSentences` and `unreadSentences`, gating only the sentences not stored word for word.
+  const current = finishedSentences(texts, { caretPara: null })
+  const read = draftId === null ? null : getSceneRead(db, row.id, draftId)
+  if (read === null) return new Set(current.map((sentence) => sentence.para))
+  const same = new Set(read.entries.map(([, text]) => text))
+  const left = current.filter((sentence) => !same.has(sentence.text))
+  if (left.length === 0) return new Set()
+  const set = readSetOf(read.entries, names)
+  return new Set(
+    left
+      .filter((sentence) => !set.has(gateHash(gateText(sentence.text, names))))
+      .map((sentence) => sentence.para)
+  )
 }
 
 /**
@@ -195,13 +237,6 @@ export function sceneReadState(
 }
 
 /**
- * F-16.28: a scene's contradiction underlines, given the paragraphs (`passageParagraphs`
- * numbering) holding a finished sentence not read yet, which are never underlined. The handlers
- * pass `findings/underlines.ts`'s builder; the reading's views never import the findings.
- */
-export type SceneUnderlines = (unreadParas: ReadonlySet<number>) => UnderlineView[]
-
-/**
  * The This scene panel's memory of one scene (P2a-D21): Here (the POV, with the text's POV over
  * a typed one that differs; characters on the page with a verified quote; "+ also here"),
  * Mentioned (named for certain, not Here), True now for those records as of this scene, the
@@ -209,11 +244,7 @@ export type SceneUnderlines = (unreadParas: ReadonlySet<number>) => UnderlineVie
  * the card still stands on the text counts (`heldCard`): a POV, place or character whose quote's
  * sentence was edited since is shown dimmed in the card and never overrides the typed details.
  */
-export function sceneMemory(
-  db: TreeDb,
-  nodeId: string,
-  underlines: SceneUnderlines = () => []
-): SceneMemory {
+export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
   const draftId = currentDraftId(db)
   const nodes = listNodes(db)
   const reading = readingOrder(db, nodes)
@@ -284,8 +315,7 @@ export function sceneMemory(
       nodeId,
       knowers.map((chip) => chip.recordId),
       povOf(knowers)
-    ),
-    underlines: underlines(new Set(unread.map((sentence) => sentence.para)))
+    )
   }
 }
 

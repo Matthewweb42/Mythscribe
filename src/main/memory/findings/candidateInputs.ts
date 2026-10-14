@@ -11,6 +11,7 @@ import {
   type TypedScene
 } from '@shared/memory/candidates'
 import { emptyCardFields, setsState, type Card, type Claim } from '@shared/memory/claims'
+import type { FindingSide } from '@shared/memory/findings'
 import type {
   LooseCharacter,
   LooseEndsInput,
@@ -28,8 +29,8 @@ import { listNodes, type TreeDb } from '../../tree/treeStore'
 import { dismissedKeys } from '../dismissedStore'
 import { listRecords } from '../recordStore'
 import { allSceneDetails } from '../sceneDetailStore'
-import { draftCards } from '../reading/cardStore'
-import { draftClaims } from '../reading/claimStore'
+import { draftCards, getCard } from '../reading/cardStore'
+import { claimRows, draftClaims, toClaim } from '../reading/claimStore'
 import { emptyScenes } from '../reading/knowsViews'
 import { listKnewBefore } from '../reading/knewBeforeStore'
 import { authorLink, boardOf, isDrafted, isPlanned, livePlanLinks } from '../reading/planLinkStore'
@@ -249,9 +250,72 @@ export function candidateInputs(
   draftId: string,
   frame: FindingsFrame = findingsFrame(db)
 ): StoredInputs {
+  return inputsOf(
+    db,
+    frame,
+    readableClaims(db, draftId, frame.reading).map(toCandidateClaim),
+    readableCards(db, draftId, frame.reading)
+  )
+}
+
+/**
+ * The inputs resolving these findings' sides reads (`resolveSide`, `findingView`; the editor's
+ * underlines, P4 slice 5 review): `candidateInputs` with only these sides' claims (read by id,
+ * kept as the rules keep them: a record, a readable scene, not waiting) and their scenes' cards,
+ * the two parts that cost a read of the whole book. Never for finding candidates.
+ */
+export function sideInputs(
+  db: TreeDb,
+  draftId: string,
+  sides: readonly FindingSide[],
+  frame: FindingsFrame = findingsFrame(db)
+): StoredInputs {
+  const { reading } = frame
+  const claimIds = [
+    ...new Set(sides.flatMap((side) => (side.kind === 'claim' ? [side.claimId] : [])))
+  ]
+  const claims = claimRows(db, claimIds)
+    .map(toClaim)
+    .filter(
+      (claim): claim is Claim & { recordId: string } =>
+        claim !== null &&
+        claim.draftId === draftId &&
+        claim.recordId !== null &&
+        claim.state !== 'waiting' &&
+        reading.order.has(claim.nodeId)
+    )
+  const scenes = new Set(
+    sides.flatMap((side) =>
+      side.kind !== 'note' && reading.order.has(side.nodeId) ? [side.nodeId] : []
+    )
+  )
+  // A few scenes are read one by one; a stacked book's many in one read of the draft's cards.
+  const cards = new Map<string, Card>()
+  if (scenes.size > SIDE_CARDS_ONE_BY_ONE) {
+    for (const card of draftCards(db, draftId)) {
+      if (scenes.has(card.nodeId)) cards.set(card.nodeId, card)
+    }
+  } else {
+    for (const nodeId of scenes) {
+      const card = getCard(db, nodeId, draftId)
+      if (card !== null) cards.set(nodeId, card)
+    }
+  }
+  return inputsOf(db, frame, claims.map(toCandidateClaim), cards)
+}
+
+/** Up to this many scenes, `sideInputs` reads their cards one by one. */
+const SIDE_CARDS_ONE_BY_ONE = 8
+
+/** The rules' inputs over these claims and stored cards (the rest is read whole: it is cheap). */
+function inputsOf(
+  db: TreeDb,
+  frame: FindingsFrame,
+  claims: CandidateClaim[],
+  cards: Map<string, Card>
+): StoredInputs {
   const { nodes, reading } = frame
   const rows = new Map(nodes.map((row) => [row.id, row]))
-  const cards = readableCards(db, draftId, reading)
   const onPage = new Map<string, Set<string>>()
   for (const [nodeId, card] of cards) {
     if (card.present.length > 0)
@@ -270,7 +334,7 @@ export function candidateInputs(
   return {
     cards,
     reading,
-    claims: readableClaims(db, draftId, reading).map(toCandidateClaim),
+    claims,
     onPage,
     typed,
     scene: sceneFactsReader(db, rows, cards),

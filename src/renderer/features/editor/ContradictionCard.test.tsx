@@ -6,11 +6,10 @@ import {
   findingViewFixture,
   installFakeMain,
   noteFindingFixture,
-  sceneMemoryFixture,
   type FakeMain
 } from '@renderer/features/memory/memoryFixture'
 import { resetMemoryStore, useMemoryStore } from '@renderer/features/memory/memoryStore'
-import { useLayoutStore } from '@renderer/features/shell/layoutStore'
+import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { resetDismissedStore } from '@renderer/features/thisScene/dismissedStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import { ContradictionCard } from './ContradictionCard'
@@ -49,6 +48,7 @@ function open(finding: FindingView, side: 'a' | 'b', keyboard = false): Underlin
 beforeEach(() => {
   resetMemoryStore()
   resetDismissedStore()
+  resetLayoutStore()
   resetContradictionCardStore()
   returnFocus.mockReset()
   main = installFakeMain({
@@ -68,6 +68,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetContradictionCardStore()
+  resetLayoutStore()
   resetMemoryStore()
   setIpcClient(null)
 })
@@ -79,30 +80,28 @@ describe('ContradictionCard (F-16.28)', () => {
     const card = screen.getByRole('dialog', { name: 'Mara Vell’s eyes: grey (1.1) · brown (1.2)' })
     expect(card).toBeInTheDocument()
     expect(screen.getByTestId('contradiction-other')).toHaveTextContent(
-      '1.1: “Mara\'s eyes were grey”'
+      "1.1: “Mara's eyes were grey”"
     )
     expect(screen.getByRole('button', { name: 'Go there' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: "This one's right: brown (1.2)" })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: "This one's right: brown (1.2)" })
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Not a problem' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Update my note' })).toBeNull()
   })
 
   it('This one’s right says the underlined side is right, closes the card and takes the underlines off', async () => {
     useMemoryStore.setState({
-      scenes: {
-        'sc-2': {
-          ...sceneMemoryFixture('sc-2'),
-          claimIds: [],
-          underlines: [
-            {
-              findingId: 'f-1',
-              side: 'b',
-              para: 0,
-              quote: "Mara's eyes were brown",
-              finding: findingViewFixture('f-1')
-            }
-          ]
-        }
+      underlines: {
+        'sc-2': [
+          {
+            findingId: 'f-1',
+            side: 'b',
+            para: 0,
+            quote: "Mara's eyes were brown",
+            finding: findingViewFixture('f-1')
+          }
+        ]
       }
     })
     open(findingViewFixture('f-1'), 'b')
@@ -112,7 +111,7 @@ describe('ContradictionCard (F-16.28)', () => {
     expect(main.sent('memory:findingAction')).toEqual([
       { findingId: 'f-1', action: 'right', side: 'b' }
     ])
-    expect(useMemoryStore.getState().scenes['sc-2']?.underlines).toEqual([])
+    expect(useMemoryStore.getState().underlines['sc-2']).toEqual([])
   })
 
   it('Not a problem goes through the finding’s answer and closes the card', async () => {
@@ -164,16 +163,38 @@ describe('ContradictionCard (F-16.28)', () => {
 
   it('closes when its finding is no longer underlined in its scene', async () => {
     const underline = open(findingViewFixture('f-1'), 'b')
-    useMemoryStore.setState({
-      scenes: {
-        'sc-2': { ...sceneMemoryFixture('sc-2'), claimIds: [], underlines: [underline] }
-      }
-    })
+    useMemoryStore.setState({ underlines: { 'sc-2': [underline] } })
     render(<ContradictionCard />)
     expect(screen.getByTestId('contradiction-card')).toBeInTheDocument()
-    useMemoryStore.setState({
-      scenes: { 'sc-2': { ...sceneMemoryFixture('sc-2'), claimIds: [], underlines: [] } }
-    })
+    useMemoryStore.setState({ underlines: { 'sc-2': [] } })
     await waitFor(() => expect(useContradictionCardStore.getState().card).toBeNull())
+  })
+
+  it('leaves Escape to the rest for a hover card, and gives the focus back only after a keyboard open', () => {
+    // A hover card: closed, the key not taken (focus mode's Escape still runs), the focus kept.
+    open(findingViewFixture('f-1'), 'b')
+    const { unmount } = render(<ContradictionCard />)
+    const hover = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    document.body.dispatchEvent(hover)
+    expect(useContradictionCardStore.getState().card).toBeNull()
+    expect(hover.defaultPrevented).toBe(false)
+    expect(returnFocus).not.toHaveBeenCalled()
+    unmount()
+    // A card a click pinned: Escape closes it first, and the focus stays where it is.
+    useContradictionCardStore.getState().open({
+      underline: open(findingViewFixture('f-1'), 'b'),
+      nodeId: 'sc-2',
+      x: 40,
+      y: 60,
+      pinned: true,
+      keyboard: false,
+      returnFocus
+    })
+    render(<ContradictionCard />)
+    const pinned = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    document.body.dispatchEvent(pinned)
+    expect(useContradictionCardStore.getState().card).toBeNull()
+    expect(pinned.defaultPrevented).toBe(true)
+    expect(returnFocus).not.toHaveBeenCalled()
   })
 })

@@ -13,11 +13,15 @@ import { manuscriptDocuments } from '../../voice/profile'
 import { indexNodePassages, indexStaleRecords } from '../passageIndexer'
 import { createRecord, savePage } from '../recordStore'
 import { getCard, upsertCard } from '../reading/cardStore'
-import { seedClaims } from '../reading/claimFixture'
 import { buildPerfBook, fastest, PERF_NOW, PERF_SCENES } from '../reading/perfFixture'
-import { findingRows } from './findingStore'
+import { gateSentences, nextReadSet } from '@shared/memory/gate'
+import { nameScanShared } from '../nameIndexer'
+import { sceneTexts, seedClaims } from '../reading/claimFixture'
+import { writeSceneRead } from '../reading/sceneReadStore'
+import { findingRows, findingsOf, setVerdicts } from './findingStore'
 import { runFindingsJob } from './findingsJob'
 import { recomputeFindings } from './recompute'
+import { underlinesOf } from './underlines'
 
 /**
  * The recompute at novel size (F-16.27; plan P4 §1.7): the 90-scene perf book with claims a novel
@@ -29,7 +33,9 @@ import { recomputeFindings } from './recompute'
  * after every change, so a warm run (nothing moved, the scenes' texts read once) stays under 50 ms,
  * the fastest of five as `timeViews.perf.test.ts` measures. So does the job as the app runs it
  * (`cachedVerdicts`, slice 2): every finding unjudged (the background judges 30 pairs a day, so a
- * backlog is the normal state), each pair's stamp checked and none rendered again.
+ * backlog is the normal state), each pair's stamp checked and none rendered again. The editor's
+ * underlines (slice 5) are asked for again on every refresh, so one scene's and a whole stacked
+ * book's are measured too.
  */
 
 /** The findings job as the app runs it, warm: every pair rendered once, then only stamped. */
@@ -48,6 +54,13 @@ const BUDGET_MS = 50
  */
 const STAMPS_MS = 15
 const STAMPS_SHARE = 0.6
+/**
+ * The editor's underlines (F-16.28, P4 slice 5 review): one scene's, as a refresh of the open
+ * scene asks (about 12 ms measured on the cast book), and a whole stacked manuscript's in one call
+ * (about 65 ms with an open finding in every one of its 90 scenes).
+ */
+const UNDERLINES_ONE_MS = 25
+const UNDERLINES_STACK_MS = 150
 const CAST = 30
 const RESEARCH_PARAGRAPHS = 2000
 
@@ -218,5 +231,39 @@ describe('the findings recompute at novel size (F-16.27)', () => {
     )
     // The budget is the recompute's; seeding 900 claims and indexing the upload takes about 4 s
     // alone and more under the full suite's load, past Vitest's 5 s default.
+  }, 30_000)
+  it('answers the editor’s underlines within budget, one scene or a whole stacked book', () => {
+    // Reads the book as the test before left it (the cast and the upload), every scene read and
+    // every finding judged a contradiction both ways: an open finding in every scene.
+    const draft = activeDraftId(db)
+    const names = nameScanShared(db).index
+    const ids = manuscriptDocuments(db).map((row) => row.id)
+    for (const nodeId of ids) {
+      const current = gateSentences(sceneTexts(db, nodeId), { caretPara: null, names })
+      writeSceneRead(
+        db,
+        {
+          nodeId,
+          draftId: draft,
+          entries: nextReadSet(null, current, 'all'),
+          full: true,
+          readingId: null
+        },
+        PERF_NOW
+      )
+    }
+    runFindingsJob(db, PERF_NOW, { cachedVerdicts: true })
+    for (const finding of findingsOf(db, draft, ['unjudged'])) {
+      setVerdicts(db, finding.id, { ab: 'c', ba: 'c', why: 'differ', costUsd: 0, now: PERF_NOW })
+    }
+    const on = { on: true, mode: 'text' as const }
+    const middle = ids[46] ?? ''
+    expect(underlinesOf(db, [middle], on)[middle]?.length).toBeGreaterThan(0)
+    const one = fastest(5, () => underlinesOf(db, [middle], on))
+    expect(one, `one scene's underlines: ${one.toFixed(1)} ms`).toBeLessThan(UNDERLINES_ONE_MS)
+    const stack = fastest(3, () => underlinesOf(db, ids, on))
+    expect(stack, `a stacked book's underlines: ${stack.toFixed(1)} ms`).toBeLessThan(
+      UNDERLINES_STACK_MS
+    )
   }, 30_000)
 })

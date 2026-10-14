@@ -9390,8 +9390,17 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     }
   })
 
-  it('answers a scene’s contradiction underlines in memory:scene and marks them shown (F-16.28)', async () => {
+  it('answers the editor’s contradiction underlines in memory:underlines and marks them shown (F-16.28)', async () => {
     const scene = await openV2()
+    const other = (
+      await invoke('tree:create', {
+        parentId:
+          (await invoke('tree:list', undefined)).find((row) => row.id === scene)?.parentId ?? '',
+        kind: 'document',
+        hierarchyLevel: 'scene',
+        title: 'Other'
+      })
+    ).id
     const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
     if (!('record' in made)) throw new Error('blocked')
     const mara = made.record.id
@@ -9428,12 +9437,15 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     const [row] = findingRows(db, activeDraftId(db))
     if (row === undefined) throw new Error('no finding')
     setVerdicts(db, row.id, { ab: 'c', ba: 'c', why: null, costUsd: 0, now: new Date() })
-    // A same-scene pair: both quotes underlined, each with its side.
-    const memory = await invoke('memory:scene', { nodeId: scene })
-    expect(memory.underlines.map((each) => [each.side, each.para, each.quote])).toEqual([
+    // A same-scene pair: both quotes underlined, each with its side; a scene with none, none.
+    const marks = await invoke('memory:underlines', { nodeIds: [scene, other] })
+    expect(marks[scene]?.map((each) => [each.side, each.para, each.quote])).toEqual([
       ['a', 0, "Mara's eyes were grey"],
       ['b', 1, "Mara's eyes were brown"]
     ])
+    expect(marks[other]).toEqual([])
+    // The panel's memory of the scene carries none: the editor asks for them on their own.
+    expect('underlines' in (await invoke('memory:scene', { nodeId: scene }))).toBe(false)
     expect(await invoke('memory:underlinesShown', { findingIds: [row.id] })).toBeNull()
     expect(findingRows(db, activeDraftId(db))[0]?.shownAt).not.toBeNull()
     // In the panel only: none drawn; the finding is still listed.
@@ -9442,8 +9454,17 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
       ...settings,
       reading: { ...settings.reading, underlines: 'panel' }
     })
-    expect((await invoke('memory:scene', { nodeId: scene })).underlines).toEqual([])
+    expect((await invoke('memory:underlines', { nodeIds: [scene] }))[scene]).toEqual([])
     expect((await invoke('memory:findings', { nodeId: scene })).open).toHaveLength(1)
+    // Not a problem on the underlined finding counts against precision; its Undo takes it back.
+    const answered = await invoke('memory:findingAction', {
+      findingId: row.id,
+      action: 'notProblem'
+    })
+    expect((await invoke('memory:health', undefined)).contradictions.underlines.counted).toBe(1)
+    if (answered.dismissed === null) throw new Error('no Dismissed row')
+    await invoke('dismissed:undo', { id: answered.dismissed.id })
+    expect((await invoke('memory:health', undefined)).contradictions.underlines.counted).toBe(0)
   })
 
   it('prices and runs Check the book, answers Not a problem and Update my note, and lists loose ends (F-16.29, F-16.30)', async () => {

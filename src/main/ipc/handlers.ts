@@ -482,7 +482,8 @@ import {
 } from '../memory/findings/findingActions'
 import { findingCounts, runFindingsJob } from '../memory/findings/findingsJob'
 import { findingsView } from '../memory/findings/findingViews'
-import { sceneUnderlines, underlinesShown } from '../memory/findings/underlines'
+import { forgetAnswer } from '../memory/findings/underlineLog'
+import { underlinesOf, underlinesShown } from '../memory/findings/underlines'
 import { isUnderResearch } from '../research/researchTree'
 import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
 import { settleOwnedNames } from '../memory/reading/waiting'
@@ -5136,16 +5137,21 @@ export function registerHandlers({
     const db = manager.require().connection.orm
     // The row goes and what it took away comes back in one transaction: a restore that fails
     // leaves the row on the list, to be undone again.
-    const { undone, topic, restored } = db.transaction((tx) => {
+    const { undone, topic, restored, forgot } = db.transaction((tx) => {
       const row = undoDismissed(tx, id)
-      if (row.kind !== 'notRight') return { undone: row, topic: null, restored: null }
+      // F-16.28: an answer on an underlined finding undone counts no more (P4 slice 5 review).
+      const forgot = forgetAnswer(tx, row)
+      if (row.kind !== 'notRight') return { undone: row, topic: null, restored: null, forgot }
       return {
         undone: row,
         // F-16.22: a secret or thread *Not a secret* took away comes back as it was.
         topic: restoreTopicNotRight(tx, row.id),
-        restored: restoreNotRight(tx, row.id)
+        restored: restoreNotRight(tx, row.id),
+        forgot
       }
     })
+    // The precision question may no longer be due.
+    if (forgot) reader.noticesMoved()
     // What it kept quiet may come back: a mention (every scan's hash holds the list), a question.
     if (undone.kind === 'notMention') queueMemoryIndex(db)
     // F-16.18: *Undo* on *Not right › Wrong value* brings its lines back as they were; the anchors
@@ -5413,17 +5419,7 @@ export function registerHandlers({
 
   register('cloudCap:set', ({ capUsd }) => reader.setCloudCap(capUsd))
 
-  register('memory:scene', ({ nodeId }) => {
-    const db = manager.require().connection.orm
-    const settings = getAiSettings(db)
-    // F-16.28: the scene's contradiction underlines, never in a paragraph with an unread change.
-    return sceneMemory(db, nodeId, (unreadParas) =>
-      sceneUnderlines(db, nodeId, unreadParas, {
-        on: settings.features.judge,
-        mode: settings.reading.underlines
-      })
-    )
-  })
+  register('memory:scene', ({ nodeId }) => sceneMemory(manager.require().connection.orm, nodeId))
 
   // F-16.20: the card lines the Outline and the cork board show where a scene has no synopsis.
   register('memory:cardLines', () =>
@@ -5468,6 +5464,17 @@ export function registerHandlers({
     // F-16.28: an underlined finding answered moves underline precision (its one question).
     reader.noticesMoved()
   }
+
+  // F-16.28: the editor's contradiction underlines, every region of a stacked view in one call,
+  // never in a paragraph with an unread change.
+  register('memory:underlines', ({ nodeIds }) => {
+    const db = manager.require().connection.orm
+    const settings = getAiSettings(db)
+    return underlinesOf(db, nodeIds, {
+      on: settings.features.judge,
+      mode: settings.reading.underlines
+    })
+  })
 
   // F-16.28: the editor drew these findings as underlines (their `shown_at`, once).
   register('memory:underlinesShown', ({ findingIds }) => {

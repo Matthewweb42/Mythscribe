@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest'
 import type { FindingRule } from './findings'
 import {
   askPanelOnly,
+  dropShownTexts,
   EMPTY_UNDERLINE_LOG,
+  forgetOutcomes,
   logOutcomes,
+  logShownTexts,
   pickUnderlines,
   PRECISION_WINDOW,
   UNDERLINE_LOG_MAX,
   UnderlineLog,
   underlinePrecision,
-  type PickFinding,
-  type UnderlineOutcome
+  type LoggedOutcome,
+  type PickFinding
 } from './underlines'
 
 type Side = PickFinding['a']
@@ -129,15 +132,23 @@ describe('pickUnderlines (F-16.28, P4-D15)', () => {
 })
 
 describe('underline precision (P4-D16)', () => {
-  const run = (right: number, notProblem: number): UnderlineOutcome[] => [
-    ...Array.from({ length: right }, (): UnderlineOutcome => 'right'),
-    ...Array.from({ length: notProblem }, (): UnderlineOutcome => 'notProblem')
+  const run = (right: number, notProblem: number, from = 0): LoggedOutcome[] => [
+    ...Array.from({ length: right }, (_, i): LoggedOutcome => ({
+      key: `k${from + i}`,
+      outcome: 'right',
+      dismissedId: null
+    })),
+    ...Array.from({ length: notProblem }, (_, i): LoggedOutcome => ({
+      key: `k${from + right + i}`,
+      outcome: 'notProblem',
+      dismissedId: `d${from + right + i}`
+    }))
   ]
 
   it('counts the last 20 outcomes', () => {
     expect(underlinePrecision([])).toEqual({ counted: 0, right: 0, share: null })
     // 10 not problems long ago, then 14 right and 6 not problems: only the last 20 count.
-    const outcomes = [...run(0, 10), ...run(14, 6)]
+    const outcomes = [...run(0, 10), ...run(14, 6, 10)]
     expect(underlinePrecision(outcomes)).toEqual({ counted: 20, right: 14, share: 0.7 })
   })
 
@@ -149,15 +160,47 @@ describe('underline precision (P4-D16)', () => {
     expect(askPanelOnly(logOutcomes(EMPTY_UNDERLINE_LOG, run(0, PRECISION_WINDOW - 1)))).toBe(false)
   })
 
-  it('keeps the newest 50 outcomes and reads a broken row leniently', () => {
-    const log = logOutcomes(EMPTY_UNDERLINE_LOG, [...run(0, 10), ...run(60, 0)])
+  it('counts a pair once, as it was last answered, and takes back an answer undone', () => {
+    const notProblem: LoggedOutcome = { key: 'pair', outcome: 'notProblem', dismissedId: 'd-1' }
+    const log = logOutcomes(EMPTY_UNDERLINE_LOG, [notProblem])
+    // Undo of its Dismissed row: by the row, or (a Not a problem row) by its key.
+    expect(forgetOutcomes(log, { id: 'd-1', kind: 'notProblem', key: 'pair' }).outcomes).toEqual([])
+    expect(forgetOutcomes(log, { id: 'd-9', kind: 'notProblem', key: 'pair' }).outcomes).toEqual([])
+    // Another row's Undo leaves it.
+    expect(forgetOutcomes(log, { id: 'd-2', kind: 'notRight', key: 'pair' })).toBe(log)
+    // The same pair answered again replaces the first answer.
+    const again = logOutcomes(log, [{ key: 'pair', outcome: 'right', dismissedId: 'd-3' }])
+    expect(again.outcomes).toEqual([{ key: 'pair', outcome: 'right', dismissedId: 'd-3' }])
+    expect(forgetOutcomes(again, { id: 'd-3', kind: 'notRight', key: 'x' }).outcomes).toEqual([])
+  })
+
+  it('keeps each drawn finding’s first scene texts until it closes', () => {
+    const first = logShownTexts(EMPTY_UNDERLINE_LOG, [{ findingId: 'f-1', texts: { s1: 'h1' } }])
+    expect(logShownTexts(first, [{ findingId: 'f-1', texts: { s1: 'h2' } }])).toBe(first)
+    const both = logShownTexts(first, [{ findingId: 'f-2', texts: { s2: 'h3' } }])
+    expect(both.shown.map((each) => each.findingId)).toEqual(['f-1', 'f-2'])
+    expect(dropShownTexts(both, new Set(['f-1'])).shown).toEqual([
+      { findingId: 'f-2', texts: { s2: 'h3' } }
+    ])
+    expect(dropShownTexts(both, new Set(['f-9']))).toBe(both)
+  })
+
+  it('keeps the newest 50 outcomes and reads a broken or first-format row leniently', () => {
+    const log = logOutcomes(EMPTY_UNDERLINE_LOG, [...run(0, 10), ...run(60, 0, 10)])
     expect(log.outcomes).toHaveLength(UNDERLINE_LOG_MAX)
-    expect(log.outcomes.every((each) => each === 'right')).toBe(true)
+    expect(log.outcomes.every((each) => each.outcome === 'right')).toBe(true)
     expect(logOutcomes(log, [])).toBe(log)
     expect(UnderlineLog.parse({ outcomes: ['right', 'maybe'], asked: 'yes' })).toEqual({
       outcomes: [],
+      shown: [],
       asked: false
     })
+    // The first format's bare words count, and are never replaced by key.
+    const bare = UnderlineLog.parse({ outcomes: ['right', 'notProblem'], asked: false })
+    expect(underlinePrecision(bare.outcomes)).toEqual({ counted: 2, right: 1, share: 0.5 })
+    expect(
+      logOutcomes(bare, [{ key: 'pair', outcome: 'right', dismissedId: null }]).outcomes
+    ).toHaveLength(3)
     expect(UnderlineLog.parse({})).toEqual(EMPTY_UNDERLINE_LOG)
   })
 })

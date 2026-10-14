@@ -87,7 +87,7 @@ import {
   SwitchoverResult
 } from '../memory/switchover'
 import { CloudCapState, CloudCapUsd } from '../memory/cloudCap'
-import { UNDERLINES_SHOWN_MAX } from '../memory/underlines'
+import { UNDERLINE_SCENES_MAX, UNDERLINES_SHOWN_MAX, UnderlinesByScene } from '../memory/underlines'
 import { ContinuityFinding } from '../continuity'
 import { REVIEW_CHAT_MESSAGE_MAX, ReviewChatResult, ReviewChatTurn } from '../reviewChat'
 import {
@@ -3599,6 +3599,16 @@ export const contract = {
    * running. Empty while the Contradiction check switch is off. Local and free.
    */
   'memory:findings': { input: z.object({ nodeId: z.string().nullable() }), output: FindingsView },
+  /**
+   * F-16.28 (plan P4 §5.1, P4 slice 5 review): the contradiction underlines of the asked scenes
+   * (every region of a stacked view in one call), each scene's at most 3 (`pickUnderlines`): open
+   * findings' book quotes in paragraphs with no unread finished sentence. Empty while the
+   * Contradiction check is off or contradictions show in the panel only. Local and free.
+   */
+  'memory:underlines': {
+    input: z.object({ nodeIds: z.array(z.string()).max(UNDERLINE_SCENES_MAX) }),
+    output: UnderlinesByScene
+  },
   /**
    * F-16.28 (plan P4 §5.1): the editor drew these findings as underlines; each one's `shown_at` is
    * set once (derived bookkeeping, like a view preference), so the precision log counts only

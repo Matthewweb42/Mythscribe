@@ -11,17 +11,19 @@ import { locateEvery } from './locateText'
 /**
  * Contradiction underlines in the editor (F-16.28; design §2.4 "Underlines", plan P4 §5.2,
  * P4-D15): story memory v2's open findings drawn as soft underlines on their quotes, from what
- * main picked for the scene (`SceneMemory.underlines`: at most 3, never in a paragraph with an
+ * main picked for the scene (`memory:underlines`: at most 3, never in a paragraph with an
  * unread change). They are decorations only, never marks: nothing is saved in the document, the
  * undo history never sees them, and `getJSON` holds none. Each quote is found again inside its
  * paragraph (`passageParagraphs` numbering, `locateEvery`), so a quote that moved or changed is
  * simply not drawn. Never at the caret: while the editor has the focus, the paragraph holding the
  * selection head shows none. A paragraph the author edits loses its underlines until the next
  * refresh (an unread change, as main will also say); a refresh while the document still has
- * unsaved edits keeps those paragraphs bare. Hovering an underline (or clicking it, or Alt+Enter
- * with the caret in its paragraph) opens the hover card (`ContradictionCard`) with the other
- * quote. The extension draws and reports what it drew (`onDrawn`); `useContradictionMarks` feeds
- * it from the memory store. Story memory v2's manuscript editors only.
+ * unsaved edits keeps those paragraphs bare. Hovering an underline (or clicking a drawn one, or
+ * Alt+Enter with the caret in its paragraph) opens the hover card (`ContradictionCard`) with the
+ * other quote; a click on words whose underline is hidden at the caret opens nothing, and a card
+ * of the scene closes as soon as she types in it (unless the keyboard opened it) or its underline
+ * is dropped. The extension draws and reports what it drew (`onDrawn`); `useContradictionMarks`
+ * feeds it from the memory store. Story memory v2's manuscript editors only.
  */
 
 /** The class an underlined quote carries; the stylesheet draws it and the e2e reads it. */
@@ -199,7 +201,10 @@ function changedRanges(tr: Transaction): [number, number][] {
 }
 
 /** The decorations to draw: every located underline but those in the caret's paragraph. */
-function draw(state: Pick<MarksState, 'located' | 'focused'>, editorState: EditorState): DecorationSet {
+function draw(
+  state: Pick<MarksState, 'located' | 'focused'>,
+  editorState: EditorState
+): DecorationSet {
   const { doc, selection } = editorState
   const caret = state.focused ? blockAt(doc, selection.head) : null
   const decorations = state.located
@@ -271,6 +276,15 @@ function apply(tr: Transaction, prev: MarksState, state: EditorState): MarksStat
 function underlineAt(view: EditorView, pos: number): Located | null {
   const state = CONTRADICTION_MARKS_KEY.getState(view.state)
   return state?.located.find((each) => each.from <= pos && pos <= each.to) ?? null
+}
+
+const sameUnderline = (a: UnderlineView, b: UnderlineView): boolean =>
+  a.findingId === b.findingId && a.side === b.side
+
+/** The drawn underline under a DOM event, inside this editor, if any. */
+function drawnAt(view: EditorView, target: EventTarget | null): Located | null {
+  const span = spanOf(view, target)
+  return span === null ? null : underlineAt(view, view.posAtDOM(span, 0))
 }
 
 /** The underline in the paragraph holding the caret, if any (Alt+Enter). */
@@ -357,6 +371,9 @@ export const ContradictionMarks = Extension.create<{ nodeId: string }, Contradic
 
   addProseMirrorPlugins() {
     const storage = this.storage
+    // The underline drawn under the pointer when a click started (P4 slice 5 review): a click opens
+    // the card only on an underline she can see, never on one hidden at the caret.
+    let pressed: Located | null = null
     return [
       new Plugin<MarksState>({
         key: CONTRADICTION_MARKS_KEY,
@@ -372,8 +389,12 @@ export const ContradictionMarks = Extension.create<{ nodeId: string }, Contradic
             return CONTRADICTION_MARKS_KEY.getState(state)?.decorations ?? DecorationSet.empty
           },
           handleClick(view, pos, event) {
-            const at = underlineAt(view, pos)
-            if (at === null) return false
+            const was = pressed
+            pressed = null
+            const at = was === null ? null : underlineAt(view, pos)
+            if (at === null || was === null || !sameUnderline(at.underline, was.underline)) {
+              return false
+            }
             openCard(
               view,
               storage.nodeId,
@@ -385,6 +406,10 @@ export const ContradictionMarks = Extension.create<{ nodeId: string }, Contradic
             return false
           },
           handleDOMEvents: {
+            mousedown: (view, event) => {
+              pressed = drawnAt(view, event.target)
+              return false
+            },
             mouseover: (view, event) => {
               const span = spanOf(view, event.target)
               if (span === null) return false
@@ -415,8 +440,19 @@ export const ContradictionMarks = Extension.create<{ nodeId: string }, Contradic
         view() {
           let drawn = ''
           return {
-            update(view) {
+            update(view, prevState) {
               const state = CONTRADICTION_MARKS_KEY.getState(view.state)
+              // Never a card over her writing (design decision 3): a card of this scene closes
+              // when she types here, unless the keyboard opened it (it holds the focus), and
+              // whenever its underline is dropped.
+              const card = useContradictionCardStore.getState().card
+              if (card !== null && card.nodeId === storage.nodeId) {
+                const typed = !card.keyboard && view.state.doc !== prevState.doc
+                const kept =
+                  state?.located.some((each) => sameUnderline(each.underline, card.underline)) ===
+                  true
+                if (typed || !kept) useContradictionCardStore.getState().close()
+              }
               const ids = [
                 ...new Set(
                   (state?.decorations.find() ?? []).map(

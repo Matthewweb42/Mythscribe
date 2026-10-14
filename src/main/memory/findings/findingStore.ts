@@ -468,9 +468,9 @@ export function setConfirm(
   return true
 }
 
-/** Marks findings as drawn as underlines, once (slice 5). */
-export function markShown(db: TreeDb, ids: readonly string[], now: Date): void {
-  if (ids.length === 0) return
+/** Marks findings as drawn as underlines, once (slice 5); answers the ids marked now. */
+export function markShown(db: TreeDb, ids: readonly string[], now: Date): string[] {
+  const marked: string[] = []
   for (const id of ids) {
     const row = db
       .select({ shownAt: finding.shownAt })
@@ -479,7 +479,9 @@ export function markShown(db: TreeDb, ids: readonly string[], now: Date): void {
       .get()
     if (row?.shownAt !== null) continue
     db.update(finding).set({ shownAt: now.toISOString() }).where(eq(finding.id, id)).run()
+    marked.push(id)
   }
+  return marked
 }
 
 /**

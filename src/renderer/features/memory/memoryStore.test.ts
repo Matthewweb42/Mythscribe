@@ -121,7 +121,24 @@ beforeEach(() => {
     },
     'memory:looseEndAction': () => tombstone('d-loose', 'notRight'),
     'memory:answerNotice': () => [],
-    'dismissed:undo': () => ({ restored: true })
+    'dismissed:undo': () => ({ restored: true }),
+    'memory:underlines': (input) =>
+      Object.fromEntries(
+        (input as Input<'memory:underlines'>).nodeIds.map((nodeId) => [
+          nodeId,
+          nodeId === 'sc-2'
+            ? [
+                {
+                  findingId: 'f-1',
+                  side: 'b' as const,
+                  para: 0,
+                  quote: "Mara's eyes were brown",
+                  finding: findingViewFixture('f-1')
+                }
+              ]
+            : []
+        ])
+      )
   })
   useMemoryStore.getState().subscribe()
 })
@@ -315,25 +332,58 @@ describe('useMemoryStore (F-16.18)', () => {
 })
 
 describe('useMemoryStore: contradiction underlines (F-16.28)', () => {
-  it('takes an answered finding’s underlines off every shown scene, and reads the shown scenes again when the findings move', async () => {
-    const release = useMemoryStore.getState().watchScene('sc-2')
+  it('reads every drawn scene’s underlines in one call, apart from the scenes’ memory', async () => {
+    const releases = ['sc-1', 'sc-2', 'sc-3'].map((nodeId) =>
+      useMemoryStore.getState().watchUnderlines(nodeId)
+    )
     await flush()
-    const underline = {
-      findingId: 'f-1',
-      side: 'b' as const,
-      para: 0,
-      quote: "Mara's eyes were brown",
-      finding: findingViewFixture('f-1')
-    }
-    const entry = useMemoryStore.getState().scenes['sc-2']
-    if (entry === undefined) throw new Error('not loaded')
-    useMemoryStore.setState({ scenes: { 'sc-2': { ...entry, underlines: [underline] } } })
-    await useMemoryStore.getState().findingAction({ findingId: 'f-1', action: 'notProblem' })
-    expect(useMemoryStore.getState().scenes['sc-2']?.underlines).toEqual([])
+    expect(main.sent('memory:underlines')).toEqual([{ nodeIds: ['sc-1', 'sc-2', 'sc-3'] }])
+    expect(main.sent('memory:scene')).toEqual([])
+    expect(useMemoryStore.getState().underlines['sc-2']?.map((each) => each.findingId)).toEqual([
+      'f-1'
+    ])
+    expect(useMemoryStore.getState().underlines['sc-1']).toEqual([])
+    // A second editor of the same scene asks for nothing more; the last one gone drops it.
+    const again = useMemoryStore.getState().watchUnderlines('sc-2')
+    await flush()
+    expect(main.sent('memory:underlines')).toHaveLength(1)
+    again()
+    releases[1]?.()
+    expect(useMemoryStore.getState().underlines['sc-2']).toBeUndefined()
+    for (const release of releases) release()
+  })
+
+  it('reads only the drawn scenes again when the findings move, and keeps an unchanged answer', async () => {
+    const shown = useMemoryStore.getState().watchScene('sc-1')
+    const grid = useMemoryStore.getState().watchKnows(null)
+    const release = useMemoryStore.getState().watchUnderlines('sc-2')
+    await flush()
+    const before = useMemoryStore.getState().underlines['sc-2']
     main.calls.length = 0
     act(() => main.emit('memory:findingsChanged', { open: 1, unclear: 0, waiting: 0 }))
     await flush()
-    expect(main.sent('memory:scene')).toEqual([{ nodeId: 'sc-2' }])
+    // The underlines only: a finding moves no scene's memory, sheet or whole-book view.
+    expect(main.sent('memory:underlines')).toEqual([{ nodeIds: ['sc-2'] }])
+    expect(main.sent('memory:scene')).toEqual([])
+    expect(main.sent('memory:knows')).toEqual([])
+    expect(useMemoryStore.getState().underlines['sc-2']).toBe(before)
+    // A reading, a name change in the scene and a roster change read them again too.
+    main.calls.length = 0
+    act(() => main.emit('memory:changed', { nodeIds: ['sc-9'], recordIds: [] }))
+    act(() => main.emit('names:changed', { nodeIds: ['sc-2'] }))
+    await flush()
+    expect(main.sent('memory:underlines')).toEqual([{ nodeIds: ['sc-2'] }])
+    shown()
+    grid()
+    release()
+  })
+
+  it('takes an answered finding’s underlines off every drawn scene at once', async () => {
+    const release = useMemoryStore.getState().watchUnderlines('sc-2')
+    await flush()
+    expect(useMemoryStore.getState().underlines['sc-2']).toHaveLength(1)
+    await useMemoryStore.getState().findingAction({ findingId: 'f-1', action: 'notProblem' })
+    expect(useMemoryStore.getState().underlines['sc-2']).toEqual([])
     release()
   })
 

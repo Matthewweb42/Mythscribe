@@ -3453,9 +3453,7 @@ test('story memory v2: Needs a look and Check the book in the panel (P4 slice 4)
   expect(
     providerBodies.some((body) =>
       body.messages.some((message) =>
-        /No scene shows|No possible contradictions|nothing since/u.test(
-          message.content
-        )
+        /No scene shows|No possible contradictions|nothing since/u.test(message.content)
       )
     )
   ).toBe(false)
@@ -3512,15 +3510,20 @@ test('story memory v2: contradiction underlines (P4 slice 5)', async () => {
   await marks.hover()
   const card = page.getByTestId('contradiction-card')
   await expect(card).toBeVisible()
-  await expect(card).toContainText('1.1: “Mara\'s eyes were grey”')
+  await expect(card).toContainText("1.1: “Mara's eyes were grey”")
   await expect(card.getByRole('button', { name: 'Go there' })).toBeVisible()
   await expect(card.getByRole('button', { name: "This one's right: brown (1.2)" })).toBeVisible()
   await expect(card.getByRole('button', { name: 'Not a problem' })).toBeVisible()
 
-  // Never at the caret: clicking into the paragraph hides it; leaving the editor shows it again.
+  // Never at the caret: clicking the underline pins its card and hides the underline; Escape
+  // closes the card, and leaving the editor shows the underline again.
   await marks.click()
   await expect(marks).toHaveCount(0)
+  await expect(card).toBeVisible()
   await page.keyboard.press('Escape')
+  await expect(card).toHaveCount(0)
+  // A click on the words while the underline is hidden opens nothing.
+  await editor.getByText("Mara's eyes were brown").click()
   await expect(card).toHaveCount(0)
   await tree.getByRole('treeitem', { name: 'Brown' }).first().click()
   await expect(marks).toHaveCount(1)
@@ -3545,6 +3548,15 @@ test('story memory v2: contradiction underlines (P4 slice 5)', async () => {
   expect((await invoke<{ count: number }>('dismissed:list', undefined)).count).toBe(
     dismissedBefore + 1
   )
+  // The editor reported the underline it drew, so the answer counts for underline precision.
+  const precision = async (): Promise<number> =>
+    (
+      await invoke<{ contradictions: { underlines: { counted: number } } }>(
+        'memory:health',
+        undefined
+      )
+    ).contradictions.underlines.counted
+  await expect.poll(precision, { timeout: 15_000 }).toBe(1)
   await tree.getByRole('treeitem', { name: 'Grey' }).first().click()
   await expect(editor).toContainText("Mara's eyes were grey")
   await expect(marks).toHaveCount(0)
@@ -3559,6 +3571,8 @@ test('story memory v2: contradiction underlines (P4 slice 5)', async () => {
   const dismissedDialog = page.getByRole('dialog', { name: /^Dismissed \(/ })
   await dismissedDialog.getByRole('button', { name: 'Undo: Mara Vell: Eyes grey' }).click()
   await dismissedDialog.getByRole('button', { name: 'Close' }).click()
+  // The answer undone counts no more.
+  await expect.poll(precision, { timeout: 15_000 }).toBe(0)
   await expect(marks).toHaveText("Mara's eyes were grey", { timeout: 15_000 })
   await tree.getByRole('treeitem', { name: 'Brown' }).first().click()
   await expect(marks).toHaveText("Mara's eyes were brown", { timeout: 15_000 })

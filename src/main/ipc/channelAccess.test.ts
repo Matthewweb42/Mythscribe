@@ -190,6 +190,7 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
       'memory:threads',
       'memory:timeline',
       'memory:findings',
+      'memory:underlines',
       'memory:underlinesShown'
     ] as const) {
       expect(CHANNEL_MEMORY[channel], channel).toBe('v2')

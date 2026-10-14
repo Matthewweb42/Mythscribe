@@ -7,7 +7,8 @@ import {
   CARD_CLOSE_DELAY_MS,
   CONTRADICTION_CLASS,
   resetContradictionCardStore,
-  useContradictionCardStore
+  useContradictionCardStore,
+  type ContradictionCardOpen
 } from './contradictionMarks'
 import { buildExtensions } from './extensions'
 import { resetNameCheck } from './nameCheck'
@@ -16,7 +17,8 @@ import { resetNameCheck } from './nameCheck'
  * The contradiction underlines (F-16.28, P4-D15): decorations at each quote found inside its
  * paragraph, never in the document, none in the caret's paragraph while the editor has the focus,
  * dropped for a paragraph edited since the last set (kept bare while the document has unsaved
- * edits), reported as drawn, and the hover card opened by hover, click or Alt+Enter.
+ * edits), reported as drawn, and the hover card opened by hover, a click on a drawn underline or
+ * Alt+Enter, and closed when she types in the scene or its underline goes.
  */
 
 const FIRST = 'Mara walked in.'
@@ -177,7 +179,12 @@ describe('ContradictionMarks (F-16.28)', () => {
   it('opens the hover card from the keyboard with Alt+Enter in the underlined paragraph', () => {
     build()
     editor.commands.setContradictionMarks([brown()])
-    vi.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ left: 10, right: 10, top: 20, bottom: 30 })
+    vi.spyOn(editor.view, 'coordsAtPos').mockReturnValue({
+      left: 10,
+      right: 10,
+      top: 20,
+      bottom: 30
+    })
     const press = (): boolean =>
       editor.view.someProp('handleKeyDown', (handle) =>
         handle(editor.view, new KeyboardEvent('keydown', { key: 'Enter', altKey: true }))
@@ -196,16 +203,67 @@ describe('ContradictionMarks (F-16.28)', () => {
     })
   })
 
-  it('opens the hover card pinned on a click on the underline', () => {
+  it('opens the hover card pinned on a click on a drawn underline, never on one hidden at the caret', () => {
     build()
     editor.commands.setContradictionMarks([brown()])
+    // jsdom has no layout: ProseMirror's own mousedown finds no position and leaves the selection.
+    vi.spyOn(editor.view, 'posAtCoords').mockReturnValue(null)
     const pos = FIRST.length + 6
-    const event = new MouseEvent('click', { clientX: 5, clientY: 6 })
-    editor.view.someProp('handleClick', (handle) => handle(editor.view, pos, event))
-    expect(useContradictionCardStore.getState().card).toMatchObject({ pinned: true, x: 5 })
-    // A hover never unpins it.
+    const card = (): ContradictionCardOpen | null => useContradictionCardStore.getState().card
+    const clickAt = (target: Element | null): void => {
+      target?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      const event = new MouseEvent('click', { clientX: 5, clientY: 6 })
+      editor.view.someProp('handleClick', (handle) => handle(editor.view, pos, event))
+    }
     const [mark] = marks()
-    mark?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
-    expect(useContradictionCardStore.getState().card?.pinned).toBe(true)
+    if (mark === undefined) throw new Error('no underline')
+    clickAt(mark)
+    expect(card()).toMatchObject({ pinned: true, keyboard: false, x: 5 })
+    // A hover never unpins it.
+    mark.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    expect(card()?.pinned).toBe(true)
+    // The caret in its paragraph hides the underline: a click on those words opens nothing.
+    resetContradictionCardStore()
+    caretAt(pos)
+    expect(marks()).toEqual([])
+    clickAt(editor.view.dom.querySelectorAll('p')[1] ?? null)
+    expect(card()).toBeNull()
+    // Nor does a click whose press began elsewhere.
+    blur()
+    clickAt(null)
+    expect(card()).toBeNull()
+  })
+
+  it('closes a card of its scene when she types, unless the keyboard opened it, and when its underline goes', () => {
+    build()
+    editor.commands.setContradictionMarks([brown()])
+    const card = (): ContradictionCardOpen | null => useContradictionCardStore.getState().card
+    const openCard = (nodeId: string, keyboard: boolean): void => {
+      useContradictionCardStore.getState().open({
+        underline: brown(),
+        nodeId,
+        x: 0,
+        y: 0,
+        pinned: true,
+        keyboard,
+        returnFocus: () => {}
+      })
+    }
+    openCard('sc-2', false)
+    // A selection change keeps it; a keystroke anywhere in the scene closes it.
+    caretAt(3)
+    expect(card()).not.toBeNull()
+    editor.commands.insertContentAt(1, 'So ')
+    expect(card()).toBeNull()
+    // A keyboard card holds the focus, so an edit elsewhere leaves it; its underline gone, it goes.
+    openCard('sc-2', true)
+    editor.commands.insertContentAt(1, 'And ')
+    expect(card()).not.toBeNull()
+    editor.commands.setContradictionMarks([])
+    expect(card()).toBeNull()
+    // Another scene's card is left alone.
+    openCard('sc-9', false)
+    editor.commands.insertContentAt(1, 'Then ')
+    expect(card()).not.toBeNull()
   })
 })

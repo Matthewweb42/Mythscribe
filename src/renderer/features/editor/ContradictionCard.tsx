@@ -18,9 +18,11 @@ const CARD_WIDTH = 320
  * marked not right; offered only when both sides are book passages, P4-D17) and *Not a problem*;
  * on a note conflict *Update my note* (only when offered, P4-D18) opens Needs a look's editor for
  * it. It opens on hover (and stays while the pointer is over the underline or the card), on a
- * click, or on Alt+Enter with the caret in the underlined paragraph (it takes the focus then);
- * Escape closes it, giving the focus back to the editor. It closes when its finding is answered or
- * goes from the scene's underlines. Mounted once in a story memory v2 project.
+ * click on a drawn underline, or on Alt+Enter with the caret in the underlined paragraph (it takes
+ * the focus then); Escape closes it (a card opened from the keyboard gives the focus back to the
+ * editor; a hover card leaves the key to the rest, such as focus mode's Escape). It closes when its
+ * finding is answered or goes from the scene's underlines, and the editor closes it when the author
+ * types or its underline is dropped. Mounted once in a story memory v2 project.
  */
 export function ContradictionCard(): React.JSX.Element | null {
   const card = useContradictionCardStore((s) => s.card)
@@ -43,11 +45,8 @@ function CardBody({ card }: { card: ContradictionCardOpen }): React.JSX.Element 
   const headingId = useId()
   // Still underlined in its scene? An answer elsewhere, a reading or the switch took it away.
   const gone = useMemoryStore((s) => {
-    const scene = s.scenes[card.nodeId]
-    return (
-      scene !== undefined &&
-      !scene.underlines.some((each) => each.findingId === underline.findingId)
-    )
+    const marks = s.underlines[card.nodeId]
+    return marks !== undefined && !marks.some((each) => each.findingId === underline.findingId)
   })
 
   useEffect(() => {
@@ -61,9 +60,16 @@ function CardBody({ card }: { card: ContradictionCardOpen }): React.JSX.Element 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
+      const inside = event.target instanceof Node && ref.current?.contains(event.target) === true
+      // A hover card closes and leaves the key to the rest (focus mode's Escape, the editor).
+      if (!card.pinned && !inside) {
+        store().close()
+        return
+      }
       event.preventDefault()
       store().close()
-      card.returnFocus()
+      // Only a card the keyboard opened took the focus; it gives it back.
+      if (card.keyboard) card.returnFocus()
     }
     const onDown = (event: MouseEvent): void => {
       if (!card.pinned) return

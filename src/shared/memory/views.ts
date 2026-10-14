@@ -20,7 +20,6 @@ import { SlotSchema } from './slots'
 import { RebuildEstimate } from './switchover'
 import { ThreadStep } from './topics'
 import { TYPED_FIELDS } from './typedVsText'
-import { UnderlineView } from './underlines'
 
 /**
  * What story memory v2's reading shows (F-16.18), as the channels of slices 2–4 answer it: the
@@ -519,13 +518,7 @@ export const SceneMemory = z.object({
    * F-16.22 (P2b slice 4): the secrets the scene touches and its tension lines, as of the scene;
    * every "has none" is scoped by `checkedUpTo` and worded in the renderer alone.
    */
-  secrets: SceneSecrets,
-  /**
-   * F-16.28 (P4 slice 5): the contradiction underlines of the scene, at most 3 (`pickUnderlines`):
-   * open findings' book quotes in paragraphs with no unread finished sentence. Empty while the
-   * Contradiction check is off or contradictions show in the panel only.
-   */
-  underlines: z.array(UnderlineView)
+  secrets: SceneSecrets
 })
 export type SceneMemory = z.infer<typeof SceneMemory>
 

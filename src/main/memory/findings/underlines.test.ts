@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { UnderlineMode } from '@shared/aiSettings'
 import { gateSentences, nextReadSet } from '@shared/memory/gate'
-import { SceneMemory } from '@shared/memory/views'
+import type { UnderlineView } from '@shared/memory/underlines'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { saveDocument } from '../../document/documentStore'
 import { activeDraftId } from '../../draft/draftStore'
@@ -12,23 +12,28 @@ import { createProject, projectFolderFor, type ProjectSession } from '../../proj
 import { createNode, getNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
 import { nameScanShared } from '../nameIndexer'
-import { createRecord, deleteRecord } from '../recordStore'
-import { seedClaims, sceneTexts } from '../reading/claimFixture'
+import { indexStaleRecords } from '../passageIndexer'
+import { createRecord, deleteRecord, savePage } from '../recordStore'
+import { revealIn, seedClaims, sceneTexts } from '../reading/claimFixture'
 import { deleteClaims } from '../reading/claimStore'
 import { wrongValue } from '../reading/notRight'
 import { writeSceneRead } from '../reading/sceneReadStore'
+import { createTopic } from '../reading/topicStore'
+import { restoreTopicNotRight, topicNotRight } from '../reading/topicActions'
+import { undoDismissed } from '../dismissedStore'
 import { sceneMemory } from '../reading/views'
-import { findingNotProblem, findingRight } from './findingActions'
+import { applyNotePatch, findingNotProblem, findingRight, notePatch } from './findingActions'
 import { findingsOf, setVerdicts } from './findingStore'
 import { runFindingsJob } from './findingsJob'
 import {
   contradictionStats,
+  forgetAnswer,
   getUnderlineLog,
   MEMORY_UNDERLINES_KEY,
   setUnderlineAsked,
   underlineNotice
 } from './underlineLog'
-import { sceneUnderlines, underlinesShown } from './underlines'
+import { underlinesOf, underlinesShown } from './underlines'
 import { writeRow } from '../reading/readerRows'
 
 /**
@@ -89,12 +94,13 @@ function judgeAll(): void {
 
 const open = (): ReturnType<typeof findingsOf> => findingsOf(db, activeDraftId(db), ['open'])
 
-/** The scene's memory as `memory:scene` answers it, the underlines as the handler builds them. */
-function scene(nodeId: string, options = ON): SceneMemory {
-  return SceneMemory.parse(
-    sceneMemory(db, nodeId, (unread) => sceneUnderlines(db, nodeId, unread, options))
-  )
+/** The scene's underlines as `memory:underlines` answers them. */
+function marks(nodeId: string, options = ON): UnderlineView[] {
+  return underlinesOf(db, [nodeId], options)[nodeId] ?? []
 }
+
+/** The precision log's outcomes, as words. */
+const outcomes = (): string[] => getUnderlineLog(db).outcomes.map((each) => each.outcome)
 
 /** Mara's eyes grey in scene one (¶1), brown in scene two (¶1); both read and judged. */
 function greyAndBrown(): void {
@@ -144,10 +150,15 @@ describe('a scene’s underlines (P4-D15)', () => {
     greyAndBrown()
     const [finding] = open()
     if (finding === undefined) throw new Error('no finding')
-    expect(scene(one).underlines).toEqual([
-      expect.objectContaining({ findingId: finding.id, side: 'a', para: 1, quote: "Mara's eyes were grey" })
+    expect(marks(one)).toEqual([
+      expect.objectContaining({
+        findingId: finding.id,
+        side: 'a',
+        para: 1,
+        quote: "Mara's eyes were grey"
+      })
     ])
-    const [brown] = scene(two).underlines
+    const [brown] = marks(two)
     expect(brown).toMatchObject({ findingId: finding.id, side: 'b', para: 1 })
     expect(brown?.finding.a).toMatchObject({ value: 'grey', quote: "Mara's eyes were grey" })
     expect(brown?.finding.actions.right).toEqual({ a: true, b: true })
@@ -155,12 +166,12 @@ describe('a scene’s underlines (P4-D15)', () => {
 
   it('draws none while the check is off or contradictions show in the panel only, nor for a finding not open', () => {
     greyAndBrown()
-    expect(scene(two, { on: false, mode: 'text' }).underlines).toEqual([])
-    expect(scene(two, { on: true, mode: 'panel' }).underlines).toEqual([])
+    expect(marks(two, { on: false, mode: 'text' })).toEqual([])
+    expect(marks(two, { on: true, mode: 'panel' })).toEqual([])
     const [finding] = open()
     if (finding === undefined) throw new Error('no finding')
     setVerdicts(db, finding.id, { ab: 'c', ba: 'u', why: null, costUsd: 0, now: NOW })
-    expect(scene(two).underlines).toEqual([])
+    expect(marks(two)).toEqual([])
   })
 
   it('leaves out a paragraph with a finished sentence not read yet', () => {
@@ -172,14 +183,24 @@ describe('a scene’s underlines (P4-D15)', () => {
       two,
       doc('Hobb stood at the gate.', "Mara's eyes were brown. She looked away.")
     )
-    const memory = scene(two)
-    expect(memory.unread).toBe(1)
-    expect(memory.underlines).toEqual([])
+    expect(sceneMemory(db, two).unread).toBe(1)
+    expect(marks(two)).toEqual([])
     // The other scene's quote is still underlined.
-    expect(scene(one).underlines).toHaveLength(1)
+    expect(marks(one)).toHaveLength(1)
     // Read again: drawn again.
     markRead(two)
-    expect(scene(two).underlines).toHaveLength(1)
+    expect(marks(two)).toHaveLength(1)
+  })
+
+  it('answers every asked scene in one call, an empty list for a scene with none', () => {
+    greyAndBrown()
+    const both = underlinesOf(db, [one, two, chapter], ON)
+    expect(Object.keys(both).sort()).toEqual([chapter, one, two].sort())
+    expect(both[one]?.map((each) => each.side)).toEqual(['a'])
+    expect(both[two]?.map((each) => each.side)).toEqual(['b'])
+    expect(both[chapter]).toEqual([])
+    expect(underlinesOf(db, [], ON)).toEqual({})
+    expect(underlinesOf(db, [one], { on: false, mode: 'text' })).toEqual({ [one]: [] })
   })
 
   it('draws at most three marks, by rule order', () => {
@@ -226,8 +247,8 @@ describe('a scene’s underlines (P4-D15)', () => {
     markRead(two)
     judgeAll()
     expect(open()).toHaveLength(4)
-    expect(scene(one).underlines).toHaveLength(3)
-    expect(scene(two).underlines).toHaveLength(3)
+    expect(marks(one)).toHaveLength(3)
+    expect(marks(two)).toHaveLength(3)
   })
 })
 
@@ -258,7 +279,7 @@ describe('the precision log (P4-D16)', () => {
     const [unshown] = open()
     if (unshown === undefined) throw new Error('no finding')
     findingNotProblem(db, unshown.id, NOW)
-    expect(getUnderlineLog(db).outcomes).toEqual([])
+    expect(outcomes()).toEqual([])
     // A fresh pair, underlined this time.
     saveDocument(db, two, doc('Hobb stood at the gate.', "Mara's eyes were green."))
     seedClaims(
@@ -273,13 +294,13 @@ describe('the precision log (P4-D16)', () => {
     if (shown === undefined) throw new Error('no finding')
     underlinesShown(db, [shown.id], NOW)
     findingNotProblem(db, shown.id, NOW)
-    expect(getUnderlineLog(db).outcomes).toEqual(['notProblem'])
+    expect(outcomes()).toEqual(['notProblem'])
   })
 
   it('logs This one’s right for', () => {
     const id = shownFinding()
     findingRight(db, id, 'b', NOW)
-    expect(getUnderlineLog(db).outcomes).toEqual(['right'])
+    expect(outcomes()).toEqual(['right'])
   })
 
   it('logs a fix in the text for, once a reading changed a side', () => {
@@ -297,7 +318,7 @@ describe('the precision log (P4-D16)', () => {
     )
     const result = runFindingsJob(db, NOW, { cachedVerdicts: true })
     expect(result.closed.map((each) => each.reason)).toEqual(['gone'])
-    expect(getUnderlineLog(db).outcomes).toEqual(['right'])
+    expect(outcomes()).toEqual(['right'])
   })
 
   it('adds nothing for Not right on a line, a deleted record, or a finding never underlined', () => {
@@ -308,7 +329,7 @@ describe('the precision log (P4-D16)', () => {
     wrongValue(db, brown.claimId, NOW)
     runFindingsJob(db, NOW, { cachedVerdicts: true })
     expect(open()).toEqual([])
-    expect(getUnderlineLog(db).outcomes).toEqual([])
+    expect(outcomes()).toEqual([])
     // A deleted record takes its findings with it.
     saveDocument(db, two, doc('Hobb stood at the gate.', "Mara's eyes were green."))
     seedClaims(
@@ -323,7 +344,141 @@ describe('the precision log (P4-D16)', () => {
     underlinesShown(db, [id], NOW)
     deleteRecord(db, mara)
     runFindingsJob(db, NOW, { cachedVerdicts: true })
-    expect(getUnderlineLog(db).outcomes).toEqual([])
+    expect(outcomes()).toEqual([])
+  })
+
+  it('adds nothing for a line taken away with the text unchanged (a spot check, a rebuild)', () => {
+    const id = shownFinding()
+    const brown = findingsOf(db, activeDraftId(db)).find((each) => each.id === id)?.b
+    if (brown?.kind !== 'claim') throw new Error('no claim side')
+    // The line went without a word of the scene changing: a memory correction, not a fix.
+    deleteClaims(db, [brown.claimId])
+    const result = runFindingsJob(db, NOW, { cachedVerdicts: true })
+    expect(result.closed.map((each) => each.reason)).toEqual(['gone'])
+    expect(outcomes()).toEqual([])
+    // Its scene texts are forgotten once it closed.
+    expect(getUnderlineLog(db).shown).toEqual([])
+  })
+
+  it('takes back an answer its Undo took back, and counts a pair answered again once', () => {
+    const id = shownFinding()
+    const npKey = findingsOf(db, activeDraftId(db)).find((each) => each.id === id)?.npKey
+    const row = findingNotProblem(db, id, NOW)
+    expect(getUnderlineLog(db).outcomes).toEqual([
+      { key: npKey, outcome: 'notProblem', dismissedId: row.id }
+    ])
+    // Undo in Dismissed: the outcome goes, and the finding comes back (drawn again, not shown yet).
+    const undone = undoDismissed(db, row.id)
+    expect(forgetAnswer(db, undone)).toBe(true)
+    expect(outcomes()).toEqual([])
+    expect(forgetAnswer(db, undone)).toBe(false)
+    judgeAll()
+    const [back] = open()
+    if (back === undefined) throw new Error('not back')
+    expect(back.shownAt).toBeNull()
+    underlinesShown(db, [back.id], NOW)
+    // Answered again: counted once.
+    findingNotProblem(db, back.id, NOW)
+    expect(outcomes()).toEqual(['notProblem'])
+  })
+
+  it('takes back This one’s right when its Not right row is undone', () => {
+    const id = shownFinding()
+    const { dismissed } = findingRight(db, id, 'a', NOW)
+    if (dismissed === null) throw new Error('no row')
+    expect(outcomes()).toEqual(['right'])
+    expect(forgetAnswer(db, undoDismissed(db, dismissed.id))).toBe(true)
+    expect(outcomes()).toEqual([])
+  })
+
+  it('adds nothing when Not a secret or a deleted secret takes a passing-on finding’s lines', () => {
+    saveDocument(db, one, doc('Mara walked in.', 'Mara told Hobb the map was sold.'))
+    saveDocument(db, two, doc('Hobb stood at the gate.', 'Mara overheard that the map was sold.'))
+    const secret = createTopic(
+      db,
+      {
+        kind: 'secret',
+        label: 'the sold map',
+        quote: revealIn(db, one, { para: 1, quote: 'the map was sold', label: 'x' })
+      },
+      NOW
+    ).recordId
+    const knows = (how: string, quote: string): Parameters<typeof seedClaims>[2][number] => ({
+      recordId: mara,
+      slot: 'knows',
+      value: how,
+      how,
+      objectId: secret,
+      quote,
+      para: 1
+    })
+    const seed = (): void => {
+      seedClaims(db, one, [knows('tells', 'Mara told Hobb the map was sold')], NOW)
+      seedClaims(db, two, [knows('overheard', 'Mara overheard that the map was sold')], NOW)
+    }
+    seed()
+    markRead(one)
+    markRead(two)
+    judgeAll()
+    const passing = open().find((each) => each.rule === 'C3')
+    if (passing === undefined) throw new Error('no C3 finding')
+    underlinesShown(db, [passing.id], NOW)
+    // Not a secret: its lines are kept aside to undo; the finding closes, nothing is counted.
+    const { dismissed } = topicNotRight(db, secret, NOW)
+    expect(runFindingsJob(db, NOW, { cachedVerdicts: true }).closed).toHaveLength(1)
+    expect(outcomes()).toEqual([])
+    // Undo brings the secret and its lines back; a deleted secret then takes them for good.
+    const [first] = dismissed
+    if (first === undefined) throw new Error('no row')
+    undoDismissed(db, first.id)
+    restoreTopicNotRight(db, first.id)
+    judgeAll()
+    const again = open().find((each) => each.rule === 'C3')
+    if (again === undefined) throw new Error('not back')
+    underlinesShown(db, [again.id], NOW)
+    deleteRecord(db, secret)
+    runFindingsJob(db, NOW, { cachedVerdicts: true })
+    expect(open().some((each) => each.rule === 'C3')).toBe(false)
+    expect(outcomes()).toEqual([])
+  })
+
+  it('logs Update my note for, with no Dismissed row to undo', () => {
+    const page = doc('Eyes: green')
+    saveDocument(db, one, doc('Mara walked in.', "Mara's eyes were grey."))
+    savePage(db, mara, 'pinned', page, NOW)
+    indexStaleRecords(db, NOW)
+    seedClaims(
+      db,
+      one,
+      [{ recordId: mara, slot: 'eyes', value: 'grey', quote: "Mara's eyes were grey", para: 1 }],
+      NOW
+    )
+    markRead(one)
+    judgeAll()
+    const note = open().find((each) => each.rule === 'C6')
+    if (note === undefined) throw new Error('no note conflict')
+    underlinesShown(db, [note.id], NOW)
+    const pages = new Map<string, TiptapNodeT>([[mara, page]])
+    const patch = notePatch(db, note.id)
+    if (patch === null) throw new Error('not offered')
+    applyNotePatch(
+      db,
+      { findingId: note.id, index: patch.index, before: patch.before, text: patch.after },
+      {
+        pinned: (recordId, next) => {
+          pages.set(recordId, next)
+          savePage(db, recordId, 'pinned', next, NOW)
+        },
+        research: () => {
+          throw new Error('not a Research page')
+        },
+        read: (owner) => pages.get(owner.id) ?? null
+      },
+      NOW
+    )
+    expect(getUnderlineLog(db).outcomes).toEqual([
+      { key: note.npKey, outcome: 'right', dismissedId: null }
+    ])
   })
 
   it('asks once, under 70 % right over the last 20, while contradictions are underlined', () => {

@@ -98,8 +98,9 @@ export function notProblemFor(
     now
   )
   const closed = closeFindings(db, finding.draftId, [{ key: finding.key, reason: 'dismissed' }])
-  // F-16.28: an underlined finding dismissed counts against underline precision.
-  logAnswered(db, closed, 'notProblem')
+  // F-16.28: an underlined finding dismissed counts against underline precision (its row's
+  // *Undo* takes that back).
+  logAnswered(db, closed, 'notProblem', row.id)
   return row
 }
 
@@ -136,7 +137,7 @@ export function findingRight(
     )
   }
   const closed = closeFindings(db, finding.draftId, [{ key: finding.key, reason: 'right' }])
-  logAnswered(db, closed, 'right')
+  logAnswered(db, closed, 'right', dismissed?.id ?? null)
   const ref = findingsFrame(db).reading.refs.get(other.nodeId) ?? ''
   return { dismissed, other: { nodeId: other.nodeId, ref } }
 }
@@ -248,7 +249,7 @@ export function applyNotePatch(
   // Indexed at once, so no recompute reads the old line again.
   indexOwner(db, owner.kind, owner.id, now)
   const closed = closeFindings(db, finding.draftId, [{ key: finding.key, reason: 'right' }])
-  logAnswered(db, closed, 'right')
+  logAnswered(db, closed, 'right', null)
   return { owner, closed: closed.length > 0 }
 }
 

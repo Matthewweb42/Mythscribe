@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import type { Editor } from '@tiptap/core'
 import type { UnderlineView } from '@shared/memory/underlines'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
-import { useSceneMemory } from '@renderer/features/memory/memoryStore'
+import { useSceneUnderlines } from '@renderer/features/memory/memoryStore'
 import { ipc } from '@renderer/lib/ipc'
 import { CONTRADICTION_MARKS_KEY, useContradictionCardStore } from './contradictionMarks'
 import { useDocumentStore } from './documentStore'
@@ -37,12 +37,13 @@ function attachDrawn(editor: Editor, nodeId: string): (() => void) | undefined {
 
 /**
  * Feeds a story memory v2 manuscript editor its contradiction underlines (F-16.28, plan P4 §5.2):
- * the scene's memory is watched while the editor shows it (so the underlines come even with the
- * This scene panel closed), and each time main's answer for it moves, or the Contradiction check or
- * Settings' "Show contradictions" changes, the editor's marks are set again (none while the check
- * is off or contradictions show in the panel only; the paragraphs edited since stay bare while the
- * document has unsaved edits). What the editor drew is reported once per finding. `v2` false (a
- * v1 project): nothing at all.
+ * the scene's underlines are watched while the editor draws them (the Contradiction check on and
+ * Settings' "Show contradictions" in the text), on their own (`useSceneUnderlines`, P4 slice 5
+ * review: never the scene's whole memory, so every region of a stacked view costs main only its
+ * share of one `memory:underlines` call), and each time main's answer moves or either setting
+ * changes, the editor's marks are set again (none while the check is off or contradictions show in
+ * the panel only; the paragraphs edited since stay bare while the document has unsaved edits).
+ * What the editor drew is reported once per finding. `v2` false (a v1 project): nothing at all.
  */
 export function useContradictionMarks(
   editor: Editor,
@@ -51,16 +52,16 @@ export function useContradictionMarks(
   v2: boolean
 ): void {
   const active = v2 && ready
-  const scene = useSceneMemory(active ? nodeId : null)
   const on = useAiSettingsStore((s) => s.settings?.features.judge === true)
   const underlined = useAiSettingsStore((s) => s.settings?.reading.underlines !== 'panel')
-  const underlines = scene?.underlines ?? NONE
+  const drawn = active && on && underlined
+  const underlines = useSceneUnderlines(drawn ? nodeId : null) ?? NONE
 
   useEffect(() => (active ? attachDrawn(editor, nodeId) : undefined), [active, editor, nodeId])
 
   useEffect(() => {
     if (!active || editor.isDestroyed || editor.storage.contradictionMarks === undefined) return
-    const shown = on && underlined ? underlines : NONE
+    const shown = drawn ? underlines : NONE
     // Nothing drawn and nothing to draw: no transaction at all.
     if (
       shown.length === 0 &&
@@ -70,5 +71,5 @@ export function useContradictionMarks(
     }
     const keepEdited = useDocumentStore.getState().docs[nodeId]?.dirty === true
     editor.commands.setContradictionMarks(shown, { keepEdited })
-  }, [active, editor, nodeId, on, underlined, underlines])
+  }, [active, drawn, editor, nodeId, underlines])
 }

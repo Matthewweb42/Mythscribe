@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import type { FindingView } from '@shared/memory/findings'
+import { UNDERLINE_SCENES_MAX, type UnderlineView } from '@shared/memory/underlines'
 import type {
   CardNotRight,
   CheckEstimate,
@@ -74,12 +75,16 @@ import { ipc } from '@renderer/lib/ipc'
  * right*) and on a loose end take it away at once and add their Dismissed row; *This one's right*
  * leaves a short line (`rightMarks`) with *Go there* and *Undo* until it is closed.
  *
- * F-16.28 (P4 slice 5): each scene's `underlines` ride in its memory; an answer on a finding takes
- * its underlines off every shown scene at once, and `memory:findingsChanged` (a judged pair, an
- * answer, the Contradiction check switched) reads the shown scenes again. The hover card's *Update
- * my note* hands its proposal to that note conflict's row in Needs a look (`noteEdit`), opening
- * the This scene panel first. *Panel only* on the one-time precision question sets Settings' "Show
- * contradictions" through the AI settings store (their one owner).
+ * F-16.28 (P4 slice 5): the editors' contradiction underlines by scene (`underlines`,
+ * `useSceneUnderlines`), apart from the scenes' memory (P4 slice 5 review: every region of a
+ * stacked view shows its own, and a whole scene's memory for each would cost main seconds). They
+ * are watched while drawn and read in one `memory:underlines` call for every scene asked within
+ * the same tick, again on `memory:findingsChanged` (a judged pair, an answer, the switch), any
+ * `memory:changed` (a reading moves a quote or what is unread), a name change in the scene and a
+ * roster change; an answer on a finding takes its underlines off at once. The hover card's
+ * *Update my note* hands its proposal to that note conflict's row in Needs a look (`noteEdit`),
+ * opening the This scene panel first. *Panel only* on the one-time precision question sets
+ * Settings' "Show contradictions" through the AI settings store (their one owner).
  */
 
 /** A scene's memory as stored here: its lines by id. */
@@ -125,6 +130,8 @@ export interface RightMark {
 interface MemoryState {
   claims: Record<string, ClaimView>
   scenes: Record<string, SceneEntry>
+  /** F-16.28: the editors' contradiction underlines, by scene (read while drawn). */
+  underlines: Record<string, UnderlineView[]>
   /** By `sheetKey(recordId, asOf)`. */
   sheets: Record<string, SheetMemory>
   /** F-16.22: the who-knows-what grids, by `knowsKey(asOf)`. */
@@ -197,12 +204,16 @@ interface MemoryState {
   load: () => Promise<void>
   loadCardLines: () => Promise<void>
   loadScene: (nodeId: string) => Promise<void>
+  /** F-16.28: these watched scenes' underlines, in one call per `UNDERLINE_SCENES_MAX`. */
+  loadUnderlines: (nodeIds: readonly string[]) => Promise<void>
   loadSheet: (recordId: string, asOf: string | null) => Promise<void>
   loadKnows: (asOf: string | null) => Promise<void>
   loadThreads: (asOf: string | null) => Promise<void>
   loadTimeline: (recordId: string | null) => Promise<void>
   /** Counts a view showing the scene and reads it; answers the release. */
   watchScene: (nodeId: string) => () => void
+  /** F-16.28: counts an editor drawing the scene's underlines and reads them; answers the release. */
+  watchUnderlines: (nodeId: string) => () => void
   watchSheet: (recordId: string, asOf: string | null) => () => void
   watchKnows: (asOf: string | null) => () => void
   watchThreads: (asOf: string | null) => () => void
@@ -252,6 +263,13 @@ let reportSeq = 0
 let counter = 0
 const nextRequestId = (): string => `mem-${Date.now().toString(36)}-${++counter}`
 const sceneWatchers = new Map<string, number>()
+/** F-16.28: the editors drawing each scene's underlines. */
+const underlineWatchers = new Map<string, number>()
+/** The scenes whose underlines are to be read at the end of this tick (one call for them all). */
+let underlineQueue: Set<string> | null = null
+/** The last read asked for each scene's underlines: an older answer landing later is dropped. */
+const underlineAsked = new Map<string, number>()
+let underlineSeq = 0
 const sheetWatchers = new Map<string, { recordId: string; asOf: string | null; count: number }>()
 /** A view of the whole book read while shown (grids, Threads, Timeline): its argument and count. */
 interface BookWatch {
@@ -347,20 +365,24 @@ function withoutFinding(entry: FindingsEntry, findingId: string): FindingsEntry 
   }
 }
 
-/** The shown scenes without one finding's underlines (an answer closed it in main). */
+/** The drawn scenes' underlines without one finding's (an answer closed it in main). */
 function withoutUnderlines(
-  scenes: Record<string, SceneEntry>,
+  underlines: Record<string, UnderlineView[]>,
   findingId: string
-): Record<string, SceneEntry> {
+): Record<string, UnderlineView[]> {
   let changed = false
-  const next: Record<string, SceneEntry> = {}
-  for (const [nodeId, entry] of Object.entries(scenes)) {
-    const underlines = entry.underlines.filter((each) => each.findingId !== findingId)
-    if (underlines.length !== entry.underlines.length) changed = true
-    next[nodeId] = underlines.length === entry.underlines.length ? entry : { ...entry, underlines }
+  const next: Record<string, UnderlineView[]> = {}
+  for (const [nodeId, marks] of Object.entries(underlines)) {
+    const kept = marks.filter((each) => each.findingId !== findingId)
+    if (kept.length !== marks.length) changed = true
+    next[nodeId] = kept.length === marks.length ? marks : kept
   }
-  return changed ? next : scenes
+  return changed ? next : underlines
 }
+
+/** Whether two scenes' underlines are the same (so an unchanged answer keeps the old list). */
+const sameUnderlines = (a: readonly UnderlineView[], b: readonly UnderlineView[]): boolean =>
+  a.length === b.length && JSON.stringify(a) === JSON.stringify(b)
 
 const NO_CHECK: CheckEntry = { estimate: null, report: null }
 
@@ -386,9 +408,26 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
     }
   }
 
+  /**
+   * F-16.28: reads these drawn scenes' underlines at the end of the tick, every scene asked
+   * meanwhile in the same call (a stacked view's regions all at once).
+   */
+  const queueUnderlines = (nodeIds: Iterable<string>): void => {
+    const queued = underlineQueue ?? new Set<string>()
+    for (const nodeId of nodeIds) if (underlineWatchers.has(nodeId)) queued.add(nodeId)
+    if (queued.size === 0 || underlineQueue !== null) return
+    underlineQueue = queued
+    queueMicrotask(() => {
+      const ids = [...(underlineQueue ?? [])].filter((nodeId) => underlineWatchers.has(nodeId))
+      underlineQueue = null
+      if (ids.length > 0) get().loadUnderlines(ids).catch(report)
+    })
+  }
+
   return {
     claims: {},
     scenes: {},
+    underlines: {},
     sheets: {},
     knows: {},
     threads: {},
@@ -501,8 +540,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
       if (result.dismissed !== null) useDismissedStore.getState().add(result.dismissed)
       const findings = get().findings
       if (findings !== null) set({ findings: withoutFinding(findings, action.findingId) })
-      // F-16.28: its underlines go from every shown scene at once.
-      set({ scenes: withoutUnderlines(get().scenes, action.findingId) })
+      // F-16.28: its underlines go from every drawn scene at once.
+      set({ underlines: withoutUnderlines(get().underlines, action.findingId) })
       if (action.action === 'right' && finding !== undefined) {
         // The other side is the one marked not right.
         const other = action.side === 'a' ? finding.b : finding.a
@@ -604,6 +643,33 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
       })
     },
 
+    async loadUnderlines(nodeIds) {
+      const mine = generation
+      const seq = ++underlineSeq
+      for (const nodeId of nodeIds) underlineAsked.set(nodeId, seq)
+      const chunks: string[][] = []
+      for (let at = 0; at < nodeIds.length; at += UNDERLINE_SCENES_MAX) {
+        chunks.push(nodeIds.slice(at, at + UNDERLINE_SCENES_MAX))
+      }
+      await Promise.all(
+        chunks.map(async (chunk) => {
+          const answer = await ipc().invoke('memory:underlines', { nodeIds: chunk })
+          if (mine !== generation) return
+          const current = get().underlines
+          let next: Record<string, UnderlineView[]> | null = null
+          for (const nodeId of chunk) {
+            if (!underlineWatchers.has(nodeId) || underlineAsked.get(nodeId) !== seq) continue
+            const marks = answer[nodeId] ?? []
+            const was = current[nodeId]
+            if (was !== undefined && sameUnderlines(was, marks)) continue
+            next ??= { ...current }
+            next[nodeId] = marks
+          }
+          if (next !== null) set({ underlines: next })
+        })
+      )
+    },
+
     async loadSheet(recordId, asOf) {
       const mine = generation
       const key = sheetKey(recordId, asOf)
@@ -656,6 +722,27 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         const scenes = { ...get().scenes }
         delete scenes[nodeId]
         set({ claims, scenes })
+      }
+    },
+
+    watchUnderlines(nodeId) {
+      underlineWatchers.set(nodeId, (underlineWatchers.get(nodeId) ?? 0) + 1)
+      if (underlineWatchers.get(nodeId) === 1) queueUnderlines([nodeId])
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        const left = (underlineWatchers.get(nodeId) ?? 1) - 1
+        if (left > 0) {
+          underlineWatchers.set(nodeId, left)
+          return
+        }
+        underlineWatchers.delete(nodeId)
+        underlineAsked.delete(nodeId)
+        if (get().underlines[nodeId] === undefined) return
+        const underlines = { ...get().underlines }
+        delete underlines[nodeId]
+        set({ underlines })
       }
     },
 
@@ -867,6 +954,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
             (recordId, sheet) =>
               records.has(recordId) || (nodeIds.length > 0 && readsWholeBook(sheet))
           )
+          // F-16.28: a reading moves a quote, what is unread, or the other side a card shows.
+          queueUnderlines(underlineWatchers.keys())
         }),
         ipc().on('names:changed', ({ nodeIds }) => {
           const nodes = new Set(nodeIds)
@@ -878,6 +967,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
             (nodeId) => nodes.has(nodeId),
             (_, sheet) => sheet !== undefined && sheet.threads !== null
           )
+          // F-16.28: what is unread is read under the roster's names.
+          queueUnderlines(nodeIds)
         }),
         ipc().on('record:changed', ({ roster }) => {
           if (!roster) return
@@ -885,6 +976,7 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
             () => true,
             () => true
           )
+          queueUnderlines(underlineWatchers.keys())
         }),
         ipc().on('memory:statusChanged', (status) => {
           const was = get().status?.check ?? null
@@ -897,11 +989,9 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         }),
         ipc().on('memory:findingsChanged', () => {
           get().loadFindings().catch(report)
-          // F-16.28: a judged pair, an answer or the switch moves the shown scenes' underlines.
-          refresh(
-            () => true,
-            () => false
-          )
+          // F-16.28: a judged pair, an answer or the switch moves the drawn scenes' underlines
+          // (only theirs: findings move no scene's memory, sheet, grid, Threads or Timeline).
+          queueUnderlines(underlineWatchers.keys())
           // The report reads the findings again: a finding closed since drops out of it.
           if (get().check.report !== null) get().loadCheckReport().catch(report)
         }),
@@ -923,6 +1013,9 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
     clear() {
       generation++
       sceneWatchers.clear()
+      underlineWatchers.clear()
+      underlineAsked.clear()
+      underlineQueue = null
       sheetWatchers.clear()
       knowsWatchers.clear()
       threadsWatchers.clear()
@@ -930,6 +1023,7 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
       set({
         claims: {},
         scenes: {},
+        underlines: {},
         sheets: {},
         knows: {},
         threads: {},
@@ -964,6 +1058,18 @@ export function useSceneMemory(nodeId: string | null): SceneEntry | undefined {
     return useMemoryStore.getState().watchScene(nodeId)
   }, [nodeId])
   return useMemoryStore((s) => (nodeId === null ? undefined : s.scenes[nodeId]))
+}
+
+/**
+ * F-16.28: a scene's contradiction underlines while the calling editor draws them (`nodeId` null:
+ * none watched); undefined until read.
+ */
+export function useSceneUnderlines(nodeId: string | null): UnderlineView[] | undefined {
+  useEffect(() => {
+    if (nodeId === null) return
+    return useMemoryStore.getState().watchUnderlines(nodeId)
+  }, [nodeId])
+  return useMemoryStore((s) => (nodeId === null ? undefined : s.underlines[nodeId]))
 }
 
 /** A record's sheet "From the book, as of" while the calling view shows it. */
