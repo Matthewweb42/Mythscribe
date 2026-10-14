@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 import { asc, sql } from 'drizzle-orm'
 import { docToText } from '@shared/docText'
-import { containsInlineTag, replaceInlineTags } from '@shared/memory/inlineTagReplace'
+import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
+import { containsInlineTag, inlineTagWords } from '@shared/memory/inlineTagReplace'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
-import { draftText, node, snapshot, snapshotText } from '../../db/schema'
+import type { TiptapNodeT } from '@shared/tiptap'
+import { draftText, node, record, snapshot, snapshotText } from '../../db/schema'
 import { AppError } from '../../ipc/errors'
 import type { TreeDb } from '../../tree/treeStore'
 import { documentJson } from '../../voice/profile'
@@ -12,19 +14,21 @@ import { invariantAliases } from '../recordStore'
 /**
  * The conversion checks its own result before it commits (F-16.31, decision SW-D6; plan
  * `Switchover.md` §1.3). `takeConvertBefore` reads, at the transaction's start, every stored
- * document's text with each inline tag's consented words put back (`replaceInlineTags`, the same
- * words the conversion writes) and a digest of the snapshots; `checkConverted`, run inside the
- * same transaction after the last write, throws VALIDATION for any of: an inline tag left in a
- * node's content or notes or a draft's text; a document that no longer parses; prose lost, added
- * or moved (its text differs from the one read before); a snapshot changed; a name clash or a
- * record without a name. The throw rolls the whole transaction back, so the project stays v1.
+ * document's text with each inline tag read as the consented words (`textWithTagWords`: a walk
+ * over the original document, not the rewrite the conversion runs, so a fault in that rewrite
+ * shows up rather than being copied into the expected text) and a digest of the snapshots;
+ * `checkConverted`, run inside the same transaction after the last write, throws VALIDATION for
+ * any of: an inline tag left in a node's content or notes or a draft's text; a document or a
+ * record's page that no longer parses; prose lost, added or moved (its text differs from the one
+ * read before); a snapshot changed; a name clash or a record without a name. The throw rolls the
+ * whole transaction back, so the project stays v1.
  */
 
 /** What a document read as before, and a digest of every snapshot. */
 export interface ConvertBefore {
   /** Each readable document's text with the consented words in place, by its place key. */
   texts: Map<string, string>
-  /** Places whose stored JSON did not parse before (left as they were, not checked). */
+  /** Places (documents and record pages) whose stored JSON did not parse before (not checked). */
   unreadable: Set<string>
   snapshots: SnapshotDigest
 }
@@ -67,6 +71,41 @@ function storedPlaces(db: TreeDb): StoredPlace[] {
   return places
 }
 
+/** Every record's Pinned and Ideas page as stored, named for a problem by the record's name. */
+function recordPages(db: TreeDb): StoredPlace[] {
+  const rows = db.all<{
+    id: string
+    name: string | null
+    pinned: string | null
+    ideas: string | null
+  }>(
+    sql`SELECT r.id AS id, a.text AS name, r.pinned AS pinned, r.ideas AS ideas FROM ${record} r
+      LEFT JOIN alias a ON a.record_id = r.id AND a.is_main = 1 ORDER BY r.id`
+  )
+  return rows.flatMap((row) => {
+    const name = row.name === null ? 'a record' : `“${row.name}”`
+    return [
+      { key: `pinned:${row.id}`, label: `the Pinned page of ${name}`, stored: row.pinned },
+      { key: `ideas:${row.id}`, label: `the Ideas page of ${name}`, stored: row.ideas }
+    ]
+  })
+}
+
+/**
+ * A document's text as `docToText` reads it once every inline tag is the words the conversion
+ * writes for it (`inlineTagWords`), walked over the original document as it is: no tree is
+ * rebuilt, so this does not share the rewrite's faults (`replaceInlineTags`: joining text runs,
+ * dropping empty ones) and a rewrite that loses or moves text beside a token differs from it.
+ */
+export function textWithTagWords(doc: TiptapNodeT, tokenText: ReadonlyMap<string, string>): string {
+  const blockText = (node: TiptapNodeT): string => {
+    if (node.type === INLINE_TAG_NODE_TYPE) return inlineTagWords(node, tokenText)
+    if (node.text !== undefined) return node.text
+    return (node.content ?? []).map(blockText).join('')
+  }
+  return (doc.content ?? []).map(blockText).join('\n')
+}
+
 /** Every snapshot row and snapshot text, in key order, hashed: one pass, no I/O. */
 function snapshotDigest(db: TreeDb): SnapshotDigest {
   const hash = createHash('sha256')
@@ -101,7 +140,12 @@ export function takeConvertBefore(
     if (place.stored === null) continue
     const doc = documentJson({ content: place.stored })
     if (doc === null) unreadable.add(place.key)
-    else texts.set(place.key, docToText(replaceInlineTags(doc, tokenText).doc))
+    else texts.set(place.key, textWithTagWords(doc, tokenText))
+  }
+  for (const page of recordPages(db)) {
+    if (page.stored !== null && documentJson({ content: page.stored }) === null) {
+      unreadable.add(page.key)
+    }
   }
   return { texts, unreadable, snapshots: snapshotDigest(db) }
 }
@@ -135,6 +179,13 @@ export function checkConverted(db: TreeDb, before: ConvertBefore): void {
   }
   for (const key of before.texts.keys()) {
     if (!seen.has(key)) problems.push('a document went missing')
+  }
+  // The records' pages are new (or merged) here, so only that they open is checked.
+  for (const page of recordPages(db)) {
+    if (page.stored === null || before.unreadable.has(page.key)) continue
+    if (documentJson({ content: page.stored }) === null) {
+      problems.push(`${page.label} would not open`)
+    }
   }
   const after = snapshotDigest(db)
   if (after.rows !== before.snapshots.rows || after.hash !== before.snapshots.hash) {

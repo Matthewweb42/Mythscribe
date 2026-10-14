@@ -27,11 +27,12 @@ import { getSwitchoverRecord } from './record'
 import {
   causeOf,
   runConvert,
+  SwitchoverRun,
   switchoverSafety,
   type SafetyMemo,
   type SwitchoverRunDeps
 } from './run'
-import { createTrialCopy } from './trial'
+import { createTrialCopy, switchoverTrialOf } from './trial'
 
 /**
  * The in-place run (F-16.31 part A, plan `Switchover.md` §1.5): the v1 fixture in a temporary
@@ -123,11 +124,17 @@ function consent(): SwitchoverConsent {
   }
 }
 
+/** A memo the safety step answered whole: its dated copy made. */
+type Safe = SafetyMemo & { datedCopy: string }
+
 /** The safety step as the dialog runs it, answering the memo (it must succeed). */
-function safety(): SafetyMemo {
-  const { outcome, memo } = switchoverSafety(deps(), null)
-  if (!outcome.ok || memo === null) throw new Error(`safety failed: ${JSON.stringify(outcome)}`)
-  return memo
+function safety(memo: SafetyMemo | null = null, given: SwitchoverRunDeps = deps()): Safe {
+  const { outcome, memo: next } = switchoverSafety(given, memo)
+  if (!outcome.ok || next?.datedCopy == null) {
+    throw new Error(`safety failed: ${JSON.stringify(outcome)}`)
+  }
+  expect(outcome).toEqual({ ok: true, backup: next.backup, datedCopy: next.datedCopy })
+  return { ...next, datedCopy: next.datedCopy }
 }
 
 /** What is in the "My Drive" folder besides the project itself. */
@@ -159,18 +166,20 @@ function settingOf(file: string, key: string): unknown {
   }
 }
 
-function sceneOneOf(file: string): string {
+function sceneOf(file: string, index: number): string {
   const handle = readDb(file)
   try {
     return (
       handle
         .prepare<[string], { content: string }>('SELECT content FROM node WHERE id = ?')
-        .get(fixture.scenes[0] ?? '')?.content ?? ''
+        .get(fixture.scenes[index] ?? '')?.content ?? ''
     )
   } finally {
     handle.close()
   }
 }
+
+const sceneOneOf = (file: string): string => sceneOf(file, 0)
 
 const para = (text: string): TiptapNodeT => ({
   type: 'doc',
@@ -242,7 +251,7 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
     expect(getSwitchoverRecord(db())?.rebuild).toBe('waiting')
   })
 
-  it('backs up again at Convert when the project changed after the safety step', async () => {
+  it('backs up and copies again at Convert when the project changed after the safety step', async () => {
     const memo = safety()
     saveDocument(db(), fixture.scenes[1] ?? '', para('Ilse counted the bells twice.'))
     calls = []
@@ -254,27 +263,164 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
     expect(calls).toEqual(['flush', 'backup', 'flush'])
     if (!outcome.ok) throw new Error(outcome.message)
     expect(outcome.backup).not.toBe(memo.backup)
-    expect(outcome.datedCopy).toBe(memo.datedCopy)
+    // The dated copy named as the way back holds the later edit too.
+    expect(outcome.datedCopy).not.toBe(memo.datedCopy)
+    expect(sceneOf(path.join(outcome.datedCopy ?? '', 'project.db'), 1)).toContain(
+      'Ilse counted the bells twice.'
+    )
+    expect(sceneOf(path.join(memo.datedCopy, 'project.db'), 1)).not.toContain('twice')
+    expect(driveCopies().sort()).toEqual(
+      [path.basename(memo.datedCopy), path.basename(outcome.datedCopy ?? '')].sort()
+    )
     manager.open(folder)
     expect(keptBackups().sort()).toEqual(
       [path.basename(memo.backup), path.basename(outcome.backup ?? '')].sort()
     )
     expect(getSwitchoverRecord(db())).toMatchObject({
       backup: outcome.backup,
-      datedCopy: memo.datedCopy
+      datedCopy: outcome.datedCopy
     })
+  })
+
+  it('makes everything again when the safety step runs after the project changed', () => {
+    const first = safety()
+    // The author left the flow, wrote on, and started it again in the same session.
+    saveDocument(db(), fixture.scenes[1] ?? '', para('Ilse rang the bell at noon.'))
+    calls = []
+    const second = safety(first)
+    expect(calls).toEqual(['flush', 'backup'])
+    expect(second.backup).not.toBe(first.backup)
+    expect(second.datedCopy).not.toBe(first.datedCopy)
+    expect(sceneOf(path.join(second.datedCopy, 'project.db'), 1)).toContain('rang the bell')
+    // Nothing written since: the same copies, nothing made.
+    calls = []
+    expect(safety(second)).toEqual(second)
+    expect(calls).toEqual([])
+  })
+
+  it('a write that lands while the originals are read is backed up and copied before the conversion', async () => {
+    const memo = safety()
+    calls = []
+    const late = deps({
+      current: () => {
+        // An autosave or a v1 job's result arriving during `prepareSwitchover`'s await.
+        saveDocument(db(), fixture.scenes[1] ?? '', para('A late autosave.'))
+        return manager.current()
+      }
+    })
+    const { outcome } = await runConvert(late, { consent: consent(), projectId: projectId() }, memo)
+    if (!outcome.ok) throw new Error(outcome.message)
+    expect(calls).toEqual(['flush', 'backup', 'flush'])
+    expect(outcome.backup).not.toBe(memo.backup)
+    expect(sceneOf(path.join(outcome.datedCopy ?? '', 'project.db'), 1)).toContain(
+      'A late autosave.'
+    )
+  })
+
+  it('forgets the memo when the project is opened again, even the same folder', async () => {
+    const memo = safety()
+    manager.close()
+    manager.open(folder)
+    await expect(
+      runConvert(deps(), { consent: consent(), projectId: projectId() }, memo)
+    ).rejects.toThrow('Make the backup and the dated copy first.')
+    calls = []
+    const again = safety(memo)
+    expect(calls).toEqual(['flush', 'backup'])
+    expect(again.datedCopy).not.toBe(memo.datedCopy)
+  })
+
+  it('a conversion that fails and is tried again makes no second backup or dated copy', async () => {
+    const memo = safety()
+    sqlite().exec(`CREATE TEMP TRIGGER plant AFTER INSERT ON record
+      BEGIN SELECT RAISE(ABORT, 'planted'); END`)
+    let kept: SafetyMemo | null
+    try {
+      const failed = await runConvert(deps(), { consent: consent(), projectId: projectId() }, memo)
+      expect(failed.outcome).toMatchObject({ ok: false, step: 'convert' })
+      kept = failed.memo
+    } finally {
+      sqlite().exec('DROP TRIGGER IF EXISTS temp.plant')
+    }
+    expect(kept).toMatchObject({ backup: memo.backup, datedCopy: memo.datedCopy })
+    calls = []
+    const { outcome } = await runConvert(
+      deps(),
+      { consent: consent(), projectId: projectId() },
+      kept
+    )
+    expect(outcome).toMatchObject({ ok: true, backup: memo.backup, datedCopy: memo.datedCopy })
+    // Only the close's copy back to Drive.
+    expect(calls).toEqual(['flush'])
+    expect(driveCopies()).toEqual([path.basename(memo.datedCopy)])
+    manager.open(folder)
+    expect(keptBackups()).toEqual([path.basename(memo.backup)])
+  })
+
+  it('a dated copy that fails twice, then works, leaves one kept backup', () => {
+    const copy = vi.spyOn(fs, 'copyFileSync')
+    copy
+      .mockImplementationOnce(() => {
+        throw new Error('ENOSPC: no space left on device')
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('ENOSPC: no space left on device')
+      })
+    const first = switchoverSafety(deps(), null)
+    expect(first.outcome).toMatchObject({ ok: false, step: 'datedCopy' })
+    expect(first.memo).toMatchObject({ datedCopy: null })
+    calls = []
+    const second = switchoverSafety(deps(), first.memo)
+    expect(second.outcome).toMatchObject({ ok: false, step: 'datedCopy' })
+    // The retry made only the dated copy: no flush, no second backup.
+    expect(calls).toEqual([])
+    const third = safety(second.memo)
+    expect(calls).toEqual([])
+    expect(third.backup).toBe(first.memo?.backup)
+    expect(keptBackups()).toHaveLength(1)
+    expect(driveCopies()).toEqual([path.basename(third.datedCopy)])
+  })
+
+  it('keeps no memo from a conversion that was running when the project changed', async () => {
+    let run: SwitchoverRun | null = null
+    let clearing = false
+    run = new SwitchoverRun(
+      deps({
+        current: () => {
+          // `manager.onChange` while the originals were read: the run is cleared.
+          if (clearing) run?.clear()
+          return manager.current()
+        }
+      })
+    )
+    expect(run.safety()).toMatchObject({ ok: true })
+    sqlite().exec(`CREATE TEMP TRIGGER plant AFTER INSERT ON record
+      BEGIN SELECT RAISE(ABORT, 'planted'); END`)
+    clearing = true
+    try {
+      expect(await run.convert({ consent: consent(), projectId: projectId() })).toMatchObject({
+        ok: false,
+        step: 'convert'
+      })
+    } finally {
+      sqlite().exec('DROP TRIGGER IF EXISTS temp.plant')
+    }
+    clearing = false
+    // The memo the conversion answered was dropped: the next safety step makes everything again.
+    calls = []
+    expect(run.safety()).toMatchObject({ ok: true })
+    expect(calls).toEqual(['flush', 'backup'])
   })
 
   describe('a step that fails changes nothing and says what to do next', () => {
     const safetyFails = (
       plant: () => void
-    ): { text: string; step: SwitchoverStep; bytes: Buffer } => {
+    ): { text: string; step: SwitchoverStep; bytes: Buffer; memo: SafetyMemo | null } => {
       const bytes = rollbackSnapshot(sqlite())
       plant()
       const { outcome, memo } = switchoverSafety(deps(), null)
-      expect(memo).toBeNull()
       if (outcome.ok) throw new Error('expected a failure')
-      return { text: expectFailure(outcome, outcome.step), step: outcome.step, bytes }
+      return { text: expectFailure(outcome, outcome.step), step: outcome.step, bytes, memo }
     }
 
     const unchanged = (bytes: Buffer): void => {
@@ -289,8 +435,9 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
         calls.push('flush')
         throw new Error('Could not copy the project to Google Drive: EACCES: permission denied')
       })
-      const { text, step, bytes } = safetyFails(() => undefined)
+      const { text, step, bytes, memo } = safetyFails(() => undefined)
       expect(step).toBe('flush')
+      expect(memo).toBeNull()
       expect(text).toBe(
         `Could not copy the project to Google Drive first: EACCES: permission denied. ${SWITCHOVER_NOTHING_CHANGED} | Check that Google Drive is running and signed in, then try again.`
       )
@@ -303,8 +450,11 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
     it('backup: the backup folder cannot be made, and no dated copy follows', () => {
       const blocked = path.join(tmp, 'a-file')
       fs.writeFileSync(blocked, 'not a folder')
-      const { text, step, bytes } = safetyFails(() => backups.setFolder(path.join(blocked, 'b')))
+      const { text, step, bytes, memo } = safetyFails(() =>
+        backups.setFolder(path.join(blocked, 'b'))
+      )
       expect(step).toBe('backup')
+      expect(memo).toBeNull()
       expect(text).toMatch(/^Could not make the backup: .+\. Nothing was changed/)
       expect(text).toContain(
         '| Choose another backup folder in Settings › Backups, then try again.'
@@ -315,13 +465,16 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
     })
 
     it('dated copy: Drive is full half-way through, and the half-made copy is removed', () => {
-      const { text, step, bytes } = safetyFails(() => {
+      const { text, step, bytes, memo } = safetyFails(() => {
         vi.spyOn(fs, 'copyFileSync').mockImplementationOnce(() => {
           throw new Error('ENOSPC: no space left on device')
         })
       })
       expect(step).toBe('datedCopy')
+      // The backup is remembered, so *Try again* makes only the dated copy.
+      expect(memo).toMatchObject({ datedCopy: null })
       const [kept] = keptBackups()
+      expect(memo?.backup.endsWith(kept ?? '?')).toBe(true)
       expect(text).toContain(
         'Could not save the dated copy beside the project: ENOSPC: no space left on device. The backup made a moment ago is kept: '
       )
@@ -332,7 +485,7 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
     })
 
     const convertFails = async (
-      run: (memo: SafetyMemo) => Promise<SwitchoverOutcome>
+      run: (memo: Safe) => Promise<SwitchoverOutcome>
     ): Promise<{ text: string; step: SwitchoverStep }> => {
       const memo = safety()
       const bytes = rollbackSnapshot(sqlite())
@@ -356,6 +509,7 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
     })
 
     it('project: the open project changed while the originals were read', async () => {
+      let handed: SafetyMemo | null | undefined
       const { step } = await convertFails(async (memo) => {
         const moved = deps({
           current: () => {
@@ -363,10 +517,13 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
             return info === null ? null : { ...info }
           }
         })
-        return (await runConvert(moved, { consent: consent(), projectId: projectId() }, memo))
-          .outcome
+        const ran = await runConvert(moved, { consent: consent(), projectId: projectId() }, memo)
+        handed = ran.memo
+        return ran.outcome
       })
       expect(step).toBe('project')
+      // The memo belonged to the session that left: it is never handed back.
+      expect(handed).toBeNull()
     })
 
     it('convert: a fault in the transaction undoes it all', async () => {
@@ -448,18 +605,22 @@ function folderHash(dir: string): string {
 }
 
 describe('a test copy (decision SW-D4)', () => {
-  it('runs without a safety step and leaves the original’s bytes as they were', async () => {
-    manager.close()
-    const before = folderHash(folder)
-    // The copy is made from the original's bytes, as the handler's snapshot of its connection.
+  /** A test copy made from the original's bytes (as the handler's snapshot of its connection). */
+  function trialCopy(): string {
     const source = readDb(path.join(folder, 'project.db'))
-    let copy: string
     try {
-      copy = createTrialCopy({ folder, sqlite: source, name: 'Harbour Book' }, new Date(clock))
+      return createTrialCopy({ folder, sqlite: source, name: 'Harbour Book' }, new Date(clock))
     } finally {
       source.close()
     }
+  }
+
+  it('runs without a safety step and leaves the original’s bytes as they were', async () => {
+    manager.close()
+    const before = folderHash(folder)
+    const copy = trialCopy()
     manager.open(copy)
+    expect(switchoverTrialOf(db())?.prose).toMatch(/^[0-9a-f]{64}$/)
     expect(() => switchoverSafety(deps(), null)).toThrow(/A test copy needs no backup/)
     calls = []
     const { outcome } = await runConvert(
@@ -483,5 +644,34 @@ describe('a test copy (decision SW-D4)', () => {
       rebuild: 'waiting'
     })
     expect(sceneOneOf(path.join(folder, 'project.db'))).toContain('inlineTag')
+  })
+
+  it('keeps a backup of a copy the author has written in, and no dated copy', async () => {
+    manager.close()
+    const before = folderHash(folder)
+    const copy = trialCopy()
+    manager.open(copy)
+    // The author closed the dialog in the copy and wrote on: the original lacks this.
+    saveDocument(db(), fixture.scenes[1] ?? '', para('Written only in the copy.'))
+    expect(() => switchoverSafety(deps(), null)).toThrow(/A test copy needs no backup/)
+    calls = []
+    const { outcome } = await runConvert(
+      deps(),
+      { consent: consent(), projectId: projectId() },
+      null
+    )
+    if (!outcome.ok) throw new Error(outcome.message)
+    expect(calls).toEqual(['flush', 'backup', 'flush'])
+    expect(outcome).toMatchObject({ trial: true, datedCopy: null })
+    expect(outcome.backup).toMatch(/before story memory .+\.zip$/)
+    expect(fs.existsSync(outcome.backup ?? '')).toBe(true)
+    // No "(before story memory …)" folder beside the copy; the original is untouched.
+    expect(driveCopies()).toEqual([path.basename(copy)])
+    expect(folderHash(folder)).toBe(before)
+    expect(settingOf(path.join(copy, 'project.db'), SWITCHOVER_RECORD_KEY)).toMatchObject({
+      trial: true,
+      backup: outcome.backup,
+      datedCopy: null
+    })
   })
 })

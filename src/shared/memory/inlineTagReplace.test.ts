@@ -6,6 +6,7 @@ import {
   containsInlineTag,
   inlineTagSamples,
   inlineTagTokens,
+  inlineTagWords,
   replaceInlineTags,
   tagNameAsWords
 } from './inlineTagReplace'
@@ -19,6 +20,20 @@ const token = (id: string, name: string, marks?: TiptapNodeT['marks']): TiptapNo
 })
 const paragraph = (...content: TiptapNodeT[]): TiptapNodeT => ({ type: 'paragraph', content })
 const doc = (...content: TiptapNodeT[]): TiptapNodeT => ({ type: 'doc', content })
+
+describe('inlineTagWords (F-16.31: one rule for the rewrite and the check)', () => {
+  it('takes the trimmed consented words, else the name as words, else nothing', () => {
+    const words = new Map([
+      ['t-1', '  Mara Vell '],
+      ['t-2', '   ']
+    ])
+    expect(inlineTagWords(token('t-1', 'mara'), words)).toBe('Mara Vell')
+    expect(inlineTagWords(token('t-2', 'the--old-mill'), words)).toBe('the old mill')
+    expect(inlineTagWords(token('t-3', 'harbour'), words)).toBe('harbour')
+    expect(inlineTagWords({ type: INLINE_TAG_NODE_TYPE, attrs: { name: 'no-id' } }, words)).toBe('')
+    expect(inlineTagWords(text('plain'), words)).toBe('')
+  })
+})
 
 describe('replaceInlineTags (F-16.15)', () => {
   it('turns each token into its replacement and joins the text around it', () => {

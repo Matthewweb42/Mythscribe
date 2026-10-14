@@ -5,6 +5,8 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { docToText } from '@shared/docText'
 import { dismissedKey } from '@shared/memory/dismissed'
+import { INLINE_TAG_NODE_TYPE } from '@shared/inlineTags'
+import { containsInlineTag, replaceInlineTags } from '@shared/memory/inlineTagReplace'
 import { checkMemoryInvariants } from '@shared/memory/invariants'
 import { pageTextBlocks } from '@shared/memory/pageMarks'
 import type { SwitchoverConsent } from '@shared/memory/switchover'
@@ -23,6 +25,7 @@ import {
   snapshotText
 } from '../../db/schema'
 import { rollbackSnapshot } from '../../db/snapshot'
+import { AppError } from '../../ipc/errors'
 import type { ProjectSession } from '../../project/projectStore'
 import { getStoryMemory } from '../../project/settingsStore'
 import { researchRootId } from '../../research/researchTree'
@@ -31,6 +34,8 @@ import { getRecord, invariantAliases, listRecords } from '../recordStore'
 import { ALREADY_SWITCHED, convertSwitchover, prepareSwitchover } from './convert'
 import { buildFixtureV1, type FixtureV1 } from './fixtureV1'
 import { inlineTagReplacements } from './plan'
+import { checkConverted, takeConvertBefore, textWithTagWords } from './checkConverted'
+import { buildSwitchoverModel } from './model'
 import { getSwitchoverRecord, markRebuildStarted } from './record'
 
 let tmp: string
@@ -438,6 +443,13 @@ describe('the switch-over record and the check before commit (F-16.31, plan Swit
       message: /the name “oren hale” belongs to more than one record/
     },
     {
+      name: 'a record page that no longer parses',
+      trigger: () => `CREATE TEMP TRIGGER plant AFTER INSERT ON record
+        WHEN NEW.pinned IS NOT NULL
+        BEGIN UPDATE record SET pinned = '{"type":' WHERE id = NEW.id; END`,
+      message: /the Pinned page of “.+” would not open/
+    },
+    {
       name: 'a record without a name',
       trigger: () => `CREATE TEMP TRIGGER plant AFTER INSERT ON alias
         WHEN NEW.is_main = 1 AND NEW.text = 'Silver Coin'
@@ -461,4 +473,87 @@ describe('the switch-over record and the check before commit (F-16.31, plan Swit
       expect(rollbackSnapshot(sqlite).equals(bytes)).toBe(true)
     })
   }
+})
+
+describe('the check reads the expected text from the original, not the rewrite (Switch-over slice 1 review)', () => {
+  const tokenText = (): ReadonlyMap<string, string> =>
+    buildSwitchoverModel(db(), {
+      replacements: new Map(consent().replacements.map((row) => [row.key, row.text]))
+    }).tokenText
+
+  it('reads each token as its words, with no tree rebuilt', () => {
+    const doc: TiptapNodeT = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'She met ' },
+            {
+              type: INLINE_TAG_NODE_TYPE,
+              attrs: { id: 't1', name: 'tomas-vale' },
+              marks: [{ type: 'bold' }]
+            },
+            { type: 'text', text: ' at dusk.', marks: [{ type: 'italic' }] }
+          ]
+        },
+        {
+          type: 'paragraph',
+          content: [
+            { type: INLINE_TAG_NODE_TYPE, attrs: { id: 't2', name: 'the-old--mill' } },
+            { type: 'text', text: ' burned' },
+            { type: INLINE_TAG_NODE_TYPE, attrs: { name: 'no-id' } }
+          ]
+        }
+      ]
+    }
+    const words = new Map([['t1', ' Tomas ']])
+    expect(textWithTagWords(doc, words)).toBe('She met Tomas at dusk.\nthe old mill burned')
+    expect(textWithTagWords(doc, words)).toBe(docToText(replaceInlineTags(doc, words).doc))
+  })
+
+  it('agrees with a correct rewrite on every document of the fixture, so it never refuses one', () => {
+    const words = tokenText()
+    const docs: TiptapNodeT[] = []
+    for (const row of db().select().from(node).all()) {
+      for (const stored of [row.content, row.notes]) {
+        const doc = documentJson({ content: stored })
+        if (doc !== null) docs.push(doc)
+      }
+    }
+    for (const row of db().select().from(draftText).all()) {
+      const doc = documentJson({ content: row.content })
+      if (doc !== null) docs.push(doc)
+    }
+    expect(docs.filter(containsInlineTag).length).toBeGreaterThan(2)
+    for (const doc of docs) {
+      expect(textWithTagWords(doc, words)).toBe(docToText(replaceInlineTags(doc, words).doc))
+    }
+  })
+
+  it('refuses a rewrite that loses the text after a token', () => {
+    const words = tokenText()
+    const before = takeConvertBefore(db(), words)
+    const scene = fixture.scenes[0] ?? ''
+    const doc = documentJson({
+      content: db().select().from(node).where(eq(node.id, scene)).get()?.content ?? null
+    })
+    if (doc === null) throw new Error('scene 1 has no text')
+    const rewritten = JSON.stringify(replaceInlineTags(doc, words).doc)
+    expect(rewritten).toContain('with Tomas at dusk')
+    session.connection.sqlite
+      .prepare('UPDATE node SET content = ? WHERE id = ?')
+      .run(rewritten.replace('with Tomas at dusk', 'with Tomas'), scene)
+    let problems: unknown = null
+    try {
+      checkConverted(db(), before)
+    } catch (err) {
+      if (!(err instanceof AppError)) throw err
+      const details = err.details
+      if (typeof details === 'object' && details !== null && 'problems' in details) {
+        problems = details.problems
+      }
+    }
+    expect(problems).toEqual(expect.arrayContaining(['“Scene 1” would not read as it did']))
+  })
 })

@@ -14,14 +14,22 @@ import { TwinRule } from './twinGate'
 /**
  * The `settings` row that marks a project as a switch-over trial copy (*Try it on a copy first*).
  * A test copy skips the safety step (its original is its safety, decision SW-D4) and its record
- * says `trial`; otherwise it runs as the project itself does.
+ * says `trial`; otherwise it runs as the project itself does. Once the author has written in the
+ * copy (its prose no longer matches `prose`), the original no longer holds that writing, so the
+ * conversion keeps a backup of the copy first (no dated copy; review of Switch-over slice 1).
  */
 export const SWITCHOVER_TRIAL_KEY = 'switchoverTrial'
 
 export const SwitchoverTrial = z.object({
   /** The folder the copy was made from. */
   source: z.string(),
-  createdAt: z.string()
+  createdAt: z.string(),
+  /**
+   * A digest of the copy's prose as it was made (every node's content and notes, every draft's
+   * text: what the conversion rewrites). Absent on a copy made before 2026-10-14, which therefore
+   * always gets its backup.
+   */
+  prose: z.string().optional()
 })
 export type SwitchoverTrial = z.infer<typeof SwitchoverTrial>
 

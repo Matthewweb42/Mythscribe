@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { CLOUD_PROVIDER_LABEL } from '@shared/cloudSync'
 import type { ProjectInfo } from '@shared/ipc/contract'
@@ -13,8 +14,13 @@ import { AppError } from '../../ipc/errors'
 import type { ProjectSession } from '../../project/projectStore'
 import { getStoryMemory } from '../../project/settingsStore'
 import { totalChanges } from '../../project/workingCopy'
-import { ALREADY_SWITCHED, convertSwitchover, prepareSwitchover } from './convert'
-import { saveSafetyCopy, switchoverTrialOf } from './trial'
+import {
+  ALREADY_SWITCHED,
+  convertSwitchover,
+  prepareSwitchover,
+  type PreparedSwitchover
+} from './convert'
+import { saveSafetyCopy, switchoverTrialOf, trialWrittenIn } from './trial'
 
 /**
  * The switch-over's run on the open project (F-16.31 part A, plan `Switchover.md` §1.2): the
@@ -22,8 +28,10 @@ import { saveSafetyCopy, switchoverTrialOf } from './trial'
  * copy beside the project, so in Drive for a Drive project), then the conversion with its own
  * checks. Every step that fails answers a `SwitchoverFailure` naming it, with the project still
  * v1 and untouched; nothing here throws for those steps. A test copy (`switchoverTrial`) skips the
- * safety step: its original is never written, so it is the copy's safety (decision SW-D4).
- * `handlers.ts` only registers the channels; `SwitchoverRun` holds the safety memo between them.
+ * safety step: its original is never written, so it is the copy's safety (decision SW-D4), unless
+ * the author has written in the copy since it was made (`trialWrittenIn`), when it gets a kept
+ * backup (no dated copy). `handlers.ts` only registers the channels; `SwitchoverRun` holds the
+ * safety memo between them.
  */
 
 /** What the run needs of main. */
@@ -40,14 +48,17 @@ export interface SwitchoverRunDeps {
 }
 
 /**
- * What the safety step made for one project, kept until the project closes or changes: a second
- * safety call answers it (no second dated copy), and the conversion re-flushes and backs up again
- * only when the project changed since (`changes`, SQLite's `total_changes()`).
+ * What the safety step made of one open session, at one state of it: reused only while it is that
+ * session (`session`, so a reopen of the same folder never matches) and nothing has been written
+ * through its connection since (`changes`, SQLite's `total_changes()`, which only grows) and the
+ * files are still there. Otherwise flush, backup and dated copy run again (review of Switch-over
+ * slice 1). `datedCopy` is null while the dated copy has failed (a retry then reuses the backup and
+ * makes only the dated copy) and on a test copy, which gets none.
  */
 export interface SafetyMemo {
-  projectId: string
+  session: ProjectSession
   backup: string
-  datedCopy: string
+  datedCopy: string | null
   changes: number
 }
 
@@ -94,11 +105,78 @@ function keptBackup(deps: SwitchoverRunDeps): { file: string } | SwitchoverFailu
   }
 }
 
+/** A memo that is still this session's state: nothing written since, the backup still there. */
+function stillCurrent(session: ProjectSession, memo: SafetyMemo | null): SafetyMemo | null {
+  if (memo?.session !== session) return null
+  if (totalChanges(session.connection.sqlite) !== memo.changes) return null
+  return fs.existsSync(memo.backup) ? memo : null
+}
+
+type Secured =
+  | { ok: true; memo: SafetyMemo }
+  | { ok: false; failure: SwitchoverFailure; memo: SafetyMemo | null }
+
+/**
+ * The kept backup of the project as it reads now (steps `flush`, `backup`): the memo's when it is
+ * still current, else the working copy flushed and a new kept backup. Synchronous, so nothing can
+ * write between it and what follows. On a failure, the memo still worth keeping.
+ */
+function secureBackup(
+  deps: SwitchoverRunDeps,
+  session: ProjectSession,
+  memo: SafetyMemo | null
+): Secured {
+  const current = stillCurrent(session, memo)
+  if (current !== null) return { ok: true, memo: current }
+  const flushed = flush(session)
+  if (flushed !== null) return { ok: false, failure: flushed, memo: null }
+  const backup = keptBackup(deps)
+  if ('ok' in backup) return { ok: false, failure: backup, memo: null }
+  const changes = totalChanges(session.connection.sqlite)
+  return { ok: true, memo: { session, backup: backup.file, datedCopy: null, changes } }
+}
+
+/**
+ * The dated copy beside the project (step `datedCopy`) for a memo `secureBackup` has just answered:
+ * its own when it has one still there, else a new one. A failure keeps the memo with its backup, so
+ * *Try again* makes only the dated copy.
+ */
+function secureDatedCopy(
+  deps: SwitchoverRunDeps,
+  session: ProjectSession,
+  memo: SafetyMemo
+):
+  | { ok: true; memo: SafetyMemo; datedCopy: string }
+  | { ok: false; failure: SwitchoverFailure; memo: SafetyMemo } {
+  if (memo.datedCopy !== null && fs.existsSync(memo.datedCopy)) {
+    return { ok: true, memo, datedCopy: memo.datedCopy }
+  }
+  try {
+    const datedCopy = saveSafetyCopy(
+      { folder: session.folder, sqlite: session.connection.sqlite },
+      deps.now()
+    )
+    return { ok: true, memo: { ...memo, datedCopy }, datedCopy }
+  } catch (err) {
+    return {
+      ok: false,
+      failure: failure(
+        'datedCopy',
+        `Could not save the dated copy beside the project: ${causeOf(err)}. The backup made a moment ago is kept: ${memo.backup}.`,
+        `Check there is room in ${path.dirname(session.folder)}, then try again.`
+      ),
+      memo: { ...memo, datedCopy: null }
+    }
+  }
+}
+
 /**
  * The safety step on the project itself, before the dry run (decision SW-D2): flush, kept backup,
  * dated copy, in that order; a failure stops there. VALIDATION on a test copy (it needs none) or
- * a project already on v2. Answers the outcome and the memo to keep (the given one when it is
- * this project's: nothing is made twice).
+ * a project already on v2. A second call answers what the first made while nothing has been
+ * written since (the author pressed Back to the intro and on again); after any write, or in
+ * another session, it makes everything again, so the copies are always the project as it is now.
+ * Answers the outcome and the memo to keep.
  */
 export function switchoverSafety(
   deps: SwitchoverRunDeps,
@@ -113,45 +191,25 @@ export function switchoverSafety(
       'A test copy needs no backup of its own: the project it was made from is not changed.'
     )
   }
-  if (memo !== null && memo.projectId === session.info.id) {
-    return { outcome: { ok: true, backup: memo.backup, datedCopy: memo.datedCopy }, memo }
+  const backedUp = secureBackup(deps, session, memo)
+  if (!backedUp.ok) return { outcome: backedUp.failure, memo: backedUp.memo }
+  const copied = secureDatedCopy(deps, session, backedUp.memo)
+  if (!copied.ok) return { outcome: copied.failure, memo: copied.memo }
+  return {
+    outcome: { ok: true, backup: copied.memo.backup, datedCopy: copied.datedCopy },
+    memo: copied.memo
   }
-  const flushed = flush(session)
-  if (flushed !== null) return { outcome: flushed, memo: null }
-  const backup = keptBackup(deps)
-  if ('ok' in backup) return { outcome: backup, memo: null }
-  let datedCopy: string
-  try {
-    datedCopy = saveSafetyCopy(
-      { folder: session.folder, sqlite: session.connection.sqlite },
-      deps.now()
-    )
-  } catch (err) {
-    return {
-      outcome: failure(
-        'datedCopy',
-        `Could not save the dated copy beside the project: ${causeOf(err)}. The backup made a moment ago is kept: ${backup.file}.`,
-        `Check there is room in ${path.dirname(session.folder)}, then try again.`
-      ),
-      memo: null
-    }
-  }
-  const next: SafetyMemo = {
-    projectId: session.info.id,
-    backup: backup.file,
-    datedCopy,
-    changes: totalChanges(session.connection.sqlite)
-  }
-  return { outcome: { ok: true, backup: backup.file, datedCopy }, memo: next }
 }
 
 /**
  * The conversion (`switchover:convert`): the open project must be the one the dialog was for and
- * still v1 (step `project`); on the project itself, anything changed since the safety step is
- * flushed and backed up again (the dated copy stays the one made before the dry run, SW-D3);
- * the originals are read; the project is checked again after that await; then the conversion in
+ * still v1 (step `project`); the originals are read; the project is checked again after that
+ * await; then, with nothing async left before the transaction, the safety copies are made current
+ * (on the project itself: anything written since the safety step is flushed, backed up and copied
+ * beside the project again, so both copies are the project exactly as it was before the
+ * conversion; a test copy the author has written in gets a kept backup); then the conversion in
  * one transaction, which checks itself (step `convert`); then the project closes so the renderer
- * reopens it on v2. VALIDATION only when the safety step never ran for this project, which the
+ * reopens it on v2. VALIDATION only when the safety step never ran for this session, which the
  * dialog never allows.
  */
 export async function runConvert(
@@ -178,24 +236,12 @@ export async function runConvert(
       memo
     }
   }
-  const trial = switchoverTrialOf(db) !== null
-  let safety: SafetyMemo | null = null
-  if (!trial) {
-    if (memo?.projectId !== session.info.id) {
-      throw new AppError('VALIDATION', 'Make the backup and the dated copy first.')
-    }
-    safety = memo
-    if (totalChanges(session.connection.sqlite) !== memo.changes) {
-      const flushed = flush(session)
-      if (flushed !== null) return { outcome: flushed, memo }
-      const backup = keptBackup(deps)
-      if ('ok' in backup) return { outcome: backup, memo }
-      safety = { ...memo, backup: backup.file, changes: totalChanges(session.connection.sqlite) }
-    }
+  const trialMarker = switchoverTrialOf(db)
+  const trial = trialMarker !== null
+  if (!trial && memo?.session !== session) {
+    throw new AppError('VALIDATION', 'Make the backup and the dated copy first.')
   }
-  const backup = safety?.backup ?? null
-  const datedCopy = safety?.datedCopy ?? null
-  const convertFailed = (err: unknown): SwitchoverFailure =>
+  const convertFailed = (err: unknown, backup: string | null): SwitchoverFailure =>
     failure(
       'convert',
       `The conversion stopped and undid everything: ${causeOf(err)}.`,
@@ -203,25 +249,51 @@ export async function runConvert(
         ? 'Try again. If it stops again, please send this message to support; the project this copy was made from is not changed.'
         : `Try again. If it stops again, your backup is ${backup}; please send this message to support.`
     )
-  let prepared: Awaited<ReturnType<typeof prepareSwitchover>>
+  let prepared: PreparedSwitchover
   try {
     prepared = await prepareSwitchover(db, session.folder)
   } catch (err) {
-    return { outcome: convertFailed(err), memo: safety }
+    if (deps.current() !== session.info) {
+      return {
+        outcome: failure('project', 'The open project changed during the switch-over.', AGAIN),
+        memo: null
+      }
+    }
+    return { outcome: convertFailed(err, memo?.backup ?? null), memo }
   }
   if (deps.current() !== session.info) {
+    // The memo belongs to a session that is gone: never handed back (a reopen gets a new one).
     return {
       outcome: failure('project', 'The open project changed during the switch-over.', AGAIN),
-      memo: safety
+      memo: null
     }
   }
+  // From here to the transaction everything is synchronous: nothing can write in between.
+  let safety: SafetyMemo | null = null
+  let datedCopy: string | null = null
+  if (!trial || trialWrittenIn(session.connection.sqlite, trialMarker)) {
+    const backedUp = secureBackup(deps, session, memo)
+    if (!backedUp.ok) return { outcome: backedUp.failure, memo: backedUp.memo }
+    safety = backedUp.memo
+    if (!trial) {
+      const copied = secureDatedCopy(deps, session, backedUp.memo)
+      if (!copied.ok) return { outcome: copied.failure, memo: copied.memo }
+      safety = copied.memo
+      datedCopy = copied.datedCopy
+    }
+  }
+  const backup = safety?.backup ?? null
   let counts: ReturnType<typeof convertSwitchover>
   try {
     counts = convertSwitchover(db, session.info.format, prepared, input.consent, deps.now(), {
       record: { trial, backup, datedCopy }
     })
   } catch (err) {
-    return { outcome: convertFailed(err), memo: safety }
+    // Rolled back: the project reads as it did when the copies were made, though SQLite counted
+    // the undone rows, so the memo takes the count as it is now and *Try again* makes no new copy.
+    const after =
+      safety === null ? null : { ...safety, changes: totalChanges(session.connection.sqlite) }
+    return { outcome: convertFailed(err, backup), memo: after }
   }
   const folder = session.folder
   // The project reopens on v2: main closes it (a Drive project is copied back) and the renderer
@@ -232,10 +304,12 @@ export async function runConvert(
 
 /**
  * The run's state between channels: the safety memo, dropped whenever the open project changes
- * (`manager.onChange` → `clear`).
+ * (`manager.onChange` → `clear`). A conversion that was running when `clear` came answers its
+ * outcome but leaves no memo behind.
  */
 export class SwitchoverRun {
   private memo: SafetyMemo | null = null
+  private generation = 0
 
   constructor(private readonly deps: SwitchoverRunDeps) {}
 
@@ -246,12 +320,14 @@ export class SwitchoverRun {
   }
 
   async convert(input: SwitchoverConvertInput): Promise<SwitchoverOutcome> {
+    const started = this.generation
     const { outcome, memo } = await runConvert(this.deps, input, this.memo)
-    this.memo = memo
+    if (started === this.generation) this.memo = memo
     return outcome
   }
 
   clear(): void {
     this.memo = null
+    this.generation += 1
   }
 }

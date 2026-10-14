@@ -10585,6 +10585,12 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
       format: 'novel',
       directory: tmp
     })
+    // The new project's v1 index jobs finish first: a write after the safety step would make the
+    // second call below copy everything again (it reuses only a memo of the project as it is).
+    const sqlite = manager.require().connection.sqlite
+    await vi.waitFor(() =>
+      expect(sqlite.prepare('SELECT count(*) AS n FROM index_job').get()).toEqual({ n: 0 })
+    )
     const safety = await invoke('switchover:safety', undefined)
     if (!safety.ok) throw new Error(safety.message)
     expect(fs.existsSync(safety.backup)).toBe(true)

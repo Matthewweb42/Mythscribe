@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -20,8 +20,9 @@ import type { TreeDb } from '../../tree/treeStore'
  * Test copies and the safety copy (F-16.15, decision P1-D12; F-16.31). A test copy (*Try it on a
  * copy first*) is a duplicate beside the project that carries the `switchoverTrial` row and a
  * project id and name of its own (its backups never mix with the original's); the switch-over runs
- * on it as on the project itself, minus the safety step (`run.ts`, decision SW-D4). The safety
- * copy is the dated copy the real run makes before its dry run.
+ * on it as on the project itself, minus the safety step (`run.ts`, decision SW-D4) unless the
+ * author has written in it since it was made (`trialWrittenIn`: then it gets a kept backup, no
+ * dated copy). The safety copy is the dated copy the real run makes before its dry run.
  */
 
 /** The project's trial marker, or null for a real project (or an unreadable row). */
@@ -34,6 +35,36 @@ export function switchoverTrialOf(db: TreeDb): SwitchoverTrial | null {
   } catch {
     return null
   }
+}
+
+/**
+ * A digest of the prose the conversion rewrites (every node's content and notes, every draft's
+ * text, in key order), read straight from `sqlite`: equal digests mean nobody has written in it.
+ */
+export function proseDigest(sqlite: Database.Database): string {
+  const hash = createHash('sha256')
+  const rows = sqlite
+    .prepare<[], { id: string; content: string | null; notes: string | null }>(
+      'SELECT id, content, notes FROM node ORDER BY id'
+    )
+    .iterate()
+  for (const row of rows) hash.update(JSON.stringify(row)).update('\u0000')
+  const drafts = sqlite
+    .prepare<[], { draftId: string; nodeId: string; content: string | null }>(
+      'SELECT draft_id AS draftId, node_id AS nodeId, content FROM draft_text ORDER BY draft_id, node_id'
+    )
+    .iterate()
+  for (const row of drafts) hash.update(JSON.stringify(row)).update('\u0001')
+  return hash.digest('hex')
+}
+
+/**
+ * Whether the author has written in a test copy since it was made (its prose no longer matches the
+ * marker's digest, or the marker predates the digest): then its original does not hold that writing
+ * and the conversion keeps a backup of the copy first.
+ */
+export function trialWrittenIn(sqlite: Database.Database, trial: SwitchoverTrial): boolean {
+  return trial.prose === undefined || proseDigest(sqlite) !== trial.prose
 }
 
 /** What a trial copy is made from: the open project's folder, its connection, and its name. */
@@ -81,8 +112,8 @@ export function saveSafetyCopy(source: Pick<TrialSource, 'folder' | 'sqlite'>, n
  * Makes the trial copy beside the project (`<Folder> (story memory test YYYY-MM-DD HHmm)`): the
  * project's database as its connection sees it now (a snapshot, so the original's files are only
  * read), with the folder's assets; then, in the copy only, a new project id, the name
- * `<Name> (story memory test …)` and the `switchoverTrial` row. Answers the copy's folder; on a
- * failure nothing is left behind.
+ * `<Name> (story memory test …)` and the `switchoverTrial` row with the copy's prose digest.
+ * Answers the copy's folder; on a failure nothing is left behind.
  */
 export function createTrialCopy(source: TrialSource, now: Date): string {
   const copy = snapshotCopy(
@@ -94,7 +125,11 @@ export function createTrialCopy(source: TrialSource, now: Date): string {
   try {
     const db = new Database(path.join(copy, 'project.db'))
     try {
-      const marker: SwitchoverTrial = { source: source.folder, createdAt: now.toISOString() }
+      const marker: SwitchoverTrial = {
+        source: source.folder,
+        createdAt: now.toISOString(),
+        prose: proseDigest(db)
+      }
       db.transaction(() => {
         db.prepare('UPDATE project SET id = ?, name = ?').run(
           randomUUID(),

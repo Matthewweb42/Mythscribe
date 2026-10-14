@@ -29,6 +29,22 @@ export function inlineTagTokenOf(node: TiptapNodeT): InlineTagToken | null {
   return { id, name: typeof name === 'string' ? name : '' }
 }
 
+/**
+ * The words an inline tag node becomes in the switch-over: the consented words by its stored id
+ * (`replacements`, trimmed), else its name with hyphens as spaces; a node that is not a well-formed
+ * token (no id) becomes nothing. One rule for the rewrite (`replaceInlineTags`) and for the
+ * conversion's own check, which walks the original document with it (F-16.31).
+ */
+export function inlineTagWords(
+  node: TiptapNodeT,
+  replacements: ReadonlyMap<string, string>
+): string {
+  const token = inlineTagTokenOf(node)
+  if (token === null) return ''
+  const chosen = (replacements.get(token.id) ?? '').trim()
+  return chosen !== '' ? chosen : tagNameAsWords(token.name)
+}
+
 /** Every token of a document in document order (one entry per occurrence). */
 export function inlineTagTokens(doc: TiptapNodeT): InlineTagToken[] {
   const found: InlineTagToken[] = []
@@ -153,12 +169,10 @@ export function replaceInlineTags(
     if (node.content === undefined) return node
     let changed = false
     const next = node.content.map((child): TiptapNodeT => {
-      const token = inlineTagTokenOf(child)
-      if (token !== null || child.type === INLINE_TAG_NODE_TYPE) {
+      if (child.type === INLINE_TAG_NODE_TYPE) {
         changed = true
         replaced += 1
-        const chosen = token === null ? '' : (replacements.get(token.id) ?? '').trim()
-        const text = chosen !== '' ? chosen : tagNameAsWords(token?.name ?? '')
+        const text = inlineTagWords(child, replacements)
         return child.marks === undefined || child.marks.length === 0
           ? { type: 'text', text }
           : { type: 'text', text, marks: child.marks }
