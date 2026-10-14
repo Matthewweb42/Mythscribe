@@ -11,6 +11,7 @@ import { DOMSerializer, type Schema } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import { AiOrigin } from './aiOrigin'
+import { ContradictionMarks } from './contradictionMarks'
 import { FindReplace } from './findReplace'
 import { GhostText } from './ghostText'
 import { InlineTag } from './InlineTag'
@@ -49,7 +50,8 @@ export interface EditorSchemaOptions {
   /**
    * Story memory v2 (F-16.4): the inline tag token and the tag range mark stay in the schema, so
    * stored documents load unchanged, but they are inert: no `#` suggestion, no bank colours, no
-   * range highlight or shortcut. The schema itself is the same either way.
+   * range highlight or shortcut. The schema itself is the same either way. A v2 manuscript
+   * document also gets the contradiction underlines (F-16.28), decorations only.
    */
   inertTags?: boolean
 }
@@ -298,6 +300,8 @@ export function buildExtensions({
       TagRange.configure({ onTagSelection: onTagSelection ?? null, inert: inertTags }),
       TrackedChanges
     )
+    // F-16.28: story memory v2's contradiction underlines, decorations only (never in the schema).
+    if (inertTags) extensions.push(ContradictionMarks.configure({ nodeId: inlineTagNodeId }))
   }
   if (onEscape) extensions.push(EscapeShortcut.configure({ onEscape }))
   return extensions

@@ -8,6 +8,8 @@ import type { NameQuestion } from '@shared/memory/nameQuestions'
 import type { MemoryNotice, SceneMemory } from '@shared/memory/views'
 import type { NamedInRow, NameMentionView } from '@shared/memory/nameScan'
 import { emptySceneDetails } from '@shared/memory/sceneDetails'
+import { defaultAiSettings } from '@shared/aiSettings'
+import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetAiStore } from '@renderer/features/ai/aiStore'
 import { resetDocumentStore, useDocumentStore } from '@renderer/features/editor/documentStore'
 import { resetSceneDetailStore } from '@renderer/features/editor/sceneDetailStore'
@@ -251,6 +253,7 @@ function resetAll(): void {
   resetDismissedStore()
   resetFiledConflictStore()
   resetAiStore()
+  resetAiSettingsStore()
   resetCategoryStore()
   resetLayoutStore()
   resetDocumentStore()
@@ -1167,6 +1170,46 @@ describe('Needs a look’s contradictions, loose ends and notices (F-16.27, F-16
     expect(useMemoryStore.getState().rebuildOpen).toBe('summary')
     fireEvent.click(within(needs).getByRole('button', { name: 'Check the book…' }))
     expect(useMemoryStore.getState().checkOpen).toBe('start')
+  })
+
+  it('asks once to show contradictions in the panel only, and opens This scene for a hover card’s Update my note (F-16.28)', async () => {
+    install({ 'memory:answerNotice': () => [] })
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
+    useMemoryStore.setState({
+      notices: [{ id: 'underlinePrecision', kind: 'underlinePrecision', counted: 20, notProblems: 8 }]
+    })
+    await open()
+    const needs = screen.getByRole('region', { name: 'Needs a look' })
+    expect(within(needs).getByTestId('reading-notice')).toHaveTextContent(
+      'Of the last 20 underlined contradictions, 8 were not problems. Show contradictions in the panel only?'
+    )
+    expect(within(needs).getByRole('button', { name: 'Keep underlines' })).toBeInTheDocument()
+    fireEvent.click(within(needs).getByRole('button', { name: 'Panel only' }))
+    await waitFor(() =>
+      expect(useAiSettingsStore.getState().settings?.reading.underlines).toBe('panel')
+    )
+    expect(sent('memory:answerNotice')).toEqual([{ id: 'underlinePrecision', action: 'panelOnly' }])
+    // On the Book tab, a hover card's Update my note brings This scene back.
+    fireEvent.click(screen.getByRole('tab', { name: 'Book' }))
+    expect(screen.getByRole('tab', { name: 'Book' })).toHaveAttribute('aria-selected', 'true')
+    act(() => {
+      useMemoryStore.setState({
+        noteEdit: {
+          findingId: 'f-6',
+          patch: {
+            findingId: 'f-6',
+            owner: { kind: 'record', id: 'r-orrin', name: 'Orrin' },
+            page: 'pinned',
+            index: 0,
+            before: 'Born: 1790',
+            after: 'Born: 1792',
+            sentence: 'Born: 1790',
+            value: '1792'
+          }
+        }
+      })
+    })
+    expect(screen.getByRole('tab', { name: 'This scene' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('says a contradiction’s or a loose end’s Not a problem in Dismissed', () => {

@@ -100,7 +100,9 @@ import {
 } from '../project/settingsStore'
 import { SAFETY_COPY_LABEL } from '@shared/memory/switchover'
 import { cardAnchorOf, revealIn, seedClaims } from '../memory/reading/claimFixture'
-import { findingRows } from '../memory/findings/findingStore'
+import { findingRows, setVerdicts } from '../memory/findings/findingStore'
+import { gateSentences, nextReadSet } from '@shared/memory/gate'
+import { nameScanShared } from '../memory/nameIndexer'
 import { recomputeFindings } from '../memory/findings/recompute'
 import { JUDGE_SENTINEL } from '../ai/prompts/judge.v1'
 import { dismiss } from '../memory/dismissedStore'
@@ -9386,6 +9388,62 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('answers a scene’s contradiction underlines in memory:scene and marks them shown (F-16.28)', async () => {
+    const scene = await openV2()
+    const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+    if (!('record' in made)) throw new Error('blocked')
+    const mara = made.record.id
+    const db = manager.require().connection.orm
+    await invoke('document:save', {
+      id: scene,
+      content: paragraphs("Mara's eyes were grey.", "Mara's eyes were brown.")
+    })
+    seedClaims(
+      db,
+      scene,
+      [
+        { recordId: mara, slot: 'eyes', value: 'grey', quote: "Mara's eyes were grey", para: 0 },
+        { recordId: mara, slot: 'eyes', value: 'brown', quote: "Mara's eyes were brown", para: 1 }
+      ],
+      new Date()
+    )
+    const current = gateSentences(["Mara's eyes were grey.", "Mara's eyes were brown."], {
+      caretPara: null,
+      names: nameScanShared(db).index
+    })
+    writeSceneRead(
+      db,
+      {
+        nodeId: scene,
+        draftId: activeDraftId(db),
+        entries: nextReadSet(null, current, 'all'),
+        full: true,
+        readingId: null
+      },
+      new Date()
+    )
+    recomputeFindings(db, new Date())
+    const [row] = findingRows(db, activeDraftId(db))
+    if (row === undefined) throw new Error('no finding')
+    setVerdicts(db, row.id, { ab: 'c', ba: 'c', why: null, costUsd: 0, now: new Date() })
+    // A same-scene pair: both quotes underlined, each with its side.
+    const memory = await invoke('memory:scene', { nodeId: scene })
+    expect(memory.underlines.map((each) => [each.side, each.para, each.quote])).toEqual([
+      ['a', 0, "Mara's eyes were grey"],
+      ['b', 1, "Mara's eyes were brown"]
+    ])
+    expect(await invoke('memory:underlinesShown', { findingIds: [row.id] })).toBeNull()
+    expect(findingRows(db, activeDraftId(db))[0]?.shownAt).not.toBeNull()
+    // In the panel only: none drawn; the finding is still listed.
+    const settings = await invoke('aiSettings:get', undefined)
+    await invoke('aiSettings:set', {
+      ...settings,
+      reading: { ...settings.reading, underlines: 'panel' }
+    })
+    expect((await invoke('memory:scene', { nodeId: scene })).underlines).toEqual([])
+    expect((await invoke('memory:findings', { nodeId: scene })).open).toHaveLength(1)
   })
 
   it('prices and runs Check the book, answers Not a problem and Update my note, and lists loose ends (F-16.29, F-16.30)', async () => {

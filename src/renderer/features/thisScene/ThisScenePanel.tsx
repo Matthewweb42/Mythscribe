@@ -144,6 +144,13 @@ export function ThisScenePanel({ sceneId }: { sceneId: string | null }): React.J
   const [tab, setTab] = useState<Tab>('scene')
   // F-16.22: "+ N more in Book" opens the Book tab at the who-knows-what grid.
   const [toGrid, setToGrid] = useState(false)
+  // F-16.28: *Update my note* from an underline's hover card opens its row in Needs a look.
+  const noteEdit = useMemoryStore((s) => s.noteEdit !== null)
+  const [sawNoteEdit, setSawNoteEdit] = useState(noteEdit)
+  if (noteEdit !== sawNoteEdit) {
+    setSawNoteEdit(noteEdit)
+    if (noteEdit && tab !== 'scene') setTab('scene')
+  }
   const openBook = (): void => {
     setToGrid(true)
     setTab('book')

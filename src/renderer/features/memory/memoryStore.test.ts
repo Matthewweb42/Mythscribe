@@ -2,6 +2,8 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Input } from '@shared/ipc/contract'
 import type { Dismissed } from '@shared/memory/dismissed'
+import { defaultAiSettings } from '@shared/aiSettings'
+import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetDismissedStore, useDismissedStore } from '@renderer/features/thisScene/dismissedStore'
@@ -118,6 +120,7 @@ beforeEach(() => {
       }
     },
     'memory:looseEndAction': () => tombstone('d-loose', 'notRight'),
+    'memory:answerNotice': () => [],
     'dismissed:undo': () => ({ restored: true })
   })
   useMemoryStore.getState().subscribe()
@@ -125,6 +128,7 @@ beforeEach(() => {
 afterEach(() => {
   resetMemoryStore()
   resetDismissedStore()
+  resetAiSettingsStore()
   setIpcClient(null)
 })
 
@@ -307,6 +311,45 @@ describe('useMemoryStore (F-16.18)', () => {
     expect(await useMemoryStore.getState().splitTopic('tq-1')).toBe('s-new')
     expect(await useMemoryStore.getState().topicNotRight('s-new')).toBe(true)
     expect(useDismissedStore.getState().items.map((row) => row.id)).toEqual(['d-gone', 'd-split'])
+  })
+})
+
+describe('useMemoryStore: contradiction underlines (F-16.28)', () => {
+  it('takes an answered finding’s underlines off every shown scene, and reads the shown scenes again when the findings move', async () => {
+    const release = useMemoryStore.getState().watchScene('sc-2')
+    await flush()
+    const underline = {
+      findingId: 'f-1',
+      side: 'b' as const,
+      para: 0,
+      quote: "Mara's eyes were brown",
+      finding: findingViewFixture('f-1')
+    }
+    const entry = useMemoryStore.getState().scenes['sc-2']
+    if (entry === undefined) throw new Error('not loaded')
+    useMemoryStore.setState({ scenes: { 'sc-2': { ...entry, underlines: [underline] } } })
+    await useMemoryStore.getState().findingAction({ findingId: 'f-1', action: 'notProblem' })
+    expect(useMemoryStore.getState().scenes['sc-2']?.underlines).toEqual([])
+    main.calls.length = 0
+    act(() => main.emit('memory:findingsChanged', { open: 1, unclear: 0, waiting: 0 }))
+    await flush()
+    expect(main.sent('memory:scene')).toEqual([{ nodeId: 'sc-2' }])
+    release()
+  })
+
+  it('Panel only on the precision question sets Settings’ Show contradictions', async () => {
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
+    expect(await useMemoryStore.getState().answerNotice('underlinePrecision', 'panelOnly')).toBe(
+      true
+    )
+    expect(main.sent('memory:answerNotice')).toEqual([
+      { id: 'underlinePrecision', action: 'panelOnly' }
+    ])
+    expect(useAiSettingsStore.getState().settings?.reading.underlines).toBe('panel')
+    // Keep underlines changes nothing.
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
+    await useMemoryStore.getState().answerNotice('underlinePrecision', 'keepUnderlines')
+    expect(useAiSettingsStore.getState().settings?.reading.underlines).toBe('text')
   })
 })
 

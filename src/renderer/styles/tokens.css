@@ -44,6 +44,11 @@
   --ms-status-idea: #c084fc;
   /* F-16.6, F-16.8: the Not canon mark of a page paragraph; it follows each theme's Idea colour. */
   --ms-not-canon: var(--ms-status-idea);
+  /*
+   * F-16.28: a contradiction underline, softer than the spelling squiggle; it follows each
+   * theme's warning colour, toned toward its subtle text.
+   */
+  --ms-contradiction: color-mix(in srgb, var(--ms-warning) 60%, var(--ms-fg-subtle));
   --ms-status-draft: #f5a524;
   --ms-status-revised: #60a5fa;
   --ms-status-final: #4ade80;

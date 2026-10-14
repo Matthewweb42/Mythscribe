@@ -390,6 +390,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'memory:timeline': 'read',
   // F-16.27: the contradictions found, only read.
   'memory:findings': 'read',
+  // F-16.28: which findings the editor drew (shown_at): derived bookkeeping, like view preferences.
+  'memory:underlinesShown': 'read',
   'memory:checkEstimate': 'read',
   'memory:checkBook': 'ai',
   'memory:checkReport': 'read',
@@ -812,6 +814,7 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'memory:threads': 'v2',
   'memory:timeline': 'v2',
   'memory:findings': 'v2',
+  'memory:underlinesShown': 'v2',
   'memory:checkEstimate': 'v2',
   'memory:checkBook': 'v2',
   'memory:checkReport': 'v2',

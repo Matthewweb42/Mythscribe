@@ -118,6 +118,14 @@ import { caretToEnd, clickIntoEditor } from './support'
  * finding back with no request; Update my note proposes "Born: 1792", saves it on the Pinned page
  * and closes the C6 finding with no request. No request carries an absence.
  *
+ * P4 slice 5 (F-16.28), in a new project: Mara's eyes grey in "Grey" (1.1) and brown in "Brown"
+ * (1.2), read and judged: each scene's quote is underlined (a decoration only: `document:get`
+ * holds none); hovering shows "1.1: “Mara's eyes were grey”" with Go there, This one's right and
+ * Not a problem; a click into the paragraph hides it and leaving the editor shows it again; This
+ * one's right on brown takes both underlines away and adds one Dismissed row, whose Undo brings
+ * both back with nothing sent; Settings' "in the panel only" draws none while Needs a look still
+ * lists the finding.
+ *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
  * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
@@ -3451,6 +3459,132 @@ test('story memory v2: Needs a look and Check the book in the panel (P4 slice 4)
       )
     )
   ).toBe(false)
+})
+
+test('story memory v2: contradiction underlines (P4 slice 5)', async () => {
+  // A new project: Mara Vell's eyes grey in "Grey" (1.1), brown in "Brown" (1.2), both read and
+  // judged a contradiction both ways.
+  const first = await newV2Project('Underline Novel')
+  await invoke('tree:rename', { id: first.id, title: 'Grey' })
+  const made = await invoke<{ record?: { id: string } }>('record:create', {
+    name: 'Mara Vell',
+    categoryId: 'character',
+    aliases: [{ text: 'Mara' }],
+    force: true
+  })
+  expect(made.record?.id).toBeDefined()
+  const write = async (id: string, text: string): Promise<void> => {
+    await invoke('document:save', {
+      id,
+      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
+    })
+  }
+  await write(first.id, "Mara's eyes were grey.")
+  expect(
+    await invoke('memory:readNow', { nodeId: first.id, requestId: 'e2e-p4s5-1' })
+  ).toMatchObject({ ok: true, read: true })
+  const brown = await invoke<TreeNode>('tree:create', {
+    parentId: first.parentId,
+    kind: 'document',
+    hierarchyLevel: 'scene',
+    title: 'Brown'
+  })
+  await write(brown.id, "Mara's eyes were brown.")
+  expect(
+    await invoke('memory:readNow', { nodeId: brown.id, requestId: 'e2e-p4s5-2' })
+  ).toMatchObject({ ok: true, read: true })
+  const findings = async (): Promise<{ rule: string }[]> =>
+    (await invoke<{ open: { rule: string }[] }>('memory:findings', { nodeId: null })).open
+  await expect
+    .poll(async () => (await findings()).map((each) => each.rule), { timeout: 30_000 })
+    .toEqual(['C1'])
+
+  await reopenProject('Underline Novel')
+  await showSection('Manuscript')
+  const tree = page.getByRole('tree', { name: 'Document tree' })
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  const marks = editor.locator('.ms-contradiction')
+
+  // Brown (1.2): its quote underlined; hovering shows the other quote and the three answers.
+  await tree.getByRole('treeitem', { name: 'Brown' }).first().click()
+  await expect(marks).toHaveCount(1, { timeout: 15_000 })
+  await expect(marks).toHaveText("Mara's eyes were brown")
+  await marks.hover()
+  const card = page.getByTestId('contradiction-card')
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('1.1: “Mara\'s eyes were grey”')
+  await expect(card.getByRole('button', { name: 'Go there' })).toBeVisible()
+  await expect(card.getByRole('button', { name: "This one's right: brown (1.2)" })).toBeVisible()
+  await expect(card.getByRole('button', { name: 'Not a problem' })).toBeVisible()
+
+  // Never at the caret: clicking into the paragraph hides it; leaving the editor shows it again.
+  await marks.click()
+  await expect(marks).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(card).toHaveCount(0)
+  await tree.getByRole('treeitem', { name: 'Brown' }).first().click()
+  await expect(marks).toHaveCount(1)
+
+  // Grey (1.1): its own quote underlined; the stored document holds no underline.
+  await tree.getByRole('treeitem', { name: 'Grey' }).first().click()
+  await expect(marks).toHaveText("Mara's eyes were grey", { timeout: 15_000 })
+  for (const id of [first.id, brown.id]) {
+    const stored = await invoke<{ content: TiptapNodeT | null }>('document:get', { id })
+    expect(JSON.stringify(stored.content)).not.toMatch(/contradiction|data-finding/u)
+  }
+
+  // This one's right on brown: the underlines go from both scenes and Dismissed grows by one.
+  const quiet = providerBodies.length
+  const dismissedBefore = (await invoke<{ count: number }>('dismissed:list', undefined)).count
+  await tree.getByRole('treeitem', { name: 'Brown' }).first().click()
+  await expect(marks).toHaveCount(1, { timeout: 15_000 })
+  await marks.hover()
+  await card.getByRole('button', { name: "This one's right: brown (1.2)" }).click()
+  await expect(card).toHaveCount(0)
+  await expect(marks).toHaveCount(0)
+  expect((await invoke<{ count: number }>('dismissed:list', undefined)).count).toBe(
+    dismissedBefore + 1
+  )
+  await tree.getByRole('treeitem', { name: 'Grey' }).first().click()
+  await expect(editor).toContainText("Mara's eyes were grey")
+  await expect(marks).toHaveCount(0)
+
+  // Undo in Dismissed brings the finding back, and both underlines with it, with nothing sent.
+  const panel = page.getByTestId('this-scene-panel')
+  if ((await panel.count()) === 0) {
+    await page.getByRole('button', { name: 'This scene', exact: true }).click()
+  }
+  await panel.getByRole('tab', { name: 'This scene' }).click()
+  await panel.getByRole('button', { name: `Dismissed (${dismissedBefore + 1})` }).click()
+  const dismissedDialog = page.getByRole('dialog', { name: /^Dismissed \(/ })
+  await dismissedDialog.getByRole('button', { name: 'Undo: Mara Vell: Eyes grey' }).click()
+  await dismissedDialog.getByRole('button', { name: 'Close' }).click()
+  await expect(marks).toHaveText("Mara's eyes were grey", { timeout: 15_000 })
+  await tree.getByRole('treeitem', { name: 'Brown' }).first().click()
+  await expect(marks).toHaveText("Mara's eyes were brown", { timeout: 15_000 })
+  expect(providerBodies.length).toBe(quiet)
+
+  // Settings' "in the panel only": no underline; Needs a look still lists the finding.
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' })
+  await page.keyboard.press('Control+,')
+  await expect(settingsDialog).toBeVisible()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog.getByRole('radio', { name: 'in the panel only' }).check()
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  await expect(marks).toHaveCount(0)
+  const needs = panel.getByRole('region', { name: 'Needs a look' })
+  await expect(
+    needs.getByRole('group', { name: 'Conflicts' }).getByTestId('finding')
+  ).toContainText('Mara Vell’s eyes: grey (1.1) · brown (1.2)')
+  await expect
+    .poll(
+      async () =>
+        (await invoke<{ reading: { underlines: string } }>('aiSettings:get', undefined)).reading
+          .underlines,
+      { timeout: 15_000 }
+    )
+    .toBe('panel')
 })
 
 test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', async () => {

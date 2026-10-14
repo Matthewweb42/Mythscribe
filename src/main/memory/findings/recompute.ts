@@ -19,6 +19,7 @@ import {
   type ClosedFinding,
   type PairReader
 } from './findingStore'
+import { logGone } from './underlineLog'
 
 /**
  * The local recompute (F-16.27; plan P4 §1.4, design §2.4 "Lifecycle"): after claim changes, scene
@@ -29,7 +30,8 @@ import {
  * for being stale, and its re-read decides); once no side is stale it closes like any other. A C7
  * row (made only by *Check the book*) closes only when a side is gone, and is held while a side is
  * stale. No AI, no text read beyond the cards a rule asks about: under 50 ms on a 90-scene book
- * (`findings.perf.test.ts`).
+ * (`findings.perf.test.ts`). F-16.28: an underlined finding that closes because a reading changed
+ * or removed a side's line is logged as right (`logGone`, the precision log).
  */
 
 export interface RecomputeResult {
@@ -138,6 +140,8 @@ export function recomputeFindings(
   }
   const upsert = upsertFindings(db, draftId, [...candidates, ...kept], now, options.pairs, rows)
   const closed = closeFindings(db, draftId, closing)
+  // F-16.28: an underlined finding the text no longer produces counts for underline precision.
+  logGone(db, closed, claims)
   return {
     opened: upsert.opened,
     closed,

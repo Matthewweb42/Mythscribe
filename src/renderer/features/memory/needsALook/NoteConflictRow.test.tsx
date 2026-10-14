@@ -14,7 +14,7 @@ import {
   noteFindingFixture,
   type FakeMain
 } from '../memoryFixture'
-import { resetMemoryStore } from '../memoryStore'
+import { resetMemoryStore, useMemoryStore } from '../memoryStore'
 import { NOTE_BUSY, NoteConflictRow } from './NoteConflictRow'
 
 /**
@@ -118,6 +118,33 @@ describe('NoteConflictRow (F-16.29)', () => {
     expect(within(item).getByRole('button', { name: 'Open my note' })).toBeInTheDocument()
     expect(within(item).getByRole('button', { name: 'Update my note' })).toBeInTheDocument()
     expect(within(item).queryByRole('button', { name: /This one/ })).toBeNull()
+  })
+
+  it('opens its editor with the proposal an underline’s hover card handed over (F-16.28)', async () => {
+    useMemoryStore.setState({
+      noteEdit: {
+        findingId: 'f-6',
+        patch: {
+          findingId: 'f-6',
+          owner: { kind: 'record', id: 'r-orrin', name: 'Orrin' },
+          page: 'pinned',
+          index: 0,
+          before: 'Born: 1790',
+          after: 'Born: 1792',
+          sentence: 'Born: 1790',
+          value: '1792'
+        }
+      }
+    })
+    render(
+      <ul>
+        <NoteConflictRow finding={NOTE} />
+      </ul>
+    )
+    expect(screen.getByRole('textbox')).toHaveValue('Born: 1792')
+    await waitFor(() => expect(useMemoryStore.getState().noteEdit).toBeNull())
+    // No second fetch: the hand-over carried the proposal.
+    expect(main.sent('memory:notePatch')).toEqual([])
   })
 
   it('withholds Update my note when the book side is not narration in the present', () => {

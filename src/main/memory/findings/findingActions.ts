@@ -21,6 +21,7 @@ import { cardNotRight, wrongValue } from '../reading/notRight'
 import { findingsFrame, looseEndInputs } from './candidateInputs'
 import { closeFindings, findingsOf } from './findingStore'
 import { findingView, noteEdit } from './findingViews'
+import { logAnswered } from './underlineLog'
 import { judgeContext, recordName, resolveSide, type JudgeContext } from './judge'
 
 /**
@@ -96,7 +97,9 @@ export function notProblemFor(
     },
     now
   )
-  closeFindings(db, finding.draftId, [{ key: finding.key, reason: 'dismissed' }])
+  const closed = closeFindings(db, finding.draftId, [{ key: finding.key, reason: 'dismissed' }])
+  // F-16.28: an underlined finding dismissed counts against underline precision.
+  logAnswered(db, closed, 'notProblem')
   return row
 }
 
@@ -132,7 +135,8 @@ export function findingRight(
       now
     )
   }
-  closeFindings(db, finding.draftId, [{ key: finding.key, reason: 'right' }])
+  const closed = closeFindings(db, finding.draftId, [{ key: finding.key, reason: 'right' }])
+  logAnswered(db, closed, 'right')
   const ref = findingsFrame(db).reading.refs.get(other.nodeId) ?? ''
   return { dismissed, other: { nodeId: other.nodeId, ref } }
 }
@@ -244,6 +248,7 @@ export function applyNotePatch(
   // Indexed at once, so no recompute reads the old line again.
   indexOwner(db, owner.kind, owner.id, now)
   const closed = closeFindings(db, finding.draftId, [{ key: finding.key, reason: 'right' }])
+  logAnswered(db, closed, 'right')
   return { owner, closed: closed.length > 0 }
 }
 

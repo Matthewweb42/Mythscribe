@@ -149,6 +149,11 @@ describe('memoryView (F-16.18)', () => {
         { id: 'findingsWaiting:2026-10-14', kind: 'findingsWaiting', pairs: 1, priceUsd: 0.0005 },
         '1 possible contradiction waits for Check the book: about 0.05¢',
         ['Check the book…', 'Not now']
+      ],
+      [
+        { id: 'underlinePrecision', kind: 'underlinePrecision', counted: 20, notProblems: 8 },
+        'Of the last 20 underlined contradictions, 8 were not problems. Show contradictions in the panel only?',
+        ['Panel only', 'Keep underlines']
       ]
     ]
     for (const [notice, line, buttons] of cases) {

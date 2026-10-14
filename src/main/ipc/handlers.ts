@@ -482,6 +482,7 @@ import {
 } from '../memory/findings/findingActions'
 import { findingCounts, runFindingsJob } from '../memory/findings/findingsJob'
 import { findingsView } from '../memory/findings/findingViews'
+import { sceneUnderlines, underlinesShown } from '../memory/findings/underlines'
 import { isUnderResearch } from '../research/researchTree'
 import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
 import { settleOwnedNames } from '../memory/reading/waiting'
@@ -973,6 +974,8 @@ export function registerHandlers({
         })
         if (result.counts !== null) emit(windows(), 'memory:findingsChanged', result.counts)
         if (result.changed) reader.queueJudge()
+        // F-16.28: an underlined finding the text no longer produces moves underline precision.
+        if (result.closed.some((each) => each.finding.shownAt !== null)) reader.noticesMoved()
         return Promise.resolve({
           requested: false,
           value: { changed: result.changed, scanned: result.changed }
@@ -5410,7 +5413,17 @@ export function registerHandlers({
 
   register('cloudCap:set', ({ capUsd }) => reader.setCloudCap(capUsd))
 
-  register('memory:scene', ({ nodeId }) => sceneMemory(manager.require().connection.orm, nodeId))
+  register('memory:scene', ({ nodeId }) => {
+    const db = manager.require().connection.orm
+    const settings = getAiSettings(db)
+    // F-16.28: the scene's contradiction underlines, never in a paragraph with an unread change.
+    return sceneMemory(db, nodeId, (unreadParas) =>
+      sceneUnderlines(db, nodeId, unreadParas, {
+        on: settings.features.judge,
+        mode: settings.reading.underlines
+      })
+    )
+  })
 
   // F-16.20: the card lines the Outline and the cork board show where a scene has no synopsis.
   register('memory:cardLines', () =>
@@ -5452,7 +5465,15 @@ export function registerHandlers({
   ): void => {
     memoryChanged(touched)
     emit(windows(), 'memory:findingsChanged', findingCounts(db, getAiSettings(db).features.judge))
+    // F-16.28: an underlined finding answered moves underline precision (its one question).
+    reader.noticesMoved()
   }
+
+  // F-16.28: the editor drew these findings as underlines (their `shown_at`, once).
+  register('memory:underlinesShown', ({ findingIds }) => {
+    underlinesShown(manager.require().connection.orm, findingIds, new Date())
+    return null
+  })
 
   // F-16.30: Check the book, priced first; its report kept until the next check.
   register('memory:checkEstimate', () => reader.checkEstimate())

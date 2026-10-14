@@ -361,6 +361,17 @@ select {
   cursor: text;
 }
 
+/*
+ * A possible contradiction (F-16.28): a soft dotted underline in its own token, quieter than the
+ * spelling squiggle; hovering it opens the hover card. Drawn as a decoration, never saved.
+ */
+.ms-editor .ms-contradiction {
+  text-decoration: underline dotted var(--ms-contradiction);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.25em;
+  cursor: text;
+}
+
 .rewrite-diff del {
   text-decoration: line-through;
   color: var(--ms-danger);

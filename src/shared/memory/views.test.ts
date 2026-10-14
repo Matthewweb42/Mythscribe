@@ -31,7 +31,8 @@ describe('the reading views (F-16.18)', () => {
         unread: 3,
         paused: null,
         claims: [],
-        secrets: { touched: [], tension: [], more: 0, checkedUpTo: null }
+        secrets: { touched: [], tension: [], more: 0, checkedUpTo: null },
+        underlines: []
       }).success
     ).toBe(true)
     expect(

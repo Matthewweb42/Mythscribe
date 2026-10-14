@@ -45,6 +45,7 @@ import { JUDGE_SENTINEL } from '../../ai/prompts/judge.v1'
 import { findingsOf } from '../findings/findingStore'
 import { runFindingsJob } from '../findings/findingsJob'
 import { JUDGE_DAY_PAIRS, MEMORY_JUDGE_DAY_KEY } from '../findings/findingsService'
+import { getUnderlineLog, MEMORY_UNDERLINES_KEY } from '../findings/underlineLog'
 
 let tmp: string
 let session: ProjectSession
@@ -1525,6 +1526,33 @@ describe('Check the book and the rebuild sweep on the reader’s queue (F-16.27,
     expect(waiting?.kind === 'findingsWaiting' ? waiting.priceUsd : 0).toBeGreaterThan(0)
     reader.answerNotice('findingsWaiting:2026-10-12', 'dismiss')
     expect(reader.notices().some((notice) => notice.kind === 'findingsWaiting')).toBe(false)
+  })
+
+  it('asks once whether to show contradictions in the panel only, and counts precision (F-16.28)', () => {
+    const reader = service(reading())
+    writeRow(db, MEMORY_UNDERLINES_KEY, {
+      outcomes: [...Array<string>(12).fill('right'), ...Array<string>(8).fill('notProblem')],
+      asked: false
+    })
+    expect(reader.notices()).toContainEqual({
+      id: 'underlinePrecision',
+      kind: 'underlinePrecision',
+      counted: 20,
+      notProblems: 8
+    })
+    expect(reader.health().contradictions).toEqual({
+      pairs: 0,
+      agreed: 0,
+      underlines: { counted: 20, right: 12 }
+    })
+    // Already in the panel only: not asked.
+    settings = { ...settings, reading: { ...settings.reading, underlines: 'panel' } }
+    expect(reader.notices().some((notice) => notice.kind === 'underlinePrecision')).toBe(false)
+    settings = { ...settings, reading: { ...settings.reading, underlines: 'text' } }
+    // Answered (either way): never asked again.
+    reader.answerNotice('underlinePrecision', 'keepUnderlines')
+    expect(reader.notices().some((notice) => notice.kind === 'underlinePrecision')).toBe(false)
+    expect(getUnderlineLog(db).asked).toBe(true)
   })
 
   it('runs Check the book as one asked job, with its price, progress and report', async () => {

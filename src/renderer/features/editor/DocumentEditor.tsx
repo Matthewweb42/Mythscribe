@@ -28,6 +28,7 @@ import type { AiSettings } from '@shared/aiSettings'
 import { useSceneLocked } from '@renderer/features/editPass/editPassStore'
 import { TrackedChangesBar } from '@renderer/features/editPass/TrackedChangesBar'
 import { useTrackedChanges } from '@renderer/features/editPass/useTrackedChanges'
+import { useContradictionMarks } from './useContradictionMarks'
 import { useActiveEditorStore } from './activeEditorStore'
 import { columnClass, deskClass, editorStyle } from './column'
 import { useDocumentStore } from './documentStore'
@@ -292,6 +293,8 @@ function RegionEditor({
   // changes show (and accept inline) once it is free.
   const locked = useSceneLocked(id) !== null
   useTrackedChanges(editor, id, ready, locked)
+  // F-16.28: story memory v2's contradiction underlines, fed from the scene's memory.
+  useContradictionMarks(editor, id, ready, inertTags)
   // AI-BILLING-SPEC M1: after the trial without the license the whole project is read-only.
   const writable = useCanWrite()
   useEffect(() => {

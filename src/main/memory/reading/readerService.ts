@@ -105,6 +105,12 @@ import {
   sweepCalls
 } from '../findings/findingsService'
 import { findingCounts, type FindingCounts } from '../findings/findingsJob'
+import {
+  contradictionStats,
+  setUnderlineAsked,
+  UNDERLINE_NOTICE_ID,
+  underlineNotice
+} from '../findings/underlineLog'
 import type { RebuildContext } from '../switchover/plan'
 
 /**
@@ -227,6 +233,11 @@ export interface ReaderService {
   notRight(claimId: string, choice: NotRightChoice, requestId: string): Promise<NotRightResult>
   /** Typed details were saved: the typed-detail conflicts are looked at again. */
   detailsChanged(): void
+  /**
+   * F-16.28: a finding closed (an answer, or a recompute): the one-time underline precision
+   * question may be due, so the notices are looked at again.
+   */
+  noticesMoved(): void
   cloudCap(): CloudCapState
   setCloudCap(capUsd: number): CloudCapState
   /** `/credits` answered: the tally is raised to the server's reading spend. */
@@ -531,6 +542,9 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
         priceUsd: priceWaiting(waiting, rebuildContext(db))
       })
     }
+    // F-16.28: under 70 % of the last 20 underlined contradictions right, asked once.
+    const underlines = underlineNotice(db, deps.settings(db))
+    if (underlines !== null) list.push(underlines)
     return list
   }
 
@@ -1173,6 +1187,10 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
         if (action === 'dismiss') reviewRebuild(db, id.slice('rebuildDone:'.length))
       } else if (id.startsWith('findingsWaiting:')) {
         if (action === 'dismiss') closedWaiting.add(id)
+      } else if (id === UNDERLINE_NOTICE_ID) {
+        // F-16.28: asked once. *Panel only* is the renderer's write to the setting (the one owner
+        // of the AI settings it holds); any answer, or closing it, records that it was asked.
+        setUnderlineAsked(db)
       } else if (id.startsWith('cloudCap:')) {
         if (action === 'allowMore') {
           deps.cloud.update((state) => markCapNotice(allowMore(state, month()), month()))
@@ -1230,7 +1248,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       const empty: MemoryHealthReport = {
         models: [],
         spot: { fast: { checked: 0, agreed: 0 }, strong: { checked: 0, agreed: 0 } },
-        cutRate: 0
+        cutRate: 0,
+        contradictions: { pairs: 0, agreed: 0, underlines: { counted: 0, right: 0 } }
       }
       if (db === null) return empty
       const recent = db
@@ -1268,7 +1287,9 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
         cutRate:
           recent.length === 0
             ? 0
-            : recent.filter((row) => row.finishReason === 'length').length / recent.length
+            : recent.filter((row) => row.finishReason === 'length').length / recent.length,
+        // F-16.28: judge order agreement and underline precision.
+        contradictions: contradictionStats(db)
       }
     },
 
@@ -1374,6 +1395,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     },
 
     detailsChanged: () => publish(),
+    noticesMoved: () => publish(),
 
     rebuildAction(action) {
       const db = requireDb()

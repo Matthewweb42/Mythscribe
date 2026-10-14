@@ -121,17 +121,28 @@ export const READING_IDLE_MINUTES_MAX = 5
 export const DEFAULT_READING_IDLE_MINUTES = 3
 
 /**
+ * F-16.28 (P4-D16): where story memory v2 shows contradictions: underlined in the text and listed
+ * in Needs a look (`text`, the default), or in the panel only (`panel`).
+ */
+export const UNDERLINE_MODES = ['text', 'panel'] as const
+export const UnderlineMode = z.enum(UNDERLINE_MODES)
+export type UnderlineMode = z.infer<typeof UnderlineMode>
+
+/**
  * Story memory v2's reading (F-16.16), per project: after how many minutes without a save of the
- * open scene it is read (the VibeWrite idle pattern; the timer runs in the renderer). A v1 project
- * stores it too and never reads it.
+ * open scene it is read (the VibeWrite idle pattern; the timer runs in the renderer), and (F-16.28)
+ * whether contradictions are underlined in the text, read leniently: a row stored before it, or
+ * with a mode this version does not know, reads as `text`. A v1 project stores it too and never
+ * reads it.
  */
 export const ReadingSettings = z.object({
-  idleMinutes: z.number().int().min(READING_IDLE_MINUTES_MIN).max(READING_IDLE_MINUTES_MAX)
+  idleMinutes: z.number().int().min(READING_IDLE_MINUTES_MIN).max(READING_IDLE_MINUTES_MAX),
+  underlines: UnderlineMode.catch('text')
 })
 export type ReadingSettings = z.infer<typeof ReadingSettings>
 
 export function defaultReadingSettings(): ReadingSettings {
-  return { idleMinutes: DEFAULT_READING_IDLE_MINUTES }
+  return { idleMinutes: DEFAULT_READING_IDLE_MINUTES, underlines: 'text' }
 }
 
 /**

@@ -101,7 +101,7 @@ describe('reader triggers (F-16.16, plan P2a §3.1)', () => {
   })
 
   it('restarts the idle timer on each save of the open scene and settles it with the caret paragraph', async () => {
-    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), reading: { idleMinutes: 2 } } })
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), reading: { idleMinutes: 2, underlines: 'text' } } })
     editor = new Editor({
       extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' }),
       content: {

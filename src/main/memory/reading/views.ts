@@ -6,11 +6,17 @@ import {
   type SheetLine
 } from '@shared/memory/asOf'
 import type { Claim } from '@shared/memory/claims'
-import { gateSentences, readSetOf, unreadSentences } from '@shared/memory/gate'
+import {
+  gateSentences,
+  readSetOf,
+  unreadSentences,
+  type GateSentence
+} from '@shared/memory/gate'
 import { locateInText } from '@shared/memory/quote'
 import { slotLabel, type Slot } from '@shared/memory/slots'
 import type { StoryRecordSummary } from '@shared/memory/records'
 import { compareTyped, detailsAgree, type TypedNames } from '@shared/memory/typedVsText'
+import type { UnderlineView } from '@shared/memory/underlines'
 import type {
   ClaimInfo,
   ClaimView,
@@ -155,9 +161,23 @@ export function hereValues(
   return out
 }
 
-/** Finished sentences of the scene the active draft has not read yet. */
-function unreadCount(db: TreeDb, nodeId: string, draftId: string | null): number {
-  return sceneReadState(db, nodeId, draftId)?.unread ?? 0
+/**
+ * The finished sentences of manuscript scene `nodeId` the active draft `draftId` has not read yet,
+ * and whether it ever read the scene; null when it is not a manuscript scene.
+ */
+function sceneGate(
+  db: TreeDb,
+  nodeId: string,
+  draftId: string | null
+): { read: boolean; unread: GateSentence[] } | null {
+  const row = manuscriptDocuments(db).find((document) => document.id === nodeId)
+  if (row === undefined) return null
+  const texts = rowTexts(row)
+  const names = nameScanShared(db).index
+  const current = gateSentences(texts, { caretPara: null, names })
+  const read = draftId === null ? null : getSceneRead(db, nodeId, draftId)
+  if (read === null) return { read: false, unread: current }
+  return { read: true, unread: unreadSentences(current, readSetOf(read.entries, names)) }
 }
 
 /**
@@ -170,15 +190,16 @@ export function sceneReadState(
   nodeId: string,
   draftId: string | null
 ): { read: boolean; unread: number } | null {
-  const row = manuscriptDocuments(db).find((document) => document.id === nodeId)
-  if (row === undefined) return null
-  const texts = rowTexts(row)
-  const names = nameScanShared(db).index
-  const current = gateSentences(texts, { caretPara: null, names })
-  const read = draftId === null ? null : getSceneRead(db, nodeId, draftId)
-  if (read === null) return { read: false, unread: current.length }
-  return { read: true, unread: unreadSentences(current, readSetOf(read.entries, names)).length }
+  const gate = sceneGate(db, nodeId, draftId)
+  return gate === null ? null : { read: gate.read, unread: gate.unread.length }
 }
+
+/**
+ * F-16.28: a scene's contradiction underlines, given the paragraphs (`passageParagraphs`
+ * numbering) holding a finished sentence not read yet, which are never underlined. The handlers
+ * pass `findings/underlines.ts`'s builder; the reading's views never import the findings.
+ */
+export type SceneUnderlines = (unreadParas: ReadonlySet<number>) => UnderlineView[]
 
 /**
  * The This scene panel's memory of one scene (P2a-D21): Here (the POV, with the text's POV over
@@ -188,7 +209,11 @@ export function sceneReadState(
  * the card still stands on the text counts (`heldCard`): a POV, place or character whose quote's
  * sentence was edited since is shown dimmed in the card and never overrides the typed details.
  */
-export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
+export function sceneMemory(
+  db: TreeDb,
+  nodeId: string,
+  underlines: SceneUnderlines = () => []
+): SceneMemory {
   const draftId = currentDraftId(db)
   const nodes = listNodes(db)
   const reading = readingOrder(db, nodes)
@@ -221,6 +246,7 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
 
   const last = draftId === null ? null : lastReading(db, nodeId, draftId)
   const knowers = knowersOf(here, records)
+  const unread = sceneGate(db, nodeId, draftId)?.unread ?? []
   return {
     nodeId,
     ref: reading.refs.get(nodeId) ?? null,
@@ -245,7 +271,7 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
       last === null
         ? null
         : { readingId: last.id, at: last.created, model: last.model, costUsd: last.costUsd },
-    unread: unreadCount(db, nodeId, draftId),
+    unread: unread.length,
     paused: null,
     claims:
       draftId === null
@@ -258,7 +284,8 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
       nodeId,
       knowers.map((chip) => chip.recordId),
       povOf(knowers)
-    )
+    ),
+    underlines: underlines(new Set(unread.map((sentence) => sentence.para)))
   }
 }
 

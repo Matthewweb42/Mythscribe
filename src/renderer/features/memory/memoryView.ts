@@ -110,6 +110,8 @@ export function noticeLine(notice: MemoryNotice): string {
       return `Rebuild finished: ${notice.lines} new line${notice.lines === 1 ? '' : 's'} on ${notice.sheets} sheet${notice.sheets === 1 ? '' : 's'}, ${notice.names} name${notice.names === 1 ? '' : 's'}, ${notice.findings} possible contradiction${notice.findings === 1 ? '' : 's'}`
     case 'findingsWaiting':
       return `${notice.pairs} possible contradiction${notice.pairs === 1 ? ' waits' : 's wait'} for Check the book: about ${formatCents(notice.priceUsd)}`
+    case 'underlinePrecision':
+      return `Of the last ${notice.counted} underlined contradictions, ${notice.notProblems} ${notice.notProblems === 1 ? 'was not a problem' : 'were not problems'}. Show contradictions in the panel only?`
   }
 }
 
@@ -158,6 +160,8 @@ export function noticeButtons(notice: MemoryNotice): NoticeButton[] {
       return [{ kind: 'review', label: 'Review' }, answer('dismiss', 'Done')]
     case 'findingsWaiting':
       return [{ kind: 'checkBook', label: 'Check the book…' }, answer('dismiss', 'Not now')]
+    case 'underlinePrecision':
+      return [answer('panelOnly', 'Panel only'), answer('keepUnderlines', 'Keep underlines')]
   }
 }
 
@@ -265,6 +269,23 @@ export function agreementLine(report: MemoryHealthReport): string | null {
   if (checked === 0) return null
   const agreed = report.spot.fast.agreed + report.spot.strong.agreed
   return `proof agreement: ${agreed} of ${checked} checked`
+}
+
+/**
+ * F-16.28 (design §2.3 "Measuring accuracy"): "Contradiction check: 40 pairs judged both ways; the
+ * two orders agreed on 37 · underlines: 14 of the last 20 were right". Never "accuracy".
+ */
+export function contradictionStatsLine(report: MemoryHealthReport): string {
+  const { pairs, agreed, underlines } = report.contradictions
+  const judged =
+    pairs === 0
+      ? 'no pairs judged both ways yet'
+      : `${pairs} pair${pairs === 1 ? '' : 's'} judged both ways; the two orders agreed on ${agreed}`
+  const shown =
+    underlines.counted === 0
+      ? 'no underlined contradiction closed yet'
+      : `${underlines.right} of the last ${underlines.counted} were right`
+  return `Contradiction check: ${judged} · underlines: ${shown}`
 }
 
 /** The price line: "About 12¢ for 90 scenes (180 requests, about 4 min) on deepseek-v4-flash". */

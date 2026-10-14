@@ -47,6 +47,7 @@ export function sceneMemoryFixture(nodeId: string, over: Partial<SceneMemory> = 
     paused: null,
     claims: [],
     secrets: { touched: [], tension: [], more: 0, checkedUpTo: null },
+    underlines: [],
     ...over
   }
 }

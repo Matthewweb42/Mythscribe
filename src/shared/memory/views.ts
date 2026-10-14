@@ -20,6 +20,7 @@ import { SlotSchema } from './slots'
 import { RebuildEstimate } from './switchover'
 import { ThreadStep } from './topics'
 import { TYPED_FIELDS } from './typedVsText'
+import { UnderlineView } from './underlines'
 
 /**
  * What story memory v2's reading shows (F-16.18), as the channels of slices 2–4 answer it: the
@@ -518,7 +519,13 @@ export const SceneMemory = z.object({
    * F-16.22 (P2b slice 4): the secrets the scene touches and its tension lines, as of the scene;
    * every "has none" is scoped by `checkedUpTo` and worded in the renderer alone.
    */
-  secrets: SceneSecrets
+  secrets: SceneSecrets,
+  /**
+   * F-16.28 (P4 slice 5): the contradiction underlines of the scene, at most 3 (`pickUnderlines`):
+   * open findings' book quotes in paragraphs with no unread finished sentence. Empty while the
+   * Contradiction check is off or contradictions show in the panel only.
+   */
+  underlines: z.array(UnderlineView)
 })
 export type SceneMemory = z.infer<typeof SceneMemory>
 
@@ -762,6 +769,18 @@ export const MemoryNotice = z.discriminatedUnion('kind', [
     kind: z.literal('findingsWaiting'),
     pairs: z.number().int().positive(),
     priceUsd: z.number().nonnegative()
+  }),
+  /**
+   * F-16.28 (P4-D16, design §2.4): of the last 20 underlined contradictions that closed, fewer than
+   * 70 % were right; asked once: *Panel only* (the renderer sets `reading.underlines` to `panel`)
+   * or *Keep underlines*. Either answer, or closing it, records that it was asked. Its id is
+   * `underlinePrecision`.
+   */
+  z.object({
+    id: z.string(),
+    kind: z.literal('underlinePrecision'),
+    counted: z.number().int().positive(),
+    notProblems: z.number().int().nonnegative()
   })
 ])
 export type MemoryNotice = z.infer<typeof MemoryNotice>
@@ -774,7 +793,8 @@ export type DetailConflictNotice = Extract<MemoryNotice, { kind: 'detailConflict
  * (`later`), *Keep reading anyway* (`keepReading`, remembered per model; also lifts a local
  * cut-off pause), *Switch to DeepSeek V4 Flash* (`switchModel`), *Allow another $1 this month*
  * (`allowMore`), *Keep mine* on a typed-detail conflict (`keepMine`, F-16.18: a `notProblem`
- * Dismissed row), and closing it (`dismiss`: the pause, if any, stays).
+ * Dismissed row), F-16.28's *Panel only* (`panelOnly`; the renderer sets the setting) and *Keep
+ * underlines* (`keepUnderlines`), and closing it (`dismiss`: the pause, if any, stays).
  */
 export const MEMORY_NOTICE_ACTIONS = [
   'read',
@@ -783,6 +803,8 @@ export const MEMORY_NOTICE_ACTIONS = [
   'switchModel',
   'allowMore',
   'keepMine',
+  'panelOnly',
+  'keepUnderlines',
   'dismiss'
 ] as const
 export const MemoryNoticeAction = z.enum(MEMORY_NOTICE_ACTIONS)
@@ -830,7 +852,20 @@ export const MemoryHealthReport = z.object({
   models: z.array(ModelHealthView),
   spot: z.object({ fast: SpotCount, strong: SpotCount }),
   /** Share of the last 100 readings cut off at their cap (`finish_reason: length`). */
-  cutRate: z.number().min(0).max(1)
+  cutRate: z.number().min(0).max(1),
+  /**
+   * F-16.28 (design §2.3 "Measuring accuracy"): the active draft's pairs judged both ways and how
+   * many of them the two orders agreed on; and underline precision, the last 20 underlined
+   * contradictions that closed and how many of them were right. Never called "accuracy".
+   */
+  contradictions: z.object({
+    pairs: z.number().int().nonnegative(),
+    agreed: z.number().int().nonnegative(),
+    underlines: z.object({
+      counted: z.number().int().nonnegative(),
+      right: z.number().int().nonnegative()
+    })
+  })
 })
 export type MemoryHealthReport = z.infer<typeof MemoryHealthReport>
 

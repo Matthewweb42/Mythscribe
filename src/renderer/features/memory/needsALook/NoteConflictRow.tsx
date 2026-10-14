@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { NOTE_PATCH_MAX, type NotePatch } from '@shared/memory/views'
 import type { FindingView } from '@shared/memory/findings'
 import { useMemoryStore } from '@renderer/features/memory/memoryStore'
@@ -42,6 +42,28 @@ export function NoteConflictRow({
   const fieldId = useId()
   const info = useFindingInfo()
   const line = noteConflictLine(finding) ?? findingLine(finding)
+  const rowRef = useRef<HTMLLIElement>(null)
+
+  // F-16.28: *Update my note* from an underline's hover card hands the proposal over: the row
+  // opens its editor with it, comes into view, and takes the hand-over.
+  const handed = useMemoryStore((s) =>
+    s.noteEdit?.findingId === finding.id ? s.noteEdit.patch : null
+  )
+  const [adopted, setAdopted] = useState<NotePatch | null>(null)
+  if (handed !== null && handed !== adopted) {
+    setAdopted(handed)
+    setPatch(handed)
+    setText(handed.after)
+  }
+  useEffect(() => {
+    if (handed === null) return
+    useMemoryStore.getState().takeNoteEdit(finding.id)
+    const row = rowRef.current
+    // jsdom has no scrollIntoView.
+    if (row !== null && typeof row.scrollIntoView === 'function') {
+      row.scrollIntoView({ block: 'nearest' })
+    }
+  }, [handed, finding.id])
 
   const startEdit = async (): Promise<void> => {
     setBusy(true)
@@ -102,6 +124,7 @@ export function NoteConflictRow({
 
   return (
     <li
+      ref={rowRef}
       className="rounded-md border border-line bg-surface px-2 py-1.5"
       data-testid="note-conflict"
     >

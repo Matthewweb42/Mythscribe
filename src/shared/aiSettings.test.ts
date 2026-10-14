@@ -92,6 +92,25 @@ describe('defaultAiSettings (F-14.4)', () => {
     expect(StoredAiSettings.safeParse({ dial: 9, features: {} }).success).toBe(false)
   })
 
+  it('reads an older reading row with contradictions underlined, and an unknown mode as underlined (F-16.28)', () => {
+    expect(defaultAiSettings().reading).toEqual({ idleMinutes: 3, underlines: 'text' })
+    const older = StoredAiSettings.parse({ dial: 1, features: {}, reading: { idleMinutes: 4 } })
+    expect(older.reading).toEqual({ idleMinutes: 4, underlines: 'text' })
+    const panel = StoredAiSettings.parse({
+      dial: 1,
+      features: {},
+      reading: { idleMinutes: 2, underlines: 'panel' }
+    })
+    expect(panel.reading.underlines).toBe('panel')
+    const later = StoredAiSettings.parse({
+      dial: 1,
+      features: {},
+      reading: { idleMinutes: 2, underlines: 'margin' }
+    })
+    expect(later.reading).toEqual({ idleMinutes: 2, underlines: 'text' })
+    expect(AiSettings.parse({ ...defaultAiSettings(), dial: 1 }).reading.underlines).toBe('text')
+  })
+
   it('names the toggles a stored row has for ids this build does not know, booleans only', () => {
     expect(
       unknownFeatureToggles({ features: { oracle: false, chat: false, odd: 'x', vectors: true } })

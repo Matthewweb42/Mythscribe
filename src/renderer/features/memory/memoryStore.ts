@@ -16,6 +16,7 @@ import type {
   MemoryNotice,
   MemoryNoticeAction,
   MemoryStatus,
+  NotePatch,
   NotRightChoice,
   NotRightResult,
   ReadNowResult,
@@ -25,7 +26,9 @@ import type {
   ThreadsMemory,
   TimelineMemory
 } from '@shared/memory/views'
+import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useDismissedStore } from '@renderer/features/thisScene/dismissedStore'
 import { describeError } from '@renderer/lib/errors'
@@ -70,6 +73,13 @@ import { ipc } from '@renderer/lib/ipc'
  * that never shows them asks for nothing. The answers on a finding (*Not a problem*, *This one's
  * right*) and on a loose end take it away at once and add their Dismissed row; *This one's right*
  * leaves a short line (`rightMarks`) with *Go there* and *Undo* until it is closed.
+ *
+ * F-16.28 (P4 slice 5): each scene's `underlines` ride in its memory; an answer on a finding takes
+ * its underlines off every shown scene at once, and `memory:findingsChanged` (a judged pair, an
+ * answer, the Contradiction check switched) reads the shown scenes again. The hover card's *Update
+ * my note* hands its proposal to that note conflict's row in Needs a look (`noteEdit`), opening
+ * the This scene panel first. *Panel only* on the one-time precision question sets Settings' "Show
+ * contradictions" through the AI settings store (their one owner).
  */
 
 /** A scene's memory as stored here: its lines by id. */
@@ -147,6 +157,18 @@ interface MemoryState {
   setCheckOpen: (open: 'start' | 'report' | null) => void
   /** F-16.27: the *This one's right* answers of this session, newest first. */
   rightMarks: RightMark[]
+  /**
+   * F-16.28: a note conflict's *Update my note* proposal the hover card asked Needs a look to open
+   * in that conflict's row; the row takes it (`takeNoteEdit`).
+   */
+  noteEdit: { findingId: string; patch: NotePatch } | null
+  /**
+   * F-16.28: *Update my note* from the hover card: the This scene panel opens, the proposal is
+   * read (`memory:notePatch`, made in code) and handed to the conflict's row in Needs a look.
+   */
+  requestNoteEdit: (findingId: string) => Promise<void>
+  /** Clears the hand-over once the row opened its editor. */
+  takeNoteEdit: (findingId: string) => void
   /** F-16.27: the active draft's findings (`memory:findings`, local and free). */
   loadFindings: () => Promise<void>
   /** F-16.29: Needs a look's Loose ends (`memory:looseEnds`, local and free). */
@@ -325,6 +347,21 @@ function withoutFinding(entry: FindingsEntry, findingId: string): FindingsEntry 
   }
 }
 
+/** The shown scenes without one finding's underlines (an answer closed it in main). */
+function withoutUnderlines(
+  scenes: Record<string, SceneEntry>,
+  findingId: string
+): Record<string, SceneEntry> {
+  let changed = false
+  const next: Record<string, SceneEntry> = {}
+  for (const [nodeId, entry] of Object.entries(scenes)) {
+    const underlines = entry.underlines.filter((each) => each.findingId !== findingId)
+    if (underlines.length !== entry.underlines.length) changed = true
+    next[nodeId] = underlines.length === entry.underlines.length ? entry : { ...entry, underlines }
+  }
+  return changed ? next : scenes
+}
+
 const NO_CHECK: CheckEntry = { estimate: null, report: null }
 
 export const useMemoryStore = create<MemoryState>((set, get) => {
@@ -366,6 +403,28 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
     check: NO_CHECK,
     checkOpen: null,
     rightMarks: [],
+    noteEdit: null,
+
+    async requestNoteEdit(findingId) {
+      const mine = generation
+      const layout = useLayoutStore.getState()
+      if (!layout.layout.tags.open) layout.toggle('tags')
+      try {
+        const patch = await ipc().invoke('memory:notePatch', { findingId })
+        if (mine !== generation) return
+        if (patch === null) {
+          toast.info('This note cannot be updated from here; open it to edit it.')
+          return
+        }
+        set({ noteEdit: { findingId, patch } })
+      } catch (err) {
+        report(err)
+      }
+    },
+
+    takeNoteEdit(findingId) {
+      if (get().noteEdit?.findingId === findingId) set({ noteEdit: null })
+    },
 
     setAgesOf(recordId) {
       if (get().agesOf !== recordId) set({ agesOf: recordId })
@@ -442,6 +501,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
       if (result.dismissed !== null) useDismissedStore.getState().add(result.dismissed)
       const findings = get().findings
       if (findings !== null) set({ findings: withoutFinding(findings, action.findingId) })
+      // F-16.28: its underlines go from every shown scene at once.
+      set({ scenes: withoutUnderlines(get().scenes, action.findingId) })
       if (action.action === 'right' && finding !== undefined) {
         // The other side is the one marked not right.
         const other = action.side === 'a' ? finding.b : finding.a
@@ -716,6 +777,15 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         const notices = await ipc().invoke('memory:answerNotice', { id, action })
         if (mine !== generation) return true
         set({ notices })
+        // F-16.28: *Panel only*: contradictions are listed in Needs a look, never underlined.
+        if (action === 'panelOnly') {
+          const settings = useAiSettingsStore.getState().settings
+          if (settings !== null) {
+            useAiSettingsStore
+              .getState()
+              .update({ reading: { ...settings.reading, underlines: 'panel' } })
+          }
+        }
         // *Keep mine* wrote a Dismissed row.
         if (action === 'keepMine' || id.startsWith('detail:')) {
           useDismissedStore.getState().load().catch(report)
@@ -827,6 +897,11 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         }),
         ipc().on('memory:findingsChanged', () => {
           get().loadFindings().catch(report)
+          // F-16.28: a judged pair, an answer or the switch moves the shown scenes' underlines.
+          refresh(
+            () => true,
+            () => false
+          )
           // The report reads the findings again: a finding closed since drops out of it.
           if (get().check.report !== null) get().loadCheckReport().catch(report)
         }),
@@ -868,7 +943,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         looseEnds: null,
         check: NO_CHECK,
         checkOpen: null,
-        rightMarks: []
+        rightMarks: [],
+        noteEdit: null
       })
     }
   }

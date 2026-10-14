@@ -2,7 +2,8 @@ import { useEffect, useId, useState } from 'react'
 import {
   DEFAULT_READING_IDLE_MINUTES,
   READING_IDLE_MINUTES_MAX,
-  READING_IDLE_MINUTES_MIN
+  READING_IDLE_MINUTES_MIN,
+  type UnderlineMode
 } from '@shared/aiSettings'
 import { CLOUD_CAP_MAX_USD, CLOUD_CAP_STEP_USD, type CloudCapState } from '@shared/memory/cloudCap'
 import type { MemoryHealthReport } from '@shared/memory/views'
@@ -11,7 +12,7 @@ import { formatCents } from '@renderer/features/ai/usageFormat'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
-import { agreementLine, capFromText, percentOf } from './memoryView'
+import { agreementLine, capFromText, contradictionStatsLine, percentOf } from './memoryView'
 import { SearchMisses } from './SearchMisses'
 
 const FIELD = 'w-20 rounded-md border border-line bg-bg px-2 py-1 text-sm'
@@ -22,8 +23,10 @@ const FIELD = 'w-20 rounded-md border border-line bg-bg px-2 py-1 text-sm'
  * without a save the open scene is read (2–5, committed on blur or Enter, P2a-D5); on MythScribe
  * Cloud, the monthly cap for background reading in quarter-dollar steps and what it spent this
  * month; the spot checks' "proof agreement: 48 of 50 checked"; how often readings were cut off at
- * their cap; and each model's health (quotes found, checks passed, paused or not). Under
- * **Details**, Ms Scribe's search misses (F-16.25, `SearchMisses`).
+ * their cap; and each model's health (quotes found, checks passed, paused or not). F-16.28: where
+ * contradictions show ("underlined in the text" or "in the panel only", `reading.underlines`).
+ * Under **Details**, the contradiction check's judge order agreement and underline precision
+ * (F-16.28, never "accuracy") and Ms Scribe's search misses (F-16.25, `SearchMisses`).
  */
 export function MemorySettings(): React.JSX.Element | null {
   const settings = useAiSettingsStore((s) => s.settings)
@@ -63,6 +66,10 @@ export function MemorySettings(): React.JSX.Element | null {
         minutes={idle}
         onCommit={(idleMinutes) => update({ reading: { ...settings.reading, idleMinutes } })}
       />
+      <UnderlinesChoice
+        mode={settings.reading.underlines}
+        onChange={(underlines) => update({ reading: { ...settings.reading, underlines } })}
+      />
       {cloud ? <CloudCapField /> : null}
       {health === null ? null : (
         <div className="flex flex-col gap-0.5 text-xs text-fg-muted" data-testid="memory-health">
@@ -93,9 +100,52 @@ export function MemorySettings(): React.JSX.Element | null {
       {/* F-16.25 (P3-D15): what Ms Scribe's search missed, the trigger for F-16.35. */}
       <details data-testid="memory-details" className="text-xs text-fg-muted">
         <summary className="cursor-pointer">Details</summary>
+        {health === null ? null : (
+          <p className="m-0" data-testid="contradiction-stats">
+            {contradictionStatsLine(health)}
+          </p>
+        )}
         <SearchMisses />
       </details>
     </section>
+  )
+}
+
+/** The choices of Settings' "Show contradictions" (F-16.28). */
+const UNDERLINE_CHOICES: { mode: UnderlineMode; label: string }[] = [
+  { mode: 'text', label: 'underlined in the text' },
+  { mode: 'panel', label: 'in the panel only' }
+]
+
+/**
+ * "Show contradictions: underlined in the text · in the panel only" (F-16.28, P4-D16): either way
+ * they are listed in Needs a look; the one-time precision question can set it, and it can be
+ * changed back here.
+ */
+function UnderlinesChoice({
+  mode,
+  onChange
+}: {
+  mode: UnderlineMode
+  onChange: (mode: UnderlineMode) => void
+}): React.JSX.Element {
+  const name = useId()
+  return (
+    <fieldset className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 border-0 p-0">
+      <legend className="float-left mr-2 p-0">Show contradictions</legend>
+      {UNDERLINE_CHOICES.map((choice) => (
+        <label key={choice.mode} className="flex items-center gap-1">
+          <input
+            type="radio"
+            name={name}
+            value={choice.mode}
+            checked={mode === choice.mode}
+            onChange={() => onChange(choice.mode)}
+          />
+          <span>{choice.label}</span>
+        </label>
+      ))}
+    </fieldset>
   )
 }
 

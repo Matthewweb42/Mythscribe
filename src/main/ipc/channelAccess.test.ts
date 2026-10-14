@@ -186,7 +186,12 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
   })
 
   it('F-16.23, F-16.27: the Threads, the Timeline and the findings are v2 and only read', () => {
-    for (const channel of ['memory:threads', 'memory:timeline', 'memory:findings'] as const) {
+    for (const channel of [
+      'memory:threads',
+      'memory:timeline',
+      'memory:findings',
+      'memory:underlinesShown'
+    ] as const) {
       expect(CHANNEL_MEMORY[channel], channel).toBe('v2')
       expect(() => assertChannelMemory(channel, 'v1'), channel).toThrow(OTHER_MEMORY_MESSAGE)
       expect(CHANNEL_ACCESS[channel], channel).toBe('read')

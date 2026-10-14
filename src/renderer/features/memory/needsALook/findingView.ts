@@ -86,6 +86,16 @@ export function noteSides(
   return null
 }
 
+/**
+ * Where a side is, as a line opens: a book quote by its scene ("1.1"), a note by its page ("Your
+ * note on Orrin", "Your Research page “Harbour notes”"). The hover card (F-16.28) and the note
+ * conflict's line share it.
+ */
+export function sideWhere(side: FindingSideView): string {
+  if (side.kind !== 'note') return side.label
+  return side.open.kind === 'research' ? `Your Research page “${side.ref}”` : `Your note on ${side.ref}`
+}
+
 /** Slots whose value reads before the noun ("green eyes", "dark hair"). */
 const VALUE_FIRST = new Set(['Eyes', 'Hair', 'Scars'])
 
@@ -111,8 +121,7 @@ export function noteConflictLine(view: FindingView): string | null {
   const sides = noteSides(view)
   if (sides === null) return null
   const { note, book } = sides
-  const where =
-    note.open.kind === 'research' ? `Your Research page “${note.ref}”` : `Your note on ${note.ref}`
+  const where = sideWhere(note)
   const own = note.open.kind === 'record' && note.open.id === view.recordId
   const of = own ? '' : `of ${view.name}: `
   return `${where} says ${of}${says(view.slotLabel, note.value)}; the book says ${book.value} (${book.label})`

@@ -191,7 +191,8 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
             return {
               models: [],
               spot: { fast: { checked: 0, agreed: 0 }, strong: { checked: 0, agreed: 0 } },
-              cutRate: 0
+              cutRate: 0,
+              contradictions: { pairs: 0, agreed: 0, underlines: { counted: 0, right: 0 } }
             } as Output<C>
           case 'scribe:searchMisses':
             return {
