@@ -188,6 +188,35 @@ describe('noteIndex (C6 reads the notes once a run)', () => {
       naming(orrin).every((each) => pairsWith(each, orrin, 'eyes') || holdsSlot(each, 'hair'))
     ).toBe(true)
   })
+
+  it('answers the same index for the same notes and names, and a new one when either moves (P4 slice 6 review)', () => {
+    const notes = [pinned('orrin', 'Eyes: grey.'), research('Ned Orrin has green eyes.')]
+    const naming = noteIndex(notes, [orrin, captain])
+    // The same notes list and the same records' names, in any order: nothing indexed again.
+    expect(noteIndex(notes, [captain, orrin])).toBe(naming)
+    // A name added: indexed again, and the new name's sentence found.
+    const ned: NoteRecord = {
+      id: 'ned',
+      names: [{ text: 'Ned', caseRule: 'auto', shared: false }]
+    }
+    const withNed = noteIndex(notes, [orrin, captain, ned])
+    expect(withNed).not.toBe(naming)
+    expect(withNed(ned).map((each) => each.text)).toEqual(['Ned Orrin has green eyes.'])
+    // A record's names changed under the same id: its sentences read again.
+    const renamed: NoteRecord = {
+      id: 'orrin',
+      names: [{ text: 'Orrin Vale', caseRule: 'auto', shared: false }]
+    }
+    expect(noteIndex(notes, [renamed, captain, ned])(renamed).map((each) => each.text)).toEqual([
+      'Eyes: grey.'
+    ])
+    // Another notes list (a note saved): indexed again.
+    const saved = [pinned('orrin', 'Eyes: brown.'), ...notes.slice(1)]
+    expect(noteIndex(saved, [orrin, captain])(orrin).map((each) => each.text)).toEqual([
+      'Eyes: brown.',
+      'Ned Orrin has green eyes.'
+    ])
+  })
 })
 
 describe('datedScene (P4-D8)', () => {

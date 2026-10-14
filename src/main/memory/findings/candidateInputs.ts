@@ -115,21 +115,31 @@ function canonNoteRows(db: TreeDb): NoteRow[] {
   return rows
 }
 
+/** The ordered note paragraphs last made from a read of the rows, under the page order then. */
+const notesPlaced = new WeakMap<readonly NoteRow[], { order: string; notes: NoteParagraph[] }>()
+
 /**
  * The canon note paragraphs the passage index holds: Pinned pages of records that exist and canon
  * Research pages still in the Research tree (an owner deleted keeps its rows until the next open's
  * prune, so they are skipped here, as every reader of the index does). In a stable page order:
  * records in list order, then Research in tree order, each by paragraph, so which two sentences C6
- * compares never depends on which page was re-indexed last.
+ * compares never depends on which page was re-indexed last. The same array while neither the rows
+ * nor that order moved, so C6 indexes the notes once for many recomputes (`noteIndex`); never
+ * mutate it.
  */
 export function canonNotes(
   db: TreeDb,
   nodes: readonly NodeRow[] = listNodes(db),
   records: readonly string[] = listRecords(db).map((each) => each.id)
-): NoteParagraph[] {
+): readonly NoteParagraph[] {
+  const rows = canonNoteRows(db)
+  const research = researchDocumentIds(nodes)
+  const order = `${records.join(',')}|${research.join(',')}`
+  const known = notesPlaced.get(rows)
+  if (known?.order === order) return known.notes
   const recordAt = new Map(records.map((id, i) => [id, i]))
-  const researchAt = new Map(researchDocumentIds(nodes).map((id, i) => [id, i]))
-  const placed = canonNoteRows(db).flatMap((row) => {
+  const researchAt = new Map(research.map((id, i) => [id, i]))
+  const placed = rows.flatMap((row) => {
     const pinned = row.source === 'pinned'
     const at = (pinned ? recordAt : researchAt).get(row.ownerId)
     return at === undefined ? [] : [{ row, pinned, at }]
@@ -141,7 +151,7 @@ export function canonNotes(
       x.row.para - y.row.para ||
       x.row.source.localeCompare(y.row.source)
   )
-  return placed.map(({ row, pinned }) =>
+  const notes = placed.map(({ row, pinned }): NoteParagraph =>
     pinned
       ? {
           ownerKind: 'record',
@@ -152,6 +162,8 @@ export function canonNotes(
         }
       : { ownerKind: 'research', ownerId: row.ownerId, page: null, para: row.para, text: row.text }
   )
+  notesPlaced.set(rows, { order, notes })
+  return notes
 }
 
 /** The records as the rules read them: kind, name and every name with its case rule. */

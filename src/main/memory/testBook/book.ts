@@ -516,7 +516,8 @@ export const TEST_BOOK: readonly TestBookScene[] = [
       `Anne's fair hair was pinned up for the evening, and she came down to dinner on the Captain's arm.`,
       `The Captain's father was a merchant in Vellmouth, and had left him a warehouse full of tea.`,
       `The Captain's father was a clergyman in Vellmouth, and had buried half the parish.`,
-      `Lise watched them all from the window seat, and thought that the portrait would never be finished.`
+      `Lise watched them all from the window seat, and thought that the portrait would never be finished.`,
+      `Anne had sold her mother's pearls at Vellmouth to pay the painter, and wore paste ones for the sitting.`
     ],
     addedFor: 'P4'
   },

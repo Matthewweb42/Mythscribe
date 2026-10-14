@@ -375,6 +375,11 @@ export const TestBookLabels = z.object({
   /** P4: the author's notes the contradictions read (on P4 records and a Research page). */
   notes: z.array(LabelNote).min(1),
   /** P4: what the book leaves hanging as of its end. */
-  looseEnds: z.array(LabelLooseEnd).min(1)
+  looseEnds: z.array(LabelLooseEnd).min(1),
+  /**
+   * P4 (F-16.29, F-16.30): the secrets readers know by the book's end that no counted learning line
+   * gives anyone, as *Check the book* lists them; every other secret has a learner.
+   */
+  secretsNobodyLearns: z.array(Id)
 })
 export type TestBookLabels = z.input<typeof TestBookLabels>

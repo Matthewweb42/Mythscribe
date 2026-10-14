@@ -196,13 +196,39 @@ export function pairsWith(sentence: NoteSentence, record: NoteRecord, slot: Slot
   return holdsSlot(sentence, slot)
 }
 
+/** What a record is read by: its id and every name with its case rule. */
+const recordKey = (record: NoteRecord): string =>
+  `${record.id}\u0001${record.names
+    .map((name) => `${name.text}\u0002${name.caseRule}\u0002${String(name.shared)}`)
+    .join('\u0001')}`
+
+/** The last index made over a notes list, under the records' names it was made for. */
+const indexes = new WeakMap<
+  readonly NoteParagraph[],
+  { key: string; index: (record: NoteRecord) => NoteSentence[] }
+>()
+
 /**
  * The canon notes indexed once for a set of records (C6 runs after every change, over notes that
  * may hold a long Research upload): a paragraph is split into sentences only when it sits on one of
  * their Pinned pages or folds to text holding one of their names; then each record's sentences
- * (its own page's, and those naming it, `nameSpans`) are found once, in note order.
+ * (its own page's, and those naming it, `nameSpans`) are found once, in note order. The same index
+ * while the notes list (the caller keeps one array while no note moved) and the records' names are
+ * the same, so a recompute after a claim change indexes nothing again.
  */
 export function noteIndex(
+  notes: readonly NoteParagraph[],
+  records: readonly NoteRecord[]
+): (record: NoteRecord) => NoteSentence[] {
+  const key = records.map(recordKey).sort().join('\u0003')
+  const known = indexes.get(notes)
+  if (known?.key === key) return known.index
+  const index = buildNoteIndex(notes, records)
+  indexes.set(notes, { key, index })
+  return index
+}
+
+function buildNoteIndex(
   notes: readonly NoteParagraph[],
   records: readonly NoteRecord[]
 ): (record: NoteRecord) => NoteSentence[] {

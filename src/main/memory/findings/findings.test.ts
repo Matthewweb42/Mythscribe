@@ -187,10 +187,14 @@ describe('the rules’ inputs (F-16.27)', () => {
     indexNodePassages(db, second.id, NOW)
     const order = (): string[] => candidateInputs(db, activeDraftId(db)).notes.map((n) => n.text)
     const before = order()
+    // The same list while no note moved (C6 indexes it once for many recomputes).
+    const notes = candidateInputs(db, activeDraftId(db)).notes
+    expect(candidateInputs(db, activeDraftId(db)).notes).toBe(notes)
     // Re-indexing the first page re-inserts its rows after the second's.
     saveDocument(db, first.id, doc('Mara has hazel eyes.', 'She sails at dawn.'))
     indexNodePassages(db, first.id, NOW)
     expect(order()).toEqual([...before.slice(0, 1), 'She sails at dawn.', ...before.slice(1)])
+    expect(candidateInputs(db, activeDraftId(db)).notes).not.toBe(notes)
   })
 
   it('reads claims of readable scenes only', () => {

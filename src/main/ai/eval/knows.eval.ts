@@ -595,7 +595,10 @@ for (const readOrder of ['book', 'reverse'] as const) {
         const view = storedKnows(book, 'h14').secrets.find(
           (each) => each.recordId === recordFor(book, secret.id)[0]
         )
-        expect(view?.readersSince?.nodeId, secret.id).toBe(book.scenes.get(first ?? ''))
+        // A secret nobody in the book learns (P4's, Check the book lists it): readers know it
+        // from the scene that tells them.
+        const since = first ?? secret.defining?.scene ?? ''
+        expect(view?.readersSince?.nodeId, secret.id).toBe(book.scenes.get(since))
       }
       // As of h05 the engagement is known; the debts are not yet (learnt later).
       const early = storedKnows(book, 'h05')

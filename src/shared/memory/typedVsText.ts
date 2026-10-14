@@ -41,14 +41,27 @@ export interface TypedNames {
   aliasesOf: (recordId: string) => readonly string[]
 }
 
+/**
+ * Folded values already seen: the contradiction rules (F-16.27) compare every claim of a slot with
+ * its value groups after every change, over the same few hundred values each time. Bounded: cleared
+ * when full.
+ */
+const folded = new Map<string, string>()
+const FOLDED_CAP = 5000
+
 /** The form place and time words are compared in: lower case, straight quotes, no articles or punctuation. */
 export function foldDetail(text: string): string {
-  return straightenQuotes(text.normalize('NFC'))
+  const known = folded.get(text)
+  if (known !== undefined) return known
+  const fold = straightenQuotes(text.normalize('NFC'))
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .split(/\s+/)
     .filter((word) => word !== '' && word !== 'the' && word !== 'a' && word !== 'an')
     .join(' ')
+  if (folded.size >= FOLDED_CAP) folded.clear()
+  folded.set(text, fold)
+  return fold
 }
 
 /** Whether folded `haystack` holds folded `needle` as whole words. */

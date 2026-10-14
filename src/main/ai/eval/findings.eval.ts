@@ -44,6 +44,7 @@ import { TEST_BOOK, testBookScene } from '../../memory/testBook/book'
 import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
 import {
   addTestBookNotes,
+  addTestBookPages,
   buildTestBookProject,
   type TestBookProject
 } from '../../memory/testBook/project'
@@ -64,6 +65,7 @@ import {
   statesAbsence,
   judgeOracleReply,
   judgeOracleServer,
+  labelRecord,
   type JudgePlant,
   type LabelContradiction,
   type SentItem
@@ -154,8 +156,6 @@ const LIVE_STOP_USD = 0.5
 /** Design Part 5: *Check the book* is about 3.3¢ for ~100 pairs on a 90-scene book. */
 const DESIGN_CHECK_USD_PER_PAIR = 0.033 / 100
 
-const SCENE_COUNT = TEST_BOOK.filter((scene) => scene.source !== 'inactiveDraft').length
-
 // ---- The test book with its judge ------------------------------------------------------------
 
 /** What a request was: the judge's batch, its stronger check, the reader's, the checker's. */
@@ -211,14 +211,13 @@ export interface FindingsSession {
   providerError(): string | null
   /** The provider error that stopped reading the memory, or null. */
   readError: string | null
-  /** Reading the memory stopped at the cost cap before the last scene. */
-  readStopped: boolean
   close(): void
 }
 
 /**
  * The test book read (by the oracle, free, or by the live reader and checker through `live`), its
- * notes written, Use AI on and the Contradiction check on, and the findings service the app runs,
+ * record pages (Pinned and Ideas, P3's) and notes written, Use AI on and the Contradiction check
+ * on, and the findings service the app runs,
  * over `live` (every request through the app's request path: fast and strong tiers, reasoning
  * off, the reported cost in the ledger).
  */
@@ -248,6 +247,8 @@ export async function openFindingsSession(
     fs.rmSync(tmp, { recursive: true, force: true })
   }
   try {
+    // The Ideas pages too: an idea is never a note C6 compares (the replays hold that).
+    addTestBookPages(book, options.now)
     addTestBookNotes(book, options.now)
     const memory =
       options.read === 'live'
@@ -279,7 +280,6 @@ export async function openFindingsSession(
       over,
       providerError: () => firstError,
       readError: readingStop(outcomes),
-      readStopped: outcomes.size < SCENE_COUNT && over(),
       close
     }
   } catch (err) {
@@ -395,7 +395,7 @@ export interface FindingsScore {
   hidden: Share
   /** Open findings matching no label, each with both quotes. */
   unlabelled: string[]
-  /** Trap negatives (a candidate the judge must rule fine) that ended open. */
+  /** Trap negatives (a candidate the judge must rule fine) that ended open, each with both quotes. */
   traps: string[]
   /** Other `finding` negatives that made any finding at all (code's candidate rules let one in). */
   forbidden: string[]
@@ -483,7 +483,13 @@ export function scoreFindings(session: FindingsSession, check: CheckOutcome | nu
     if (negative.candidate === true) {
       for (const hit of hits) {
         trapIds.add(hit.id)
-        if (hit.state === 'open') traps.push(negativeText(negative))
+        if (hit.state === 'open') {
+          // Both quotes, for the author to read what the judge called a contradiction.
+          const view = views.get(hit.id)
+          traps.push(
+            `${negativeText(negative)} — ${view === undefined ? `${hit.rule} ${hit.key}` : findingText(view)}`
+          )
+        }
         if (hit.verdictAb !== null && hit.verdictBa !== null) {
           labels.of += 1
           if (!(hit.verdictAb === 'c' && hit.verdictBa === 'c')) labels.right += 1
@@ -658,7 +664,7 @@ export function findingsReport(score: FindingsScore, run: FindingsLiveRun): Find
     ...(run.costUnknown === null ? [] : [`**Cost unknown:** ${run.costUnknown}.`, '']),
     ...listed('Labelled contradictions missed', score.missed),
     ...listed('False alarms: open findings no label names (read both quotes)', score.unlabelled),
-    ...listed('Trap negatives that became findings', score.traps),
+    ...listed('Trap negatives that became findings (read both quotes)', score.traps),
     ...listed('Negatives with a candidate code must not make', score.forbidden),
     'No prompt text and no key are written here.'
   ]
@@ -688,9 +694,13 @@ export async function runLiveFindings(
   const session = await openFindingsSession(live, { read, now, stopUsd })
   try {
     let error = session.readError
-    let stopped = session.readStopped
+    let stopped = false
     let check: CheckOutcome | null = null
-    if (error === null && !session.over()) {
+    if (error === null && session.over()) {
+      // The cap passed (or a cost could not be known) while the memory was read, its last scene
+      // included: nothing is judged, and the report says why.
+      stopped = true
+    } else if (error === null) {
       const background = await judgeInBackground(session)
       error = background.error
       stopped ||= background.stopped
@@ -729,6 +739,7 @@ let tmp: string
 beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-findings-eval-'))
   book = buildTestBookProject(tmp, NOW)
+  addTestBookPages(book, NOW)
   addTestBookNotes(book, NOW)
   const ai = fakeAi(
     (request) => ({
@@ -808,8 +819,12 @@ describe('the contradiction candidates over the test book (F-16.27)', () => {
 
 /** The loose ends as the labels name them: kind, label record (or planned scene), last scene. */
 function looseEndRows(of: TestBookProject, view: LooseEndsView): (string | null)[][] {
+  // A thread the readings made is matched by its label (`labelRecord`), as every topic is.
   const labelOf = new Map(
-    TEST_BOOK_LABELS.records.map((record) => [of.records.get(record.id) ?? '', record.id])
+    TEST_BOOK_LABELS.records.flatMap((record) => {
+      const made = labelRecord(of, record.id)
+      return made === null ? [] : [[made, record.id] as const]
+    })
   )
   const scene = (nodeId: string | null): string | null =>
     nodeId === null ? null : sceneOf(of, nodeId)
@@ -831,6 +846,10 @@ describe('the loose ends of the test book (F-16.29)', () => {
     const view = looseEnds(looseEndInputs(book.db, activeDraftId(book.db)))
     expect(looseEndRows(book, view)).toEqual(LOOSE_END_LABELS)
     expect(view.more).toBe(0)
+    // Every kind is there: the author's thread, the characters and the planned card.
+    expect(new Set(view.items.map((item) => item.kind))).toEqual(
+      new Set(['thread', 'character', 'planned'])
+    )
     // Every question it would send is worded as a question, never as an absence.
     for (const item of view.items) expect(item.ask).toMatch(/\?$/)
   })
@@ -1028,6 +1047,27 @@ describe('contradictions over the test book: the oracle replay (F-16.27, F-16.28
     for (const item of view.items) {
       expect(item.ask).toMatch(/\?$/)
       expect(statesAbsence(item.ask), item.ask).toBe(false)
+    }
+  })
+
+  it('lists the secrets nobody in the book learns, and only those, each scoped', () => {
+    const report = first.report ?? fail()
+    const expected = TEST_BOOK_LABELS.secretsNobodyLearns.map((id) => {
+      const label = TEST_BOOK_LABELS.records.find((record) => record.id === id) ?? fail()
+      return { recordId: labelRecord(session.book, id) ?? fail(), since: label.defining?.scene }
+    })
+    expect(expected.length).toBeGreaterThan(0)
+    // No secret with a labelled learner is listed; each since the scene that tells the reader.
+    expect(
+      report.secretsNobodyLearns.map((each) => [
+        each.secretId,
+        each.readersSince === null ? null : sceneOf(session.book, each.readersSince.nodeId)
+      ])
+    ).toEqual(expected.map((each) => [each.recordId, each.since]))
+    for (const each of report.secretsNobodyLearns) {
+      // Scoped to how far the book is checked: the renderer words the line, never a bare absence.
+      expect(each.checkedUpTo, each.label).not.toBeNull()
+      expect(statesAbsence(each.label), each.label).toBe(false)
     }
   })
 
@@ -1285,6 +1325,11 @@ describe('contradictions over the test book: the adversarial judges (F-16.27, F-
       )
       const open = draftFindings(session.book).filter((each) => each.state === 'open')
       expect(open.map((each) => each.key).sort()).toEqual(candidates.map((each) => each.key).sort())
+      // And code made no candidate the labels do not name: every open finding is a labelled
+      // contradiction or a trap (an Idea scene's, an inactive draft's, an Ideas page's or a Not
+      // canon line's value never reaches the judge, so even a judge that agrees to everything
+      // raises no false alarm from one).
+      expect(scoreFindings(session, checked).unlabelled).toEqual([])
       // The dialogue-only values, the dream, the change claim, the rumour, the future note and the
       // agreeing kin word never reached the judge: no finding at all.
       const findings = draftFindings(session.book)
@@ -1426,6 +1471,24 @@ describe('the live contradictions run, end to end against a fake OpenRouter (F-1
     const report = await runLiveFindings(fakeLive(server), { now: NOW, read: 'live' })
     expect(server.calls.every((call) => !isJudgeRequest(call.messages))).toBe(true)
     expect(report.run.stopped).toBe(true)
+    expect(report.failures.some((failure) => failure.includes('stopped at the 0.5 USD cap'))).toBe(
+      true
+    )
+  }, 120_000)
+
+  it('stops when the cap passes while the last scene is read, judges nothing, and says why', async () => {
+    const last = testBookScene('h16').paragraphs.at(-1) ?? fail()
+    // The last scene in reading order (h16) costs past the cap; every scene before it is cheap.
+    const readsLast = (messages: readonly AiMessage[]): boolean =>
+      !isJudgeRequest(messages) && messages.some((message) => message.content.includes(last))
+    const server = judgeOracleServer({
+      costUsd: (messages) => (readsLast(messages) ? 0.6 : 0.0001)
+    })
+    const report = await runLiveFindings(fakeLive(server), { now: NOW, read: 'live' })
+    // Every scene was read (the cap passed in the last one), and nothing was judged after it.
+    expect(readsLast(server.calls.at(-1)?.messages ?? [])).toBe(true)
+    expect(server.calls.every((call) => !isJudgeRequest(call.messages))).toBe(true)
+    expect(report.run).toMatchObject({ stopped: true, error: null, costUnknown: null })
     expect(report.failures.some((failure) => failure.includes('stopped at the 0.5 USD cap'))).toBe(
       true
     )

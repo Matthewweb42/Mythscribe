@@ -197,6 +197,31 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       kind: 'character',
       aliases: [{ text: 'Mr. Fenwick' }],
       addedFor: 'P4'
+    },
+    {
+      // P4 (F-16.29): a thread opened and advanced in s02 and never touched again (Mr. Harrow
+      // calls on Mr. Ashby himself): a loose end at the book's end.
+      id: 'thread-tull-introduction',
+      name: "Mrs. Tull's introduction",
+      kind: 'thread',
+      aliases: [{ text: "Mrs. Tull's introduction" }],
+      defining: { scene: 's02', p: 3, quote: 'Mrs. Tull has promised to introduce him' },
+      addedFor: 'P4'
+    },
+    {
+      // P4 (F-16.30): a secret the narration tells the reader (h15) and nobody in the book learns:
+      // Check the book lists it.
+      id: 'secret-anne-pearls',
+      name: "Anne's sold pearls",
+      kind: 'secret',
+      aliases: [{ text: "Anne's sold pearls" }],
+      originator: 'anne',
+      defining: {
+        scene: 'h15',
+        p: 18,
+        quote: "Anne had sold her mother's pearls at Vellmouth to pay the painter"
+      },
+      addedFor: 'P4'
     }
   ],
   dismissed: ['Michaelmas'],
@@ -1286,6 +1311,23 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       scene: 'h15',
       p: 13,
       quote: "the lawyers met again over Lottie's match"
+    },
+    {
+      // P4: opened and advanced in one scene, never touched again (a loose end).
+      thread: 'thread-tull-introduction',
+      how: 'opens',
+      scene: 's02',
+      p: 3,
+      quote: 'Mrs. Tull has promised to introduce him',
+      voice: 'dialogue'
+    },
+    {
+      thread: 'thread-tull-introduction',
+      how: 'advances',
+      scene: 's02',
+      p: 11,
+      quote: 'it will be impossible for her to introduce him',
+      voice: 'dialogue'
     }
   ],
   years: [
@@ -1522,6 +1564,21 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       kind: 'claim',
       reason:
         "A scene left out of compile is never read: Ashby's engagement and Clara's marriage never happened."
+    },
+    {
+      scene: 'h11',
+      kind: 'finding',
+      rule: 'C1',
+      record: 'liesel',
+      slot: 'eyes',
+      reason: "The Idea scene's blue eyes are never read: no C1 against the book's."
+    },
+    {
+      scene: 'h11',
+      kind: 'finding',
+      rule: 'C2',
+      record: 'harrow-mr',
+      reason: "The Idea scene's death is never read: no C2 for Mr. Harrow on the page after it."
     },
     {
       scene: 'h06',
@@ -1997,11 +2054,17 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       ]
     }
   ],
-  // P4 (F-16.29): what the book leaves hanging as of its end (h16), worked out by hand: each
-  // character named in 3 or more scenes and last named a window (8 scenes) or more before h16,
-  // alive (Hobb is dead), in the order last touched; no thread (Ashby's return is resolved, and
-  // Lottie's match moved in h15); and the planned card.
+  // P4 (F-16.29): what the book leaves hanging as of its end (h16), worked out by hand: the thread
+  // with two steps last touched a window (8 scenes) or more before h16, and each character named
+  // in 3 or more scenes and last named that long before it, alive (Hobb is dead), in the order last
+  // touched (Ashby's return is resolved, and Lottie's match moved in h15); and the planned card.
   looseEnds: [
+    {
+      kind: 'thread',
+      id: 'thread-tull-introduction',
+      last: 's02',
+      reason: 'Opened and advanced in s02 and never touched again: a window or more before h16.'
+    },
     {
       kind: 'character',
       id: 'pell-sir',
@@ -2025,5 +2088,8 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       id: 'h17',
       reason: 'A planned card with no words and no link, before the last drafted scenes.'
     }
-  ]
+  ],
+  // P4 (F-16.30): readers learn of Anne's pearls in h15 and no one in the book does; every other
+  // secret has a learner.
+  secretsNobodyLearns: ['secret-anne-pearls']
 }

@@ -239,7 +239,8 @@ export function judgeOracleReply(
 export function judgeOracleServer(
   options: {
     plant?: () => JudgePlant | null
-    costUsd?: number | null
+    /** Each answered request's reported cost: one figure, or by request (null: none reported). */
+    costUsd?: number | null | ((messages: AiMessage[]) => number | null)
     /** An HTTP error status answered from the request after this many (a 429, a 402). */
     failAfter?: { calls: number; status: number }
   } = {}
@@ -250,7 +251,8 @@ export function judgeOracleServer(
     if (failAfter !== undefined && server.calls.length > failAfter.calls) {
       return { text: 'Rate limit exceeded', status: failAfter.status }
     }
-    const cost = options.costUsd === undefined ? {} : { costUsd: options.costUsd }
+    const costUsd = typeof options.costUsd === 'function' ? options.costUsd(messages) : options.costUsd
+    const cost = costUsd === undefined ? {} : { costUsd }
     const judged = judgeOracleReply(messages, options.plant?.() ?? null, memory)
     if (judged !== null) {
       return {

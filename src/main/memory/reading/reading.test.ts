@@ -13,6 +13,8 @@ import { activeDraftId, duplicateDraft, switchDraft } from '../../draft/draftSto
 import { setSceneMeta } from '../../document/sceneMetaStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { ensureResearchRoot } from '../../project/seed'
+import { asc, eq, sql } from 'drizzle-orm'
+import { claim } from '../../db/schema'
 import { createNode, deleteNode, getNode, moveNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
 import { nameScanShared, scanNamesFor } from '../nameIndexer'
@@ -21,17 +23,20 @@ import { createRecord, deleteRecord } from '../recordStore'
 import { setSceneDetails } from '../sceneDetailStore'
 import { runAnchors } from './anchors'
 import { getCard, upsertCard } from './cardStore'
-import { cardAnchorOf, sceneTexts, seedClaims } from './claimFixture'
+import { anchoredClaim, cardAnchorOf, sceneTexts, seedClaims } from './claimFixture'
 import {
   attachClaims,
   claimsByState,
   deleteClaims,
+  draftClaims,
   getClaim,
+  insertClaims,
   invariantClaims,
   recordClaims,
   reviveClaim,
   sceneClaims,
-  setClaimsState
+  setClaimsState,
+  toClaim
 } from './claimStore'
 import { getReading, insertReading, lastReading, recentReadings } from './readingStore'
 import { getSceneRead, writeSceneRead } from './sceneReadStore'
@@ -227,6 +232,56 @@ describe('the claim store (F-16.17)', () => {
       readingId: reading,
       proved: LATER.toISOString()
     })
+  })
+
+  it('reads a draft’s claims as plain rows exactly as the ORM maps them (P4 slice 6 review)', () => {
+    const draft = activeDraftId(db)
+    seedClaims(
+      db,
+      one,
+      [
+        { recordId: mara, slot: 'eyes', value: 'grey', quote: "Mara's eyes were grey", para: 1 },
+        {
+          recordId: null,
+          pending: { kind: 'name', norm: 'hesk', text: 'Hesk' },
+          state: 'waiting',
+          slot: 'clothing',
+          value: 'a blue coat',
+          quote: 'Mara wore a blue coat',
+          para: 2,
+          voice: 'dialogue',
+          mode: 'memory'
+        }
+      ],
+      NOW
+    )
+    // A change claim: the one column stored as a 0 or 1 the ORM maps to a boolean.
+    insertClaims(
+      db,
+      [
+        {
+          ...anchoredClaim(db, one, {
+            recordId: mara,
+            slot: 'hair',
+            value: 'red',
+            quote: 'Mara wore a blue coat',
+            para: 2
+          }),
+          change: true
+        }
+      ],
+      LATER
+    )
+    const orm = db
+      .select()
+      .from(claim)
+      .where(eq(claim.draftId, draft))
+      .orderBy(asc(claim.created), sql`rowid`)
+      .all()
+      .map(toClaim)
+    expect(orm).toHaveLength(3)
+    expect(draftClaims(db, draft)).toEqual(orm)
+    expect(draftClaims(db, draft).map((each) => each.change)).toEqual([false, false, true])
   })
 
   it('drops a scene’s claims with the scene and a record’s with the record', () => {

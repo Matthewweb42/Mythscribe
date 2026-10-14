@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 const alias = { '@shared': resolve('src/shared'), '@renderer': resolve('src/renderer') }
@@ -18,7 +18,22 @@ export default defineConfig({
         test: {
           name: 'main',
           environment: 'node',
-          include: ['src/main/**/*.test.ts', 'src/shared/**/*.test.ts']
+          include: ['src/main/**/*.test.ts', 'src/shared/**/*.test.ts'],
+          exclude: [...configDefaults.exclude, 'src/**/*.perf.test.ts']
+        }
+      },
+      {
+        resolve: { alias },
+        test: {
+          name: 'perf',
+          environment: 'node',
+          // The timing budgets (`*.perf.test.ts`: the findings recompute's 50 ms, the time views',
+          // Step 0's) measure what the code costs, so they run once every other project is done
+          // (`groupOrder`) and one file at a time: the contradictions eval's 20 s of work beside
+          // them failed the 50 ms bar about one full run in two (P4 slice 6 review).
+          include: ['src/**/*.perf.test.ts'],
+          sequence: { groupOrder: 1 },
+          fileParallelism: false
         }
       },
       {

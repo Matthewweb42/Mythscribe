@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
+import { and, asc, eq, getTableColumns, inArray, isNotNull, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import {
   ClaimPending,
@@ -195,15 +195,32 @@ export function claimsByState(db: TreeDb, state: ClaimState, draftId: string): C
   )
 }
 
+/**
+ * Every column of `claim` named as its row field, for a read of a whole draft's claims as plain rows:
+ * the ORM's row mapping cost as much as the read itself on a novel's claims, and the contradiction
+ * recompute (F-16.27) reads them after every change within its 50 ms budget (P4 slice 6 review).
+ * Every column is stored as the field reads it but `change`, a 0 or 1 (`rawClaimRow`);
+ * `claimStore.test.ts` holds the plain read to the ORM's, so a new column that maps is caught.
+ */
+const CLAIM_FIELDS = sql.raw(
+  Object.entries(getTableColumns(claim))
+    .map(([field, column]) => `"${column.name}" AS "${field}"`)
+    .join(', ')
+)
+
+/** A claim row as SQLite gives it: the ORM's row with `change` as the integer it is stored as. */
+type RawClaimRow = Omit<ClaimRow, 'change'> & { change: number }
+
+const rawClaimRow = (row: RawClaimRow): ClaimRow => ({ ...row, change: row.change !== 0 })
+
 /** Every claim of one draft. */
 export function draftClaims(db: TreeDb, draftId: string): Claim[] {
   return toClaims(
     db
-      .select()
-      .from(claim)
-      .where(eq(claim.draftId, draftId))
-      .orderBy(asc(claim.created), sql`rowid`)
-      .all()
+      .all<RawClaimRow>(
+        sql`SELECT ${CLAIM_FIELDS} FROM claim WHERE draft_id = ${draftId} ORDER BY created, rowid`
+      )
+      .map(rawClaimRow)
   )
 }
 

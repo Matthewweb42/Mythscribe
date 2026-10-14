@@ -218,7 +218,9 @@ describe('the findings recompute at novel size (F-16.27)', () => {
     // Each cast member's grey once against their own Pinned green, and the Research hazel for those
     // it names (one value group each, never one finding per scene).
     expect(notes.filter((row) => cast.includes(row.recordId))).toHaveLength(CAST + 20)
-    const ms = fastest(5, () => recomputeFindings(db, PERF_NOW))
+    // The fastest of ten: the first runs after seeding 900 claims and indexing the upload share the
+    // machine with the collection of that garbage (P4 slice 6 review: up to 15 ms of it).
+    const ms = fastest(10, () => recomputeFindings(db, PERF_NOW))
     expect(ms, `recompute with the cast: ${ms.toFixed(1)} ms`).toBeLessThan(BUDGET_MS)
     // The job as the app runs it adds only the pairs' stamps to the recompute (none rendered),
     // within the budget too. The stamps' share is measured against the recompute just before
