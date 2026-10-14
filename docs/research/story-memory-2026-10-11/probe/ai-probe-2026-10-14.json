@@ -1,0 +1,681 @@
+{
+  "date": "2026-10-14",
+  "listing": [
+    {
+      "id": "deepseek/deepseek-v4-pro",
+      "inUsdPerM": 0.400548,
+      "outUsdPerM": 0.801096,
+      "cachedInUsdPerM": 0.033379
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash",
+      "inUsdPerM": 0.091,
+      "outUsdPerM": 0.182,
+      "cachedInUsdPerM": 0.0182
+    }
+  ],
+  "endpoints": {
+    "deepseek/deepseek-v4-flash": [
+      {
+        "provider": "OpenInference",
+        "inUsdPerM": 0.03276,
+        "outUsdPerM": 1.152,
+        "cachedInUsdPerM": 0.0117,
+        "quantization": "fp4"
+      },
+      {
+        "provider": "Relace",
+        "inUsdPerM": 0.0364,
+        "outUsdPerM": 1.28,
+        "cachedInUsdPerM": 0.0364,
+        "quantization": "fp4"
+      },
+      {
+        "provider": "Baidu",
+        "inUsdPerM": 0.03836,
+        "outUsdPerM": 0.07672,
+        "cachedInUsdPerM": 0.007672,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "StreamLake",
+        "inUsdPerM": 0.07,
+        "outUsdPerM": 0.14,
+        "cachedInUsdPerM": 0.014,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "DeepInfra",
+        "inUsdPerM": 0.09,
+        "outUsdPerM": 0.18,
+        "cachedInUsdPerM": 0.018,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "GMICloud",
+        "inUsdPerM": 0.091,
+        "outUsdPerM": 0.182,
+        "cachedInUsdPerM": 0.0182,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "Venice",
+        "inUsdPerM": 0.0966,
+        "outUsdPerM": 0.1925,
+        "cachedInUsdPerM": 0.0196,
+        "quantization": "unknown"
+      },
+      {
+        "provider": "DigitalOcean",
+        "inUsdPerM": 0.098,
+        "outUsdPerM": 0.196,
+        "cachedInUsdPerM": 0.0196,
+        "quantization": "unknown"
+      },
+      {
+        "provider": "SiliconFlow",
+        "inUsdPerM": 0.13,
+        "outUsdPerM": 0.28,
+        "cachedInUsdPerM": 0.028,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "AtlasCloud",
+        "inUsdPerM": 0.14,
+        "outUsdPerM": 0.28,
+        "cachedInUsdPerM": 0.028,
+        "quantization": "fp4"
+      },
+      {
+        "provider": "Parasail",
+        "inUsdPerM": 0.14,
+        "outUsdPerM": 0.28,
+        "cachedInUsdPerM": 0.07,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "Alibaba",
+        "inUsdPerM": 0.15,
+        "outUsdPerM": 0.3,
+        "cachedInUsdPerM": 0.03,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "Mancer 2",
+        "inUsdPerM": 0.19,
+        "outUsdPerM": 0.5,
+        "cachedInUsdPerM": null,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "Azure",
+        "inUsdPerM": 0.21,
+        "outUsdPerM": 0.56,
+        "cachedInUsdPerM": 0.031,
+        "quantization": "unknown"
+      },
+      {
+        "provider": "Wafer",
+        "inUsdPerM": 0.34,
+        "outUsdPerM": 0.17,
+        "cachedInUsdPerM": 0.013,
+        "quantization": "unknown"
+      },
+      {
+        "provider": "Cloudflare",
+        "inUsdPerM": 0.44,
+        "outUsdPerM": 1.32,
+        "cachedInUsdPerM": 0.014,
+        "quantization": "unknown"
+      }
+    ],
+    "deepseek/deepseek-v4-pro": [
+      {
+        "provider": "StreamLake",
+        "inUsdPerM": 0.398808,
+        "outUsdPerM": 0.797616,
+        "cachedInUsdPerM": 0.033234,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "Baidu",
+        "inUsdPerM": 0.40053,
+        "outUsdPerM": 0.80106,
+        "cachedInUsdPerM": 0.03318,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "Parasail",
+        "inUsdPerM": 0.45,
+        "outUsdPerM": 3.48,
+        "cachedInUsdPerM": 0.1,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "GMICloud",
+        "inUsdPerM": 0.957,
+        "outUsdPerM": 1.914,
+        "cachedInUsdPerM": 0.07975,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "DigitalOcean",
+        "inUsdPerM": 1.044,
+        "outUsdPerM": 2.088,
+        "cachedInUsdPerM": 0.2088,
+        "quantization": "unknown"
+      },
+      {
+        "provider": "Reka",
+        "inUsdPerM": 1.05,
+        "outUsdPerM": 10.5,
+        "cachedInUsdPerM": 0.21,
+        "quantization": "unknown"
+      },
+      {
+        "provider": "Cloudflare",
+        "inUsdPerM": 1.15,
+        "outUsdPerM": 2.55,
+        "cachedInUsdPerM": 0.2,
+        "quantization": "unknown"
+      },
+      {
+        "provider": "DeepInfra",
+        "inUsdPerM": 1.3,
+        "outUsdPerM": 2.6,
+        "cachedInUsdPerM": 0.1,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "Alibaba",
+        "inUsdPerM": 1.416,
+        "outUsdPerM": 2.832,
+        "cachedInUsdPerM": 0.118,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "SiliconFlow",
+        "inUsdPerM": 1.50162,
+        "outUsdPerM": 3.135,
+        "cachedInUsdPerM": 0.135,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "Alibaba",
+        "inUsdPerM": 1.56,
+        "outUsdPerM": 3.12,
+        "cachedInUsdPerM": 0.13,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "Novita",
+        "inUsdPerM": 1.6,
+        "outUsdPerM": 3.2,
+        "cachedInUsdPerM": 0.135,
+        "quantization": "fp8"
+      },
+      {
+        "provider": "Venice",
+        "inUsdPerM": 1.65,
+        "outUsdPerM": 3.301,
+        "cachedInUsdPerM": 0.33,
+        "quantization": "unknown"
+      },
+      {
+        "provider": "AtlasCloud",
+        "inUsdPerM": 1.68,
+        "outUsdPerM": 3.38,
+        "cachedInUsdPerM": 0.13,
+        "quantization": "fp4"
+      },
+      {
+        "provider": "Azure",
+        "inUsdPerM": 1.91,
+        "outUsdPerM": 3.83,
+        "cachedInUsdPerM": 0.16,
+        "quantization": "unknown"
+      }
+    ]
+  },
+  "table": {
+    "deepseek/deepseek-v4-flash": {
+      "inUsdPerM": 0.14,
+      "outUsdPerM": 0.28,
+      "cachedInUsdPerM": null,
+      "source": "list"
+    },
+    "deepseek/deepseek-v4-pro": {
+      "inUsdPerM": 1.74,
+      "outUsdPerM": 3.48,
+      "cachedInUsdPerM": null,
+      "source": "list"
+    }
+  },
+  "summaries": [
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "runs": 13,
+      "medianInputTokens": 489,
+      "medianOutputTokens": 174,
+      "cacheHitShare": 0.29252366960496246,
+      "cachedBilledLower": true,
+      "reasoning": {
+        "off": {
+          "runs": 3,
+          "medianReasoningTokens": 0,
+          "medianOutputTokens": 147,
+          "cutOff": 0
+        },
+        "low": {
+          "runs": 3,
+          "medianReasoningTokens": 400,
+          "medianOutputTokens": 400,
+          "cutOff": 3
+        },
+        "default": {
+          "runs": 3,
+          "medianReasoningTokens": 400,
+          "medianOutputTokens": 400,
+          "cutOff": 3
+        }
+      },
+      "finishReasons": {
+        "stop": 7,
+        "length": 6
+      },
+      "reportedCostUsd": 0.0007624620720000001,
+      "unreportedCostRuns": 0,
+      "estimatedCostUsd": 0.0025548600000000004
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "runs": 13,
+      "medianInputTokens": 489,
+      "medianOutputTokens": 103,
+      "cacheHitShare": 0.5679072804440092,
+      "cachedBilledLower": true,
+      "reasoning": {
+        "off": {
+          "runs": 3,
+          "medianReasoningTokens": 0,
+          "medianOutputTokens": 103,
+          "cutOff": 0
+        },
+        "low": {
+          "runs": 3,
+          "medianReasoningTokens": 400,
+          "medianOutputTokens": 400,
+          "cutOff": 3
+        },
+        "default": {
+          "runs": 3,
+          "medianReasoningTokens": 400,
+          "medianOutputTokens": 400,
+          "cutOff": 3
+        }
+      },
+      "finishReasons": {
+        "stop": 7,
+        "length": 6
+      },
+      "reportedCostUsd": 0.005372295612,
+      "unreportedCostRuns": 0,
+      "estimatedCostUsd": 0.0313461
+    }
+  ],
+  "proposed": {
+    "deepseek/deepseek-v4-flash": {
+      "inUsdPerM": 0.091,
+      "outUsdPerM": 0.182,
+      "cachedInUsdPerM": 0.0182,
+      "source": "probe"
+    },
+    "deepseek/deepseek-v4-pro": {
+      "inUsdPerM": 0.400548,
+      "outUsdPerM": 0.801096,
+      "cachedInUsdPerM": 0.033379,
+      "source": "probe"
+    }
+  },
+  "stoppedAtLimit": false,
+  "runs": [
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "cache",
+      "reasoning": "off",
+      "inputTokens": 2042,
+      "outputTokens": 6,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.00007879144,
+      "finishReason": "stop",
+      "ms": 779,
+      "spentUsd": 0.00007879144
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "cache",
+      "reasoning": "off",
+      "inputTokens": 2042,
+      "outputTokens": 5,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.00014364,
+      "finishReason": "stop",
+      "ms": 1055,
+      "spentUsd": 0.00014364
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "cache",
+      "reasoning": "off",
+      "inputTokens": 2042,
+      "outputTokens": 5,
+      "cachedInputTokens": 1792,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.000084076,
+      "finishReason": "stop",
+      "ms": 1844,
+      "spentUsd": 0.000084076
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "cache",
+      "reasoning": "off",
+      "inputTokens": 2042,
+      "outputTokens": 5,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.00007871472,
+      "finishReason": "stop",
+      "ms": 749,
+      "spentUsd": 0.00007871472
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "reasoning",
+      "reasoning": "default",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 400,
+      "reportedCostUsd": 0.00004944604,
+      "finishReason": "length",
+      "ms": 5175,
+      "spentUsd": 0.00004944604
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "reasoning",
+      "reasoning": "default",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 392,
+      "reportedCostUsd": 0.00004944604,
+      "finishReason": "length",
+      "ms": 4257,
+      "spentUsd": 0.00004944604
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "reasoning",
+      "reasoning": "default",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 400,
+      "reportedCostUsd": 0.00004944604,
+      "finishReason": "length",
+      "ms": 5188,
+      "spentUsd": 0.00004944604
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "reasoning",
+      "reasoning": "off",
+      "inputTokens": 489,
+      "outputTokens": 98,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.0000262766,
+      "finishReason": "stop",
+      "ms": 1823,
+      "spentUsd": 0.0000262766
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "reasoning",
+      "reasoning": "off",
+      "inputTokens": 489,
+      "outputTokens": 174,
+      "cachedInputTokens": 256,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.000024251192,
+      "finishReason": "stop",
+      "ms": 2335,
+      "spentUsd": 0.000024251192
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "reasoning",
+      "reasoning": "off",
+      "inputTokens": 489,
+      "outputTokens": 147,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.00003003588,
+      "finishReason": "stop",
+      "ms": 2189,
+      "spentUsd": 0.00003003588
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "reasoning",
+      "reasoning": "low",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 400,
+      "reportedCostUsd": 0.00004944604,
+      "finishReason": "length",
+      "ms": 4811,
+      "spentUsd": 0.00004944604
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "reasoning",
+      "reasoning": "low",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 400,
+      "reportedCostUsd": 0.00004944604,
+      "finishReason": "length",
+      "ms": 4990,
+      "spentUsd": 0.00004944604
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "kind": "reasoning",
+      "reasoning": "low",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 400,
+      "reportedCostUsd": 0.00004944604,
+      "finishReason": "length",
+      "ms": 4700,
+      "spentUsd": 0.00004944604
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "cache",
+      "reasoning": "off",
+      "inputTokens": 2042,
+      "outputTokens": 3,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.00082028544,
+      "finishReason": "stop",
+      "ms": 2299,
+      "spentUsd": 0.00082028544
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "cache",
+      "reasoning": "off",
+      "inputTokens": 2042,
+      "outputTokens": 3,
+      "cachedInputTokens": 1024,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.00044411904,
+      "finishReason": "stop",
+      "ms": 901,
+      "spentUsd": 0.00044411904
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "cache",
+      "reasoning": "off",
+      "inputTokens": 2042,
+      "outputTokens": 5,
+      "cachedInputTokens": 1431,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.000295217622,
+      "finishReason": "stop",
+      "ms": 2290,
+      "spentUsd": 0.000295217622
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "cache",
+      "reasoning": "off",
+      "inputTokens": 2042,
+      "outputTokens": 3,
+      "cachedInputTokens": 1024,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.00044411904,
+      "finishReason": "stop",
+      "ms": 809,
+      "spentUsd": 0.00044411904
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "reasoning",
+      "reasoning": "default",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 400,
+      "reportedCostUsd": 0.00051628317,
+      "finishReason": "length",
+      "ms": 6772,
+      "spentUsd": 0.00051628317
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "reasoning",
+      "reasoning": "default",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 400,
+      "reportedCostUsd": 0.00051628317,
+      "finishReason": "length",
+      "ms": 7012,
+      "spentUsd": 0.00051628317
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "reasoning",
+      "reasoning": "default",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 256,
+      "reasoningTokens": 400,
+      "reportedCostUsd": 0.00042224157,
+      "finishReason": "length",
+      "ms": 7347,
+      "spentUsd": 0.00042224157
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "reasoning",
+      "reasoning": "off",
+      "inputTokens": 489,
+      "outputTokens": 103,
+      "cachedInputTokens": 256,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.00018432675,
+      "finishReason": "stop",
+      "ms": 1472,
+      "spentUsd": 0.00018432675
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "reasoning",
+      "reasoning": "off",
+      "inputTokens": 489,
+      "outputTokens": 103,
+      "cachedInputTokens": 256,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.00018432675,
+      "finishReason": "stop",
+      "ms": 2193,
+      "spentUsd": 0.00018432675
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "reasoning",
+      "reasoning": "off",
+      "inputTokens": 489,
+      "outputTokens": 103,
+      "cachedInputTokens": 256,
+      "reasoningTokens": 0,
+      "reportedCostUsd": 0.00018432675,
+      "finishReason": "stop",
+      "ms": 2746,
+      "spentUsd": 0.00018432675
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "reasoning",
+      "reasoning": "low",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 256,
+      "reasoningTokens": 400,
+      "reportedCostUsd": 0.00042224157,
+      "finishReason": "length",
+      "ms": 6850,
+      "spentUsd": 0.00042224157
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "reasoning",
+      "reasoning": "low",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 256,
+      "reasoningTokens": 400,
+      "reportedCostUsd": 0.00042224157,
+      "finishReason": "length",
+      "ms": 6989,
+      "spentUsd": 0.00042224157
+    },
+    {
+      "model": "deepseek/deepseek-v4-pro",
+      "kind": "reasoning",
+      "reasoning": "low",
+      "inputTokens": 489,
+      "outputTokens": 400,
+      "cachedInputTokens": 0,
+      "reasoningTokens": 355,
+      "reportedCostUsd": 0.00051628317,
+      "finishReason": "length",
+      "ms": 9225,
+      "spentUsd": 0.00051628317
+    }
+  ]
+}

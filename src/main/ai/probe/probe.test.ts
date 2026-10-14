@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { OPENROUTER_PROBED_PRICES } from '@shared/modelPrices'
+import { OPENROUTER_PROBED_PRICES, type ProbedModelId, type ProbedPrice } from '@shared/modelPrices'
 import {
   PROBED_MODELS,
   cacheAdvice,
@@ -27,6 +27,26 @@ import {
  * summaries, the proposed prices, the price module's round trip, and the report.
  */
 
+/**
+ * The app's table before the probe, fixed here so the probe's logic is tested against the
+ * fixtures' world (list prices, no cached price known) and not against whatever the last live
+ * probe wrote to `src/shared/modelPrices.ts`. Only the round-trip test reads the live table.
+ */
+const TABLE: Readonly<Record<ProbedModelId, ProbedPrice>> = {
+  'deepseek/deepseek-v4-flash': {
+    inUsdPerM: 0.14,
+    outUsdPerM: 0.28,
+    cachedInUsdPerM: null,
+    source: 'list'
+  },
+  'deepseek/deepseek-v4-pro': {
+    inUsdPerM: 1.74,
+    outUsdPerM: 3.48,
+    cachedInUsdPerM: null,
+    source: 'list'
+  }
+}
+
 const fixture = (name: string): unknown =>
   JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8')) as unknown
 
@@ -37,7 +57,7 @@ const PRO = 'deepseek/deepseek-v4-pro'
 const listed = (model: string): ListedPrice | undefined =>
   LISTING.find((entry) => entry.id === model)
 const SUMMARIES = PROBED_MODELS.map((model) =>
-  summariseRuns(model, RUNS, OPENROUTER_PROBED_PRICES[model], listed(model))
+  summariseRuns(model, RUNS, TABLE[model], listed(model))
 )
 
 function result(): ProbeResult {
@@ -48,9 +68,9 @@ function result(): ProbeResult {
       [FLASH]: parseEndpoints(fixture('endpoints-flash.json')),
       [PRO]: parseEndpoints(fixture('endpoints-pro.json'))
     },
-    table: OPENROUTER_PROBED_PRICES,
+    table: TABLE,
     summaries: SUMMARIES,
-    proposed: proposePrices(LISTING, SUMMARIES, OPENROUTER_PROBED_PRICES),
+    proposed: proposePrices(LISTING, SUMMARIES, TABLE),
     stoppedAtLimit: false
   }
 }
@@ -128,7 +148,7 @@ describe('summariseRuns', () => {
     const real: ListedPrice = { id: FLASH, inUsdPerM: 0.1, outUsdPerM: 0.28, cachedInUsdPerM: 0.01 }
     const summary = summariseRuns(FLASH, runs, stale, real)
     expect(summary.cachedBilledLower).toBe(false)
-    const proposed = proposePrices([real], [summary], OPENROUTER_PROBED_PRICES)
+    const proposed = proposePrices([real], [summary], TABLE)
     expect(proposed[FLASH].cachedInUsdPerM).toBeNull()
     // Without the cold run's bill, the listed price alone still decides.
     expect(summariseRuns(FLASH, runs.slice(1), stale, real).cachedBilledLower).toBe(false)
@@ -142,7 +162,7 @@ describe('summariseRuns', () => {
   it('counts a run that reported no cost at the table estimate against the limit', () => {
     const run = RUNS[0]
     if (run === undefined) throw new Error('no runs')
-    expect(spendOf(run, OPENROUTER_PROBED_PRICES[FLASH])).toBe(run.reportedCostUsd)
+    expect(spendOf(run, TABLE[FLASH])).toBe(run.reportedCostUsd)
     expect(spendOf({ ...run, reportedCostUsd: null }, { inUsdPerM: 1, outUsdPerM: 2 })).toBeCloseTo(
       (2_100 * 1 + 1 * 2) / 1_000_000,
       12
@@ -150,7 +170,7 @@ describe('summariseRuns', () => {
     const summary = summariseRuns(
       FLASH,
       [{ ...run, reportedCostUsd: null }, ...RUNS.slice(1)],
-      OPENROUTER_PROBED_PRICES[FLASH],
+      TABLE[FLASH],
       listed(FLASH)
     )
     expect(summary.unreportedCostRuns).toBe(1)
@@ -182,7 +202,7 @@ describe('summariseRuns', () => {
 
 describe('proposePrices', () => {
   it('takes the listed prices, and the cached price only where the runs saw it billed lower', () => {
-    const proposed = proposePrices(LISTING, SUMMARIES, OPENROUTER_PROBED_PRICES)
+    const proposed = proposePrices(LISTING, SUMMARIES, TABLE)
     expect(proposed[FLASH]).toEqual({
       inUsdPerM: 0.14,
       outUsdPerM: 0.28,
@@ -199,17 +219,17 @@ describe('proposePrices', () => {
   })
 
   it('keeps the current price of a model the listing lacks', () => {
-    const proposed = proposePrices([], SUMMARIES, OPENROUTER_PROBED_PRICES)
-    expect(proposed).toEqual(OPENROUTER_PROBED_PRICES)
+    const proposed = proposePrices([], SUMMARIES, TABLE)
+    expect(proposed).toEqual(TABLE)
   })
 
   it('keeps a confirmed price and its source, so a plain run passes when nothing changed', () => {
     const [flash, pro] = SUMMARIES
     if (flash === undefined || pro === undefined) throw new Error('no summaries')
     const unchanged = [flash, pro].map((summary) => ({ ...summary, cachedBilledLower: false }))
-    const proposed = proposePrices(LISTING, unchanged, OPENROUTER_PROBED_PRICES)
-    expect(proposed).toEqual(OPENROUTER_PROBED_PRICES)
-    expect(renderPriceModule(proposed)).toBe(renderPriceModule(OPENROUTER_PROBED_PRICES))
+    const proposed = proposePrices(LISTING, unchanged, TABLE)
+    expect(proposed).toEqual(TABLE)
+    expect(renderPriceModule(proposed)).toBe(renderPriceModule(TABLE))
   })
 })
 
@@ -219,9 +239,7 @@ describe('parseSavedProbe', () => {
     const parsed = parseSavedProbe(JSON.parse(JSON.stringify(saved)))
     expect(parsed?.listing).toEqual(LISTING)
     expect(parsed?.runs).toEqual(RUNS)
-    expect(proposePrices(parsed?.listing ?? [], SUMMARIES, OPENROUTER_PROBED_PRICES)).toEqual(
-      result().proposed
-    )
+    expect(proposePrices(parsed?.listing ?? [], SUMMARIES, TABLE)).toEqual(result().proposed)
     expect(parseSavedProbe({ listing: 'x', runs: [] })).toBeNull()
     expect(parseSavedProbe(null)).toBeNull()
   })
@@ -237,7 +255,7 @@ describe('the price module', () => {
   })
 
   it('writes a probed cached price as a number and the source as probe, a confirmed one unchanged', () => {
-    const text = renderPriceModule(proposePrices(LISTING, SUMMARIES, OPENROUTER_PROBED_PRICES))
+    const text = renderPriceModule(proposePrices(LISTING, SUMMARIES, TABLE))
     expect(text).toContain("cachedInUsdPerM: 0.028,\n    source: 'probe'")
     expect(text).toContain("cachedInUsdPerM: null,\n    source: 'list'")
     expect(text).not.toContain('2026')

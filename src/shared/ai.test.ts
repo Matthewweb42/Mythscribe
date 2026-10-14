@@ -19,6 +19,7 @@ import {
   modelPriceOf,
   TAGS_MIN_CHARS,
   aiFailure,
+  costOf,
   defaultAiModels,
   estimateTokens,
   inputBudget,
@@ -56,18 +57,37 @@ describe('cached input and OpenRouter (AI-BILLING-SPEC A4, R6, A2)', () => {
         priceFor(DEFAULT_MODELS[tier], 1_000, 1_000)
       )
     }
-    // F-16.1: the researched list prices until the probe runs. 1M in, 1M out on V4 Flash:
-    // $0.14 + $0.28; on V4 Pro: $1.74 + $3.48.
-    expect(priceFor('deepseek/deepseek-v4-flash', 1_000_000, 1_000_000).costUsd).toBeCloseTo(0.42)
-    expect(priceFor('deepseek/deepseek-v4-pro', 1_000_000, 1_000_000).costUsd).toBeCloseTo(5.22)
+    // F-16.1: priced from the one price module (list prices until the probe runs, then the
+    // probe's), so a fresh probe never breaks this. 1M in and 1M out cost in + out.
+    for (const [model, probed] of Object.entries(OPENROUTER_PROBED_PRICES)) {
+      expect(priceFor(model, 1_000_000, 1_000_000).costUsd).toBeCloseTo(
+        probed.inUsdPerM + probed.outUsdPerM,
+        10
+      )
+    }
     expect(defaultModelsFor('openrouter')).toEqual(OPENROUTER_DEFAULT_MODELS)
   })
 
-  it('bills cached DeepSeek input at the full input rate while no cached price is known (F-16.1)', () => {
-    for (const model of ['deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro']) {
-      expect(OPENROUTER_PRICING[model]).not.toHaveProperty('cachedInUsdPerM')
+  it('bills cached input at the full input rate while no cached price is known (F-16.1)', () => {
+    // A fixture, not the live table: the probe may have found a cached price by now.
+    const unknownCached = modelPriceOf({
+      inUsdPerM: 0.14,
+      outUsdPerM: 0.28,
+      cachedInUsdPerM: null,
+      source: 'list'
+    })
+    expect(unknownCached).not.toHaveProperty('cachedInUsdPerM')
+    expect(costOf(unknownCached, 10_000, 100, 8_000)).toBeCloseTo(
+      costOf(unknownCached, 10_000, 100, 0),
+      12
+    )
+  })
+
+  it('bills cached DeepSeek input at the price module’s cached rate, or the input rate without one', () => {
+    for (const [model, probed] of Object.entries(OPENROUTER_PROBED_PRICES)) {
+      const cachedRate = probed.cachedInUsdPerM ?? probed.inUsdPerM
       expect(priceFor(model, 10_000, 100, 8_000).costUsd).toBeCloseTo(
-        priceFor(model, 10_000, 100, 0).costUsd,
+        (2_000 * probed.inUsdPerM + 8_000 * cachedRate + 100 * probed.outUsdPerM) / 1_000_000,
         12
       )
     }

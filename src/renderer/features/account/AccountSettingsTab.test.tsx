@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AccountStatus } from '@shared/account'
 import type { CreditsResult, PricingResult, UsageResult } from '@shared/cloudApi'
 import { USAGE_PERIOD_DAYS } from '@shared/cloudUsage'
-import { bundledPricing } from '@shared/hostedPricing'
+import { bundledPricing, multiplierLabel } from '@shared/hostedPricing'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import type { SupporterStatus } from '@shared/license'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -478,8 +478,11 @@ describe('AccountSettingsTab balance (F-15.3, AI-BILLING-SPEC E1-E7, C2-C4)', ()
     expect(screen.getByTestId('account-model-price-deepseek/deepseek-v4-flash')).toHaveTextContent(
       'Standard'
     )
+    // The multiplier follows the price module (the last probe), so it is read, not hard-coded.
+    const pro = multiplierLabel(bundledPricing(), 'deepseek/deepseek-v4-pro')
+    expect(pro).toMatch(/^about \d+(\.\d)?x$/)
     expect(screen.getByTestId('account-model-price-deepseek/deepseek-v4-pro')).toHaveTextContent(
-      'about 12x the standard price'
+      `${pro ?? ''} the standard price`
     )
     expect(models.textContent).not.toMatch(/per 1M|token/i)
   })

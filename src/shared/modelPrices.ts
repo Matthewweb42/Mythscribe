@@ -16,15 +16,15 @@ export type ProbedModelId = 'deepseek/deepseek-v4-flash' | 'deepseek/deepseek-v4
 
 export const OPENROUTER_PROBED_PRICES: Readonly<Record<ProbedModelId, ProbedPrice>> = {
   'deepseek/deepseek-v4-flash': {
-    inUsdPerM: 0.14,
-    outUsdPerM: 0.28,
-    cachedInUsdPerM: null,
-    source: 'list'
+    inUsdPerM: 0.091,
+    outUsdPerM: 0.182,
+    cachedInUsdPerM: 0.0182,
+    source: 'probe'
   },
   'deepseek/deepseek-v4-pro': {
-    inUsdPerM: 1.74,
-    outUsdPerM: 3.48,
-    cachedInUsdPerM: null,
-    source: 'list'
+    inUsdPerM: 0.400548,
+    outUsdPerM: 0.801096,
+    cachedInUsdPerM: 0.033379,
+    source: 'probe'
   }
 }

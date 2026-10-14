@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { AI_FEATURE_IDS, estimateTokens, inputBudget, outputBudget } from '@shared/ai'
+import {
+  AI_FEATURE_IDS,
+  OPENROUTER_DEFAULT_MODELS,
+  OPENROUTER_PRICING,
+  estimateTokens,
+  inputBudget,
+  outputBudget,
+  type Tier
+} from '@shared/ai'
 import {
   PLANNED_COST_NOTES,
+  PLANNED_RETRY_FACTOR,
   PLANNED_TASK_COSTS,
   SHIPPED_PLAN_ROWS,
   type PlannedTask
@@ -158,6 +167,45 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
     return found
   }
 
+  type TierPrices = Record<Tier, { inUsdPerM: number; outUsdPerM: number }>
+  /**
+   * The researched list prices design Part 5 priced its figures at ("the corrected prices"):
+   * V4 Flash $0.14 / $0.28, V4 Pro $1.74 / $3.48. Fixed here so the size checks below test the
+   * planned token sizes, not whatever the last price probe wrote to `modelPrices.ts`.
+   */
+  const DESIGN_PRICES: TierPrices = {
+    fast: { inUsdPerM: 0.14, outUsdPerM: 0.28 },
+    strong: { inUsdPerM: 1.74, outUsdPerM: 3.48 }
+  }
+  const rows = [...PLANNED_COST_NOTES, ...SHIPPED_PLAN_ROWS]
+  /** A task's cost at the given tier prices, the way `plannedTaskCost` adds it up. */
+  const taskCostAt = (planned: PlannedTask, prices: TierPrices): number =>
+    planned.calls.reduce((total, { row, calls }) => {
+      const note = rows.find((candidate) => candidate.id === row)
+      if (note === undefined) throw new Error(`no row ${row}`)
+      const price = prices[note.tier]
+      const one =
+        (note.typicalInTokens * price.inUsdPerM + note.typicalOutTokens * price.outUsdPerM) /
+        1_000_000
+      return total + one * calls
+    }, 0) * PLANNED_RETRY_FACTOR
+  const designCost = (id: string): number => taskCostAt(task(id), DESIGN_PRICES)
+
+  it('prices every planned task at the own-key defaults from the one price module', () => {
+    const live = (tier: Tier): { inUsdPerM: number; outUsdPerM: number } => {
+      const price = OPENROUTER_PRICING[OPENROUTER_DEFAULT_MODELS[tier]]
+      if (price === undefined) throw new Error(`no price for ${tier}`)
+      return price
+    }
+    const prices: TierPrices = { fast: live('fast'), strong: live('strong') }
+    for (const planned of PLANNED_TASK_COSTS) {
+      expect(plannedTaskCost(planned, 'ownKey'), planned.id).toBeCloseTo(
+        taskCostAt(planned, prices),
+        12
+      )
+    }
+  })
+
   it.each([
     ['index', 0.12],
     ['openQuestion', 0.015],
@@ -169,22 +217,20 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
   ] as const)(
     'keeps %s within ±30 %% of the design’s figure at the corrected prices',
     (id, design) => {
-      const cost = plannedTaskCost(task(id), 'ownKey')
+      const cost = designCost(id)
       expect(cost).toBeGreaterThan(design * 0.7)
       expect(cost).toBeLessThan(design * 1.3)
     }
   )
 
   it('averages an open question near the design’s 2¢ with one in five widened', () => {
-    const average =
-      0.8 * plannedTaskCost(task('openQuestion'), 'ownKey') +
-      0.2 * plannedTaskCost(task('openQuestionWidened'), 'ownKey')
+    const average = 0.8 * designCost('openQuestion') + 0.2 * designCost('openQuestionWidened')
     expect(average).toBeGreaterThan(0.02 * 0.7)
     expect(average).toBeLessThan(0.02 * 1.3)
   })
 
   it('keeps the heavy month inside the design’s $1.60–2.30, give or take 30 %', () => {
-    const month = plannedTaskCost(task('heavyMonth'), 'ownKey')
+    const month = designCost('heavyMonth')
     expect(month).toBeGreaterThan(1.6 * 0.7)
     expect(month).toBeLessThan(2.3 * 1.3)
   })
@@ -241,10 +287,8 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
       expect(PLANNED_COST_NOTES.some((planned) => planned.id === row.id)).toBe(false)
       expect(isPromptVersion(row.prompt), row.prompt).toBe(true)
     }
-    // The upload task is still priced from the design's sizes: 14 chunks, about 15¢ on an own key.
-    const upload = PLANNED_TASK_COSTS.find((task) => task.id === 'upload')
-    if (upload === undefined) throw new Error('no upload task')
-    const cost = plannedTaskCost(upload, 'ownKey')
+    // The upload task is still priced from the design's sizes: 14 chunks, about 15¢ at the design's prices.
+    const cost = designCost('upload')
     expect(cost).toBeGreaterThan(0.15 * 0.7)
     expect(cost).toBeLessThan(0.15 * 1.3)
     // P2a, P2b, P3 and P4 are shipped: none of their rows is planned any more.

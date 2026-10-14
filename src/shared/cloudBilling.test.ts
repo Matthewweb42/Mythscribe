@@ -112,11 +112,21 @@ describe('the price table', () => {
     }
     const multiplier = (id: string): number | undefined =>
       findHostedModel(DEFAULT_HOSTED_MODELS, id)?.displayMultiplier
+    // Against the price module's fast price, whatever the last probe wrote: 10 × in + out each.
+    const flash = OPENROUTER_PROBED_PRICES['deepseek/deepseek-v4-flash']
+    const against = (inUsdPerM: number, outUsdPerM: number): number =>
+      Math.round(((10 * inUsdPerM + outUsdPerM) / (10 * flash.inUsdPerM + flash.outUsdPerM)) * 10) /
+      10
+    const pro = OPENROUTER_PROBED_PRICES['deepseek/deepseek-v4-pro']
     expect(multiplier('deepseek/deepseek-v4-flash')).toBe(1)
-    expect(multiplier('deepseek/deepseek-v4-pro')).toBe(12.4)
-    expect(multiplier('openai/gpt-5.4-mini')).toBe(7.1)
-    expect(multiplier('openai/gpt-5.4')).toBe(23.8)
-    expect(multiplier('openai/gpt-5.4-nano')).toBe(1.9)
+    expect(multiplier('deepseek/deepseek-v4-pro')).toBe(against(pro.inUsdPerM, pro.outUsdPerM))
+    expect(multiplier('openai/gpt-5.4-mini')).toBe(against(0.75, 4.5))
+    expect(multiplier('openai/gpt-5.4')).toBe(against(2.5, 15))
+    expect(multiplier('openai/gpt-5.4-nano')).toBe(against(0.2, 1.25))
+    // Fixed figures at the researched list prices (Flash $0.14 / $0.28, Pro $1.74 / $3.48).
+    const listFlash = { inputUsdPerM: 0.14, outputUsdPerM: 0.28 }
+    expect(displayMultiplierOf({ inputUsdPerM: 1.74, outputUsdPerM: 3.48 }, listFlash)).toBe(12.4)
+    expect(displayMultiplierOf({ inputUsdPerM: 2.5, outputUsdPerM: 15 }, listFlash)).toBe(23.8)
     // (10 × 3 + 15) / (10 × 1 + 2) = 3.75 → 3.8.
     expect(
       displayMultiplierOf(
