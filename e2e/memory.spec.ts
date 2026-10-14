@@ -134,8 +134,12 @@ import { caretToEnd, clickIntoEditor } from './support'
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Switch to the new story memory… › Try it on a copy first (since
  * Switch-over slice 3, F-16.31); the dry run lists the tag as a record; the consent screen's
- * replacement is edited to "Mara"; the copy reopens on v2 with plain "Mara" and a Mara record; the
- * original reopens as v1 with its inline tag.
+ * replacement is edited to "Mara of the Reef"; the copy reopens on v2 with those plain words and a
+ * Mara record; the original reopens as v1 with its inline tag. Since the switch-over's final
+ * verification, Use AI is on with an own key at the fake before the copy is made, so the copy's
+ * final screen asks once with its price ("Rebuild memory now: the AI reads 1 scene once, about …
+ * on your own key", the copy-only line), nothing read before the answer; Rebuild now closes it
+ * and the rebuild dialog reads the copy with `reader.v2` to its grouped summary.
  *
  * Switch-over slice 3 (F-16.31 part A), a third launch without the override, as the installed app
  * runs it: a v1 project in a temp "My Drive" (Google Drive) with "#mara" typed inline; Help lists
@@ -3837,6 +3841,27 @@ test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', asy
     .poll(async () => (await invoke<ProjectInfo | null>('project:current', undefined))?.path)
     .toBe(projectPath)
   await expect(page.getByTestId('project-name')).toHaveText('Switch Novel')
+
+  // Use AI on with an own OpenAI key at the fake (F-16.31 part A's final verification), so the
+  // copy's final screen asks for Rebuild memory with its price instead of waiting.
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' })
+  await page.keyboard.press('Control+,')
+  await expect(settingsDialog).toBeVisible()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog.getByRole('switch', { name: 'Use AI' }).check()
+  await settingsDialog
+    .getByRole('radiogroup', { name: 'Key provider' })
+    .getByTestId('own-key-provider-openai')
+    .click()
+  await expect(settingsDialog.getByRole('form', { name: 'OpenAI API key' })).toBeVisible()
+  await settingsDialog.getByLabel('API key', { exact: true }).fill(OWN_KEY)
+  await settingsDialog.getByRole('button', { name: 'Save' }).click()
+  await expect(settingsDialog.getByTestId('ai-key-hint')).toHaveText('Key saved: sk-…5678')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+  const isReader = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(READER_SENTINEL) === true
+
   await tryOnACopy()
   // (A character tag arrives with its sheet in v1, F-9.12, so the record comes from both.)
   await expect(dryRun.getByRole('list', { name: 'Converted' })).toContainText(
@@ -3865,8 +3890,31 @@ test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', asy
   expect((await invoke<{ name: string }[]>('record:list', undefined)).map((r) => r.name)).toEqual([
     'Mara'
   ])
-  await done.getByRole('button', { name: 'Close', exact: true }).click()
+
+  // The rebuild is asked once, with its price, on the copy too (SW-D8); nothing is read before
+  // the answer. Rebuild now closes the switch-over and the rebuild dialog runs to its summary.
+  const bodiesAtAsk = providerBodies.length
+  const ask = done.getByTestId('switchover-rebuild-ask')
+  await expect(ask).toContainText(
+    /Rebuild memory now: the AI reads 1 scene once, about \S+ on your own key \(about/,
+    { timeout: 15_000 }
+  )
+  await expect(ask).toContainText('This reads the test copy only')
+  expect(providerBodies.slice(bodiesAtAsk).filter(isReader)).toEqual([])
+  await ask.getByRole('button', { name: 'Rebuild now' }).click()
   await expect(done).toHaveCount(0)
+  const rebuild = page.getByRole('dialog', { name: 'Rebuild memory' })
+  const summary = rebuild.getByTestId('rebuild-summary')
+  await expect(summary).toBeVisible({ timeout: 90_000 })
+  await expect(summary).toContainText('Read 1 of 1 scenes.')
+  const reads = providerBodies.slice(bodiesAtAsk).filter(isReader)
+  expect(reads.length).toBeGreaterThan(0)
+  expect(reads.every((body) => body.messages[0]?.content.includes(READER_TOPICS_LINE))).toBe(true)
+  expect((await invoke<{ rebuild: string } | null>('switchover:record', undefined))?.rebuild).toBe(
+    'started'
+  )
+  await rebuild.getByRole('button', { name: 'Close' }).click()
+  await expect(rebuild).toHaveCount(0)
   await page
     .getByRole('tree', { name: 'Document tree' })
     .getByText(scene.title, { exact: true })
