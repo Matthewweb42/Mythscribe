@@ -201,14 +201,15 @@ const ENTRIES: readonly Entry[] = [
 /**
  * The feature that gates `feature`'s suggestion in story memory `memory` (P3-D17): in v2 a
  * question about the book is Ms Scribe's (`agent`), the router's work is the navigator's, and the
- * consistency check waits for P4 (none). v1 keeps each feature as it is.
+ * consistency check is the Contradiction check's (`judge`, P4-D23: answered from the open scene's
+ * findings). v1 keeps each feature as it is.
  */
 function gateOf(
   feature: AiFeatureId,
   memory: StoryMemoryVersion
 ): { feature: AiFeatureId; router: AiFeatureId | null } | null {
   const router: AiFeatureId = memory === 'v2' ? 'navigator' : 'route'
-  if (memory === 'v2' && feature === 'continuity') return null
+  if (memory === 'v2' && feature === 'continuity') return { feature: 'judge', router }
   if (memory === 'v2' && feature === 'query') return { feature: 'agent', router: null }
   return { feature, router: ROUTED.has(feature) ? router : null }
 }

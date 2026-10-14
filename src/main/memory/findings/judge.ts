@@ -25,8 +25,10 @@ import {
   JUDGE_PROMPT_VERSION,
   buildJudgePrompt,
   judgeBatches,
+  judgeConfirmChars,
   judgeItem,
   judgeItemKeyText,
+  judgeItemText,
   parseJudgeAnswer,
   type JudgeItem,
   type JudgeOrder,
@@ -558,6 +560,30 @@ export function pairItem(ctx: JudgeContext, core: FindingCore): PairItem | null 
   }
 }
 
+/**
+ * The stronger check's pair (*Check the book*, F-16.30): the finding rendered with three sentences
+ * either side, and its verdict-cache key on the strong tier (in the A,B order it is sent in, at the
+ * context cap its call fits, names folded and places masked as the fast keys are). Null when a side
+ * is gone.
+ */
+export function confirmPair(
+  ctx: JudgeContext,
+  core: FindingCore
+): { pair: JudgePair; key: string } | null {
+  const pair = judgePair(ctx, core, 3)
+  if (pair === null) return null
+  const chars = judgeConfirmChars(pair)
+  return {
+    pair,
+    key: verdictKey({
+      promptVersion: JUDGE_PROMPT_VERSION,
+      tier: 'strong',
+      order: 'ab',
+      item: gateText(judgeItemText(pair, 0, 'ab', chars, true), ctx.names())
+    })
+  }
+}
+
 /** A side's reference as one string, whatever key order built it. */
 function sideRef(side: FindingSide): string {
   switch (side.kind) {
@@ -689,6 +715,8 @@ export interface JudgeRunInput {
   signal?: AbortSignal
   /** Each call's reported cost as it returns. */
   onSpend?: (usd: number) => void
+  /** After each call's verdicts were stored (*Check the book*'s progress). */
+  onCall?: (result: JudgeRunResult) => void
   now: () => Date
 }
 
@@ -860,6 +888,7 @@ export async function judgeFindings(
           )
           store(ctx, pending, share, now, result)
         }
+        input.onCall?.(result)
       }
     }
   } finally {

@@ -6,7 +6,11 @@ import { seedClaims } from '../memory/reading/claimFixture'
 import { setKnewBefore } from '../memory/reading/knewBeforeStore'
 import { recordTopicQuotes, setTopicQuotesState } from '../memory/reading/topicStore'
 import { setSceneSettled } from '../memory/reading/sceneReadStore'
+import { findingsOf, setVerdicts } from '../memory/findings/findingStore'
+import { runFindingsJob } from '../memory/findings/findingsJob'
+import { indexStaleRecords } from '../memory/passageIndexer'
 import { savePage } from '../memory/recordStore'
+import { getAiSettings, setAiSettings } from '../project/settingsStore'
 import { setSceneDetails } from '../memory/sceneDetailStore'
 import { contested, instantCard } from './instant'
 import {
@@ -483,5 +487,29 @@ describe('contested (P3-D3)', () => {
     expect(contested(line('grey-blue', 'grey'), [])).toBeNull()
     expect(contested(line('grey', 'brown'), [])).toBe('contested')
     expect(contested({ ...line('short', 'long'), slot: 'hair' }, [])).toBeNull()
+  })
+})
+
+describe('an open finding contests the slot (P4-D25)', () => {
+  it('hands the slot over while a possible contradiction on it is open; off, the card stands', () => {
+    grey()
+    // Mara's Pinned page says green: a book-against-note finding, judged a contradiction.
+    savePage(book.db, book.mara, 'pinned', doc('Eyes: green'), SCRIBE_NOW)
+    indexStaleRecords(book.db, SCRIBE_NOW)
+    runFindingsJob(book.db, SCRIBE_NOW)
+    const [finding] = findingsOf(book.db, activeDraftId(book.db))
+    if (finding === undefined) throw new Error('no finding')
+    setVerdicts(book.db, finding.id, {
+      ab: 'c',
+      ba: 'c',
+      why: 'values differ',
+      costUsd: 0,
+      now: SCRIBE_NOW
+    })
+    expect(eyes(book.two)).toMatchObject({ handover: 'contested' })
+    // The Contradiction check off hides findings everywhere: the card stands.
+    const settings = getAiSettings(book.db)
+    setAiSettings(book.db, { ...settings, features: { ...settings.features, judge: false } })
+    expect(eyes(book.two)).toMatchObject({ card: { value: 'grey' } })
   })
 })

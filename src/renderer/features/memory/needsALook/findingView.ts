@@ -1,0 +1,37 @@
+import type { FindingView } from '@shared/memory/findings'
+import type { FindingsView } from '@shared/memory/views'
+
+/**
+ * The words of a possible contradiction (F-16.27, F-16.29; plan P4 §3.3, slice 4's `FindingRow`
+ * builds on them): the record and the slot, then each side's value and where it is, "Mara Vell’s
+ * eyes: grey (1.1) · brown (1.2)". A note side names the page ("Orrin’s Pinned page").
+ */
+
+const possessive = (name: string): string => (/s$/iu.test(name) ? `${name}’` : `${name}’s`)
+
+/** One finding as a line. */
+export function findingLine(view: FindingView): string {
+  return `${possessive(view.name)} ${view.slotLabel.toLowerCase()}: ${view.a.value} (${view.a.label}) · ${view.b.value} (${view.b.label})`
+}
+
+/** Where *Check the book* lives, as the chat names it. */
+export const CHECK_THE_BOOK_HINT = 'Check the book, in the Book tab, looks through the whole book.'
+
+/**
+ * P4-D23: the chat's answer to "Check this scene for consistency" in story memory v2, made
+ * locally from the open scene's open findings (no request): each as a line, or that none was found
+ * in the scene so far; then where *Check the book* is.
+ */
+export function sceneContradictionsAnswer(view: FindingsView, nodeId: string | null): string {
+  const here = view.open.filter(
+    (finding) => nodeId !== null && (finding.a.nodeId === nodeId || finding.b.nodeId === nodeId)
+  )
+  if (here.length === 0) {
+    return `No possible contradictions found in this scene so far. ${CHECK_THE_BOOK_HINT}`
+  }
+  return [
+    'Possible contradictions in this scene:',
+    ...here.map((finding) => `- ${findingLine(finding)}`),
+    CHECK_THE_BOOK_HINT
+  ].join('\n')
+}

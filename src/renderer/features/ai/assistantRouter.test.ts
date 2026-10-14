@@ -14,6 +14,8 @@ import type {
   Input,
   Output
 } from '@shared/ipc/contract'
+import type { FindingView } from '@shared/memory/findings'
+import type { FindingsView } from '@shared/memory/views'
 import type { InstantCard } from '@shared/scribe'
 import {
   resetActiveEditorStore,
@@ -90,6 +92,15 @@ let calls: [Channel, unknown][]
 let route: AiRouteResult
 /** F-16.25: what `ai:navigate` answers in a story memory v2 project. */
 let navigate: AiNavigateResult
+const NO_FINDINGS: FindingsView = {
+  open: [],
+  unclear: [],
+  counts: { unjudged: 0, held: 0, hidden: 0, open: 0, unclear: 0, fine: 0 },
+  waiting: 0,
+  judging: false
+}
+/** F-16.27 (P4-D23): what `memory:findings` answers in a story memory v2 project. */
+let findings: FindingsView = NO_FINDINGS
 
 function client(): IpcClient {
   return {
@@ -103,6 +114,8 @@ function client(): IpcClient {
           return input as Output<C>
         case 'ai:route':
           return { ...route, requestId: (input as Input<'ai:route'>).requestId } as Output<C>
+        case 'memory:findings':
+          return findings as Output<C>
         case 'ai:navigate':
           return {
             ...navigate,
@@ -204,6 +217,7 @@ let editor: Editor
 
 beforeEach(async () => {
   calls = []
+  findings = NO_FINDINGS
   route = routed('chat')
   navigate = {
     ok: true,
@@ -625,6 +639,48 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
     expect(sent('ai:agent')).toEqual([expect.objectContaining({ access: 'read' })])
     // No navigation: Ms Scribe answers from Step 0's evidence.
     expect(sent('ai:agent')[0]?.navigation).toBeUndefined()
+  })
+
+  it('answers a consistency check from the open scene’s findings, with no request (P4-D23)', async () => {
+    navigate = routedV2('continuity')
+    await useAssistantStore.getState().send('Check this scene for consistency')
+    expect(sent('memory:findings')).toEqual([{ nodeId: 'sc-1' }])
+    expect(calls.some(([channel]) => channel === 'ai:continuity')).toBe(false)
+    expect(turns()[1]?.content).toContain('No possible contradictions found in this scene so far')
+    const side = (value: string, label: string, nodeId: string): FindingView['a'] => ({
+      kind: 'claim',
+      ref: label,
+      nodeId,
+      para: 0,
+      quote: `Mara's eyes were ${value}`,
+      value,
+      voice: 'narration',
+      mode: 'now',
+      label,
+      open: { kind: 'scene', id: nodeId, para: 0 }
+    })
+    const open: FindingView = {
+      id: 'f1',
+      rule: 'C1',
+      variant: null,
+      recordId: 'r-mara',
+      name: 'Mara Vell',
+      slot: 'eyes',
+      slotLabel: 'Eyes',
+      a: side('grey', '1.1', 'sc-0'),
+      b: side('brown', '1.2', 'sc-1'),
+      state: 'open',
+      verdictAb: 'c',
+      verdictBa: 'c',
+      confirmed: false,
+      why: 'values differ',
+      costUsd: 0.0001,
+      actions: { right: { a: true, b: true }, updateNote: false, notFlashback: null }
+    }
+    findings = { ...findings, open: [open] }
+    await useAssistantStore.getState().send('Check this scene for consistency')
+    expect(turns()[3]?.content).toContain('Mara Vell’s eyes: grey (1.1) · brown (1.2)')
+    expect(sent('ai:navigate')).toHaveLength(2)
   })
 
   it('shows an instant card as the turn’s text with no AI call', async () => {

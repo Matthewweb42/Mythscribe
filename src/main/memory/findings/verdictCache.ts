@@ -43,6 +43,17 @@ export function cachedVerdict(db: TreeDb, key: string, now: Date): CachedVerdict
   return { verdict: row.verdict, why: row.why, model: row.model, costUsd: row.costUsd }
 }
 
+/**
+ * The verdict remembered for `key` without marking it used (a price worked out before anything is
+ * sent reads the cache and must not write); null when the pair-order was never judged.
+ */
+export function peekVerdict(db: TreeDb, key: string): CachedVerdict | null {
+  const row = db.select().from(verdictCache).where(eq(verdictCache.key, key)).get()
+  return row === undefined
+    ? null
+    : { verdict: row.verdict, why: row.why, model: row.model, costUsd: row.costUsd }
+}
+
 /** Remembers a verdict (replacing one under the same key), then prunes to the newest `max` by use. */
 export function cacheVerdict(
   db: TreeDb,

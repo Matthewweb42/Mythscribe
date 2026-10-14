@@ -3,7 +3,6 @@ import {
   localRoute,
   ROUTE_ACTIONS,
   routeActionFeature,
-  routeForMemory,
   settleRoute,
   type RouteDecision
 } from './assistantRoute'
@@ -158,21 +157,14 @@ describe('localRoute (F-5.19)', () => {
   })
 })
 
-describe('routeForMemory (F-16.4)', () => {
-  it('answers a consistency check through the agent in a v2 project, instruction kept', () => {
-    expect(routeForMemory(plain('continuity', 'the boat'), 'v2')).toEqual(
-      plain('query', 'the boat')
+describe('the consistency check in each story memory (F-16.4, P4-D23)', () => {
+  it('stays continuity in both: v2 answers it from the findings, v1 runs continuity.v2', () => {
+    expect(localRoute('continuity', open)).toEqual(plain('continuity'))
+    expect(settleRoute(plain('continuity', 'the boat'), open)).toEqual(
+      plain('continuity', 'the boat')
     )
-    expect(routeForMemory(localRoute('continuity', open) ?? plain('chat'), 'v2')).toEqual(
-      plain('query')
-    )
-  })
-
-  it('leaves every decision alone in v1, and every other decision in v2', () => {
-    expect(routeForMemory(plain('continuity'), 'v1')).toEqual(plain('continuity'))
-    for (const action of ROUTE_ACTIONS.filter((each) => each !== 'continuity')) {
-      expect(routeForMemory(plain(action), 'v2')).toEqual(plain(action))
-    }
+    expect(routeActionFeature('continuity', 'v2')).toBe('judge')
+    expect(routeActionFeature('continuity', 'v1')).toBe('continuity')
   })
 })
 
@@ -182,7 +174,9 @@ describe('routeActionFeature (F-16.25, P3-D17)', () => {
     expect(routeActionFeature('query', 'v2')).toBe('agent')
     expect(routeActionFeature('chat', 'v1')).toBe('chat')
     expect(routeActionFeature('query', 'v1')).toBe('query')
-    for (const action of ROUTE_ACTIONS.filter((each) => each !== 'chat' && each !== 'query')) {
+    for (const action of ROUTE_ACTIONS.filter(
+      (each) => each !== 'chat' && each !== 'query' && each !== 'continuity'
+    )) {
       expect(routeActionFeature(action, 'v2')).toBe(routeActionFeature(action, 'v1'))
     }
     expect(routeActionFeature('notes', 'v2')).toBe('notesSuggest')

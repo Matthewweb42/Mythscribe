@@ -414,14 +414,38 @@ export function setVerdicts(
   return { before: row.state, after: state }
 }
 
-/** Stores the stronger check's verdict on an open finding (*Check the book*). */
+/**
+ * Stores the stronger check's verdict on an open finding (*Check the book*, F-16.30) with its cost,
+ * and the state it gives (`ok` fine, `u` unclear, P4-D10). With `expect`, only the cost is added
+ * when the row no longer holds the pair as it was rendered (a recompute re-stated it while the call
+ * was out: the verdict stays remembered under its own words). `confirm` null adds the cost alone
+ * (a reply that gave no verdict). Answers whether the verdict was written.
+ */
 export function setConfirm(
   db: TreeDb,
   id: string,
-  input: { confirm: JudgeVerdict; why: string | null; costUsd: number; now: Date }
-): void {
+  input: {
+    confirm: JudgeVerdict | null
+    why: string | null
+    costUsd: number
+    now: Date
+    expect?: FindingAsRendered
+  }
+): boolean {
   const row = db.select().from(finding).where(eq(finding.id, id)).get()
-  if (row === undefined) return
+  if (row === undefined) return false
+  if (
+    input.confirm === null ||
+    (input.expect !== undefined && !stillAsRendered(row, input.expect))
+  ) {
+    if (input.costUsd > 0) {
+      db.update(finding)
+        .set({ costUsd: row.costUsd + input.costUsd })
+        .where(eq(finding.id, id))
+        .run()
+    }
+    return false
+  }
   db.update(finding)
     .set({
       confirm: input.confirm,
@@ -441,6 +465,7 @@ export function setConfirm(
     })
     .where(eq(finding.id, id))
     .run()
+  return true
 }
 
 /** Marks findings as drawn as underlines, once (slice 5). */

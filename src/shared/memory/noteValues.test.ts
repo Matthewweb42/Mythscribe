@@ -9,6 +9,8 @@ import {
   noteSentences,
   noteValue,
   pairsWith,
+  patchNoteParagraph,
+  patchNoteSentence,
   type NoteParagraph,
   type NoteRecord
 } from './noteValues'
@@ -205,5 +207,34 @@ describe('datedScene (P4-D8)', () => {
   it('names none when it is ambiguous or gone', () => {
     expect(datedScene("'The storm'", scenes)).toBeNull()
     expect(datedScene("19.1 'The portrait'", scenes)).toBeNull()
+  })
+})
+
+describe('Update my note’s proposal (F-16.29, P4-D18)', () => {
+  it('replaces the note’s value words with the book’s, whole words, any case', () => {
+    expect(patchNoteSentence('Eyes: green', 'green', 'grey')).toBe('Eyes: grey')
+    expect(patchNoteSentence("Orrin's Green eyes.", 'green', 'grey')).toBe("Orrin's grey eyes.")
+    expect(patchNoteSentence('Born: 1790.', '1790', '1792')).toBe('Born: 1792.')
+    expect(patchNoteSentence("Location (from 19.1 'The portrait'): London", 'London', 'Bath')).toBe(
+      "Location (from 19.1 'The portrait'): Bath"
+    )
+    // Never inside another word.
+    expect(patchNoteSentence('Greenwich eyes, green', 'green', 'grey')).toBe('Greenwich eyes, grey')
+  })
+
+  it('replaces a Label: value line’s value when its words are not found as read', () => {
+    expect(patchNoteSentence('Eyes: grey-green.', 'grey green', 'brown')).toBe('Eyes: brown.')
+    expect(patchNoteSentence('He has odd eyes.', 'grey green', 'brown')).toBeNull()
+  })
+
+  it('patches one sentence of a paragraph, the rest kept as written', () => {
+    expect(
+      patchNoteParagraph('The harbour. Orrin has green eyes. He sails.', 1, 'green', 'grey')
+    ).toEqual({
+      sentence: 'Orrin has green eyes.',
+      after: 'The harbour. Orrin has grey eyes. He sails.'
+    })
+    expect(patchNoteParagraph('Eyes: green', 3, 'green', 'grey')).toBeNull()
+    expect(patchNoteParagraph('Eyes: grey', 0, 'grey', 'grey')).toBeNull()
   })
 })

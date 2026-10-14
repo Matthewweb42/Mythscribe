@@ -13,6 +13,9 @@ import { modelHealth, probeDue } from '@shared/memory/health'
 import { SPOT_EVERY } from '@shared/memory/spot'
 import type { RebuildEstimate } from '@shared/memory/switchover'
 import type {
+  CheckEstimate,
+  CheckReport,
+  CheckStartResult,
   MemoryHealthReport,
   MemoryNotice,
   MemoryNoticeAction,
@@ -41,6 +44,7 @@ import {
   setCap,
   type MemoryCloudState
 } from '../../ai/cloudTally'
+import { dayOf } from '../../ai/dailyCap'
 import { assertFeatureAllowed } from '../../ai/dial'
 import { registerInflight, releaseInflight } from '../../ai/inflight'
 import { AiCancelledError, AiProviderError } from '../../ai/providers/types'
@@ -84,13 +88,21 @@ import {
   rebuildSceneDone,
   rebuildSummary,
   startRebuild,
-  stopRebuild
+  stopRebuild,
+  noteRebuildDone,
+  rebuildDoneNotice,
+  reviewRebuild
 } from './rebuild'
 import { linkPlansAfterReading } from './planLinks'
 import { markRebuilt, pickStrongDue, runSpotChecks } from './spotChecks'
 import { detailConflicts, keepMine } from './detailConflicts'
 import { notAbout, wrongValue } from './notRight'
-import { createFindingsService } from '../findings/findingsService'
+import { checkReport, estimateCheck, priceWaiting } from '../findings/checkBook'
+import {
+  HOLD as HOLD_FINDINGS,
+  createFindingsService,
+  sweepCalls
+} from '../findings/findingsService'
 import { findingCounts, type FindingCounts } from '../findings/findingsJob'
 import type { RebuildContext } from '../switchover/plan'
 
@@ -198,6 +210,16 @@ export interface ReaderService {
   health(): MemoryHealthReport
   rebuildEstimate(): RebuildEstimate
   rebuild(): RebuildStartResult
+  /** F-16.30: *Check the book*'s price now (local; nothing is sent). */
+  checkEstimate(): CheckEstimate
+  /**
+   * F-16.30: *Check the book*, confirmed with its price: one `checkBook` job (stopped with the
+   * queue's Stop); `openNodeId` is the open scene, whose findings the stronger check takes first.
+   * AI failures (the switch or Use AI off, no provider, the daily cap) as data.
+   */
+  checkBook(openNodeId: string | null): CheckStartResult
+  /** F-16.30: the last check's report; null before any. */
+  checkReport(): CheckReport | null
   rebuildSummary(): RebuildSummary | null
   rebuildAction(action: RebuildAction): { changed: number }
   /** *Not right* on an AI line (F-16.18): *Wrong value*, or *Not about* with one check. */
@@ -266,7 +288,8 @@ const NO_STATUS: MemoryStatus = {
   paused: null,
   todayUsd: 0,
   cloud: null,
-  rebuild: null
+  rebuild: null,
+  check: null
 }
 
 /** The start of the local day of `now`, as an ISO string (the footer's "today"). */
@@ -300,6 +323,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
   let offered: DueScene[] = []
   /** Health notices closed this session, by model. */
   const closedHealth = new Set<string>()
+  /** F-16.27: `findingsWaiting` notices closed this session, by day. */
+  const closedWaiting = new Set<string>()
   let backlogTimer: ReturnType<typeof setTimeout> | null = null
   let lastStatus: string | null = null
   let lastNotices: string | null = null
@@ -450,7 +475,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
               capUsd: cloudLimit(cloud, month())
             }
           : null,
-      rebuild: getRebuild(db)
+      rebuild: getRebuild(db),
+      check: findings.progress()
     }
   }
 
@@ -490,6 +516,20 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     }
     // Decision 4: the cards already read disagree with typed details (local; AI off too).
     list.push(...detailConflicts(db))
+    // F-16.29: the last rebuild's review, and pairs the background left for Check the book.
+    const findingsOn = deps.settings(db).features.judge
+    const done = rebuildDoneNotice(db, findingsOn)
+    if (done !== null) list.push(done)
+    const waiting = findings.waiting(db)
+    const waitingId = `findingsWaiting:${dayOf(now())}`
+    if (waiting > 0 && !closedWaiting.has(waitingId)) {
+      list.push({
+        id: waitingId,
+        kind: 'findingsWaiting',
+        pairs: waiting,
+        priceUsd: priceWaiting(waiting, rebuildContext(db))
+      })
+    }
     return list
   }
 
@@ -525,6 +565,14 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       deps.notices(notices)
     }
   }
+
+  /** *Rebuild memory*'s price, its contradiction sweep included with the switch on (F-16.27). */
+  const priceRebuild = (db: TreeDb): RebuildEstimate =>
+    rebuildEstimate(
+      db,
+      rebuildContext(db),
+      isFeatureAllowed(deps.settings(db), 'judge') ? sweepCalls : undefined
+    )
 
   const rebuildContext = (db: TreeDb): RebuildContext => {
     const provider = deps.provider(db)
@@ -598,7 +646,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
           kind: 'draftUnread',
           draftId,
           scenes: due.length,
-          priceUsd: rebuildEstimate(db, rebuildContext(db)).costUsd
+          priceUsd: priceRebuild(db).costUsd
         })
       } else {
         stored.set('backlog', {
@@ -776,15 +824,19 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     spend: (db, usd, asked) => tally(db, usd, asked),
     changed: deps.changed,
     ...(deps.findingsChanged === undefined ? {} : { findingsChanged: deps.findingsChanged }),
+    // F-16.30: Check the book's progress is the status the activity bar reads.
+    progressed: () => publish(),
     now
   })
 
   /** Queues a background judge run when one is wanted (and none waits already). */
   function queueJudge(): void {
     const db = v2Db()
-    if (db === null || !findings.wanted(db)) return
+    if (db === null) return
     const at = root(db)
-    if (at !== null) queue.indexAll('judge', [at], { afterRunning: true })
+    if (findings.wanted(db) && at !== null) queue.indexAll('judge', [at], { afterRunning: true })
+    // The findings moved: the notice of pairs left for Check the book follows.
+    publish()
   }
 
   async function runRead(
@@ -880,8 +932,11 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     if (progress.done > 0 && at !== null) {
       markRebuilt(db, now())
       queue.indexAll('spotCheck', [at])
+      // F-16.27, F-16.29: its contradiction sweep (asked, priced with it) and its review notice.
+      if (isFeatureAllowed(deps.settings(db), 'judge')) findings.sweepDue(db, progress.startedAt)
+      noteRebuildDone(db, progress.startedAt)
     }
-    // F-16.27: background judging waited for the rebuild.
+    // F-16.27: background judging waited for the rebuild (the sweep runs first when due).
     queueJudge()
   }
 
@@ -1108,6 +1163,11 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
         if (conflict !== undefined && (action === 'keepMine' || action === 'dismiss')) {
           keepMine(db, conflict, now())
         }
+      } else if (id.startsWith('rebuildDone:')) {
+        // F-16.29: *Done* (or closing it): the review is not shown again for this rebuild.
+        if (action === 'dismiss') reviewRebuild(db, id.slice('rebuildDone:'.length))
+      } else if (id.startsWith('findingsWaiting:')) {
+        if (action === 'dismiss') closedWaiting.add(id)
       } else if (id.startsWith('cloudCap:')) {
         if (action === 'allowMore') {
           deps.cloud.update((state) => markCapNotice(allowMore(state, month()), month()))
@@ -1208,8 +1268,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     },
 
     rebuildEstimate() {
-      const db = requireDb()
-      return rebuildEstimate(db, rebuildContext(db))
+      return priceRebuild(requireDb())
     },
 
     rebuild() {
@@ -1235,7 +1294,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
           nextStep: HEALTH_NEXT_STEP
         }
       }
-      const estimate = rebuildEstimate(db, rebuildContext(db))
+      const estimate = priceRebuild(db)
       const { nodeIds } = startRebuild(db, now())
       // The rebuild replaces scene by scene: leftover reads of those scenes are its to do.
       queue.indexAll('rebuild', nodeIds)
@@ -1245,7 +1304,40 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     },
 
     rebuildSummary() {
-      return rebuildSummary(requireDb())
+      const db = requireDb()
+      return rebuildSummary(db, deps.settings(db).features.judge)
+    },
+
+    checkEstimate() {
+      const db = requireDb()
+      return estimateCheck(db, rebuildContext(db))
+    },
+
+    checkBook(openNodeId) {
+      const db = requireDb()
+      const hold = findings.askedHold(db)
+      if (hold !== null) {
+        const code =
+          hold === HOLD_FINDINGS.provider
+            ? 'NO_KEY'
+            : hold === HOLD_FINDINGS.dailyCap
+              ? 'BUDGET'
+              : 'DISABLED'
+        return aiFailure(code, hold)
+      }
+      const estimate = estimateCheck(db, rebuildContext(db))
+      const at = root(db)
+      if (at !== null) {
+        findings.checkAsked(openNodeId)
+        queue.indexAll('checkBook', [at])
+        resumeIfPaused()
+      }
+      publish()
+      return { ok: true, estimate }
+    },
+
+    checkReport() {
+      return checkReport(requireDb())
     },
 
     async notRight(claimId, choice, requestId) {
@@ -1290,6 +1382,11 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       // F-16.22: the secrets and threads *Not right* took away leave the sidebar's lists.
       if (result.topicIds.length > 0) deps.recordsChanged?.(result.topicIds)
       if (result.names) deps.questions()
+      // F-16.29: *Not a problem* on the rebuild's possible contradictions moves the counts.
+      if (action.action === 'notProblems' && result.changed > 0) {
+        deps.findingsChanged?.(findingCounts(db, deps.settings(db).features.judge))
+        publish()
+      }
       return { changed: result.changed }
     },
 
@@ -1348,6 +1445,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       carets.clear()
       stored.clear()
       closedHealth.clear()
+      closedWaiting.clear()
       offered = []
       skipped = 0
       heldBack = false

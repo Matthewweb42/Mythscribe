@@ -1,5 +1,6 @@
 import {
   backgroundCandidates,
+  candidatesC7,
   claimSide,
   type Candidate,
   type CandidateClaim,
@@ -53,6 +54,11 @@ export interface RecomputeOptions {
   pairs?: PairReader
   /** The rules' inputs, when the caller built them. */
   inputs?: CandidateInputs
+  /**
+   * *Check the book* (F-16.30): C7 is found too, so a C7 row its rule no longer produces closes
+   * like any other; without it C7 rows are kept (they close only when a side is gone).
+   */
+  checkRules?: boolean
 }
 
 const NOTHING: RecomputeResult = { opened: [], closed: [], unjudged: 0, changed: false }
@@ -93,7 +99,10 @@ export function recomputeFindings(
   const draftId = currentDraftId(db)
   if (draftId === null) return NOTHING
   const inputs = options.inputs ?? candidateInputs(db, draftId, findingsFrame(db))
-  const candidates = backgroundCandidates(inputs)
+  const candidates =
+    options.checkRules === true
+      ? [...backgroundCandidates(inputs), ...candidatesC7(inputs)]
+      : backgroundCandidates(inputs)
   const produced = new Set(candidates.map((each) => each.key))
   const claims = new Map(inputs.claims.map((each) => [each.id, each]))
   const closing: { key: string; reason: FindingCloseReason }[] = []
@@ -114,8 +123,9 @@ export function recomputeFindings(
       continue
     }
     const again = restated(parsed, claims)
-    // C7 rows are Check the book's, out of the background set; others wait only for a re-read.
-    if (row.rule === 'C7' || again.held) kept.push(again)
+    // C7 rows are Check the book's, out of the background set (kept until a check finds C7
+    // again); others wait only for a re-read.
+    if ((row.rule === 'C7' && options.checkRules !== true) || again.held) kept.push(again)
     else closing.push({ key: row.key, reason: 'gone' })
   }
   const upsert = upsertFindings(db, draftId, [...candidates, ...kept], now, options.pairs, rows)

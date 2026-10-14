@@ -157,16 +157,26 @@ describe('assistantSuggestions', () => {
         'Proofread this scene'
       ])
     )
-    // The consistency check waits for P4 in v2; v1 never sees v2's lookups.
+    // The consistency check is the Contradiction check's in v2 (P4-D23): off, it is not offered;
+    // on (`judge`), it is. v1 never sees v2's lookups.
     expect(list(0)).not.toContain('Check this scene for continuity slips')
+    const withJudge = new Set<AiFeatureId>([...v2, 'judge'])
+    expect(
+      [0, 1, 2, 3].flatMap((step) =>
+        assistantSuggestions(
+          context({ memory: 'v2', allowed: withJudge, characters: ['Mara'] }),
+          step
+        )
+      )
+    ).toContain('Check this scene for continuity slips')
     expect(
       assistantSuggestions(context({ allowed: EVERYTHING, characters: ['Mara'] }), 0)
     ).not.toContain("Mara's eyes?")
     // Without the navigator, nothing it would route; without Ms Scribe, none of her lookups.
     const noNavigator = new Set<AiFeatureId>([...v2].filter((id) => id !== 'navigator'))
-    expect(
-      assistantSuggestions(context({ memory: 'v2', allowed: noNavigator }), 0)
-    ).not.toContain('Proofread this scene')
+    expect(assistantSuggestions(context({ memory: 'v2', allowed: noNavigator }), 0)).not.toContain(
+      'Proofread this scene'
+    )
     const noAgent = new Set<AiFeatureId>([...v2].filter((id) => id !== 'agent'))
     expect(
       assistantSuggestions(context({ memory: 'v2', allowed: noAgent, characters: ['Mara'] }), 0)

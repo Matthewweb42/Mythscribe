@@ -9388,6 +9388,116 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     }
   })
 
+  it('prices and runs Check the book, answers Not a problem and Update my note, and lists loose ends (F-16.29, F-16.30)', async () => {
+    vi.useFakeTimers()
+    try {
+      const scene = await openV2()
+      const made = await invoke('record:create', { name: 'Mara', categoryId: 'character' })
+      if (!('record' in made)) throw new Error('blocked')
+      const mara = made.record.id
+      await invoke('document:save', {
+        id: scene,
+        content: paragraphs("Mara's eyes were grey.", "Mara's eyes were brown.")
+      })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      complete.mockImplementation((request) => {
+        const user = request.messages.at(-1)?.content ?? ''
+        const text = user.startsWith('Pair:\n')
+          ? JSON.stringify({ r: 'c', w: 'grey eyes against brown' })
+          : JSON.stringify({
+              v: [...user.matchAll(/^(\d+)\. /gmu)].map((match) => ({
+                i: Number(match[1]),
+                r: 'c',
+                w: 'values differ'
+              }))
+            })
+        return Promise.resolve({
+          text,
+          model: 'gpt-fake',
+          usage: { inputTokens: 600, outputTokens: 30 }
+        })
+      })
+      await invoke('ai:setKey', { key: 'sk-test-check-1234abcd' })
+      await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+      const db = manager.require().connection.orm
+      seedClaims(
+        db,
+        scene,
+        [
+          { recordId: mara, slot: 'eyes', value: 'grey', quote: "Mara's eyes were grey", para: 0 },
+          { recordId: mara, slot: 'eyes', value: 'brown', quote: "Mara's eyes were brown", para: 1 }
+        ],
+        new Date()
+      )
+      // Priced first, with nothing sent.
+      const judged = (): number =>
+        complete.mock.calls.filter(([request]) =>
+          request.messages[0]?.content.startsWith(JUDGE_SENTINEL)
+        ).length
+      expect(await invoke('memory:checkEstimate', undefined)).toMatchObject({
+        free: false,
+        pairs: 1,
+        fastCalls: 2
+      })
+      expect(judged()).toBe(0)
+      expect(await invoke('memory:checkReport', undefined)).toBeNull()
+      expect(await invoke('memory:checkBook', { nodeId: scene })).toMatchObject({ ok: true })
+      await vi.advanceTimersByTimeAsync(5_000)
+      // Both orders, then the stronger check.
+      expect(judged()).toBe(3)
+      const report = await invoke('memory:checkReport', undefined)
+      expect(report?.found).toEqual([
+        expect.objectContaining({ rule: 'C1', name: 'Mara', confirmed: true })
+      ])
+      expect(report?.notChecked.fixed.join(', ')).toContain('travel times')
+      // Unchanged: free, and nothing more is sent.
+      expect((await invoke('memory:checkEstimate', undefined)).free).toBe(true)
+
+      // Not a problem: one Dismissed row; Undo brings the finding back with nothing sent.
+      const findingId = report?.found[0]?.id ?? ''
+      const answered = await invoke('memory:findingAction', { findingId, action: 'notProblem' })
+      expect(answered.dismissed).toMatchObject({ kind: 'notProblem', recordId: mara })
+      expect((await invoke('memory:findings', { nodeId: null })).open).toEqual([])
+      expect(sentOf('memory:findingsChanged').at(-1)).toEqual({ open: 0, unclear: 0, waiting: 0 })
+      await invoke('dismissed:undo', { id: answered.dismissed?.id ?? '' })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      expect((await invoke('memory:findings', { nodeId: null })).open).toHaveLength(1)
+      expect(judged()).toBe(3)
+
+      // A note conflict: Update my note proposes the book's value and saves it.
+      await invoke('record:savePage', { id: mara, page: 'pinned', doc: paragraphs('Eyes: green') })
+      await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
+      await vi.advanceTimersByTimeAsync(5_000)
+      const conflict = (await invoke('memory:findings', { nodeId: null })).open.find(
+        (each) => each.rule === 'C6' && each.a.value === 'grey'
+      )
+      expect(conflict?.actions).toMatchObject({ updateNote: true, right: { a: false, b: false } })
+      const patch = await invoke('memory:notePatch', { findingId: conflict?.id ?? '' })
+      expect(patch).toMatchObject({ before: 'Eyes: green', after: 'Eyes: grey' })
+      await expect(
+        invoke('memory:findingAction', {
+          findingId: conflict?.id ?? '',
+          action: 'right',
+          side: 'a'
+        })
+      ).rejects.toThrow(/canon side of a note conflict/u)
+      expect(
+        await invoke('memory:applyNotePatch', {
+          findingId: conflict?.id ?? '',
+          index: 0,
+          before: 'Eyes: green',
+          text: 'Eyes: grey'
+        })
+      ).toEqual({ owner: { kind: 'record', id: mara }, closed: true })
+      expect(sentOf('record:changed')).toContainEqual({ recordIds: [mara], roster: false })
+
+      // Loose ends: local and free.
+      expect(await invoke('memory:looseEnds', undefined)).toMatchObject({ items: [], more: 0 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('finds the candidates again after sheet lines, an Undo of Not a problem, Research pages, Same as… and a draft switch (F-16.27)', async () => {
     vi.useFakeTimers()
     try {

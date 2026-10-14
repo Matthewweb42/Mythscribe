@@ -258,7 +258,15 @@ export function timelineFixture(over: Partial<TimelineMemory> = {}): TimelineMem
 }
 
 export function memoryStatusFixture(over: Partial<MemoryStatus> = {}): MemoryStatus {
-  return { lastRead: null, paused: null, todayUsd: 0, cloud: null, rebuild: null, ...over }
+  return {
+    lastRead: null,
+    paused: null,
+    todayUsd: 0,
+    cloud: null,
+    rebuild: null,
+    check: null,
+    ...over
+  }
 }
 
 /** A fake main for the reading's tests: each channel's handler, every call kept, events sent on demand. */

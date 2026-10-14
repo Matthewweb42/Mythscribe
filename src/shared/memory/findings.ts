@@ -213,7 +213,10 @@ export const FindingView = z.object({
   why: z.string().nullable(),
   costUsd: z.number().nonnegative(),
   actions: z.object({
-    /** *This one's right* under each side (claim and presence sides only). */
+    /**
+     * *This one's right* under each side: it marks the other side not right, so it is offered only
+     * when both sides are book passages (a claim or a presence; never on a note conflict, P4-D17).
+     */
     right: z.object({ a: z.boolean(), b: z.boolean() }),
     /** *Update my note* (a C6 finding whose book side is narration in `now` mode, P4-D18). */
     updateNote: z.boolean(),

@@ -47,12 +47,14 @@ export { REBUILD_FAST_CHECKS, REBUILD_STRONG_CHECKS }
 /**
  * The rebuild's price and time: each scene read whole once (`reader.v2:first`, one request per
  * page of `REBUILD_PAGE_TOKENS` prose tokens, the row's other input on each page) and its claims
- * verified once per page (`verify.v2`), then the spot checks; priced on the configured fast and
- * strong models (`estimateCost`), minutes from `CONVERSION_SECONDS_PER_SCENE`.
+ * verified once per page (`verify.v2`), then the spot checks, and (F-16.27, P4 slice 3) the
+ * contradiction sweep's `judgeCalls` (`judge.v1`, with the Contradiction check on); priced on the
+ * configured fast and strong models (`estimateCost`), minutes from `CONVERSION_SECONDS_PER_SCENE`.
  */
 export function estimateRebuild(
   scenes: readonly number[],
-  context: RebuildContext
+  context: RebuildContext,
+  judgeCalls = 0
 ): RebuildEstimate {
   const reader = plannedRow('reader.v2:first')
   const verify = plannedRow('verify.v2')
@@ -72,6 +74,11 @@ export function estimateRebuild(
   const checks = scenes.length === 0 ? 0 : 1
   fastIn += checks * REBUILD_FAST_CHECKS * spot.typicalInTokens
   fastOut += checks * REBUILD_FAST_CHECKS * spot.typicalOutTokens
+  if (judgeCalls > 0) {
+    const judge = plannedRow('judge.v1')
+    fastIn += judgeCalls * judge.typicalInTokens
+    fastOut += judgeCalls * judge.typicalOutTokens
+  }
   const strongIn = checks * REBUILD_STRONG_CHECKS * strong.typicalInTokens
   const strongOut = checks * REBUILD_STRONG_CHECKS * strong.typicalOutTokens
   const fast = estimateCost(
@@ -86,7 +93,7 @@ export function estimateRebuild(
   )
   return {
     scenes: scenes.length,
-    requests: pages * 2 + checks * (REBUILD_FAST_CHECKS + REBUILD_STRONG_CHECKS),
+    requests: pages * 2 + checks * (REBUILD_FAST_CHECKS + REBUILD_STRONG_CHECKS) + judgeCalls,
     tokensIn: fastIn + strongIn,
     tokensOut: fastOut + strongOut,
     costUsd: fast.costUsd + strongCost.costUsd,

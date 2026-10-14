@@ -29,7 +29,7 @@ import {
   type FakeAi
 } from './readingFixture'
 import { gateScene } from './pipeline'
-import { getRebuild, getSpotState, setSpotState } from './readerRows'
+import { getRebuild, getSpotState, setSpotState, writeRow } from './readerRows'
 import { createReaderService, type ReaderService, type ReaderServiceDeps } from './readerService'
 import { emptyCardFields, emptyYields, type Claim } from '@shared/memory/claims'
 import { emptySceneDetails } from '@shared/memory/sceneDetails'
@@ -44,6 +44,7 @@ import { reading as readingTable } from '../../db/schema'
 import { JUDGE_SENTINEL } from '../../ai/prompts/judge.v1'
 import { findingsOf } from '../findings/findingStore'
 import { runFindingsJob } from '../findings/findingsJob'
+import { JUDGE_DAY_PAIRS, MEMORY_JUDGE_DAY_KEY } from '../findings/findingsService'
 
 let tmp: string
 let session: ProjectSession
@@ -131,10 +132,15 @@ async function drained(reader: ReaderService): Promise<void> {
 
 /**
  * The fake reader's answer: Mara's eyes in every paragraph that states them; the checker passes
- * all; the contradiction judge (F-16.27) calls every pair a contradiction.
+ * all; the contradiction judge (F-16.27) calls every pair a contradiction, and so does the stronger
+ * check of Check the book (F-16.30).
  */
 function answerReading(request: CompletionRequest): { text: string } {
   if (request.messages[0]?.content.startsWith(JUDGE_SENTINEL) === true) {
+    // The stronger check's one pair (Check the book): a contradiction too.
+    if ((request.messages.at(-1)?.content ?? '').startsWith('Pair:\n')) {
+      return { text: JSON.stringify({ r: 'c', w: 'grey eyes against brown' }) }
+    }
     const items = [...(request.messages.at(-1)?.content ?? '').matchAll(/^(\d+)\. /gmu)]
     return {
       text: JSON.stringify({
@@ -1430,5 +1436,92 @@ describe('the contradiction judge on the reader’s queue (F-16.27, P4 slice 2)'
     expect(lastRead).toBeGreaterThanOrEqual(0)
     expect(firstJudge).toBeGreaterThan(lastRead)
     expect(judgeRequests(ai)).toHaveLength(2)
+  })
+})
+
+describe('Check the book and the rebuild sweep on the reader’s queue (F-16.27, F-16.30, P4 slice 3)', () => {
+  const judgeRequests = (ai: FakeAi): CompletionRequest[] =>
+    ai.requests.filter((request) => request.messages[0]?.content.startsWith(JUDGE_SENTINEL))
+
+  it('prices the rebuild’s sweep with the switch on, sweeps once as asked, and asks for a review', async () => {
+    addScene('Second', "Mara's eyes were brown.")
+    const ai = reading({ providerId: 'cloud' })
+    const reader = service(ai)
+    const withSweep = reader.rebuildEstimate()
+    settings = { ...settings, features: { ...settings.features, judge: false } }
+    const without = reader.rebuildEstimate()
+    expect(withSweep.requests - without.requests).toBe(2)
+    expect(withSweep.costUsd).toBeGreaterThan(without.costUsd)
+    settings = { ...settings, features: { ...settings.features, judge: true } }
+    // Background spend is capped: the sweep is asked spend and runs past it.
+    cloud = { ...cloud, capUsd: 0, backgroundUsd: 0 }
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 2 })
+    await until(() => typeof getRebuild(db)?.finishedAt === 'string', 'the rebuild to finish')
+    await drained(reader)
+    expect(judgeRequests(ai)).toHaveLength(2)
+    expect(cloud.askedUsd).toBeGreaterThan(0)
+    expect(findingsOf(db, activeDraftId(db)).map((each) => each.state)).toEqual(['open'])
+    // The review: the summary lists the contradiction, the notice counts it.
+    const summary = reader.rebuildSummary()
+    expect(summary?.findings).toEqual([
+      expect.objectContaining({ rule: 'C1', name: 'Mara Vell', state: 'open' })
+    ])
+    const startedAt = getRebuild(db)?.startedAt ?? ''
+    expect(reader.notices()).toContainEqual(
+      expect.objectContaining({
+        id: `rebuildDone:${startedAt}`,
+        kind: 'rebuildDone',
+        lines: 2,
+        sheets: 1,
+        findings: 1
+      })
+    )
+    // Not a problem for them all: one Dismissed row, the finding closed.
+    expect(reader.rebuildAction({ action: 'notProblems' })).toEqual({ changed: 1 })
+    expect(findingsOf(db, activeDraftId(db), ['open'])).toEqual([])
+    expect(listDismissed(db).items.map((row) => row.kind)).toEqual(['notProblem'])
+    // Done: never shown again for this rebuild.
+    reader.answerNotice(`rebuildDone:${startedAt}`, 'dismiss')
+    expect(reader.notices().some((notice) => notice.kind === 'rebuildDone')).toBe(false)
+  })
+
+  it('says how many pairs wait for Check the book once the day’s background limit is reached', async () => {
+    const ai = reading()
+    const reader = service(ai)
+    const second = addScene('Second', "Mara's eyes were brown.")
+    for (const nodeId of [scene, second]) await reader.readNow(nodeId, `read-${nodeId}`)
+    runFindingsJob(db, NOW, { cachedVerdicts: true })
+    expect(reader.notices().some((notice) => notice.kind === 'findingsWaiting')).toBe(false)
+    writeRow(db, MEMORY_JUDGE_DAY_KEY, { day: '2026-10-12', pairs: JUDGE_DAY_PAIRS })
+    const waiting = reader.notices().find((notice) => notice.kind === 'findingsWaiting')
+    expect(waiting).toMatchObject({ pairs: 1, id: 'findingsWaiting:2026-10-12' })
+    expect(waiting?.kind === 'findingsWaiting' ? waiting.priceUsd : 0).toBeGreaterThan(0)
+    reader.answerNotice('findingsWaiting:2026-10-12', 'dismiss')
+    expect(reader.notices().some((notice) => notice.kind === 'findingsWaiting')).toBe(false)
+  })
+
+  it('runs Check the book as one asked job, with its price, progress and report', async () => {
+    const ai = reading()
+    const reader = service(ai)
+    const second = addScene('Second', "Mara's eyes were brown.")
+    for (const nodeId of [scene, second]) await reader.readNow(nodeId, `read-${nodeId}`)
+    settings = { ...settings, features: { ...settings.features, judge: false } }
+    expect(reader.checkBook(second)).toMatchObject({ ok: false, code: 'DISABLED' })
+    settings = { ...settings, features: { ...settings.features, judge: true } }
+    expect(reader.checkEstimate()).toMatchObject({ free: false, pairs: 1, fastCalls: 2 })
+    expect(reader.checkBook(second)).toMatchObject({ ok: true, estimate: { pairs: 1 } })
+    await drained(reader)
+    // Both orders, then the stronger check (the fake judges call it a contradiction too).
+    expect(judgeRequests(ai)).toHaveLength(3)
+    expect(reader.checkReport()?.found).toEqual([
+      expect.objectContaining({ rule: 'C1', confirmed: true })
+    ])
+    expect(reader.status().check).toMatchObject({ judged: 1, confirmed: 1 })
+    expect(reader.status().check?.finishedAt).not.toBeNull()
+    // Unchanged: free, and a second check sends nothing.
+    expect(reader.checkEstimate().free).toBe(true)
+    expect(reader.checkBook(second)).toMatchObject({ ok: true })
+    await drained(reader)
+    expect(judgeRequests(ai)).toHaveLength(3)
   })
 })

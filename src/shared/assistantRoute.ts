@@ -75,10 +75,13 @@ const ROUTE_ACTION_FEATURE: Record<RouteAction, AiFeatureId> = {
 /**
  * The feature that gates `action` in a project with story memory `memory` (F-16.25, P3-D17): in
  * v2 a chat message or a question about the book is Ms Scribe's (`agent`, behind the navigator),
- * since v2 hides `chat`'s router and Story Intelligence; every other action keeps its feature.
+ * since v2 hides `chat`'s router and Story Intelligence; the consistency check is the
+ * Contradiction check's (`judge`, P4-D23: v2 answers it from the open scene's findings, with no
+ * request; v1 keeps `continuity.v2`); every other action keeps its feature.
  */
 export function routeActionFeature(action: RouteAction, memory: StoryMemoryVersion): AiFeatureId {
   if (memory === 'v2' && (action === 'chat' || action === 'query')) return 'agent'
+  if (memory === 'v2' && action === 'continuity') return 'judge'
   return ROUTE_ACTION_FEATURE[action]
 }
 
@@ -186,16 +189,6 @@ export function settleRoute(decision: RouteDecision, situation: RouteSituation):
   }
   if (ROUTE_NODE_ACTIONS.includes(action) && !situation.hasNode) return CHAT
   return decision.edit === null ? decision : { ...decision, edit: null }
-}
-
-/**
- * F-16.4: in a story memory v2 project the consistency check is retired (P4 brings contradictions
- * back), so a turn routed to it is answered by the chat agent as a question about the book
- * (`query`, read only, cited), its instruction kept. Every other decision is left as it is.
- */
-export function routeForMemory(decision: RouteDecision, memory: StoryMemoryVersion): RouteDecision {
-  if (memory !== 'v2' || decision.action !== 'continuity') return decision
-  return { action: 'query', instruction: decision.instruction, edit: null }
 }
 
 /** The quick-action ids (F-5.17) as router actions; the recap is a Story Intelligence question. */

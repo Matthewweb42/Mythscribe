@@ -95,7 +95,12 @@ export function findingView(ctx: JudgeContext, finding: Finding): FindingView | 
     why: finding.why,
     costUsd: finding.costUsd,
     actions: {
-      right: { a: a.kind !== 'note', b: b.kind !== 'note' },
+      // P4-D17: *This one's right* marks the other side not right; on a note conflict the book is
+      // canon (answer 1), so neither side offers it (the panel offers *Update my note*).
+      right: {
+        a: a.kind !== 'note' && b.kind !== 'note',
+        b: a.kind !== 'note' && b.kind !== 'note'
+      },
       // P4-D18: a note conflict whose book side is narration in `now` mode.
       updateNote: finding.rule === 'C6' && bookClaim !== null && setsState(bookClaim),
       notFlashback: flashback

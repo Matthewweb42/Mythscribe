@@ -13,7 +13,7 @@ import {
   SpotVerdict
 } from './claims'
 import { Dismissed, LOOSE_END_KINDS } from './dismissed'
-import { FINDING_STATES, FindingView } from './findings'
+import { FINDING_STATES, FindingRule, FindingView } from './findings'
 import { KnowsHow } from './knows'
 import { RecordOrigin } from './records'
 import { SlotSchema } from './slots'
@@ -641,8 +641,24 @@ export const RebuildProgress = z.object({
 export type RebuildProgress = z.infer<typeof RebuildProgress>
 
 /**
- * The footer: "Read 3 min ago · today 0.3¢ · Cloud 12¢ of $1"; and the last *Rebuild memory*
- * (its progress for the activity bar while it runs, F-16.19), null before any.
+ * F-16.30: *Check the book* while it runs or as it last ended in this session (the activity bar's
+ * progress, as *Rebuild memory*'s): the pairs judged of those due, then the stronger check's
+ * confirmations of those due. Null before a check this session.
+ */
+export const CheckProgress = z.object({
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  judged: z.number().int().nonnegative(),
+  toJudge: z.number().int().nonnegative(),
+  confirmed: z.number().int().nonnegative(),
+  toConfirm: z.number().int().nonnegative()
+})
+export type CheckProgress = z.infer<typeof CheckProgress>
+
+/**
+ * The footer: "Read 3 min ago · today 0.3¢ · Cloud 12¢ of $1"; the last *Rebuild memory* (its
+ * progress for the activity bar while it runs, F-16.19), null before any; and *Check the book*'s
+ * progress (F-16.30), null before a check this session.
  */
 export const MemoryStatus = z.object({
   lastRead: z.object({ nodeId: z.string(), at: z.string() }).nullable(),
@@ -651,7 +667,8 @@ export const MemoryStatus = z.object({
   cloud: z
     .object({ spentUsd: z.number().nonnegative(), capUsd: z.number().nonnegative() })
     .nullable(),
-  rebuild: RebuildProgress.nullable()
+  rebuild: RebuildProgress.nullable(),
+  check: CheckProgress.nullable()
 })
 export type MemoryStatus = z.infer<typeof MemoryStatus>
 
@@ -711,6 +728,32 @@ export const MemoryNotice = z.discriminatedUnion('kind', [
     /** The record the text's value names (the card's POV; a place record the place names), or null. */
     textRecordId: z.string().nullable(),
     quote: z.string()
+  }),
+  /**
+   * F-16.29 (P4 slice 3): a *Rebuild memory* finished: what it added (new lines on how many sheets,
+   * names waiting on a question, possible contradictions it opened), with *Review* (the renderer
+   * opens the grouped summary) and *Done* (`dismiss`: never shown again for this rebuild). Its id
+   * is `rebuildDone:<startedAt>`.
+   */
+  z.object({
+    id: z.string(),
+    kind: z.literal('rebuildDone'),
+    startedAt: z.string(),
+    lines: z.number().int().nonnegative(),
+    sheets: z.number().int().nonnegative(),
+    names: z.number().int().nonnegative(),
+    findings: z.number().int().nonnegative()
+  }),
+  /**
+   * F-16.27, F-16.30 (P4 slice 3): pairs the background judge left for *Check the book* (today's
+   * background limit reached, or the Cloud cap), with the price of judging them. Its id is
+   * `findingsWaiting:<day>`; closing it (`dismiss`) hides it for the day.
+   */
+  z.object({
+    id: z.string(),
+    kind: z.literal('findingsWaiting'),
+    pairs: z.number().int().positive(),
+    priceUsd: z.number().nonnegative()
   })
 ])
 export type MemoryNotice = z.infer<typeof MemoryNotice>
@@ -807,7 +850,13 @@ export const RebuildSummary = z.object({
    */
   topics: z.array(
     z.object({ recordId: z.string(), kind: z.enum(['secret', 'thread']), label: z.string() })
-  )
+  ),
+  /**
+   * F-16.27, F-16.29 (P4 slice 3): the possible contradictions the rebuild opened (open findings
+   * made since it started), shown with the Contradiction check on ("Possible contradictions (n)",
+   * with one *Not a problem* for them all).
+   */
+  findings: z.array(FindingView)
 })
 export type RebuildSummary = z.infer<typeof RebuildSummary>
 
@@ -827,7 +876,9 @@ export const RebuildAction = z.discriminatedUnion('action', [
   z.object({ action: z.literal('notRightAll'), recordId: z.string() }),
   z.object({ action: z.literal('notNames') }),
   /** F-16.22: *Not right* on every secret and thread the rebuild made (*Not a secret* each). */
-  z.object({ action: z.literal('notTopics') })
+  z.object({ action: z.literal('notTopics') }),
+  /** F-16.29 (P4 slice 3): *Not a problem* on every possible contradiction the rebuild opened. */
+  z.object({ action: z.literal('notProblems') })
 ])
 export type RebuildAction = z.infer<typeof RebuildAction>
 
@@ -968,3 +1019,168 @@ export const LooseEndsView = z.object({
   checkedUpTo: SceneRefView.nullable()
 })
 export type LooseEndsView = z.infer<typeof LooseEndsView>
+
+/**
+ * F-16.30 (plan P4 §3.1, design Part 1 "Revising"): what *Check the book* never checks, whatever
+ * the book holds: no rule covers them. The report always names them.
+ */
+export const CHECK_NOT_COVERED = [
+  'travel times and distances',
+  'where objects are',
+  'anything the book never states'
+] as const
+
+/**
+ * F-16.30: *Check the book*'s price, worked out locally before anything is sent (P4-D22): the
+ * candidate pairs it would look at (C1–C7, held and hidden ones apart), the pairs and orders no
+ * remembered verdict covers (the fast check's calls), the stronger check's confirmations (about:
+ * the open findings not yet confirmed and a quarter of the new pairs; at most: all that could be
+ * due, never more than 20), priced from the cost registry on the models set up. `free` when
+ * nothing would be sent (the book has not changed since the last check). Also: the candidates
+ * hidden because a scene looks like a flashback, the scenes not read yet, and whether it goes
+ * through MythScribe Cloud (spent from the Balance).
+ */
+export const CheckEstimate = z.object({
+  free: z.boolean(),
+  pairs: z.number().int().nonnegative(),
+  /** Pair-orders with no remembered verdict. */
+  uncached: z.number().int().nonnegative(),
+  fastCalls: z.number().int().nonnegative(),
+  confirms: z.object({
+    about: z.number().int().nonnegative(),
+    most: z.number().int().nonnegative()
+  }),
+  aboutUsd: z.number().nonnegative(),
+  mostUsd: z.number().nonnegative(),
+  /** False when a model's price is unknown (the prices are then lower bounds). */
+  priced: z.boolean(),
+  hidden: z.number().int().nonnegative(),
+  unreadScenes: z.array(SceneRefView),
+  cloud: z.boolean(),
+  fastModel: z.string(),
+  strongModel: z.string()
+})
+export type CheckEstimate = z.infer<typeof CheckEstimate>
+
+/** What `memory:checkBook` answers: the check queued with its price, or why it cannot run. */
+export const CheckStartResult = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), estimate: CheckEstimate }),
+  z.object({ ok: z.literal(false), code: AiErrorCode, message: z.string(), nextStep: z.string() })
+])
+export type CheckStartResult = z.infer<typeof CheckStartResult>
+
+/**
+ * F-16.30: the last *Check the book*'s report (`memory:checkReport`, the `memoryCheck` settings
+ * row, kept until the next check): the open findings it found (those still open), the unclear
+ * ones, the ones the stronger check cleared ("the stronger check found no contradiction"), how
+ * many the stronger check confirmed, what it checked (pairs by rule, scenes, note pages), what it
+ * did not (what no rule covers, the scenes not read yet, the open findings past the 20
+ * confirmations, pairs left unjudged when it was stopped), the findings hidden because a scene
+ * looks like a flashback (each with *Not a flashback?*), and the secrets readers know that no
+ * scene shows anyone learning, as the scenes and "checked up to" only (rule 5: the renderer words
+ * the scoped line). A finding that closed since is left out.
+ */
+export const CheckReport = z.object({
+  at: z.string(),
+  draftId: z.string(),
+  costUsd: z.number().nonnegative(),
+  /** The check was stopped (or a failure ended it) before it judged everything. */
+  stopped: z.boolean(),
+  found: z.array(FindingView),
+  unclear: z.array(FindingView),
+  cleared: z.array(FindingView),
+  confirmed: z.number().int().nonnegative(),
+  checked: z.object({
+    pairs: z.number().int().nonnegative(),
+    byRule: z.record(FindingRule, z.number().int().nonnegative()),
+    scenes: z.number().int().nonnegative(),
+    notes: z.number().int().nonnegative()
+  }),
+  notChecked: z.object({
+    fixed: z.array(z.string()),
+    unreadScenes: z.array(SceneRefView),
+    pastConfirm: z.number().int().nonnegative(),
+    unjudged: z.number().int().nonnegative()
+  }),
+  hidden: z.array(
+    z.object({
+      findingId: z.string(),
+      /** The scene whose card says flashback (what *Not a flashback?* marks not right). */
+      nodeId: z.string(),
+      ref: z.string(),
+      label: z.string()
+    })
+  ),
+  secretsNobodyLearns: z.array(
+    z.object({
+      secretId: z.string(),
+      label: z.string(),
+      readersSince: SceneRefView.nullable(),
+      checkedUpTo: SceneRefView.nullable()
+    })
+  )
+})
+export type CheckReport = z.infer<typeof CheckReport>
+
+/**
+ * F-16.27, F-16.29 (plan P4 §3.2): the answers on a finding. *Not a problem* writes a `notProblem`
+ * Dismissed row keyed by the finding's *Not a problem* key and closes it (Undo brings it back,
+ * with its remembered verdicts, at no cost). *This one's right* under side `side` marks the other
+ * side not right through its own path (a line's *Wrong value*, a card's *Not right* on who is on
+ * the page) and closes the finding; it never edits the manuscript, and is refused when the other
+ * side is a note (the panel offers *Update my note* there).
+ */
+export const FindingAction = z.discriminatedUnion('action', [
+  z.object({ findingId: z.string(), action: z.literal('notProblem') }),
+  z.object({ findingId: z.string(), action: z.literal('right'), side: z.enum(['a', 'b']) })
+])
+export type FindingAction = z.infer<typeof FindingAction>
+
+/** What a finding's answer wrote, and (for *This one's right*) the scene of the side marked not right. */
+export const FindingActionResult = z.object({
+  dismissed: Dismissed.nullable(),
+  other: SceneRefView.nullable()
+})
+export type FindingActionResult = z.infer<typeof FindingActionResult>
+
+/**
+ * F-16.29 (plan P4 §3.2, P4-D18): *Update my note*'s proposal, made in code with no AI: the note
+ * paragraph (`before`, its index on the page) with the note's value words in its sentence replaced
+ * by the book's value (`after`). Offered only for a book-against-note finding whose book side is
+ * narration in `now` mode; the author edits it and saves (`memory:applyNotePatch`).
+ */
+export const NotePatch = z.object({
+  findingId: z.string(),
+  owner: z.object({
+    kind: z.enum(['record', 'research']),
+    id: z.string(),
+    /** The record's name or the Research page's title. */
+    name: z.string()
+  }),
+  page: z.literal('pinned').nullable(),
+  index: z.number().int().nonnegative(),
+  before: z.string(),
+  after: z.string(),
+  /** The note's sentence as it reads now, and the book's value. */
+  sentence: z.string(),
+  value: z.string()
+})
+export type NotePatch = z.infer<typeof NotePatch>
+
+/** The longest paragraph *Update my note* writes. */
+export const NOTE_PATCH_MAX = 4_000
+
+/** What `memory:applyNotePatch` wrote: the page, and whether the finding closed. */
+export const NotePatchApplied = z.object({
+  owner: z.object({ kind: z.enum(['record', 'research']), id: z.string() }),
+  closed: z.boolean()
+})
+export type NotePatchApplied = z.infer<typeof NotePatchApplied>
+
+/** F-16.29: *Not a problem* on a loose end (it comes back once the thing is touched again). */
+export const LooseEndKey = z.object({
+  kind: z.enum(LOOSE_END_KINDS),
+  id: z.string(),
+  lastNodeId: z.string().nullable()
+})
+export type LooseEndKey = z.infer<typeof LooseEndKey>

@@ -193,4 +193,23 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
       expect(isWriteChannel(channel), channel).toBe(false)
     }
   })
+
+  it('F-16.29, F-16.30: Check the book is v2’s AI; its price, report, loose ends and note proposal read; the answers write', () => {
+    const access: [Channel, 'read' | 'write' | 'ai'][] = [
+      ['memory:checkEstimate', 'read'],
+      ['memory:checkBook', 'ai'],
+      ['memory:checkReport', 'read'],
+      ['memory:findingAction', 'write'],
+      ['memory:notePatch', 'read'],
+      ['memory:applyNotePatch', 'write'],
+      ['memory:looseEnds', 'read'],
+      ['memory:looseEndAction', 'write']
+    ]
+    for (const [channel, kind] of access) {
+      expect(CHANNEL_MEMORY[channel], channel).toBe('v2')
+      expect(() => assertChannelMemory(channel, 'v1'), channel).toThrow(OTHER_MEMORY_MESSAGE)
+      expect(CHANNEL_ACCESS[channel], channel).toBe(kind)
+      expect(isWriteChannel(channel), channel).toBe(kind === 'write')
+    }
+  })
 })

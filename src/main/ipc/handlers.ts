@@ -470,7 +470,17 @@ import {
   staleNameScans
 } from '../memory/nameIndexer'
 import { anchorsChanged, runAnchors } from '../memory/reading/anchors'
-import { runFindingsJob } from '../memory/findings/findingsJob'
+import {
+  applyNotePatch,
+  findingNotProblem,
+  findingRight,
+  findingTouches,
+  looseEndNotProblem,
+  looseEndsView,
+  notePatch,
+  requireFinding
+} from '../memory/findings/findingActions'
+import { findingCounts, runFindingsJob } from '../memory/findings/findingsJob'
 import { findingsView } from '../memory/findings/findingViews'
 import { isUnderResearch } from '../research/researchTree'
 import { createReaderService, dropSummaryJobs } from '../memory/reading/readerService'
@@ -3910,8 +3920,7 @@ export function registerHandlers({
           message,
           history,
           selection,
-          requestId,
-          memory: memory()
+          requestId
         })
         const { action, instruction, edit, routedBy, usage, costUsd, cached, model } = result
         return {
@@ -5410,6 +5419,82 @@ export function registerHandlers({
       on: getAiSettings(db).features.judge,
       judging: reader.judging()
     })
+  })
+
+  /**
+   * F-16.27, F-16.29: a finding answered (closed by *Not a problem*, *This one's right* or *Update
+   * my note*): its scenes and records read again, and the counts sent at once (the recompute that
+   * follows finds nothing to move).
+   */
+  const findingsAnswered = (
+    db: TreeDb,
+    touched: { nodeIds: readonly string[]; recordIds: readonly string[] }
+  ): void => {
+    memoryChanged(touched)
+    emit(windows(), 'memory:findingsChanged', findingCounts(db, getAiSettings(db).features.judge))
+  }
+
+  // F-16.30: Check the book, priced first; its report kept until the next check.
+  register('memory:checkEstimate', () => reader.checkEstimate())
+  register('memory:checkBook', ({ nodeId }) => reader.checkBook(nodeId))
+  register('memory:checkReport', () => reader.checkReport())
+
+  // F-16.27, F-16.29: the answers on a finding; Dismissed rows only, never the manuscript.
+  register('memory:findingAction', (input) => {
+    const db = manager.require().connection.orm
+    const now = new Date()
+    const touched = findingTouches(requireFinding(db, input.findingId))
+    if (input.action === 'notProblem') {
+      const dismissed = findingNotProblem(db, input.findingId, now)
+      findingsAnswered(db, touched)
+      return { dismissed, other: null }
+    }
+    const result = findingRight(db, input.findingId, input.side, now)
+    findingsAnswered(db, touched)
+    // A card's Not right moves Here and decision 4's conflicts.
+    reader.detailsChanged()
+    return result
+  })
+
+  // F-16.29: Update my note, a code-made proposal the author edits and saves.
+  register('memory:notePatch', ({ findingId }) =>
+    notePatch(manager.require().connection.orm, findingId)
+  )
+  register('memory:applyNotePatch', (input) => {
+    const db = manager.require().connection.orm
+    const now = new Date()
+    const touched = findingTouches(requireFinding(db, input.findingId))
+    const result = applyNotePatch(
+      db,
+      input,
+      {
+        read: (owner) =>
+          owner.kind === 'record'
+            ? requireRecord(db, owner.id).pinned
+            : getDocumentContent(db, owner.id).content,
+        pinned: (recordId, doc) =>
+          void saveRecordPageWith(db, recordId, (tx) => savePage(tx, recordId, 'pinned', doc, now)),
+        research: (nodeId, doc) => void saveFromEditor(db, nodeId, doc, 'bulk')
+      },
+      now
+    )
+    if (result.owner.kind === 'record') {
+      emit(windows(), 'record:changed', { recordIds: [result.owner.id], roster: false })
+    }
+    findingsAnswered(db, touched)
+    return result
+  })
+
+  // F-16.29: Needs a look's Loose ends, local and free.
+  register('memory:looseEnds', () => looseEndsView(manager.require().connection.orm))
+  register('memory:looseEndAction', (input) => {
+    const db = manager.require().connection.orm
+    const row = looseEndNotProblem(db, input, new Date())
+    memoryChanged({
+      nodeIds: input.lastNodeId === null ? [] : [input.lastNodeId],
+      recordIds: input.kind === 'planned' ? [] : [input.id]
+    })
+    return row
   })
 
   // F-16.25 (P3-D15): Ms Scribe's search misses, for Settings and F-16.35.

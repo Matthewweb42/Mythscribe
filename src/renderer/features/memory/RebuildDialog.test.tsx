@@ -43,7 +43,8 @@ const SUMMARY: RebuildSummary = {
   topics: [
     { recordId: 's-map', kind: 'secret', label: 'the sold map' },
     { recordId: 't-heir', kind: 'thread', label: 'the missing heir' }
-  ]
+  ],
+  findings: []
 }
 
 let main: FakeMain

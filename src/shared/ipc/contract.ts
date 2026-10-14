@@ -271,8 +271,18 @@ import {
 import { TwinGateBlocked, TwinGateVerdict } from '../memory/twinGate'
 import {
   CardNotRight,
+  CheckEstimate,
+  CheckReport,
+  CheckStartResult,
   ClaimInfo,
+  FindingAction,
+  FindingActionResult,
   KnowsGrid,
+  LooseEndKey,
+  LooseEndsView,
+  NOTE_PATCH_MAX,
+  NotePatch,
+  NotePatchApplied,
   MemoryHealthReport,
   MemoryNotice,
   MemoryNoticeAction,
@@ -3588,6 +3598,61 @@ export const contract = {
    * running. Empty while the Contradiction check switch is off. Local and free.
    */
   'memory:findings': { input: z.object({ nodeId: z.string().nullable() }), output: FindingsView },
+  /**
+   * F-16.30 (plan P4 §3.1): *Check the book*'s price now, worked out locally (nothing is sent):
+   * the pairs it would judge, the fast calls and the stronger check's confirmations (about and at
+   * most), "free" when nothing would be sent, the candidates hidden as flashbacks, the scenes not
+   * read yet, and whether it is spent from the Cloud Balance.
+   */
+  'memory:checkEstimate': { input: z.undefined(), output: CheckEstimate },
+  /**
+   * F-16.30: *Check the book*, confirmed with its price: one job on the reader's queue (stopped with
+   * the queue's Stop, `jobs:cancel`; what was judged stays): C1–C7, every uncached pair judged in
+   * both orders, then the strong model confirms at most 20 open findings (`nodeId`: the open scene,
+   * whose findings go first), then the report. Asked spend (past the Cloud cap, never the daily
+   * cap). AI failures (the Contradiction check or Use AI off, no provider, the daily cap) as data.
+   */
+  'memory:checkBook': {
+    input: z.object({ nodeId: z.string().nullable() }),
+    output: CheckStartResult
+  },
+  /** F-16.30: the last check's report (kept until the next check); null before any. Local. */
+  'memory:checkReport': { input: z.undefined(), output: CheckReport.nullable() },
+  /**
+   * F-16.27, F-16.29 (plan P4 §3.2): an answer on a finding. *Not a problem*: a `notProblem`
+   * Dismissed row (Undo brings the finding back at no cost). *This one's right*: the other side
+   * marked not right (a line's *Wrong value*, or a card's *Not right* on who is on the page); never
+   * the manuscript; VALIDATION on a note conflict. The finding closes. NOT_FOUND once it is gone.
+   */
+  'memory:findingAction': { input: FindingAction, output: FindingActionResult },
+  /**
+   * F-16.29 (P4-D18): *Update my note*'s proposal, made in code: the note paragraph with its value
+   * replaced by the book's; null when it is not offered (the book side is not narration now, or no
+   * value can be placed). Local.
+   */
+  'memory:notePatch': { input: z.object({ findingId: z.string() }), output: NotePatch.nullable() },
+  /**
+   * F-16.29: saves the author's edited note paragraph (`index` and `before` as the proposal read
+   * them; VALIDATION "That line changed since" when the page moved) through the page's own save
+   * (a Pinned page or a Research page; the paragraph's AI marks go); the finding closes.
+   */
+  'memory:applyNotePatch': {
+    input: z.object({
+      findingId: z.string(),
+      index: z.number().int().nonnegative(),
+      before: z.string().max(NOTE_PATCH_MAX),
+      text: z.string().max(NOTE_PATCH_MAX)
+    }),
+    output: NotePatchApplied
+  },
+  /**
+   * F-16.29 (design §2.7): Needs a look's Loose ends: threads, characters and planned cards left
+   * behind the furthest drafted scene, each with its *Ask Ms Scribe* question; local and free (Use
+   * AI off too). The scoped "nothing since" words are the renderer's.
+   */
+  'memory:looseEnds': { input: z.undefined(), output: LooseEndsView },
+  /** F-16.29: *Not a problem* on a loose end (a `notProblem` row; a later touch brings it back). */
+  'memory:looseEndAction': { input: LooseEndKey, output: Dismissed },
   /**
    * F-16.25 (P3-D15): Ms Scribe's search misses, newest first (at most `SEARCH_MISSES_LIST_MAX`):
    * passages a widened answer cited that the turn's searches had not returned. Local; the count

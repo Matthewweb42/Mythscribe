@@ -8,7 +8,9 @@ import { slotGroup, type Slot } from '@shared/memory/slots'
 import { detailsAgree } from '@shared/memory/typedVsText'
 import type { SheetLineView } from '@shared/memory/views'
 import type { EvidenceKey, InstantCard } from '@shared/scribe'
+import { findingsOf } from '../memory/findings/findingStore'
 import { nameScanShared } from '../memory/nameIndexer'
+import { getAiSettings } from '../project/settingsStore'
 import { getClaim, recordClaims } from '../memory/reading/claimStore'
 import { storedKnows } from '../memory/reading/knowsViews'
 import { rowTexts } from '../memory/reading/readingFrame'
@@ -45,17 +47,43 @@ export const READ_FIRST_SCENES = 2
 /**
  * Whether a slot's value as of now is contested (P3-D3): any claim of the record and slot as of
  * now is stale (`stale`), or a fixed slot gives another value that neither contains (`contested`;
- * "grey" and "grey-blue" agree). A value later in the book never contests. P4 adds open findings.
+ * "grey" and "grey-blue" agree). A value later in the book never contests. P4-D25: an open
+ * finding on the record and slot (`openFinding`) contests it too, so Ms Scribe answers with both
+ * sides instead of a card.
  */
 export function contested(
   line: SheetLineView,
-  claims: readonly Pick<Claim, 'state'>[]
+  claims: readonly Pick<Claim, 'state'>[],
+  openFinding = false
 ): 'stale' | 'contested' | null {
   if (line.value.stale || claims.some((claim) => claim.state === 'stale')) return 'stale'
+  if (openFinding) return 'contested'
   if (slotGroup(line.slot) !== 'fixed') return null
   return line.also.some((other) => !detailsAgree(other.value, line.value.value))
     ? 'contested'
     : null
+}
+
+/** The rules whose open findings contest a slot's instant card (P4-D25): C1, C6, and C4 for an age. */
+const CONTESTING_RULES = ['C1', 'C6'] as const
+
+/**
+ * Whether an open finding of the active draft names the record and slot (C1 or C6 on that slot; C4
+ * for `age`), while the Contradiction check is on (off, findings are hidden everywhere, P4-D21).
+ */
+export function openFindingOn(
+  db: TreeDb,
+  draftId: string | null,
+  recordId: string,
+  slot: Slot
+): boolean {
+  if (draftId === null || !getAiSettings(db).features.judge) return false
+  return findingsOf(db, draftId, ['open']).some(
+    (finding) =>
+      finding.recordId === recordId &&
+      ((slot === 'age' && finding.rule === 'C4') ||
+        (finding.slot === slot && (CONTESTING_RULES as readonly string[]).includes(finding.rule)))
+  )
 }
 
 /** The record ids a gate text's name tokens hold (`⟨a|b⟩`). */
@@ -202,10 +230,13 @@ export function instantCard(
               orderOf(frame, claim.nodeId) <= now
           )
     const keys = slotKeys(frame, shape.recordId, shape.slot, claims)
+    // P4-D25: a possible contradiction on the slot is Ms Scribe's to answer, with both sides.
+    const disputed = openFindingOn(db, frame.draftId, shape.recordId, shape.slot)
     const sheet = sheetMemory(db, shape.recordId, nowId)
     const age = shape.slot === 'age' ? (sheet.age?.age ?? null) : null
     if (age !== null) {
       const timeline: EvidenceKey = { kind: 'timeline', recordId: shape.recordId }
+      if (disputed) return { handover: 'contested', keys: [...keys, timeline] }
       switch (age.kind) {
         case 'computed': {
           // A birth year read from a sentence that changed since is re-checking: no card.
@@ -249,7 +280,7 @@ export function instantCard(
             : []
     const line = lines.find((each) => each.slot === shape.slot && each.objectId === null)
     if (line === undefined) return { handover: 'none', keys }
-    const doubt = contested(line, claims)
+    const doubt = contested(line, claims, disputed)
     if (doubt !== null) return { handover: doubt, keys }
     const claim = getClaim(db, line.value.claimId)
     if (claim === null) return { handover: 'none', keys }

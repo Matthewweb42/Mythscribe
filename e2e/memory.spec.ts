@@ -110,6 +110,14 @@ import { caretToEnd, clickIntoEditor } from './support'
  * Contradiction check off a new disagreement sends nothing and nothing is listed, and switching
  * it on judges it.
  *
+ * P4 slice 3 (F-16.27, F-16.29, F-16.30), invoke level in a new project: Mara's eyes grey and brown
+ * (C1) and Orrin born in 1792 against his Pinned "Born: 1790" (C6), both found in the background;
+ * Check the book is priced first with nothing sent (two confirmations, no new pairs), then sends
+ * the two one-pair confirmations and reports both, with travel times named as not checked; a second
+ * check is free and sends nothing; Not a problem adds one Dismissed row and its Undo brings the
+ * finding back with no request; Update my note proposes "Born: 1792", saves it on the Pinned page
+ * and closes the C6 finding with no request. No request carries an absence.
+ *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
  * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
  * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
@@ -3065,6 +3073,182 @@ test('story memory v2: contradictions are found in code and judged twice (P4 sli
   await invoke('aiSettings:set', settings)
   await expect.poll(() => judged().length - judgedBefore, { timeout: 20_000 }).toBe(4)
   await expect.poll(async () => (await findings()).open.length, { timeout: 15_000 }).toBe(1)
+
+  // No request ever carried an absence.
+  expect(
+    providerBodies.some((body) =>
+      body.messages.some((message) => message.content.includes('No scene shows'))
+    )
+  ).toBe(false)
+})
+
+test('story memory v2: Check the book, Not a problem and note conflicts (P4 slice 3)', async () => {
+  // A new project: Mara Vell's eyes grey in 1.1 and brown in 1.2; Orrin born in 1792 in 1.1, while
+  // his Pinned page says "Born: 1790".
+  const first = await newV2Project('Check Novel')
+  const record = async (name: string, aliases: string[]): Promise<string> => {
+    const made = await invoke<{ record?: { id: string } }>('record:create', {
+      name,
+      categoryId: 'character',
+      aliases: aliases.map((text) => ({ text })),
+      force: true
+    })
+    if (made.record === undefined) throw new Error(`${name} was not made`)
+    return made.record.id
+  }
+  await record('Mara Vell', ['Mara'])
+  const orrin = await record('Orrin', [])
+  const note = (text: string): TiptapNodeT => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+  await invoke('record:savePage', { id: orrin, page: 'pinned', doc: note('Born: 1790') })
+  const write = async (id: string, ...texts: string[]): Promise<void> => {
+    await invoke('document:save', {
+      id,
+      content: {
+        type: 'doc',
+        content: texts.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] }))
+      }
+    })
+  }
+  let reads = 0
+  const readNow = async (nodeId: string): Promise<void> => {
+    reads += 1
+    expect(
+      await invoke('memory:readNow', { nodeId, requestId: `e2e-p4s3-${reads}` })
+    ).toMatchObject({ ok: true, read: true })
+  }
+  interface Side {
+    kind: string
+    value: string
+    nodeId: string | null
+  }
+  interface View {
+    id: string
+    rule: string
+    name: string
+    state: string
+    confirmed: boolean
+    a: Side
+    b: Side
+    actions: { updateNote: boolean; right: { a: boolean; b: boolean } }
+  }
+  interface Estimate {
+    free: boolean
+    pairs: number
+    fastCalls: number
+    confirms: { about: number; most: number }
+    aboutUsd: number
+    mostUsd: number
+  }
+  interface Report {
+    at: string
+    found: View[]
+    confirmed: number
+    notChecked: { fixed: string[] }
+  }
+  const findings = async (): Promise<View[]> =>
+    (await invoke<{ open: View[] }>('memory:findings', { nodeId: null })).open
+  const isJudge = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(JUDGE_SENTINEL) === true
+  const confirmations = (): number =>
+    providerBodies.filter(
+      (body) => isJudge(body) && (body.messages.at(-1)?.content ?? '').startsWith('Pair:\n')
+    ).length
+  /** The findings job runs 1.5 s after the memory moved, then the judge on the reader's queue. */
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 4_000))
+
+  await write(first.id, "Mara's eyes were grey.", 'Orrin was born in 1792.')
+  await readNow(first.id)
+  const brown = await invoke<TreeNode>('tree:create', {
+    parentId: first.parentId,
+    kind: 'document',
+    hierarchyLevel: 'scene',
+    title: 'Brown'
+  })
+  await write(brown.id, "Mara's eyes were brown.")
+  await readNow(brown.id)
+  // The background judge finds both (C1 and C6) in both orders; the stronger check has not run.
+  await expect
+    .poll(async () => (await findings()).map((each) => each.rule).sort(), { timeout: 30_000 })
+    .toEqual(['C1', 'C6'])
+  await settle()
+  expect(confirmations()).toBe(0)
+
+  // Priced first, with nothing sent: the two open findings to confirm, no new pairs.
+  const sentBefore = providerBodies.length
+  const estimate = await invoke<Estimate>('memory:checkEstimate', undefined)
+  expect(estimate).toMatchObject({ free: false, fastCalls: 0, confirms: { about: 2, most: 2 } })
+  expect(estimate.mostUsd).toBeGreaterThanOrEqual(estimate.aboutUsd)
+  expect(providerBodies.length).toBe(sentBefore)
+  expect(await invoke<Report | null>('memory:checkReport', undefined)).toBeNull()
+
+  // The check: two confirmations (one pair a call), then the report.
+  expect(await invoke('memory:checkBook', { nodeId: first.id })).toMatchObject({ ok: true })
+  await expect
+    .poll(async () => (await invoke<Report | null>('memory:checkReport', undefined)) !== null, {
+      timeout: 30_000
+    })
+    .toBe(true)
+  expect(confirmations()).toBe(2)
+  const report = await invoke<Report>('memory:checkReport', undefined)
+  expect(report.confirmed).toBe(2)
+  expect(report.found.map((each) => each.rule).sort()).toEqual(['C1', 'C6'])
+  expect(report.found.every((each) => each.confirmed)).toBe(true)
+  const c1 = report.found.find((each) => each.rule === 'C1')
+  const c6 = report.found.find((each) => each.rule === 'C6')
+  expect(c1).toMatchObject({ name: 'Mara Vell', a: { value: 'grey' }, b: { value: 'brown' } })
+  expect(c6).toMatchObject({ name: 'Orrin', actions: { updateNote: true } })
+  expect(report.notChecked.fixed).toContain('travel times and distances')
+
+  // Unchanged: the next check is free and sends nothing.
+  expect((await invoke<Estimate>('memory:checkEstimate', undefined)).free).toBe(true)
+  const sentAfterCheck = providerBodies.length
+  expect(await invoke('memory:checkBook', { nodeId: first.id })).toMatchObject({ ok: true })
+  await expect
+    .poll(async () => (await invoke<Report>('memory:checkReport', undefined)).at, {
+      timeout: 30_000
+    })
+    .not.toBe(report.at)
+  expect(providerBodies.length).toBe(sentAfterCheck)
+
+  // Not a problem on Mara's eyes: one Dismissed row; Undo brings the finding back, nothing sent.
+  const dismissedBefore = (await invoke<{ count: number }>('dismissed:list', undefined)).count
+  const answered = await invoke<{ dismissed: { id: string; kind: string } | null }>(
+    'memory:findingAction',
+    { findingId: c1?.id ?? '', action: 'notProblem' }
+  )
+  expect(answered.dismissed?.kind).toBe('notProblem')
+  expect((await invoke<{ count: number }>('dismissed:list', undefined)).count).toBe(
+    dismissedBefore + 1
+  )
+  expect((await findings()).map((each) => each.rule)).toEqual(['C6'])
+  await invoke('dismissed:undo', { id: answered.dismissed?.id ?? '' })
+  await expect
+    .poll(async () => (await findings()).map((each) => each.rule).sort(), { timeout: 15_000 })
+    .toEqual(['C1', 'C6'])
+  await settle()
+  expect(providerBodies.length).toBe(sentAfterCheck)
+
+  // Update my note: the book's year in the note's own words, saved; the C6 finding closes.
+  const patch = await invoke<{ before: string; after: string; index: number }>(
+    'memory:notePatch',
+    { findingId: c6?.id ?? '' }
+  )
+  expect(patch).toMatchObject({ before: 'Born: 1790', after: 'Born: 1792', index: 0 })
+  expect(
+    await invoke('memory:applyNotePatch', {
+      findingId: c6?.id ?? '',
+      index: patch.index,
+      before: patch.before,
+      text: patch.after
+    })
+  ).toEqual({ owner: { kind: 'record', id: orrin }, closed: true })
+  expect(await pageLines(orrin, 'pinned')).toEqual([{ text: 'Born: 1792', written: false }])
+  await settle()
+  expect((await findings()).map((each) => each.rule)).toEqual(['C1'])
+  expect(providerBodies.length).toBe(sentAfterCheck)
 
   // No request ever carried an absence.
   expect(

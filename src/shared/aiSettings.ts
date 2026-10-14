@@ -797,9 +797,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'sentence either side, whether each sits earlier or later in the book, in a flashback or a ' +
       'remembered moment, or in a note, whether it is narration, speech, thought or rumour, the ' +
       'story years you typed or the book states for those scenes, and any time-skip sentence ' +
-      'between them. Sent after a reading or a note save (at most 10 pairs) and on Check the ' +
-      'book, which also sends up to 20 pairs with three sentences either side to the strong ' +
-      'model.',
+      'between them. Sent after a reading or a note save (at most 10 pairs), once after ' +
+      'Rebuild memory (at most 60 pairs) and on Check the book, which also sends up to 20 ' +
+      'pairs with three sentences either side to the strong model.',
     minDial: 1
   }
 }

@@ -350,3 +350,54 @@ export function datedScene(text: string, scenes: readonly DatedScene[]): string 
   }
   return null
 }
+
+/**
+ * *Update my note*'s proposal for one sentence (F-16.29, P4-D18), in code: the note's value words
+ * (`noteValue`, as code read them) replaced by the book's value, whole words, in any case ("Eyes:
+ * green" → "Eyes: grey"; "Orrin's green eyes" → "Orrin's grey eyes"); for a `Label: value` line
+ * whose value is not found as written, everything after the colon. Null when neither applies (the
+ * proposal is not offered).
+ */
+export function patchNoteSentence(
+  sentence: string,
+  noteValue: string,
+  bookValue: string
+): string | null {
+  const value = noteValue.trim()
+  if (value !== '') {
+    const pattern = new RegExp(
+      `(?<![\\p{L}\\p{N}])${escapeRegExp(value).replace(/\s+/g, '\\s+')}(?![\\p{L}\\p{N}])`,
+      'iu'
+    )
+    const found = pattern.exec(sentence)
+    if (found !== null) {
+      return (
+        sentence.slice(0, found.index) + bookValue + sentence.slice(found.index + found[0].length)
+      )
+    }
+  }
+  if (labelLine(sentence) === null) return null
+  const line = /^(\s*[^:\n]+?:\s*)(.+?)([.;]*\s*)$/u.exec(sentence)
+  return line === null ? null : `${line[1] ?? ''}${bookValue}${line[3] ?? ''}`
+}
+
+/**
+ * A note paragraph with its sentence `index` (`splitSentences`' numbering, as a finding's note side
+ * keeps it) patched (`patchNoteSentence`); null when that sentence is gone or cannot be patched.
+ */
+export function patchNoteParagraph(
+  paragraph: string,
+  index: number,
+  noteValue: string,
+  bookValue: string
+): { sentence: string; after: string } | null {
+  const span = splitSentences(paragraph)[index]
+  if (span === undefined) return null
+  const sentence = paragraph.slice(span.start, span.end)
+  const patched = patchNoteSentence(sentence, noteValue, bookValue)
+  if (patched === null || patched === sentence) return null
+  return {
+    sentence,
+    after: paragraph.slice(0, span.start) + patched + paragraph.slice(span.end)
+  }
+}

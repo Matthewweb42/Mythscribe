@@ -428,13 +428,14 @@ describe('routing (F-5.26 kept, P3-D7): navigator.v1 in place of route.v2', () =
         decision: { action }
       })
     }
-    // F-16.4: a consistency check is answered as a question about the book until P4.
+    // P4-D23: a consistency check stays `continuity` in v2 (the renderer answers it from the
+    // open scene's findings, with no request).
     replies({ a: 'continuity', t: 'answer' })
     expect(
       await run({ message: 'Check this scene for contradictions.', requestId: 'r4' })
     ).toMatchObject({
-      kind: 'answer',
-      action: 'query'
+      kind: 'route',
+      decision: { action: 'continuity' }
     })
   })
 

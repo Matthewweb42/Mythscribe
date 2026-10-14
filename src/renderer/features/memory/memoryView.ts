@@ -106,6 +106,10 @@ export function noticeLine(notice: MemoryNotice): string {
       return `Story memory paused: the local model ${notice.model} stopped answering at its limit.`
     case 'detailConflict':
       return `${notice.ref}: the text says ${notice.text}; you typed ${notice.typed}`
+    case 'rebuildDone':
+      return `Rebuild finished: ${notice.lines} new line${notice.lines === 1 ? '' : 's'} on ${notice.sheets} sheet${notice.sheets === 1 ? '' : 's'}, ${notice.names} name${notice.names === 1 ? '' : 's'}, ${notice.findings} possible contradiction${notice.findings === 1 ? '' : 's'}`
+    case 'findingsWaiting':
+      return `${notice.pairs} possible contradiction${notice.pairs === 1 ? '' : 's'} wait for Check the book: about ${formatCents(notice.priceUsd)}`
   }
 }
 
@@ -144,6 +148,10 @@ export function noticeButtons(notice: MemoryNotice): NoticeButton[] {
       return [answer('keepReading', 'Keep reading anyway')]
     case 'detailConflict':
       return [{ kind: 'updateDetail', label: 'Update my detail' }, answer('keepMine', 'Keep mine')]
+    case 'rebuildDone':
+      return [answer('dismiss', 'Done')]
+    case 'findingsWaiting':
+      return [answer('dismiss', 'Not now')]
   }
 }
 

@@ -1,15 +1,25 @@
 import { and, eq, gte } from 'drizzle-orm'
 import type { Claim } from '@shared/memory/claims'
-import type { RebuildAction, RebuildProgress, RebuildSummary } from '@shared/memory/views'
+import { z } from 'zod'
+import type {
+  MemoryNotice,
+  RebuildAction,
+  RebuildProgress,
+  RebuildSummary
+} from '@shared/memory/views'
 import { reading } from '../../db/schema'
-import { activeDraftId } from '../../draft/draftStore'
+import { activeDraftId, currentDraftId } from '../../draft/draftStore'
 import type { TreeDb } from '../../tree/treeStore'
+import { findingNotProblem, findingTouches } from '../findings/findingActions'
+import { findingsOf } from '../findings/findingStore'
+import { findingView } from '../findings/findingViews'
+import { judgeContext } from '../findings/judge'
 import { answerNameQuestion } from '../questions'
 import { getRecord } from '../recordStore'
 import { readableScenes } from './backlog'
 import { draftClaims } from './claimStore'
 import { dismissClaimsNotRight } from './notRight'
-import { getRebuild, setRebuild } from './readerRows'
+import { getRebuild, readRow, setRebuild, writeRow } from './readerRows'
 import { markRosterForRebuild } from './roster'
 import { topicNotRight } from './topicActions'
 import { listTopicQuotes, listTopics } from './topicStore'
@@ -102,8 +112,28 @@ function rebuildTopics(
     .map((topic) => ({ recordId: topic.recordId, kind: topic.kind, label: topic.label }))
 }
 
-/** What the last rebuild changed, grouped by sheet; null before any rebuild. */
-export function rebuildSummary(db: TreeDb): RebuildSummary | null {
+/**
+ * F-16.27, F-16.29 (P4 slice 3): the possible contradictions the rebuild opened: open findings of
+ * its draft (the active one) made since it started, as `memory:findings` lists them.
+ */
+function rebuildFindings(db: TreeDb, progress: RebuildProgress): RebuildSummary['findings'] {
+  if (currentDraftId(db) !== progress.draftId) return []
+  const opened = findingsOf(db, progress.draftId, ['open']).filter(
+    (finding) => finding.created >= progress.startedAt
+  )
+  if (opened.length === 0) return []
+  const ctx = judgeContext(db, progress.draftId)
+  return opened.flatMap((finding) => {
+    const view = findingView(ctx, finding)
+    return view === null ? [] : [view]
+  })
+}
+
+/**
+ * What the last rebuild changed, grouped by sheet; null before any rebuild. `findingsOn` (the
+ * Contradiction check switch): off, the possible contradictions are left out, as everywhere.
+ */
+export function rebuildSummary(db: TreeDb, findingsOn = true): RebuildSummary | null {
   const progress = getRebuild(db)
   if (progress === null) return null
   const readings = rebuildReadings(db, progress)
@@ -136,7 +166,8 @@ export function rebuildSummary(db: TreeDb): RebuildSummary | null {
     waiting: [...waiting]
       .map(([norm, entry]) => ({ norm, text: entry.text, lines: entry.lines }))
       .sort((a, b) => b.lines - a.lines || a.text.localeCompare(b.text)),
-    topics
+    topics,
+    findings: findingsOn ? rebuildFindings(db, progress) : []
   }
 }
 
@@ -156,6 +187,28 @@ export function applyRebuildAction(
   const progress = getRebuild(db)
   if (progress === null) {
     return { changed: 0, nodeIds: [], recordIds: [], names: false, topicIds: [] }
+  }
+  if (action.action === 'notProblems') {
+    // F-16.29: *Not a problem* on every possible contradiction the rebuild opened.
+    const nodeIds = new Set<string>()
+    const recordIds = new Set<string>()
+    const opened = rebuildFindings(db, progress)
+    const byId = new Map(findingsOf(db, progress.draftId).map((each) => [each.id, each]))
+    for (const view of opened) {
+      const finding = byId.get(view.id)
+      if (finding === undefined) continue
+      findingNotProblem(db, finding.id, now)
+      const touched = findingTouches(finding)
+      for (const id of touched.nodeIds) nodeIds.add(id)
+      for (const id of touched.recordIds) recordIds.add(id)
+    }
+    return {
+      changed: opened.length,
+      nodeIds: [...nodeIds],
+      recordIds: [...recordIds],
+      names: false,
+      topicIds: []
+    }
   }
   const readings = rebuildReadings(db, progress)
   if (action.action === 'notTopics') {
@@ -224,4 +277,53 @@ export function stopRebuild(db: TreeDb, now: Date): boolean {
   if (progress?.finishedAt !== null) return false
   setRebuild(db, { ...progress, finishedAt: now.toISOString() })
   return true
+}
+
+/**
+ * F-16.29 (P4 slice 3): the settings row of the post-rebuild review: the rebuild it is for, and
+ * whether the author closed its notice (*Done*). Written when a rebuild that read scenes closes.
+ */
+export const MEMORY_REBUILD_REVIEW_KEY = 'memoryRebuildReview'
+const RebuildReview = z.object({ startedAt: z.string(), reviewed: z.boolean() })
+
+/** A rebuild that read scenes closed: its review is due (the `rebuildDone` notice). */
+export function noteRebuildDone(db: TreeDb, startedAt: string): void {
+  writeRow(db, MEMORY_REBUILD_REVIEW_KEY, { startedAt, reviewed: false })
+}
+
+/** *Done* on the `rebuildDone` notice: never shown again for that rebuild. */
+export function reviewRebuild(db: TreeDb, startedAt: string): void {
+  const row = readRow(db, MEMORY_REBUILD_REVIEW_KEY, RebuildReview.nullable(), null)
+  if (row?.startedAt === startedAt)
+    writeRow(db, MEMORY_REBUILD_REVIEW_KEY, { ...row, reviewed: true })
+}
+
+/**
+ * The `rebuildDone` notice (design §2.7: after a rebuild, one summary grouped by page, with bulk
+ * actions): "Rebuild finished: 14 new lines on 6 sheets, 2 names, 3 possible contradictions" while
+ * the last rebuild's review is due and the rebuild has finished. Null otherwise.
+ */
+export function rebuildDoneNotice(db: TreeDb, findingsOn: boolean): MemoryNotice | null {
+  const progress = getRebuild(db)
+  if (progress === null) return null
+  const review = readRow(db, MEMORY_REBUILD_REVIEW_KEY, RebuildReview.nullable(), null)
+  if (
+    progress.finishedAt === null ||
+    review === null ||
+    review.reviewed ||
+    review.startedAt !== progress.startedAt
+  ) {
+    return null
+  }
+  const summary = rebuildSummary(db, findingsOn)
+  if (summary === null) return null
+  return {
+    id: `rebuildDone:${progress.startedAt}`,
+    kind: 'rebuildDone',
+    startedAt: progress.startedAt,
+    lines: summary.sheets.reduce((sum, sheet) => sum + sheet.lines, 0),
+    sheets: summary.sheets.length,
+    names: summary.waiting.length,
+    findings: summary.findings.length
+  }
 }

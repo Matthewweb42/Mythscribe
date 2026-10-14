@@ -2,16 +2,27 @@ import { z } from 'zod'
 import type { AiProviderId } from '@shared/ai'
 import { isFeatureAllowed, type AiSettings } from '@shared/aiSettings'
 import { RULE_ORDER, type Finding, type FindingSide } from '@shared/memory/findings'
+import type { CheckProgress } from '@shared/memory/views'
 import { dayOf, rollIfNewDay } from '../../ai/dailyCap'
 import { registerInflight, releaseInflight } from '../../ai/inflight'
-import { AiBudgetError } from '../../ai/providers/types'
+import { AiBudgetError, AiCancelledError } from '../../ai/providers/types'
 import type { AiRequestDeps } from '../../ai/request'
 import { currentDraftId } from '../../draft/draftStore'
 import { JobSkippedError, jobOutcome } from '../../jobs/indexQueue'
 import type { TreeDb } from '../../tree/treeStore'
 import { readRow, writeRow } from '../reading/readerRows'
-import { countFindings, findingsOf } from './findingStore'
-import { findingCounts, type FindingCounts } from './findingsJob'
+import { findingsFrame } from './candidateInputs'
+import {
+  CHECK_CONFIRM_MAX,
+  confirmFindings,
+  confirmOrder,
+  emptyConfirmRun,
+  unreadScenes,
+  writeCheckReport,
+  type ConfirmRunResult
+} from './checkBook'
+import { findingsOf } from './findingStore'
+import { findingCounts, runFindingsJob, type FindingCounts } from './findingsJob'
 import {
   emptyJudgeRun,
   judgeContext,
@@ -21,20 +32,27 @@ import {
 } from './judge'
 
 /**
- * The contradiction judge's jobs (F-16.27, F-16.30; plan P4 §2.3, P4-D12), on the reader's
- * provider-backed queue (`readerService` only dispatches `judge` and `checkBook` here).
+ * The contradiction judge's jobs (F-16.27, F-16.30; plan P4 §2.3, §3.1, §3.3, P4-D12), on the
+ * reader's provider-backed queue (`readerService` only dispatches `judge` and `checkBook` here).
  *
  * - **Background** (`judge`): queued by the `findings` job when unjudged pairs exist and the
  *   switch allows; at most 10 pairs a run (two calls), the scene just read first, then by rule
  *   (`RULE_ORDER`) and reading order; it queues itself again while unjudged pairs remain, up to 30
- *   pairs a day; the rest wait for *Check the book*. Never while a *Rebuild memory* runs (its sweep
- *   is slice 3's). Gates before any request: Use AI and the **Contradiction check** switch, a
- *   provider, the day's pairs, the daily cap and, on Cloud, the monthly cap for background spend
- *   (P2a-D9). A hold throws `JobSkippedError`: the job goes quietly, the queue never pauses for it
- *   (reading behind it runs), and the next change that moves a finding queues it again.
- * - **Check the book** (`checkBook`, asked): every unjudged pair, as asked spend (past the Cloud
- *   cap, never past the daily cap), with no daily pair limit. Slice 3 adds C7, the stronger check
- *   and the report.
+ *   pairs a day; the rest wait for *Check the book*. C7 pairs are *Check the book*'s only. Never
+ *   while a *Rebuild memory* runs. Gates before any request: Use AI and the **Contradiction check**
+ *   switch, a provider, the day's pairs, the daily cap and, on Cloud, the monthly cap for
+ *   background spend (P2a-D9). A hold throws `JobSkippedError`: the job goes quietly, the queue
+ *   never pauses for it (reading behind it runs), and the next change that moves a finding queues
+ *   it again.
+ * - **The rebuild sweep** (a `judge` job while the `memoryJudgeSweep` row is due, P4-D12): a
+ *   *Rebuild memory* that read any scene ends with one sweep of up to 60 pairs (C1–C6), asked
+ *   spend priced with the rebuild (past the Cloud cap and the day's pairs, never past the daily
+ *   cap), after a recompute of its own.
+ * - **Check the book** (`checkBook`, asked, F-16.30): a recompute with C7, every unjudged pair (no
+ *   daily pair limit), then the stronger check on the open findings (`confirmFindings`, at most
+ *   20 calls), then the report (`writeCheckReport`). Asked spend: past the Cloud cap, never past
+ *   the daily cap. A Stop keeps what was judged, and the report says it was stopped. Its progress
+ *   (`progress`) is the activity bar's.
  *
  * Every call's cost goes to the Cloud tally as it returns (`spend`), and is shared out to the
  * findings it judged (`judge.ts`). After a run that moved a finding's state (an unjudged pair now
@@ -50,6 +68,18 @@ import {
 export const JUDGE_RUN_PAIRS = 10
 /** Pairs at most the background judges a day (the rest wait for *Check the book*). */
 export const JUDGE_DAY_PAIRS = 30
+
+/** Pairs at most the rebuild's sweep judges (P4-D12). */
+export const JUDGE_SWEEP_PAIRS = 60
+
+/** The settings row saying a finished rebuild's sweep is due (asked, priced with the rebuild). */
+export const MEMORY_JUDGE_SWEEP_KEY = 'memoryJudgeSweep'
+const JudgeSweep = z.object({ rebuildAt: z.string() })
+
+/** The rebuild sweep's calls, as *Rebuild memory*'s price counts them (both orders of ≤ 6 batches). */
+export function sweepCalls(scenes: number): number {
+  return scenes === 0 ? 0 : 2 * Math.min(JUDGE_SWEEP_PAIRS / 10, Math.ceil(scenes / 15))
+}
 
 /** The settings row counting today's background pairs. */
 export const MEMORY_JUDGE_DAY_KEY = 'memoryJudgeDay'
@@ -95,6 +125,8 @@ export interface FindingsServiceDeps {
   changed: (payload: { nodeIds: string[]; recordIds: string[] }) => void
   /** `memory:findingsChanged`. */
   findingsChanged?: (counts: FindingCounts) => void
+  /** *Check the book*'s progress moved (the status the activity bar reads). */
+  progressed?: () => void
   now: () => Date
 }
 
@@ -105,15 +137,33 @@ export interface FindingsJobResult {
   /** Background only: unjudged pairs remain and today's limit allows another run. */
   again: boolean
   run: JudgeRunResult | null
+  /** *Check the book* only: the stronger check's run. */
+  confirm: ConfirmRunResult | null
 }
 
 export interface FindingsService {
   /** A scene was just read: its findings are judged first in the next background run. */
   read(nodeId: string): void
-  /** Whether a background run may be queued now and has something to judge. */
+  /** Whether a judge job (background, or a due rebuild sweep) may be queued now and has work. */
   wanted(db: TreeDb): boolean
   judge(db: TreeDb, requestId: string): Promise<FindingsJobResult>
   checkBook(db: TreeDb, requestId: string): Promise<FindingsJobResult>
+  /**
+   * What holds an asked run (Check the book, the sweep) back now: the switch, a provider, the daily
+   * cap; null when it may run.
+   */
+  askedHold(db: TreeDb): string | null
+  /** *Check the book* was asked for with this scene open (its findings are confirmed first). */
+  checkAsked(openNodeId: string | null): void
+  /** A *Rebuild memory* that read scenes finished: its sweep is due. */
+  sweepDue(db: TreeDb, rebuildAt: string): void
+  /**
+   * The background pairs left for *Check the book* while the day's limit or the Cloud cap holds
+   * background judging (the `findingsWaiting` notice), or 0.
+   */
+  waiting(db: TreeDb): number
+  /** *Check the book*'s progress this session (null before a check). */
+  progress(): CheckProgress | null
   clear(): void
 }
 
@@ -149,8 +199,19 @@ export function judgeOrder(
   )
 }
 
+/** How a run judges: in the background, as the rebuild's sweep, or as *Check the book*. */
+type RunMode = 'background' | 'sweep' | 'check'
+
+/** The unjudged findings a run of `mode` judges (C7 is *Check the book*'s only). */
+const unjudgedFor = (db: TreeDb, draftId: string, mode: RunMode): Finding[] =>
+  findingsOf(db, draftId, ['unjudged']).filter(
+    (finding) => mode === 'check' || finding.rule !== 'C7'
+  )
+
 export function createFindingsService(deps: FindingsServiceDeps): FindingsService {
   let lastRead: string | null = null
+  let openScene: string | null = null
+  let check: CheckProgress | null = null
 
   const today = (): string => dayOf(deps.now())
 
@@ -160,24 +221,34 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
     return day.spentTodayUsd >= day.dailyCapUsd
   }
 
-  /** What holds the judge back (`asked`: Check the book), or null. */
-  const holdOf = (db: TreeDb, asked: boolean): string | null => {
+  /** What holds an asked run back: the switch, a provider, the daily cap. */
+  const askedHold = (db: TreeDb): string | null => {
     if (!isFeatureAllowed(deps.settings(db), 'judge')) return HOLD.off
     if (deps.provider(db) === null) return HOLD.provider
-    if (!asked && deps.rebuilding(db)) return HOLD.rebuild
-    if (!asked && judgeDay(db, today()).pairs >= JUDGE_DAY_PAIRS) return HOLD.dayPairs
     if (dailyCapped(db)) return HOLD.dailyCap
-    if (!asked && deps.cloudCapped(db)) return HOLD.cloudCap
     return null
   }
 
+  /** What holds the judge back in `mode`, or null. */
+  const holdOf = (db: TreeDb, mode: RunMode): string | null => {
+    const asked = askedHold(db)
+    if (asked !== null || mode !== 'background') return asked
+    if (deps.rebuilding(db)) return HOLD.rebuild
+    if (judgeDay(db, today()).pairs >= JUDGE_DAY_PAIRS) return HOLD.dayPairs
+    if (deps.cloudCapped(db)) return HOLD.cloudCap
+    return null
+  }
+
+  const sweepRow = (db: TreeDb): z.infer<typeof JudgeSweep> | null =>
+    readRow(db, MEMORY_JUDGE_SWEEP_KEY, JudgeSweep.nullable(), null)
+
   /** Pushes what a run moved: the counts, and the settled findings' scenes and records. */
-  const pushed = (db: TreeDb, run: JudgeRunResult): void => {
-    if (run.settled.length === 0) return
+  const pushed = (db: TreeDb, settled: readonly Finding[]): void => {
+    if (settled.length === 0) return
     deps.findingsChanged?.(findingCounts(db, deps.settings(db).features.judge))
     const nodeIds = new Set<string>()
     const recordIds = new Set<string>()
-    for (const finding of run.settled) {
+    for (const finding of settled) {
       recordIds.add(finding.recordId)
       for (const side of [finding.a, finding.b]) {
         const nodeId = sideNode(side)
@@ -187,22 +258,44 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
     deps.changed({ nodeIds: [...nodeIds].sort(), recordIds: [...recordIds].sort() })
   }
 
-  /** One run over the active draft's unjudged findings. */
-  const run = async (db: TreeDb, requestId: string, asked: boolean): Promise<FindingsJobResult> => {
-    const hold = holdOf(db, asked)
-    if (hold !== null) throw new JobSkippedError(hold)
-    const draftId = currentDraftId(db)
-    if (draftId === null) return { requested: false, again: false, run: null }
+  /**
+   * An asked run's own recompute first (the findings job may still be waiting out its debounce
+   * after the last change), with C7 for *Check the book*; the counts are pushed when it moved.
+   */
+  const recomputeFirst = (db: TreeDb, mode: RunMode): void => {
+    const shown = deps.settings(db).features.judge
+    const result = runFindingsJob(db, deps.now(), {
+      cachedVerdicts: true,
+      shown,
+      checkRules: mode === 'check'
+    })
+    if (result.counts !== null) deps.findingsChanged?.(result.counts)
+  }
+
+  const setProgress = (next: CheckProgress | null): void => {
+    check = next
+    deps.progressed?.()
+  }
+
+  /** One run's judging over the active draft's unjudged findings; `failed` holds what it threw. */
+  const judgeRun = async (
+    db: TreeDb,
+    draftId: string,
+    requestId: string,
+    mode: RunMode,
+    signal: AbortSignal,
+    result: JudgeRunResult
+  ): Promise<{ err: unknown } | null> => {
     const day = judgeDay(db, today())
-    const room = asked
-      ? Number.MAX_SAFE_INTEGER
-      : Math.min(JUDGE_RUN_PAIRS, JUDGE_DAY_PAIRS - day.pairs)
+    const room =
+      mode === 'background'
+        ? Math.min(JUDGE_RUN_PAIRS, JUDGE_DAY_PAIRS - day.pairs)
+        : mode === 'sweep'
+          ? JUDGE_SWEEP_PAIRS
+          : Number.MAX_SAFE_INTEGER
     const ctx = judgeContext(db, draftId)
-    const findings = judgeOrder(findingsOf(db, draftId, ['unjudged']), ctx, lastRead)
-    const controller = registerInflight(requestId)
-    // Filled as the calls return, so a run cut short still counts and pushes what it did.
-    const result = emptyJudgeRun()
-    let failed: { err: unknown } | null = null
+    const findings = judgeOrder(unjudgedFor(db, draftId, mode), ctx, lastRead)
+    if (mode === 'check' && check !== null) setProgress({ ...check, toJudge: findings.length })
     try {
       await judgeFindings(
         ctx,
@@ -211,30 +304,140 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
           findings,
           maxPairs: room,
           requestId,
-          signal: controller.signal,
-          onSpend: (usd) => deps.spend(db, usd, asked),
+          signal,
+          onSpend: (usd) => deps.spend(db, usd, mode !== 'background'),
+          ...(mode === 'check'
+            ? {
+                onCall: (run: JudgeRunResult) => {
+                  if (check !== null) setProgress({ ...check, judged: run.sent })
+                }
+              }
+            : {}),
           now: deps.now
         },
         result
       )
+      return null
     } catch (err) {
-      failed = { err }
+      return { err }
+    } finally {
+      if (mode === 'background') addJudgeDay(db, today(), result.sent)
+      pushed(db, result.settled)
+    }
+  }
+
+  /** A failure as the job reports it: quiet for the daily cap and a background transient one. */
+  const rethrow = (err: unknown, mode: RunMode): never => {
+    if (err instanceof AiBudgetError) throw new JobSkippedError(HOLD.dailyCap)
+    if (mode === 'background' && jobOutcome(err) === 'transient') {
+      throw new JobSkippedError(`${HOLD.transient} ${errorText(err)}`)
+    }
+    throw err
+  }
+
+  /** A background run, or the rebuild's sweep when one is due. */
+  const judge = async (db: TreeDb, requestId: string): Promise<FindingsJobResult> => {
+    const sweep = sweepRow(db) !== null
+    const mode: RunMode = sweep ? 'sweep' : 'background'
+    const hold = holdOf(db, mode)
+    // A sweep is tried once: held back (the switch off, no provider, the daily cap), it is not
+    // run later as spend nobody asked for then.
+    if (sweep) writeRow(db, MEMORY_JUDGE_SWEEP_KEY, null)
+    if (hold !== null) throw new JobSkippedError(hold)
+    const draftId = currentDraftId(db)
+    if (draftId === null) return { requested: false, again: false, run: null, confirm: null }
+    if (sweep) recomputeFirst(db, mode)
+    const controller = registerInflight(requestId)
+    // Filled as the calls return, so a run cut short still counts and pushes what it did.
+    const result = emptyJudgeRun()
+    let failed: { err: unknown } | null
+    try {
+      failed = await judgeRun(db, draftId, requestId, mode, controller.signal, result)
     } finally {
       releaseInflight(requestId)
     }
-    if (!asked) addJudgeDay(db, today(), result.sent)
-    pushed(db, result)
-    if (failed !== null) {
-      // The daily cap reached mid-run: what was judged stays; the rest waits, quietly.
-      if (failed.err instanceof AiBudgetError) throw new JobSkippedError(HOLD.dailyCap)
-      if (!asked && jobOutcome(failed.err) === 'transient') {
-        throw new JobSkippedError(`${HOLD.transient} ${errorText(failed.err)}`)
-      }
-      throw failed.err
-    }
+    if (failed !== null) rethrow(failed.err, mode)
+    // After a sweep, background judging takes up what is left (within its own limits).
     const again =
-      !asked && result.sent > 0 && result.left > 0 && judgeDay(db, today()).pairs < JUDGE_DAY_PAIRS
-    return { requested: result.requested, again, run: result }
+      result.left > 0 &&
+      (sweep || (result.sent > 0 && judgeDay(db, today()).pairs < JUDGE_DAY_PAIRS))
+    return { requested: result.requested, again, run: result, confirm: null }
+  }
+
+  /** *Check the book*: recompute with C7, judge every unjudged pair, confirm, report. */
+  const checkBook = async (db: TreeDb, requestId: string): Promise<FindingsJobResult> => {
+    const hold = holdOf(db, 'check')
+    if (hold !== null) throw new JobSkippedError(hold)
+    const draftId = currentDraftId(db)
+    if (draftId === null) return { requested: false, again: false, run: null, confirm: null }
+    const startedAt = deps.now()
+    setProgress({
+      startedAt: startedAt.toISOString(),
+      finishedAt: null,
+      judged: 0,
+      toJudge: 0,
+      confirmed: 0,
+      toConfirm: 0
+    })
+    const unread = unreadScenes(db, findingsFrame(db), draftId)
+    recomputeFirst(db, 'check')
+    const controller = registerInflight(requestId)
+    const result = emptyJudgeRun()
+    const confirm = emptyConfirmRun()
+    let failed: { err: unknown } | null = null
+    try {
+      failed = await judgeRun(db, draftId, requestId, 'check', controller.signal, result)
+      if (failed === null) {
+        const open = confirmOrder(
+          findingsOf(db, draftId, ['open']).filter((finding) => finding.confirm === null),
+          openScene
+        )
+        if (check !== null)
+          setProgress({ ...check, toConfirm: Math.min(open.length, CHECK_CONFIRM_MAX) })
+        try {
+          await confirmFindings(
+            judgeContext(db, draftId),
+            { ai: deps.requestDeps(db) },
+            {
+              findings: open,
+              max: CHECK_CONFIRM_MAX,
+              requestId,
+              signal: controller.signal,
+              onSpend: (usd) => deps.spend(db, usd, true),
+              onConfirmed: (run) => {
+                if (check !== null) setProgress({ ...check, confirmed: run.settled.length })
+              },
+              now: deps.now
+            },
+            confirm
+          )
+        } catch (err) {
+          failed = { err }
+        } finally {
+          pushed(db, confirm.settled)
+        }
+      }
+    } finally {
+      releaseInflight(requestId)
+      writeCheckReport(db, {
+        at: deps.now(),
+        costUsd: result.costUsd + confirm.costUsd,
+        stopped: failed !== null,
+        unreadScenes: unread
+      })
+      if (check !== null) setProgress({ ...check, finishedAt: deps.now().toISOString() })
+    }
+    if (failed !== null) {
+      // A Stop keeps what was judged and its report; nothing else to say.
+      if (failed.err instanceof AiCancelledError) throw failed.err
+      rethrow(failed.err, 'check')
+    }
+    return {
+      requested: result.requested || confirm.requested,
+      again: false,
+      run: result,
+      confirm
+    }
   }
 
   return {
@@ -243,17 +446,41 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
     },
 
     wanted(db) {
-      if (holdOf(db, false) !== null) return false
       const draftId = currentDraftId(db)
-      return draftId !== null && countFindings(db, draftId, 'unjudged') > 0
+      if (draftId === null) return false
+      const mode: RunMode = sweepRow(db) !== null ? 'sweep' : 'background'
+      // A due sweep is wanted even with nothing unjudged yet: it recomputes first.
+      if (mode === 'sweep') return askedHold(db) === null
+      return holdOf(db, mode) === null && unjudgedFor(db, draftId, mode).length > 0
     },
 
-    judge: (db, requestId) => run(db, requestId, false),
+    judge,
 
-    checkBook: (db, requestId) => run(db, requestId, true),
+    checkBook,
+
+    askedHold,
+
+    checkAsked(openNodeId) {
+      openScene = openNodeId
+    },
+
+    sweepDue(db, rebuildAt) {
+      writeRow(db, MEMORY_JUDGE_SWEEP_KEY, { rebuildAt })
+    },
+
+    waiting(db) {
+      const draftId = currentDraftId(db)
+      if (draftId === null || askedHold(db) !== null) return 0
+      const held = judgeDay(db, today()).pairs >= JUDGE_DAY_PAIRS || deps.cloudCapped(db)
+      return held ? unjudgedFor(db, draftId, 'background').length : 0
+    },
+
+    progress: () => check,
 
     clear() {
       lastRead = null
+      openScene = null
+      check = null
     }
   }
 }

@@ -25,6 +25,8 @@ import { fakeAi, requestKind } from './readingFixture'
 import { writeSceneRead } from './sceneReadStore'
 import { createTopic } from './topicStore'
 import { sceneMemory } from './views'
+import { checkReport, writeCheckReport } from '../findings/checkBook'
+import { looseEndsView } from '../findings/findingActions'
 import { evidenceFrame, renderEvidence, resolveEvidence } from '../../scribe/evidence'
 import { askIndexOf, EvidenceMenu, gatherStep0 } from '../../scribe/step0'
 import { navigatorPrefix } from '../../scribe/navigate'
@@ -320,6 +322,33 @@ describe('absence is never a fact on any surface that reaches a model (P2b rule 
         // The rules say never to list who does not know; nothing else may say it.
         if (message.role !== 'system') expect(message.content).not.toMatch(NOT_KNOWING)
       }
+    }
+  })
+
+  it('keeps Check the book’s report and the loose ends’ questions free of absences (P4 rule 5)', () => {
+    // A second secret nobody learns: the report lists it by its scenes and "checked up to" only.
+    createTopic(
+      db,
+      {
+        kind: 'secret',
+        label: 'the stair',
+        quote: revealIn(db, one, {
+          para: 0,
+          quote: 'Mara watched from the stair',
+          label: 'the stair'
+        })
+      },
+      NOW
+    )
+    writeCheckReport(db, { at: NOW, costUsd: 0, stopped: false, unreadScenes: [] })
+    const report = checkReport(db)
+    expect(report?.secretsNobodyLearns.map((secret) => secret.label)).toEqual(['the stair'])
+    const text = JSON.stringify(report)
+    expect(text).not.toMatch(/No scene shows|not checked yet/i)
+    expect(text).not.toMatch(NOT_KNOWING)
+    for (const end of looseEndsView(db).items) {
+      expect(end.ask).not.toMatch(ABSENCE)
+      expect(end.ask).not.toMatch(NOT_KNOWING)
     }
   })
 

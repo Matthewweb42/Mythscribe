@@ -79,12 +79,17 @@ export function readableScenes(db: TreeDb): { nodeId: string; proseTokens: numbe
     .filter((scene) => scene.proseTokens > 0)
 }
 
-/** *Rebuild memory*'s price over the active draft (P1's `estimateRebuild`, now over shipped rows). */
-export function rebuildEstimate(db: TreeDb, context: RebuildContext): RebuildEstimate {
-  return estimateRebuild(
-    readableScenes(db).map((scene) => scene.proseTokens),
-    context
-  )
+/**
+ * *Rebuild memory*'s price over the active draft (P1's `estimateRebuild`, now over shipped rows);
+ * `sweepCalls` (F-16.27) prices the contradiction sweep it ends with, when the switch is on.
+ */
+export function rebuildEstimate(
+  db: TreeDb,
+  context: RebuildContext,
+  sweepCalls?: (scenes: number) => number
+): RebuildEstimate {
+  const scenes = readableScenes(db).map((scene) => scene.proseTokens)
+  return estimateRebuild(scenes, context, sweepCalls?.(scenes.length) ?? 0)
 }
 
 /**

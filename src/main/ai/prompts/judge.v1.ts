@@ -330,6 +330,22 @@ export function buildJudgePrompt(items: readonly JudgeItem[], order: JudgeOrder)
   }
 }
 
+/** The stronger check's context caps, tried in order until the call fits. */
+const JUDGE_CONFIRM_CAPS = [JUDGE_CONFIRM_CHARS, 900, 600, 450] as const
+
+/**
+ * The context cap the stronger check's call of `pair` is sent at (the first of
+ * `JUDGE_CONFIRM_CAPS` that fits `JUDGE_CONFIRM_INPUT_TOKENS`): what its remembered verdict is
+ * keyed by too (F-16.30, P4 slice 3).
+ */
+export function judgeConfirmChars(pair: JudgePair, order: JudgeOrder = 'ab'): number {
+  const fits = (chars: number): boolean =>
+    estimateTokens(
+      `${JUDGE_CONFIRM_RULES}\nPair:\n${judgeItemText(pair, 1, order, chars)}`
+    ) <= JUDGE_CONFIRM_INPUT_TOKENS
+  return JUDGE_CONFIRM_CAPS.find(fits) ?? 450
+}
+
 /**
  * The stronger check's call (*Check the book*, F-16.30): one pair, its sides' contexts (±3
  * sentences, as main gives them) cut to 1,200 characters around their quotes, shorter until the
@@ -339,11 +355,8 @@ export function buildJudgeConfirmPrompt(
   pair: JudgePair,
   order: JudgeOrder = 'ab'
 ): BuiltJudgePrompt {
-  const caps = [JUDGE_CONFIRM_CHARS, 900, 600, 450] as const
-  const render = (chars: number): string => `Pair:\n${judgeItemText(pair, 1, order, chars)}`
-  const fits = (chars: number): boolean =>
-    estimateTokens(`${JUDGE_CONFIRM_RULES}\n${render(chars)}`) <= JUDGE_CONFIRM_INPUT_TOKENS
-  const chars = caps.find(fits) ?? 450
+  const chars = judgeConfirmChars(pair, order)
+  const render = (cap: number): string => `Pair:\n${judgeItemText(pair, 1, order, cap)}`
   return {
     version: JUDGE_PROMPT_VERSION,
     messages: [

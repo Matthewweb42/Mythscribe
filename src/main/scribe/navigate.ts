@@ -8,7 +8,6 @@ import {
   ROUTE_TITLE_CHARS,
   ROUTE_TURN_CHARS,
   routeActionFeature,
-  routeForMemory,
   settleRoute,
   type RouteDecision,
   type RouteSituation
@@ -77,7 +76,7 @@ import { runNavigatorTool, type NavigatorWorld } from './tools'
  * navigator call (P3-D5), as does a change the read-first could not read. A slot the memory has no
  * value for, or a knows question that is not a yes, goes to the navigator, which searches by
  * meaning. Otherwise `navigator.v1` (fast, at most three steps): its first step
- * picks route.v2's action (P3-D7: settled by `settleRoute` and `routeForMemory`, so F-5.26's edit
+ * picks route.v2's action (P3-D7: settled by `settleRoute`, so F-5.26's edit
  * passes and every other route action run as before) and the turn's kind (`settleTurn`: the words
  * decide whether it is a change, so an explicit sheet request is never a read-only query); for a
  * chat message or a question it calls the tools (`tools.ts`) and names the evidence to use (on a
@@ -436,7 +435,7 @@ export async function runNavigate(
   const situation: RouteSituation = { hasNode: document, hasSelection: selection !== '' }
   const local = localRoute(input.message, situation)
   if (local !== null) {
-    return { kind: 'route', decision: routeForMemory(local, 'v2'), routedBy: 'local', ...NONE }
+    return { kind: 'route', decision: local, routedBy: 'local', ...NONE }
   }
 
   const caretPara =
@@ -608,9 +607,9 @@ async function navigateSteps(
     if (n === 1) {
       // Unreadable: Step 0's evidence answers, the author never loses the turn.
       if (!step.readable) return answer('chat', null, 'model', spend)
-      const decision = routeForMemory(
-        settleRoute(step.route ?? { action: 'chat', instruction: null, edit: null }, situation),
-        'v2'
+      const decision = settleRoute(
+        step.route ?? { action: 'chat', instruction: null, edit: null },
+        situation
       )
       if (decision.action !== 'chat' && decision.action !== 'query') {
         return { kind: 'route', decision, routedBy: 'model', ...spend }
