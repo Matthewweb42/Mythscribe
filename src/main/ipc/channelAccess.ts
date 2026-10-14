@@ -425,6 +425,7 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'cloudCap:set': 'read',
   'switchover:available': 'read',
   'switchover:trialCopy': 'write',
+  'switchover:safety': 'write',
   'switchover:plan': 'read',
   'switchover:consent': 'read',
   'switchover:convert': 'write'
@@ -846,6 +847,7 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   // F-16.15: the switch-over runs on a v1 project (a second run is refused in v2).
   'switchover:available': 'any',
   'switchover:trialCopy': 'v1',
+  'switchover:safety': 'v1',
   'switchover:plan': 'v1',
   'switchover:consent': 'v1',
   'switchover:convert': 'v1'

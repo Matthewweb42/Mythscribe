@@ -204,7 +204,9 @@ function SwitchoverBody(): React.JSX.Element {
           </table>
         )}
         <p className="m-0 text-sm">
-          A full backup and a dated copy beside this project are made first.
+          {state.copy === null
+            ? 'Convert changes this project. Its backup and dated copy are already made.'
+            : 'Only this test copy changes; the project it was made from stays as it is.'}
         </p>
       </>
     )
@@ -243,9 +245,11 @@ function SwitchoverBody(): React.JSX.Element {
           {formatCount(counts.labels, 'label')}, {formatCount(counts.research, 'Research document')}
           , {formatCount(counts.tokens, 'inline tag')} as words.
         </p>
-        <p className="m-0 break-all text-xs text-fg-muted">
-          Dated copy: {datedCopy} · Backup: {backup}
-        </p>
+        {backup !== null && datedCopy !== null ? (
+          <p className="m-0 break-all text-xs text-fg-muted">
+            Dated copy: {datedCopy} · Backup: {backup}
+          </p>
+        ) : null}
       </>
     )
     actions = (

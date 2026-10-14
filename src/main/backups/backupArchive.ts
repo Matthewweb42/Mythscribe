@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import {
   BACKUP_MAX_UNPACKED_BYTES,
   backupsToPrune,
+  isKeptBackupName,
   parseBackupFileName,
   projectBackupDirName,
   projectBackupDirSuffix,
@@ -117,7 +118,10 @@ export function projectBackupDir(root: string, safeName: string, projectId: stri
   return path.join(root, projectBackupDirName(safeName, projectId))
 }
 
-/** The backups in `dir`, newest first. Files that are not named like a backup are not ours. */
+/**
+ * The backups in `dir`, newest first, kept ones (F-16.31) marked. Files that are not named like a
+ * backup are not ours.
+ */
 export function listBackups(dir: string): BackupEntry[] {
   if (!fs.existsSync(dir)) return []
   const entries: { entry: BackupEntry; time: number }[] = []
@@ -128,7 +132,13 @@ export function listBackups(dir: string): BackupEntry[] {
     const file = path.join(dir, item.name)
     const bytes = fs.statSync(file).size
     entries.push({
-      entry: { file, name: item.name, createdAt: date.toISOString(), bytes },
+      entry: {
+        file,
+        name: item.name,
+        createdAt: date.toISOString(),
+        bytes,
+        kept: isKeptBackupName(item.name)
+      },
       time: date.getTime()
     })
   }
@@ -136,7 +146,10 @@ export function listBackups(dir: string): BackupEntry[] {
   return entries.map((e) => e.entry)
 }
 
-/** Deletes every backup in `dir` past the newest `keep`; answers what it deleted. */
+/**
+ * Deletes every rolling backup in `dir` past the newest `keep`; answers what it deleted. Kept
+ * backups (F-16.31) are never deleted and do not count toward `keep`.
+ */
 export function pruneBackups(dir: string, keep: number): BackupEntry[] {
   const doomed = backupsToPrune(listBackups(dir), keep)
   for (const entry of doomed) fs.rmSync(entry.file, { force: true })

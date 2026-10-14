@@ -6,6 +6,8 @@ import {
   backupProjectName,
   backupsToPrune,
   defaultBackupSettings,
+  isKeptBackupName,
+  keptBackupFileName,
   parseBackupFileName,
   projectBackupDirName,
   restoredFolderName
@@ -62,7 +64,34 @@ describe('backups (F-8.4)', () => {
   })
 
   it('prunes everything past the newest N', () => {
-    expect(backupsToPrune(['a', 'b', 'c', 'd'], 2)).toEqual(['c', 'd'])
-    expect(backupsToPrune(['a'], 10)).toEqual([])
+    const rolling = (name: string): { name: string; kept: boolean } => ({ name, kept: false })
+    expect(backupsToPrune(['a', 'b', 'c', 'd'].map(rolling), 2).map((e) => e.name)).toEqual([
+      'c',
+      'd'
+    ])
+    expect(backupsToPrune([rolling('a')], 10)).toEqual([])
+  })
+
+  it('names a kept backup, reads it as a backup, and never prunes it (F-16.31)', () => {
+    const date = new Date(2026, 9, 14, 9, 5, 7)
+    const name = keptBackupFileName('My Novel', date)
+    expect(name).toBe('My Novel before story memory 2026-10-14 090507.zip')
+    expect(parseBackupFileName(name)?.getTime()).toBe(date.getTime())
+    expect(isKeptBackupName(name)).toBe(true)
+    expect(isKeptBackupName(backupFileName('My Novel', date))).toBe(false)
+    expect(isKeptBackupName('My Novel before story memory.zip')).toBe(false)
+    expect(isKeptBackupName(`${name}.tmp`)).toBe(false)
+    expect(backupProjectName(name)).toBe('My Novel before story memory')
+
+    // Newest first: a kept backup in the middle neither goes nor counts toward the two kept.
+    const entries = [
+      { name: 'r1', kept: false },
+      { name: 'k', kept: true },
+      { name: 'r2', kept: false },
+      { name: 'r3', kept: false },
+      { name: 'r4', kept: false }
+    ]
+    expect(backupsToPrune(entries, 2).map((e) => e.name)).toEqual(['r3', 'r4'])
+    expect(backupsToPrune([{ name: 'k', kept: true }], 0)).toEqual([])
   })
 })

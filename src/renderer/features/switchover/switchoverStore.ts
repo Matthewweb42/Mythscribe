@@ -139,13 +139,29 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => ({
         .filter((pair) => ticked.includes(mergeKey(pair.keep, pair.merge)))
         .map((pair) => ({ keep: pair.keep, merge: pair.merge }))
     }
+    // F-16.31 (decision SW-D5): Convert names the project it is for, so a dialog left open across
+    // a project switch never converts another book.
+    const projectId = useProjectStore.getState().current?.id
+    if (projectId === undefined) {
+      set({ error: 'No project is open.' })
+      return
+    }
     set({ phase: 'converting', error: null })
     let result: SwitchoverResult
     try {
       // The scene open behind the dialog may hold an unsaved edit: it is written into the copy
       // before the conversion reads it, and nothing is pending when main closes the copy.
       await flushPendingSaves()
-      result = await ipc().invoke('switchover:convert', consent)
+      const outcome = await ipc().invoke('switchover:convert', { consent, projectId })
+      if (!outcome.ok) {
+        // A step failed and nothing changed: what failed and the next step (Switch-over slice 3
+        // gives it its own block).
+        if (mine === generation) {
+          set({ phase: 'consent', error: `${outcome.message} Next: ${outcome.nextStep}` })
+        }
+        return
+      }
+      result = outcome
     } catch (err) {
       if (mine === generation) set({ phase: 'consent', error: describeError(err) })
       return

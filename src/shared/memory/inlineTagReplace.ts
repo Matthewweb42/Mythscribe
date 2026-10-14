@@ -41,6 +41,15 @@ export function inlineTagTokens(doc: TiptapNodeT): InlineTagToken[] {
   return found
 }
 
+/**
+ * Whether any node of `doc` is an inline tag, well formed or not (F-16.31: the switch-over's own
+ * check that none is left once it has converted).
+ */
+export function containsInlineTag(doc: TiptapNodeT): boolean {
+  if (doc.type === INLINE_TAG_NODE_TYPE) return true
+  return (doc.content ?? []).some(containsInlineTag)
+}
+
 /** The longest sample the consent screen shows around a token. */
 export const INLINE_TAG_SAMPLE_MAX = 160
 

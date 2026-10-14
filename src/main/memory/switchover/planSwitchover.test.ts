@@ -5,7 +5,10 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { sql } from 'drizzle-orm'
 import { PLANNED_COST_NOTES, SHIPPED_PLAN_ROWS } from '@shared/aiCostNotes'
 import type { SwitchoverPlan } from '@shared/memory/switchover'
+import { sweepCalls } from '../findings/findingsService'
+import { rebuildEstimate } from '../reading/backlog'
 import { getStoryMemory } from '../../project/settingsStore'
+import { convertSwitchover, prepareSwitchover } from './convert'
 import { buildFixtureV1, type FixtureV1 } from './fixtureV1'
 import {
   estimateRebuild,
@@ -216,5 +219,33 @@ describe('inlineTagReplacements: the consent rows (step 3)', () => {
       // A sheet's tag is replaced by the sheet's name.
       { tag: '#mara-vell', count: 1, sample: 'Ask #mara-vell later.', replacement: 'Mara Vell' }
     ])
+  })
+})
+
+describe('the dry run prices the rebuild it asks for (F-16.31, decision SW-D10)', () => {
+  it('equals *Rebuild memory*’s estimate on the converted book, with and without the sweep', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-plan-price-'))
+    const own = await buildFixtureV1(path.join(dir, 'Harbour Book.mythscribe'))
+    try {
+      const db = own.session.connection.orm
+      const withSweep = planSwitchover(db, CONTEXT, sweepCalls).rebuild
+      const without = planSwitchover(db, CONTEXT).rebuild
+      expect(withSweep.requests - without.requests).toBe(sweepCalls(without.scenes))
+      expect(withSweep.costUsd).toBeGreaterThan(without.costUsd)
+      const replacements = inlineTagReplacements(db).map((row) => ({
+        key: row.key,
+        text: row.replacement
+      }))
+      const prepared = await prepareSwitchover(db, own.session.folder)
+      convertSwitchover(db, 'novel', prepared, { replacements, merges: [] }, new Date(), {
+        record: { trial: false, backup: null, datedCopy: null }
+      })
+      expect(getStoryMemory(db).version).toBe('v2')
+      expect(rebuildEstimate(db, CONTEXT, sweepCalls)).toEqual(withSweep)
+      expect(rebuildEstimate(db, CONTEXT)).toEqual(without)
+    } finally {
+      own.session.close()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

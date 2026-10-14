@@ -3,18 +3,18 @@ import { AiSource } from '../aiSettings'
 import { TwinRule } from './twinGate'
 
 /**
- * The story-memory switch-over (F-16.15, story memory P1 slice 6; design Part 3, answer 16): the
- * steps that move a v1 project onto v2, built and tested on copies only in P1. One owner for the
- * shapes both sides share: the dry run (`SwitchoverPlan`), the consent screen's inline-tag rows,
- * what the author consents to, and what the conversion answers. The rules are
- * `src/main/memory/switchover/`; the pure mapping is `switchoverMapping.ts`.
+ * The story-memory switch-over (F-16.15, story memory P1 slice 6; F-16.31 part A, plan
+ * `Switchover.md`; design Part 3, answer 16): the steps that move a v1 project onto v2, on a test
+ * copy or, since F-16.31, on the project itself. One owner for the shapes both sides share: the
+ * dry run (`SwitchoverPlan`), the consent screen's inline-tag rows, what the author consents to,
+ * the steps and their failures, what the conversion answers, and the switch-over record. The
+ * rules are `src/main/memory/switchover/`; the pure mapping is `switchoverMapping.ts`.
  */
 
 /**
- * The `settings` row that marks a project as a switch-over trial copy (Help › Try the
- * story-memory switch-over on a copy…). The `switchover:*` channels refuse a project without it
- * unless the in-place run of F-16.31 says so (`allowInPlace`), so in P1 nothing converts a real
- * project.
+ * The `settings` row that marks a project as a switch-over trial copy (*Try it on a copy first*).
+ * A test copy skips the safety step (its original is its safety, decision SW-D4) and its record
+ * says `trial`; otherwise it runs as the project itself does.
  */
 export const SWITCHOVER_TRIAL_KEY = 'switchoverTrial'
 
@@ -138,14 +138,84 @@ export const SwitchoverCounts = z.object({
 export type SwitchoverCounts = z.infer<typeof SwitchoverCounts>
 
 /**
- * What `switchover:convert` answers: the counts, the safety copies made first (the backup file
- * and the dated copy; when either cannot be written the call fails and nothing converts), and
- * the folder, which main has closed so the renderer reopens it on v2.
+ * The in-place run's steps, in order (F-16.31, plan Switchover §1.2): the Google Drive working
+ * copy flushed, the kept backup, the dated copy beside the project, the open project checked, the
+ * conversion. A failure names the step it stopped at.
+ */
+export const SWITCHOVER_STEPS = ['flush', 'backup', 'datedCopy', 'project', 'convert'] as const
+export const SwitchoverStep = z.enum(SWITCHOVER_STEPS)
+export type SwitchoverStep = z.infer<typeof SwitchoverStep>
+
+/** How every failure's message ends: a failed step changed nothing. */
+export const SWITCHOVER_NOTHING_CHANGED =
+  'Nothing was changed: this project still uses the old story memory.'
+
+/**
+ * A step that failed (F-16.31): which, what happened (ending `SWITCHOVER_NOTHING_CHANGED`), and
+ * what to do next. The project is still v1 and untouched.
+ */
+export const SwitchoverFailure = z.object({
+  ok: z.literal(false),
+  step: SwitchoverStep,
+  message: z.string(),
+  nextStep: z.string()
+})
+export type SwitchoverFailure = z.infer<typeof SwitchoverFailure>
+
+/**
+ * What `switchover:safety` answers (the project itself, before the dry run): the kept backup and
+ * the dated copy beside the project (in Google Drive for a Drive project), or the failure.
+ */
+export const SwitchoverSafetyOutcome = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), backup: z.string(), datedCopy: z.string() }),
+  SwitchoverFailure
+])
+export type SwitchoverSafetyOutcome = z.infer<typeof SwitchoverSafetyOutcome>
+
+/**
+ * What a conversion that ran answers: the counts, the safety copies (the kept backup and the dated
+ * copy; null on a test copy, whose original is its safety), and the folder, which main has closed
+ * so the renderer reopens it on v2.
  */
 export const SwitchoverResult = z.object({
   folder: z.string(),
-  backup: z.string(),
-  datedCopy: z.string(),
+  trial: z.boolean(),
+  backup: z.string().nullable(),
+  datedCopy: z.string().nullable(),
   counts: SwitchoverCounts
 })
 export type SwitchoverResult = z.infer<typeof SwitchoverResult>
+
+/** What `switchover:convert` takes: the consent, and the open project's id (decision SW-D5). */
+export const SwitchoverConvertInput = z.object({
+  consent: SwitchoverConsent,
+  projectId: z.string().min(1)
+})
+export type SwitchoverConvertInput = z.infer<typeof SwitchoverConvertInput>
+
+/** What `switchover:convert` answers: the result, or the step that failed. */
+export const SwitchoverOutcome = z.discriminatedUnion('ok', [
+  SwitchoverResult.extend({ ok: z.literal(true) }),
+  SwitchoverFailure
+])
+export type SwitchoverOutcome = z.infer<typeof SwitchoverOutcome>
+
+/**
+ * The switch-over record (F-16.31, decision SW-D7): a project `settings` row written in the
+ * conversion's transaction, so where the backup and the dated copy are, and how to go back, are
+ * never lost with the dialog. `rebuild` is `waiting` until a *Rebuild memory* starts.
+ */
+export const SWITCHOVER_RECORD_KEY = 'switchover'
+
+export const SwitchoverRecord = z.object({
+  switchedAt: z.string(),
+  /** A test copy (`switchoverTrial`). */
+  trial: z.boolean(),
+  /** The kept backup's zip (null on a test copy). */
+  backup: z.string().nullable(),
+  /** The dated copy's folder (null on a test copy). */
+  datedCopy: z.string().nullable(),
+  rebuild: z.enum(['waiting', 'started']),
+  rebuildStartedAt: z.string().nullable()
+})
+export type SwitchoverRecord = z.infer<typeof SwitchoverRecord>

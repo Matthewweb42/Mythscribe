@@ -1167,13 +1167,15 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
     `The Changes log keeps only its newest ${CHANGES_MAX.toLocaleString('en-US')} rows, so sheet text the AI wrote before that counts as yours.`
   )
 
-  // The rebuild never reads an Idea scene or one left out of compile (design §2.2).
+  // The rebuild never reads an Idea scene or one left out of compile (design §2.2). Each scene is
+  // counted as it will read once converted (its inline tags as words), so the dry run's price is
+  // the one *Rebuild memory* gives after the switch (F-16.31, decision SW-D10).
   const statuses = sceneStatuses(db, rows)
   const rebuildScenes = scenes
     .filter((row) => !statuses.idea.has(row.id) && !statuses.excluded.has(row.id))
     .map((row) => {
       const doc = storedDoc(row.content)
-      return doc === null ? 0 : estimateTokens(docToText(doc))
+      return doc === null ? 0 : estimateTokens(docToText(replaceInlineTags(doc, tokenText).doc))
     })
     .filter((tokensOf) => tokensOf > 0)
 

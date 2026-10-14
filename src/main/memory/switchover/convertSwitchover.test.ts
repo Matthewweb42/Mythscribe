@@ -1,8 +1,6 @@
-import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import Database from 'better-sqlite3'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { docToText } from '@shared/docText'
@@ -24,7 +22,8 @@ import {
   sceneDetail,
   snapshotText
 } from '../../db/schema'
-import { openProject, type ProjectSession } from '../../project/projectStore'
+import { rollbackSnapshot } from '../../db/snapshot'
+import type { ProjectSession } from '../../project/projectStore'
 import { getStoryMemory } from '../../project/settingsStore'
 import { researchRootId } from '../../research/researchTree'
 import { documentJson } from '../../voice/profile'
@@ -32,7 +31,7 @@ import { getRecord, invariantAliases, listRecords } from '../recordStore'
 import { ALREADY_SWITCHED, convertSwitchover, prepareSwitchover } from './convert'
 import { buildFixtureV1, type FixtureV1 } from './fixtureV1'
 import { inlineTagReplacements } from './plan'
-import { createTrialCopy, NOT_A_TRIAL, requireSwitchoverTarget, switchoverTrialOf } from './trial'
+import { getSwitchoverRecord, markRebuildStarted } from './record'
 
 let tmp: string
 let fixture: FixtureV1
@@ -62,9 +61,15 @@ function consent(overrides: Partial<SwitchoverConsent> = {}): SwitchoverConsent 
   return { replacements, merges: [], ...overrides }
 }
 
+const RECORD = {
+  trial: false,
+  backup: '/backups/Harbour Book before story memory.zip',
+  datedCopy: '/books/Harbour Book (before story memory)'
+}
+
 async function convert(given: SwitchoverConsent = consent()): Promise<void> {
   const prepared = await prepareSwitchover(db(), session.folder)
-  convertSwitchover(db(), 'novel', prepared, given, NOW)
+  convertSwitchover(db(), 'novel', prepared, given, NOW, { record: RECORD })
 }
 
 const byName = (name: string): ReturnType<typeof listRecords> =>
@@ -361,71 +366,99 @@ describe('convertSwitchover (F-16.15, plan P1 §6.2)', () => {
   })
 })
 
-/** The sha256 of every file under `folder`, by relative path. */
-function folderHash(folder: string): string {
-  const hash = createHash('sha256')
-  const walk = (dir: string): void => {
-    for (const entry of fs
-      .readdirSync(dir, { withFileTypes: true })
-      .sort((a, b) => a.name.localeCompare(b.name))) {
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) walk(full)
-      else hash.update(`${path.relative(folder, full)}\u0000`).update(fs.readFileSync(full))
-    }
-  }
-  walk(folder)
-  return hash.digest('hex')
-}
-
-/** A database file opened from its bytes in memory (as a rollback-journal database). */
-function inMemory(file: string): Database.Database {
-  const bytes = fs.readFileSync(file)
-  bytes[18] = 1
-  bytes[19] = 1
-  return new Database(bytes)
-}
-
-describe('the trial copy (decision P1-D12)', () => {
-  it('refuses a project that is not a trial copy unless the in-place run asks', () => {
-    expect(() => requireSwitchoverTarget(db(), { allowInPlace: false })).toThrow(NOT_A_TRIAL)
-    expect(() => requireSwitchoverTarget(db(), { allowInPlace: true })).not.toThrow()
-  })
-
-  it('converts the copy and leaves the original folder’s bytes as they were', async () => {
-    const folder = session.folder
-    session.close()
-    const before = folderHash(folder)
-    // The open project's connection, as the handler has it; read from the bytes, so the test's
-    // own reader touches nothing in the folder either.
-    const source = inMemory(path.join(folder, 'project.db'))
-    let copy: string
-    try {
-      copy = createTrialCopy({ folder, sqlite: source, name: 'Harbour Book' }, NOW)
-    } finally {
-      source.close()
-    }
-    expect(path.basename(copy)).toMatch(
-      /^Harbour Book \(story memory test \d{4}-\d\d-\d\d \d{4}\)\.mythscribe$/
-    )
-    session = openProject(copy)
-    expect(switchoverTrialOf(db())?.source).toBe(folder)
-    expect(session.info.name).toMatch(/^Harbour Book \(story memory test /)
-    requireSwitchoverTarget(db(), { allowInPlace: false })
+describe('the switch-over record and the check before commit (F-16.31, plan Switchover §1.3)', () => {
+  it('writes the record in the conversion, waiting for a rebuild, and marks the rebuild once', async () => {
+    expect(getSwitchoverRecord(db())).toBeNull()
     await convert()
-    expect(getStoryMemory(db()).version).toBe('v2')
-    expect(byName('Mara Vell')).toHaveLength(1)
-    expect(folderHash(folder)).toBe(before)
-    // The original still reads as v1, with its inline tag.
-    const original = inMemory(path.join(folder, 'project.db'))
-    try {
-      const memory = original.prepare("SELECT value FROM settings WHERE key = 'storyMemory'").get()
-      expect(memory).toBeUndefined()
-      const row = original
-        .prepare<[string], { content: string }>('SELECT content FROM node WHERE id = ?')
-        .get(fixture.scenes[0] ?? '')
-      expect(row?.content).toContain('inlineTag')
-    } finally {
-      original.close()
-    }
+    expect(getSwitchoverRecord(db())).toEqual({
+      switchedAt: NOW.toISOString(),
+      ...RECORD,
+      rebuild: 'waiting',
+      rebuildStartedAt: null
+    })
+    const later = new Date('2026-10-12T10:00:00.000Z')
+    expect(markRebuildStarted(db(), later)).toMatchObject({
+      rebuild: 'started',
+      rebuildStartedAt: later.toISOString()
+    })
+    expect(markRebuildStarted(db(), new Date('2026-10-13T10:00:00.000Z'))?.rebuildStartedAt).toBe(
+      later.toISOString()
+    )
   })
+
+  it('reads a broken record as none', () => {
+    session.connection.sqlite
+      .prepare("INSERT INTO settings (key, value) VALUES ('switchover', '{\"switchedAt\": 3')")
+      .run()
+    expect(getSwitchoverRecord(db())).toBeNull()
+    expect(markRebuildStarted(db(), NOW)).toBeNull()
+  })
+
+  /**
+   * Faults planted with a temporary trigger on the test's own connection (nothing in the project
+   * file): each makes the converted project fail one of the checks, and the whole conversion is
+   * undone, the database bytes as they were.
+   */
+  const scene = (): string => fixture.scenes[0] ?? ''
+  const plants: { name: string; trigger: () => string; message: RegExp }[] = [
+    {
+      name: 'an inline tag left in a scene',
+      trigger: () => `CREATE TEMP TRIGGER plant AFTER UPDATE OF content ON node
+        WHEN NEW.id = '${scene()}' AND OLD.content LIKE '%inlineTag%'
+        BEGIN UPDATE node SET content = OLD.content WHERE id = NEW.id; END`,
+      message: /“Scene 1” still has an inline tag/
+    },
+    {
+      name: 'a lost paragraph',
+      trigger: () => `CREATE TEMP TRIGGER plant AFTER UPDATE OF content ON node
+        WHEN NEW.id = '${scene()}'
+        BEGIN UPDATE node SET content = '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Mara walked."}]}]}' WHERE id = NEW.id; END`,
+      message: /“Scene 1” would not read as it did/
+    },
+    {
+      name: 'a document that no longer parses',
+      trigger: () => `CREATE TEMP TRIGGER plant AFTER UPDATE OF content ON node
+        WHEN NEW.id = '${scene()}'
+        BEGIN UPDATE node SET content = '{"type":' WHERE id = NEW.id; END`,
+      message: /“Scene 1” no longer opens/
+    },
+    {
+      name: 'a snapshot changed',
+      trigger: () => `CREATE TEMP TRIGGER plant AFTER INSERT ON record
+        BEGIN UPDATE snapshot_text SET word_count = word_count + 1; END`,
+      message: /a snapshot changed/
+    },
+    {
+      name: 'a name clash',
+      trigger: () => `CREATE TEMP TRIGGER plant AFTER INSERT ON alias
+        WHEN NEW.is_main = 1 AND NEW.shared = 0 AND NEW.text = 'Oren Hale'
+        BEGIN INSERT INTO alias (id, record_id, text, norm, is_main, case_rule, origin, shared, created)
+          SELECT 'plant', id, NEW.text, NEW.norm, 0, 'auto', 'author', 1, NEW.created
+          FROM record WHERE id <> NEW.record_id LIMIT 1; END`,
+      message: /the name “oren hale” belongs to more than one record/
+    },
+    {
+      name: 'a record without a name',
+      trigger: () => `CREATE TEMP TRIGGER plant AFTER INSERT ON alias
+        WHEN NEW.is_main = 1 AND NEW.text = 'Silver Coin'
+        BEGIN DELETE FROM alias WHERE id = NEW.id; END`,
+      message: /a record would have no name/
+    }
+  ]
+  for (const plant of plants) {
+    it(`undoes everything when the check finds ${plant.name}`, async () => {
+      const sqlite = session.connection.sqlite
+      const bytes = rollbackSnapshot(sqlite)
+      sqlite.exec(plant.trigger())
+      try {
+        await expect(convert()).rejects.toThrow(plant.message)
+      } finally {
+        sqlite.exec('DROP TRIGGER IF EXISTS temp.plant')
+      }
+      expect(getStoryMemory(db()).version).toBe('v1')
+      expect(getSwitchoverRecord(db())).toBeNull()
+      expect(listRecords(db())).toEqual([])
+      expect(rollbackSnapshot(sqlite).equals(bytes)).toBe(true)
+    })
+  }
 })

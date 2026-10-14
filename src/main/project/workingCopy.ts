@@ -544,7 +544,8 @@ function renameRetrying(from: string, to: string): void {
   }
 }
 
-function totalChanges(sqlite: Database.Database): number {
+/** Rows changed through this connection since it opened (SQLite's `total_changes()`). */
+export function totalChanges(sqlite: Database.Database): number {
   return sqlite.prepare<[], { n: number }>('SELECT total_changes() AS n').get()?.n ?? 0
 }
 

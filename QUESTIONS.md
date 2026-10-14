@@ -12,6 +12,23 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-14 · F-16.31, F-8.4 · Switch-over slice 1 (the in-place run, main side): calls made while building it
+- Question: Building the switch-over's run on the project itself (plan `Switchover.md` §1: the safety step, the kept backup, step-labelled failures, the switch-over record, the conversion's own check) needed small calls the plan left open. Nothing of it is visible yet except the kept backup's row in Settings › Backups; the entry points and screens are slices 3 and 4. No live run is involved (no key here); the switch-over itself calls no model.
+- Chosen (decided by Claude, unconfirmed):
+  1. **A failed step after the safety step keeps the dated copy and the backup** made before the dry run (no second dated copy is made on *Try again*); only a failed dated copy leaves none (the half-made folder is removed), and a failed backup leaves no dated copy because it never starts.
+  2. **Convert on a project already switched** answers the `project` step with "This project already uses the new story memory; the switch-over runs once. Nothing was changed." rather than the usual "…still uses the old story memory", which would be untrue there.
+  3. **The conversion's own check looks everywhere:** every node's content and notes (folders and the section roots too) and every other draft, wider than the places the conversion rewrites. The app cannot put an inline tag in a folder's text or a root's notes, so this only refuses a project damaged some other way, and it names the place.
+  4. **The check's message names up to three problems** ("its own check found that “Scene 1” would not read as it did; …", then "and N more"), after "The conversion stopped and undid everything:".
+  5. **A cause is shown once:** a Google Drive or dated-copy error already starting "Could not …:" is shown from its cause, so the message reads "Could not copy the project to Google Drive first: EACCES…." and not the same words twice.
+  6. **Without the safety step,** Convert on the project itself is refused outright ("Make the backup and the dated copy first."); the dialog never allows it. The safety step itself refuses a test copy ("A test copy needs no backup of its own…") and a project already switched.
+  7. **The safety step's record of what it made** lasts while the project stays open: a second safety call answers the same backup and dated copy, a project switch forgets it, and a failed Convert keeps it (updated when Convert had to back up again), so *Try again* never makes another dated copy.
+  8. **A kept backup is recognised by its name** ("… before story memory <date time>.zip"). A project whose own name ends in "before story memory" would have its ordinary backups kept for ever too: retention can only keep too much, never delete a kept one.
+  9. **The dry run counts each scene as it will read once converted** (inline tags as their words), so its rebuild price equals *Rebuild memory*'s on the converted book (tested with and without the contradiction sweep).
+  10. **Until slice 3,** the developer copy flow shows a failed step as its error line ("<what failed> Next: <next step>"), its consent screen says only the test copy changes (a test copy has no backup or dated copy of its own now), and its done screen shows the backup and dated copy line only when there are some.
+  11. **The check stays inside the transaction:** a 200-scene book with a second draft and a snapshot converts and checks itself in about 0.7 s (the bar is 5 s), so nothing moves out of it.
+- Alternatives: removing the dated copy when Convert fails (then *Try again* needs a new safety step); the check limited to the places the conversion writes; a separate "already switched" step; marking kept backups in a side file rather than by name.
+- To change it: `src/main/memory/switchover/run.ts`, `checkConverted.ts`, `src/shared/backups.ts`, `plans/Switchover.md` §1.
+
 ## 2026-10-14 · F-16.31 · Switch-over plan (part A): the calls the design left open
 - Question: Planning part A of the switch-over, your switch of the real project from the installed app (`docs/research/story-memory-2026-10-11/plans/Switchover.md`, five slices, nothing built yet), needed calls the design and F-16.15's copy flow did not make. Details are in the plan's §8 (SW-D1 to SW-D14).
 - Chosen (decided by Claude, unconfirmed):

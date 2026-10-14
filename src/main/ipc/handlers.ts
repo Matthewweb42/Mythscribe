@@ -482,6 +482,7 @@ import {
 } from '../memory/findings/findingActions'
 import { findingCounts, runFindingsJob } from '../memory/findings/findingsJob'
 import { findingsView } from '../memory/findings/findingViews'
+import { sweepCalls } from '../memory/findings/findingsService'
 import { forgetAnswer } from '../memory/findings/underlineLog'
 import { underlinesOf, underlinesShown } from '../memory/findings/underlines'
 import { isUnderResearch } from '../research/researchTree'
@@ -510,13 +511,9 @@ import {
 } from '../memory/passageIndexer'
 import { answerNameQuestion, listNameQuestions, resetNameQuestionCache } from '../memory/questions'
 import { applyRename, clearRenameUndo, previewRename, undoRename } from '../memory/renameStore'
-import { convertSwitchover, prepareSwitchover } from '../memory/switchover/convert'
 import { inlineTagReplacements, planSwitchover } from '../memory/switchover/plan'
-import {
-  createTrialCopy,
-  requireSwitchoverTarget,
-  saveSafetyCopy
-} from '../memory/switchover/trial'
+import { SwitchoverRun } from '../memory/switchover/run'
+import { createTrialCopy } from '../memory/switchover/trial'
 import {
   createRecord,
   deleteRecord,
@@ -3245,7 +3242,7 @@ export function registerHandlers({
     return folder === null ? backups.state() : backups.setFolder(folder)
   })
 
-  register('backups:now', () => backups.backupNow())
+  register('backups:now', () => backups.backupNow().state)
 
   register('backups:reveal', async () => {
     const { folder } = backups.state()
@@ -5699,25 +5696,20 @@ export function registerHandlers({
     )
   )
 
-  // F-16.15: the story-memory switch-over, built and tested on copies only (decision P1-D12): an
-  // unpackaged build offers Help › Try the story-memory switch-over on a copy…, and the dry run,
-  // the consent rows and the conversion refuse any project without the trial row. Only F-16.31's
-  // in-place run will pass `allowInPlace`.
+  // F-16.15, F-16.31 (part A): the story-memory switch-over, on a test copy or on the project
+  // itself. The steps live in `memory/switchover/` (`run.ts` holds the safety memo between the
+  // channels); these handlers only reach them. `switchover:available` still names the developer
+  // item's builds until Switch-over slice 3 gives every build its entry points.
   const switchoverAvailable = !app.isPackaged
-  const requireSwitchoverBuild = (): void => {
-    if (!switchoverAvailable) {
-      throw new AppError('VALIDATION', 'The story-memory switch-over is not in this build yet.')
-    }
-  }
-  const switchoverTarget = (): TreeDb => {
-    requireSwitchoverBuild()
-    const db = manager.require().connection.orm
-    requireSwitchoverTarget(db, { allowInPlace: false })
-    return db
-  }
+  const switchover = new SwitchoverRun({
+    session: () => manager.require(),
+    backupNow: (options) => backups.backupNow(options).file,
+    current: () => manager.current(),
+    close: () => manager.close(),
+    now: () => new Date()
+  })
   register('switchover:available', () => ({ available: switchoverAvailable }))
   register('switchover:trialCopy', () => {
-    requireSwitchoverBuild()
     const session = manager.require()
     const folder = createTrialCopy(
       { folder: session.folder, sqlite: session.connection.sqlite, name: session.info.name },
@@ -5725,50 +5717,30 @@ export function registerHandlers({
     )
     return { folder, info: manager.open(folder) }
   })
+  register('switchover:safety', () => switchover.safety())
   register('switchover:plan', () => {
-    const db = switchoverTarget()
+    const db = manager.require().connection.orm
     const source = sourceOf(db)
     const provider = ai.get(source)
-    return planSwitchover(db, {
-      source,
-      fastModel: provider?.resolveModel('fast') ?? '',
-      strongModel: provider?.resolveModel('strong') ?? '',
-      pricing: appState.get().cloudPricing?.pricing ?? null
-    })
-  })
-  register('switchover:consent', () => inlineTagReplacements(switchoverTarget()))
-  register('switchover:convert', async (consent) => {
-    const db = switchoverTarget()
-    const session = manager.require()
-    const now = new Date()
-    // Step 1, safety, just before the only write: the Drive working copy copied back, the full
-    // backup (a failure stops here), and a dated copy beside the project wherever it lives.
-    session.workingCopy?.syncNow(session.connection.sqlite)
-    const backup = backups.backupNow().backups[0]?.file
-    if (backup === undefined) {
-      throw new AppError('VALIDATION', 'The backup was not listed; nothing was converted.')
-    }
-    const datedCopy = saveSafetyCopy(
-      { folder: session.folder, sqlite: session.connection.sqlite },
-      now
+    return planSwitchover(
+      db,
+      {
+        source,
+        fastModel: provider?.resolveModel('fast') ?? '',
+        strongModel: provider?.resolveModel('strong') ?? '',
+        pricing: appState.get().cloudPricing?.pricing ?? null
+      },
+      isFeatureAllowed(getAiSettings(db), 'judge') ? sweepCalls : undefined
     )
-    const prepared = await prepareSwitchover(db, session.folder)
-    if (manager.current() !== session.info) {
-      throw new AppError(
-        'VALIDATION',
-        'The project changed during the switch-over; nothing was converted.'
-      )
-    }
-    const counts = convertSwitchover(db, session.info.format, prepared, consent, now)
-    const folder = session.folder
-    // The project reopens on v2: main closes it and the renderer opens it again.
-    manager.close()
-    return { folder, backup, datedCopy, counts }
   })
+  register('switchover:consent', () => inlineTagReplacements(manager.require().connection.orm))
+  register('switchover:convert', (input) => switchover.convert(input))
 
   manager.onChange((info) => {
     // Open, create, and close all land here: a profile built for one project never answers for another.
     resetVoiceProfileCache()
+    // F-16.31: the switch-over's safety memo belongs to the project that left.
+    switchover.clear()
     // F-5.13: drop every pending job, timer, and status with the project that queued them;
     // the rows stay in that project's database, so opening it again takes the work up where it
     // stopped (`load` on an empty table does nothing, which is what a create lands on).

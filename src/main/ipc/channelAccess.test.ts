@@ -218,4 +218,21 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
       expect(isWriteChannel(channel), channel).toBe(kind === 'write')
     }
   })
+
+  it('F-16.31: the switch-over runs on a v1 project: its safety step and conversion write, its dry run reads', () => {
+    const access: [Channel, 'read' | 'write'][] = [
+      ['switchover:trialCopy', 'write'],
+      ['switchover:safety', 'write'],
+      ['switchover:plan', 'read'],
+      ['switchover:consent', 'read'],
+      ['switchover:convert', 'write']
+    ]
+    for (const [channel, kind] of access) {
+      expect(CHANNEL_MEMORY[channel], channel).toBe('v1')
+      expect(() => assertChannelMemory(channel, 'v2'), channel).toThrow(OTHER_MEMORY_MESSAGE)
+      expect(() => assertChannelMemory(channel, 'v1'), channel).not.toThrow()
+      expect(CHANNEL_ACCESS[channel], channel).toBe(kind)
+      expect(isWriteChannel(channel), channel).toBe(kind === 'write')
+    }
+  })
 })

@@ -174,8 +174,8 @@ describe('BackupService (F-8.4)', () => {
   it('restores only a listed backup, into a new folder beside the original', () => {
     const folder = projectFolderFor(tmp, 'Ridge')
     manager.create(folder, 'Ridge', 'novel')
-    const { backups } = service.backupNow()
-    const file = backups[0]?.file ?? ''
+    const { state, file } = service.backupNow()
+    expect(state.backups[0]?.file).toBe(file)
     expect(service.listedBackup(file).file).toBe(file)
     expect(() => service.listedBackup(path.join(tmp, 'elsewhere.zip'))).toThrow(AppError)
 
@@ -184,6 +184,30 @@ describe('BackupService (F-8.4)', () => {
     const second = service.extractToNewProject(file, tmp)
     expect(second).toBe(first.replace(/\)\.mythscribe$/, ') 2.mythscribe'))
     expect(fs.existsSync(path.join(second, 'project.db'))).toBe(true)
+  })
+
+  it('makes a kept backup that survives 12 later backups at keep 5 and restores (F-16.31)', () => {
+    const folder = projectFolderFor(tmp, 'Ridge')
+    manager.create(folder, 'Ridge', 'novel')
+    service.setSettings({ keep: 5 })
+    const { file, state } = service.backupNow({ kept: true })
+    expect(path.basename(file)).toMatch(/^Ridge before story memory 2026-10-04 \d{6}\.zip$/)
+    expect(fs.existsSync(file)).toBe(true)
+    expect(state.backups.find((b) => b.file === file)?.kept).toBe(true)
+
+    for (let i = 0; i < 12; i++) {
+      write(manager.require(), `Change ${i}`)
+      tick()
+    }
+    const after = service.state().backups
+    expect(after.filter((b) => !b.kept)).toHaveLength(5)
+    expect(after.filter((b) => b.kept).map((b) => b.file)).toEqual([file])
+    expect(fs.existsSync(file)).toBe(true)
+
+    const restored = service.restore(file, tmp, (target) => manager.open(target))
+    expect(path.basename(restored.path)).toMatch(
+      /^Ridge before story memory \(restored 2026-10-04 \d{4}\)\.mythscribe$/
+    )
   })
 
   it('stops the timer and pushes nothing after dispose', () => {

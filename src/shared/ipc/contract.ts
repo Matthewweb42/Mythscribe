@@ -82,9 +82,10 @@ import { RESEARCH_TITLE_MAX, ResearchDoc } from '../research'
 import {
   InlineTagReplacement,
   RebuildEstimate,
-  SwitchoverConsent,
+  SwitchoverConvertInput,
+  SwitchoverOutcome,
   SwitchoverPlan,
-  SwitchoverResult
+  SwitchoverSafetyOutcome
 } from '../memory/switchover'
 import { CloudCapState, CloudCapUsd } from '../memory/cloudCap'
 import { UNDERLINE_SCENES_MAX, UNDERLINES_SHOWN_MAX, UnderlinesByScene } from '../memory/underlines'
@@ -3776,22 +3777,31 @@ export const contract = {
   /**
    * F-16.15: copies the open (v1) project beside it as `<Name> (story memory test <date>)` with a
    * new id and the `switchoverTrial` row, and opens the copy (still v1). The renderer flushes
-   * pending saves first. VALIDATION in a packaged build.
+   * pending saves first.
    */
   'switchover:trialCopy': {
     input: z.undefined(),
     output: z.object({ folder: z.string(), info: ProjectInfo })
   },
-  /** F-16.15: the dry run on a trial copy; writes nothing. VALIDATION without the trial row. */
+  /**
+   * F-16.31: the safety step on the open project itself, before the dry run: the Google Drive
+   * working copy copied back, a kept backup, a dated copy beside the project. Answers both paths
+   * or the step that failed (nothing changed). A second call for the same open project answers
+   * what the first made. VALIDATION on a test copy (it needs none) or a v2 project.
+   */
+  'switchover:safety': { input: z.undefined(), output: SwitchoverSafetyOutcome },
+  /** F-16.15: the dry run (a test copy or the project itself); writes nothing. */
   'switchover:plan': { input: z.undefined(), output: SwitchoverPlan },
-  /** F-16.15: the consent screen's inline-tag rows on a trial copy; writes nothing. */
+  /** F-16.15: the consent screen's inline-tag rows; writes nothing. */
   'switchover:consent': { input: z.undefined(), output: z.array(InlineTagReplacement) },
   /**
-   * F-16.15: the conversion of a trial copy: the working copy copied back, a full backup and a
-   * dated copy first, then one transaction (v2 tables, inline tags as the consented words, the
-   * ticked merges, `storyMemory` v2). Main then closes the project; the renderer reopens `folder`.
+   * F-16.15, F-16.31: the conversion of the open project, named by its id (decision SW-D5): on
+   * the project itself anything changed since the safety step is copied back and backed up again;
+   * then one transaction (v2 tables, inline tags as the consented words, the ticked merges, its
+   * own check, the switch-over record, `storyMemory` v2). Main then closes the project and the
+   * renderer reopens `folder`. A step that fails answers `ok: false` with the project still v1.
    */
-  'switchover:convert': { input: SwitchoverConsent, output: SwitchoverResult }
+  'switchover:convert': { input: SwitchoverConvertInput, output: SwitchoverOutcome }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract

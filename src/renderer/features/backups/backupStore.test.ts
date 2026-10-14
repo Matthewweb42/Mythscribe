@@ -19,7 +19,8 @@ const ENTRY = {
   file: '/backups/Ridge (01234567)/Ridge 2026-10-04 120000.zip',
   name: 'Ridge 2026-10-04 120000.zip',
   createdAt: '2026-10-04T12:00:00.000Z',
-  bytes: 4096
+  bytes: 4096,
+  kept: false
 }
 
 let calls: string[]

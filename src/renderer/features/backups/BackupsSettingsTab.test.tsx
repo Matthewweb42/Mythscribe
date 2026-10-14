@@ -38,7 +38,8 @@ const ENTRY = {
   file: '/backups/Ridge (01234567)/Ridge 2026-10-04 120000.zip',
   name: 'Ridge 2026-10-04 120000.zip',
   createdAt: '2026-10-04T12:00:00.000Z',
-  bytes: 2.5 * 1024 * 1024
+  bytes: 2.5 * 1024 * 1024,
+  kept: false
 }
 
 const BASE: BackupState = {
@@ -124,6 +125,26 @@ describe('BackupsSettingsTab (F-8.4)', () => {
     const rows = screen.getAllByTestId('backup-row')
     expect(rows).toHaveLength(1)
     expect(rows[0]).toHaveTextContent('2.5 MB')
+    expect(rows[0]).not.toHaveTextContent('kept')
+  })
+
+  it("marks the switch-over's kept backup and restores it like any other (F-16.31)", async () => {
+    const kept = {
+      file: '/backups/Ridge (01234567)/Ridge before story memory 2026-10-04 110000.zip',
+      name: 'Ridge before story memory 2026-10-04 110000.zip',
+      createdAt: '2026-10-04T11:00:00.000Z',
+      bytes: 1024,
+      kept: true
+    }
+    state = { ...BASE, backups: [ENTRY, kept] }
+    render(<BackupsSettingsTab />)
+    await waitFor(() => expect(screen.getAllByTestId('backup-row')).toHaveLength(2))
+    const rows = screen.getAllByTestId('backup-row')
+    expect(rows[0]).not.toHaveTextContent('kept')
+    expect(rows[1]).toHaveTextContent('(kept: before story memory)')
+    expect(
+      within(rows[1]!).getByRole('button', { name: /^Restore the backup from/ })
+    ).toBeEnabled()
   })
 
   it('forwards the switch, the interval, and the retention', async () => {

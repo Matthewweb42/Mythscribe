@@ -4,6 +4,7 @@ import {
   BACKUP_KEEP_CHOICES,
   BackupInterval,
   BackupKeep,
+  KEPT_BACKUP_LABEL,
   type BackupEntry
 } from '@shared/backups'
 import { describeError } from '@renderer/lib/errors'
@@ -218,7 +219,12 @@ export function BackupsSettingsTab(): React.JSX.Element {
                 data-testid="backup-row"
                 className="flex items-center justify-between gap-3 border-b border-line py-1 last:border-b-0"
               >
-                <span className="min-w-0 truncate">{when(entry.createdAt)}</span>
+                <span className="min-w-0 truncate">
+                  {when(entry.createdAt)}
+                  {entry.kept ? (
+                    <span className="text-fg-muted"> (kept: {KEPT_BACKUP_LABEL})</span>
+                  ) : null}
+                </span>
                 <span className="ml-auto shrink-0 text-xs text-fg-muted">{size(entry.bytes)}</span>
                 <button
                   type="button"

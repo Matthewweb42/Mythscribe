@@ -5,7 +5,11 @@ import { dismissedKey } from '@shared/memory/dismissed'
 import { replaceInlineTags } from '@shared/memory/inlineTagReplace'
 import { normName } from '@shared/memory/names'
 import { STORY_YEAR_MAX, STORY_YEAR_MIN } from '@shared/memory/sceneDetails'
-import type { SwitchoverConsent, SwitchoverCounts } from '@shared/memory/switchover'
+import type {
+  SwitchoverConsent,
+  SwitchoverCounts,
+  SwitchoverRecord
+} from '@shared/memory/switchover'
 import { pageFromLines, pinnedPage } from '@shared/memory/switchoverMapping'
 import { EMPTY_DOC } from '@shared/tiptap'
 import { dropAiPlanLinks } from '../../ai/planLinks'
@@ -31,7 +35,9 @@ import { dismiss } from '../dismissedStore'
 import { assignLabel, createLabel } from '../labelStore'
 import { insertConvertedRecord, sameAs, unshareLoneConvertedNames } from '../recordStore'
 import { setSceneDetails } from '../sceneDetailStore'
+import { checkConverted, takeConvertBefore } from './checkConverted'
 import { buildSwitchoverModel, plannedUploads } from './model'
+import { setSwitchoverRecord } from './record'
 
 /**
  * The switch-over's conversion (F-16.15, plan P1 §6.1 step 4; modelled on F-9.14's
@@ -39,7 +45,7 @@ import { buildSwitchoverModel, plannedUploads } from './model'
  * text asynchronously, outside the transaction; `convertSwitchover` then writes every v2 table in
  * one transaction from the model built inside it, with the author's consent applied, and sets the
  * project's story memory to v2. Nothing of v1 is dropped (the old tables stay until P9), and
- * snapshots are never read or written.
+ * snapshots are never written (F-16.31's check reads them only to prove it).
  */
 
 /** The uploads' pages, by library file id; null when the original could not be read. */
@@ -73,25 +79,34 @@ export async function prepareSwitchover(db: TreeDb, folder: string): Promise<Pre
 export const ALREADY_SWITCHED =
   'This project already uses the new story memory; the switch-over runs once.'
 
+/** What the run knows for the switch-over record (F-16.31): a test copy, and its safety copies. */
+export interface ConvertOptions {
+  record: Pick<SwitchoverRecord, 'trial' | 'backup' | 'datedCopy'>
+}
+
 /**
  * Converts the project in one transaction (see the module comment). In order: inline tags become
  * the consented words in every node's content and notes and every inactive draft; the records are
  * written with their names and pages; the labels with their links; Research (uploads and the
  * Project notes); the typed scene details; the dismissals that still apply; the merges the author
- * ticked (only pairs the dry run offered); the plan links the AI applied come off; then
- * `storyMemory` is v2. VALIDATION when the stored version is v2 already: it runs once.
+ * ticked (only pairs the dry run offered); the plan links the AI applied come off; the result is
+ * checked against what the book read as before (`checkConverted`, F-16.31: any problem throws and
+ * undoes it all); the switch-over record is written (`rebuild: 'waiting'`); then `storyMemory` is
+ * v2. VALIDATION when the stored version is v2 already: it runs once.
  */
 export function convertSwitchover(
   db: TreeDb,
   format: NovelFormat,
   prepared: PreparedSwitchover,
   consent: SwitchoverConsent,
-  now: Date
+  now: Date,
+  options: ConvertOptions
 ): SwitchoverCounts {
   if (getStoryMemory(db).version === 'v2') throw new AppError('VALIDATION', ALREADY_SWITCHED)
   const replacements = new Map(consent.replacements.map((row) => [row.key, row.text]))
   return db.transaction((tx) => {
     const model = buildSwitchoverModel(tx, { replacements })
+    const before = takeConvertBefore(tx, model.tokenText)
     const counts: SwitchoverCounts = {
       records: 0,
       labels: 0,
@@ -265,7 +280,18 @@ export function convertSwitchover(
     // 8. The plan links the AI made come off (design Part 3); hers stay.
     dropAiPlanLinks(tx)
 
-    // 9. The switch.
+    // 9. The conversion checks itself (F-16.31): a problem throws, and nothing above stays.
+    checkConverted(tx, before)
+
+    // 10. The switch-over record, then the switch.
+    setSwitchoverRecord(tx, {
+      switchedAt: now.toISOString(),
+      trial: options.record.trial,
+      backup: options.record.backup,
+      datedCopy: options.record.datedCopy,
+      rebuild: 'waiting',
+      rebuildStartedAt: null
+    })
     setStoryMemory(tx, 'v2', now)
     return counts
   })

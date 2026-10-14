@@ -116,7 +116,7 @@ import { writeSceneRead } from '../memory/reading/sceneReadStore'
 import { activeDraftId } from '../draft/draftStore'
 import { listRecords } from '../memory/recordStore'
 import { enqueueJob, listJobs } from '../jobs/jobStore'
-import { NOT_A_TRIAL } from '../memory/switchover/trial'
+import { getSwitchoverRecord } from '../memory/switchover/record'
 import { createTag } from '../tag/tagStore'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -10567,32 +10567,80 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
   })
 })
 
-describe('the story-memory switch-over channels (F-16.15, decision P1-D12)', () => {
-  const NO_CONSENT = { replacements: [], merges: [] }
+describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () => {
   const safetyCopies = (): string[] =>
     fs.readdirSync(tmp).filter((name) => name.includes(SAFETY_COPY_LABEL))
+  const consentOf = async (): Promise<Input<'switchover:convert'>['consent']> => ({
+    replacements: (await invoke('switchover:consent', undefined)).map((row) => ({
+      key: row.key,
+      text: row.replacement
+    })),
+    merges: []
+  })
+  const currentId = (): string => manager.require().info.id
 
-  it('refuses the dry run, the consent rows and the conversion on a project that is no trial copy', async () => {
-    await invoke('project:create', { name: 'Book', format: 'novel', directory: tmp })
-    await expect(invoke('switchover:plan', undefined)).rejects.toThrow(`VALIDATION: ${NOT_A_TRIAL}`)
-    await expect(invoke('switchover:consent', undefined)).rejects.toThrow(
-      `VALIDATION: ${NOT_A_TRIAL}`
-    )
-    await expect(invoke('switchover:convert', NO_CONSENT)).rejects.toThrow(
-      `VALIDATION: ${NOT_A_TRIAL}`
-    )
-    expect(getStoryMemory(manager.require().connection.orm).version).toBe('v1')
-    expect(safetyCopies()).toEqual([])
+  it('runs in place: the safety step, the dry run, the consent and the conversion, then v2', async () => {
+    const created = await invoke('project:create', {
+      name: 'Book',
+      format: 'novel',
+      directory: tmp
+    })
+    const safety = await invoke('switchover:safety', undefined)
+    if (!safety.ok) throw new Error(safety.message)
+    expect(fs.existsSync(safety.backup)).toBe(true)
+    expect(path.basename(safety.backup)).toMatch(/^Book before story memory .+\.zip$/)
+    expect(path.dirname(safety.datedCopy)).toBe(tmp)
+    expect(safetyCopies()).toEqual([path.basename(safety.datedCopy)])
+    // A second call (Back to the intro and on again) makes nothing new.
+    expect(await invoke('switchover:safety', undefined)).toEqual(safety)
+    expect((await invoke('backups:get', undefined)).backups.filter((b) => b.kept)).toHaveLength(1)
+    expect((await invoke('switchover:plan', undefined)).rebuild.scenes).toBeGreaterThanOrEqual(0)
+    const outcome = await invoke('switchover:convert', {
+      consent: await consentOf(),
+      projectId: currentId()
+    })
+    expect(outcome).toMatchObject({
+      ok: true,
+      folder: created?.path,
+      trial: false,
+      backup: safety.backup,
+      datedCopy: safety.datedCopy
+    })
+    // Main closed the project: the renderer opens it again, now on v2, with the record.
+    expect(manager.current()).toBeNull()
+    expect((await invoke('project:open', { path: created?.path ?? '' }))?.storyMemory).toBe('v2')
+    expect(getSwitchoverRecord(manager.require().connection.orm)).toMatchObject({
+      trial: false,
+      backup: safety.backup,
+      datedCopy: safety.datedCopy,
+      rebuild: 'waiting'
+    })
+    // v1 channels in a v2 project: refused before the handlers run.
+    await expect(invoke('switchover:safety', undefined)).rejects.toThrow(/^VALIDATION: /)
+    await expect(
+      invoke('switchover:convert', {
+        consent: { replacements: [], merges: [] },
+        projectId: currentId()
+      })
+    ).rejects.toThrow(/^VALIDATION: /)
+    expect(safetyCopies()).toHaveLength(1)
   })
 
-  it('converts nothing when the backup fails', async () => {
+  it('answers a failed step when the backup cannot be made, and changes nothing', async () => {
     await invoke('project:create', { name: 'Book', format: 'novel', directory: tmp })
-    await invoke('switchover:trialCopy', undefined)
     const backupNow = vi.spyOn(BackupService.prototype, 'backupNow').mockImplementation(() => {
       throw new Error('The backup folder is not writable')
     })
     try {
-      await expect(invoke('switchover:convert', NO_CONSENT)).rejects.toThrow(/not writable/)
+      const outcome = await invoke('switchover:safety', undefined)
+      expect(outcome).toMatchObject({
+        ok: false,
+        step: 'backup',
+        nextStep: 'Choose another backup folder in Settings › Backups, then try again.'
+      })
+      expect(outcome.ok ? '' : outcome.message).toMatch(
+        /^Could not make the backup: The backup folder is not writable\. Nothing was changed/
+      )
     } finally {
       backupNow.mockRestore()
     }
@@ -10600,9 +10648,25 @@ describe('the story-memory switch-over channels (F-16.15, decision P1-D12)', () 
     expect(getStoryMemory(db).version).toBe('v1')
     expect(listRecords(db)).toEqual([])
     expect(safetyCopies()).toEqual([])
+    // Convert without the safety step: refused, nothing written.
+    await expect(
+      invoke('switchover:convert', { consent: await consentOf(), projectId: currentId() })
+    ).rejects.toThrow('VALIDATION: Make the backup and the dated copy first.')
+    expect(getStoryMemory(db).version).toBe('v1')
   })
 
-  it('makes the backup and the dated copy first, converts the copy, and closes it to open again on v2', async () => {
+  it('refuses a Convert for another project, as the project step', async () => {
+    await invoke('project:create', { name: 'Book', format: 'novel', directory: tmp })
+    const safety = await invoke('switchover:safety', undefined)
+    expect(safety.ok).toBe(true)
+    expect(
+      await invoke('switchover:convert', { consent: await consentOf(), projectId: 'stale' })
+    ).toMatchObject({ ok: false, step: 'project' })
+    expect(getStoryMemory(manager.require().connection.orm).version).toBe('v1')
+    expect(manager.current()).not.toBeNull()
+  })
+
+  it('converts a test copy with no safety step of its own, and leaves the original on v1', async () => {
     const original = await invoke('project:create', {
       name: 'Book',
       format: 'novel',
@@ -10611,16 +10675,23 @@ describe('the story-memory switch-over channels (F-16.15, decision P1-D12)', () 
     const made = await invoke('switchover:trialCopy', undefined)
     expect(made.info.storyMemory).toBe('v1')
     expect(made.folder).not.toBe(original?.path)
-    const result = await invoke('switchover:convert', NO_CONSENT)
-    expect(result.folder).toBe(made.folder)
-    expect(fs.existsSync(result.backup)).toBe(true)
-    expect(fs.existsSync(result.datedCopy)).toBe(true)
-    expect(path.basename(result.datedCopy)).toContain(SAFETY_COPY_LABEL)
-    // Main closed the copy: the renderer opens it again, now on v2.
+    await expect(invoke('switchover:safety', undefined)).rejects.toThrow(
+      /VALIDATION: A test copy needs no backup of its own/
+    )
+    const outcome = await invoke('switchover:convert', {
+      consent: await consentOf(),
+      projectId: made.info.id
+    })
+    expect(outcome).toMatchObject({
+      ok: true,
+      folder: made.folder,
+      trial: true,
+      backup: null,
+      datedCopy: null
+    })
+    expect(safetyCopies()).toEqual([])
     expect(manager.current()).toBeNull()
     expect((await invoke('project:open', { path: made.folder }))?.storyMemory).toBe('v2')
-    // A v1 channel in a v2 project: refused before the handler runs.
-    await expect(invoke('switchover:convert', NO_CONSENT)).rejects.toThrow(/^VALIDATION: /)
     // The original is untouched.
     expect((await invoke('project:open', { path: original?.path ?? '' }))?.storyMemory).toBe('v1')
   })

@@ -3,6 +3,7 @@ import { INLINE_TAG_NODE_TYPE } from '../inlineTags'
 import { TAG_RANGE_MARK } from '../tagRanges'
 import type { TiptapNodeT } from '../tiptap'
 import {
+  containsInlineTag,
   inlineTagSamples,
   inlineTagTokens,
   replaceInlineTags,
@@ -84,5 +85,15 @@ describe('replaceInlineTags (F-16.15)', () => {
 
   it('writes names as words', () => {
     expect(tagNameAsWords('mara--vell')).toBe('mara vell')
+  })
+})
+
+describe('containsInlineTag (F-16.31)', () => {
+  it('finds a token at any depth, well formed or not, and nothing in plain prose', () => {
+    expect(containsInlineTag(doc(paragraph(text('Mara walked.'))))).toBe(false)
+    expect(containsInlineTag(doc(paragraph(text('With '), token('t1', 'mara'))))).toBe(true)
+    const broken: TiptapNodeT = { type: INLINE_TAG_NODE_TYPE }
+    expect(containsInlineTag(doc({ type: 'blockquote', content: [paragraph(broken)] }))).toBe(true)
+    expect(containsInlineTag(replaceInlineTags(doc(paragraph(broken)), new Map()).doc)).toBe(false)
   })
 })

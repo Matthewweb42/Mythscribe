@@ -7,6 +7,10 @@ import { z } from 'zod'
  *
  * A backup is `<folder>/<project> (<id8>)/<project> YYYY-MM-DD HHmmss.zip` in local time. Only
  * files that match that name are ever listed or pruned, so nothing else in the folder is touched.
+ *
+ * A **kept** backup (F-16.31, decision SW-D3) is the one the story-memory switch-over makes just
+ * before it converts: `<project> before story memory YYYY-MM-DD HHmmss.zip`. It is listed and
+ * restored like any other, but retention never deletes it and it does not count toward "keep N".
  */
 
 /** How often a changed project is backed up while it is open, in minutes. */
@@ -57,7 +61,9 @@ export const BackupEntry = z.object({
   name: z.string(),
   /** When it was made (from the file name, local time), as ISO. */
   createdAt: z.string(),
-  bytes: z.number().int().nonnegative()
+  bytes: z.number().int().nonnegative(),
+  /** A kept backup (`isKeptBackupName`): retention never deletes it (F-16.31). */
+  kept: z.boolean()
 })
 export type BackupEntry = z.infer<typeof BackupEntry>
 
@@ -92,6 +98,24 @@ export function backupStamp(date: Date): string {
 /** `<name> YYYY-MM-DD HHmmss.zip` in local time; `safeName` is already a valid file name. */
 export function backupFileName(safeName: string, date: Date): string {
   return `${safeName} ${backupStamp(date)}.zip`
+}
+
+/** The words a kept backup carries between the project's name and the date (F-16.31). */
+export const KEPT_BACKUP_LABEL = 'before story memory'
+
+/** `<name> before story memory YYYY-MM-DD HHmmss.zip`: the switch-over's kept backup (F-16.31). */
+export function keptBackupFileName(safeName: string, date: Date): string {
+  return backupFileName(`${safeName} ${KEPT_BACKUP_LABEL}`, date)
+}
+
+const KEPT_NAME = new RegExp(` ${KEPT_BACKUP_LABEL} \\d{4}-\\d{2}-\\d{2} \\d{6}\\.zip$`)
+
+/**
+ * Whether a backup file is a kept one. A project whose own name ends in the label reads as kept
+ * too: retention then keeps a file it could have deleted, never the other way round.
+ */
+export function isKeptBackupName(name: string): boolean {
+  return parseBackupFileName(name) !== null && KEPT_NAME.test(name)
 }
 
 const BACKUP_NAME = /^.+ (\d{4})-(\d{2})-(\d{2}) (\d{2})(\d{2})(\d{2})\.zip$/
@@ -152,7 +176,13 @@ export function restoredFolderName(safeName: string, date: Date): string {
   return `${safeName} (restored ${day} ${pad(date.getHours())}${pad(date.getMinutes())}).mythscribe`
 }
 
-/** The backups past the newest `keep`, given newest first: the ones retention deletes. */
-export function backupsToPrune<T>(entries: readonly T[], keep: number): T[] {
-  return entries.slice(Math.max(0, keep))
+/**
+ * The backups past the newest `keep`, given newest first: the ones retention deletes. Kept
+ * backups are never among them and do not count toward `keep` (F-16.31).
+ */
+export function backupsToPrune<T extends { kept: boolean }>(
+  entries: readonly T[],
+  keep: number
+): T[] {
+  return entries.filter((entry) => !entry.kept).slice(Math.max(0, keep))
 }

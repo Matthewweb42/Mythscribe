@@ -3,6 +3,7 @@ import path from 'node:path'
 import {
   backupFileName,
   backupProjectName,
+  keptBackupFileName,
   restoredFolderName,
   type BackupEntry,
   type BackupSettings,
@@ -143,10 +144,14 @@ export class BackupService {
     this.emit()
   }
 
-  /** Backs the open project up now, changed or not. Throws with the cause. */
-  backupNow(): BackupState {
-    this.backup(this.projects.require())
-    return this.state()
+  /**
+   * Backs the open project up now, changed or not, and answers the zip it wrote with the state.
+   * Throws with the cause. `kept` (F-16.31, the switch-over) writes a kept backup, which
+   * retention never deletes (`keptBackupFileName`).
+   */
+  backupNow(options: { kept?: boolean } = {}): { state: BackupState; file: string } {
+    const file = this.backup(this.projects.require(), options.kept === true)
+    return { state: this.state(), file }
   }
 
   /** `file` if it is one of the open project's backups; NOT_FOUND otherwise. */
@@ -225,15 +230,17 @@ export class BackupService {
     }
   }
 
-  private backup(session: ProjectSession): void {
+  private backup(session: ProjectSession, kept = false): string {
     const dir = this.dirFor(session)
     const now = this.now()
-    const file = path.join(dir, backupFileName(sanitizeName(session.info.name), now))
+    const name = sanitizeName(session.info.name)
+    const file = path.join(dir, kept ? keptBackupFileName(name, now) : backupFileName(name, now))
     createBackupArchive(session, file, this.folder(), now)
     pruneBackups(dir, this.settings().keep)
     if (this.tracked?.session === session) this.tracked.baseline = changesOf(session)
     this.lastError = null
     this.emit()
+    return file
   }
 
   /** A scheduled or on-close backup: only when needed, and a failure is recorded, not thrown. */

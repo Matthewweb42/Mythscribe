@@ -108,9 +108,18 @@ export function estimateRebuild(
   }
 }
 
-/** The dry run (`switchover:plan`): writes nothing. */
-export function planSwitchover(db: TreeDb, context: RebuildContext): SwitchoverPlan {
+/**
+ * The dry run (`switchover:plan`): writes nothing. The rebuild is priced as *Rebuild memory* will
+ * price it once converted (F-16.31, decision SW-D10): `sweepCalls`, given when the Contradiction
+ * check is on, adds the contradiction sweep, as `rebuildEstimate` does.
+ */
+export function planSwitchover(
+  db: TreeDb,
+  context: RebuildContext,
+  sweepCalls?: (scenes: number) => number
+): SwitchoverPlan {
   const model = buildSwitchoverModel(db)
+  const scenes = model.rebuildScenes
   return {
     kept: model.kept,
     converted: model.converted,
@@ -121,7 +130,7 @@ export function planSwitchover(db: TreeDb, context: RebuildContext): SwitchoverP
       .map((record) => ({ name: record.name, lines: record.filedByAi })),
     notes: model.notes,
     inlineTags: model.inlineTags.length,
-    rebuild: estimateRebuild(model.rebuildScenes, context)
+    rebuild: estimateRebuild(scenes, context, sweepCalls?.(scenes.length) ?? 0)
   }
 }
 

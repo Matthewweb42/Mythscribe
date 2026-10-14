@@ -184,6 +184,26 @@ describe('listBackups / pruneBackups / projectBackupDir (F-8.4)', () => {
     expect(listBackups(path.join(tmp, 'missing'))).toEqual([])
   })
 
+  it('marks a kept backup, never prunes it, and keeps it out of the count (F-16.31)', () => {
+    const dir = path.join(tmp, 'kept')
+    fs.mkdirSync(dir)
+    const kept = 'Ridge before story memory 2026-10-01 093000.zip'
+    fs.writeFileSync(path.join(dir, kept), kept)
+    const rolling: string[] = []
+    for (let day = 1; day <= 12; day++) {
+      const name = `Ridge 2026-10-${String(day).padStart(2, '0')} 120000.zip`
+      rolling.push(name)
+      fs.writeFileSync(path.join(dir, name), name)
+    }
+    const listed = listBackups(dir)
+    expect(listed.filter((b) => b.kept).map((b) => b.name)).toEqual([kept])
+    expect(listed.filter((b) => !b.kept)).toHaveLength(12)
+    expect(pruneBackups(dir, 5).map((b) => b.name)).toEqual(rolling.slice(0, 7).reverse())
+    const after = listBackups(dir)
+    expect(after.map((b) => b.name)).toEqual([...rolling.slice(7).reverse(), kept])
+    expect(after.filter((b) => !b.kept)).toHaveLength(5)
+  })
+
   it('keeps a renamed project in the folder keyed by its id', () => {
     const root = path.join(tmp, 'backups')
     expect(projectBackupDir(root, 'Ridge', '0123456789')).toBe(path.join(root, 'Ridge (01234567)'))

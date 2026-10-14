@@ -63,6 +63,8 @@ const PLAN: SwitchoverPlan = {
 let calls: { channel: Channel; input: unknown }[]
 /** What `project:open` does; a test makes it fail. */
 let reopen: () => ProjectInfo
+/** Whether `switchover:convert` answers a failed step. */
+let convertFails: boolean
 
 beforeEach(() => {
   resetSwitchoverStore()
@@ -70,6 +72,7 @@ beforeEach(() => {
   useDialogStore.setState({ modals: [], toasts: [] })
   useProjectStore.setState({ current: null, busy: false })
   calls = []
+  convertFails = false
   reopen = () => ({ ...INFO, storyMemory: 'v2' })
   const client: IpcClient = {
     async invoke<C extends Channel>(channel: C, input: Input<C>): Promise<Output<C>> {
@@ -84,10 +87,21 @@ beforeEach(() => {
             { key: 't-1', tag: '#mara', count: 2, sample: 'Then #mara left.', replacement: 'mara' }
           ] as Output<C>
         case 'switchover:convert':
+          if (convertFails) {
+            return {
+              ok: false,
+              step: 'convert',
+              message:
+                'The conversion stopped and undid everything: disk full. Nothing was changed: this project still uses the old story memory.',
+              nextStep: 'Try again. If it stops again, please send this message to support.'
+            } as Output<C>
+          }
           return {
+            ok: true,
             folder: INFO.path,
-            backup: '/backups/Book.zip',
-            datedCopy: '/tmp/Book (before story memory 2026-10-12 0900).mythscribe',
+            trial: true,
+            backup: null,
+            datedCopy: null,
             counts: {
               records: 2,
               labels: 0,
@@ -150,9 +164,12 @@ describe('SwitchoverDialog (F-16.15)', () => {
     await screen.findByRole('dialog', { name: 'Switched over' })
     const convert = calls.find((call) => call.channel === 'switchover:convert')
     expect(convert?.input).toEqual({
-      replacements: [{ key: 't-1', text: 'Mara' }],
-      merges: [{ keep: 'entity:1', merge: 'tag:2' }]
-    } satisfies SwitchoverConsent)
+      consent: {
+        replacements: [{ key: 't-1', text: 'Mara' }],
+        merges: [{ keep: 'entity:1', merge: 'tag:2' }]
+      } satisfies SwitchoverConsent,
+      projectId: 'copy'
+    })
     expect(calls).toContainEqual({ channel: 'project:open', input: { path: INFO.path } })
     await waitFor(() => expect(useProjectStore.getState().current?.storyMemory).toBe('v2'))
     expect(screen.getByTestId('switchover-done')).toHaveTextContent('2 records')
@@ -177,9 +194,26 @@ describe('SwitchoverDialog (F-16.15)', () => {
     await user.click(screen.getByRole('button', { name: 'Convert' }))
     await screen.findByRole('dialog', { name: 'Switched over' })
     expect(calls.find((call) => call.channel === 'switchover:convert')?.input).toEqual({
-      replacements: [{ key: 't-1', text: 'mara' }],
-      merges: []
+      consent: { replacements: [{ key: 't-1', text: 'mara' }], merges: [] },
+      projectId: 'copy'
     })
+  })
+
+  it('shows a failed step with its next step and stays on the consent screen (F-16.31)', async () => {
+    const user = userEvent.setup()
+    convertFails = true
+    render(<SwitchoverDialog />)
+    await useSwitchoverStore.getState().start()
+    await user.click(await screen.findByRole('button', { name: 'Next' }))
+    await user.click(await screen.findByRole('button', { name: 'Convert' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The conversion stopped and undid everything: disk full. Nothing was changed: this project still uses the old story memory. Next: Try again.'
+    )
+    expect(useSwitchoverStore.getState().phase).toBe('consent')
+    expect(screen.getByRole('button', { name: 'Convert' })).toBeEnabled()
+    // Nothing converted, so nothing reopens.
+    const order = calls.map((call) => call.channel)
+    expect(order.slice(order.indexOf('switchover:convert'))).not.toContain('project:open')
   })
 
   it('settles the open project before the copy, and writes pending saves before converting', async () => {

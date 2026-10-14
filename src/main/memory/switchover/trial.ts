@@ -17,11 +17,11 @@ import { datedCopyStamp, saveDatedCopy } from '../../project/datedCopy'
 import type { TreeDb } from '../../tree/treeStore'
 
 /**
- * Copies only in P1 (F-16.15, decision P1-D12): the switch-over runs on a duplicate made by
- * Help › Try the story-memory switch-over on a copy…, which unpackaged builds show. The duplicate
- * carries the `switchoverTrial` row and a project id and name of its own (its backups never mix
- * with the original's); the `switchover:*` channels refuse any project without the row unless the
- * in-place run of F-16.31 passes `allowInPlace`.
+ * Test copies and the safety copy (F-16.15, decision P1-D12; F-16.31). A test copy (*Try it on a
+ * copy first*) is a duplicate beside the project that carries the `switchoverTrial` row and a
+ * project id and name of its own (its backups never mix with the original's); the switch-over runs
+ * on it as on the project itself, minus the safety step (`run.ts`, decision SW-D4). The safety
+ * copy is the dated copy the real run makes before its dry run.
  */
 
 /** The project's trial marker, or null for a real project (or an unreadable row). */
@@ -34,15 +34,6 @@ export function switchoverTrialOf(db: TreeDb): SwitchoverTrial | null {
   } catch {
     return null
   }
-}
-
-export const NOT_A_TRIAL =
-  'The story-memory switch-over runs only on a test copy in this build: use Help › Try the story-memory switch-over on a copy….'
-
-/** VALIDATION unless the project is a trial copy or the caller is the in-place run (F-16.31). */
-export function requireSwitchoverTarget(db: TreeDb, options: { allowInPlace: boolean }): void {
-  if (options.allowInPlace) return
-  if (switchoverTrialOf(db) === null) throw new AppError('VALIDATION', NOT_A_TRIAL)
 }
 
 /** What a trial copy is made from: the open project's folder, its connection, and its name. */
@@ -73,8 +64,9 @@ function snapshotCopy(
 }
 
 /**
- * Step 1's dated copy (F-16.15, decision P1-D13): `<Folder> (before story memory YYYY-MM-DD
- * HHmm)` beside the project, wherever it lives, made just before the conversion writes.
+ * The safety step's dated copy (F-16.15, decision P1-D13; F-16.31): `<Folder> (before story
+ * memory YYYY-MM-DD HHmm)` beside the project, wherever it lives (in Google Drive for a Drive
+ * project), made before the dry run.
  */
 export function saveSafetyCopy(source: Pick<TrialSource, 'folder' | 'sqlite'>, now: Date): string {
   return snapshotCopy(
