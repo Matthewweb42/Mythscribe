@@ -720,11 +720,21 @@ export function invariants(
   })
 }
 
-/** Nothing from the scenes that are never read: the Idea scene, the cut scene, the inactive draft. */
+/**
+ * Nothing from the scenes that are never read: the Idea scene, the cut scene, the inactive draft.
+ * A claim in the active draft counts as the inactive draft's only when its quote stands in h10's
+ * text and nowhere in a readable scene's: h09 and h10 share sentences ("Lise came back to
+ * Thornmere"), so the live run of 2026-10-14 counted two of h09's own facts as strays.
+ */
 export function neverRead(book: TestBookProject): Claim[] {
   const idea = book.scenes.get('h11')
   const cut = book.scenes.get('h12')
   const earlier = TEST_BOOK.find((scene) => scene.id === 'h10')?.paragraphs ?? []
+  const readable = TEST_BOOK.filter((scene) => scene.source === 'scene').flatMap(
+    (scene) => scene.paragraphs
+  )
+  const standsIn = (paragraphs: readonly string[], quote: string): boolean =>
+    paragraphs.some((paragraph) => normalizeForMatch(paragraph).includes(normalizeForMatch(quote)))
   const all = [
     ...draftClaims(book.db, activeDraftId(book.db)),
     ...draftClaims(book.db, book.inactiveDraftId)
@@ -734,9 +744,7 @@ export function neverRead(book: TestBookProject): Claim[] {
       claim.nodeId === idea ||
       claim.nodeId === cut ||
       claim.draftId === book.inactiveDraftId ||
-      earlier.some((paragraph) =>
-        normalizeForMatch(paragraph).includes(normalizeForMatch(claim.quote))
-      )
+      (standsIn(earlier, claim.quote) && !standsIn(readable, claim.quote))
   )
 }
 

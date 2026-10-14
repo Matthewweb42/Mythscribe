@@ -53,6 +53,8 @@ export interface PlantedMeasures {
   facts: number
   /** Claims from the scenes never read (the Idea scene, the cut scene, the inactive draft). */
   strays: number
+  /** Those claims, each as a line to read (scene, record, slot, value, quote). */
+  strayLines: string[]
   /** Negatives the labels forbid, stored live. */
   falseAlarms: string[]
   /** Readings cut off at their cap (finish_reason length), and readings. */
@@ -98,6 +100,7 @@ export function plantedMeasures(book: TestBookProject): PlantedMeasures {
         `${sceneOf(book, claim.nodeId)} ¶${claim.para} ${nameOfRecord.get(claim.recordId ?? '') ?? '?'} ` +
         `${claim.slot} “${claim.value}” (${claim.proof}, ${claim.voice}, ${claim.mode}) ← “${claim.quote}”`
     )
+  const strays = neverRead(book)
   // The health gate's measures, from the readings' own yields.
   const readings = [...book.scenes]
     .filter(([id]) => id !== 'h10')
@@ -121,7 +124,12 @@ export function plantedMeasures(book: TestBookProject): PlantedMeasures {
     supportPrecision: share(verifiedMatched.filter(rightAbout).length, verifiedMatched.length),
     unreviewed,
     facts: claims.length,
-    strays: neverRead(book).length,
+    strays: strays.length,
+    strayLines: strays.map(
+      (claim) =>
+        `${sceneOf(book, claim.nodeId) || claim.nodeId} ${nameOfRecord.get(claim.recordId ?? '') ?? '?'} ` +
+        `${claim.slot} “${claim.value}” ← “${claim.quote}”`
+    ),
     falseAlarms: negativesStored(book, claims),
     cut: share(
       readings.filter((reading) => reading.finishReason === 'length').length,
@@ -164,7 +172,7 @@ export function plantedBarLines(measures: PlantedMeasures): string[] {
     `- Literal precision: ${percentOf(measures.literalPrecision)} (bar ${bars.literalPrecision * 100} %)`,
     `- Support precision: ${percentOf(measures.supportPrecision)} (bar ${bars.supportPrecision * 100} %; verified claims on labelled sentences, the label's record)`,
     `- Stored on no labelled sentence (unreviewed, listed below): ${measures.unreviewed.length} of ${measures.facts}`,
-    `- Claims from never-read scenes: ${measures.strays} (bar 0)`,
+    `- Claims from never-read scenes: ${measures.strays} (bar 0)${measures.strayLines.length > 0 ? `: ${measures.strayLines.join('; ')}` : ''}`,
     `- Negatives stored live (false alarms): ${falseAlarms.length} (bar 0)${falseAlarms.length > 0 ? `: ${falseAlarms.join('; ')}` : ''}`
   ]
 }

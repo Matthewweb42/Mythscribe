@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   groupHeadIn,
   nameInSentence,
+  pointsAtOne,
   pronounPerson,
+  quotePointsAtSubject,
   resolveSubject,
   unknownName,
+  valueStated,
+  wishWord,
   type LadderSentence
 } from './ladder'
 import type { LiteralName } from './literal'
@@ -258,5 +262,79 @@ describe('a group named by its head noun (P2b-D8, amended in review)', () => {
     expect(groupHeadIn(['the regiment'], ['They all knew.'])).toBeNull()
     // A head shorter than three letters never counts.
     expect(groupHeadIn(['the Ox'], ['the ox knew'])).toBeNull()
+  })
+})
+
+describe('the code gates of the live run of 2026-10-14', () => {
+  it('keeps a value only when its words stand in the quote', () => {
+    expect(valueStated('location', 'the road', 'Johanna walked quickly')).toBe(false)
+    expect(
+      valueStated(
+        'location',
+        'at the table',
+        'Mr. Harrow said nothing more until the cloth was drawn'
+      )
+    ).toBe(false)
+    expect(
+      valueStated('location', 'Greyhallow', 'Anne Fenwick was at Greyhallow that summer')
+    ).toBe(true)
+    // Articles and prepositions aside; a word sharing four letters or more is the same word.
+    expect(
+      valueStated('traits', 'proud, disagreeable', 'He was the proudest, most disagreeable man')
+    ).toBe(true)
+    expect(valueStated('clothing', 'her muff', 'with her hands in her muff')).toBe(true)
+    expect(valueStated('eyes', 'grey', 'Varrow’s brown eyes followed her')).toBe(false)
+    // An age in digits for words; alive and kinship are never the quote's words.
+    expect(valueStated('age', '22', 'Johanna was two-and-twenty that spring')).toBe(true)
+    expect(valueStated('age', '23', 'Johanna was two-and-twenty that spring')).toBe(false)
+    expect(valueStated('alive', 'dead', 'He died in the night')).toBe(true)
+    expect(valueStated('kinship', 'son of a clergyman', 'My father was a clergyman')).toBe(true)
+  })
+
+  it('points at one person: a he or she, a description, or a they for eyes', () => {
+    expect(pointsAtOne('traits', 'She was a woman of mean understanding')).toBe(true)
+    expect(pointsAtOne('detail:income', 'A single man of large fortune')).toBe(true)
+    expect(pointsAtOne('eyes', 'They were the colour of wet slate')).toBe(true)
+    expect(pointsAtOne('location', 'the sisters walked to Callow Cross')).toBe(false)
+    expect(pointsAtOne('location', 'They walked to Callow Cross')).toBe(false)
+    expect(pointsAtOne('detail:accent', 'How can you be so unfeeling')).toBe(false)
+    expect(pointsAtOne('traits', 'talked of everything except Thornmere')).toBe(false)
+  })
+
+  it('wants the quote itself to name or point at the subject', () => {
+    const fact = { slot: 'traits', names: ['Johanna'], firstPerson: false }
+    expect(quotePointsAtSubject({ ...fact, quote: 'talked of everything except Thornmere' })).toBe(
+      false
+    )
+    expect(quotePointsAtSubject({ ...fact, quote: 'Johanna laughed as easily as ever' })).toBe(true)
+    // Any case: a name opening the sentence.
+    expect(
+      quotePointsAtSubject({
+        ...fact,
+        names: ['the Captain'],
+        quote: "The Captain's father was a merchant"
+      })
+    ).toBe(true)
+    expect(
+      quotePointsAtSubject({ ...fact, quote: "though I am the youngest, I'm the tallest" })
+    ).toBe(false)
+    expect(
+      quotePointsAtSubject({
+        ...fact,
+        firstPerson: true,
+        quote: "though I am the youngest, I'm the tallest"
+      })
+    ).toBe(true)
+  })
+
+  it('finds a want, wish, hope or plan in a state read as now', () => {
+    expect(wishWord('objects', 'now', 'Johanna wanted thread')).toBe('wanted')
+    expect(wishWord('detail:occupation', 'now', 'I hope Mr. Ashby will like it, Lise.')).toBe(
+      'hope'
+    )
+    expect(wishWord('objects', 'hypothetical', 'Johanna wanted thread')).toBeNull()
+    expect(wishWord('traits', 'now', 'she always wished to travel')).toBeNull()
+    // "long" is no longing.
+    expect(wishWord('hair', 'now', "Lottie's hair was long that morning")).toBeNull()
   })
 })

@@ -38,7 +38,10 @@ import {
   ANTECEDENT_SENTENCES,
   groupHeadIn,
   nameInSentence,
+  quotePointsAtSubject,
   resolveSubject,
+  valueStated,
+  wishWord,
   type LadderReject,
   type LadderSentence,
   type SubjectResult
@@ -57,7 +60,7 @@ import {
   type VerifyVerdict
 } from '@shared/memory/readerAnswer'
 import { reconcile, type FreshClaim } from '@shared/memory/reconcile'
-import { OBJECT_SLOTS, parseSlot, slotGroup, type Slot } from '@shared/memory/slots'
+import { OBJECT_SLOTS, readSlot, slotFitsKind, slotGroup, type Slot } from '@shared/memory/slots'
 import { readerMayRead } from '@shared/memory/sources'
 import { spotPicked } from '@shared/memory/spot'
 import {
@@ -68,21 +71,17 @@ import {
   type TopicFacet,
   type TopicKind
 } from '@shared/memory/topics'
-import { cardDue, outputCap, planPages, planWindows, type ReadPiece } from '@shared/memory/windows'
+import { cardDue, planPages, planWindows, type ReadPiece } from '@shared/memory/windows'
 import { activeDraftId, currentDraftId } from '../../draft/draftStore'
+import { STEP_VALUE_MAX_WORDS } from '../../ai/prompts/reader.v2'
 import {
-  READER_V2_PROMPT_VERSION,
-  STEP_VALUE_MAX_WORDS,
-  buildReaderV2Prompt,
-  readerV2PageTokens
-} from '../../ai/prompts/reader.v2'
-import {
-  VERIFY_UNNAMED_MARK,
-  VERIFY_V2_PROMPT_VERSION,
-  buildVerifyV2Prompt,
-  verifyV2Batches,
-  type VerifyV2Item
-} from '../../ai/prompts/verify.v2'
+  READER_V3_PROMPT_VERSION,
+  buildReaderV3Prompt,
+  readerV3OutputCap,
+  readerV3PageTokens
+} from '../../ai/prompts/reader.v3'
+import { VERIFY_UNNAMED_MARK, verifyV2Batches, type VerifyV2Item } from '../../ai/prompts/verify.v2'
+import { VERIFY_V3_PROMPT_VERSION, buildVerifyV3Prompt } from '../../ai/prompts/verify.v3'
 import { cancelInflight } from '../../ai/inflight'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from '../../ai/request'
 import { AiCancelledError, type AiMessage } from '../../ai/providers/types'
@@ -305,7 +304,7 @@ async function send(
     messages: AiMessage[]
     maxTokens: number
     childId: string
-    promptVersion: typeof READER_V2_PROMPT_VERSION | typeof VERIFY_V2_PROMPT_VERSION
+    promptVersion: typeof READER_V3_PROMPT_VERSION | typeof VERIFY_V3_PROMPT_VERSION
   }
 ): Promise<AiRequestResult> {
   stopIfCancelled(input.signal)
@@ -870,18 +869,35 @@ function withoutLines(
 }
 
 /**
- * Merges two answers of one piece (a cut-off reply and its retry). Every id of the retry's that
- * is not a listed topic's is renamed (`x1` → `x1'`), in its new secrets and threads and in the
+ * A cut reply without what it gave from paragraph `from` on (facts, names, new secrets and
+ * threads): that paragraph's list may stop midway, and the retry reads it again.
+ */
+function withoutFrom(answer: ReaderAnswer, from: number): ReaderAnswer {
+  return {
+    ...answer,
+    claims: answer.claims.filter((claim) => claim.p < from),
+    names: answer.names
+      .filter((name) => name.p < from)
+      .map((name) => ({ ...name, c: name.c.filter((claim) => claim.p < from) })),
+    topics: answer.topics.filter((topic) => topic.p < from)
+  }
+}
+
+/**
+ * Merges two answers of one piece (a cut-off reply and a retry). Every id of the retry's that
+ * is not a listed topic's is renamed (`x1` → `x1'`, `x1''` for a second retry), in its new
+ * secrets and threads and in the
  * facts that use them, so the two replies' own ids never collide (a retry's line pointing at an id
  * it never gave stays unresolved, never the first reply's).
  */
 function mergeAnswers(
   a: ReaderAnswer,
   b: ReaderAnswer,
-  listed: (id: string) => boolean
+  listed: (id: string) => boolean,
+  suffix = "'"
 ): ReaderAnswer {
   const renamed = (id: string | null): string | null =>
-    id !== null && !listed(id) ? `${id.trim()}'` : id
+    id !== null && !listed(id) ? `${id.trim()}${suffix}` : id
   return {
     claims: [
       ...a.claims,
@@ -1064,7 +1080,7 @@ export async function runReading(
   // 2. The plan. A topics roster past its share makes the pages smaller, so every request fits
   // its input cap (P2b-D10, amended in review).
   const roster = readerRoster(db)
-  const pageTokens = readerV2PageTokens(roster.topicLines)
+  const pageTokens = readerV3PageTokens(roster.topicLines)
   const windowParas = backfill ? backfillParas : decision.read === 'window' ? decision.paras : []
   const pieces = full
     ? planPages(scene.texts, estimateTokens, pageTokens)
@@ -1180,16 +1196,12 @@ export async function runReading(
         near: nearLines(named, draft, roster),
         anchored,
         cardDue: withCard,
-        maxTokens: outputCap({
-          purpose: full ? 'full' : 'window',
-          proseTokens: piece.tokens,
-          cardDue: withCard
-        })
+        maxTokens: readerV3OutputCap({ proseTokens: piece.tokens, cardDue: withCard })
       }
       const ask = async (
         parts: ReadPiece['paragraphs']
       ): Promise<{ answer: ReaderAnswer | null; cut: boolean }> => {
-        const prompt = buildReaderV2Prompt({
+        const prompt = buildReaderV3Prompt({
           ...base,
           paragraphs: parts.map((part) => ({ p: part.p, text: texts[part.p] ?? '' }))
         })
@@ -1201,43 +1213,60 @@ export async function runReading(
           messages: prompt.messages,
           maxTokens: prompt.maxTokens,
           childId: `${input.requestId}:r${requests}`,
-          promptVersion: READER_V2_PROMPT_VERSION
+          promptVersion: READER_V3_PROMPT_VERSION
         })
         return { answer: parseReaderAnswer(result.text), cut: result.finishReason === 'length' }
       }
       const first = await ask(piece.paragraphs)
       let answer = first.answer
+      /** Retry replies merged into this piece's answer (each renames its own ids apart). */
+      let merges = 0
       if (first.cut) {
         yields.cut += 1
         cutPieces.add(index)
-        // Only the paragraphs after the last one quoted are read again, once (all of them when
-        // the reply did not keep to paragraph order, so where it stopped says nothing; from the
-        // last new name, secret or thread it gave when it was cut inside that list).
+        // The paragraphs from the last one quoted are read again, once (all of them when the
+        // reply did not keep to paragraph order, so where it stopped says nothing; from the last
+        // new name, secret or thread it gave when it was cut inside that list). The last one
+        // quoted is read again too, its facts from the cut reply dropped, since its list may
+        // stop midway (live run 2026-10-14), unless that would ask the same piece again.
         const last = retryAfter(first.answer, isListed)
-        const rest = piece.paragraphs.filter((part) => part.p > last)
-        // A knows line or step pointing at a new secret or thread the cut reply never gave is
-        // left to the retry when the retry reads its paragraph again.
+        const fromLast = piece.paragraphs.filter((part) => part.p >= last)
+        const again = last >= 0 && fromLast.length < piece.paragraphs.length
+        const rest = again ? fromLast : piece.paragraphs.filter((part) => part.p > last)
+        const retried = (p: number): boolean => (again ? p >= last : p > last)
         if (answer !== null && rest.length > 0) {
-          answer = withoutLines(answer, danglingTopicIds(answer, isListed), (p) => p > last)
+          if (again) answer = withoutFrom(answer, last)
+          // A knows line or step pointing at a new secret or thread the cut reply never gave is
+          // left to the retry when the retry reads its paragraph again.
+          answer = withoutLines(answer, danglingTopicIds(answer, isListed), retried)
         }
-        if (rest.length > 0) {
-          const again = await ask(rest)
-          if (again.cut) yields.cut += 1
-          if (again.answer === null) {
+        // The rest is read in two halves, so each has the whole cap (live run 2026-10-14: a page
+        // cut once is mostly cut again when asked whole).
+        const half = Math.ceil(rest.length / 2)
+        const halves = rest.length >= 2 ? [rest.slice(0, half), rest.slice(half)] : [rest]
+        for (const parts of halves) {
+          if (parts.length === 0) continue
+          const retry = await ask(parts)
+          if (retry.cut) yields.cut += 1
+          if (retry.answer === null) {
             // A retry that does not parse reads nothing: its paragraphs stay unread.
-            for (const part of rest) unread.add(part.p)
-          } else {
-            if (again.cut) {
-              const reached = reachedOf(again.answer)
-              for (const part of rest) if (part.p > reached) unread.add(part.p)
-            }
-            // The card comes last in a reply: one only the retry gave saw only its paragraphs.
-            if ((answer?.card ?? null) === null && again.answer.card !== null) {
-              const seen = new Set(rest.map((part) => part.p))
-              for (const part of piece.paragraphs) if (!seen.has(part.p)) unseenByCard.add(part.p)
-            }
-            answer = answer === null ? again.answer : mergeAnswers(answer, again.answer, isListed)
+            for (const part of parts) unread.add(part.p)
+            continue
           }
+          if (retry.cut) {
+            const reached = reachedOf(retry.answer)
+            for (const part of parts) if (part.p > reached) unread.add(part.p)
+          }
+          // The card comes last in a reply: one only a retry gave saw only its paragraphs.
+          if ((answer?.card ?? null) === null && retry.answer.card !== null) {
+            const seen = new Set(parts.map((part) => part.p))
+            for (const part of piece.paragraphs) if (!seen.has(part.p)) unseenByCard.add(part.p)
+          }
+          merges += 1
+          answer =
+            answer === null
+              ? retry.answer
+              : mergeAnswers(answer, retry.answer, isListed, "'".repeat(merges))
         }
       }
       if (answer === null) {
@@ -1447,7 +1476,7 @@ export async function runReading(
         name: 'name' in about ? about.name.text : 'owners' in about ? about.text : null
       }
       const parsed =
-        line.kind === 'fact' ? parseSlot(claim.s) : line.kind === 'knows' ? 'knows' : 'thread'
+        line.kind === 'fact' ? readSlot(claim.s) : line.kind === 'knows' ? 'knows' : 'thread'
       // A fact never takes the knows or thread slot: those come as knows lines and steps.
       if (
         parsed === null ||
@@ -1568,6 +1597,35 @@ export async function runReading(
             : sentence.names
       }
       if (item.subject.kind === 'none') return refuse('subject', claim, who)
+      if (line.kind === 'fact') {
+        // The code gates of the live run of 2026-10-14, before literal proof and the checker: a
+        // place holds no person's slot, the value is the quote's own words, a fact read as now
+        // is not a wish, and the quote itself names or points at its subject as one person
+        // (never "the sisters", never only "you", never a sentence whose name the quote left out).
+        if (item.recordId !== null && !slotFitsKind(slot, scene.kindOf(item.recordId))) {
+          return refuse('kind', claim, who)
+        }
+        if (!valueStated(slot, item.value, claim.q)) return refuse('value', claim, who)
+        if (wishWord(slot, claim.mode, claim.q) !== null) return refuse('wish', claim, who)
+        const subject = item.subject
+        const calledBy =
+          subject.kind === 'newName' || subject.kind === 'shared'
+            ? [subject.text]
+            : quote.flatMap((sentence) =>
+                sentence.names
+                  .filter((name) => name.recordId === item.recordId)
+                  .map((name) => sentence.text.slice(name.start, name.end))
+              )
+        const pointed = quotePointsAtSubject({
+          slot,
+          quote: claim.q,
+          names: calledBy,
+          // The subject's own words: "I" is them, whether the sentence names them or not.
+          firstPerson:
+            subject.kind === 'firstPerson' || (speakerId !== null && speakerId === item.recordId)
+        })
+        if (!pointed) return refuse('subject', claim, who)
+      }
       const single = quote.length === 1 ? quote[0] : undefined
       const span = scene.spans[claim.p]?.[location.sentences[0] ?? -1]
       // Knows lines and steps never take literal proof (P2b): the checker confirms them.
@@ -2027,13 +2085,13 @@ export async function runReading(
     /** Sends one batch and keeps its verdicts; true when the reply was cut off at its cap. */
     const runBatch = async (batch: readonly (Check & { at: number })[]): Promise<boolean> => {
       batchNo += 1
-      const prompt = buildVerifyV2Prompt({ items: batch })
+      const prompt = buildVerifyV3Prompt({ items: batch })
       const result = await send(deps, input, spend, inFlight, {
         feature: 'verify',
         messages: prompt.messages,
         maxTokens: prompt.maxTokens,
         childId: `${input.requestId}:v${batchNo}`,
-        promptVersion: VERIFY_V2_PROMPT_VERSION
+        promptVersion: VERIFY_V3_PROMPT_VERSION
       })
       const answered = parseVerifyAnswer(result.text)
       for (const [i, entry] of batch.entries()) {
@@ -2527,8 +2585,8 @@ export async function runReading(
           purpose,
           pages: requests,
           paras: ranges([...readParas]),
-          promptVersion: READER_V2_PROMPT_VERSION,
-          verifyVersion: spend.verifySent ? VERIFY_V2_PROMPT_VERSION : null,
+          promptVersion: READER_V3_PROMPT_VERSION,
+          verifyVersion: spend.verifySent ? VERIFY_V3_PROMPT_VERSION : null,
           model: spend.model,
           tokensIn: spend.tokensIn,
           tokensOut: spend.tokensOut,

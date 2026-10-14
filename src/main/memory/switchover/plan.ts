@@ -1,4 +1,9 @@
-import { PLANNED_COST_NOTES, SHIPPED_PLAN_ROWS, type PlannedCostNote } from '@shared/aiCostNotes'
+import {
+  PLANNED_COST_NOTES,
+  READING_V3_ROWS,
+  SHIPPED_PLAN_ROWS,
+  type PlannedCostNote
+} from '@shared/aiCostNotes'
 import type { AiSource } from '@shared/aiSettings'
 import type { PricingResult } from '@shared/cloudApi'
 import { CONVERSION_SECONDS_PER_SCENE } from '@shared/knowledge'
@@ -8,6 +13,7 @@ import type {
   RebuildEstimate,
   SwitchoverPlan
 } from '@shared/memory/switchover'
+import { READER_V3_PAGE_TOKENS } from '../../ai/prompts/reader.v3'
 import { estimateCost } from '../../knowledge/conversion'
 import type { TreeDb } from '../../tree/treeStore'
 import { buildSwitchoverModel } from './model'
@@ -15,8 +21,8 @@ import { buildSwitchoverModel } from './model'
 /**
  * The switch-over's dry run (F-16.15, plan P1 §6.1 step 2) and consent rows (step 3). Both read
  * only: the model (`buildSwitchoverModel`) is reported by name, and the rebuild that follows the
- * switch (P2a's *Rebuild memory*) is priced from the shipped `reader.v2` and `verify.v2` rows over
- * this book's own scene sizes, on the models the author has set up.
+ * switch (P2a's *Rebuild memory*) is priced from the `reader.v3` and `verify.v3` rows (2026-10-14)
+ * over this book's own scene sizes, on the models the author has set up.
  */
 
 /** Where the rebuild's requests would go and at what price. */
@@ -31,23 +37,26 @@ export interface RebuildContext {
 
 /**
  * The planned row with this id, planned or shipped (F-16.17 moved the reader and verify rows to
- * `SHIPPED_PLAN_ROWS`); `planSwitchover.test.ts` fails when one of them goes.
+ * `SHIPPED_PLAN_ROWS`; their v3 sizes are `READING_V3_ROWS`); `planSwitchover.test.ts` fails when
+ * one of them goes.
  */
 export function plannedRow(id: string): PlannedCostNote {
-  const row = [...PLANNED_COST_NOTES, ...SHIPPED_PLAN_ROWS].find((note) => note.id === id)
+  const row = [...PLANNED_COST_NOTES, ...SHIPPED_PLAN_ROWS, ...READING_V3_ROWS].find(
+    (note) => note.id === id
+  )
   if (row === undefined) throw new Error(`No planned cost row ${id}`)
   return row
 }
 
-/** The prose tokens a first read takes per page (`reader.v2:first`'s `when`: pages of 2,500). */
-export const REBUILD_PAGE_TOKENS = 2_500
+/** The prose tokens a first read takes per page (`reader.v3`'s pages of 400). */
+export const REBUILD_PAGE_TOKENS = READER_V3_PAGE_TOKENS
 /** Spot checks per rebuild (the `verify.v2:pro` and `verify.v2:spot` rows' `when`). */
 export { REBUILD_FAST_CHECKS, REBUILD_STRONG_CHECKS }
 
 /**
- * The rebuild's price and time: each scene read whole once (`reader.v2:first`, one request per
+ * The rebuild's price and time: each scene read whole once (`reader.v3:first`, one request per
  * page of `REBUILD_PAGE_TOKENS` prose tokens, the row's other input on each page) and its claims
- * verified once per page (`verify.v2`), then the spot checks, and (F-16.27, P4 slice 3) the
+ * verified once per page (`verify.v3`), then the spot checks, and (F-16.27, P4 slice 3) the
  * contradiction sweep's `judgeCalls` (`judge.v1`, with the Contradiction check on); priced on the
  * configured fast and strong models (`estimateCost`), minutes from `CONVERSION_SECONDS_PER_SCENE`.
  */
@@ -56,8 +65,8 @@ export function estimateRebuild(
   context: RebuildContext,
   judgeCalls = 0
 ): RebuildEstimate {
-  const reader = plannedRow('reader.v2:first')
-  const verify = plannedRow('verify.v2')
+  const reader = plannedRow('reader.v3:first')
+  const verify = plannedRow('verify.v3')
   const strong = plannedRow('verify.v2:pro')
   const spot = plannedRow('verify.v2:spot')
   const overhead = reader.typicalInTokens - REBUILD_PAGE_TOKENS

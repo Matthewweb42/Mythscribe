@@ -9,7 +9,7 @@ import { notRightLine } from '@shared/memory/reconcile'
 import { slotLabel } from '@shared/memory/slots'
 import { SPOT_STRONG_AROUND } from '@shared/memory/spot'
 import type { CardNotRight } from '@shared/memory/views'
-import { VERIFY_V2_PROMPT_VERSION, buildVerifyV2Prompt } from '../../ai/prompts/verify.v2'
+import { VERIFY_V3_PROMPT_VERSION, buildVerifyV3Prompt } from '../../ai/prompts/verify.v3'
 import { runAiRequest, sha256, type AiRequestDeps } from '../../ai/request'
 import {
   claim as claimTable,
@@ -51,7 +51,7 @@ import { heldCard, hereChips, readingOrder } from './readingFrame'
  *   its stored anchor instead (nothing new can match it, but the row is there to undo). The claim
  *   row is kept beside the tombstone (the settings row `memoryNotRight`), so *Undo* in Dismissed
  *   always brings the line back as it was; the anchors job then re-checks it against the text.
- * - **Not about Mara** (the author picks the record): one `verify.v2` call, the fast tier, with
+ * - **Not about Mara** (the author picks the record): one `verify.v3` call, the fast tier, with
  *   the reading's subject safeguards (`notAboutCheck`: every record named in reach is a candidate,
  *   the picked one marked "not named here" when nothing names it), the quote's sentences ±3.
  *   Supported for the picked record with the line's voice and mode: the line moves to that record
@@ -286,7 +286,7 @@ export function wrongValue(db: TreeDb, claimId: string, now: Date): NotRightOutc
 
 /**
  * *Not right › Not about Mara*: the line re-checked for the record the author picks (one
- * `verify.v2` call). Supported: it moves there; refused: it is dismissed as a wrong value. A line
+ * `verify.v3` call). Supported: it moves there; refused: it is dismissed as a wrong value. A line
  * whose quote is no longer in its scene cannot be checked, and a reply with no verdict for it
  * says nothing: both answer `unchecked`, and the line stays as it is.
  */
@@ -346,7 +346,7 @@ export async function notAbout(
     claim.slot === 'knows' && picked.kind === 'character' && !here.has(input.recordId)
       ? hereCheck(scene, claim, input.recordId, roster)
       : null
-  const prompt = buildVerifyV2Prompt({
+  const prompt = buildVerifyV3Prompt({
     items: onPage === null ? [check.item] : [check.item, onPage]
   })
   const result = await runAiRequest(deps.ai, {
@@ -356,7 +356,7 @@ export async function notAbout(
     maxTokens: prompt.maxTokens,
     json: true,
     contextHash: sha256(JSON.stringify(prompt.messages)),
-    promptVersion: VERIFY_V2_PROMPT_VERSION,
+    promptVersion: VERIFY_V3_PROMPT_VERSION,
     requestId: input.requestId,
     cacheIf: (text) => parseVerifyAnswer(text).size > 0
   })

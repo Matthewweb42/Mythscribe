@@ -176,9 +176,18 @@ export function readerV2PageTokens(topics: readonly string[]): number {
 
 /** The system message: the rules, the record roster, then the topics roster. */
 export function readerV2System(roster: readonly string[], topics: readonly string[]): string {
+  return readerSystem(READER_V2_RULES, roster, topics)
+}
+
+/** A reader version's system message: its rules, the record roster, then the topics roster. */
+export function readerSystem(
+  rules: string,
+  roster: readonly string[],
+  topics: readonly string[]
+): string {
   const listed = topics.length === 0 ? READER_NO_TOPICS : topics.join('\n')
   return (
-    `${READER_V2_RULES}\n\n${READER_ROSTER_HEADING}\n${roster.join('\n')}\n\n` +
+    `${rules}\n\n${READER_ROSTER_HEADING}\n${roster.join('\n')}\n\n` +
     `${READER_TOPICS_HEADING}\n${listed}`
   )
 }
@@ -204,7 +213,19 @@ function userTurn(
 }
 
 export function buildReaderV2Prompt(input: BuildReaderV2PromptInput): BuiltReaderV2Prompt {
-  const system = readerV2System(input.roster, input.topics)
+  return { version: READER_V2_PROMPT_VERSION, ...buildReaderMessages(READER_V2_RULES, input) }
+}
+
+/**
+ * The reader's messages, fit and caps for a set of rules: `reader.v2`'s layout, which `reader.v3`
+ * keeps with its own rules (one system message: the rules, the record roster, the topics roster;
+ * then the tail), so the two differ only in what the rules say.
+ */
+export function buildReaderMessages(
+  rules: string,
+  input: BuildReaderV2PromptInput
+): Omit<BuiltReaderV2Prompt, 'version'> {
+  const system = readerSystem(rules, input.roster, input.topics)
   // P2b-D10: the topics roster never drops a topic; what it runs past its 400 the near lines give.
   const rosterOver = topicsRosterOver(input.topics)
   let near = fitLines(input.near, Math.max(0, READER_V2_NEAR_TOKENS - rosterOver))
@@ -218,7 +239,6 @@ export function buildReaderV2Prompt(input: BuildReaderV2PromptInput): BuiltReade
   while (total() > budget && topicLines.length > 0) topicLines = topicLines.slice(0, -1)
   while (total() > budget && anchored.length > 0) anchored = anchored.slice(0, -1)
   return {
-    version: READER_V2_PROMPT_VERSION,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: userTurn(input, near, topicLines, anchored) }

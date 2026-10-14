@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { sql } from 'drizzle-orm'
-import { PLANNED_COST_NOTES, SHIPPED_PLAN_ROWS } from '@shared/aiCostNotes'
+import { PLANNED_COST_NOTES, READING_V3_ROWS, SHIPPED_PLAN_ROWS } from '@shared/aiCostNotes'
 import type { SwitchoverPlan } from '@shared/memory/switchover'
 import { sweepCalls } from '../findings/findingsService'
 import { rebuildEstimate } from '../reading/backlog'
@@ -178,16 +178,18 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
     expect(plan.rebuild.minutes).toBe(1)
     expect(plan.rebuild.priced).toBe(true)
     expect(plan.rebuild.costUsd).toBeGreaterThan(0)
-    // F-16.17, F-16.22: the reader and verify rows shipped (v2 since P2b); the rebuild prices
-    // from their sizes.
-    const shipped = (id: string) => SHIPPED_PLAN_ROWS.find((note) => note.id === id)
+    // F-16.17, F-16.22: the reader and verify rows shipped (v2 since P2b, v3 since the live run
+    // of 2026-10-14); the rebuild prices from the v3 sizes.
+    const shipped = (id: string) => READING_V3_ROWS.find((note) => note.id === id)
     expect(PLANNED_COST_NOTES.some((note) => note.id.startsWith('reader.'))).toBe(false)
-    const reader = shipped('reader.v2:first')
-    const verify = shipped('verify.v2')
+    expect(SHIPPED_PLAN_ROWS.some((note) => note.id === 'reader.v2:first')).toBe(true)
+    const reader = shipped('reader.v3:first')
+    const verify = shipped('verify.v3')
     if (reader === undefined || verify === undefined) throw new Error('shipped rows are missing')
-    expect(plannedRow('reader.v2:first')).toBe(reader)
+    expect(plannedRow('reader.v3:first')).toBe(reader)
+    expect(REBUILD_PAGE_TOKENS).toBe(400)
     expect(() => plannedRow('nothing.v1')).toThrow('No planned cost row nothing.v1')
-    const one = estimateRebuild([1_000], { ...CONTEXT, source: 'local' })
+    const one = estimateRebuild([REBUILD_PAGE_TOKENS], { ...CONTEXT, source: 'local' })
     expect(one.costUsd).toBe(0)
     expect(one.requests).toBe(2 + REBUILD_FAST_CHECKS + REBUILD_STRONG_CHECKS)
     const two = estimateRebuild([REBUILD_PAGE_TOKENS + 1], { ...CONTEXT, source: 'local' })

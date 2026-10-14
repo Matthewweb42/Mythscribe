@@ -546,6 +546,20 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
         'One name, narration, no marker (and the changed fact: four sisters); a trait goes to the verifier (no cue word).'
     },
     {
+      id: 'johanna-muff',
+      scene: 'h07',
+      p: 1,
+      record: 'johanna',
+      slot: 'clothing',
+      value: 'her muff',
+      quote: 'with her hands in her muff',
+      voice: 'narration',
+      mode: 'now',
+      expect: 'verified',
+      reason:
+        "The sentence names Johanna: what she wears on the walk (added 2026-10-14: the live run stored it, and it is true; the hypothetical's negative is about 'If Mr. Ashby came back tomorrow', not this)."
+    },
+    {
       id: 'varrow-duel',
       scene: 'h07',
       p: 5,
