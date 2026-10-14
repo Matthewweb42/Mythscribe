@@ -179,21 +179,34 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
     expect(plan.rebuild.priced).toBe(true)
     expect(plan.rebuild.costUsd).toBeGreaterThan(0)
     // F-16.17, F-16.22: the reader and verify rows shipped (v2 since P2b, v3 since the live run
-    // of 2026-10-14, v4 since its second run); the rebuild prices from the v4 sizes.
+    // of 2026-10-14, v4 since its second run, reader.v5 and verify.v4 since its third); the
+    // rebuild prices from the v5 sizes, a page checked in a fast and a strong batch.
     const shipped = (id: string) => READING_V3_ROWS.find((note) => note.id === id)
     expect(PLANNED_COST_NOTES.some((note) => note.id.startsWith('reader.'))).toBe(false)
     expect(SHIPPED_PLAN_ROWS.some((note) => note.id === 'reader.v2:first')).toBe(true)
-    const reader = shipped('reader.v4:first')
-    const verify = shipped('verify.v3')
-    if (reader === undefined || verify === undefined) throw new Error('shipped rows are missing')
-    expect(plannedRow('reader.v4:first')).toBe(reader)
+    const reader = shipped('reader.v5:first')
+    const verify = shipped('verify.v4')
+    const verifyStrong = shipped('verify.v4:strong')
+    if (reader === undefined || verify === undefined || verifyStrong === undefined) {
+      throw new Error('shipped rows are missing')
+    }
+    expect(plannedRow('reader.v5:first')).toBe(reader)
+    expect(verifyStrong.tier).toBe('strong')
     expect(REBUILD_PAGE_TOKENS).toBe(400)
     expect(() => plannedRow('nothing.v1')).toThrow('No planned cost row nothing.v1')
     const one = estimateRebuild([REBUILD_PAGE_TOKENS], { ...CONTEXT, source: 'local' })
     expect(one.costUsd).toBe(0)
-    expect(one.requests).toBe(2 + REBUILD_FAST_CHECKS + REBUILD_STRONG_CHECKS)
+    expect(one.requests).toBe(3 + REBUILD_FAST_CHECKS + REBUILD_STRONG_CHECKS)
     const two = estimateRebuild([REBUILD_PAGE_TOKENS + 1], { ...CONTEXT, source: 'local' })
-    expect(two.tokensOut - one.tokensOut).toBe(reader.typicalOutTokens + verify.typicalOutTokens)
+    expect(two.tokensOut - one.tokensOut).toBe(
+      reader.typicalOutTokens + verify.typicalOutTokens + verifyStrong.typicalOutTokens
+    )
+    // Cents per book (plan ReaderPrecision.md): 90 scenes of 800 prose tokens on the defaults.
+    const book = estimateRebuild(
+      Array.from({ length: 90 }, () => 800),
+      CONTEXT
+    )
+    expect(book.costUsd).toBeLessThan(0.5)
     expect(estimateRebuild([], CONTEXT)).toMatchObject({
       scenes: 0,
       requests: 0,

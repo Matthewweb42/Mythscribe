@@ -109,6 +109,8 @@ import { JUDGE_PROMPT_VERSION } from './judge.v1'
 import { READER_V3_PROMPT_VERSION } from './reader.v3'
 import { READER_V4_PROMPT_VERSION } from './reader.v4'
 import { VERIFY_V3_PROMPT_VERSION } from './verify.v3'
+import { READER_V5_PROMPT_VERSION } from './reader.v5'
+import { VERIFY_V4_PROMPT_VERSION } from './verify.v4'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -247,7 +249,11 @@ export const PROMPT_VERSIONS = [
   READER_V3_PROMPT_VERSION,
   VERIFY_V3_PROMPT_VERSION,
   // F-16.17 (second live run of 2026-10-14): the slot list first, the value rules, a 1,000 cap.
-  READER_V4_PROMPT_VERSION
+  READER_V4_PROMPT_VERSION,
+  // F-16.17 (third live run of 2026-10-14, plan ReaderPrecision.md): the field "src" for "voice",
+  // the open-ended slots' value rules; the checker's open-ended rules, sent on the strong tier.
+  READER_V5_PROMPT_VERSION,
+  VERIFY_V4_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -739,7 +745,11 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   [JUDGE_PROMPT_VERSION]: { feature: 'judge', tier: 'fast', output: 'json', since: 'F-16.27' },
   [READER_V3_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
   [VERIFY_V3_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' },
-  [READER_V4_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' }
+  [READER_V4_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
+  [READER_V5_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
+  // The fast batch; the open-ended slots' facts (history, traits, relation, kinship, role) go in
+  // batches of their own on the strong tier (`STRONG_CHECK_SLOTS`, the `verify.v4:strong` row).
+  [VERIFY_V4_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' }
 }
 
 /**

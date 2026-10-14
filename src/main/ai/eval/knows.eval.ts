@@ -31,6 +31,7 @@ import { listTopicQuotes, listTopics } from '../../memory/reading/topicStore'
 import { readingOrder } from '../../memory/reading/readingFrame'
 import { storedAge, storedYears } from '../../memory/reading/timeViews'
 import type { CompletionRequest } from '../providers/types'
+import { VERIFY_SENTINEL } from '../prompts/verify.v1'
 import { listNodes } from '../../tree/treeStore'
 import { TEST_BOOK } from '../../memory/testBook/book'
 import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
@@ -1398,12 +1399,24 @@ describe('the live knows run, end to end against a fake OpenRouter (F-16.22; not
     for (const call of server.calls) {
       expect(call.url).toBe(`${OPENROUTER_BASE_URL}/chat/completions`)
       expect(call.headers.get('authorization')).toBe('Bearer sk-or-fake')
-      expect(call.body).toMatchObject({
-        model: OPENROUTER_DEFAULT_MODELS.fast,
-        reasoning: { enabled: false },
-        usage: { include: true }
-      })
+      expect(call.body).toMatchObject({ reasoning: { enabled: false }, usage: { include: true } })
     }
+    // Everything on V4 Flash but the checker's open-ended facts (plan ReaderPrecision.md: the
+    // strong batch of history, traits, relation, kinship and role), which go to V4 Pro.
+    const strong = server.calls.filter(
+      (call) => call.body.model === OPENROUTER_DEFAULT_MODELS.strong
+    )
+    expect(strong.length).toBeGreaterThan(0)
+    for (const call of strong) {
+      expect(JSON.stringify(call.body.messages)).toContain(VERIFY_SENTINEL)
+    }
+    expect(
+      server.calls.every(
+        (call) =>
+          call.body.model === OPENROUTER_DEFAULT_MODELS.fast ||
+          call.body.model === OPENROUTER_DEFAULT_MODELS.strong
+      )
+    ).toBe(true)
     // The reported cost is what the run counts (0.0001 USD a request at the fake).
     const cost = report.passes.reduce((sum, pass) => sum + pass.costUsd, 0)
     expect(cost).toBeCloseTo(server.calls.length * 0.0001, 6)

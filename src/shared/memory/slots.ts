@@ -167,13 +167,13 @@ export function readSlot(text: string): Slot | null {
 
 /**
  * The slots a place can hold (live planted-error run 2026-10-14: "Thornmere" was given a home):
- * where it lies, its role, traits, history and relations, and the few details a place has. A
- * place never has eyes, an age, clothes, a birthplace or an occupation. Only places are checked:
- * a thing's kind covers the author's own categories (a creature may well have eyes), and a group
- * may have a home or a faith.
+ * its role, traits, history and relations, and the few details a place has. A place never has
+ * eyes, an age, clothes, a birthplace or an occupation, and since the third live run of that day
+ * (plan `ReaderPrecision.md`: "never settled at Thornmere" stored as Thornmere's location) no
+ * location either: the slot says where a person is or goes, and a place named in a sentence is
+ * where someone else is. A group may have a home or a faith.
  */
 const PLACE_SLOTS: ReadonlySet<Slot> = new Set<Slot>([
-  'location',
   'role',
   'traits',
   'history',
@@ -186,13 +186,28 @@ const PLACE_SLOTS: ReadonlySet<Slot> = new Set<Slot>([
 ])
 
 /**
+ * The person slots a thing never holds (plan `ReaderPrecision.md`, decided by Claude, unconfirmed:
+ * "places and things are never the subject of a person slot, location included"). A thing's kind
+ * covers the author's own categories, so a creature keeps eyes, hair, scars, an age and alive; it
+ * never has a location, a role, kin, clothes or objects of its own.
+ */
+const THING_REFUSED: ReadonlySet<Slot> = new Set<Slot>([
+  'location',
+  'role',
+  'kinship',
+  'clothing',
+  'objects'
+])
+
+/**
  * Whether a fact in `slot` can be about a record of `kind` (the ladder's `kind` refusal): a place
- * only in `PLACE_SLOTS`, a secret or thread never (they are topics, read as knows lines and
- * steps), every other kind in any slot.
+ * only in `PLACE_SLOTS`, a thing in no slot of `THING_REFUSED`, a secret or thread never (they are
+ * topics, read as knows lines and steps), every other kind in any slot.
  */
 export function slotFitsKind(slot: Slot, kind: string | undefined): boolean {
   if (kind === 'secret' || kind === 'thread') return false
   if (kind === 'place') return PLACE_SLOTS.has(slot)
+  if (kind === 'thing') return !THING_REFUSED.has(slot)
   return true
 }
 

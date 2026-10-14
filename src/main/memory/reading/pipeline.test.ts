@@ -98,6 +98,8 @@ interface PlannedClaim {
   voice?: string
   sp?: string | null
   mode?: string
+  /** A kinship's or relation's other record, by name. */
+  o?: string
 }
 
 /** A reader answer from planned claims; `r` is a record's name, mapped to the request's roster id. */
@@ -119,7 +121,7 @@ function readerReply(
       voice: claim.voice ?? 'narration',
       sp: claim.sp === undefined || claim.sp === null ? null : (ids.get(claim.sp) ?? claim.sp),
       mode: claim.mode ?? 'now',
-      o: null,
+      o: claim.o === undefined ? null : (ids.get(claim.o) ?? claim.o),
       chg: false
     }))
   return JSON.stringify({ c, n: [], same: [], drop: [], ...extra })
@@ -235,8 +237,8 @@ describe('runReading (F-16.17)', () => {
     expect(reading).toMatchObject({
       purpose: 'first',
       pages: 1,
-      promptVersion: 'reader.v4',
-      verifyVersion: 'verify.v3',
+      promptVersion: 'reader.v5',
+      verifyVersion: 'verify.v4',
       model: 'gpt-5.4-mini',
       tokensIn: 2_000,
       tokensOut: 200,
@@ -513,7 +515,8 @@ describe('runReading (F-16.17)', () => {
         r: 'Tomas',
         s: 'relation',
         v: 'violent against him',
-        q: 'Amongst the most violent against him was Tomas'
+        q: 'Amongst the most violent against him was Tomas',
+        o: 'Mara Vell'
       },
       {
         p: 4,
@@ -588,7 +591,7 @@ describe('runReading (F-16.17)', () => {
     ])
   })
 
-  it('leaves a pronoun more than one woman fits waiting, attached to nobody', async () => {
+  it('refuses a pronoun more than one woman fits before any check, attached to nobody (third live run)', async () => {
     saveDocument(
       db,
       one,
@@ -598,23 +601,111 @@ describe('runReading (F-16.17)', () => {
       )
     )
     scanNamesFor(db, one, NOW)
+    const events: ReadingItemEvent[] = []
+    // A gullible checker would pick Mara (the live run's checker picked Clara): it is never asked.
     const ai = fakeAi((request) => {
-      if (requestKind(request) === 'verify') {
-        return { text: verifyReply(request, () => ({ r: null })) }
-      }
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
       return {
         text: readerReply(request, [
           { p: 1, r: 'Mara Vell', s: 'eyes', v: 'green', q: 'She had green eyes' }
         ])
       }
     })
-    await read(ai)
-    const checks = sentChecks(nth(ai.requests, 1))
-    expect(checks[0]?.who).toHaveLength(2)
-    const [claim] = claimsNow()
-    expect(claim).toMatchObject({ recordId: null, state: 'waiting', proof: 'verified' })
-    expect(claim?.pending).toEqual({ kind: 'subject', candidates: [mara, lise] })
+    await runReading(
+      db,
+      { ai: ai.deps },
+      { nodeId: one, caretPara: null, requestId: 'r-amb', observe: (event) => events.push(event) }
+    )
+    expect(events.map((event) => event.outcome)).toEqual(['ambiguous'])
+    expect(ai.requests.filter((request) => requestKind(request) === 'verify')).toEqual([])
+    expect(claimsNow()).toEqual([])
     expect(invariants()).toEqual([])
+  })
+
+  it('refuses the third live run’s wrong facts in code, before any check (2026-10-14, 21:35)', async () => {
+    saveDocument(
+      db,
+      one,
+      doc(
+        'Mara met Tomas at the Quay. He asked Lise for a dance.',
+        'Ada was sorry. When they were children he had kept a plum in his coat for them.',
+        'Old Tomas had kept the gate at the Quay for forty years.',
+        "Tomas watched his second daughter. Mara's father was a merchant.",
+        'Lise came in. She and her sisters walked on.'
+      )
+    )
+    // A woman by her title: a he never means her.
+    record('Ada Grey', ['Ada', 'Miss Grey'])
+    scanNamesFor(db, one, NOW)
+    const events: ReadingItemEvent[] = []
+    const plan: PlannedClaim[] = [
+      // Someone else did it: Lise was only asked.
+      {
+        p: 0,
+        r: 'Lise',
+        s: 'history',
+        v: 'asked Lise for a dance',
+        q: 'He asked Lise for a dance'
+      },
+      // A he for a woman: the plum is the old man's.
+      {
+        p: 1,
+        r: 'Ada Grey',
+        s: 'history',
+        v: 'he had kept a plum in his coat',
+        q: 'When they were children he had kept a plum in his coat for them'
+      },
+      // A span of time is no age.
+      {
+        p: 2,
+        r: 'Tomas',
+        s: 'age',
+        v: 'forty years',
+        q: 'Old Tomas had kept the gate at the Quay for forty years'
+      },
+      // The relative is not the kinship of the one whose relative it is.
+      { p: 3, r: 'Tomas', s: 'kinship', v: 'second daughter', q: 'his second daughter' },
+      {
+        p: 3,
+        r: 'Mara Vell',
+        s: 'kinship',
+        v: 'father',
+        q: "Mara's father was a merchant"
+      },
+      // A place is no one's location.
+      { p: 2, r: 'the Quay', s: 'location', v: 'the Quay', q: 'kept the gate at the Quay' },
+      // A relation with nobody to relate to, and one that is only people.
+      { p: 4, r: 'Lise', s: 'relation', v: 'sisters', q: 'She and her sisters walked on' },
+      {
+        p: 4,
+        r: 'Lise',
+        s: 'relation',
+        v: 'her sisters',
+        q: 'She and her sisters walked on',
+        o: 'Mara Vell'
+      }
+    ]
+    const ai = fakeAi((request) => {
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      return { text: readerReply(request, plan) }
+    })
+    await runReading(
+      db,
+      { ai: ai.deps },
+      { nodeId: one, caretPara: null, requestId: 'r-4', observe: (event) => events.push(event) }
+    )
+    expect(events.map((event) => [event.p, event.slot, event.outcome])).toEqual([
+      [0, 'history', 'actor'],
+      [1, 'history', 'subject'],
+      [2, 'age', 'valueKind'],
+      [3, 'kinship', 'possessed'],
+      [3, 'kinship', 'possessed'],
+      [2, 'location', 'kind'],
+      [4, 'relation', 'object'],
+      [4, 'relation', 'object']
+    ])
+    expect(ai.requests.filter((request) => requestKind(request) === 'verify')).toEqual([])
+    expect(claimsNow()).toEqual([])
   })
 
   it('pins first person to the speaker of a line of dialogue, and to the typed POV only when the text’s POV agrees', async () => {
@@ -1029,8 +1120,10 @@ describe('runReading: what changes under it, and what it cannot read (F-16.17, r
 })
 
 describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', () => {
+  // Open-ended slots only, so the three go in one batch (on the strong tier since the third live
+  // run of 2026-10-14).
   const TRAITS: PlannedClaim[] = [
-    { p: 1, r: 'Mara Vell', s: 'location', v: 'the quay', q: 'She walked to the quay' },
+    { p: 1, r: 'Mara Vell', s: 'history', v: 'walked to the quay', q: 'She walked to the quay' },
     { p: 1, r: 'Mara Vell', s: 'traits', v: 'grey eyes', q: "Mara's eyes were grey" },
     { p: 2, r: 'Tomas', s: 'traits', v: 'a blue coat', q: 'Tomas wore a blue coat' }
   ]
@@ -1050,9 +1143,10 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
     const checks = ai.requests.filter((request) => requestKind(request) === 'verify')
     expect(checks).toHaveLength(2)
     expect(sentChecks(nth(checks, 1))).toHaveLength(2)
+    expect(checks.every((request) => request.tier === 'strong')).toBe(true)
     expect(claimsNow().map((claim) => [claim.slot, claim.state])).toEqual([
       ['traits', 'live'],
-      ['location', 'live'],
+      ['history', 'live'],
       ['traits', 'live']
     ])
     // Every verdict came on the second ask: a recovered cut, no cut-off of the reading.
@@ -1098,7 +1192,11 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
     expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([['blue coat', 'live']])
     // An edit two paragraphs up (its anchor holds): the window read proposes another value on the
     // same quote and says to drop c1.
-    saveDocument(db, one, doc(SCENE[0] ?? '', "Mara's eyes were green. She walked to the quay.", SCENE[2] ?? ''))
+    saveDocument(
+      db,
+      one,
+      doc(SCENE[0] ?? '', "Mara's eyes were green. She walked to the quay.", SCENE[2] ?? '')
+    )
     const ai = fakeAi((request): FakeAnswer => {
       if (requestKind(request) === 'verify') {
         return { text: verifyReply(request, () => ({ ok: false })) }
@@ -1158,21 +1256,49 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
 })
 
 describe('runReading: who a pronoun may mean (F-16.17, review 2026-10-12)', () => {
-  it('offers every woman named before a man named last, so the checker can say both fit', async () => {
-    const clara = record('Clara Pell', ['Clara'])
+  it('refuses a she whose nearest possible antecedent is someone else, before any check (third live run)', async () => {
+    record('Clara Pell', ['Clara'])
     saveDocument(
       db,
       one,
       doc('Clara and Lise sat by the window. Tomas brought the tea. She had green eyes.')
     )
     scanNamesFor(db, one, NOW)
+    const events: ReadingItemEvent[] = []
+    // No title gives Tomas a gender, so the nearest sentence's Tomas may be "She"; Clara is not
+    // the one the text points to, whatever a checker would pick.
+    const ai = fakeAi((request): FakeAnswer => {
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      return {
+        text: readerReply(request, [
+          { p: 0, r: 'Clara Pell', s: 'eyes', v: 'green', q: 'She had green eyes' }
+        ])
+      }
+    })
+    await runReading(
+      db,
+      { ai: ai.deps },
+      { nodeId: one, caretPara: null, requestId: 'r-she', observe: (event) => events.push(event) }
+    )
+    expect(events.map((event) => event.outcome)).toEqual(['subject'])
+    expect(ai.requests.filter((request) => requestKind(request) === 'verify')).toEqual([])
+    expect(claimsNow()).toEqual([])
+  })
+
+  it('offers the checker every candidate when the one woman in reach is the subject', async () => {
+    const clara = record('Clara Pell', ['Clara', 'Miss Pell'])
+    saveDocument(
+      db,
+      one,
+      doc('Tomas sat by the window. Miss Pell brought the tea. She had green eyes.')
+    )
+    scanNamesFor(db, one, NOW)
     const ai = fakeAi((request): FakeAnswer => {
       if (requestKind(request) === 'verify') {
-        // An honest checker: two women fit "She".
         return {
-          text: verifyReply(request, (check) =>
-            check.names.includes('Clara Pell') && check.names.includes('Lise') ? { r: null } : null
-          )
+          text: verifyReply(request, (check) => ({
+            r: check.who[check.names.indexOf('Clara Pell')] ?? null
+          }))
         }
       }
       return {
@@ -1183,11 +1309,9 @@ describe('runReading: who a pronoun may mean (F-16.17, review 2026-10-12)', () =
     })
     await read(ai)
     const [check] = sentChecks(nth(ai.requests, 1))
-    expect([...(check?.names ?? [])].sort()).toEqual(['Clara Pell', 'Lise', 'Tomas'])
-    expect(check?.unnamed).toEqual([])
+    expect([...(check?.names ?? [])].sort()).toEqual(['Clara Pell', 'Tomas'])
     const [claim] = claimsNow()
-    expect(claim).toMatchObject({ recordId: null, state: 'waiting' })
-    expect(claim?.pending).toEqual({ kind: 'subject', candidates: [tomas, clara, lise] })
+    expect(claim).toMatchObject({ recordId: clara, state: 'live', value: 'green' })
   })
 
   it('refuses a fact whose sentence names someone the roster does not know (the twin rule)', async () => {
@@ -1336,7 +1460,9 @@ describe('runReading: slice 3 purposes and spot checks (F-16.16, F-16.17)', () =
       if (requestKind(request) === 'verify') {
         // The checker disagrees with code about the eyes: counted, the claim stays.
         return {
-          text: verifyReply(request, (check) => (check.fact.startsWith('eyes') ? { ok: false } : null))
+          text: verifyReply(request, (check) =>
+            check.fact.startsWith('eyes') ? { ok: false } : null
+          )
         }
       }
       return { text: readerReply(request, PLAN) }
@@ -1347,7 +1473,12 @@ describe('runReading: slice 3 purposes and spot checks (F-16.16, F-16.17)', () =
       { nodeId: one, caretPara: null, requestId: 'r-spot', spotEvery: 1 }
     )
     const eyes = claimsNow().find((claim) => claim.slot === 'eyes')
-    expect(eyes).toMatchObject({ proof: 'literal', state: 'live', spot: 'disagree', spotTier: 'fast' })
+    expect(eyes).toMatchObject({
+      proof: 'literal',
+      state: 'live',
+      spot: 'disagree',
+      spotTier: 'fast'
+    })
     const checked = ai.requests
       .filter((request) => requestKind(request) === 'verify')
       .flatMap((request) => sentChecks(request).map((check) => check.fact))
@@ -1358,7 +1489,11 @@ describe('runReading: slice 3 purposes and spot checks (F-16.16, F-16.17)', () =
 
   it('replaces on a rebuild what it does not prove again, and reads a back-fill’s paragraphs whatever the gate says', async () => {
     await read(standard())
-    expect(claimsNow().map((claim) => claim.slot).sort()).toEqual(['clothing', 'eyes', 'location'])
+    expect(
+      claimsNow()
+        .map((claim) => claim.slot)
+        .sort()
+    ).toEqual(['clothing', 'eyes', 'location'])
     // A rebuild that finds only the eyes: the rest goes (P2a-D25).
     const rebuilt = await runReading(
       db,
@@ -1377,6 +1512,10 @@ describe('runReading: slice 3 purposes and spot checks (F-16.16, F-16.17)', () =
     expect(outcome).toMatchObject({ read: true, purpose: 'backfill' })
     const sent = backfill.requests.find((request) => requestKind(request) === 'reader')
     expect([...sentParagraphs(nth(sent === undefined ? [] : [sent], 0)).keys()]).toEqual([0, 1, 2])
-    expect(claimsNow().map((claim) => claim.slot).sort()).toEqual(['clothing', 'eyes', 'location'])
+    expect(
+      claimsNow()
+        .map((claim) => claim.slot)
+        .sort()
+    ).toEqual(['clothing', 'eyes', 'location'])
   })
 })

@@ -72,6 +72,32 @@ describe('the test book (F-16.3)', () => {
     }
   })
 
+  it('judges stored facts only on sentences no claim label covers, each quote in its paragraph (F-16.17)', () => {
+    const slotOf = (slot: string): string => (slot.startsWith('relation:') ? 'relation' : slot)
+    const overlaps = (a: string, b: string): boolean => {
+      const [x, y] = [normalizeForMatch(a), normalizeForMatch(b)]
+      return x.includes(y) || y.includes(x)
+    }
+    for (const verdict of LABELS.storedVerdicts) {
+      const where = `${verdict.scene} ${verdict.record} ${verdict.slot} “${verdict.value}”`
+      expect(RECORD_IDS.has(verdict.record), where).toBe(true)
+      const paragraph = testBookScene(verdict.scene).paragraphs[verdict.p] ?? ''
+      expect(normalizeForMatch(paragraph), where).toContain(normalizeForMatch(verdict.quote))
+      const labelled = LABELS.claims.some(
+        (claim) =>
+          claim.scene === verdict.scene &&
+          slotOf(claim.slot) === slotOf(verdict.slot) &&
+          overlaps(claim.quote, verdict.quote)
+      )
+      expect(labelled, where).toBe(false)
+    }
+    // One verdict per stored fact: no two judge the same record, slot, value and sentence.
+    const keys = LABELS.storedVerdicts.map((verdict) =>
+      [verdict.scene, verdict.record, verdict.slot, normalizeForMatch(verdict.value)].join('|')
+    )
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
   it('finds both quotes of every planted contradiction, and every knows line and defining quote', () => {
     for (const finding of LABELS.contradictions) {
       expect(located(finding.a.scene, finding.a.p, finding.a.quote), finding.a.quote).toBe(true)

@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   absentValue,
+  actsOnSubject,
+  ageIsSpan,
   diesInQuote,
+  genderOfNames,
+  pronounOfOtherGender,
+  pronounRivals,
+  relationValue,
+  relativeValue,
   groupHeadIn,
   locationStated,
   possessedOnly,
@@ -453,5 +460,202 @@ describe('the code gates of the second live run of 2026-10-14', () => {
     ).toBe(true)
     expect(sameQuote('Lottie was eighteen now', 'Lottie was nineteen')).toBe(false)
     expect(sameQuote('', 'x')).toBe(false)
+  })
+})
+
+/** A sentence with the names found in it, located by their text. */
+const named = (position: number, text: string, ...found: [string, string][]): LadderSentence =>
+  sentence(
+    position,
+    text,
+    found.map(([recordId, written]) => {
+      const start = text.indexOf(written)
+      return name(recordId, start, start + written.length)
+    })
+  )
+
+describe('the code gates of the third live run of 2026-10-14 (plan ReaderPrecision.md)', () => {
+  const GENDERS: Record<string, 'female' | 'male' | null> = {
+    clara: 'female',
+    lise: 'female',
+    johanna: 'female',
+    ashby: 'male',
+    harrow: 'male',
+    hobb: null,
+    lottie: null
+  }
+  const rivals = (
+    quote: string,
+    sentences: LadderSentence[],
+    before: LadderSentence[],
+    slot = 'eyes'
+  ): string[] =>
+    pronounRivals({
+      slot,
+      quote,
+      sentences,
+      before,
+      isCharacter: () => true,
+      genderOf: (id) => GENDERS[id] ?? null
+    })
+
+  it('reads a gender only from a title a name opens with', () => {
+    expect(genderOfNames(['Clara Pell', 'Miss Pell'])).toBe('female')
+    expect(genderOfNames(['Mr. Harrow', 'Harrow'])).toBe('male')
+    expect(genderOfNames(['Sir Walter Pell'])).toBe('male')
+    expect(genderOfNames(['Lottie'])).toBeNull()
+    expect(genderOfNames(['the Captain'])).toBeNull()
+    expect(genderOfNames(['Mr. Grey', 'Miss Grey'])).toBeNull()
+  })
+
+  it('finds two women in reach of the green-eyes "She", and one man for "he wore a blue coat"', () => {
+    const trap = 'She had green eyes, and in that light they looked almost gold'
+    expect(
+      rivals(
+        trap,
+        [sentence(2, `${trap}.`)],
+        [
+          sentence(1, 'The two women sat close to the window, where the light was best.'),
+          named(
+            0,
+            'Clara Pell called at Wexley on the Thursday, and found Lise alone in the morning room.',
+            ['clara', 'Clara Pell'],
+            ['lise', 'Lise']
+          )
+        ]
+      ).sort()
+    ).toEqual(['clara', 'lise'])
+    // "Mr. Harrow's visit" is a possessive: no antecedent of "he".
+    expect(
+      rivals(
+        'that he wore a blue coat',
+        [sentence(3, 'The ladies saw that he wore a blue coat.')],
+        [
+          named(
+            0,
+            "In a few days Mr. Ashby returned Mr. Harrow's visit.",
+            ['ashby', 'Mr. Ashby'],
+            ['harrow', 'Mr. Harrow']
+          )
+        ],
+        'clothing'
+      )
+    ).toEqual(['ashby'])
+    // A she skips a sentence that names only a man and looks further back.
+    expect(
+      rivals(
+        'she had a lively disposition',
+        [sentence(2, 'For she had a lively disposition.')],
+        [
+          named(1, 'Mr. Ashby walked off.', ['ashby', 'Mr. Ashby']),
+          named(0, 'Lise laughed.', ['lise', 'Lise'])
+        ],
+        'traits'
+      )
+    ).toEqual(['lise'])
+    // A name of no known gender may be meant by a he or a she; no pronoun, no rivals.
+    expect(
+      rivals(
+        'he smiled',
+        [named(0, 'Lottie came in and he smiled.', ['lottie', 'Lottie'])],
+        [],
+        'traits'
+      )
+    ).toEqual(['lottie'])
+    expect(rivals('Mara had grey eyes', [sentence(0, 'Mara had grey eyes.')], [])).toEqual([])
+  })
+
+  it('refuses a he for a woman, never a description or a she', () => {
+    const plum = 'When they were children he had kept a sugar plum in his coat'
+    expect(pronounOfOtherGender({ quote: plum, names: [], gender: 'female' })).toBe(true)
+    expect(pronounOfOtherGender({ quote: plum, names: [], gender: 'male' })).toBe(false)
+    expect(pronounOfOtherGender({ quote: plum, names: [], gender: null })).toBe(false)
+    expect(pronounOfOtherGender({ quote: 'his wife was ill', names: [], gender: 'female' })).toBe(
+      false
+    )
+    expect(pronounOfOtherGender({ quote: 'he told her so', names: [], gender: 'female' })).toBe(
+      false
+    )
+  })
+
+  it('refuses the one acted on as the doer, never a co-subject or a clause of their own', () => {
+    const acts = (slot: string, quote: string, names: string[], others: string[] = []): boolean =>
+      actsOnSubject({ slot, quote, names, others })
+    expect(acts('history', 'he asked Miss Pell', ['Miss Pell'])).toBe(true)
+    expect(
+      acts(
+        'history',
+        'Mr. Ashby does not know the whole of his history, and is quite ignorant of the circumstances which have principally offended Mr. Varrow',
+        ['Mr. Varrow'],
+        ['Mr. Ashby']
+      )
+    ).toBe(true)
+    expect(
+      acts(
+        'history',
+        'Mrs. Harrow had taken Bel and Lottie to Callow Cross',
+        ['Bel'],
+        ['Mrs. Harrow']
+      )
+    ).toBe(true)
+    expect(
+      acts(
+        'history',
+        'Johanna and Mr. Ashby had been married two years',
+        ['Mr. Ashby'],
+        ['Johanna']
+      )
+    ).toBe(false)
+    expect(
+      acts('history', 'the spring when Johanna had come down to breakfast', ['Johanna'], ['Lise'])
+    ).toBe(false)
+    expect(acts('history', 'Mr. Ashby had danced with her twice', ['Mr. Ashby'])).toBe(false)
+    expect(acts('traits', "Miss Harrow's pleasing manners", ['Miss Harrow'])).toBe(false)
+    expect(
+      acts('relation', 'danced only once with Mrs. Lowther', ['Mrs. Lowther'], ['Mr. Varrow'])
+    ).toBe(false)
+    // Only history, role, relation and traits.
+    expect(acts('location', 'he asked Miss Pell', ['Miss Pell'])).toBe(false)
+  })
+
+  it('refuses a span of time as an age, never an age said with "over" or "past"', () => {
+    expect(
+      ageIsSpan('forty years', 'Old Hobb had kept the lodge gate at Thornmere for forty years')
+    ).toBe(true)
+    expect(ageIsSpan('two years', 'married two years ago')).toBe(true)
+    expect(ageIsSpan('three', 'after the last three years')).toBe(true)
+    expect(ageIsSpan('eighteen', 'Lottie was eighteen now, and married')).toBe(false)
+    expect(ageIsSpan('over forty', 'he was over forty')).toBe(false)
+    expect(ageIsSpan('seven-and-twenty', 'Clara Pell was seven-and-twenty')).toBe(false)
+  })
+
+  it('refuses a kinship that is the relative, keeping what the subject is to someone', () => {
+    const kin = (value: string, quote: string, names: string[] = []): boolean =>
+      relativeValue({ slot: 'kinship', value, quote, names })
+    expect(kin('second daughter', 'his second daughter')).toBe(true)
+    expect(kin('her eldest daughter', 'her eldest daughter')).toBe(true)
+    expect(kin('father', "The Captain's father was a merchant in Vellmouth", ['The Captain'])).toBe(
+      true
+    )
+    expect(kin("Lise's cousin", "Anne Fenwick was Lise's cousin", ['Anne Fenwick'])).toBe(false)
+    expect(kin('son of a clergyman in Elsdale', 'My father was a clergyman in Elsdale')).toBe(false)
+    expect(kin('married', 'Lottie was eighteen now, and married', ['Lottie'])).toBe(false)
+    expect(
+      relativeValue({ slot: 'history', value: 'father', quote: 'his father', names: [] })
+    ).toBe(false)
+  })
+
+  it('refuses a relation with nobody to relate to, a remark, or only people', () => {
+    const rel = (value: string, objectId: string | null = 'o1'): boolean =>
+      relationValue({ slot: 'relation', value, objectId })
+    expect(rel('thought her quite beautiful', null)).toBe(true)
+    expect(rel('sisters')).toBe(true)
+    expect(rel('her sister and Mr. Ashby')).toBe(true)
+    expect(rel('his guilt and his descent appear, by your account, to be the same')).toBe(true)
+    expect(rel('thought her quite beautiful')).toBe(false)
+    expect(rel('did admire Johanna')).toBe(false)
+    expect(rel('brother-in-law')).toBe(false)
+    expect(rel('friend')).toBe(false)
+    expect(relationValue({ slot: 'kinship', value: 'sisters', objectId: null })).toBe(false)
   })
 })

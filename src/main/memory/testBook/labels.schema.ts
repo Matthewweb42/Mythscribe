@@ -218,6 +218,29 @@ export const LabelNegative = z.object({
   reason: z.string().min(1)
 })
 
+/**
+ * A fact a live run stored on a sentence no claim label covers, judged by hand from the text alone
+ * (F-16.17, plan `ReaderPrecision.md` step 1): right or wrong as stored (its record, slot, value,
+ * voice and mode), so stored-fact precision is measured over every stored fact, not only those on
+ * labelled sentences. Strict: the quote must state the fact of that named person, nothing assumed.
+ * Never an expected reading (recall reads `claims` only), only a verdict on what was stored.
+ */
+export const LabelStoredVerdict = z.object({
+  scene: SceneId,
+  p: z.number().int().min(0),
+  record: Id,
+  /** As stored: a relation's object is not in the live report, so `relation` stands alone. */
+  slot: z.union([Slot, z.literal('relation')]),
+  /** The stored value (a stored fact matches when one value holds the other, normalised). */
+  value: z.string().min(1),
+  /** The stored quote (a stored fact matches when the quotes overlap). */
+  quote: z.string().min(1),
+  right: z.boolean(),
+  /** A judgment call the author may turn the other way (listed in QUESTIONS.md). */
+  call: z.boolean().default(false),
+  reason: z.string().min(1)
+})
+
 /** P4: a record on the page in a scene, by the quote that shows it (the card's `present`). */
 export const LabelPresence = z.object({
   scene: SceneId,
@@ -380,6 +403,8 @@ export const TestBookLabels = z.object({
    * P4 (F-16.29, F-16.30): the secrets readers know by the book's end that no counted learning line
    * gives anyone, as *Check the book* lists them; every other secret has a learner.
    */
-  secretsNobodyLearns: z.array(Id)
+  secretsNobodyLearns: z.array(Id),
+  /** F-16.17: the live runs' stored facts on unlabelled sentences, judged (`LabelStoredVerdict`). */
+  storedVerdicts: z.array(LabelStoredVerdict)
 })
 export type TestBookLabels = z.input<typeof TestBookLabels>

@@ -38,9 +38,11 @@ import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
 import { buildTestBookProject, type TestBookProject } from '../../memory/testBook/project'
 import {
   cutLines,
+  PLANTED_PASS_BARS,
   plantedBarLines,
   plantedFailures,
   plantedMeasures,
+  scoreStored,
   unreviewedLines
 } from './plantedScore'
 import { fakeChatServer } from './fakeChatServer'
@@ -222,6 +224,11 @@ describe('the reading pipeline over the test book: the oracle replay (F-16.17)',
     expect(negativesStored(book, claims)).toEqual([])
     const labelled = TEST_BOOK_LABELS.claims.filter((claim) => claim.expect !== 'reject')
     expect(claims).toHaveLength(labelled.length)
+    // The author's bar (plan ReaderPrecision.md): every stored fact right, none left unjudged.
+    const { stored } = plantedMeasures(book)
+    expect(stored.wrong).toEqual([])
+    expect(stored.unjudged).toEqual([])
+    expect(stored.precision).toEqual({ right: claims.length, of: claims.length })
   })
 
   it('keeps the memory invariants and the readings’ yields', () => {
@@ -283,6 +290,12 @@ describe('the reading pipeline over the test book: the adversarial replay (F-16.
     expect(negativesStored(book, liveFacts(book))).toEqual([])
     expect(neverRead(book)).toEqual([])
     expect(invariants(book)).toEqual([])
+    // The author's bar (plan ReaderPrecision.md): no planted error is a wrong stored fact.
+    const { stored } = plantedMeasures(book)
+    expect(stored.wrong).toEqual([])
+    expect(stored.precision.right / stored.precision.of).toBeGreaterThanOrEqual(
+      PLANTED_PASS_BARS.storedPrecision
+    )
   })
 
   it('counts each planted error by its reason', () => {
@@ -320,7 +333,12 @@ interface LivePlant {
   /** The speaker's record label, for dialogue. */
   speaker?: string
   mode?: 'dream'
+  /** A kinship's or relation's other record. */
+  object?: string
   refused:
+    | 'ambiguous'
+    | 'actor'
+    | 'object'
     | 'subject'
     | 'value'
     | 'wish'
@@ -520,6 +538,123 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     voice: 'dialogue',
     speaker: 'dunmore',
     refused: 'slot'
+  },
+  // The third live run of 2026-10-14 (21:35; plan ReaderPrecision.md "What the third run
+  // showed"): every wrong fact it names, each refused in code whatever the checker says.
+  // The green-eyes trap: two women in reach of "She"; the live checker picked Clara.
+  {
+    scene: 'h01',
+    p: 1,
+    record: 'clara',
+    slot: 'eyes',
+    value: 'green',
+    quote: 'She had green eyes, and in that light they looked almost gold',
+    refused: 'ambiguous'
+  },
+  // Wrong person: he (Mr. Ashby) asked; Miss Pell was only asked.
+  {
+    scene: 's03',
+    p: 16,
+    record: 'clara',
+    slot: 'history',
+    value: 'asked Miss Pell',
+    quote: 'he asked Miss Pell',
+    voice: 'dialogue',
+    speaker: 'harrow-mrs',
+    refused: 'actor'
+  },
+  // Wrong person: the sugar plum is Hobb's ("he"), not Johanna's.
+  {
+    scene: 'h03',
+    p: 6,
+    record: 'johanna',
+    slot: 'history',
+    value: 'When they were children he had kept a sugar plum in his coat',
+    quote: 'When they were children he had kept a sugar plum in his coat',
+    refused: 'subject'
+  },
+  // Wrong kind: forty years at the gate is no age.
+  {
+    scene: 'h03',
+    p: 3,
+    record: 'hobb',
+    slot: 'age',
+    value: 'forty years',
+    quote: 'Old Hobb had kept the lodge gate at Thornmere for forty years',
+    refused: 'valueKind'
+  },
+  // A place as the subject of a location.
+  {
+    scene: 's03',
+    p: 3,
+    record: 'thornmere',
+    slot: 'location',
+    value: 'Thornmere',
+    quote: 'never settled at Thornmere as he ought to be',
+    refused: 'kind'
+  },
+  // Another person's: the father is the relative, not the Captain's kinship.
+  {
+    scene: 'h15',
+    p: 15,
+    record: 'captain',
+    slot: 'kinship',
+    value: 'father',
+    quote: "The Captain's father was a merchant in Vellmouth",
+    refused: 'possessed'
+  },
+  {
+    scene: 's02',
+    p: 0,
+    record: 'harrow-mr',
+    slot: 'kinship',
+    value: 'second daughter',
+    quote: 'his second daughter',
+    refused: 'possessed'
+  },
+  // Junk relation lines: nobody to relate to, only people, a remark.
+  {
+    scene: 's05',
+    p: 18,
+    record: 'liesel',
+    slot: 'relation',
+    value: 'her sister and Mr. Ashby',
+    quote: 'her sister and Mr. Ashby',
+    refused: 'object'
+  },
+  {
+    scene: 's05',
+    p: 18,
+    record: 'liesel',
+    slot: 'relation',
+    value: 'her sister and Mr. Ashby',
+    quote: 'glancing at her sister and Mr. Ashby',
+    object: 'johanna',
+    refused: 'object'
+  },
+  {
+    scene: 's05',
+    p: 20,
+    record: 'liesel',
+    slot: 'relation',
+    value: 'his guilt and his descent appear, by your account, to be the same',
+    quote: 'His guilt and his descent appear, by your account, to be the same',
+    voice: 'dialogue',
+    speaker: 'liesel',
+    object: 'dunmore',
+    refused: 'object'
+  },
+  // The third run's invented slot, in reader.v5's field: "src" no longer shares its name.
+  {
+    scene: 's03',
+    p: 18,
+    record: 'harrow-mrs',
+    slot: 'voice',
+    value: 'quite delighted with him',
+    quote: 'I am quite delighted with him',
+    voice: 'dialogue',
+    speaker: 'harrow-mrs',
+    refused: 'slot'
   }
 ]
 
@@ -564,7 +699,8 @@ const LIVE_KEPT: readonly Omit<LivePlant, 'refused'>[] = [
     record: 'harrow-mrs',
     slot: 'relation',
     value: 'violent against him',
-    quote: 'Amongst the most violent against him was Mrs. Harrow'
+    quote: 'Amongst the most violent against him was Mrs. Harrow',
+    object: 'varrow'
   }
 ]
 
@@ -587,10 +723,12 @@ function plantsFor(
       s: plant.slot,
       v: plant.value,
       q: plant.quote,
+      // reader.v5 names the voice field "src" (the third live run of 2026-10-14).
       ...(plant.voice === undefined
         ? {}
-        : { voice: plant.voice, sp: plant.speaker === undefined ? null : id(plant.speaker) }),
-      ...(plant.mode === undefined ? {} : { mode: plant.mode })
+        : { src: plant.voice, sp: plant.speaker === undefined ? null : id(plant.speaker) }),
+      ...(plant.mode === undefined ? {} : { mode: plant.mode }),
+      ...(plant.object === undefined ? {} : { o: id(plant.object) })
     }))
 }
 
@@ -717,6 +855,42 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
       expect(storedFor(book, live, wanted), wanted.id).toBeDefined()
     }
     expect(invariants(book)).toEqual([])
+    // The author's bar holds with every live failure planted: of the kept facts only the trait
+    // the verdicts judge a passing state (a judgment call) and the unjudged kept relation miss.
+    const { stored } = plantedMeasures(book)
+    expect(stored.precision.right / stored.precision.of).toBeGreaterThanOrEqual(
+      PLANTED_PASS_BARS.storedPrecision
+    )
+    expect(stored.wrong).toEqual([
+      expect.stringMatching(/^s03 ¶3 Mrs\. Harrow traits “quite disconcerted”.*\(judgment call\)$/)
+    ])
+  })
+})
+
+describe('the third live run, re-scored (plan ReaderPrecision.md step 1)', () => {
+  it('judges every fact it stored, and counts a fact not judged yet as wrong', () => {
+    const fact = {
+      scene: 'h03',
+      p: 3,
+      record: 'hobb',
+      slot: 'age',
+      value: 'forty years',
+      quote: 'Old Hobb had kept the lodge gate at Thornmere for forty years',
+      voice: 'narration',
+      mode: 'now',
+      proof: 'verified'
+    }
+    const right = { ...fact, slot: 'location', record: 'liesel', scene: 'h05', p: 0 }
+    const score = scoreStored([
+      fact,
+      { ...right, value: 'the back stairs', quote: 'Lise came up the back stairs' },
+      { ...fact, scene: 'h02', value: 'nine', quote: 'never judged' }
+    ])
+    expect(score.precision).toEqual({ right: 1, of: 3 })
+    expect(score.wrong).toEqual([
+      expect.stringMatching(/^h03 ¶3 Hobb age “forty years”.*: How long he kept the gate/)
+    ])
+    expect(score.unjudged).toHaveLength(1)
   })
 })
 
@@ -917,18 +1091,99 @@ describe('the live planted-error run, end to end against a fake OpenRouter (F-16
   }, 120_000)
 })
 
+/** Most book readings one live run makes (`MYTHSCRIBE_EVAL_RUNS`). */
+const MAX_LIVE_RUNS = 3
+
+/**
+ * How many times the live run reads the book (plan `ReaderPrecision.md` step 1:
+ * `MYTHSCRIBE_EVAL_RUNS=2` reads it twice on fresh copies and reports both); 1 when unset or not a
+ * count, at most `MAX_LIVE_RUNS`.
+ */
+export function liveRuns(value: string | undefined): number {
+  const count = Number.parseInt(value ?? '', 10)
+  return Number.isInteger(count) && count > 1 ? Math.min(count, MAX_LIVE_RUNS) : 1
+}
+
+type LiveReport = Awaited<ReturnType<typeof runLivePlanted>>
+
+/**
+ * Several readings' reports as one: each in full under its run's heading, the failures of each
+ * named by its run, the JSON a list of the runs'. One run's report is answered as it is.
+ */
+export function mergeRuns(reports: readonly LiveReport[]): LiveReport {
+  if (reports.length === 1 && reports[0] !== undefined) return reports[0]
+  const failures = reports.flatMap((report, i) =>
+    report.failures.map((failure) => `run ${i + 1}: ${failure}`)
+  )
+  return {
+    markdown: [
+      `# Story memory: the live planted-error run, ${reports.length} readings of the book`,
+      '',
+      failures.length === 0 ? '**Every run passed.**' : `**Failed:** ${failures.join('; ')}.`,
+      ...reports.flatMap((report, i) => [
+        '',
+        `## Run ${i + 1} of ${reports.length}`,
+        '',
+        report.markdown.replace(/^(#+) /gm, '$1# ')
+      ])
+    ].join('\n'),
+    json: { runs: reports.map((report) => report.json), failures },
+    failures
+  }
+}
+
+describe('the live run’s reports, merged (plan ReaderPrecision.md step 1)', () => {
+  it('reads MYTHSCRIBE_EVAL_RUNS as a count of at most three, else once', () => {
+    expect([undefined, '', 'two', '0', '1'].map(liveRuns)).toEqual([1, 1, 1, 1, 1])
+    expect([liveRuns('2'), liveRuns('3'), liveRuns('9')]).toEqual([2, 3, 3])
+  })
+
+  it('reports every run in full, each failure named by its run', () => {
+    const one = {
+      markdown: '# Run\n\n- Stored-fact precision: 97.0 %',
+      json: { a: 1 },
+      failures: []
+    }
+    const two = {
+      markdown: '# Run\n\n- Stored-fact precision: 90.0 %',
+      json: { a: 2 },
+      failures: ['stored-fact precision 90.0 % < 95 %']
+    }
+    expect(mergeRuns([one])).toBe(one)
+    const merged = mergeRuns([one, two])
+    expect(merged.failures).toEqual(['run 2: stored-fact precision 90.0 % < 95 %'])
+    expect(merged.json).toEqual({ runs: [{ a: 1 }, { a: 2 }], failures: merged.failures })
+    expect(merged.markdown).toContain('## Run 1 of 2\n\n## Run\n\n- Stored-fact precision: 97.0 %')
+    expect(merged.markdown).toContain('## Run 2 of 2\n\n## Run\n\n- Stored-fact precision: 90.0 %')
+  })
+})
+
 describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', () => {
-  it('reads the test book with the real provider, scores it per slot, and writes the report', async () => {
-    // One key (F-16.22): OPENROUTER_API_KEY, else OPENAI_API_KEY (and OPENAI_BASE_URL).
-    const report = await runLivePlanted(liveProviderFromEnv())
-    const dir = path.resolve('test-results/eval-memory')
-    fs.mkdirSync(dir, { recursive: true })
-    const stamp = new Date().toISOString().slice(0, 10)
-    fs.writeFileSync(path.join(dir, `planted-${stamp}.md`), report.markdown)
-    fs.writeFileSync(path.join(dir, `planted-${stamp}.json`), JSON.stringify(report.json, null, 2))
-    process.stdout.write(`\n${report.markdown}\n`)
-    expect(report.failures).toEqual([])
-  }, 900_000)
+  it(
+    'reads the test book with the real provider, scores it per slot, and writes the report',
+    async () => {
+      // One key (F-16.22): OPENROUTER_API_KEY, else OPENAI_API_KEY (and OPENAI_BASE_URL). Each run
+      // reads a fresh copy of the book and holds its own 50¢ stop.
+      const live = liveProviderFromEnv()
+      const reports: LiveReport[] = []
+      for (let run = 0; run < liveRuns(process.env.MYTHSCRIBE_EVAL_RUNS); run += 1) {
+        reports.push(await runLivePlanted(live))
+      }
+      const report = mergeRuns(reports)
+      const dir = path.resolve('test-results/eval-memory')
+      fs.mkdirSync(dir, { recursive: true })
+      // To the minute: the three runs of 2026-10-14 each overwrote the day's report.
+      const stamp = new Date().toISOString().slice(0, 16).replace(':', '')
+      fs.writeFileSync(path.join(dir, `planted-${stamp}.md`), report.markdown)
+      fs.writeFileSync(
+        path.join(dir, `planted-${stamp}.json`),
+        JSON.stringify(report.json, null, 2)
+      )
+      process.stdout.write(`\n${report.markdown}\n`)
+      expect(report.failures).toEqual([])
+    },
+    900_000 * MAX_LIVE_RUNS
+  )
 })
 
 /** Scores the live run per slot against the labels; answers the report and the failed bars. */
@@ -1044,7 +1299,14 @@ function scoreLive(
       costUnknown: run.costUnknown,
       requests: run.requests,
       scenesRead: readCount,
-      quotesFound: { found: measures.quotesFound.right, proposed: measures.quotesFound.of },
+      storedPrecision: {
+        right: measures.stored.precision.right,
+        stored: measures.stored.precision.of,
+        unjudged: measures.stored.unjudged.length,
+        callsTurned: measures.stored.callsTurned.right
+      },
+      quotesFound: { found: measures.quotesFound.right, lookedFor: measures.quotesFound.of },
+      costRefusals: measures.costRefusals,
       verifierPass: { passed: measures.verifierPass.right, sent: measures.verifierPass.of },
       attribution: { right: measures.attribution.right, matched: measures.attribution.of },
       literalPrecision: {
@@ -1064,6 +1326,9 @@ function scoreLive(
       names: { proposed: names.length, twins },
       spot,
       slots: Object.fromEntries(slots),
+      // Every live fact as the precision bar judged it: `scoreStored` re-scores it after new
+      // verdicts, with no second run.
+      stored: measures.storedFacts,
       failures
     },
     failures

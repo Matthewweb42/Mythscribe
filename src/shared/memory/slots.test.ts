@@ -101,9 +101,17 @@ describe('reading a slot leniently, and the slots a place holds (live run 2026-1
     expect(slotFitsKind('detail:home', 'place')).toBe(false)
     expect(slotFitsKind('eyes', 'place')).toBe(false)
     expect(slotFitsKind('history', 'place')).toBe(true)
-    expect(slotFitsKind('location', 'place')).toBe(true)
+    // Third live run of 2026-10-14: "never settled at Thornmere" was Thornmere's location.
+    expect(slotFitsKind('location', 'place')).toBe(false)
+    expect(slotFitsKind('role', 'place')).toBe(true)
     expect(slotFitsKind('detail:home', 'character')).toBe(true)
+    expect(slotFitsKind('location', 'character')).toBe(true)
+    expect(slotFitsKind('location', 'group')).toBe(true)
+    // A thing keeps a creature's body slots, never a person's place, kin, clothes or role.
     expect(slotFitsKind('eyes', 'thing')).toBe(true)
+    for (const slot of ['location', 'role', 'kinship', 'clothing', 'objects'] as const) {
+      expect(slotFitsKind(slot, 'thing'), slot).toBe(false)
+    }
     expect(slotFitsKind('traits', 'secret')).toBe(false)
     expect(slotFitsKind('traits', undefined)).toBe(true)
   })

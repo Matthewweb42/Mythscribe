@@ -86,6 +86,16 @@ export type LadderReject =
   | 'possessed'
   /** The same fact again in another slot or quote of this reading: one claim, one slot. */
   | 'duplicate'
+  /*
+   * The gates of the third live run of 2026-10-14 (plan `ReaderPrecision.md`), each before the
+   * checker:
+   */
+  /** A he, she or they with more than one person it could mean in reach (`pronounRivals`). */
+  | 'ambiguous'
+  /** Someone else does what the fact says, the subject only acted on ("he asked Miss Pell"; `actsOnSubject`). */
+  | 'actor'
+  /** A relation with no one to relate to, or no relation in its value (`relationValue`). */
+  | 'object'
 
 /** One sentence of the scene as the ladder reads it. */
 export interface LadderSentence {
@@ -871,4 +881,343 @@ export function possessedOnly(input: {
     SINGULAR_THIRD.test(stripped) ||
     (PART_SLOTS.has(input.slot) && PLURAL_OR_IT.test(stripped))
   return !left
+}
+
+/*
+ * The gates of the third live run of 2026-10-14 (`test-results/eval-memory/planted-2026-10-14.md`,
+ * 21:35; plan `ReaderPrecision.md` step 2): causes, not instances. The checker supported the
+ * green-eyes trap ("The two women sat… She had green eyes") as Clara's; "he asked Miss Pell" was
+ * stored as Clara's history, Hobb's sugar plum as Johanna's, Hobb's forty years at the gate as his
+ * age, "his second daughter" and "The Captain's father" as kinship of the father, and lines like
+ * "she and her sisters" as relations. Each runs before the checker.
+ */
+
+export type Gender = 'female' | 'male'
+
+const FEMALE_TITLES = new Set([
+  'mrs',
+  'miss',
+  'ms',
+  'lady',
+  'madam',
+  'madame',
+  'mistress',
+  'dame',
+  'queen',
+  'princess',
+  'duchess',
+  'countess',
+  'aunt'
+])
+const MALE_TITLES = new Set([
+  'mr',
+  'mister',
+  'sir',
+  'lord',
+  'master',
+  'king',
+  'prince',
+  'duke',
+  'earl',
+  'count',
+  'baron',
+  'uncle'
+])
+
+/**
+ * A record's gender as its names give it, by a title one of them opens with ("Mrs. Harrow",
+ * "Miss Liesel", "Sir Walter"); null when none does or they disagree. Nothing else is guessed: a
+ * name with no title ("Lottie", "Hobb", "the Captain") is of no known gender, so a he and a she
+ * may each mean them.
+ */
+export function genderOfNames(names: readonly string[]): Gender | null {
+  let female = false
+  let male = false
+  for (const name of names) {
+    const first = tokensOf(name)[0] ?? ''
+    if (FEMALE_TITLES.has(first)) female = true
+    if (MALE_TITLES.has(first)) male = true
+  }
+  return female === male ? null : female ? 'female' : 'male'
+}
+
+const FEMALE_PRONOUN = /(?<![\p{L}\p{N}'’])(?:she|her|hers|herself)(?![\p{L}\p{N}])/iu
+const MALE_PRONOUN = /(?<![\p{L}\p{N}'’])(?:he|him|his|himself)(?![\p{L}\p{N}])/iu
+
+/** Words after which a name is no he or she's antecedent ("with Mr. Varrow", "to Clara"). */
+const PREPOSITIONS = new Set([
+  'of',
+  'to',
+  'with',
+  'by',
+  'for',
+  'from',
+  'at',
+  'on',
+  'in',
+  'into',
+  'upon',
+  'about',
+  'towards',
+  'toward',
+  'beside',
+  'after',
+  'before',
+  'than',
+  'like',
+  'among',
+  'amongst',
+  'between',
+  'behind',
+  'near'
+])
+
+/**
+ * Whether a name stands where a he or she seldom points back to: as a possessive ("Mr. Harrow's
+ * visit") or right after a preposition ("sat with Mr. Varrow").
+ */
+function oblique(text: string, start: number, end: number): boolean {
+  const straight = straightenQuotes(text)
+  if (/^['’]s?(?![\p{L}\p{N}])/u.test(straight.slice(end))) return true
+  const before = tokensOf(straight.slice(0, start)).at(-1) ?? ''
+  return PREPOSITIONS.has(before)
+}
+
+/**
+ * The people a he, she or they in a fact's quote could mean (plan `ReaderPrecision.md`: the
+ * green-eyes trap): the characters named in the quote's sentences and in the nearest sentence
+ * before them that names one who fits (for a she a woman or someone of no known gender, for a he
+ * a man or someone of no known gender, for a they standing for eyes or hair anyone), each named
+ * where a pronoun may point back to them (not as a possessive, not after a preposition). More
+ * than one means the text does not settle whom the pronoun means, whatever the checker would
+ * pick. Empty for a quote with no he, she or part's they.
+ */
+export function pronounRivals(input: {
+  slot: string
+  quote: string
+  /** The quote's sentences. */
+  sentences: readonly LadderSentence[]
+  /** The sentences before the quote that were sent, nearest first. */
+  before: readonly LadderSentence[]
+  isCharacter: (recordId: string) => boolean
+  genderOf: (recordId: string) => Gender | null
+}): string[] {
+  const text = straightenQuotes(input.quote)
+  const female = FEMALE_PRONOUN.test(text)
+  const male = MALE_PRONOUN.test(text)
+  const part = PART_SLOTS.has(input.slot) && PLURAL_OR_IT.test(text)
+  if (!female && !male && !part) return []
+  const fits = (recordId: string): boolean => {
+    if (!female && !male) return true
+    const gender = input.genderOf(recordId)
+    return gender === null || (female && gender === 'female') || (male && gender === 'male')
+  }
+  const named = (sentence: LadderSentence): string[] =>
+    sentence.names
+      .filter(
+        (name) =>
+          !name.ambiguous &&
+          input.isCharacter(name.recordId) &&
+          !oblique(sentence.text, name.start, name.end) &&
+          fits(name.recordId)
+      )
+      .map((name) => name.recordId)
+  const rivals = new Set(input.sentences.flatMap(named))
+  for (const sentence of input.before.slice(0, ANTECEDENT_SENTENCES)) {
+    const here = named(sentence)
+    if (here.length === 0) continue
+    for (const id of here) rivals.add(id)
+    break
+  }
+  return [...rivals]
+}
+
+/**
+ * Whether a fact's quote points at its subject only with a he or she of the other gender (third
+ * live run: Hobb's "he had kept a sugar plum in his coat" stored as Johanna's): the subject's
+ * gender is known from a title, the quote does not name them, holds no description of one person
+ * ("his wife", "a woman of mean understanding"), and its only he/she words are of the other gender.
+ */
+export function pronounOfOtherGender(input: {
+  quote: string
+  names: readonly string[]
+  gender: Gender | null
+}): boolean {
+  if (input.gender === null) return false
+  const text = straightenQuotes(input.quote)
+  if (input.names.some((name) => nameIn(text, name)) || EPITHET.test(text)) return false
+  const female = FEMALE_PRONOUN.test(text)
+  const male = MALE_PRONOUN.test(text)
+  return input.gender === 'female' ? male && !female : female && !male
+}
+
+/** Nominative pronouns: someone doing the act ("he asked", "they walked", "I told"). */
+const NOMINATIVE = /(?<![\p{L}\p{N}'’])(?:he|she|they|we|I)(?![\p{L}\p{N}'’])/iu
+/** Words that open a clause of the subject's own ("the spring when Johanna had come down"). */
+const SUBORDINATORS = new Set([
+  'when',
+  'where',
+  'while',
+  'that',
+  'who',
+  'whom',
+  'because',
+  'as',
+  'if',
+  'until',
+  'till',
+  'though',
+  'although',
+  'since',
+  'whether',
+  'but',
+  'and'
+])
+
+/** Slots that say what the subject does or how they stand to others: the doer must be them. */
+const ACTOR_SLOTS = new Set(['history', 'role', 'relation', 'traits'])
+
+/**
+ * Whether a fact's quote has someone else doing what it says, the subject only acted on (third
+ * live run: "he asked Miss Pell" stored as Clara's history): before the subject's first name in
+ * its sentence of the quote stands a he, she, they, we or I, or another character's name (not as
+ * a possessive or after a preposition), and the subject does not open a clause of its own (right
+ * after "when", "that", "and"…: "Johanna and Mr. Ashby had been married", "the spring when
+ * Johanna had come down"). Only for history, role, relation and traits, where who did it is the
+ * fact.
+ */
+export function actsOnSubject(input: {
+  slot: string
+  quote: string
+  /** The names the quote's sentences call the subject by, as written. */
+  names: readonly string[]
+  /** The names of the other characters its sentences name, as written. */
+  others: readonly string[]
+}): boolean {
+  if (!ACTOR_SLOTS.has(input.slot)) return false
+  for (const segment of straightenQuotes(input.quote).split(SENTENCE_BREAK)) {
+    const at = input.names
+      .map((name) => nameInSentence(segment, name)?.start ?? -1)
+      .filter((start) => start >= 0)
+      .sort((a, b) => a - b)[0]
+    if (at === undefined) continue
+    const before = segment.slice(0, at)
+    if (SUBORDINATORS.has(tokensOf(before).at(-1) ?? '')) return false
+    if (NOMINATIVE.test(before)) return true
+    return input.others.some((other) => {
+      const found = nameInSentence(before, other)
+      return found !== null && !oblique(before, found.start, found.end)
+    })
+  }
+  return false
+}
+
+/** Words before a count that make it a span of time, not an age ("for forty years"). */
+const SPAN_BEFORE = new Set(['for', 'after', 'within', 'during', 'since', 'these', 'those', 'next'])
+/** Words after a count's unit that make it a span of time ("forty years ago", "two years later"). */
+const SPAN_AFTER = new Set(['ago', 'later', 'before', 'earlier', 'since', 'after', 'hence'])
+const SPAN_UNITS = new Set(['years', 'year', 'months', 'month', 'weeks', 'week', 'days', 'day'])
+
+/**
+ * Whether an age's count stands in its quote as a span of time, not an age (third live run: "Old
+ * Hobb had kept the lodge gate at Thornmere for forty years" stored as his age): the count right
+ * after "for", "after", "within", "during", "since" (a "the" or "last" between allowed), or its
+ * unit followed by "ago", "later", "before". "Over forty" and "past forty" stay ages.
+ */
+export function ageIsSpan(value: string, quote: string): boolean {
+  const count = tokensOf(value).find((word) => ageYears(word) !== null)
+  if (count === undefined) return false
+  const tokens = tokensOf(quote)
+  return tokens.some((token, i) => {
+    if (token !== count) return false
+    const back = tokens
+      .slice(Math.max(0, i - 3), i)
+      .filter((word) => word !== 'the' && word !== 'last')
+    if (SPAN_BEFORE.has(back.at(-1) ?? '')) return true
+    return SPAN_UNITS.has(tokens[i + 1] ?? '') && SPAN_AFTER.has(tokens[i + 2] ?? '')
+  })
+}
+
+const PERSON_NOUN_SET = new Set(PERSON_NOUNS)
+const PERSON_PLURALS = new Set(['children', 'men', 'women', 'gentlemen', 'ladies', 'wives'])
+/** Whether a word is a person noun, and whether it is a plural one ("sisters", "children"). */
+function personWord(word: string): { person: boolean; plural: boolean } {
+  if (PERSON_NOUN_SET.has(word)) return { person: true, plural: false }
+  const plural =
+    PERSON_PLURALS.has(word) ||
+    (word.endsWith('s') && PERSON_NOUN_SET.has(word.slice(0, -1))) ||
+    (word.endsWith('es') && PERSON_NOUN_SET.has(word.slice(0, -2)))
+  return { person: plural, plural }
+}
+
+/**
+ * Whether a kinship value names the subject's relative, not what the subject is (third live run:
+ * "second daughter" from "his second daughter" stored on Mr. Harrow, "father" from "The Captain's
+ * father was a merchant" on the Captain): the value (a leading his, her or the left out) ends in a
+ * person word and stands in the quote right after a possessive pointing at the subject, his, her,
+ * their, my, or the subject's name with 's. "Lise's cousin" on Anne and "son of a clergyman" stay.
+ */
+export function relativeValue(input: {
+  slot: string
+  value: string
+  quote: string
+  names: readonly string[]
+}): boolean {
+  if (input.slot !== 'kinship') return false
+  const core = straightenQuotes(input.value)
+    .trim()
+    .replace(/^(?:his|her|their|my|our|your|the)\s+/i, '')
+  if (!personWord(tokensOf(core).at(-1) ?? '').person) return false
+  const owners = [
+    '(?:his|her|their|my|our|your)',
+    ...input.names.flatMap((name) => {
+      const escaped = escapeName(name)
+      return escaped === '' ? [] : [`${escaped}['’]s`]
+    })
+  ]
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])(?:${owners.join('|')})\\s+${escapeName(core)}(?![\\p{L}\\p{N}])`,
+    'iu'
+  )
+  return pattern.test(straightenQuotes(input.quote))
+}
+
+/** The most words a relation's value holds ("thought her quite beautiful", "did admire Johanna"). */
+export const RELATION_VALUE_MAX_WORDS = 6
+
+/** Title words that open a name in a value ("Mr. Ashby"). */
+const NAME_TITLES = new Set([...FEMALE_TITLES, ...MALE_TITLES, 'dr', 'captain', 'colonel'])
+
+/**
+ * Whether a relation is no relation (third live run's junk lines: "sisters" from "she and her
+ * sisters", "her sister and Mr. Ashby", "his guilt and his descent appear, by your account, to be
+ * the same"): it names nobody to relate to ("o" is no record), its value runs past
+ * `RELATION_VALUE_MAX_WORDS` words (a remark, not how they stand), or its value is only people
+ * (names, person words, pronouns), more than one of them or a plural: who, not how.
+ */
+export function relationValue(input: {
+  slot: string
+  value: string
+  objectId: string | null
+}): boolean {
+  if (input.slot !== 'relation') return false
+  if (input.objectId === null) return true
+  const words = straightenQuotes(input.value).match(/[\p{L}\p{N}'’-]+/gu) ?? []
+  if (words.length > RELATION_VALUE_MAX_WORDS) return true
+  let people = 0
+  let plural = false
+  for (const raw of words) {
+    const word = raw.toLowerCase().replace(/['’]s$/u, '')
+    if (VALUE_STOPWORDS.has(word) || NAME_TITLES.has(word)) continue
+    const noun = personWord(word)
+    if (noun.person) {
+      people += 1
+      plural ||= noun.plural
+    } else if (/^\p{Lu}/u.test(raw)) {
+      people += 1
+    } else {
+      return false
+    }
+  }
+  return people > 1 || plural
 }

@@ -21,8 +21,8 @@ import { buildSwitchoverModel } from './model'
 /**
  * The switch-over's dry run (F-16.15, plan P1 §6.1 step 2) and consent rows (step 3). Both read
  * only: the model (`buildSwitchoverModel`) is reported by name, and the rebuild that follows the
- * switch (P2a's *Rebuild memory*) is priced from the `reader.v3` and `verify.v3` rows (2026-10-14)
- * over this book's own scene sizes, on the models the author has set up.
+ * switch (P2a's *Rebuild memory*) is priced from the `reader.v5` and `verify.v4` rows (2026-10-14,
+ * the third live run) over this book's own scene sizes, on the models the author has set up.
  */
 
 /** Where the rebuild's requests would go and at what price. */
@@ -54,19 +54,22 @@ export const REBUILD_PAGE_TOKENS = READER_V3_PAGE_TOKENS
 export { REBUILD_FAST_CHECKS, REBUILD_STRONG_CHECKS }
 
 /**
- * The rebuild's price and time: each scene read whole once (`reader.v4:first`, one request per
+ * The rebuild's price and time: each scene read whole once (`reader.v5:first`, one request per
  * page of `REBUILD_PAGE_TOKENS` prose tokens, the row's other input on each page) and its claims
- * verified once per page (`verify.v3`), then the spot checks, and (F-16.27, P4 slice 3) the
- * contradiction sweep's `judgeCalls` (`judge.v1`, with the Contradiction check on); priced on the
- * configured fast and strong models (`estimateCost`), minutes from `CONVERSION_SECONDS_PER_SCENE`.
+ * verified once per page in two batches (`verify.v4` on the fast tier, `verify.v4:strong` for the
+ * open-ended slots on the strong one; plan `ReaderPrecision.md`), then the spot checks, and
+ * (F-16.27, P4 slice 3) the contradiction sweep's `judgeCalls` (`judge.v1`, with the
+ * Contradiction check on); priced on the configured fast and strong models (`estimateCost`),
+ * minutes from `CONVERSION_SECONDS_PER_SCENE`.
  */
 export function estimateRebuild(
   scenes: readonly number[],
   context: RebuildContext,
   judgeCalls = 0
 ): RebuildEstimate {
-  const reader = plannedRow('reader.v4:first')
-  const verify = plannedRow('verify.v3')
+  const reader = plannedRow('reader.v5:first')
+  const verify = plannedRow('verify.v4')
+  const verifyStrong = plannedRow('verify.v4:strong')
   const strong = plannedRow('verify.v2:pro')
   const spot = plannedRow('verify.v2:spot')
   const overhead = reader.typicalInTokens - REBUILD_PAGE_TOKENS
@@ -88,8 +91,10 @@ export function estimateRebuild(
     fastIn += judgeCalls * judge.typicalInTokens
     fastOut += judgeCalls * judge.typicalOutTokens
   }
-  const strongIn = checks * REBUILD_STRONG_CHECKS * strong.typicalInTokens
-  const strongOut = checks * REBUILD_STRONG_CHECKS * strong.typicalOutTokens
+  const strongIn =
+    pages * verifyStrong.typicalInTokens + checks * REBUILD_STRONG_CHECKS * strong.typicalInTokens
+  const strongOut =
+    pages * verifyStrong.typicalOutTokens + checks * REBUILD_STRONG_CHECKS * strong.typicalOutTokens
   const fast = estimateCost(
     { source: context.source, model: context.fastModel, pricing: context.pricing },
     fastIn,
@@ -102,7 +107,7 @@ export function estimateRebuild(
   )
   return {
     scenes: scenes.length,
-    requests: pages * 2 + checks * (REBUILD_FAST_CHECKS + REBUILD_STRONG_CHECKS) + judgeCalls,
+    requests: pages * 3 + checks * (REBUILD_FAST_CHECKS + REBUILD_STRONG_CHECKS) + judgeCalls,
     tokensIn: fastIn + strongIn,
     tokensOut: fastOut + strongOut,
     costUsd: fast.costUsd + strongCost.costUsd,

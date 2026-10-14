@@ -1,4 +1,4 @@
-import { estimateTokens } from '@shared/ai'
+import { estimateTokens, type Tier } from '@shared/ai'
 import { anchorFor, sceneSentences } from '@shared/memory/anchor'
 import {
   CARD_GIST_MAX_WORDS,
@@ -37,17 +37,25 @@ import { KNOWER_KINDS, keepsFrom, parseHow } from '@shared/memory/knows'
 import {
   ANTECEDENT_SENTENCES,
   absentValue,
+  actsOnSubject,
+  ageIsSpan,
   diesInQuote,
+  genderOfNames,
   groupHeadIn,
   locationStated,
   nameInSentence,
   possessedOnly,
+  pronounOfOtherGender,
+  pronounRivals,
   quotePointsAtSubject,
+  relationValue,
+  relativeValue,
   resolveSubject,
   sameQuote,
   valueOfKind,
   valueStated,
   wishWord,
+  type Gender,
   type LadderReject,
   type LadderSentence,
   type SubjectResult
@@ -81,13 +89,10 @@ import { cardDue, planPages, planWindows, type ReadPiece } from '@shared/memory/
 import { activeDraftId, currentDraftId } from '../../draft/draftStore'
 import { STEP_VALUE_MAX_WORDS } from '../../ai/prompts/reader.v2'
 import { readerV3PageTokens } from '../../ai/prompts/reader.v3'
-import {
-  READER_V4_PROMPT_VERSION,
-  buildReaderV4Prompt,
-  readerV4OutputCap
-} from '../../ai/prompts/reader.v4'
+import { readerV4OutputCap } from '../../ai/prompts/reader.v4'
+import { READER_V5_PROMPT_VERSION, buildReaderV5Prompt } from '../../ai/prompts/reader.v5'
 import { VERIFY_UNNAMED_MARK, verifyV2Batches, type VerifyV2Item } from '../../ai/prompts/verify.v2'
-import { VERIFY_V3_PROMPT_VERSION, buildVerifyV3Prompt } from '../../ai/prompts/verify.v3'
+import { VERIFY_V4_PROMPT_VERSION, buildVerifyV4Prompt } from '../../ai/prompts/verify.v4'
 import { cancelInflight } from '../../ai/inflight'
 import { runAiRequest, sha256, type AiRequestDeps, type AiRequestResult } from '../../ai/request'
 import { AiCancelledError, type AiMessage } from '../../ai/providers/types'
@@ -310,7 +315,12 @@ async function send(
     messages: AiMessage[]
     maxTokens: number
     childId: string
-    promptVersion: typeof READER_V4_PROMPT_VERSION | typeof VERIFY_V3_PROMPT_VERSION
+    promptVersion: typeof READER_V5_PROMPT_VERSION | typeof VERIFY_V4_PROMPT_VERSION
+    /**
+     * The tier asked for: fast, but the open-ended facts' checks (`STRONG_CHECK_SLOTS`) go strong
+     * (plan `ReaderPrecision.md`), through the request path's routing like any other request.
+     */
+    tier?: Tier
   }
 ): Promise<AiRequestResult> {
   stopIfCancelled(input.signal)
@@ -318,7 +328,7 @@ async function send(
   try {
     const result = await runAiRequest(deps.ai, {
       feature: request.feature,
-      tier: 'fast',
+      tier: request.tier ?? 'fast',
       messages: request.messages,
       maxTokens: request.maxTokens,
       json: true,
@@ -443,6 +453,20 @@ function statingOf(
 }
 
 /** A verify item, with what it checks. */
+/**
+ * The open-ended slots whose facts the checker reads on the strong tier (plan
+ * `ReaderPrecision.md`, after the third live run of 2026-10-14: about one in ten facts the fast
+ * checker passed there was wrong; decided by Claude, unconfirmed): who did what and what a value
+ * means is judgment there, not a colour or a place. Every other check stays on the fast tier.
+ */
+export const STRONG_CHECK_SLOTS: ReadonlySet<string> = new Set([
+  'history',
+  'traits',
+  'relation',
+  'kinship',
+  'role'
+])
+
 interface Check extends VerifyV2Item {
   piece: number
   /** The item, card field or present entry it checks. */
@@ -1214,7 +1238,7 @@ export async function runReading(
       const ask = async (
         parts: ReadPiece['paragraphs']
       ): Promise<{ answer: ReaderAnswer | null; cut: boolean }> => {
-        const prompt = buildReaderV4Prompt({
+        const prompt = buildReaderV5Prompt({
           ...base,
           paragraphs: parts.map((part) => ({ p: part.p, text: texts[part.p] ?? '' }))
         })
@@ -1226,7 +1250,7 @@ export async function runReading(
           messages: prompt.messages,
           maxTokens: prompt.maxTokens,
           childId: `${input.requestId}:r${requests}`,
-          promptVersion: READER_V4_PROMPT_VERSION
+          promptVersion: READER_V5_PROMPT_VERSION
         })
         return { answer: parseReaderAnswer(result.text), cut: result.finishReason === 'length' }
       }
@@ -1306,6 +1330,13 @@ export async function runReading(
       topicLabels(db)
     )
     const isCharacter = (id: string): boolean => scene.kindOf(id) === 'character'
+    /** A record's gender by a title its names open with (`genderOfNames`), else unknown. */
+    const genderOf = (id: string): Gender | null => {
+      const found = recordsById.get(id)
+      return found === undefined
+        ? null
+        : genderOfNames([found.name, ...found.aliases.map((alias) => alias.text)])
+    }
     const items: Item[] = []
     const waitingNames = new Set<string>()
     const texts = pieces.map((piece) => sentTexts(scene, piece))
@@ -1628,6 +1659,10 @@ export async function runReading(
         // The second live run's (2026-10-14, 19:20): an age that is no age, a feeling as an
         // object, an absence as a value.
         if (!valueOfKind(slot, item.value)) return refuse('valueKind', claim, who)
+        // The third live run's (2026-10-14, 21:35): a span of time is no age ("for forty years").
+        if (slot === 'age' && ageIsSpan(item.value, claim.q)) {
+          return refuse('valueKind', claim, who)
+        }
         if (absentValue(slot, item.value) !== null) return refuse('absence', claim, who)
         if (wishWord(slot, claim.mode, claim.q) !== null) return refuse('wish', claim, who)
         const subject = item.subject
@@ -1649,13 +1684,57 @@ export async function runReading(
           firstPerson
         })
         if (!pointed) return refuse('subject', claim, who)
+        const relative = subject.kind === 'antecedent' && subject.unnamed === item.recordId
+        // The third live run's (2026-10-14, 21:35; plan ReaderPrecision.md): a he, she or they
+        // that more than one person in reach could be (the green-eyes trap), a he or she of the
+        // other gender (Hobb's sugar plum as Johanna's), and someone else doing what the fact
+        // says ("he asked Miss Pell" as Clara's history).
+        if (subject.kind === 'antecedent' && !relative && item.recordId !== null) {
+          // A pronoun of the other gender rules the subject out whoever else is in reach.
+          const gender = genderOf(item.recordId)
+          if (pronounOfOtherGender({ quote: claim.q, names: calledBy, gender })) {
+            return refuse('subject', claim, who)
+          }
+          const rivals = pronounRivals({
+            slot,
+            quote: claim.q,
+            sentences: quote,
+            before,
+            isCharacter,
+            genderOf
+          })
+          if (rivals.length > 1) return refuse('ambiguous', claim, who)
+          // The one person the pronoun can mean is someone else ("she had been distinguished by
+          // his sisters" after "Mrs. Harrow had seen her eldest daughter", stored as Liesel's).
+          if (rivals.length === 1 && rivals[0] !== item.recordId) {
+            return refuse('subject', claim, who)
+          }
+        }
+        const others = quote.flatMap((sentence) =>
+          sentence.names
+            .filter(
+              (name) =>
+                !name.ambiguous && name.recordId !== item.recordId && isCharacter(name.recordId)
+            )
+            .map((name) => sentence.text.slice(name.start, name.end))
+        )
+        if (actsOnSubject({ slot, quote: claim.q, names: calledBy, others })) {
+          return refuse('actor', claim, who)
+        }
         // The second live run's: a relative's fact reached through the subject ("My father was
         // a clergyman" is no occupation of the speaker's; never asked for a subject that is the
         // relative itself, "his wife"), a location not stated as where they are or go, a state
-        // at their death, and one fact proposed twice.
-        const relative = subject.kind === 'antecedent' && subject.unnamed === item.recordId
+        // at their death, and one fact proposed twice. The third's: a kinship value that is the
+        // relative ("his second daughter", "The Captain's father"), and a relation with nobody
+        // to relate to or no relation in it ("she and her sisters").
         if (!relative && possessedOnly({ slot, quote: claim.q, names: calledBy, firstPerson })) {
           return refuse('possessed', claim, who)
+        }
+        if (relativeValue({ slot, value: item.value, quote: claim.q, names: calledBy })) {
+          return refuse('possessed', claim, who)
+        }
+        if (relationValue({ slot, value: item.value, objectId })) {
+          return refuse('object', claim, who)
         }
         if (
           slot === 'location' &&
@@ -2139,15 +2218,19 @@ export async function runReading(
     const verdicts = new Map<number, VerifyVerdict>()
     let batchNo = 0
     /** Sends one batch and keeps its verdicts; true when the reply was cut off at its cap. */
-    const runBatch = async (batch: readonly (Check & { at: number })[]): Promise<boolean> => {
+    const runBatch = async (
+      batch: readonly (Check & { at: number })[],
+      tier: Tier
+    ): Promise<boolean> => {
       batchNo += 1
-      const prompt = buildVerifyV3Prompt({ items: batch })
+      const prompt = buildVerifyV4Prompt({ items: batch })
       const result = await send(deps, input, spend, inFlight, {
         feature: 'verify',
         messages: prompt.messages,
         maxTokens: prompt.maxTokens,
         childId: `${input.requestId}:v${batchNo}`,
-        promptVersion: VERIFY_V3_PROMPT_VERSION
+        promptVersion: VERIFY_V4_PROMPT_VERSION,
+        tier
       })
       const answered = parseVerifyAnswer(result.text)
       for (const [i, entry] of batch.entries()) {
@@ -2156,19 +2239,29 @@ export async function runReading(
       }
       return result.finishReason === 'length'
     }
+    // Plan ReaderPrecision.md (third live run of 2026-10-14): the open-ended facts' checks go on
+    // the strong tier in batches of their own, everything else on the fast one.
+    const strongCheck = (check: Check): boolean => {
+      if (check.target.kind !== 'item') return false
+      const item = items[check.target.index]
+      return item?.kind === 'fact' && STRONG_CHECK_SLOTS.has(item.slot)
+    }
     for (let piece = 0; piece < pieces.length; piece += 1) {
       const own = checks
         .map((check, index) => ({ ...check, at: index }))
         .filter((entry) => entry.piece === piece)
-      for (const batch of verifyV2Batches(own)) {
-        if (!(await runBatch(batch))) continue
-        yields.cut += 1
-        // The items a cut-off reply did not reach are asked once more.
-        const missing = batch.filter((entry) => !verdicts.has(entry.at))
-        for (const again of verifyV2Batches(missing)) {
-          if (!(await runBatch(again))) continue
+      for (const tier of ['fast', 'strong'] as const) {
+        const ofTier = own.filter((entry) => strongCheck(entry) === (tier === 'strong'))
+        for (const batch of verifyV2Batches(ofTier)) {
+          if (!(await runBatch(batch, tier))) continue
           yields.cut += 1
-          lost += 1
+          // The items a cut-off reply did not reach are asked once more.
+          const missing = batch.filter((entry) => !verdicts.has(entry.at))
+          for (const again of verifyV2Batches(missing)) {
+            if (!(await runBatch(again, tier))) continue
+            yields.cut += 1
+            lost += 1
+          }
         }
       }
     }
@@ -2643,8 +2736,8 @@ export async function runReading(
           purpose,
           pages: requests,
           paras: ranges([...readParas]),
-          promptVersion: READER_V4_PROMPT_VERSION,
-          verifyVersion: spend.verifySent ? VERIFY_V3_PROMPT_VERSION : null,
+          promptVersion: READER_V5_PROMPT_VERSION,
+          verifyVersion: spend.verifySent ? VERIFY_V4_PROMPT_VERSION : null,
           model: spend.model,
           tokensIn: spend.tokensIn,
           tokensOut: spend.tokensOut,

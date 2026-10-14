@@ -75,7 +75,8 @@ import {
   MEMORY_EVAL_CASES,
   MEMORY_V2_EVAL_CASES,
   MEMORY_V3_EVAL_CASES,
-  MEMORY_V4_EVAL_CASES
+  MEMORY_V4_EVAL_CASES,
+  MEMORY_V5_EVAL_CASES
 } from './memoryFixtures'
 import { citeEvalCases } from './citeFixtures'
 import { navigatorEvalCases } from './navigatorFixtures'
@@ -6790,5 +6791,8 @@ export const EVAL_CASES: EvalCase[] = [
   // F-16.17 (2026-10-14): reader.v3 and verify.v3, after the live planted-error run.
   ...MEMORY_V3_EVAL_CASES,
   // F-16.17 (the second live run of 2026-10-14): reader.v4, the slot list first and a larger cap.
-  ...MEMORY_V4_EVAL_CASES
+  ...MEMORY_V4_EVAL_CASES,
+  // F-16.17 (the third live run of 2026-10-14): reader.v5 ("src", the open-ended value rules) and
+  // verify.v4 (the open-ended rules, sent on the strong tier).
+  ...MEMORY_V5_EVAL_CASES
 ]

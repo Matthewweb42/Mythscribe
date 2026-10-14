@@ -121,7 +121,10 @@ const RawClaim = z.object({
   q: Text,
   // A missing voice or mode reads as narration, now: literal proof still checks the sentence for
   // quotation marks and markers, and the checker confirms both for everything else.
-  voice: ClaimVoice.nullish().transform((value) => value ?? 'narration'),
+  voice: ClaimVoice.nullish(),
+  // `reader.v5` names the field "src" (the third live run of 2026-10-14: v4 wrote its field's name
+  // "voice" as a slot 18 times); either is read, "src" first.
+  src: ClaimVoice.nullish(),
   sp: OptionalId,
   mode: ClaimMode.nullish().transform((value) => value ?? 'now'),
   o: OptionalId,
@@ -137,9 +140,9 @@ const RawClaim = z.object({
 function claimOf(raw: unknown): ReaderClaim | null {
   const parsed = RawClaim.safeParse(raw)
   if (!parsed.success) return null
-  const { v, ...rest } = parsed.data
+  const { v, src, voice, ...rest } = parsed.data
   const value = v ?? (rest.s === 'knows' ? rest.how : null)
-  return value === null ? null : { ...rest, v: value }
+  return value === null ? null : { ...rest, voice: src ?? voice ?? 'narration', v: value }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

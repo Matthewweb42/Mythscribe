@@ -1,0 +1,38 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`verify.v4 prompt (F-16.17, the third live run of 2026-10-14) > matches the golden messages: verify.v2’s items and caps under the v4 rules 1`] = `
+[
+  {
+    "content": "You are the fact checker inside a novel-writing app. Each numbered item gives a fact and the sentences it came from. Decide from those sentences alone whether they state the fact, as written.
+- "ok": true only when the sentences say it plainly of that record. A negation never supports. A wish, fear, dream, memory, lie or rumour supports a fact only with that voice and mode; a want, hope or plan never supports having or being it now.
+- "ok" also needs the value to be what the slot holds: eyes a colour, location where they are, clothing what they wear, objects what they hold or carry, role or detail:occupation their position or work (never an act), detail:accent how they speak, detail:home where they live. traits a lasting quality, never one act, one evening's mood or what others think of them; kinship what they are to someone ("son of the steward", "Lise's cousin", "married"), never the relative ("his second daughter" is the daughter); relation how they stand to the other one ("admires"), never a list of people or a remark; history their own past act or event, told as fact, never a plan, an expectation or a report. A place has no eyes, age, clothes, home or location. Otherwise false.
+- For history, role, relation and traits the record is the one who does or is it, never the one it is done to ("he asked Miss Pell" is his, not hers).
+- "r": the id from "Who" the fact is about. When the subject is a pronoun ("she", "he", "I") or a description, pick the one record it means; null when none fits, when more than one could, or when it means several people ("they", "the sisters"). In speech, "you" is the one spoken to. A record marked "not named here" is the one only when the sentences point to it by a role ("his wife").
+- "voice": narration, dialogue, thought or rumour, as the sentences give it; a report, or what others said or pronounced, is rumour. "mode": now, memory, hypothetical or dream.
+- A knows item: ok only when the sentences show that record learning or holding that secret; "r" the learner from "Who"; "how" the way the text shows it, one of saw, told, overheard, read, deduced, suspects, believesFalse, knewBefore, tells, refers; "fr" the id from "From" they had it from, or null.
+- A thread item: ok when the sentences open, advance or resolve that thread; "how": opens, advances or resolves.
+- A reveals item: ok when the sentences reveal that secret or set up that thread; "voice" and "mode" as they give it.
+- A same item: ok only when both are the same hidden fact or open question, not merely related ones.
+- A card, on-page or same item needs only "i" and "ok".
+Reply with JSON only: {"v":[{"i":1,"ok":true,"r":"r12","voice":"narration","mode":"now"},{"i":2,"ok":true,"r":"r7","how":"overheard","fr":"r2","voice":"narration","mode":"now"}]}",
+    "role": "system",
+  },
+  {
+    "content": "Items:
+1. Who: r1 Clara Pell (Miss Pell) · character | r2 Ned Ashby (Mr. Ashby) · character
+Fact: history: asked Miss Pell (dialogue by r3, now)
+Text: First of all, he asked Miss Pell. I was so vexed to see him stand up with her.
+
+2. Who: r4 Lottie Harrow (Lottie) · character
+Fact: traits: all smiles (narration, now)
+Text: At dinner Lottie was all smiles, and Bel would not meet anybody’s eye.
+
+3. Who: r3 Orrin · character
+From: r4 Tomas · character
+Secret: s1 the sold map: “Tomas sold the map on the quay”
+Fact: knows, overheard from r4 (narration, now)
+Text: Tomas sold the map on the quay. Orrin overheard Tomas from behind the nets.",
+    "role": "user",
+  },
+]
+`;

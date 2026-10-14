@@ -2105,5 +2105,957 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
   ],
   // P4 (F-16.30): readers learn of Anne's pearls in h15 and no one in the book does; every other
   // secret has a learner.
-  secretsNobodyLearns: ['secret-anne-pearls']
+  secretsNobodyLearns: ['secret-anne-pearls'],
+  // F-16.17 (plan ReaderPrecision.md step 1, 2026-10-14): every fact the third live planted-error
+  // run (21:35) stored on a sentence no claim label covers, judged from the text alone and strictly
+  // (the quote must state the fact of that named person; a trait is a lasting quality, never one
+  // act or one evening's mood; a rumour or someone's opinion stored as narration is wrong). `call`
+  // marks the judgment calls listed for the author in QUESTIONS.md.
+  storedVerdicts: [
+    {
+      scene: 's02',
+      p: 0,
+      record: 'harrow-mr',
+      slot: 'history',
+      value: 'waited on Mr. Ashby',
+      quote: 'Mr. Harrow was among the earliest of those who waited on Mr. Ashby.',
+      right: true,
+      reason: 'Named, narration, a past act of his.'
+    },
+    {
+      scene: 's02',
+      p: 0,
+      record: 'harrow-mr',
+      slot: 'kinship',
+      value: 'second daughter',
+      quote: 'his second daughter',
+      right: false,
+      reason: 'The daughter is the relative: "second daughter" is Liesel, not what Mr. Harrow is.'
+    },
+    {
+      scene: 's03',
+      p: 3,
+      record: 'harrow-mrs',
+      slot: 'traits',
+      value: 'quite disconcerted',
+      quote: 'Mrs. Harrow was quite disconcerted.',
+      right: false,
+      call: true,
+      reason: 'A passing state at one letter, not a lasting quality.'
+    },
+    {
+      scene: 's03',
+      p: 3,
+      record: 'thornmere',
+      slot: 'location',
+      value: 'Thornmere',
+      quote: 'never settled at Thornmere as he ought to be',
+      right: false,
+      reason: 'A place as the subject of a location; the sentence is about Mr. Ashby.'
+    },
+    {
+      scene: 's03',
+      p: 3,
+      record: 'ashby',
+      slot: 'history',
+      value: 'brought only six with him from Vellmouth, his five sisters and a cousin',
+      quote:
+        'instead of twelve, he had brought only six with him from Vellmouth, his five sisters and a cousin',
+      right: false,
+      call: true,
+      reason:
+        'A report the girls heard ("by hearing that"), not narration, and the next sentence says five came.'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'ashby',
+      slot: 'traits',
+      value: 'pleasant countenance, and easy, unaffected manners',
+      quote: 'he had a pleasant countenance, and easy, unaffected manners',
+      right: true,
+      reason: '"he" is Mr. Ashby, named at the start of the sentence.'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'lowther-mr',
+      slot: 'relation',
+      value: 'brother-in-law',
+      quote: 'His brother-in-law, Mr. Lowther',
+      right: true,
+      call: true,
+      reason:
+        "Mr. Lowther is named as Mr. Ashby's brother-in-law (the stored object is not in the report)."
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'lowther-mr',
+      slot: 'traits',
+      value: 'merely looked the gentleman',
+      quote: 'merely looked the gentleman',
+      right: true,
+      call: true,
+      reason: 'Narration of how he is; the quote leaves his name out but the clause is his.'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'varrow',
+      slot: 'detail:height',
+      value: 'fine, tall person',
+      quote: 'his fine, tall person',
+      right: true,
+      reason: 'Narration: his tall person.'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'varrow',
+      slot: 'detail:wealth',
+      value: 'ten thousand a year',
+      quote:
+        'the report, which was in general circulation within five minutes after his entrance, of his having ten thousand a year',
+      right: false,
+      call: true,
+      reason: 'A report in circulation, stored as narration: it should be a rumour.'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'varrow',
+      slot: 'detail:build',
+      value: 'fine figure of a man',
+      quote: 'a fine figure of a man',
+      right: false,
+      call: true,
+      reason:
+        'What the gentlemen pronounced, an opinion, stored as narration; the quote does not name him.'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'varrow',
+      slot: 'traits',
+      value: 'above his company',
+      quote: 'above his company',
+      right: true,
+      call: true,
+      reason: 'Narration says he was discovered to be above his company.'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'varrow',
+      slot: 'detail:home',
+      value: 'Elsdale',
+      quote: 'not all his large estate in Elsdale',
+      right: false,
+      call: true,
+      reason: 'An estate in Elsdale is what he owns; the text never says he lives there.'
+    },
+    {
+      scene: 's03',
+      p: 5,
+      record: 'ashby',
+      slot: 'traits',
+      value: 'lively and unreserved',
+      quote: 'he was lively and unreserved',
+      right: true,
+      reason: '"he" is Mr. Ashby, named at the start of the sentence.'
+    },
+    {
+      scene: 's03',
+      p: 5,
+      record: 'ashby',
+      slot: 'history',
+      value: 'talked of giving one himself at Thornmere',
+      quote: 'talked of giving one himself at Thornmere',
+      right: true,
+      reason: 'His act, in his sentence.'
+    },
+    {
+      scene: 's03',
+      p: 5,
+      record: 'varrow',
+      slot: 'history',
+      value: 'speaking occasionally to one of his own party',
+      quote: 'speaking occasionally to one of his own party',
+      right: true,
+      reason: 'His act, in his sentence.'
+    },
+    {
+      scene: 's03',
+      p: 5,
+      record: 'harrow-mrs',
+      slot: 'traits',
+      value: 'most violent against him',
+      quote: 'Amongst the most violent against him was Mrs. Harrow',
+      right: false,
+      call: true,
+      reason: 'Her feeling towards Mr. Varrow: a relation, not a lasting quality of hers.'
+    },
+    {
+      scene: 's03',
+      p: 5,
+      record: 'harrow-mrs',
+      slot: 'traits',
+      value: 'dislike of his general behaviour sharpened into particular resentment',
+      quote: 'whose dislike of his general behaviour was sharpened into particular resentment',
+      right: false,
+      call: true,
+      reason: 'Her feeling towards Mr. Varrow: a relation, not a lasting quality of hers.'
+    },
+    {
+      scene: 's03',
+      p: 14,
+      record: 'harrow-mrs',
+      slot: 'kinship',
+      value: 'her eldest daughter',
+      quote: 'her eldest daughter',
+      right: false,
+      reason: 'The daughter is the relative (Johanna), not what Mrs. Harrow is.'
+    },
+    {
+      scene: 's03',
+      p: 14,
+      record: 'ashby',
+      slot: 'history',
+      value: 'Mr. Ashby had danced with her twice',
+      quote: 'Mr. Ashby had danced with her twice',
+      right: true,
+      reason: 'Named, narration, his act.'
+    },
+    {
+      scene: 's03',
+      p: 14,
+      record: 'liesel',
+      slot: 'history',
+      value: 'she had been distinguished by his sisters',
+      quote: 'she had been distinguished by his sisters',
+      right: false,
+      reason: 'Wrong person: "she" is the eldest daughter, Johanna.'
+    },
+    {
+      scene: 's03',
+      p: 16,
+      record: 'johanna',
+      slot: 'traits',
+      value: 'admired',
+      quote: 'Johanna was so admired',
+      right: false,
+      call: true,
+      reason: "One evening in her mother's words, not a lasting quality."
+    },
+    {
+      scene: 's03',
+      p: 16,
+      record: 'ashby',
+      slot: 'relation',
+      value: 'thought her quite beautiful',
+      quote: 'Mr. Ashby thought her quite beautiful',
+      right: true,
+      reason: 'Mrs. Harrow says it (stored as dialogue); "her" is Johanna.'
+    },
+    {
+      scene: 's03',
+      p: 16,
+      record: 'clara',
+      slot: 'history',
+      value: 'asked Miss Pell',
+      quote: 'he asked Miss Pell',
+      right: false,
+      reason: 'Wrong person: he (Mr. Ashby) asked; Miss Pell only was asked.'
+    },
+    {
+      scene: 's03',
+      p: 16,
+      record: 'johanna',
+      slot: 'history',
+      value: 'asked her for the two next',
+      quote: 'asked her for the two next',
+      right: false,
+      reason: 'Wrong person: Mr. Ashby asked her.'
+    },
+    {
+      scene: 's03',
+      p: 18,
+      record: 'liesel',
+      slot: 'relation',
+      value: 'does not lose much by not suiting his fancy',
+      quote: 'Lise does not lose much by not suiting his fancy',
+      right: false,
+      call: true,
+      reason: "Mrs. Harrow's opinion, no relation of Liesel's."
+    },
+    {
+      scene: 's04',
+      p: 0,
+      record: 'johanna',
+      slot: 'traits',
+      value: 'pleasing manners',
+      quote: "Miss Harrow's pleasing manners",
+      right: true,
+      reason: 'Named, narration, a lasting quality.'
+    },
+    {
+      scene: 's04',
+      p: 1,
+      record: 'ashby',
+      slot: 'relation',
+      value: 'did admire Johanna',
+      quote: 'Mr. Ashby did admire Johanna',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 's04',
+      p: 4,
+      record: 'varrow',
+      slot: 'traits',
+      value: 'critical',
+      quote:
+        'he had detected with a critical eye more than one failure of perfect symmetry in her form',
+      right: false,
+      call: true,
+      reason: 'How he looked at her once, not a lasting quality.'
+    },
+    {
+      scene: 's04',
+      p: 11,
+      record: 'ashby',
+      slot: 'role',
+      value: 'join the group',
+      quote: 'on seeing Mr. Ashby join the group',
+      right: false,
+      reason: 'An act, no role.'
+    },
+    {
+      scene: 's05',
+      p: 15,
+      record: 'liesel',
+      slot: 'relation',
+      value: 'sisters',
+      quote: 'she and her sisters',
+      right: false,
+      reason: 'No relation to anyone named: a junk relation line.'
+    },
+    {
+      scene: 's05',
+      p: 18,
+      record: 'liesel',
+      slot: 'relation',
+      value: 'her sister and Mr. Ashby',
+      quote: 'her sister and Mr. Ashby',
+      right: false,
+      reason: 'The people Sir Walter glances at, no relation of hers.'
+    },
+    {
+      scene: 's05',
+      p: 20,
+      record: 'liesel',
+      slot: 'relation',
+      value: 'his guilt and his descent appear, by your account, to be the same',
+      quote: 'His guilt and his descent appear, by your account, to be the same',
+      right: false,
+      reason: 'A remark, no relation.'
+    },
+    {
+      scene: 's05',
+      p: 21,
+      record: 'varrow',
+      slot: 'history',
+      value:
+        'Mr. Ashby does not know the whole of his history, and is quite ignorant of the circumstances which have principally offended Mr. Varrow',
+      quote:
+        'Mr. Ashby does not know the whole of his history, and is quite ignorant of the circumstances which have principally offended Mr. Varrow',
+      right: false,
+      reason:
+        "Johanna's speech about Mr. Ashby's ignorance, stored as narration and as Mr. Varrow's history."
+    },
+    {
+      scene: 's05',
+      p: 22,
+      record: 'pruett',
+      slot: 'traits',
+      value: 'exultation',
+      quote:
+        'told her with great exultation that he had just been so fortunate as to make an important discovery',
+      right: false,
+      call: true,
+      reason: "One moment's feeling, not a lasting quality."
+    },
+    {
+      scene: 's05',
+      p: 24,
+      record: 'johanna',
+      slot: 'relation',
+      value: 'to be married to Mr. Ashby',
+      quote: 'Johanna would soon be married to Mr. Ashby',
+      right: false,
+      reason: "Mrs. Harrow's expectation, a hypothetical, stored as now."
+    },
+    {
+      scene: 'h01',
+      p: 0,
+      record: 'liesel',
+      slot: 'location',
+      value: 'Wexley',
+      quote:
+        'Clara Pell called at Wexley on the Thursday, and found Lise alone in the morning room',
+      right: true,
+      call: true,
+      reason: 'Clara found Lise in the morning room at Wexley.'
+    },
+    {
+      scene: 'h01',
+      p: 2,
+      record: 'harrow-mrs',
+      slot: 'location',
+      value: 'Callow Cross',
+      quote: 'Mrs. Harrow had taken Bel and Lottie to Callow Cross',
+      right: true,
+      reason: 'Named, narration, she went there.'
+    },
+    {
+      scene: 'h01',
+      p: 2,
+      record: 'bel',
+      slot: 'location',
+      value: 'Callow Cross',
+      quote: 'Mrs. Harrow had taken Bel and Lottie to Callow Cross',
+      right: true,
+      reason: 'Named, narration, taken there.'
+    },
+    {
+      scene: 'h01',
+      p: 2,
+      record: 'lottie',
+      slot: 'location',
+      value: 'Callow Cross',
+      quote: 'Mrs. Harrow had taken Bel and Lottie to Callow Cross',
+      right: true,
+      reason: 'Named, narration, taken there.'
+    },
+    {
+      scene: 'h01',
+      p: 7,
+      record: 'harrow-mrs',
+      slot: 'history',
+      value: 'had once laughed at a ball until she cried',
+      quote: 'how Mrs. Harrow had once laughed at a ball until she cried',
+      right: true,
+      call: true,
+      reason:
+        'Her past act, as Lise remembers it (stored as now; for history the remembering changes nothing).'
+    },
+    {
+      scene: 'h03',
+      p: 3,
+      record: 'hobb',
+      slot: 'age',
+      value: 'forty years',
+      quote: 'Old Hobb had kept the lodge gate at Thornmere for forty years',
+      right: false,
+      reason: 'How long he kept the gate, not his age.'
+    },
+    {
+      scene: 'h03',
+      p: 6,
+      record: 'johanna',
+      slot: 'history',
+      value:
+        'When they were children he had kept a sugar plum in his coat for whichever of them reached the gate first',
+      quote:
+        'When they were children he had kept a sugar plum in his coat for whichever of them reached the gate first',
+      right: false,
+      reason: 'Wrong person: "he" is Hobb.'
+    },
+    {
+      scene: 'h03',
+      p: 8,
+      record: 'harrow-mr',
+      slot: 'history',
+      value: 'would ride over to Thornmere himself in the afternoon',
+      quote: 'he would ride over to Thornmere himself in the afternoon',
+      right: false,
+      call: true,
+      reason: 'A plan he states, no past event.'
+    },
+    {
+      scene: 'h04',
+      p: 2,
+      record: 'lottie',
+      slot: 'kinship',
+      value: 'to marry Mr. Dunmore',
+      quote: 'Lottie is to marry Mr. Dunmore',
+      right: false,
+      reason: 'Bel says it (stored as narration), and an engagement is no kinship yet.'
+    },
+    {
+      scene: 'h05',
+      p: 0,
+      record: 'liesel',
+      slot: 'location',
+      value: 'the back stairs',
+      quote: 'Lise came up the back stairs',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h05',
+      p: 6,
+      record: 'lottie',
+      slot: 'age',
+      value: 'not yet sixteen',
+      quote: 'Lottie, who was not yet sixteen',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h05',
+      p: 8,
+      record: 'lottie',
+      slot: 'traits',
+      value: 'all smiles',
+      quote: 'At dinner Lottie was all smiles',
+      right: false,
+      call: true,
+      reason: "One dinner's mood, not a lasting quality."
+    },
+    {
+      scene: 'h07',
+      p: 9,
+      record: 'captain',
+      slot: 'location',
+      value: 'the bridge',
+      quote: 'On the way home they passed the Captain on the bridge.',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h09',
+      p: 0,
+      record: 'liesel',
+      slot: 'history',
+      value: 'Three winters later, Lise came back to Thornmere as a guest',
+      quote: 'Three winters later, Lise came back to Thornmere as a guest',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h09',
+      p: 0,
+      record: 'liesel',
+      slot: 'location',
+      value: 'Thornmere',
+      quote: 'Lise came back to Thornmere as a guest',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h09',
+      p: 0,
+      record: 'liesel',
+      slot: 'role',
+      value: 'guest',
+      quote: 'as a guest',
+      right: true,
+      call: true,
+      reason: 'Her position on this visit, in her sentence (the quote leaves her name out).'
+    },
+    {
+      scene: 'h09',
+      p: 1,
+      record: 'hobb',
+      slot: 'role',
+      value: 'opened the lodge gate',
+      quote: 'Hobb opened the lodge gate for them',
+      right: false,
+      call: true,
+      reason: 'An act, no role.'
+    },
+    {
+      scene: 'h09',
+      p: 2,
+      record: 'varrow',
+      slot: 'location',
+      value: 'the steps',
+      quote: 'Mr. Varrow was waiting on the steps',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h09',
+      p: 3,
+      record: 'lottie',
+      slot: 'kinship',
+      value: 'married',
+      quote: 'Lottie was eighteen now, and married',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h09',
+      p: 4,
+      record: 'johanna',
+      slot: 'kinship',
+      value: 'married',
+      quote: 'Johanna and Mr. Ashby had been married two years',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h09',
+      p: 4,
+      record: 'johanna',
+      slot: 'history',
+      value: 'Johanna and Mr. Ashby had been married two years',
+      quote: 'Johanna and Mr. Ashby had been married two years',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h09',
+      p: 4,
+      record: 'ashby',
+      slot: 'kinship',
+      value: 'married',
+      quote: 'Johanna and Mr. Ashby had been married two years',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h09',
+      p: 4,
+      record: 'ashby',
+      slot: 'history',
+      value: 'had been married two years',
+      quote: 'Johanna and Mr. Ashby had been married two years',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h09',
+      p: 4,
+      record: 'ashby',
+      slot: 'detail:build',
+      value: 'grown a little stouter',
+      quote: 'Ashby had grown a little stouter',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h09',
+      p: 5,
+      record: 'ashby',
+      slot: 'location',
+      value: 'the hall',
+      quote: 'handing her into the hall',
+      right: false,
+      call: true,
+      reason: 'She is handed into the hall; the quote does not put him there.'
+    },
+    {
+      scene: 'h13',
+      p: 0,
+      record: 'dunmore',
+      slot: 'traits',
+      value: 'a married man now and very pleased with himself',
+      quote: 'Mr. Dunmore came with it, a married man now and very pleased with himself',
+      right: true,
+      call: true,
+      reason: 'True of him, though "a married man" is kinship rather than a trait.'
+    },
+    {
+      scene: 'h13',
+      p: 3,
+      record: 'lottie',
+      slot: 'history',
+      value: 'written to a friend at Gullhaven',
+      quote: 'Lottie had written to a friend at Gullhaven',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h13',
+      p: 6,
+      record: 'lottie',
+      slot: 'traits',
+      value: 'very happy now on most days of the week',
+      quote: 'Lottie was very happy now, which was true on most days of the week',
+      right: true,
+      call: true,
+      reason: 'Lise says it and the narration confirms it for most days.'
+    },
+    {
+      scene: 'h13',
+      p: 10,
+      record: 'liesel',
+      slot: 'location',
+      value: 'the doorway',
+      quote: 'Lise waited in the doorway',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h13',
+      p: 11,
+      record: 'ashby',
+      slot: 'history',
+      value: 'had once taken rooms',
+      quote: 'the house on the green where Mr. Ashby had once taken rooms',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h13',
+      p: 11,
+      record: 'johanna',
+      slot: 'history',
+      value:
+        'had come down to breakfast pale from a sleepless night to say that he was coming back to Thornmere at last',
+      quote:
+        'Johanna had come down to breakfast pale from a sleepless night to say that he was coming back to Thornmere at last',
+      right: true,
+      reason: "Named, Lise's memory, stored as memory."
+    },
+    {
+      scene: 'h14',
+      p: 0,
+      record: 'captain',
+      slot: 'alive',
+      value: 'alive',
+      quote: 'the Captain came to dine at Wexley',
+      right: true,
+      reason: 'He comes to dine.'
+    },
+    {
+      scene: 'h14',
+      p: 0,
+      record: 'captain',
+      slot: 'history',
+      value: 'came to dine at Wexley',
+      quote: 'the Captain came to dine at Wexley',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h14',
+      p: 0,
+      record: 'captain',
+      slot: 'location',
+      value: 'Wexley',
+      quote: 'the Captain came to dine at Wexley',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h14',
+      p: 1,
+      record: 'captain',
+      slot: 'history',
+      value: 'walked the whole way and arrived with his boots in his hand',
+      quote: 'he walked the whole way and arrived with his boots in his hand',
+      right: true,
+      reason: '"he" is the Captain, the only man in reach.'
+    },
+    {
+      scene: 'h14',
+      p: 1,
+      record: 'captain',
+      slot: 'clothing',
+      value: 'his boots in his hand',
+      quote: 'he walked the whole way and arrived with his boots in his hand',
+      right: false,
+      call: true,
+      reason: 'Boots carried in his hand are not worn: objects, not clothing.'
+    },
+    {
+      scene: 'h14',
+      p: 3,
+      record: 'captain',
+      slot: 'history',
+      value: 'left the army at last and was a farmer now',
+      quote: 'He had left the army at last and was a farmer now',
+      right: true,
+      reason: '"He" is the Captain.'
+    },
+    {
+      scene: 'h14',
+      p: 4,
+      record: 'harrow-mr',
+      slot: 'traits',
+      value: 'noticed nothing at all',
+      quote:
+        'Mr. Harrow sat at the head of the table and talked to the Captain about the price of corn, and noticed nothing at all.',
+      right: false,
+      call: true,
+      reason: 'What he did that evening, not a lasting quality.'
+    },
+    {
+      scene: 'h14',
+      p: 4,
+      record: 'harrow-mr',
+      slot: 'location',
+      value: 'at the head of the table',
+      quote: 'Mr. Harrow sat at the head of the table',
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h14',
+      p: 5,
+      record: 'varrow',
+      slot: 'history',
+      value: 'his name came up',
+      quote: "when Mr. Varrow's name came up",
+      right: false,
+      reason: 'Nothing he did or was: his name mentioned by others.'
+    },
+    {
+      scene: 'h14',
+      p: 5,
+      record: 'liesel',
+      slot: 'traits',
+      value: 'noticed a great deal',
+      quote: 'Lise noticed a great deal.',
+      right: false,
+      call: true,
+      reason: 'What she did that evening, not a lasting quality.'
+    },
+    {
+      scene: 'h14',
+      p: 5,
+      record: 'captain',
+      slot: 'objects',
+      value: 'his glass',
+      quote: 'he set his glass down',
+      right: true,
+      reason: '"he" is the Captain; a glass he holds.'
+    },
+    {
+      scene: 'h14',
+      p: 7,
+      record: 'liesel',
+      slot: 'traits',
+      value: 'put it together',
+      quote: 'she put it together',
+      right: false,
+      call: true,
+      reason: 'One act, not a lasting quality.'
+    },
+    {
+      scene: 'h14',
+      p: 7,
+      record: 'captain',
+      slot: 'traits',
+      value: 'owed Mr. Varrow money',
+      quote: 'The Captain owed Mr. Varrow money',
+      right: false,
+      call: true,
+      reason: 'A debt (a secret and a relation), not a quality of his.'
+    },
+    {
+      scene: 'h14',
+      p: 8,
+      record: 'johanna',
+      slot: 'traits',
+      value: 'missed very little',
+      quote: 'Johanna, who missed very little',
+      right: true,
+      reason: 'Named, narration, a lasting quality.'
+    },
+    {
+      scene: 'h14',
+      p: 11,
+      record: 'lottie',
+      slot: 'history',
+      value: 'expecting her first child',
+      quote: 'expecting her first child',
+      right: true,
+      reason: 'In her sentence ("Lottie, who was nineteen and expecting her first child").'
+    },
+    {
+      scene: 'h14',
+      p: 12,
+      record: 'captain',
+      slot: 'role',
+      value: 'the Captain',
+      quote: 'the Captain took his leave',
+      right: false,
+      reason: 'His name, not a role: he has left the army (h14 ¶3).'
+    },
+    {
+      scene: 'h15',
+      p: 0,
+      record: 'anne',
+      slot: 'detail:occupation',
+      value: 'sitting for her portrait',
+      quote: 'sitting for her portrait',
+      right: false,
+      reason: 'What she is doing that summer, not her occupation.'
+    },
+    {
+      scene: 'h15',
+      p: 6,
+      record: 'fenwick-father',
+      slot: 'history',
+      value: 'laughed at her first portrait',
+      quote: 'laughed at her first portrait',
+      right: true,
+      reason: 'His past act, as Anne remembers it.'
+    },
+    {
+      scene: 'h15',
+      p: 7,
+      record: 'fenwick-father',
+      slot: 'history',
+      value: 'drowned off Vellmouth the winter before',
+      quote: 'Mr. Fenwick had drowned off Vellmouth the winter before',
+      right: false,
+      reason: '"It was said in the village": a rumour, stored as narration.'
+    },
+    {
+      scene: 'h15',
+      p: 15,
+      record: 'captain',
+      slot: 'kinship',
+      value: 'father',
+      quote: "The Captain's father was a merchant in Vellmouth",
+      right: false,
+      reason: 'The father is the relative: "father" is not what the Captain is.'
+    },
+    {
+      scene: 'h15',
+      p: 15,
+      record: 'captain',
+      slot: 'objects',
+      value: 'a warehouse full of tea',
+      quote: 'had left him a warehouse full of tea',
+      right: true,
+      reason: 'Left to him: a thing he owns.'
+    },
+    {
+      scene: 'h15',
+      p: 18,
+      record: 'anne',
+      slot: 'history',
+      value: "had sold her mother's pearls at Vellmouth to pay the painter",
+      quote: "Anne had sold her mother's pearls at Vellmouth to pay the painter",
+      right: true,
+      reason: 'Named, narration.'
+    },
+    {
+      scene: 'h16',
+      p: 1,
+      record: 'hobb',
+      slot: 'traits',
+      value: 'stood at the lodge gate in the rain and lifted his hat to the carriage',
+      quote: 'stood at the lodge gate in the rain and lifted his hat to the carriage',
+      right: false,
+      reason: 'One act, not a lasting quality.'
+    }
+  ]
 }

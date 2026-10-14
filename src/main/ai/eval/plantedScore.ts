@@ -20,15 +20,130 @@ import {
  * reading by the same numbers. Test support only: nothing in the app imports it.
  */
 
-/** The live run's pass bars (decided by Claude, unconfirmed; plan P2a §2.7). */
+/**
+ * The live run's pass bars (plan P2a §2.7, decided by Claude, unconfirmed; plan
+ * `ReaderPrecision.md`, 2026-10-14: stored-fact precision is the author's bar, confirmed by her;
+ * the checker's pass rate is reported with no bar, decided by Claude, unconfirmed).
+ */
 export const PLANTED_PASS_BARS = {
+  /** Quotes really not in the text: refusals for an invented slot or a quote's length are apart. */
   quotesFound: 0.9,
-  verifierPass: 0.8,
   attribution: 0.95,
   literalPrecision: 0.98,
   /** Verified claims on a labelled sentence, with the label's record (2026-10-12 review). */
-  supportPrecision: 0.9
+  supportPrecision: 0.9,
+  /**
+   * The author's bar (2026-10-14): right stored facts over every stored fact, judged by the claim
+   * labels or, on unlabelled sentences, by `storedVerdicts`; a fact not judged yet counts wrong.
+   */
+  storedPrecision: 0.95
 } as const
+
+/**
+ * Refusals that cost a reply's tokens but are no quote missing from the text (plan
+ * `ReaderPrecision.md` step 1): an invented slot, a quote too short or too long. Reported, no bar.
+ */
+export const COST_REFUSALS = ['slot', 'tooShort', 'tooLong'] as const
+/** Refusals for a quote that is really not where the reader said (the quotes-found bar's misses). */
+export const QUOTE_MISSES = ['notFound', 'otherParagraph', 'repeated'] as const
+
+/** A stored fact as the precision bar judges it: plain values, so a report's JSON re-scores it. */
+export interface StoredFact {
+  scene: string
+  p: number
+  /** The record's label id (`TEST_BOOK_LABELS.records`), or null for a record no label names. */
+  record: string | null
+  slot: string
+  value: string
+  quote: string
+  voice: string
+  mode: string
+  proof: string
+}
+
+/** How the bar judged one stored fact. */
+export type StoredJudgment =
+  | { kind: 'label'; right: boolean; id: string }
+  | { kind: 'verdict'; right: boolean; call: boolean; reason: string }
+  | { kind: 'unjudged' }
+
+/**
+ * Judges one stored fact: by the claim label on its sentence and slot when there is one (right
+ * when the label is no reject and names its record), else by the hand verdict on its record, slot,
+ * value and sentence (`storedVerdicts`), else not judged yet.
+ */
+export function judgeStored(fact: StoredFact): StoredJudgment {
+  const label = TEST_BOOK_LABELS.claims.find(
+    (each) =>
+      each.scene === fact.scene && slotOf(each) === fact.slot && overlaps(each.quote, fact.quote)
+  )
+  if (label !== undefined) {
+    return {
+      kind: 'label',
+      right: label.expect !== 'reject' && label.record === fact.record,
+      id: label.id
+    }
+  }
+  const verdict = TEST_BOOK_LABELS.storedVerdicts.find(
+    (each) =>
+      each.scene === fact.scene &&
+      each.record === fact.record &&
+      slotOf(each) === fact.slot &&
+      overlaps(each.quote, fact.quote) &&
+      overlaps(each.value, fact.value)
+  )
+  if (verdict === undefined) return { kind: 'unjudged' }
+  return {
+    kind: 'verdict',
+    right: verdict.right,
+    call: verdict.call ?? false,
+    reason: verdict.reason
+  }
+}
+
+/** Stored-fact precision over every stored fact (the author's bar), with what it rests on. */
+export interface StoredScore {
+  /** Right facts of all stored facts; a fact not judged yet counts wrong. */
+  precision: Part
+  /** The same with every judgment call (`call`) turned the other way. */
+  callsTurned: Part
+  /** Wrong facts, each as a line to read (the verdict's or the label's reason). */
+  wrong: string[]
+  /** Facts not judged yet, each as a line to judge in `storedVerdicts`. */
+  unjudged: string[]
+}
+
+const factLine = (fact: StoredFact): string =>
+  `${fact.scene} ¶${fact.p} ${nameOf.get(fact.record ?? '') ?? '?'} ${fact.slot} “${fact.value}” ` +
+  `(${fact.proof}, ${fact.voice}, ${fact.mode}) ← “${fact.quote}”`
+
+/** Scores stored facts against the labels and verdicts (also from a report's JSON `stored`). */
+export function scoreStored(facts: readonly StoredFact[]): StoredScore {
+  let right = 0
+  let turned = 0
+  const wrong: string[] = []
+  const unjudged: string[] = []
+  for (const fact of facts) {
+    const judged = judgeStored(fact)
+    if (judged.kind === 'unjudged') {
+      unjudged.push(factLine(fact))
+      continue
+    }
+    if (judged.right) right += 1
+    const call = judged.kind === 'verdict' && judged.call
+    if (judged.right !== call) turned += 1
+    if (!judged.right) {
+      const why = judged.kind === 'label' ? `label ${judged.id}` : judged.reason
+      wrong.push(`${factLine(fact)}: ${why}${call ? ' (judgment call)' : ''}`)
+    }
+  }
+  return {
+    precision: share(right, facts.length),
+    callsTurned: share(turned, facts.length),
+    wrong,
+    unjudged
+  }
+}
 
 /** A share: how many of how many. */
 export interface Part {
@@ -37,10 +152,19 @@ export interface Part {
 }
 
 export interface PlantedMeasures {
-  /** Proposed items whose quote stood in the text (the readings' yields). */
+  /**
+   * Quotes found in the text of those that were looked for: refusals for an invented slot or a
+   * quote's length (`COST_REFUSALS`) are left out, only `QUOTE_MISSES` count against it.
+   */
   quotesFound: Part
-  /** Items sent to the checker that it passed. */
+  /** Items proposed, and those refused for slot or length (a cost, reported with no bar). */
+  costRefusals: { items: number; byReason: Record<string, number> }
+  /** Items sent to the checker that it passed (an efficiency figure: reported, no bar). */
   verifierPass: Part
+  /** The author's bar: right stored facts over every stored fact (`scoreStored`). */
+  stored: StoredScore
+  /** Every live fact as the bar judged it (the report's JSON, so it can be re-scored). */
+  storedFacts: StoredFact[]
   /** Stored facts on a labelled sentence and slot, with the label's subject. */
   attribution: Part
   /** Literal facts that are a labelled fact about the label's record. */
@@ -117,11 +241,29 @@ export function plantedMeasures(book: TestBookProject): PlantedMeasures {
     })
   const sum = (pick: (yields: (typeof readings)[number]['yields']) => number): number =>
     readings.reduce((total, reading) => total + pick(reading.yields), 0)
+  const refused = (reasons: readonly string[]): number =>
+    sum((yields) => reasons.reduce((total, reason) => total + (yields.rejections[reason] ?? 0), 0))
+  const found = sum((yields) => yields.quotesFound)
+  const labelOf = new Map([...book.records].map(([labelId, id]) => [id, labelId]))
+  const storedFacts: StoredFact[] = claims.map((claim) => ({
+    scene: sceneOf(book, claim.nodeId),
+    p: claim.para,
+    record: labelOf.get(claim.recordId ?? '') ?? null,
+    slot: claim.slot,
+    value: claim.value,
+    quote: claim.quote,
+    voice: claim.voice,
+    mode: claim.mode,
+    proof: claim.proof
+  }))
   return {
-    quotesFound: share(
-      sum((yields) => yields.quotesFound),
-      sum((yields) => yields.items)
-    ),
+    quotesFound: share(found, found + refused(QUOTE_MISSES)),
+    costRefusals: {
+      items: sum((yields) => yields.items),
+      byReason: Object.fromEntries(COST_REFUSALS.map((reason) => [reason, refused([reason])]))
+    },
+    stored: scoreStored(storedFacts),
+    storedFacts,
     verifierPass: share(
       sum((yields) => yields.verified),
       sum((yields) => yields.verifySent)
@@ -177,8 +319,13 @@ export function plantedFailures(measures: PlantedMeasures): string[] {
       failures.push(`${name} ${percentOf(part)} < ${min * 100} %`)
     }
   }
+  bar('stored-fact precision', measures.stored.precision, PLANTED_PASS_BARS.storedPrecision)
+  if (measures.stored.unjudged.length > 0) {
+    failures.push(
+      `${measures.stored.unjudged.length} stored facts not judged yet (counted wrong; judge them in storedVerdicts and re-score)`
+    )
+  }
   bar('quotes found', measures.quotesFound, PLANTED_PASS_BARS.quotesFound)
-  bar('verifier pass', measures.verifierPass, PLANTED_PASS_BARS.verifierPass)
   bar('attribution precision', measures.attribution, PLANTED_PASS_BARS.attribution)
   bar('literal precision', measures.literalPrecision, PLANTED_PASS_BARS.literalPrecision)
   bar('support precision', measures.supportPrecision, PLANTED_PASS_BARS.supportPrecision)
@@ -192,29 +339,41 @@ export function plantedFailures(measures: PlantedMeasures): string[] {
 /** The report's lines for the bars (a Markdown list). */
 export function plantedBarLines(measures: PlantedMeasures): string[] {
   const bars = PLANTED_PASS_BARS
-  const { falseAlarms } = measures
+  const { falseAlarms, stored, costRefusals } = measures
+  const costs = Object.entries(costRefusals.byReason)
+    .map(([reason, count]) => `${reason} ${count}`)
+    .join(', ')
   return [
-    `- Quotes found: ${percentOf(measures.quotesFound)} (bar ${bars.quotesFound * 100} %)`,
-    `- Verifier pass: ${percentOf(measures.verifierPass)} (bar ${bars.verifierPass * 100} %)`,
+    `- **Stored-fact precision: ${percentOf(stored.precision)}** (bar ${bars.storedPrecision * 100} %; ${stored.precision.right} right of every stored fact, ${stored.precision.of}; not judged yet, counted wrong: ${stored.unjudged.length}; with every judgment call turned: ${percentOf(stored.callsTurned)})`,
+    `- Quotes found: ${percentOf(measures.quotesFound)} (bar ${bars.quotesFound * 100} %; of the quotes looked for, ${measures.quotesFound.of})`,
+    `- Refused for slot or length (a cost, no bar): ${costs} of ${costRefusals.items} items proposed`,
+    `- Verifier pass (efficiency, no bar): ${percentOf(measures.verifierPass)}`,
     `- Attribution precision: ${percentOf(measures.attribution)} (bar ${bars.attribution * 100} %)`,
     `- Literal precision: ${percentOf(measures.literalPrecision)} (bar ${bars.literalPrecision * 100} %)`,
     `- Support precision: ${percentOf(measures.supportPrecision)} (bar ${bars.supportPrecision * 100} %; verified claims on labelled sentences, the label's record)`,
-    `- Stored on no labelled sentence (unreviewed, listed below): ${measures.unreviewed.length} of ${measures.facts}`,
+    `- Stored on no labelled sentence (judged by the verdicts, or listed below to judge): ${measures.unreviewed.length} of ${measures.facts}`,
     `- Claims from never-read scenes: ${measures.strays} (bar 0)${measures.strayLines.length > 0 ? `: ${measures.strayLines.join('; ')}` : ''}`,
     `- Negatives stored live (false alarms): ${falseAlarms.length} (bar 0)${falseAlarms.length > 0 ? `: ${falseAlarms.join('; ')}` : ''}`
   ]
 }
 
-/** The report's closing section: the facts no bar judges, to read by hand. */
+/**
+ * The report's closing sections: the stored facts judged wrong, and those not judged yet (no
+ * claim label and no verdict), each to judge by hand into `storedVerdicts` before the precision
+ * bar is final.
+ */
 export function unreviewedLines(measures: PlantedMeasures): string[] {
+  const { wrong, unjudged } = measures.stored
   return [
-    '## Unreviewed: stored on no labelled sentence',
+    '## Stored facts judged wrong',
     '',
-    'No bar judges these: read each against its quote (a wrong person or an unsupported value is a',
-    'failure of the run even when every bar passed).',
+    ...(wrong.length === 0 ? ['None.'] : wrong.map((line) => `- ${line}`)),
     '',
-    ...(measures.unreviewed.length === 0
-      ? ['None.']
-      : measures.unreviewed.map((line) => `- ${line}`))
+    '## Not judged yet: stored on no labelled or judged sentence',
+    '',
+    'Each counts wrong until judged: read it against its quote from the text alone and add a',
+    'verdict to `storedVerdicts` (`src/main/memory/testBook/labels.ts`), then re-score the JSON.',
+    '',
+    ...(unjudged.length === 0 ? ['None.'] : unjudged.map((line) => `- ${line}`))
   ]
 }

@@ -1464,7 +1464,15 @@ describe('the live switch-over run, end to end against a fake OpenRouter (F-16.3
 describe('the switch-over report (F-16.31, SW-D13)', () => {
   const measures: PlantedMeasures = {
     quotesFound: { right: 10, of: 10 },
+    costRefusals: { items: 12, byReason: { slot: 1, tooShort: 1, tooLong: 0 } },
     verifierPass: { right: 9, of: 10 },
+    stored: {
+      precision: { right: 15, of: 15 },
+      callsTurned: { right: 15, of: 15 },
+      wrong: [],
+      unjudged: []
+    },
+    storedFacts: [],
     attribution: { right: 10, of: 10 },
     literalPrecision: { right: 5, of: 5 },
     supportPrecision: { right: 5, of: 5 },
