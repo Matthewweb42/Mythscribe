@@ -96,7 +96,8 @@ describe('resolveEvidence', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: 1811,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       SCRIBE_NOW
     )

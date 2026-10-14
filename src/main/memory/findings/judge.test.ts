@@ -446,6 +446,19 @@ describe('the words the judge read, as the book moves (P4 slice 2 review)', () =
     expect(state()).toBe('fine')
   })
 
+  it('judges a pair afresh when the Flashback switch marks one of its scenes (2026-10-14)', async () => {
+    await judge(judgeWith(() => 'c'))
+    // No card says so: the author's switch alone makes the side a flashback for the judge.
+    setSceneDetails(db, two, { ...emptySceneDetails(), flashback: true }, NOW)
+    recompute()
+    expect(state()).toBe('unjudged')
+    const again = judgeWith(() => 'ok')
+    await judge(again)
+    expect(judgeCalls(again)).toHaveLength(2)
+    expect(judgeCalls(again)[0]?.messages.at(-1)?.content).toContain('flashback')
+    expect(state()).toBe('fine')
+  })
+
   it('judges a pair afresh when a time skip appears between its scenes', async () => {
     await judge(judgeWith(() => 'c'))
     // A scene placed between the two: no new words for the judge (scene places are masked).

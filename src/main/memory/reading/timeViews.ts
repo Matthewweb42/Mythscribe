@@ -1,5 +1,6 @@
 import type { ReadingOrder } from '@shared/memory/asOf'
 import { emptyCardFields, type Card, type Claim } from '@shared/memory/claims'
+import { sceneFlashback, type SceneFlashback } from '@shared/memory/flashback'
 import { pronounPerson } from '@shared/memory/ladder'
 import type { RecordKind, StoryRecordSummary } from '@shared/memory/records'
 import { pinnedCanonLines } from '@shared/memory/storyNotes'
@@ -42,7 +43,7 @@ import { heldCard, hereChips, readingOrder, rowTexts } from './readingFrame'
  * only what was proved plus `checkedUpTo`; "No scene shows this thread yet (checked up to …)" is
  * worded in the renderer alone, and nothing here reaches a prompt. A year is read from the typed
  * details and the held card (the verified `year` and `flashback`, the `elapsed` hint standing on
- * the text).
+ * the text); a scene's flashback is `sceneFlashback`'s (the author's Flashback switch wins).
  *
  * Cost (review of P2b slice 5): these run synchronously in Electron main whenever a scene moved,
  * so a scene's text is read only when its card has a field the view needs (a year, a flashback or
@@ -114,22 +115,26 @@ function sceneTimes(
     })
 }
 
+/** A scene's flashback (`sceneFlashback`): the author's switch, else the held card's checked reading. */
+const flashbackOf = (scene: SceneTime): SceneFlashback =>
+  sceneFlashback(scene.details.flashback, scene.held?.fields.flashback)
+
 /**
- * Decision 5 over the scenes: the typed year, the held card's verified year (its own scene only)
- * and verified flashback, and its elapsed hint standing on the text (its value and its quote).
+ * Decision 5 over the scenes: the typed year, the held card's verified year (its own scene only),
+ * the scene's flashback (`sceneFlashback`: the author's switch wins, else the verified card), and
+ * its elapsed hint standing on the text (its value and its quote).
  */
 function yearsOf(scenes: readonly SceneTime[]): StoryYear[] {
   return storyYears(
     scenes.map((scene) => {
       const year = scene.held?.fields.year ?? null
-      const flashback = scene.held?.fields.flashback ?? null
       const elapsed = scene.held?.fields.elapsed ?? null
       return {
         nodeId: scene.nodeId,
         ref: scene.ref,
         typedYear: scene.details.storyYear,
         quotedYear: year?.verified === true ? year.value : null,
-        flashback: flashback?.verified === true && flashback.value === 'yes',
+        flashback: flashbackOf(scene).flashback,
         elapsed:
           elapsed === null ? null : { value: elapsed.value, quote: elapsed.quote, para: elapsed.p }
       }
@@ -139,7 +144,8 @@ function yearsOf(scenes: readonly SceneTime[]): StoryYear[] {
 
 /**
  * The card fields a row's year rests on, for ⓘ: the year the text states when it is the row's,
- * the flashback, the hint.
+ * the flashback when the card's reading is what makes it one (never under the author's switch),
+ * the hint.
  */
 function sourcesOf(scene: SceneTime, year: StoryYear | undefined): TimelineSourceView[] {
   const fields = scene.held?.fields
@@ -148,7 +154,7 @@ function sourcesOf(scene: SceneTime, year: StoryYear | undefined): TimelineSourc
   if (year.year.kind === 'quoted' && fields.year !== null) {
     sources.push({ field: 'year', entry: fields.year })
   }
-  if (year.flashback && fields.flashback !== null) {
+  if (year.flashback && fields.flashback !== null && flashbackOf(scene).source === 'card') {
     sources.push({ field: 'flashback', entry: fields.flashback })
   }
   if (year.elapsed !== null && fields.elapsed !== null) {

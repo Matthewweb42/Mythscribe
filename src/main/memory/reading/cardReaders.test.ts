@@ -264,7 +264,8 @@ describe('the Story notes block reads the reading (F-16.20)', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       NOW
     )
@@ -281,7 +282,8 @@ describe('the Story notes block reads the reading (F-16.20)', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       NOW
     )
@@ -299,7 +301,8 @@ describe('the Story notes block reads the reading (F-16.20)', () => {
         place: { recordId: null, text: 'the harbour' },
         time: { text: 'dusk' },
         storyYear: 1814,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       NOW
     )

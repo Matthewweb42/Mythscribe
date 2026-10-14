@@ -148,7 +148,8 @@ export function buildTestBookProject(
           },
           time: { text: details.time ?? '' },
           storyYear: details.year ?? null,
-          alsoHere: []
+          alsoHere: [],
+          flashback: null
         },
         now
       )

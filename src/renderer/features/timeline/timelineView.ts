@@ -2,6 +2,9 @@ import { toEntityNameKey } from '@shared/entities'
 import type { Entity } from '@shared/ipc/contract'
 import { ageAt, characterBirthYear, type TimelineEvent } from '@shared/timeline'
 
+/** The reading-order view's rows (F-11.2): shared with the switch-over (F-16.31). */
+export { readingOrderRows, type ReadingOrderRow } from '@shared/timeline'
+
 /**
  * The pure arithmetic of the Timeline tab (F-11.2). `eventOf(id)` answers the event id a node's
  * scene metadata links to, or undefined; a link to an event the timeline no longer has reads as
@@ -57,33 +60,6 @@ export function yearWarnings(events: readonly TimelineEvent[]): Set<string> {
     else latest = event.year
   }
   return warned
-}
-
-/** One row of the reading-order view: a document, its event's position on the timeline, and whether it is a flashback. */
-export interface ReadingOrderRow {
-  id: string
-  /** The index of the node's event in the timeline, or null when it sits on none. */
-  eventIndex: number | null
-  /** True when its event comes before the latest event of a document read earlier. */
-  flashback: boolean
-}
-
-/** The documents in reading order, each placed on the timeline, with the rows set earlier than one before them flagged. */
-export function readingOrderRows(
-  events: readonly TimelineEvent[],
-  documentIds: readonly string[],
-  eventOf: EventOf
-): ReadingOrderRow[] {
-  const indexOf = new Map(events.map((event, index) => [event.id, index]))
-  let latest = -1
-  return documentIds.map((id) => {
-    const eventId = eventOf(id)
-    const eventIndex = eventId === undefined ? null : (indexOf.get(eventId) ?? null)
-    if (eventIndex === null) return { id, eventIndex, flashback: false }
-    const flashback = eventIndex < latest
-    latest = Math.max(latest, eventIndex)
-    return { id, eventIndex, flashback }
-  })
 }
 
 /** One character's age at an event (F-11.2b); negative = not born yet. */

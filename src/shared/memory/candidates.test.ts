@@ -18,7 +18,8 @@ import {
   type CandidateClaim,
   type CandidateInputs,
   type CandidateRecord,
-  type SceneFacts
+  type SceneFacts,
+  type TypedScene
 } from './candidates'
 import { valueKey } from './claims'
 import type { NoteParagraph } from './noteValues'
@@ -377,7 +378,7 @@ describe('C2 dead: a dead character on the page later (P4-D3)', () => {
       candidatesC2Dead(
         inputs({
           claims: [death()],
-          typed: new Map([['s5', { pov: 'hobb', alsoHere: ['hobb'], year: null }]])
+          typed: new Map([['s5', { pov: 'hobb', alsoHere: ['hobb'], year: null, flashback: null }]])
         })
       )
     ).toEqual([])
@@ -433,7 +434,7 @@ describe('C2 body: hair or scars changed between appearances (P4-D4)', () => {
       candidatesC2Body(
         inputs({
           claims: [hair('s2', 'dark'), hair('s5', 'fair')],
-          typed: new Map([['s3', { pov: 'mara', alsoHere: [], year: null }]])
+          typed: new Map([['s3', { pov: 'mara', alsoHere: [], year: null, flashback: null }]])
         })
       )
     ).toEqual([])
@@ -524,11 +525,8 @@ describe('C4 birth: a stated age against the birth year and that scene’s year 
   const born = claim({ recordId: 'mara', slot: 'born', value: 'in 1795', nodeId: 's1' })
   const age = (value: string, nodeId = 's6'): CandidateClaim =>
     claim({ recordId: 'mara', slot: 'age', value, nodeId })
-  const typed = (
-    year: number,
-    nodeId = 's6'
-  ): Map<string, { pov: null; alsoHere: string[]; year: number }> =>
-    new Map([[nodeId, { pov: null, alsoHere: [], year }]])
+  const typed = (year: number, nodeId = 's6'): Map<string, TypedScene> =>
+    new Map([[nodeId, { pov: null, alsoHere: [], year, flashback: null }]])
 
   it('flags an age more than a year off, with the year it used', () => {
     const found = candidatesC4Birth(

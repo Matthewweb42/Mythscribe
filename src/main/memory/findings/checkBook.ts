@@ -563,7 +563,8 @@ export function checkReport(db: TreeDb): CheckReport | null {
           findingId: view.id,
           nodeId,
           ref: side?.ref ?? '',
-          label: `${view.name}: ${view.slotLabel}`
+          label: `${view.name}: ${view.slotLabel}`,
+          typed: ctx?.inputs.typed.get(nodeId)?.flashback === true
         }
       ]
     }),

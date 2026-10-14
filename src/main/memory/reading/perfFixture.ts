@@ -80,7 +80,8 @@ export function buildPerfBook(dir: string): PerfBook {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: i === 0 ? 1811 : null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       PERF_NOW
     )

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { changeRunId } from '@shared/changes'
 import { pageTextBlocks } from '@shared/memory/pageMarks'
 import { FILED_BY_AI_HEADING } from '@shared/memory/switchoverMapping'
+import { storyYears } from '@shared/memory/years'
 import { parseStoredSceneMeta, SCENE_META_TIMELINE_MAX } from '@shared/sceneMeta'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { entity, node } from '../../db/schema'
@@ -356,6 +357,45 @@ describe('the rest of the conversion', () => {
     const all = buildSwitchoverModel(db()).rebuildScenes.length
     setCompileState(db(), { ...getCompileState(db()), excluded: [s1] })
     expect(buildSwitchoverModel(db()).rebuildScenes.length).toBe(all - 1)
+  })
+
+  it('sets the Flashback switch where v1’s reading order showed a flashback, each with its own year (2026-10-14)', () => {
+    setProjectTimeline(db(), {
+      events: [
+        { id: 'e1', label: 'The flood', when: '', year: 1820, note: '' },
+        { id: 'e2', label: 'The trial', when: '', year: 1830, note: '' }
+      ]
+    })
+    const [s1 = '', s2 = '', s3 = '', s4 = ''] = scenes
+    const meta = (timeline: string, eventId: string) => ({
+      location: '',
+      pov: '',
+      timeline,
+      eventId
+    })
+    // The trial, then two scenes back at the flood (v1 flags both), then a scene on no event.
+    setSceneMeta(db(), s1, meta('The trial', 'e2'))
+    setSceneMeta(db(), s2, meta('The flood', 'e1'))
+    setSceneMeta(db(), s3, meta('The flood', 'e1'))
+    const details = buildSwitchoverModel(db()).details
+    const of = (id: string) => details.find((each) => each.nodeId === id)
+    expect(of(s1)).toMatchObject({ storyYear: 1830, flashback: null })
+    // Each flashback scene gets its event's year (not only the first of the run) and the switch.
+    expect(of(s2)).toMatchObject({ storyYear: 1820, flashback: true })
+    expect(of(s3)).toMatchObject({ storyYear: 1820, flashback: true })
+    expect(of(s4)).toBeUndefined()
+    // So in v2 the year before the flashback carries on after it.
+    const years = storyYears(
+      [s1, s2, s3, s4].map((nodeId, i) => ({
+        nodeId,
+        ref: `1.${i + 1}`,
+        typedYear: of(nodeId)?.storyYear ?? null,
+        quotedYear: null,
+        flashback: of(nodeId)?.flashback === true,
+        elapsed: null
+      }))
+    )
+    expect(years.at(-1)?.year).toMatchObject({ kind: 'carried', value: 1830 })
   })
 
   it('keeps the timeline’s events, linked or not, as a written Research note', () => {

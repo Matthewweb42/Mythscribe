@@ -111,7 +111,7 @@ export interface JudgeContext {
   /** Readable scenes in reading order. */
   scenes: () => readonly string[]
   notRight: () => ReadonlySet<string>
-  /** A scene's stamp: its text, its stored card and its typed year (`pairInputs`). */
+  /** A scene's stamp: its text, its stored card, its typed year and Flashback switch (`pairInputs`). */
   sceneStamp: (nodeId: string) => string
   /**
    * The stamp of the scenes after reading-order place `from` up to and including `to` whose stored
@@ -196,7 +196,9 @@ export function judgeContext(
           [
             row === undefined ? '∅' : textsHash(rowTexts(row)),
             card === undefined ? '∅' : JSON.stringify([card.fields, card.present, card.anchor]),
-            String(inputs.typed.get(nodeId)?.year ?? '')
+            String(inputs.typed.get(nodeId)?.year ?? ''),
+            // The Flashback switch: a side's "flashback" mark (`sceneFlashback`) follows it.
+            String(inputs.typed.get(nodeId)?.flashback ?? '')
           ].join('\u0000')
         )
         stamps.set(nodeId, stamp)
@@ -609,7 +611,7 @@ function sideRef(side: FindingSide): string {
  * A stamp of everything `judgePair` reads of a finding, cheap to compute (no quote is located, no
  * card held, no name folded): the finding's identity and sides, the record's name and the slot's
  * words, each note side's paragraph and owner, each book side's place in reading order, its scene's
- * stamp (text, stored card, typed year) and its claim as stored, the stamps of the scenes between
+ * stamp (text, stored card, typed year and Flashback switch) and its claim as stored, the stamps of the scenes between
  * two book sides that may give a time skip, and the Not right list. It over-reaches on purpose
  * (any edit in a side's scene moves it): a moved stamp only costs a rendering, and the verdicts
  * stay while the rendered keys are the same.

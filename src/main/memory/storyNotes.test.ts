@@ -77,7 +77,8 @@ describe('buildStoryNotes (F-16.14)', () => {
         place: { recordId: gull, text: 'the quay' },
         time: { text: 'dusk' },
         storyYear: 1814,
-        alsoHere: [orrin]
+        alsoHere: [orrin],
+        flashback: null
       },
       at(2)
     )

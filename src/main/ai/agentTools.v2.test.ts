@@ -92,7 +92,8 @@ beforeEach(() => {
       place: { recordId: null, text: 'the ferry deck' },
       time: { text: 'night' },
       storyYear: null,
-      alsoHere: []
+      alsoHere: [],
+      flashback: null
     },
     NOW
   )
@@ -253,7 +254,8 @@ describe('the v2 cards in tool outputs (F-16.20)', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       NOW
     )

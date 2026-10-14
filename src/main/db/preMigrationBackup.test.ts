@@ -146,7 +146,7 @@ describe('writePreMigrationBackup (F-8.7)', () => {
 })
 
 describe('openProject writes the backup before an upgrade (F-8.7)', () => {
-  /** A real project put back to the schema before F-9.12: migrations 0021 to 0036 undone. */
+  /** A real project put back to the schema before F-9.12: migrations 0021 to 0040 undone. */
   function olderProject(): { folder: string; content: string } {
     const folder = path.join(tmp, 'Book.mythscribe')
     const session = createProject(folder, 'Book', 'novel')
@@ -176,7 +176,8 @@ describe('openProject writes the backup before an upgrade (F-8.7)', () => {
       'story_knows',
       'search_miss',
       'story_findings',
-      'finding_rendered'
+      'finding_rendered',
+      'scene_flashback'
     ])
     for (const table of [
       'finding',
@@ -240,7 +241,7 @@ describe('openProject writes the backup before an upgrade (F-8.7)', () => {
     expect(asked[0]?.id).toBe(session.info.id)
     const [file] = listPreMigrationBackups(backups)
     if (file === undefined) throw new Error('no backup written')
-    expect(path.basename(file)).toMatch(/^pre-migration-21-40-/)
+    expect(path.basename(file)).toMatch(/^pre-migration-21-41-/)
     const copy = new Database(file, { readonly: true })
     const tables = copy.prepare("SELECT name FROM sqlite_master WHERE name = 'passage_fts'").all()
     expect(tables).toEqual([])

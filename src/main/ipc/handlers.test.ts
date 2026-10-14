@@ -9000,7 +9000,8 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
         place: { recordId: null, text: '' },
         time: { text: 'dawn' },
         storyYear: 1811,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       }
     })
     const heir = createTopic(
@@ -9276,7 +9277,8 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
           place: { recordId: null, text: '' },
           time: { text: '' },
           storyYear: null,
-          alsoHere: []
+          alsoHere: [],
+          flashback: null
         }
       })
       await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
@@ -9347,7 +9349,8 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
           place: { recordId: null, text: '' },
           time: { text: '' },
           storyYear: null,
-          alsoHere: []
+          alsoHere: [],
+          flashback: null
         }
       })
       await vi.advanceTimersByTimeAsync(MENTION_DEBOUNCE_MS * 3)
@@ -10156,7 +10159,8 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
         place: { recordId: null, text: 'the harbour' },
         time: { text: 'dusk' },
         storyYear: 1811,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       }
     })
     expect(details).toMatchObject({ povRecordId: made.record.id, storyYear: 1811, gone: [] })

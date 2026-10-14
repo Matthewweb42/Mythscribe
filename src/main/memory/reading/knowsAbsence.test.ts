@@ -120,7 +120,8 @@ beforeEach(() => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: [...alsoHere]
+        alsoHere: [...alsoHere],
+        flashback: null
       },
       NOW
     )

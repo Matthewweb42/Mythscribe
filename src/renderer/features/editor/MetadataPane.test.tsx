@@ -989,6 +989,79 @@ describe('MetadataPane in story memory v2 (F-16.11, F-16.7)', () => {
     expect(useRecordStore.getState().creating).toBe('setting')
   })
 
+  it('puts the Flashback switch beside Story year: the book’s reading until the author sets it, then the author’s (2026-10-14)', async () => {
+    const details: Input<'sceneDetail:set'>[] = []
+    const { release } = install({
+      'record:list': () => [MARA, QUAY, TOMAS],
+      'label:list': () => [WRY],
+      'label:links': () => [],
+      'sceneDetail:get': () => ({ ...emptySceneDetails(), storyYear: 1798, gone: [] }),
+      // The card read the scene as a flashback, checked.
+      'memory:scene': (input) =>
+        sceneMemoryFixture((input as Input<'memory:scene'>).nodeId, {
+          card: {
+            line: 'Mara remembers the winter.',
+            gist: 'Mara remembers the winter.',
+            fields: {
+              where: null,
+              when: null,
+              pov: null,
+              year: null,
+              flashback: { value: 'yes', quote: 'Mara remembered', p: 0, verified: true },
+              elapsed: null
+            },
+            stale: [],
+            mood: null,
+            theme: null,
+            readingId: 'rd',
+            created: '2026-10-14T10:00:00.000Z'
+          }
+        }),
+      'sceneDetail:set': (input) => {
+        const sent = input as Input<'sceneDetail:set'>
+        details.push(sent)
+        return { ...sent.details, gone: [] }
+      }
+    })
+    release()
+    ready()
+    await act(async () => {
+      await useRecordStore.getState().load()
+      await useLabelStore.getState().load()
+    })
+    render(<MetadataPane id="sc-1" />)
+    const flashback = await screen.findByRole('switch', { name: 'Flashback' })
+    await waitFor(() => expect(flashback).toBeEnabled())
+    // Unset: it follows the book, and says so.
+    await waitFor(() => expect(flashback).toBeChecked())
+    expect(screen.getByText('AI read: flashback')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Follow the book' })).toBeNull()
+    // Off: the author's Not a flashback wins; the book's reading is shown dimmed beside it.
+    fireEvent.click(flashback)
+    await waitFor(() => expect(details).toHaveLength(1))
+    expect(details[0]).toEqual({
+      nodeId: 'sc-1',
+      details: { ...emptySceneDetails(), storyYear: 1798, flashback: false }
+    })
+    await waitFor(() => expect(flashback).not.toBeChecked())
+    expect(screen.getByTestId('flashback-ai-read')).toHaveTextContent('AI read: flashback')
+    // Follow the book: unset again.
+    fireEvent.click(screen.getByRole('button', { name: 'Follow the book' }))
+    await waitFor(() => expect(details).toHaveLength(2))
+    expect(details[1]?.details.flashback).toBeNull()
+    await waitFor(() => expect(flashback).toBeChecked())
+    expect(screen.queryByTestId('flashback-ai-read')).toBeNull()
+  })
+
+  it('has no Flashback switch on a chapter (only a scene is read in story order)', async () => {
+    installV2()
+    ready()
+    await act(() => useRecordStore.getState().load())
+    render(<MetadataPane id="ch-1" />)
+    await screen.findByRole('textbox', { name: 'Story year' })
+    expect(screen.queryByRole('switch', { name: 'Flashback' })).toBeNull()
+  })
+
   it('shows only the labels outside the manuscript (front matter has no typed details)', async () => {
     installV2()
     ready()

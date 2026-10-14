@@ -170,7 +170,10 @@ export interface YearRow {
   typedYear: number | null
   /** The held card's year field, when it stands on the text and was verified. */
   quotedYear: string | null
-  /** The held card says (verified) the scene is a flashback. */
+  /**
+   * The scene is a flashback (`sceneFlashback`: the author's Flashback switch when set, else the
+   * held card's checked reading).
+   */
   flashback: boolean
   /** The held card's elapsed hint, when it stands on the text ("Three winters later"). */
   elapsed: ElapsedSource | null

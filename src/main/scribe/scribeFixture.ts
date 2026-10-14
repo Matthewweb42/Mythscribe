@@ -103,7 +103,8 @@ export function scribeBook(): ScribeBook {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: id === one ? [orrin, tomas] : []
+        alsoHere: id === one ? [orrin, tomas] : [],
+        flashback: null
       },
       SCRIBE_NOW
     )

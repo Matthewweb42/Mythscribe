@@ -30,7 +30,12 @@ import {
   updateLabel
 } from './labelStore'
 import { createRecord, deleteRecord } from './recordStore'
-import { allSceneDetails, getSceneDetails, setSceneDetails } from './sceneDetailStore'
+import {
+  allSceneDetails,
+  getSceneDetails,
+  setSceneDetails,
+  typedFlashbacks
+} from './sceneDetailStore'
 
 let tmp: string
 let session: ProjectSession
@@ -180,6 +185,7 @@ describe('sceneDetailStore (F-16.11)', () => {
       time: { text: '' },
       storyYear: null,
       alsoHere: [],
+      flashback: null,
       gone: []
     })
     const saved = setSceneDetails(
@@ -190,7 +196,8 @@ describe('sceneDetailStore (F-16.11)', () => {
         place: { recordId: null, text: ' the harbour ' },
         time: { text: 'December, evening' },
         storyYear: 1811,
-        alsoHere: [tomas, tomas]
+        alsoHere: [tomas, tomas],
+        flashback: null
       },
       at(0)
     )
@@ -214,7 +221,8 @@ describe('sceneDetailStore (F-16.11)', () => {
         place: { recordId: null, text: 'the harbour' },
         time: { text: 'x'.repeat(SCENE_META_TIMELINE_MAX) },
         storyYear: 1811,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       at(0)
     )
@@ -230,6 +238,29 @@ describe('sceneDetailStore (F-16.11)', () => {
     })
   })
 
+  it('keeps the Flashback switch both ways and unset, and lists only the scenes that set it (2026-10-14)', () => {
+    const empty = {
+      povRecordId: null,
+      place: { recordId: null, text: '' },
+      time: { text: '' },
+      storyYear: 1798,
+      alsoHere: []
+    }
+    expect(typedFlashbacks(db).size).toBe(0)
+    expect(setSceneDetails(db, scene, { ...empty, flashback: true }, at(0))).toMatchObject({
+      storyYear: 1798,
+      flashback: true
+    })
+    expect([...typedFlashbacks(db)]).toEqual([[scene, true]])
+    expect(setSceneDetails(db, scene, { ...empty, flashback: false }, at(1)).flashback).toBe(false)
+    expect([...typedFlashbacks(db)]).toEqual([[scene, false]])
+    expect(allSceneDetails(db).get(scene)?.flashback).toBe(false)
+    // Follow the book: unset, and no longer listed.
+    expect(setSceneDetails(db, scene, { ...empty, flashback: null }, at(2)).flashback).toBeNull()
+    expect(typedFlashbacks(db).size).toBe(0)
+    expect(getSceneDetails(db, scene)).toMatchObject({ storyYear: 1798, flashback: null })
+  })
+
   it('reads every stored node’s details in one query, and no node without any (F-16.23)', () => {
     const mara = record('Mara')
     expect(allSceneDetails(db).size).toBe(0)
@@ -241,7 +272,8 @@ describe('sceneDetailStore (F-16.11)', () => {
         place: { recordId: null, text: '' },
         time: { text: 'dawn' },
         storyYear: 1811,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       at(0)
     )

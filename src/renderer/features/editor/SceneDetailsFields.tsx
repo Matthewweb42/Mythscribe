@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
+import { cardFlashback, sceneFlashback } from '@shared/memory/flashback'
 import type { StoryRecordSummary, RecordKind } from '@shared/memory/records'
 import {
   ALSO_HERE_MAX,
@@ -11,6 +12,8 @@ import {
 import { isTopicKind } from '@shared/memory/topics'
 import { SCENE_META_FIELD_MAX, SCENE_META_TIMELINE_MAX } from '@shared/sceneMeta'
 import { LabelPicker } from '@renderer/features/labels/LabelPicker'
+import { isManuscriptDocument, useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { useSceneMemory } from '@renderer/features/memory/memoryStore'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useSceneDetailsEditor, type SceneDetailsEditor } from './sceneDetailsEditor'
@@ -19,6 +22,8 @@ const FIELD =
   'min-w-0 flex-1 rounded-md border border-line bg-bg px-2 py-px text-xs leading-5 disabled:opacity-50'
 const ROW = 'flex min-w-0 items-center gap-2'
 const LABEL = 'w-16 shrink-0 text-xs text-fg-muted'
+const SMALL =
+  'rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40'
 /** A picker's "New character…" choice; never a record id (those are UUIDs). */
 const NEW_RECORD = 'new:'
 
@@ -37,8 +42,8 @@ function useRecordsOfKind(kind: RecordKind | null): StoryRecordSummary[] {
 /**
  * Story memory v2's typed scene details (F-16.11), in the scene details of a manuscript scene,
  * chapter or part: POV (a Characters record), Place (a place record plus free text), Time (free
- * text), Story year (one typed year per time jump, decision 5), *+ also here* (records present
- * without being named) and Labels (F-16.7). Each change saves at once through the scene detail
+ * text), Story year (one typed year per time jump, decision 5) with the Flashback switch beside it
+ * on a scene (2026-10-14), *+ also here* (records present without being named) and Labels (F-16.7). Each change saves at once through the scene detail
  * store; a text field saves when it loses focus or on Enter. POV and Place offer *New
  * character…* and *New place…*, the record creation dialog (twin gate included), whose record is
  * then chosen. Synopsis, brief, beats and status stay in the scene meta beside them. Outside the
@@ -139,10 +144,70 @@ export function AlsoHereField({ editor }: { editor: SceneDetailsEditor }): React
   )
 }
 
+/**
+ * The Flashback switch beside Story year (F-16.11, F-16.23; the author's decision 2026-10-14). The
+ * author's setting wins over the AI's reading in both directions: on, the scene is a flashback (a
+ * year typed or quoted there is its own and does not carry on, ages there are flashback ages, and
+ * findings that need it not to be one are set aside), with no card and with Use AI off too; off,
+ * it is not one whatever the card read. Unset, it follows the book (the card's checked flashback,
+ * standing on the text), shown as "AI read: flashback". Where the book reads otherwise than the
+ * author's setting, its reading is shown dimmed beside it, never asked about; *Follow the book*
+ * unsets the switch. `sceneFlashback` decides, here as in main.
+ */
+export function FlashbackField({ editor }: { editor: SceneDetailsEditor }): React.JSX.Element {
+  const memory = useSceneMemory(editor.id)
+  const card = memory?.card ?? null
+  // A field whose quote no longer stands counts for nothing until the next reading (as in main).
+  const field = card === null || card.stale.includes('flashback') ? null : card.fields.flashback
+  const typed = editor.details.flashback
+  const { flashback, source } = sceneFlashback(typed, field)
+  const read = cardFlashback(field)
+  const differs = typed !== null && read !== null && read !== typed
+  return (
+    <>
+      <label className="flex shrink-0 items-center gap-1 text-xs text-fg-muted">
+        <input
+          type="checkbox"
+          role="switch"
+          aria-checked={flashback}
+          checked={flashback}
+          disabled={editor.disabled}
+          onChange={(event) => editor.save({ flashback: event.target.checked })}
+        />
+        Flashback
+      </label>
+      {source === 'card' && flashback ? (
+        <span className="basis-full pl-18 text-xs text-fg-subtle opacity-70">
+          AI read: flashback
+        </span>
+      ) : null}
+      {typed === null ? null : (
+        <span className="flex basis-full flex-wrap items-center gap-x-1 pl-18 text-xs">
+          {differs ? (
+            <span className="text-fg-subtle opacity-70" data-testid="flashback-ai-read">
+              AI read: {read ? 'flashback' : 'not a flashback'}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className={SMALL}
+            disabled={editor.disabled}
+            onClick={() => editor.save({ flashback: null })}
+          >
+            Follow the book
+          </button>
+        </span>
+      )}
+    </>
+  )
+}
+
 function TypedDetails({ id }: { id: string }): React.JSX.Element {
   const editor = useSceneDetailsEditor(id)
   const places = useRecordsOfKind('place')
   const byId = useRecordStore((s) => s.byId)
+  // The Flashback switch is a scene's: only a manuscript document is read in story order.
+  const scene = useTreeStore((s) => isManuscriptDocument(s, id))
   const { details, disabled, save, createFor } = editor
 
   return (
@@ -196,7 +261,7 @@ function TypedDetails({ id }: { id: string }): React.JSX.Element {
           onCommit={(text) => save({ time: { text } })}
         />
       </div>
-      <div className={ROW}>
+      <div className={`${ROW} flex-wrap`}>
         <span className={LABEL}>Story year</span>
         <TextField
           key={`year:${details.storyYear ?? ''}`}
@@ -217,6 +282,7 @@ function TypedDetails({ id }: { id: string }): React.JSX.Element {
             return true
           }}
         />
+        {scene ? <FlashbackField editor={editor} /> : null}
       </div>
       <div className={`${ROW} flex-wrap`}>
         <span className={LABEL}>Also here</span>

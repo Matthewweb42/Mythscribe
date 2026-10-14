@@ -178,7 +178,8 @@ describe('nameIndexer (F-16.5)', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       at(3)
     )

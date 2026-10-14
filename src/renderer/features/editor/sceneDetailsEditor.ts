@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { emptySceneDetails, type SceneDetails } from '@shared/memory/sceneDetails'
+import { detailsOf, emptySceneDetails, type SceneDetails } from '@shared/memory/sceneDetails'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -38,13 +38,7 @@ export function useSceneDetailsEditor(id: string): SceneDetailsEditor {
   const save: SceneDetailsEditor['save'] = (patch) => {
     const now = useSceneDetailStore.getState().docs[id]
     if (now === undefined) return
-    const current: SceneDetails = {
-      povRecordId: now.povRecordId,
-      place: now.place,
-      time: now.time,
-      storyYear: now.storyYear,
-      alsoHere: now.alsoHere
-    }
+    const current = detailsOf(now)
     const change = typeof patch === 'function' ? patch(current) : patch
     useSceneDetailStore
       .getState()

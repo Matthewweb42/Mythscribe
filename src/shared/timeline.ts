@@ -154,3 +154,35 @@ export function characterBirthYear(entity: { fields: EntityFields }): number | n
   const year = parseYear(entity.fields.born ?? '')
   return year === 'invalid' ? null : year
 }
+
+/** One row of v1's reading-order view: a document, its event's place on the timeline, and whether it is a flashback. */
+export interface ReadingOrderRow {
+  id: string
+  /** The index of the node's event in the timeline, or null when it sits on none. */
+  eventIndex: number | null
+  /** True when its event comes before the latest event of a document read earlier. */
+  flashback: boolean
+}
+
+/**
+ * The documents in reading order, each placed on the timeline, with the rows set earlier than one
+ * before them flagged (F-11.2's reading-order view; the switch-over reads the same rule to set
+ * story memory v2's Flashback switch, F-16.31). `eventOf(id)` answers the event a document links
+ * to, or undefined; a link to an event the timeline no longer has reads as none.
+ */
+export function readingOrderRows(
+  events: readonly TimelineEvent[],
+  documentIds: readonly string[],
+  eventOf: (id: string) => string | undefined
+): ReadingOrderRow[] {
+  const indexOf = new Map(events.map((event, index) => [event.id, index]))
+  let latest = -1
+  return documentIds.map((id) => {
+    const eventId = eventOf(id)
+    const eventIndex = eventId === undefined ? null : (indexOf.get(eventId) ?? null)
+    if (eventIndex === null) return { id, eventIndex, flashback: false }
+    const flashback = eventIndex < latest
+    latest = Math.max(latest, eventIndex)
+    return { id, eventIndex, flashback }
+  })
+}

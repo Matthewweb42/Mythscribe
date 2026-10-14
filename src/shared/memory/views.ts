@@ -1120,9 +1120,9 @@ export type CheckStartResult = z.infer<typeof CheckStartResult>
  * many the stronger check confirmed, what it checked (pairs by rule, scenes, note pages), what it
  * did not (what no rule covers, the scenes not read yet, the open findings past the 20
  * confirmations, pairs left unjudged when it was stopped), the findings hidden because a scene
- * looks like a flashback (each with *Not a flashback?*), and the secrets readers know that no
- * scene shows anyone learning, as the scenes and "checked up to" only (rule 5: the renderer words
- * the scoped line). A finding that closed since is left out.
+ * is a flashback (the author's switch, or the card's reading; each with *Not a flashback?*), and
+ * the secrets readers know that no scene shows anyone learning, as the scenes and "checked up to"
+ * only (rule 5: the renderer words the scoped line). A finding that closed since is left out.
  */
 export const CheckReport = z.object({
   at: z.string(),
@@ -1149,10 +1149,15 @@ export const CheckReport = z.object({
   hidden: z.array(
     z.object({
       findingId: z.string(),
-      /** The scene whose card says flashback (what *Not a flashback?* marks not right). */
+      /**
+       * The flashback scene (`sceneFlashback`): *Not a flashback?* sets its Flashback switch to
+       * Not a flashback (2026-10-14; it marked the card's flashback not right before).
+       */
       nodeId: z.string(),
       ref: z.string(),
-      label: z.string()
+      label: z.string(),
+      /** The author's switch makes it a flashback (else the card's verified reading). */
+      typed: z.boolean()
     })
   ),
   secretsNobodyLearns: z.array(

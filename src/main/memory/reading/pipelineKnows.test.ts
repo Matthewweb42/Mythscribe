@@ -417,7 +417,8 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: [tomas]
+        alsoHere: [tomas],
+        flashback: null
       },
       NOW
     )
@@ -492,7 +493,8 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       NOW
     )

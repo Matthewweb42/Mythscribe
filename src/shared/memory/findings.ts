@@ -30,8 +30,9 @@ export type FindingVariant = z.infer<typeof FindingVariant>
  * - `unjudged`: a candidate waiting for its two verdicts;
  * - `held`: a side is a claim whose sentence changed since it was read: never judged, shown or
  *   closed until the re-read (P4-D13);
- * - `hidden`: it needs a scene not to be a flashback, and the scene's card says it is one (shown
- *   only by *Check the book*, with *Not a flashback?*);
+ * - `hidden`: it needs a scene not to be a flashback, and the scene is one (`sceneFlashback`: the
+ *   author's Flashback switch, else the card's verified reading; shown only by *Check the book*,
+ *   with *Not a flashback?*);
  * - `open`: both orders said "contradiction";
  * - `unclear`: no "fine", and at least one "unclear" (shown muted, never counted, never
  *   underlined);
@@ -229,7 +230,7 @@ export const FindingView = z.object({
     right: z.object({ a: z.boolean(), b: z.boolean() }),
     /** *Update my note* (a C6 finding whose book side is narration in `now` mode, P4-D18). */
     updateNote: z.boolean(),
-    /** *Not a flashback?*: the scene whose card hides it. */
+    /** *Not a flashback?*: the flashback scene that hides it (the switch it sets, 2026-10-14). */
     notFlashback: z.string().nullable()
   })
 })

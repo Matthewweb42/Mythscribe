@@ -44,8 +44,8 @@ import { ageYears, birthSource, bornLine, yearCalendar, yearIn } from './years'
  * book* only. Each candidate names its rule, its subject, its slot and two sides (references, never
  * copies of the text). A side that is a claim whose sentence changed since it was read (`stale`)
  * makes the candidate `held`: never judged, shown or closed until the re-read (P4-D13). A
- * candidate that needs a scene not to be a flashback, in a scene whose card says it is one, is
- * `hidden` (C2, C4). Keys on the Dismissed list (*Not a problem*) are dropped. Nothing here reads
+ * candidate that needs a scene not to be a flashback, in a scene that is one (`SceneFacts`: the
+ * author's Flashback switch, else the card's verified reading), is `hidden`. Keys on the Dismissed list (*Not a problem*) are dropped. Nothing here reads
  * text: the inputs carry everything (`candidateInputs.ts` in main).
  */
 
@@ -77,7 +77,10 @@ export interface CandidateClaim {
 export interface SceneFacts {
   /** Records on the page by a verified quote that still stands. */
   present: ReadonlySet<string>
-  /** The card's verified flashback, standing on the text. */
+  /**
+   * The scene is a flashback (`sceneFlashback`): the author's Flashback switch when set, else the
+   * card's verified flashback standing on the text.
+   */
   flashback: boolean
   /** The year the text states, verified and standing, as written ("the spring of 1812"). */
   quotedYear: string | null
@@ -88,6 +91,8 @@ export interface TypedScene {
   pov: string | null
   alsoHere: readonly string[]
   year: number | null
+  /** The Flashback switch (null: follow the book); the rules read it through `scene`. */
+  flashback: boolean | null
 }
 
 /** A record as the rules read it. */
@@ -378,8 +383,8 @@ export function candidatesC1(inputs: CandidateInputs): Candidate[] {
  * C2 `dead` (P4-D3): a narration-now `alive` claim reading as a death (`deathWord`) at scene A, and
  * a later scene B where the record is on the page (a held `present` entry with its verified quote,
  * never a typed POV or *+ also here*), with no narration-now `alive` claim reading as living
- * (`lifeWord`) from A to B outside a verified flashback (a flashback's "alive then" is earlier in
- * story time); each presence pairs with the latest death before it. B a verified flashback →
+ * (`lifeWord`) from A to B outside a flashback (a flashback's "alive then" is earlier in
+ * story time); each presence pairs with the latest death before it. B a flashback →
  * hidden.
  */
 export function candidatesC2Dead(inputs: CandidateInputs): Candidate[] {
@@ -455,8 +460,8 @@ function appearances(inputs: CandidateInputs, recordId: string): Set<number> {
  * C2 `body` (P4-D4): consecutive narration-now claims of one record in a lasting body slot (hair,
  * scars), A then B, whose values disagree, where B is the record's next appearance after A (no scene
  * between them where the record is Here by the stored cards, the typed POV or *+ also here*; or the
- * same scene), and no claim of that slot from A to B states a change. Either scene a verified
- * flashback → hidden.
+ * same scene), and no claim of that slot from A to B states a change. Either scene a flashback →
+ * hidden.
  */
 export function candidatesC2Body(inputs: CandidateInputs): Candidate[] {
   const out: Candidate[] = []
@@ -508,7 +513,7 @@ function membershipOf(inputs: CandidateInputs): MembershipInput {
  * knower that is not a memory exists (a later scene, or the same scene's later paragraph). Skipped
  * when the author marked them *Knew before the book*, when their earliest line is `knewBefore`, or
  * when a group they belong to (`groupsOf`, P4-D5) knew it at or before that line. Never raised
- * without the later learning line (design Part 6). The learning line in a verified flashback scene
+ * without the later learning line (design Part 6). The learning line in a flashback scene
  * → hidden (it is a memory in story time).
  */
 export function candidatesC3(inputs: CandidateInputs): Candidate[] {
@@ -585,7 +590,7 @@ export function candidatesC3(inputs: CandidateInputs): Candidate[] {
  * (`birthSource`, as the sheet's `birthYear` reads it: a narration-now `born` claim with one year,
  * stale ones included so the pair is held, else a canon Pinned "Born:" line), and A's own year,
  * typed for A or quoted (verified) in A, never carried, in the same calendar; a candidate when the
- * age is more than a year off. A a verified flashback → hidden.
+ * age is more than a year off. A a flashback → hidden.
  */
 export function candidatesC4Birth(inputs: CandidateInputs): Candidate[] {
   const out: Candidate[] = []
@@ -687,7 +692,7 @@ export function candidatesC4Falls(inputs: CandidateInputs): Candidate[] {
  * C5 (P4-D7): a thread's counted `resolves` step and a counted `advances` step in a later scene
  * (one scene with both reads as resolved, `stepRank`, so the same scene never pairs), with no
  * `opens` step between them, the advance's own scene up to its paragraph included (a thread
- * re-opened is not flagged). The advance in a verified flashback scene → hidden (earlier in story
+ * re-opened is not flagged). The advance in a flashback scene → hidden (earlier in story
  * time).
  */
 export function candidatesC5(inputs: CandidateInputs): Candidate[] {

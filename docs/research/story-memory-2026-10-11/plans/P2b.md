@@ -407,3 +407,15 @@ The extra per reading is the rules (+220, cached), the topics roster (≤ 400, c
   - **The health gate may pause reading.** Knows items are harder than eye colours, so a model that handles P2a's slots may fall under the 80 % verified bar. The live run reports verified rates by kind; if knows alone drags a model under, the gate can count them apart (a change to P2a-D16, logged then).
   - **Scenes read before P2b show "not checked yet"** until they are read again. That is honest, but it can look empty in a development project read under `reader.v1`; *Rebuild memory* fixes it.
   - **Slice 2 is the largest.** If it runs long, the Same items (§2.4 step 6 merge path) can ship in slice 3 with the replays that test them, and slice 2 then creates topics without merging.
+
+## Flashback switch (2026-10-14)
+
+The author's decision of 2026-10-14 (QUESTIONS, P2b slice 5 review, item 10): "Yes, add the switch". Built the same day, story memory v2 only, no prompt change.
+
+- **Data:** migration `0040_scene_flashback` (additive): `scene_detail.flashback`, null = follow the book (every older row), true = a flashback, false = not one. `SceneDetails.flashback` is required in the schema, so a save that leaves it out is refused rather than unsetting it.
+- **One rule:** `sceneFlashback(typed, cardField)` in `src/shared/memory/flashback.ts`. The author's setting wins in both directions; unset, the card's flashback counts only when verified and standing on the text (as in slices 1–5); else not a flashback. `storyYears` (§1, decision 5) still takes a boolean per row: `timeViews.ts` fills it through the rule, so the carry, ages, the Timeline, the sheets and P3's computed years all follow it; so do P4's candidate hiding, loose ends, the judge's mark and *Check the book*'s hidden list.
+- **With Use AI off:** a scene switched to Flashback keeps its typed year to itself and the year before it carries on after it, which closes the known limit of the slice 5 review.
+- **UI:** the switch sits on Story year's row of a scene's details (manuscript documents only). The card's differing reading is shown dimmed beside it ("AI read: flashback"), with *Follow the book* to unset it; no Needs a look question.
+- **Switch-over:** v1 has something that maps. Its Timeline's reading-order view marks a scene whose event comes before the latest event of a scene read earlier as a flashback (F-11.2). The switch-over sets the switch on those scenes and gives each its own event's year (not only the first scene of the run); the rule moved to `src/shared/timeline.ts` so v1's view and the switch-over share it. v1's scene meta has no flashback field of its own.
+- **P4:** *Check the book*'s *Not a flashback?* sets the switch to Not a flashback (with *Undo*) instead of marking the card's flashback not right; the contradictions replay drives it that way on h16.
+- Calls: QUESTIONS "Flashback switch (2026-10-14)".

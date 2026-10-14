@@ -1,23 +1,29 @@
 import { create } from 'zustand'
-import type { SceneDetails, SceneDetailsView } from '@shared/memory/sceneDetails'
+import { detailsOf, type SceneDetails, type SceneDetailsView } from '@shared/memory/sceneDetails'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc, IpcRequestError } from '@renderer/lib/ipc'
 
 /**
  * Typed scene details in the renderer (F-16.11, story memory v2): the one owner of each loaded
- * scene's POV, place, time, story year and "+ also here", which point at records. A save is
- * optimistic: the pane shows the new details at once, main's answer replaces them, and a refusal
- * puts the last saved ones back (and propagates). Only the newest save of a scene may land, so a
- * slow answer never undoes a quicker click. A roster change (`record:changed` with `roster`: a
- * merge re-points details, a delete leaves a "+ also here" id gone) reads again only the loaded
- * scenes whose details name one of its records.
+ * scene's POV, place, time, story year, "+ also here", which point at records, and the Flashback
+ * switch. A save is optimistic: the pane shows the new details at once, main's answer replaces
+ * them, and a refusal puts the last saved ones back (and propagates). Only the newest save of a
+ * scene may land, so a slow answer never undoes a quicker click. A roster change (`record:changed`
+ * with `roster`: a merge re-points details, a delete leaves a "+ also here" id gone) reads again
+ * only the loaded scenes whose details name one of its records.
  */
 interface SceneDetailState {
   docs: Record<string, SceneDetailsView>
   /** Reads a scene's details (again). */
   load: (nodeId: string) => Promise<void>
   save: (nodeId: string, details: SceneDetails) => Promise<void>
+  /**
+   * Sets the scene's Flashback switch (true, false, or null to follow the book) over its details
+   * as stored, reading them first when they are not loaded; answers the switch as it was (for
+   * *Undo*). *Check the book*'s *Not a flashback?* sets it to false (2026-10-14).
+   */
+  setFlashback: (nodeId: string, flashback: boolean | null) => Promise<boolean | null>
   /** Opens the `record:changed` subscription (idempotent); call it where a v2 project opens. */
   subscribe: () => void
   clear: () => void
@@ -65,6 +71,13 @@ export const useSceneDetailStore = create<SceneDetailState>((set, get) => ({
       if (settle() && before !== undefined) set({ docs: { ...get().docs, [nodeId]: before } })
       throw err
     }
+  },
+
+  async setFlashback(nodeId, flashback) {
+    if (get().docs[nodeId] === undefined) await get().load(nodeId)
+    const view = get().docs[nodeId] ?? (await ipc().invoke('sceneDetail:get', { nodeId }))
+    await get().save(nodeId, { ...detailsOf(view), flashback })
+    return view.flashback
   },
 
   subscribe() {

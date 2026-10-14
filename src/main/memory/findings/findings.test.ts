@@ -19,6 +19,7 @@ import { manuscriptDocuments } from '../../voice/profile'
 import { dismiss, dismissedKeys } from '../dismissedStore'
 import { indexNodePassages, indexStaleRecords } from '../passageIndexer'
 import { createRecord, renameAlias, requireRecord, sameAs, savePage } from '../recordStore'
+import { setSceneDetails } from '../sceneDetailStore'
 import { upsertCard } from '../reading/cardStore'
 import { anchoredClaim, cardAnchorOf, seedClaims } from '../reading/claimFixture'
 import { deleteClaims, reviveClaim, setClaimsState } from '../reading/claimStore'
@@ -238,6 +239,92 @@ describe('the rules’ inputs (F-16.27)', () => {
       flashback: false,
       quotedYear: null
     })
+  })
+})
+
+describe('the Flashback switch (F-16.11, F-16.23; the author’s decision 2026-10-14)', () => {
+  function flashback(nodeId: string, value: boolean | null): void {
+    setSceneDetails(
+      db,
+      nodeId,
+      {
+        povRecordId: null,
+        place: { recordId: null, text: '' },
+        time: { text: '' },
+        storyYear: null,
+        alsoHere: [],
+        flashback: value
+      },
+      NOW
+    )
+  }
+  const hair = (): string | undefined =>
+    findingsOf(db, activeDraftId(db)).find((row) => row.rule === 'C2')?.state
+
+  beforeEach(() => {
+    // Mara's hair, dark then fair in her next appearance: a C2 body pair (it needs no flashback).
+    seedClaims(
+      db,
+      one,
+      [{ recordId: mara, slot: 'hair', value: 'dark', quote: 'Mara climbed the ridge', para: 0 }],
+      NOW
+    )
+    seedClaims(
+      db,
+      two,
+      [{ recordId: mara, slot: 'hair', value: 'fair', quote: 'The rain came', para: 0 }],
+      NOW
+    )
+  })
+
+  it('hides a pair in a scene switched to Flashback, with no card (Use AI off)', () => {
+    recomputeFindings(db, NOW)
+    expect(hair()).toBe('unjudged')
+    flashback(two, true)
+    expect(candidateInputs(db, activeDraftId(db)).scene(two)).toEqual({
+      present: new Set(),
+      flashback: true,
+      quotedYear: null
+    })
+    recomputeFindings(db, NOW)
+    expect(hair()).toBe('hidden')
+    // Not a flashback?: the switch set to false, the pair is judged next.
+    flashback(two, false)
+    recomputeFindings(db, NOW)
+    expect(hair()).toBe('unjudged')
+    expect(findingViolations()).toEqual([])
+  })
+
+  it('ignores the card’s flashback when the switch says Not a flashback, and follows it when unset', () => {
+    upsertCard(
+      db,
+      {
+        nodeId: two,
+        draftId: activeDraftId(db),
+        readingId: null,
+        line: 'A scene.',
+        gist: 'A scene.',
+        fields: {
+          ...emptyCardFields(),
+          flashback: { value: 'yes', quote: 'The rain came', p: 0, verified: true }
+        },
+        present: [],
+        mood: null,
+        theme: null,
+        anchor: cardAnchorOf(db, two),
+        seen: cardAnchorOf(db, two)
+      },
+      NOW
+    )
+    recomputeFindings(db, NOW)
+    expect(hair()).toBe('hidden')
+    flashback(two, false)
+    expect(candidateInputs(db, activeDraftId(db)).scene(two).flashback).toBe(false)
+    recomputeFindings(db, NOW)
+    expect(hair()).toBe('unjudged')
+    flashback(two, null)
+    recomputeFindings(db, NOW)
+    expect(hair()).toBe('hidden')
   })
 })
 

@@ -7,6 +7,7 @@ import type { NameMentionView } from '@shared/memory/nameScan'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
 import { AUTHOR_TODO_TEXT_MAX, type AuthorTodo } from '@shared/memory/authorTodo'
 import { detailFromText } from '@shared/memory/typedVsText'
+import { detailsOf } from '@shared/memory/sceneDetails'
 import type { DetailConflictNotice, HereChip, MemoryNotice } from '@shared/memory/views'
 import { formatCents } from '@renderer/features/ai/usageFormat'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
@@ -1125,13 +1126,7 @@ function DetailConflictRow({ conflict }: { conflict: DetailConflictNotice }): Re
         toast.error('That value cannot be written into your detail; change it in scene details.')
         return
       }
-      await store.save(conflict.nodeId, {
-        povRecordId: next.povRecordId,
-        place: next.place,
-        time: next.time,
-        storyYear: next.storyYear,
-        alsoHere: next.alsoHere
-      })
+      await store.save(conflict.nodeId, detailsOf(next))
     } catch (err) {
       toast.error(describeError(err))
     } finally {

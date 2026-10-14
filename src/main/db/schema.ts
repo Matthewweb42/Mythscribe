@@ -1060,7 +1060,13 @@ export const sceneDetail = sqliteTable('scene_detail', {
   timeText: text('time_text').notNull().default(''),
   storyYear: integer('story_year'),
   alsoHere: text('also_here').notNull().default('[]'),
-  modified: text('modified').notNull()
+  modified: text('modified').notNull(),
+  /**
+   * The author's Flashback switch (F-16.11, F-16.23; migration 0040, the author's decision
+   * 2026-10-14): null follows the book's reading (the card's verified flashback), true is a
+   * flashback, false is not one. The author's setting wins (`sceneFlashback`).
+   */
+  flashback: integer('flashback', { mode: 'boolean' })
 })
 export type SceneDetailRow = typeof sceneDetail.$inferSelect
 export type SceneDetailInsert = typeof sceneDetail.$inferInsert

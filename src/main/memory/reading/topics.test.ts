@@ -723,7 +723,8 @@ describe('who knows what over the stores (F-16.22)', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       NOW
     )

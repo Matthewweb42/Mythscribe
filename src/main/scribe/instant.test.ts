@@ -244,7 +244,8 @@ describe('an age as of now (decision 5, P2b-D15)', () => {
           place: { recordId: null, text: '' },
           time: { text: '' },
           storyYear: values[i] ?? null,
-          alsoHere: []
+          alsoHere: [],
+          flashback: null
         },
         SCRIBE_NOW
       )

@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Dismissed } from '@shared/memory/dismissed'
+import { emptySceneDetails, type SceneDetailsView } from '@shared/memory/sceneDetails'
 import type { CheckEstimate, CheckReport } from '@shared/memory/views'
+import type { Input } from '@shared/ipc/contract'
 import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import { resetSceneDetailStore } from '@renderer/features/editor/sceneDetailStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -31,20 +33,14 @@ let main: FakeMain
 let estimate: CheckEstimate
 let report: CheckReport | null
 
-const flashbackRow: Dismissed = {
-  id: 'd-fb',
-  kind: 'notRight',
-  key: 'card|sc-3|flashback|yes',
-  recordId: null,
-  nodeId: 'sc-3',
-  label: '1.3: flashback: not right',
-  quote: null,
-  created: '2026-10-14T10:00:00.000Z'
-}
+/** Scene 1.3's typed details as main holds them (its year typed, the switch as each test sets it). */
+let stored: SceneDetailsView
 
 beforeEach(() => {
   resetMemoryStore()
   resetDismissedStore()
+  resetSceneDetailStore()
+  stored = { ...emptySceneDetails(), storyYear: 1811, gone: [] }
   resetPendingSaves()
   // A jump one test starts must not land in the next one's editor.
   resetActiveEditorStore()
@@ -56,13 +52,19 @@ beforeEach(() => {
     'memory:checkEstimate': () => estimate,
     'memory:checkBook': () => ({ ok: true, estimate }),
     'memory:checkReport': () => report,
-    'memory:cardNotRight': () => flashbackRow
+    'sceneDetail:get': () => stored,
+    'sceneDetail:set': (input) => {
+      const { details } = input as Input<'sceneDetail:set'>
+      stored = { ...details, gone: [] }
+      return stored
+    }
   })
   useMemoryStore.getState().subscribe()
 })
 afterEach(() => {
   resetMemoryStore()
   resetDismissedStore()
+  resetSceneDetailStore()
   resetActiveEditorStore()
   useTreeStore.getState().clear()
   setIpcClient(null)
@@ -157,7 +159,15 @@ describe('Check the book (F-16.30)', () => {
           findingId: 'f-h',
           nodeId: 'sc-3',
           ref: '1.3',
-          label: 'Hobb dies in 1.1 and is here in 1.3'
+          label: 'Hobb dies in 1.1 and is here in 1.3',
+          typed: false
+        },
+        {
+          findingId: 'f-t',
+          nodeId: 'sc-2',
+          ref: '1.2',
+          label: 'Mara Vell’s age',
+          typed: true
         }
       ],
       secretsNobodyLearns: [
@@ -180,13 +190,28 @@ describe('Check the book (F-16.30)', () => {
     expect(hidden).toHaveTextContent(
       'Hobb dies in 1.1 and is here in 1.3 (1.3 looks like a flashback)'
     )
-    fireEvent.click(within(hidden).getByRole('button', { name: 'Not a flashback?' }))
+    // A flashback by the author's own switch says so.
+    expect(hidden).toHaveTextContent('Mara Vell’s age (you set 1.2 as a flashback)')
+    // 2026-10-14: Not a flashback? sets the scene's Flashback switch (the author's setting wins),
+    // keeping what else the details hold; the card is not marked.
+    const [first] = within(hidden).getAllByRole('button', { name: 'Not a flashback?' })
+    fireEvent.click(first ?? shown)
     await waitFor(() =>
-      expect(main.sent('memory:cardNotRight')).toEqual([
-        { nodeId: 'sc-3', field: 'flashback', value: 'yes' }
+      expect(main.sent('sceneDetail:set')).toEqual([
+        { nodeId: 'sc-3', details: { ...emptySceneDetails(), storyYear: 1811, flashback: false } }
       ])
     )
+    expect(main.sent('memory:cardNotRight')).toEqual([])
     await waitFor(() => expect(main.sent('memory:checkReport').length).toBeGreaterThan(1))
+    // Undo puts the switch back as it was (following the book).
+    const toast = useDialogStore.getState().toasts.at(-1)
+    expect(toast?.message).toBe('1.3 is set to Not a flashback; that pair is judged next.')
+    act(() => toast?.action?.run())
+    await waitFor(() => expect(main.sent('sceneDetail:set')).toHaveLength(2))
+    expect(main.sent('sceneDetail:set')[1]).toEqual({
+      nodeId: 'sc-3',
+      details: { ...emptySceneDetails(), storyYear: 1811, flashback: null }
+    })
   })
 
   it('says why when the check it started ended before it began (a hold met since Check)', async () => {

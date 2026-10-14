@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(40)
+    expect(result.version).toBe(41)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1894,5 +1894,50 @@ describe('the judged rendering (0039, F-16.27, P4 slice 2 review) leaves every o
     const { finding: _finding, ...restAfter } = rowsAfter
     const { finding: _before, ...restBefore } = rowsBefore
     expect(JSON.stringify(restAfter)).toBe(JSON.stringify(restBefore))
+  })
+})
+
+describe('the Flashback switch (0040, F-16.11, F-16.23) leaves every older row and column', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, loadMigrations().slice(0, 40))
+    fillEveryTable(db)
+  })
+  afterEach(() => db.close())
+
+  it('adds a nullable flashback column to scene_detail, older rows read null (follow the book)', () => {
+    const tables = tableNamesOf(db).filter((table) => table !== 'schema_migrations')
+    const objectsBefore = schemaOf(db)
+    const rowsBefore = dumpOf(db, tables)
+    expect(rowsBefore.scene_detail).toHaveLength(1)
+
+    expect(migrate(db, loadMigrations().slice(0, 41)).applied).toEqual(['0040_scene_flashback'])
+
+    expect(tableNamesOf(db).filter((table) => table !== 'schema_migrations')).toEqual(tables)
+    const others = (objects: ReturnType<typeof schemaOf>): ReturnType<typeof schemaOf> =>
+      objects.filter((object) => !(object.type === 'table' && object.name === 'scene_detail'))
+    expect(JSON.stringify(others(schemaOf(db)))).toBe(JSON.stringify(others(objectsBefore)))
+    const columns = (
+      db.prepare('PRAGMA table_info(scene_detail)').all() as { name: string; notnull: number }[]
+    ).map((column) => [column.name, column.notnull])
+    expect(columns.at(-1)).toEqual(['flashback', 0])
+    const rowsAfter = dumpOf(db, tables)
+    // Every older value kept, the switch unset.
+    expect(rowsAfter.scene_detail).toEqual(
+      (rowsBefore.scene_detail ?? []).map((row) => ({ ...(row as object), flashback: null }))
+    )
+    const { scene_detail: _after, ...restAfter } = rowsAfter
+    const { scene_detail: _before, ...restBefore } = rowsBefore
+    expect(JSON.stringify(restAfter)).toBe(JSON.stringify(restBefore))
+    // The switch takes both answers and null again.
+    const node = (rowsAfter.scene_detail?.[0] as { node_id: string }).node_id
+    for (const value of [1, 0, null]) {
+      db.prepare('UPDATE scene_detail SET flashback = ? WHERE node_id = ?').run(value, node)
+      expect(db.prepare('SELECT flashback FROM scene_detail WHERE node_id = ?').get(node)).toEqual({
+        flashback: value
+      })
+    }
   })
 })

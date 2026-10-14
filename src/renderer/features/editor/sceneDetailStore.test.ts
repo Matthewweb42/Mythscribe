@@ -160,4 +160,26 @@ describe('sceneDetailStore (F-16.11)', () => {
     expect(namesAny({ ...view(), gone: ['r-1'] }, ids)).toBe(true)
     expect(namesAny(view({ povRecordId: 'r-2' }), ids)).toBe(false)
   })
+
+  it('sets the Flashback switch over the stored details, read first, and answers the old one (2026-10-14)', async () => {
+    handlers['sceneDetail:get'] = () => view({ storyYear: 1798, alsoHere: ['r-1'] })
+    handlers['sceneDetail:set'] = (input) => {
+      const { details } = input as Input<'sceneDetail:set'>
+      return { ...details, gone: [] }
+    }
+    // Not loaded yet: read, then saved with everything else kept.
+    expect(await useSceneDetailStore.getState().setFlashback('sc-1', false)).toBeNull()
+    expect(sent('sceneDetail:get')).toEqual([{ nodeId: 'sc-1' }])
+    expect(sent('sceneDetail:set')).toEqual([
+      {
+        nodeId: 'sc-1',
+        details: { ...emptySceneDetails(), storyYear: 1798, alsoHere: ['r-1'], flashback: false }
+      }
+    ])
+    expect(useSceneDetailStore.getState().docs['sc-1']?.flashback).toBe(false)
+    // Loaded: no read; the old value comes back for Undo.
+    expect(await useSceneDetailStore.getState().setFlashback('sc-1', null)).toBe(false)
+    expect(sent('sceneDetail:get')).toHaveLength(1)
+    expect(useSceneDetailStore.getState().docs['sc-1']?.flashback).toBeNull()
+  })
 })

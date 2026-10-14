@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, isNotNull } from 'drizzle-orm'
 import type { z } from 'zod'
 import { emptySceneDetails, SceneDetails, type SceneDetailsView } from '@shared/memory/sceneDetails'
 import { record, sceneDetail, type SceneDetailRow } from '../db/schema'
@@ -40,7 +40,8 @@ function toDetails(row: SceneDetailRow): SceneDetails {
     },
     time: { text: read(shape.time.shape.text, row.timeText, empty.time.text) },
     storyYear: read(shape.storyYear, row.storyYear, empty.storyYear),
-    alsoHere: read(shape.alsoHere, parseAlsoHere(row.alsoHere), empty.alsoHere)
+    alsoHere: read(shape.alsoHere, parseAlsoHere(row.alsoHere), empty.alsoHere),
+    flashback: read(shape.flashback, row.flashback, empty.flashback)
   }
 }
 
@@ -105,6 +106,21 @@ export function allSceneDetails(db: TreeDb): Map<string, SceneDetails> {
   )
 }
 
+/**
+ * The nodes whose Flashback switch is set, with its answer (null rows left out), in one small read:
+ * what loose ends read when they hold no details (`sceneFlashback` takes it with the card).
+ */
+export function typedFlashbacks(db: TreeDb): Map<string, boolean> {
+  return new Map(
+    db
+      .select({ nodeId: sceneDetail.nodeId, flashback: sceneDetail.flashback })
+      .from(sceneDetail)
+      .where(isNotNull(sceneDetail.flashback))
+      .all()
+      .map((row) => [row.nodeId, row.flashback === true])
+  )
+}
+
 /** A node's details (empty when it has none), with the "+ also here" ids whose record is gone. */
 export function getSceneDetails(db: TreeDb, nodeId: string): SceneDetailsView {
   requireTarget(db, nodeId)
@@ -139,7 +155,8 @@ export function setSceneDetails(
     timeText: details.time.text.trim(),
     storyYear: details.storyYear,
     alsoHere: JSON.stringify(alsoHere),
-    modified: now.toISOString()
+    modified: now.toISOString(),
+    flashback: details.flashback
   }
   db.insert(sceneDetail)
     .values(row)

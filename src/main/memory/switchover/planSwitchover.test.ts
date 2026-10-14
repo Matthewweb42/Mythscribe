@@ -108,7 +108,8 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
     )
     expect(detailOf(plan.converted, 'Scene details')).toBe(
       // Oren only: with the default words, scene 1 names Tomas, so he is not "also here".
-      '4 scenes: 3 POVs and 2 places as records, 3 story years, 1 “also here”.'
+      // Scene 4 returns to the flood after the trial: v1's reading order shows it as a flashback.
+      '4 scenes: 3 POVs and 2 places as records, 3 story years, 1 “also here”, 1 flashback.'
     )
     expect(detailOf(plan.converted, 'Dismissals')).toBe(
       '4 dismissals that still apply, into Dismissed.'

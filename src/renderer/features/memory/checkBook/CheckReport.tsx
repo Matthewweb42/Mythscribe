@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import type { CheckReport } from '@shared/memory/views'
+import { useSceneDetailStore } from '@renderer/features/editor/sceneDetailStore'
 import { useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { FindingRow, UnclearFindings } from '@renderer/features/memory/needsALook/FindingRow'
 import { findingRuleLine } from '@renderer/features/memory/needsALook/findingView'
 import { NoteConflictRow } from '@renderer/features/memory/needsALook/NoteConflictRow'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { describeError } from '@renderer/lib/errors'
 import {
   checkedLine,
   checkSkipsLine,
@@ -23,9 +25,10 @@ const HEADING = 'm-0 mt-3 mb-1 text-xs font-medium tracking-wide text-fg-muted u
  * unclear), the ones the stronger check cleared; what it checked ("Checked: 124 pairs over 90
  * scenes and your notes; 20 confirmed by a stronger AI read") and what it did not (what no rule
  * covers, the scenes not read yet, findings past the 20 confirmations, pairs a Stop left); the
- * findings hidden because a scene looks like a flashback, each with *Not a flashback?* (the card's
- * flashback marked not right, so it is judged next); and the secrets readers know that no scene
- * shows anyone learning, muted and scoped.
+ * findings hidden because a scene is a flashback (the author's Flashback switch, or the card's
+ * reading), each with *Not a flashback?*: it sets the scene's switch to Not a flashback (one place
+ * for the author's answer, 2026-10-14), with *Undo*, so the pair is judged next; and the secrets
+ * readers know that no scene shows anyone learning, muted and scoped.
  */
 export function CheckReportView({
   report,
@@ -96,23 +99,41 @@ export function CheckReportView({
   )
 }
 
-/** The findings hidden because a scene looks like a flashback, each with *Not a flashback?*. */
+/** A hidden finding's line: "Hobb: alive (1.3 looks like a flashback)", or "(you set 1.3 as a flashback)". */
+function hiddenLine(entry: CheckReport['hidden'][number]): string {
+  const why = entry.typed
+    ? `you set ${entry.ref} as a flashback`
+    : `${entry.ref} looks like a flashback`
+  return `${entry.label} (${why})`
+}
+
+/**
+ * The findings hidden because a scene is a flashback, each with *Not a flashback?*: the scene's
+ * Flashback switch set to Not a flashback (2026-10-14; P4-D13 marked the card's flashback not
+ * right), so the author's answer lives in one place, the scene details, and wins over the card;
+ * *Undo* puts the switch back as it was. The finding is judged next, in the background or the next
+ * check.
+ */
 function HiddenFlashbacks({ hidden }: { hidden: CheckReport['hidden'] }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
   const notFlashback = async (entry: CheckReport['hidden'][number]): Promise<void> => {
     setBusy(true)
     try {
-      const store = useMemoryStore.getState()
-      // P4-D13: the card's flashback marked not right (P2a's Not right on a card value); the
-      // finding is judged next, in the background or the next check.
-      const marked = await store.cardNotRight({
-        nodeId: entry.nodeId,
-        field: 'flashback',
-        value: 'yes'
+      const details = useSceneDetailStore.getState()
+      const before = await details.setFlashback(entry.nodeId, false)
+      const undo = (): void => {
+        details
+          .setFlashback(entry.nodeId, before)
+          .then(() => useMemoryStore.getState().loadCheckReport())
+          .catch((err: unknown) => toast.error(describeError(err)))
+      }
+      toast.successWithAction(`${entry.ref} is set to Not a flashback; that pair is judged next.`, {
+        label: 'Undo',
+        run: undo
       })
-      if (!marked) return
-      toast.info(`${entry.ref} is no longer read as a flashback; that pair is judged next.`)
-      await store.loadCheckReport()
+      await useMemoryStore.getState().loadCheckReport()
+    } catch (err) {
+      toast.error(describeError(err))
     } finally {
       setBusy(false)
     }
@@ -123,9 +144,7 @@ function HiddenFlashbacks({ hidden }: { hidden: CheckReport['hidden'] }): React.
       <ul className="m-0 list-none space-y-1 p-0 text-xs" data-testid="check-hidden">
         {hidden.map((entry) => (
           <li key={entry.findingId} className="flex flex-wrap items-center gap-1">
-            <span className="min-w-0 flex-1 text-fg-muted">
-              {entry.label} ({entry.ref} looks like a flashback)
-            </span>
+            <span className="min-w-0 flex-1 text-fg-muted">{hiddenLine(entry)}</span>
             <button
               type="button"
               className={SMALL}

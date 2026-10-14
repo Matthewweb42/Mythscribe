@@ -47,7 +47,8 @@ export function seedStoryNotes(db: TreeDb, sceneId: string, now: Date): string {
       place: { recordId: null, text: 'the quay' },
       time: { text: 'dusk' },
       storyYear: null,
-      alsoHere: []
+      alsoHere: [],
+      flashback: null
     },
     now
   )

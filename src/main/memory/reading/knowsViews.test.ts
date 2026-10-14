@@ -99,7 +99,8 @@ function details(nodeId: string, pov: string, alsoHere: string[] = []): void {
       place: { recordId: null, text: '' },
       time: { text: '' },
       storyYear: null,
-      alsoHere
+      alsoHere,
+      flashback: null
     },
     NOW
   )

@@ -37,7 +37,7 @@ import {
 } from '../../memory/findings/findingsService'
 import { recomputeFindings } from '../../memory/findings/recompute'
 import { underlinesOf } from '../../memory/findings/underlines'
-import { cardNotRight } from '../../memory/reading/notRight'
+import { setSceneDetails, storedSceneDetails } from '../../memory/sceneDetailStore'
 import { fakeAi, requestKind } from '../../memory/reading/readingFixture'
 import { unreadParagraphs } from '../../memory/reading/views'
 import { TEST_BOOK, testBookScene } from '../../memory/testBook/book'
@@ -103,8 +103,8 @@ import {
  *   `OPENROUTER_API_KEY` alone, answered by the oracle judge (`judgeOracle.ts`: `c` for a labelled
  *   contradiction's pair, `ok` for everything else). Every labelled contradiction ends an open
  *   finding confirmed by the stronger check (C7 after the check); no negative is one; h16's is
- *   hidden, listed with *Not a flashback?*, and judged once the card's flashback is marked not
- *   right; a second check is free; the underlines stay at 3 a scene, on open findings, never in a
+ *   hidden, listed with *Not a flashback?*, and judged once its Flashback switch says Not a
+ *   flashback (the author's setting wins over the card, 2026-10-14); a second check is free; the underlines stay at 3 a scene, on open findings, never in a
  *   paragraph with an unread sentence; the loose ends are the labels'; no item, view, report or
  *   ask states an absence; the invariants hold.
  * - **The adversarial judges**: orders that disagree, all unclear, all contradiction, items dropped,
@@ -1114,17 +1114,21 @@ describe('contradictions over the test book: the oracle replay (F-16.27, F-16.28
     expect(marks[session.book.scenes.get('h15') ?? '']?.length).toBe(UNDERLINES_MAX)
   })
 
-  it('hides the flashback pair, lists it with Not a flashback?, and judges it once the card is marked not right', async () => {
+  it('hides the flashback pair, lists it with Not a flashback?, and judges it once the switch says Not a flashback', async () => {
     const label = TEST_BOOK_LABELS.contradictions.find((each) => each.hidden === true) ?? fail()
     const h16 = session.book.scenes.get('h16') ?? fail()
     const finding = findingFor(session.book, label)
     expect(finding.state).toBe('hidden')
+    // The card's reading hides it (no switch set yet).
     expect(first.report?.hidden).toEqual([
-      expect.objectContaining({ findingId: finding.id, nodeId: h16 })
+      expect.objectContaining({ findingId: finding.id, nodeId: h16, typed: false })
     ])
     const calls = server.calls.length
-    // Not a flashback?: the card's flashback marked not right (P4-D13), then the job and the judge.
-    cardNotRight(session.book.db, { nodeId: h16, field: 'flashback', value: 'yes' }, NOW)
+    // Not a flashback?: the scene's Flashback switch set to Not a flashback, its other details kept,
+    // as the report's button sends it (2026-10-14; P4-D13 marked the card not right), then the job
+    // and the judge.
+    const { db } = session.book
+    setSceneDetails(db, h16, { ...storedSceneDetails(db, h16), flashback: false }, NOW)
     const after = await judgeInBackground(session)
     expect(after.error).toBeNull()
     expect(server.calls.length).toBe(calls + 2)

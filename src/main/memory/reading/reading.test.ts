@@ -770,7 +770,8 @@ describe('the views (F-16.18)', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       NOW
     )
@@ -838,7 +839,8 @@ describe('the views (F-16.18)', () => {
         place: { recordId: null, text: 'the harbour' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       NOW
     )

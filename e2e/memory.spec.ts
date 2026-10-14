@@ -95,6 +95,11 @@ import { caretToEnd, clickIntoEditor } from './support'
  * its row 1814 with Mara about 22; moving 1.3 before 1.2 with the Timeline open reorders its rows
  * and carries 1814 into the moved-down scene.
  *
+ * The Flashback switch (F-16.11, F-16.23; 2026-10-14), Use AI off in a new project: 1.1 typed
+ * 1811, 1.2 typed 1798, 1.3 no year; before, 1.3 reads "1798 · from 1.2" with Mara about 6;
+ * switching 1.2 to Flashback beside Story year makes it "flashback · 1798" and 1.3 "1811 · from
+ * 1.1" with Mara about 19; the switch is still on after a reopen; nothing reaches a provider.
+ *
  * P3 slice 5 (F-16.24, F-16.25, F-16.26), the chat's UI in a new project: "Mara's eyes?",
  * "Does Orrin know about the sold map?" and "Who knows about the sold map?" draw instant cards (the
  * line with ⓘ and Not right, the mark, the muted scoped line under the holders) with no request; a
@@ -2161,7 +2166,8 @@ test('story memory v2: who knows what in the panel, the grid and sheets (P2b sli
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       }
     })
   }
@@ -2327,7 +2333,8 @@ test('story memory v2: threads, the timeline and ages (P2b slice 5)', async () =
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       }
     })
   }
@@ -2440,6 +2447,117 @@ test('story memory v2: threads, the timeline and ages (P2b slice 5)', async () =
   expect(
     providerBodies.some((body) =>
       body.messages.some((message) => message.content.includes('year not known'))
+    )
+  ).toBe(false)
+})
+
+test('story memory v2: the Flashback switch in scene details (2026-10-14)', async () => {
+  // A new project with Use AI off: no card reads anything, so only the author's switch can make
+  // a scene a flashback. 1.1 typed 1811, 1.2 typed 1798, 1.3 no year; Mara (Pinned "Born: 1792")
+  // the POV of each.
+  const first = await newV2Project('Flashback Novel')
+  const settings = await invoke<AiSettings>('aiSettings:get', undefined)
+  await invoke('aiSettings:set', { ...settings, dial: 0 })
+  const made = await invoke<{ record?: { id: string } }>('record:create', {
+    name: 'Mara',
+    categoryId: 'character',
+    aliases: [],
+    force: true
+  })
+  const mara = made.record?.id ?? ''
+  await invoke('record:savePage', {
+    id: mara,
+    page: 'pinned',
+    doc: {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Born: 1792' }] }]
+    }
+  })
+  const write = async (id: string, text: string, storyYear: number | null): Promise<void> => {
+    await invoke('document:save', {
+      id,
+      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
+    })
+    await invoke('sceneDetail:set', {
+      nodeId: id,
+      details: {
+        povRecordId: mara,
+        place: { recordId: null, text: '' },
+        time: { text: '' },
+        storyYear,
+        alsoHere: [],
+        flashback: null
+      }
+    })
+  }
+  const scene = async (title: string, text: string, storyYear: number | null): Promise<string> => {
+    const node = await invoke<TreeNode>('tree:create', {
+      parentId: first.parentId,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title
+    })
+    await write(node.id, text, storyYear)
+    return node.id
+  }
+  await write(first.id, 'Mara stood at the gate.', 1811)
+  await scene('Winter', 'Mara remembered the winter.', 1798)
+  await scene('After', 'Mara rode on.', null)
+  await reopenProject('Flashback Novel')
+
+  // Before: 1.2's typed 1798 carries into 1.3, and Mara is about 6 there.
+  await showSection('Manuscript')
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  await bookTree.getByRole('treeitem', { name: 'Winter', exact: true }).click()
+  const panel = page.getByTestId('this-scene-panel')
+  if ((await panel.count()) === 0) {
+    await page.getByRole('button', { name: 'This scene', exact: true }).click()
+  }
+  await panel.getByRole('tab', { name: 'Book' }).click()
+  const timeline = panel.getByTestId('timeline')
+  const row = (name: string) => timeline.getByRole('listitem', { name })
+  await expect(row('1.3 After').getByTestId('timeline-year')).toHaveText('1798 · from 1.2', {
+    timeout: 15_000
+  })
+  await expect(row('1.3 After').getByTestId('timeline-age')).toContainText('Mara about 6')
+
+  // The switch beside Story year in 1.2's scene details: on, its 1798 is its own.
+  const notesColumn = page.getByTestId('notes-panel')
+  if ((await notesColumn.count()) === 0) {
+    await page.getByRole('button', { name: 'Notes', exact: true }).click()
+  }
+  const detailsToggle = notesColumn.getByRole('button', { name: 'Scene details' })
+  if ((await detailsToggle.getAttribute('aria-expanded')) !== 'true') await detailsToggle.click()
+  const meta = notesColumn.getByRole('group', { name: 'Scene metadata' })
+  await expect(meta.getByRole('textbox', { name: 'Story year' })).toHaveValue('1798')
+  const flashback = meta.getByRole('switch', { name: 'Flashback' })
+  await expect(flashback).not.toBeChecked()
+  await flashback.check()
+  await expect(flashback).toBeChecked()
+  await expect(meta.getByRole('button', { name: 'Follow the book' })).toBeVisible()
+
+  // The Timeline: 1.2 a flashback in 1798 (Mara about 6 there), 1.3 back to 1811 from 1.1.
+  await panel.getByRole('tab', { name: 'Book' }).click()
+  await expect(row('1.2 Winter').getByTestId('timeline-year')).toHaveText('flashback · 1798', {
+    timeout: 15_000
+  })
+  await expect(row('1.2 Winter').getByTestId('timeline-age')).toContainText('Mara about 6')
+  await expect(row('1.3 After').getByTestId('timeline-year')).toHaveText('1811 · from 1.1')
+  await expect(row('1.3 After').getByTestId('timeline-age')).toContainText('Mara about 19')
+
+  // The switch survives a reopen.
+  await reopenProject('Flashback Novel')
+  await showSection('Manuscript')
+  await bookTree.getByRole('treeitem', { name: 'Winter', exact: true }).click()
+  if ((await notesColumn.count()) === 0) {
+    await page.getByRole('button', { name: 'Notes', exact: true }).click()
+  }
+  if ((await detailsToggle.getAttribute('aria-expanded')) !== 'true') await detailsToggle.click()
+  await expect(meta.getByRole('switch', { name: 'Flashback' })).toBeChecked({ timeout: 15_000 })
+  // Nothing was sent to any provider: Use AI is off and all of it is local.
+  expect(
+    providerBodies.some((body) =>
+      body.messages.some((message) => message.content.includes('Mara remembered the winter'))
     )
   ).toBe(false)
 })

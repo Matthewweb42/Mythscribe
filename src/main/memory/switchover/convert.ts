@@ -202,7 +202,8 @@ export function convertSwitchover(
           time: { text: details.timeText },
           storyYear:
             year !== null && year >= STORY_YEAR_MIN && year <= STORY_YEAR_MAX ? year : null,
-          alsoHere: details.alsoHere.flatMap((key) => idOf(key) ?? [])
+          alsoHere: details.alsoHere.flatMap((key) => idOf(key) ?? []),
+          flashback: details.flashback
         },
         now
       )

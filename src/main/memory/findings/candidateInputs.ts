@@ -11,6 +11,7 @@ import {
   type TypedScene
 } from '@shared/memory/candidates'
 import { emptyCardFields, setsState, type Card, type Claim } from '@shared/memory/claims'
+import { sceneFlashback } from '@shared/memory/flashback'
 import type { FindingSide } from '@shared/memory/findings'
 import type {
   LooseCharacter,
@@ -28,7 +29,7 @@ import { researchDocumentIds } from '../../research/researchTree'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
 import { dismissedKeys } from '../dismissedStore'
 import { listRecords } from '../recordStore'
-import { allSceneDetails } from '../sceneDetailStore'
+import { allSceneDetails, typedFlashbacks } from '../sceneDetailStore'
 import { draftCards, getCard } from '../reading/cardStore'
 import { claimRows, draftClaims, toClaim } from '../reading/claimStore'
 import { emptyScenes } from '../reading/knowsViews'
@@ -210,12 +211,15 @@ function readableClaims(
 
 /**
  * One scene's held card as the rules read it (its text is read once, only when a rule asks): who is
- * on the page by a verified quote that still stands, the verified flashback, the quoted year.
+ * on the page by a verified quote that still stands, the scene's flashback (`sceneFlashback`: the
+ * author's Flashback switch, `typed`, wins over the card's verified reading, so a switch set to
+ * Flashback hides with no card and with Use AI off), the quoted year.
  */
 function sceneFactsReader(
   db: TreeDb,
   rows: ReadonlyMap<string, NodeRow>,
-  cards: ReadonlyMap<string, Card>
+  cards: ReadonlyMap<string, Card>,
+  typed: (nodeId: string) => boolean | null
 ): (nodeId: string) => SceneFacts {
   let notRight: ReadonlySet<string> | null = null
   const facts = new Map<string, SceneFacts>()
@@ -225,15 +229,18 @@ function sceneFactsReader(
     const stored = cards.get(nodeId)
     const card = stored === undefined ? null : slimCard(stored)
     const row = rows.get(nodeId)
-    let found = NO_FACTS
+    const switched = typed(nodeId)
+    let found: SceneFacts =
+      switched === null
+        ? NO_FACTS
+        : { ...NO_FACTS, flashback: sceneFlashback(switched, null).flashback }
     if (card !== null && row !== undefined) {
       notRight ??= dismissedKeys(db, 'notRight')
       const held = heldCard(db, card, true, notRight, rowTexts(row))
-      const flashback = held.fields.flashback
       const year = held.fields.year
       found = {
         present: new Set(held.present.filter((each) => each.verified).map((each) => each.recordId)),
-        flashback: flashback?.verified === true && flashback.value === 'yes',
+        flashback: sceneFlashback(switched, held.fields.flashback).flashback,
         quotedYear: year?.verified === true ? year.value : null
       }
     }
@@ -339,7 +346,8 @@ function inputsOf(
     typed.set(nodeId, {
       pov: details.povRecordId,
       alsoHere: details.alsoHere,
-      year: details.storyYear
+      year: details.storyYear,
+      flashback: details.flashback
     })
   }
   const records = listRecords(db)
@@ -349,7 +357,7 @@ function inputsOf(
     claims,
     onPage,
     typed,
-    scene: sceneFactsReader(db, rows, cards),
+    scene: sceneFactsReader(db, rows, cards, (nodeId) => typed.get(nodeId)?.flashback ?? null),
     knewBefore: listKnewBefore(db),
     records: candidateRecords(records),
     notes: canonNotes(
@@ -419,15 +427,18 @@ export function looseEndInputs(
       .map((quote) => ({ nodeId: quote.nodeId }))
   }))
   // Deaths and living values in story order: a value that is neither ("presumed dead") is left
-  // out, and so is a living value in a verified flashback (alive then, earlier in story time).
+  // out, and so is a living value in a flashback (alive then, earlier in story time; the author's
+  // switch, else the verified card).
   const deaths = new Map<string, { order: number; dead: boolean }[]>()
+  const switches = typedFlashbacks(db)
   const scene =
     draftId === null
       ? null
       : sceneFactsReader(
           db,
           new Map(nodes.map((row) => [row.id, row])),
-          readableCards(db, draftId, reading)
+          readableCards(db, draftId, reading),
+          (nodeId) => switches.get(nodeId) ?? null
         )
   for (const claim of claims) {
     if (claim.slot !== 'alive' || !setsState(claim)) continue

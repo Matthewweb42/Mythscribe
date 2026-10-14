@@ -1,0 +1,1 @@
+ALTER TABLE `scene_detail` ADD `flashback` integer;

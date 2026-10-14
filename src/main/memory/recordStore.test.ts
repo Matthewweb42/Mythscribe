@@ -354,7 +354,8 @@ describe('pages, update and delete', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: [id]
+        alsoHere: [id],
+        flashback: null
       },
       NOW
     )
@@ -387,7 +388,8 @@ describe('sameAs (F-16.4)', () => {
         place: { recordId: merge, text: '' },
         time: { text: '' },
         storyYear: 1811,
-        alsoHere: [merge, keep, other]
+        alsoHere: [merge, keep, other],
+        flashback: null
       },
       NOW
     )

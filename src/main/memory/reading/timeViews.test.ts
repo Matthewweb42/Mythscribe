@@ -71,7 +71,12 @@ function scene(title: string, chapter: string, ...paragraphs: string[]): string 
   return id
 }
 
-function details(nodeId: string, storyYear: number | null, time = ''): void {
+function details(
+  nodeId: string,
+  storyYear: number | null,
+  time = '',
+  flashback: boolean | null = null
+): void {
   setSceneDetails(
     db,
     nodeId,
@@ -80,7 +85,8 @@ function details(nodeId: string, storyYear: number | null, time = ''): void {
       place: { recordId: null, text: '' },
       time: { text: time },
       storyYear,
-      alsoHere: []
+      alsoHere: [],
+      flashback
     },
     NOW
   )
@@ -423,6 +429,75 @@ describe('the Timeline’s words and sources (review of P2b slice 5)', () => {
   })
 })
 
+describe('the Flashback switch (F-16.11, F-16.23; the author’s decision 2026-10-14)', () => {
+  /** A scene after "Five" with nothing typed and no card: what a flashback before it leaves it. */
+  function six(): string {
+    const chapter = getNode(db, one)?.parentId ?? ''
+    const id = scene('Six', chapter, 'Mara rode on.')
+    scanNamesFor(db, id, NOW)
+    return id
+  }
+
+  it('on, with no card (Use AI off): a typed year there is its own, never carried, and ages there are flashback ages', () => {
+    maraAges()
+    const after = six()
+    // Before: 1.6's typed 1800 carries into 1.7, and so does the age computed from it (Ages of
+    // Mara: 1.7 types no POV).
+    details(five, 1800)
+    let rows = timelineMemory(db, mara).rows
+    expect(rows.slice(5).map(yearText)).toEqual(['1800 typed', '1800 from 1.6'])
+    expect(rows.slice(5).map((row) => ageText(row.ages[0]?.age))).toEqual([
+      'about 8 (1.6)',
+      'about 8 (1.6)'
+    ])
+    // The switch on 1.6 (no card anywhere on it): its year stays its own.
+    details(five, 1800, '', true)
+    rows = timelineMemory(db, mara).rows
+    expect(rows.slice(5).map(yearText)).toEqual(['1800 typed', 'unknown since Three winters later'])
+    expect(rows.map((row) => row.flashback)).toEqual([
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false
+    ])
+    // The flashback's own age; after it, the last age stated outside a flashback, as before.
+    expect(rows.slice(5).map((row) => ageText(row.ages[0]?.age))).toEqual([
+      'about 8 (1.6)',
+      'nineteen stated 1.2; since 1.4,1.5'
+    ])
+    // A typed switch gives the row no card source to doubt.
+    expect(rows[5]?.sources).toEqual([])
+    // The same years and ages for the sheets and P3.
+    expect(storedYears(db).find((row) => row.nodeId === after)?.year.kind).toBe('unknown')
+    expect(ageText(storedAge(db, mara, after))).toBe('nineteen stated 1.2; since 1.4,1.5')
+  })
+
+  it('off, the card’s flashback is ignored; unset again, the card counts', () => {
+    maraAges()
+    details(flash, null, '', false)
+    let row = timelineMemory(db, null).rows[2]
+    expect(row?.flashback).toBe(false)
+    // Its own quoted year stays its scene's; the card's flashback is no source any more.
+    expect(row === undefined ? '' : yearText(row)).toBe('1798 quoted')
+    expect(row?.sources.map((source) => source.field)).toEqual(['year'])
+    // Not a flashback, its quoted 1798 is a year change the stated age lists since.
+    expect(ageText(storedAge(db, mara, three))).toBe('nineteen stated 1.2; since 1.3,1.4')
+    // Follow the book: the card's checked flashback counts again.
+    details(flash, null, '', null)
+    row = timelineMemory(db, null).rows[2]
+    expect(row?.flashback).toBe(true)
+    expect(row?.sources.map((source) => source.field)).toEqual(['year', 'flashback'])
+    // On over a card that agrees: a flashback, but the switch's, so no card source for it.
+    details(flash, null, '', true)
+    row = timelineMemory(db, null).rows[2]
+    expect(row?.flashback).toBe(true)
+    expect(row?.sources.map((source) => source.field)).toEqual(['year'])
+  })
+})
+
 describe('the Threads (F-16.23, P2b-D22)', () => {
   it('reads each thread as of a scene: open, then resolved; the author’s with no step, scoped', () => {
     const thread = heir()
@@ -547,7 +622,8 @@ describe('a sheet’s Threads, Age and The thread (F-16.23)', () => {
         place: { recordId: null, text: '' },
         time: { text: '' },
         storyYear: null,
-        alsoHere: []
+        alsoHere: [],
+        flashback: null
       },
       NOW
     )
