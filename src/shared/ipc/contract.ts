@@ -86,7 +86,8 @@ import {
   SwitchoverOutcome,
   SwitchoverPlan,
   SwitchoverRecord,
-  SwitchoverSafetyOutcome
+  SwitchoverSafetyOutcome,
+  SwitchoverTrial
 } from '../memory/switchover'
 import { CloudCapState, CloudCapUsd } from '../memory/cloudCap'
 import { UNDERLINE_SCENES_MAX, UNDERLINES_SHOWN_MAX, UnderlinesByScene } from '../memory/underlines'
@@ -3771,11 +3772,6 @@ export const contract = {
   'cloudCap:get': { input: z.undefined(), output: CloudCapState },
   'cloudCap:set': { input: z.object({ capUsd: CloudCapUsd }), output: CloudCapState },
   /**
-   * F-16.15: whether this build offers the story-memory switch-over on a copy (Help › Try the
-   * story-memory switch-over on a copy…): unpackaged builds only in P1 (decision P1-D12).
-   */
-  'switchover:available': { input: z.undefined(), output: z.object({ available: z.boolean() }) },
-  /**
    * F-16.15: copies the open (v1) project beside it as `<Name> (story memory test <date>)` with a
    * new id and the `switchoverTrial` row, and opens the copy (still v1). The renderer flushes
    * pending saves first.
@@ -3784,6 +3780,12 @@ export const contract = {
     input: z.undefined(),
     output: z.object({ folder: z.string(), info: ProjectInfo })
   },
+  /**
+   * F-16.31 (Switch-over slice 3): the open v1 project's test-copy marker, or null for a project
+   * that is not a test copy. The intro offers a test copy only *Switch this copy…*, and its final
+   * screen names the project it was made from (`source`). Writes nothing.
+   */
+  'switchover:trial': { input: z.undefined(), output: SwitchoverTrial.nullable() },
   /**
    * F-16.31: the safety step on the open project itself, before the dry run: the Google Drive
    * working copy copied back, a kept backup, a dated copy beside the project. Answers both paths

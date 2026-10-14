@@ -1,15 +1,31 @@
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { INLINE_TAG_REPLACEMENT_MAX, type SwitchoverItem } from '@shared/memory/switchover'
-import { formatCount } from '@renderer/features/ai/usageFormat'
 import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
+import { useBackupStore } from '@renderer/features/backups/backupStore'
+import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { SwitchoverFailure } from './SwitchoverFailure'
 import { mergeKey, useSwitchoverStore } from './switchoverStore'
-import { rebuildLine } from './switchoverText'
+import {
+  THIS_IS_A_COPY,
+  TRY_COPY_FIRST,
+  WHAT_CHANGES,
+  cloudLabel,
+  countsLine,
+  goBackLine,
+  rebuildLine,
+  safetyProgress
+} from './switchoverText'
 
 /**
- * The story-memory switch-over on a copy (F-16.15): the dry run (kept, converted and dropped, by
+ * The story-memory switch-over (F-16.15; F-16.31 part A, plan `Switchover.md` §3): the intro (what
+ * changes; *Try it on a copy first*, recommended; *Switch this project…*; on a test copy only
+ * *Switch this copy…*), the safety step's progress, the dry run (kept, converted and dropped, by
  * name; the merges to tick; the sheet text the AI wrote; what cannot convert; the rebuild's price
- * and time), then the consent screen (each inline tag's words, editable), then the conversion's
- * summary. Escape or Cancel leaves the test copy open as it is (still v1) until Convert.
+ * and time; on the project itself, where the backup and the dated copy are), the consent screen
+ * (each inline tag's words, editable), then the final screen (what was written, the kept backup
+ * with *Show backups*, the dated copy, how to go back; a test copy's names the project it was made
+ * from and offers *Open my project*). A failed step shows its block (`SwitchoverFailure`) where it
+ * failed. Escape or Cancel leaves the project as it is (still v1) until Convert.
  */
 export function SwitchoverDialog(): React.JSX.Element | null {
   const phase = useSwitchoverStore((s) => s.phase)
@@ -66,31 +82,120 @@ function SwitchoverBody(): React.JSX.Element {
 
   useEffect(() => {
     first.current?.focus()
-  }, [state.phase])
+  }, [state.phase, state.target])
 
-  const busy = state.phase === 'copying' || state.phase === 'converting'
-  const close = (): void => useSwitchoverStore.getState().close()
+  const busy =
+    state.phase === 'copying' || state.phase === 'safety' || state.phase === 'converting'
+  const store = useSwitchoverStore.getState
+  const close = (): void => store().close()
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === 'Escape' && !busy) {
       event.stopPropagation()
       close()
     }
   }
+  const onCopy = state.target === 'copy'
+  const failure =
+    state.failure === null ? null : (
+      <SwitchoverFailure
+        failure={state.failure}
+        cloud={state.cloud}
+        busy={busy}
+        onRetry={() => void store().retry()}
+      />
+    )
 
-  let title = 'Story-memory switch-over'
+  let title = 'Switch to the new story memory'
   let body: ReactNode = null
   let actions: ReactNode = null
   const plan = state.plan
-  if (state.phase === 'copying') {
-    title = 'Making a test copy'
-    body = <p className={`m-0 text-sm ${AI_WAIT_CLASS}`}>Copying the project and reading it…</p>
+  if (state.phase === 'intro') {
+    body = (
+      <>
+        {onCopy ? <p className="m-0 text-sm">{THIS_IS_A_COPY}</p> : null}
+        <ul
+          role="list"
+          aria-label="What changes"
+          data-testid="switchover-what-changes"
+          className="m-0 flex list-disc flex-col gap-1 pl-5 text-sm"
+        >
+          {WHAT_CHANGES.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        {state.target === 'project' ? <p className="m-0 text-sm">{TRY_COPY_FIRST}</p> : null}
+        {failure}
+      </>
+    )
+    actions =
+      state.target === null ? null : (
+        <>
+          <button type="button" className={BUTTON} onClick={close}>
+            Cancel
+          </button>
+          {onCopy ? (
+            <button
+              ref={first}
+              type="button"
+              className={PRIMARY}
+              onClick={() => void store().switchThis()}
+            >
+              Switch this copy…
+            </button>
+          ) : (
+            <>
+              <button type="button" className={BUTTON} onClick={() => void store().switchThis()}>
+                Switch this project…
+              </button>
+              <button
+                ref={first}
+                type="button"
+                className={PRIMARY}
+                onClick={() => void store().tryCopy()}
+              >
+                Try it on a copy first
+              </button>
+            </>
+          )}
+        </>
+      )
+  } else if (state.phase === 'copying') {
+    title = state.copy === null ? 'Making a test copy' : 'Reading the test copy'
+    body = (
+      <p className={`m-0 text-sm ${AI_WAIT_CLASS}`}>
+        {state.copy === null ? 'Copying the project and reading it…' : 'Reading the test copy…'}
+      </p>
+    )
+  } else if (state.phase === 'safety') {
+    title = 'Making the backup and the dated copy'
+    body = (
+      <p className={`m-0 text-sm ${AI_WAIT_CLASS}`} data-testid="switchover-safety">
+        {state.safety === null ? safetyProgress(state.cloud) : 'Reading the project…'}
+      </p>
+    )
   } else if (state.phase === 'plan' && plan !== null) {
     title = 'Switch-over dry run'
     body = (
       <>
-        <p className="m-0 text-sm">
-          This is a test copy; nothing has changed yet. Your original project stays as it is.
-        </p>
+        {onCopy ? (
+          <p className="m-0 text-sm">
+            This is a test copy; nothing has changed yet. Your original project stays as it is.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-0.5 text-sm" data-testid="switchover-yours">
+            <p className="m-0">
+              This is your project. Nothing has changed yet; the backup and the dated copy are made.
+            </p>
+            {state.safety === null ? null : (
+              <>
+                <p className="m-0 break-all text-xs text-fg-muted">Backup: {state.safety.backup}</p>
+                <p className="m-0 break-all text-xs text-fg-muted">
+                  Dated copy: {state.safety.datedCopy}
+                </p>
+              </>
+            )}
+          </div>
+        )}
         <Section title="Converted" testId="switchover-converted">
           <Items items={plan.converted} label="Converted" />
         </Section>
@@ -109,9 +214,7 @@ function SwitchoverBody(): React.JSX.Element {
                     <input
                       type="checkbox"
                       checked={state.ticked.includes(mergeKey(pair.keep, pair.merge))}
-                      onChange={() =>
-                        useSwitchoverStore.getState().toggleMerge(pair.keep, pair.merge)
-                      }
+                      onChange={() => store().toggleMerge(pair.keep, pair.merge)}
                     />
                     {`Merge ${pair.mergeName} (${pair.mergeCategory}) into ${pair.keepName} (${pair.keepCategory})`}
                   </label>
@@ -150,11 +253,7 @@ function SwitchoverBody(): React.JSX.Element {
         <button ref={first} type="button" className={BUTTON} onClick={close}>
           Cancel
         </button>
-        <button
-          type="button"
-          className={PRIMARY}
-          onClick={() => void useSwitchoverStore.getState().toConsent()}
-        >
+        <button type="button" className={PRIMARY} onClick={() => void store().toConsent()}>
           Next
         </button>
       </>
@@ -192,9 +291,7 @@ function SwitchoverBody(): React.JSX.Element {
                       value={row.replacement}
                       disabled={busy}
                       maxLength={INLINE_TAG_REPLACEMENT_MAX}
-                      onChange={(event) =>
-                        useSwitchoverStore.getState().setReplacement(row.key, event.target.value)
-                      }
+                      onChange={(event) => store().setReplacement(row.key, event.target.value)}
                       className="w-full rounded-md border border-line bg-surface px-2 py-1"
                     />
                   </td>
@@ -203,11 +300,12 @@ function SwitchoverBody(): React.JSX.Element {
             </tbody>
           </table>
         )}
-        <p className="m-0 text-sm">
-          {state.copy === null
-            ? 'Convert changes this project. Its backup and dated copy are already made.'
-            : 'Only this test copy changes; the project it was made from stays as it is.'}
+        <p className="m-0 break-all text-sm" data-testid="switchover-consent-last">
+          {onCopy
+            ? 'Only this test copy changes; the project it was made from stays as it is.'
+            : `Convert changes this project. Its backup is ${state.safety?.backup ?? 'made first'}.`}
         </p>
+        {failure}
       </>
     )
     actions = (
@@ -217,7 +315,7 @@ function SwitchoverBody(): React.JSX.Element {
           type="button"
           className={BUTTON}
           disabled={busy}
-          onClick={() => useSwitchoverStore.getState().back()}
+          onClick={() => store().back()}
         >
           Back
         </button>
@@ -225,7 +323,7 @@ function SwitchoverBody(): React.JSX.Element {
           type="button"
           className={PRIMARY}
           disabled={busy}
-          onClick={() => void useSwitchoverStore.getState().convert()}
+          onClick={() => void store().convert()}
         >
           {state.phase === 'converting' ? (
             <span className={AI_WAIT_CLASS}>Converting…</span>
@@ -236,23 +334,61 @@ function SwitchoverBody(): React.JSX.Element {
       </>
     )
   } else if (state.phase === 'done' && state.result !== null) {
-    const { counts, backup, datedCopy } = state.result
+    const { counts, backup, datedCopy, trial } = state.result
     title = 'Switched over'
+    const where = cloudLabel(state.cloud)
     body = (
       <>
         <p className="m-0 text-sm" data-testid="switchover-done">
-          The test copy now uses the new story memory: {formatCount(counts.records, 'record')},{' '}
-          {formatCount(counts.labels, 'label')}, {formatCount(counts.research, 'Research document')}
-          , {formatCount(counts.tokens, 'inline tag')} as words.
+          {trial
+            ? `This test copy now uses the new story memory: ${countsLine(counts)}.`
+            : `Your project now uses the new story memory: ${countsLine(counts)}.`}
         </p>
-        {backup !== null && datedCopy !== null ? (
-          <p className="m-0 break-all text-xs text-fg-muted">
-            Dated copy: {datedCopy} · Backup: {backup}
+        {trial ? (
+          <p className="m-0 break-all text-sm" data-testid="switchover-original">
+            {`Your project at ${state.source ?? 'its folder'} is unchanged and still uses the old one.`}
           </p>
         ) : null}
+        {backup === null ? null : (
+          <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="switchover-backup">
+            <span className="min-w-0 break-all">
+              Backup: {backup} (kept until you delete it)
+            </span>
+            <button type="button" className={BUTTON} onClick={() => void showBackups()}>
+              Show backups
+            </button>
+          </div>
+        )}
+        {datedCopy === null ? null : (
+          <p className="m-0 break-all text-sm" data-testid="switchover-dated-copy">
+            {where === null
+              ? `Dated copy: ${datedCopy}`
+              : `Dated copy (in ${where}): ${datedCopy}`}
+          </p>
+        )}
+        {trial || backup === null ? null : (
+          <p className="m-0 text-sm" data-testid="switchover-go-back">
+            {goBackLine(backup)}
+          </p>
+        )}
       </>
     )
-    actions = (
+    actions = trial ? (
+      <>
+        <button type="button" className={BUTTON} onClick={close}>
+          Close
+        </button>
+        <button
+          ref={first}
+          type="button"
+          className={PRIMARY}
+          disabled={state.source === null}
+          onClick={() => void store().openMyProject()}
+        >
+          Open my project
+        </button>
+      </>
+    ) : (
       <button ref={first} type="button" className={PRIMARY} onClick={close}>
         Close
       </button>
@@ -282,4 +418,11 @@ function SwitchoverBody(): React.JSX.Element {
       </div>
     </div>
   )
+}
+
+/** *Show backups*: the backup folder in the file manager; a failure says why. */
+async function showBackups(): Promise<void> {
+  await useBackupStore.getState().reveal()
+  const error = useBackupStore.getState().error
+  if (error !== null) toast.error(error)
 }

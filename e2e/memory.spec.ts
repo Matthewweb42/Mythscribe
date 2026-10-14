@@ -132,9 +132,20 @@ import { caretToEnd, clickIntoEditor } from './support'
  * lists the finding.
  *
  * P1 slice 6 (F-16.15), a second launch without the override: a v1 project with a character tag
- * typed inline goes through Help › Try the story-memory switch-over on a copy…; the dry run lists
- * the tag as a record; the consent screen's replacement is edited to "Mara"; the copy reopens on
- * v2 with plain "Mara" and a Mara record; the original reopens as v1 with its inline tag.
+ * typed inline goes through Help › Switch to the new story memory… › Try it on a copy first (since
+ * Switch-over slice 3, F-16.31); the dry run lists the tag as a record; the consent screen's
+ * replacement is edited to "Mara"; the copy reopens on v2 with plain "Mara" and a Mara record; the
+ * original reopens as v1 with its inline tag.
+ *
+ * Switch-over slice 3 (F-16.31 part A), a third launch without the override, as the installed app
+ * runs it: a v1 project in a temp "My Drive" (Google Drive) with "#mara" typed inline; Help lists
+ * Switch to the new story memory…, and the flow starts from Settings › AI › Story memory; the intro
+ * says what changes; Switch this project… with the backup folder under a file fails at the backup
+ * (the project still v1, its inline tag, no dated copy); Try again makes the kept backup and the
+ * dated copy in My Drive; the dry run says "This is your project"; the consent keeps "Mara"; the
+ * final screen names the backup zip and the dated copy (both on disk) and how to go back; the same
+ * folder reopens on v2 with "Mara's eyes were grey." and a Mara record, and Help no longer lists
+ * the item.
  */
 
 let app: ElectronApplication
@@ -3782,14 +3793,19 @@ test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', asy
   await expect.poll(storedText).toContain('left.')
   expect(await storedText()).toContain('inlineTag')
 
-  // Help › Try the story-memory switch-over on a copy…: the dry run lists the tag as a record.
+  // Help › Switch to the new story memory… › Try it on a copy first (F-16.31 slice 3): the dry
+  // run lists the tag as a record.
   await page
     .getByRole('menubar', { name: 'Application menu' })
     .getByRole('menuitem', { name: 'Help' })
     .click()
   await page
     .getByRole('menu', { name: 'Help' })
-    .getByRole('menuitem', { name: 'Try the story-memory switch-over on a copy…' })
+    .getByRole('menuitem', { name: 'Switch to the new story memory…' })
+    .click()
+  await page
+    .getByRole('dialog', { name: 'Switch to the new story memory' })
+    .getByRole('button', { name: 'Try it on a copy first' })
     .click()
   const dryRun = page.getByRole('dialog', { name: 'Switch-over dry run' })
   // (A character tag arrives with its sheet in v1, F-9.12, so the record comes from both.)
@@ -3850,4 +3866,192 @@ test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', asy
     .getByText(scene.title, { exact: true })
     .click()
   await expect(editor.locator('[data-inline-tag]')).toHaveText(['#mara'])
+})
+
+test('story memory: the switch-over of a v1 project in place, as the installed app runs it (F-16.31 part A)', async () => {
+  // A third launch without the override, with its own app data: new projects run v1, and nothing
+  // turns the switch-over on but the author.
+  if (!exited) await app.close()
+  const userData = path.join(tmp, 'userData-in-place')
+  app = await electron.launch({ args: ['.'], env: { ...baseEnv, MYTHSCRIBE_USER_DATA: userData } })
+  exited = false
+  app.on('close', () => {
+    exited = true
+  })
+  page = await app.firstWindow()
+
+  // 1. A v1 project in Google Drive (a temp "My Drive" folder), made through the wizard, Use AI off.
+  const drive = path.join(tmp, 'My Drive')
+  fs.mkdirSync(drive, { recursive: true })
+  const projectPath = path.join(drive, 'Real Novel.mythscribe')
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
+  }, projectPath)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const wizard = page.getByRole('dialog')
+  await wizard.getByRole('textbox', { name: 'Project name' }).fill('Real Novel')
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByText('Off', { exact: true }).click()
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByTestId('project-name')).toHaveText('Real Novel')
+  const created = await invoke<ProjectInfo | null>('project:current', undefined)
+  expect(created?.storyMemory).toBe('v1')
+  expect(created?.path).toBe(projectPath)
+
+  // 2. A character tag, made in the Index, typed inline at the start of the first scene.
+  await showSection('Index')
+  const tagsPanel = page.getByRole('region', { name: 'Index section', exact: true })
+  await tagsPanel
+    .getByRole('tablist', { name: 'Tag categories' })
+    .getByRole('tab', { name: 'Characters' })
+    .click()
+  const tagForm = tagsPanel.getByRole('form', { name: 'New tag' })
+  await tagForm.getByRole('textbox', { name: 'Tag name' }).fill('mara')
+  await tagForm.getByRole('button', { name: 'Create tag' }).click()
+  await showSection('Manuscript')
+  const scene = (await invoke<TreeNode[]>('tree:list', undefined)).find(
+    (n) => n.hierarchyLevel === 'scene'
+  )
+  if (scene === undefined) throw new Error('the new project has no scene')
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByText(scene.title, { exact: true })
+    .click()
+  await expect(page.getByTestId('status-cloud')).toContainText('Google Drive')
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await clickIntoEditor(editor)
+  await page.keyboard.type('#mar')
+  const suggestions = page.getByRole('listbox', { name: 'Tag suggestions' })
+  await expect(suggestions.getByRole('option').first()).toHaveText('mara')
+  await page.keyboard.press('Tab')
+  // The token brings its own space; the possessive follows the name directly.
+  await page.keyboard.press('Backspace')
+  await page.keyboard.type("'s eyes were grey. She walked to the quay.")
+  await expect(editor.locator('[data-inline-tag]')).toHaveText(['#mara'])
+  const stored = async (): Promise<string> =>
+    JSON.stringify(
+      (await invoke<{ content: TiptapNodeT | null }>('document:get', { id: scene.id })).content
+    )
+  await expect.poll(stored).toContain('the quay.')
+  expect(await stored()).toContain('inlineTag')
+
+  // 3. Help lists the item while a v1 project is open; the flow starts from Settings › AI instead.
+  const menubar = page.getByRole('menubar', { name: 'Application menu' })
+  await menubar.getByRole('menuitem', { name: 'Help' }).click()
+  await expect(
+    page
+      .getByRole('menu', { name: 'Help' })
+      .getByRole('menuitem', { name: 'Switch to the new story memory…' })
+  ).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu', { name: 'Help' })).toHaveCount(0)
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' })
+  await page.keyboard.press('Control+,')
+  await expect(settingsDialog).toBeVisible()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog
+    .getByTestId('switchover-settings')
+    .getByRole('button', { name: 'Switch to the new story memory…' })
+    .click()
+  await expect(settingsDialog).toHaveCount(0)
+
+  // 4. The intro says what changes and recommends a copy first; this run switches the project.
+  const intro = page.getByRole('dialog', { name: 'Switch to the new story memory' })
+  await expect(intro.getByRole('list', { name: 'What changes' })).toContainText(
+    'Inline tags in your scenes become plain words.'
+  )
+  await expect(intro.getByRole('button', { name: 'Try it on a copy first' })).toBeFocused()
+
+  // 5. The backup folder under a file (main's folder dialog, stubbed): the safety step fails at
+  // the backup, and nothing changed.
+  const blocker = path.join(tmp, 'not-a-folder.txt')
+  fs.writeFileSync(blocker, 'a file where the backup folder should be')
+  await app.evaluate(({ dialog }, chosen) => {
+    dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] })
+  }, path.join(blocker, 'backups'))
+  await invoke('backups:chooseFolder', undefined)
+  await intro.getByRole('button', { name: 'Switch this project…' }).click()
+  const failure = intro.getByTestId('switchover-failure')
+  await expect(failure).toContainText('What failed: The backup', { timeout: 15_000 })
+  await expect(failure).toContainText('Nothing was changed')
+  await expect(failure).toContainText('Next: Choose another backup folder in Settings › Backups')
+  const unchanged = await invoke<ProjectInfo | null>('project:current', undefined)
+  expect(unchanged?.storyMemory).toBe('v1')
+  expect(await stored()).toContain('inlineTag')
+  const datedCopies = (): string[] =>
+    fs.readdirSync(drive).filter((name) => name.includes('before story memory'))
+  expect(datedCopies()).toEqual([])
+  // The folder back to the default; Try again.
+  await invoke('backups:setSettings', { patch: { folder: null } })
+  await failure.getByRole('button', { name: 'Try again' }).click()
+
+  // 6. The dry run on the project itself, then the consent screen keeps the record's name.
+  const dryRun = page.getByRole('dialog', { name: 'Switch-over dry run' })
+  await expect(dryRun.getByTestId('switchover-yours')).toContainText(
+    'This is your project. Nothing has changed yet; the backup and the dated copy are made.',
+    { timeout: 15_000 }
+  )
+  await expect(dryRun.getByRole('list', { name: 'Converted' })).toContainText(
+    'Mara: Record (character): from its sheet and tag.'
+  )
+  await expect(dryRun.getByTestId('switchover-rebuild')).toContainText('Rebuild memory:')
+  await dryRun.getByRole('button', { name: 'Next' }).click()
+  await expect(page.getByRole('textbox', { name: 'Replacement for #mara' })).toHaveValue('Mara')
+  await expect(page.getByTestId('switchover-consent-last')).toContainText(
+    'Convert changes this project. Its backup is'
+  )
+  await page.getByRole('button', { name: 'Convert' }).click()
+
+  // 7. The final screen: the kept backup and the dated copy in My Drive, both on disk, and how to
+  // go back; the same folder is open again on v2 with plain words and a Mara record.
+  const done = page.getByRole('dialog', { name: 'Switched over' })
+  await expect(done).toBeVisible({ timeout: 20_000 })
+  const record = await invoke<{ backup: string | null; datedCopy: string | null } | null>(
+    'switchover:record',
+    undefined
+  )
+  const backup = record?.backup ?? ''
+  const datedCopy = record?.datedCopy ?? ''
+  expect(path.basename(backup)).toMatch(
+    /^Real Novel before story memory \d{4}-\d\d-\d\d \d{6}\.zip$/
+  )
+  expect(fs.existsSync(backup)).toBe(true)
+  expect(path.dirname(datedCopy)).toBe(drive)
+  expect(path.basename(datedCopy)).toMatch(
+    /^Real Novel \(before story memory \d{4}-\d\d-\d\d \d{4}\)\.mythscribe$/
+  )
+  expect(fs.existsSync(path.join(datedCopy, 'project.db'))).toBe(true)
+  await expect(done.getByTestId('switchover-backup')).toContainText(backup)
+  await expect(done.getByTestId('switchover-backup')).toContainText('(kept until you delete it)')
+  await expect(done.getByTestId('switchover-dated-copy')).toContainText(
+    `Dated copy (in Google Drive): ${datedCopy}`
+  )
+  const goBack = done.getByTestId('switchover-go-back')
+  await expect(goBack).toContainText('in Settings › Backups choose Restore')
+  await expect(goBack).toContainText(path.basename(backup))
+  const switched = await invoke<ProjectInfo | null>('project:current', undefined)
+  expect(switched?.path).toBe(projectPath)
+  expect(switched?.storyMemory).toBe('v2')
+  const converted = await stored()
+  expect(converted).not.toContain('inlineTag')
+  expect(
+    (await storedParagraphs(scene.id))
+      .map((paragraph) => paragraph.text.replace(/’/g, "'"))
+      .filter((text) => text !== '')
+  ).toEqual([READ_PARAGRAPH])
+  expect((await invoke<{ name: string }[]>('record:list', undefined)).map((r) => r.name)).toEqual([
+    'Mara'
+  ])
+  await done.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(done).toHaveCount(0)
+
+  // Help no longer offers the switch: the project is on the new story memory.
+  await menubar.getByRole('menuitem', { name: 'Help' }).click()
+  const help = page.getByRole('menu', { name: 'Help' })
+  await expect(help.getByRole('menuitem', { name: 'Keyboard shortcuts' })).toBeVisible()
+  await expect(help.getByRole('menuitem', { name: 'Switch to the new story memory…' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
 })

@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import type Database from 'better-sqlite3'
 import { CLOUD_PROVIDER_LABEL } from '@shared/cloudSync'
 import type { ProjectInfo } from '@shared/ipc/contract'
 import {
@@ -49,10 +51,10 @@ export interface SwitchoverRunDeps {
 
 /**
  * What the safety step made of one open session, at one state of it: reused only while it is that
- * session (`session`, so a reopen of the same folder never matches) and nothing has been written
- * through its connection since (`changes`, SQLite's `total_changes()`, which only grows) and the
- * files are still there. Otherwise flush, backup and dated copy run again (review of Switch-over
- * slice 1). `datedCopy` is null while the dated copy has failed (a retry then reuses the backup and
+ * session (`session`, so a reopen of the same folder never matches), nothing has been written
+ * through its connection since (`changes`, SQLite's `total_changes()`, which only grows) or what
+ * was written touched only the derived indexes (`digest`, Switch-over slice 3), and the files are
+ * still there. Otherwise flush, backup and dated copy run again (review of Switch-over slice 1). `datedCopy` is null while the dated copy has failed (a retry then reuses the backup and
  * makes only the dated copy) and on a test copy, which gets none.
  */
 export interface SafetyMemo {
@@ -60,6 +62,47 @@ export interface SafetyMemo {
   backup: string
   datedCopy: string | null
   changes: number
+  /** `projectDigest` when the backup was made: what a write since must have changed to count. */
+  digest: string
+}
+
+/**
+ * What only the app writes, rebuilt from the author's own data whenever it is stale: the search
+ * indexes and their full-text shadow tables, the tag mention scans and the mentions they found, the
+ * background job queue and the AI request cache. A write to these alone (a mention scan landing a second after a save) is
+ * not a change the safety copies must follow (Switch-over slice 3: it made a second dated copy in
+ * Google Drive); everything else is the project.
+ */
+const DERIVED_TABLES: ReadonlySet<string> = new Set([
+  'index_job',
+  'mention_scan',
+  'tag_mention',
+  'ai_cache'
+])
+const DERIVED_PREFIXES: readonly string[] = ['passage_fts', 'memory_passage_fts']
+
+const isDerived = (table: string): boolean =>
+  DERIVED_TABLES.has(table) || DERIVED_PREFIXES.some((prefix) => table.startsWith(prefix))
+
+/**
+ * A SHA-256 over every table of the project but the derived ones, row by row in stored order: two
+ * equal digests mean the author's data, settings and history read the same. Synchronous; one pass
+ * over the database, run only when SQLite's change count has moved.
+ */
+export function projectDigest(sqlite: Database.Database): string {
+  const hash = createHash('sha256')
+  const tables = sqlite
+    .prepare<[], { name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    )
+    .all()
+  for (const { name } of tables) {
+    if (isDerived(name)) continue
+    hash.update(name).update('\u0000')
+    const rows = sqlite.prepare(`SELECT * FROM "${name.replace(/"/g, '""')}"`).raw().iterate()
+    for (const row of rows) hash.update(JSON.stringify(row)).update('\u0001')
+  }
+  return hash.digest('hex')
 }
 
 /** The cause an error carries, without the "Could not …: " its thrower led with, unpunctuated. */
@@ -105,11 +148,16 @@ function keptBackup(deps: SwitchoverRunDeps): { file: string } | SwitchoverFailu
   }
 }
 
-/** A memo that is still this session's state: nothing written since, the backup still there. */
+/**
+ * A memo that is still this session's state: nothing written since but the derived indexes
+ * (`projectDigest`), the backup still there. Answered with the change count as it is now.
+ */
 function stillCurrent(session: ProjectSession, memo: SafetyMemo | null): SafetyMemo | null {
-  if (memo?.session !== session) return null
-  if (totalChanges(session.connection.sqlite) !== memo.changes) return null
-  return fs.existsSync(memo.backup) ? memo : null
+  if (memo?.session !== session || !fs.existsSync(memo.backup)) return null
+  const sqlite = session.connection.sqlite
+  const changes = totalChanges(sqlite)
+  if (changes === memo.changes) return memo
+  return projectDigest(sqlite) === memo.digest ? { ...memo, changes } : null
 }
 
 type Secured =
@@ -132,8 +180,10 @@ function secureBackup(
   if (flushed !== null) return { ok: false, failure: flushed, memo: null }
   const backup = keptBackup(deps)
   if ('ok' in backup) return { ok: false, failure: backup, memo: null }
-  const changes = totalChanges(session.connection.sqlite)
-  return { ok: true, memo: { session, backup: backup.file, datedCopy: null, changes } }
+  const sqlite = session.connection.sqlite
+  const changes = totalChanges(sqlite)
+  const digest = projectDigest(sqlite)
+  return { ok: true, memo: { session, backup: backup.file, datedCopy: null, changes, digest } }
 }
 
 /**

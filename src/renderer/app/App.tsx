@@ -142,7 +142,6 @@ import { useReferenceStore } from '@renderer/features/references/referenceStore'
 import { GoalsDialog } from '@renderer/features/goals/GoalsDialog'
 import { ConversionDialog } from '@renderer/features/knowledge/ConversionDialog'
 import { SwitchoverDialog } from '@renderer/features/switchover/SwitchoverDialog'
-import { useSwitchoverStore } from '@renderer/features/switchover/switchoverStore'
 import { useConversionStore } from '@renderer/features/knowledge/conversionStore'
 import { useThreadStore } from '@renderer/features/threads/threadStore'
 import { useGoalsStore } from '@renderer/features/goals/goalsStore'
@@ -232,8 +231,6 @@ export function App(): React.JSX.Element {
     const offBackups = useBackupStore.getState().subscribe()
     // 2026-10-08: the working copy of a project in a cloud-synced folder; main pushes each copy.
     const offCloudSync = useCloudSyncStore.getState().subscribe()
-    // F-16.15: whether this build offers the story-memory switch-over on a copy (Help menu).
-    void useSwitchoverStore.getState().loadAvailable()
     // F-8.3: leaving the window writes every pending save at once, not after the debounce.
     const offBlur = installSaveOnBlur()
     return () => {

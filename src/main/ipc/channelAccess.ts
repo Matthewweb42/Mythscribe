@@ -423,8 +423,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   // App-wide settings, like the daily cap.
   'cloudCap:get': 'read',
   'cloudCap:set': 'read',
-  'switchover:available': 'read',
   'switchover:trialCopy': 'write',
+  'switchover:trial': 'read',
   'switchover:safety': 'write',
   'switchover:plan': 'read',
   'switchover:consent': 'read',
@@ -846,8 +846,8 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'cloudCap:get': 'any',
   'cloudCap:set': 'any',
   // F-16.15: the switch-over runs on a v1 project (a second run is refused in v2).
-  'switchover:available': 'any',
   'switchover:trialCopy': 'v1',
+  'switchover:trial': 'v1',
   'switchover:safety': 'v1',
   'switchover:plan': 'v1',
   'switchover:consent': 'v1',

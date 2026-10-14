@@ -13,7 +13,6 @@ import {
   menuItemChord,
   menuItemLabel,
   menuFor,
-  SWITCHOVER_MENU_ENTRIES,
   menuItems,
   type MenuItem
 } from './menu'
@@ -26,11 +25,7 @@ describe('menu definition (F-7.1)', () => {
 
   it('uses every item id exactly once, and every id is an item', () => {
     // The developer items join only while developer tools are on (2026-10-07).
-    const ids = [
-      ...MENU.flatMap((section) => section.entries),
-      ...DEVELOPER_MENU_ENTRIES,
-      ...SWITCHOVER_MENU_ENTRIES
-    ]
+    const ids = [...MENU.flatMap((section) => section.entries), ...DEVELOPER_MENU_ENTRIES]
       .filter((entry) => !isSeparator(entry))
       .map((entry) => (isSeparator(entry) ? '' : entry.id))
     expect([...ids].sort()).toEqual([...MENU_ITEM_IDS].sort())
@@ -41,16 +36,21 @@ describe('menu definition (F-7.1)', () => {
     const ids = (storyMemory: 'v1' | 'v2' | null, devTools = false): string[] =>
       menuItems(menuFor({ devTools, storyMemory })).map((item) => item.id)
     expect(ids('v1')).toEqual(expect.arrayContaining(['toggleTags', 'openTags']))
-    // No project open: the menu as it always was.
+    // No project open: the menu as it always was, less the switch-over (it needs a project open).
+    expect(ids(null)).toEqual(ids('v1').filter((id) => id !== 'switchStoryMemory'))
     expect(menuFor({ devTools: false, storyMemory: null })).toBe(
-      menuFor({ devTools: false, storyMemory: 'v1' })
+      menuFor({ devTools: false, storyMemory: null })
     )
     expect(ids('v1')).toEqual(
       menuItems(MENU)
         .map((item) => item.id)
         .filter((id) => id !== 'toggleThisScene')
     )
-    expect(ids('v1').filter((id) => !ids('v2').includes(id))).toEqual(['toggleTags', 'openTags'])
+    expect(ids('v1').filter((id) => !ids('v2').includes(id))).toEqual([
+      'toggleTags',
+      'openTags',
+      'switchStoryMemory'
+    ])
     expect(ids('v2').filter((id) => !ids('v1').includes(id))).toEqual(['toggleThisScene'])
     const thisScene = menuItems(MENU).find((item) => item.id === 'toggleThisScene')
     expect(thisScene?.label).toBe('This scene')
@@ -78,28 +78,41 @@ describe('menu definition (F-7.1)', () => {
     ])
   })
 
-  it('offers the switch-over on a copy in an unpackaged build, while a v1 project is open (F-16.15)', () => {
-    const ids = (
-      storyMemory: 'v1' | 'v2' | null,
-      switchover: boolean,
-      devTools = false
-    ): string[] => menuItems(menuFor({ devTools, storyMemory, switchover })).map((item) => item.id)
-    expect(ids('v1', false)).not.toContain('trySwitchover')
-    expect(ids('v2', true)).not.toContain('trySwitchover')
-    expect(ids(null, true)).not.toContain('trySwitchover')
-    const help = menuFor({ devTools: true, storyMemory: 'v1', switchover: true }).find(
+  it('offers Help › Switch to the new story memory… while a v1 project is open, in every build (F-16.31)', () => {
+    const ids = (storyMemory: 'v1' | 'v2' | null, devTools = false): string[] =>
+      menuItems(menuFor({ devTools, storyMemory })).map((item) => item.id)
+    expect(ids('v1')).toContain('switchStoryMemory')
+    expect(ids('v1', true)).toContain('switchStoryMemory')
+    expect(ids('v2')).not.toContain('switchStoryMemory')
+    expect(ids('v2', true)).not.toContain('switchStoryMemory')
+    expect(ids(null)).not.toContain('switchStoryMemory')
+    expect(ids(null, true)).not.toContain('switchStoryMemory')
+    // After Keyboard shortcuts; no developer item for it any more.
+    const help = menuFor({ devTools: true, storyMemory: 'v1' }).find(
       (section) => section.id === 'help'
     )
-    expect(help?.entries.slice(-4).map((e) => (isSeparator(e) ? '-' : e.label))).toEqual([
-      'Developer tools',
-      'Chromium DevTools',
+    expect(help?.entries.map((e) => (isSeparator(e) ? '-' : e.label))).toEqual([
+      'Documentation',
+      'Keyboard shortcuts',
+      'Switch to the new story memory…',
       '-',
-      'Try the story-memory switch-over on a copy…'
+      'Check for updates…',
+      'About MythScribe',
+      '-',
+      'Developer tools',
+      'Chromium DevTools'
     ])
-    // Developer tools need not be on: the build decides.
-    expect(ids('v1', true).filter((id) => !ids('v1', false).includes(id))).toEqual([
-      'trySwitchover'
-    ])
+    const item = menuItems(MENU).find((each) => each.id === 'switchStoryMemory')
+    expect(item?.when).toBe('project')
+    expect(item?.memory).toBe('v1')
+    expect(MENU_ITEM_IDS).not.toContain('trySwitchover')
+    // No section of any menu starts or ends with a separator once the item is left out.
+    for (const memory of ['v1', 'v2', null] as const) {
+      for (const section of menuFor({ devTools: false, storyMemory: memory })) {
+        expect(isSeparator(section.entries[0]!)).toBe(false)
+        expect(isSeparator(section.entries[section.entries.length - 1]!)).toBe(false)
+      }
+    }
   })
 
   it('never starts or ends a section with a separator, nor doubles one', () => {
@@ -353,7 +366,14 @@ describe('menu definition (F-7.1)', () => {
     const ids = (help?.entries ?? [])
       .filter((entry): entry is MenuItem => !isSeparator(entry))
       .map((entry) => entry.id)
-    expect(ids).toEqual(['openDocumentation', 'openShortcuts', 'checkForUpdates', 'openAbout'])
+    expect(ids).toEqual([
+      'openDocumentation',
+      'openShortcuts',
+      // F-16.31: a v1 project's switch-over, after Keyboard shortcuts.
+      'switchStoryMemory',
+      'checkForUpdates',
+      'openAbout'
+    ])
     const [check] = menuItems().filter((item) => item.id === 'checkForUpdates')
     expect(check?.label).toBe('Check for updates…')
     expect(isMenuItemEnabled(check!, false)).toBe(true)

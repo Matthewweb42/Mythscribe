@@ -222,6 +222,7 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
   it('F-16.31: the switch-over runs on a v1 project: its safety step and conversion write, its dry run reads', () => {
     const access: [Channel, 'read' | 'write'][] = [
       ['switchover:trialCopy', 'write'],
+      ['switchover:trial', 'read'],
       ['switchover:safety', 'write'],
       ['switchover:plan', 'read'],
       ['switchover:consent', 'read'],
@@ -242,5 +243,10 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
     expect(isWriteChannel('switchover:record')).toBe(false)
     expect(() => assertChannelMemory('switchover:record', 'v1')).toThrow(OTHER_MEMORY_MESSAGE)
     expect(() => assertChannelMemory('switchover:record', 'v2')).not.toThrow()
+  })
+
+  it('F-16.31 slice 3: no build-only channel is left (the entry points are in every build)', () => {
+    expect(Object.keys(CHANNEL_ACCESS)).not.toContain('switchover:available')
+    expect(Object.keys(CHANNEL_MEMORY)).not.toContain('switchover:available')
   })
 })

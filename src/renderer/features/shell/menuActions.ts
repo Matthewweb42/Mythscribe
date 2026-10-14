@@ -104,9 +104,9 @@ export async function runMenuAction(id: MenuItemId): Promise<void> {
       case 'openChromiumDevTools':
         await useDevToolsStore.getState().openChromium()
         return
-      case 'trySwitchover':
-        // F-16.15: the story-memory switch-over on a copy (unpackaged builds only).
-        await useSwitchoverStore.getState().start()
+      case 'switchStoryMemory':
+        // F-16.31 (part A): every build, a v1 project open; the intro recommends a copy first.
+        await useSwitchoverStore.getState().open()
         return
       case 'openSettings':
         // App-wide since F-15.2: without a project the dialog shows only the app-wide tabs.

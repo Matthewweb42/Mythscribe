@@ -23,6 +23,11 @@ import { computeStylometrics } from '@shared/stylometry'
 import { IDLE_INDEX_QUEUE } from '@shared/jobs'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetShellDialogStore, useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
+import {
+  resetSwitchoverStore,
+  useSwitchoverStore
+} from '@renderer/features/switchover/switchoverStore'
 import { setIpcClient, IpcRequestError, type IpcClient } from '@renderer/lib/ipc'
 import { AiSettingsTab } from './AiSettingsTab'
 import { resetAccountStore, useAccountStore } from '@renderer/features/account/accountStore'
@@ -186,6 +191,9 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
             return EMPTY_LEDGER as Output<C>
           case 'jobs:indexAll':
             return { ok: true, queued: 2, status: IDLE_INDEX_QUEUE } as Output<C>
+          // F-16.31: the switch-over's intro asks whether the open project is a test copy.
+          case 'switchover:trial':
+            return null as Output<C>
           // Story memory v2's Settings › AI › Story memory (F-16.19, F-16.25).
           case 'memory:health':
             return {
@@ -267,6 +275,8 @@ async function open(
 }
 
 beforeEach(() => {
+  resetSwitchoverStore()
+  resetShellDialogStore()
   resetAiStore()
   resetAiSettingsStore()
   resetAccountStore()
@@ -279,6 +289,8 @@ afterEach(() => {
   resetAiSettingsStore()
   resetIndexingStore()
   resetAccountStore()
+  resetSwitchoverStore()
+  resetShellDialogStore()
 })
 
 describe('AiSettingsTab (F-5.1)', () => {
@@ -947,6 +959,47 @@ describe('AiSettingsTab usage history (AI-BILLING-SPEC E7, C4)', () => {
   })
 })
 
+describe('AiSettingsTab story memory v1: the switch to the new story memory (F-16.31)', () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      current: {
+        id: 'p-1',
+        name: 'Old',
+        format: 'novel',
+        path: '/books/Old.mythscribe',
+        created: 'c',
+        modified: 'm',
+        lastOpened: 'l',
+        schemaVersion: 40,
+        storyMemory: 'v1'
+      }
+    })
+  })
+  afterEach(() => {
+    useProjectStore.setState({ current: null })
+  })
+
+  it('says what the new story memory is and starts the flow on its intro, closing Settings', async () => {
+    useShellDialogStore.getState().show('settings', 'ai')
+    await open()
+    const block = screen.getByTestId('switchover-settings')
+    expect(within(block).getByRole('heading', { name: 'Story memory' })).toBeInTheDocument()
+    expect(block).toHaveTextContent(
+      'This project uses the old story memory: tags and the story bible. The new one reads your book and keeps your names, notes and labels.'
+    )
+    // v1 keeps its own block beside it, and has no v2 reading settings.
+    expect(screen.getByTestId('summarize-all')).toBeInTheDocument()
+    expect(screen.queryByTestId('memory-settings')).toBeNull()
+    await userEvent.click(within(block).getByRole('button', { name: 'Switch to the new story memory…' }))
+    expect(useShellDialogStore.getState().open).toBeNull()
+    expect(useSwitchoverStore.getState().phase).toBe('intro')
+    await waitFor(() => expect(useSwitchoverStore.getState().target).toBe('project'))
+    expect(lastCall('switchover:trial')).toBeDefined()
+    // Nothing is made or changed by opening the intro.
+    expect(fake.calls.map((c) => c.channel)).not.toContain('switchover:safety')
+  })
+})
+
 describe('AiSettingsTab story memory v2: Ms Scribe (F-16.25, P3 slice 5)', () => {
   beforeEach(() => {
     useProjectStore.setState({
@@ -988,6 +1041,12 @@ describe('AiSettingsTab story memory v2: Ms Scribe (F-16.25, P3 slice 5)', () =>
         cite: true
       })
     )
+  })
+
+  it('offers no switch-over on a v2 project', async () => {
+    await open()
+    expect(screen.queryByTestId('switchover-settings')).toBeNull()
+    expect(screen.getByTestId('memory-settings')).toBeInTheDocument()
   })
 
   it('lists what the search and the quote check send, and the search misses under Details', async () => {

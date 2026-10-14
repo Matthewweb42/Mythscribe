@@ -180,8 +180,11 @@ describe('MenuBar (F-7.1)', () => {
     await userEvent.keyboard('{Escape}')
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(trigger('Help')).toHaveFocus()
-    // Enter on a focused item runs it (Help's fourth item since F-15.7 is About).
-    await userEvent.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{Enter}')
+    // Enter on a focused item runs it (Help's fifth item in a v1 project is About: F-15.7 added
+    // Check for updates…, F-16.31 Switch to the new story memory… after Keyboard shortcuts).
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}')
+    expect(item('Help', 'Switch to the new story memory…')).toHaveFocus()
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}')
     expect(useShellDialogStore.getState().open).toBe('about')
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })

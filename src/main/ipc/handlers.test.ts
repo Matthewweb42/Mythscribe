@@ -10593,6 +10593,8 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
     )
     // The record is v2's to read: refused on the v1 project.
     await expect(invoke('switchover:record', undefined)).rejects.toThrow(/^VALIDATION: /)
+    // Slice 3: the project itself is no test copy (the intro offers both paths).
+    expect(await invoke('switchover:trial', undefined)).toBeNull()
     const safety = await invoke('switchover:safety', undefined)
     if (!safety.ok) throw new Error(safety.message)
     expect(fs.existsSync(safety.backup)).toBe(true)
@@ -10762,6 +10764,8 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
     const made = await invoke('switchover:trialCopy', undefined)
     expect(made.info.storyMemory).toBe('v1')
     expect(made.folder).not.toBe(original?.path)
+    // Slice 3: the copy says it is one, and where it was made from (its final screen names it).
+    expect(await invoke('switchover:trial', undefined)).toMatchObject({ source: original?.path })
     await expect(invoke('switchover:safety', undefined)).rejects.toThrow(
       /VALIDATION: A test copy needs no backup of its own/
     )
@@ -10779,6 +10783,8 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
     expect(safetyCopies()).toEqual([])
     expect(manager.current()).toBeNull()
     expect((await invoke('project:open', { path: made.folder }))?.storyMemory).toBe('v2')
+    // A v1 channel: refused once the copy is on v2.
+    await expect(invoke('switchover:trial', undefined)).rejects.toThrow(/^VALIDATION: /)
     // The original is untouched.
     expect((await invoke('project:open', { path: original?.path ?? '' }))?.storyMemory).toBe('v1')
   })

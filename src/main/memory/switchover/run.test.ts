@@ -26,6 +26,7 @@ import { inlineTagReplacements, planSwitchover } from './plan'
 import { getSwitchoverRecord } from './record'
 import {
   causeOf,
+  projectDigest,
   runConvert,
   SwitchoverRun,
   switchoverSafety,
@@ -280,6 +281,44 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
       backup: outcome.backup,
       datedCopy: outcome.datedCopy
     })
+  })
+
+  it('makes nothing again at Convert when only the derived indexes were written since (slice 3)', async () => {
+    const memo = safety()
+    const before = projectDigest(sqlite())
+    // A mention scan and a search-index row landing a second after the last save: the app's own
+    // indexes, rebuilt from the text, so the copies made a moment ago still hold the project.
+    const scene = fixture.scenes[0] ?? ''
+    sqlite()
+      .prepare(
+        'INSERT OR REPLACE INTO mention_scan (node_id, content_hash, scanned_at) VALUES (?, ?, ?)'
+      )
+      .run(scene, 'hash-after', '2026-10-14T10:00:00.000Z')
+    sqlite()
+      .prepare('INSERT INTO passage_fts (node_id, para, text) VALUES (?, ?, ?)')
+      .run(scene, 0, 'a search index row')
+    expect(projectDigest(sqlite())).toBe(before)
+    calls = []
+    expect(safety(memo)).toMatchObject({ backup: memo.backup, datedCopy: memo.datedCopy })
+    expect(calls).toEqual([])
+    const { outcome } = await runConvert(
+      deps(),
+      { consent: consent(), projectId: projectId() },
+      memo
+    )
+    if (!outcome.ok) throw new Error(outcome.message)
+    // No second backup or dated copy; the one copy back is the close's.
+    expect(calls).toEqual(['flush'])
+    expect(outcome).toMatchObject({ backup: memo.backup, datedCopy: memo.datedCopy })
+    expect(driveCopies()).toEqual([path.basename(memo.datedCopy)])
+  })
+
+  it('counts a write to anything but the derived indexes as a change (slice 3)', () => {
+    const before = projectDigest(sqlite())
+    sqlite()
+      .prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
+      .run('slice3-probe', JSON.stringify(true))
+    expect(projectDigest(sqlite())).not.toBe(before)
   })
 
   it('makes everything again when the safety step runs after the project changed', () => {

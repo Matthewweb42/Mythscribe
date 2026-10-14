@@ -210,7 +210,6 @@ describe('installApplicationMenu (F-7.1)', () => {
       manager: fakeManager,
       devTools: () => devTools,
       assistantName: () => assistantName,
-      switchover: true,
       platform: 'linux',
       target: () => win
     })
@@ -228,9 +227,12 @@ describe('installApplicationMenu (F-7.1)', () => {
     item(second, 'openShortcuts').click?.(undefined as never, undefined, undefined as never)
     expect(send).toHaveBeenCalledWith('menu:action', { id: 'openShortcuts' })
     expect(JSON.stringify(second)).not.toContain('openDeveloperTools')
-    // F-16.15: an unpackaged build offers the switch-over on a copy while a v1 project is open.
-    item(second, 'trySwitchover').click?.(undefined as never, undefined, undefined as never)
-    expect(send).toHaveBeenCalledWith('menu:action', { id: 'trySwitchover' })
+    // F-16.31: every build offers the switch-over while a v1 project is open (none without one).
+    expect(JSON.stringify(first)).not.toContain('switchStoryMemory')
+    item(second, 'switchStoryMemory').click?.(undefined as never, undefined, undefined as never)
+    expect(send).toHaveBeenCalledWith('menu:action', { id: 'switchStoryMemory' })
+    expect(item(second, 'switchStoryMemory').enabled).toBe(true)
+    expect(item(second, 'switchStoryMemory').label).toBe('Switch to the new story memory…')
 
     // Developer tools: the Help items appear on the rebuild after the switch turns on.
     devTools = true
@@ -249,13 +251,29 @@ describe('installApplicationMenu (F-7.1)', () => {
     expect(listeners).toEqual([])
   })
 
+  it('leaves Help › Switch to the new story memory… out for a v2 project (F-16.31)', () => {
+    const fakeManager: Pick<ProjectManager, 'current' | 'onChange'> = {
+      current: () => ({ ...info, storyMemory: 'v2' }),
+      onChange: () => () => undefined
+    }
+    installApplicationMenu({
+      manager: fakeManager,
+      devTools: () => true,
+      assistantName: () => 'Ms Scribe',
+      platform: 'linux',
+      target: () => null
+    })
+    const template = built(0)
+    expect(JSON.stringify(template)).not.toContain('switchStoryMemory')
+    expect(item(template, 'toggleThisScene').enabled).toBe(true)
+  })
+
   it('drops a click when there is no window to send it to', () => {
     const manager = new ProjectManager()
     installApplicationMenu({
       manager,
       devTools: () => false,
       assistantName: () => 'Ms Scribe',
-      switchover: false,
       platform: 'win32',
       target: () => null
     })

@@ -61,8 +61,6 @@ export interface InstallMenuDeps {
   devTools: () => boolean
   /** The assistant's name (F-7.13), read on every rebuild. */
   assistantName: () => string
-  /** F-16.15: an unpackaged build offers the story-memory switch-over on a copy (Help). */
-  switchover: boolean
   platform: NodeJS.Platform
   /** The window a click goes to: the focused one, else the first. */
   target: () => EmitTarget | null
@@ -79,7 +77,6 @@ export function installApplicationMenu({
   manager,
   devTools,
   assistantName,
-  switchover,
   platform,
   target
 }: InstallMenuDeps): {
@@ -90,8 +87,7 @@ export function installApplicationMenu({
     const template = buildMenuTemplate(
       menuFor({
         devTools: devTools(),
-        storyMemory: manager.current()?.storyMemory ?? null,
-        switchover
+        storyMemory: manager.current()?.storyMemory ?? null
       }),
       { format: manager.current()?.format ?? null, platform, assistantName: assistantName() },
       (id) => {

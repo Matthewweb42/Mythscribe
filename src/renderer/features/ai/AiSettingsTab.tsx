@@ -46,6 +46,7 @@ import { bundledPricing, hostedModel, hostedModelFor, multiplierLabel } from '@s
 import { useAccountStore } from '@renderer/features/account/accountStore'
 import { MemorySettings } from '@renderer/features/memory/MemorySettings'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
+import { SwitchoverSettings } from '@renderer/features/switchover/SwitchoverSettings'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { AiDialSection } from './AiDialSection'
@@ -212,9 +213,9 @@ export function AiSettingsTab({
       <AiDialSection />
 
       {/* F-16.16, F-16.19 (story memory v2): the reading's settings; v2 has no summaries. */}
-      {memory === 'v2' ? (
-        <MemorySettings />
-      ) : (
+      {/* F-16.31 (part A): a v1 project is offered the switch to the new story memory here. */}
+      {memory === 'v2' ? <MemorySettings /> : <SwitchoverSettings />}
+      {memory === 'v2' ? null : (
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs text-fg-muted">
             Summarise every scene that has no summary yet or whose summary is out of date. They are

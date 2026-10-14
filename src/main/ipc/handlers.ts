@@ -514,7 +514,7 @@ import { applyRename, clearRenameUndo, previewRename, undoRename } from '../memo
 import { inlineTagReplacements, planSwitchover } from '../memory/switchover/plan'
 import { getSwitchoverRecord } from '../memory/switchover/record'
 import { SwitchoverRun } from '../memory/switchover/run'
-import { createTrialCopy } from '../memory/switchover/trial'
+import { createTrialCopy, switchoverTrialOf } from '../memory/switchover/trial'
 import {
   createRecord,
   deleteRecord,
@@ -5705,10 +5705,9 @@ export function registerHandlers({
   )
 
   // F-16.15, F-16.31 (part A): the story-memory switch-over, on a test copy or on the project
-  // itself. The steps live in `memory/switchover/` (`run.ts` holds the safety memo between the
-  // channels); these handlers only reach them. `switchover:available` still names the developer
-  // item's builds until Switch-over slice 3 gives every build its entry points.
-  const switchoverAvailable = !app.isPackaged
+  // itself, in every build (Help › Switch to the new story memory… and Settings › AI). The steps
+  // live in `memory/switchover/` (`run.ts` holds the safety memo between the channels); these
+  // handlers only reach them.
   const switchover = new SwitchoverRun({
     session: () => manager.require(),
     backupNow: (options) => backups.backupNow(options).file,
@@ -5716,7 +5715,6 @@ export function registerHandlers({
     close: () => manager.close(),
     now: () => new Date()
   })
-  register('switchover:available', () => ({ available: switchoverAvailable }))
   register('switchover:trialCopy', () => {
     const session = manager.require()
     const folder = createTrialCopy(
@@ -5725,6 +5723,7 @@ export function registerHandlers({
     )
     return { folder, info: manager.open(folder) }
   })
+  register('switchover:trial', () => switchoverTrialOf(manager.require().connection.orm))
   register('switchover:safety', () => switchover.safety())
   register('switchover:plan', () => {
     const db = manager.require().connection.orm

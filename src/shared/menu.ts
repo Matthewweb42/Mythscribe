@@ -68,7 +68,7 @@ export const MENU_ITEM_IDS = [
   'openAbout',
   'openDeveloperTools',
   'openChromiumDevTools',
-  'trySwitchover'
+  'switchStoryMemory'
 ] as const
 export const MenuItemId = z.enum(MENU_ITEM_IDS)
 export type MenuItemId = z.infer<typeof MenuItemId>
@@ -97,6 +97,11 @@ export interface MenuItem {
    * the tag items out. Absent: in every project.
    */
   memory?: StoryMemoryVersion
+  /**
+   * Absent, not disabled, while no project is open (F-16.31): the item is about the open
+   * project's story memory, which the welcome screen has none of.
+   */
+  openProjectOnly?: true
 }
 
 export interface MenuSeparator {
@@ -240,6 +245,15 @@ export const MENU: readonly MenuSection[] = [
     entries: [
       { id: 'openDocumentation', label: 'Documentation', when: 'always' },
       { id: 'openShortcuts', label: 'Keyboard shortcuts', when: 'always' },
+      // F-16.31 (part A, decision SW-D1): every build, while a v1 project is open; the flow's
+      // intro recommends trying it on a copy first.
+      {
+        id: 'switchStoryMemory',
+        label: 'Switch to the new story memory…',
+        when: 'project',
+        memory: 'v1',
+        openProjectOnly: true
+      },
       SEPARATOR,
       { id: 'checkForUpdates', label: 'Check for updates…', when: 'always' },
       { id: 'openAbout', label: 'About MythScribe', when: 'always' }
@@ -259,56 +273,45 @@ export const DEVELOPER_MENU_ENTRIES: readonly MenuEntry[] = [
 ]
 
 /**
- * Help › Developer's story-memory switch-over on a copy (F-16.15, decision P1-D12): only in an
- * unpackaged build (developer tools being on is not enough) and only while a v1 project is open.
- * It duplicates the project and runs the switch-over on the duplicate.
+ * `MENU` for one story memory: the items of the other one left out (F-16.4). With no project open
+ * (`null`) it is v1's less the items that need one open (`openProjectOnly`).
  */
-export const SWITCHOVER_MENU_ENTRIES: readonly MenuEntry[] = [
-  SEPARATOR,
-  {
-    id: 'trySwitchover',
-    label: 'Try the story-memory switch-over on a copy…',
-    when: 'project',
-    memory: 'v1'
-  }
-]
-
-/** `MENU` for one story memory: the items of the other one left out (F-16.4). */
-function menuForMemory(memory: StoryMemoryVersion): readonly MenuSection[] {
+function menuForMemory(memory: StoryMemoryVersion | null): readonly MenuSection[] {
+  const shown = memory ?? 'v1'
   return MENU.map((section) => ({
     ...section,
     entries: section.entries.filter(
-      (entry) => isSeparator(entry) || entry.memory === undefined || entry.memory === memory
+      (entry) =>
+        isSeparator(entry) ||
+        ((entry.memory === undefined || entry.memory === shown) &&
+          (memory !== null || entry.openProjectOnly !== true))
     )
   }))
 }
 
-const MENU_BY_MEMORY: Readonly<Record<StoryMemoryVersion, readonly MenuSection[]>> = {
+const MENU_BY_MEMORY: Readonly<Record<StoryMemoryVersion | 'none', readonly MenuSection[]>> = {
   v1: menuForMemory('v1'),
-  v2: menuForMemory('v2')
+  v2: menuForMemory('v2'),
+  none: menuForMemory(null)
 }
 
 /**
  * The menu as shown now: `MENU` less the items of the other story memory (`memory`), plus Help's
- * developer items while developer tools are on, and the switch-over on a copy in an unpackaged
- * build (`switchover`) while a v1 project is open. With no project open (`storyMemory` null) it
- * is v1's, as it always was: a v2 project's own items join only while one is open.
+ * developer items while developer tools are on. With no project open (`storyMemory` null) it is
+ * v1's as it always was, less the items that need a project open (Help › Switch to the new story
+ * memory…, F-16.31): a v2 project's own items join only while one is open.
  */
 export function menuFor(options: {
   devTools: boolean
   storyMemory: StoryMemoryVersion | null
-  /** F-16.15: the build offers the switch-over on a copy (`switchover:available`). */
-  switchover?: boolean
 }): readonly MenuSection[] {
   const { devTools, storyMemory } = options
-  const base = MENU_BY_MEMORY[storyMemory ?? 'v1']
-  const extra = [
-    ...(devTools ? DEVELOPER_MENU_ENTRIES : []),
-    ...(options.switchover === true && storyMemory === 'v1' ? SWITCHOVER_MENU_ENTRIES : [])
-  ]
-  if (extra.length === 0) return base
+  const base = MENU_BY_MEMORY[storyMemory ?? 'none']
+  if (!devTools) return base
   return base.map((section) =>
-    section.id === 'help' ? { ...section, entries: [...section.entries, ...extra] } : section
+    section.id === 'help'
+      ? { ...section, entries: [...section.entries, ...DEVELOPER_MENU_ENTRIES] }
+      : section
   )
 }
 
