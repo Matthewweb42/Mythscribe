@@ -12,7 +12,7 @@ import {
 import { sentenceHash } from '@shared/memory/anchor'
 import { activeDraftId } from '../../draft/draftStore'
 import { cancelInflight } from '../../ai/inflight'
-import { VERIFY_V2_PROMPT_VERSION, buildVerifyV2Prompt } from '../../ai/prompts/verify.v2'
+import { VERIFY_V3_PROMPT_VERSION, buildVerifyV3Prompt } from '../../ai/prompts/verify.v3'
 import { AiCancelledError } from '../../ai/providers/types'
 import { runAiRequest, sha256, type AiRequestDeps } from '../../ai/request'
 import type { TreeDb } from '../../tree/treeStore'
@@ -136,7 +136,7 @@ export async function runSpotChecks(
     strong: boolean
   ): Promise<ReturnType<typeof parseVerifyAnswer>> => {
     if (input.signal?.aborted === true) throw new AiCancelledError('The spot checks were stopped.')
-    const prompt = buildVerifyV2Prompt({ items, strong })
+    const prompt = buildVerifyV3Prompt({ items, strong })
     calls += 1
     inFlight = `${input.requestId}:s${calls}`
     try {
@@ -147,7 +147,7 @@ export async function runSpotChecks(
         maxTokens: prompt.maxTokens,
         json: true,
         contextHash: sha256(JSON.stringify(prompt.messages)),
-        promptVersion: VERIFY_V2_PROMPT_VERSION,
+        promptVersion: VERIFY_V3_PROMPT_VERSION,
         requestId: inFlight,
         cacheIf: (text) => parseVerifyAnswer(text).size > 0
       })

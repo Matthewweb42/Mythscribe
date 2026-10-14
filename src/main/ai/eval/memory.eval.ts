@@ -27,6 +27,7 @@ import {
   fakeAi,
   requestKind,
   rosterIds,
+  sentChecks,
   sentParagraphs,
   type FakeAi,
   type FakeAnswer
@@ -43,11 +44,14 @@ import {
   type LiveProvider
 } from './liveProvider'
 import {
+  answerText,
   invariants,
   liveClaims,
   liveFacts,
+  nameOf,
   negativesStored,
   neverRead,
+  oracleAnswer,
   oracleChatServer,
   oracleRead,
   oracleVerify,
@@ -55,6 +59,7 @@ import {
   proposal,
   readBook,
   readingStop,
+  sceneOf,
   sentLabels,
   slotOf,
   storedFor,
@@ -289,6 +294,286 @@ describe('the reading pipeline over the test book: the adversarial replay (F-16.
     expect(storedFor(book, claims, label('varrow-eyes-grey'))?.proof).toBe('literal')
     // The pronoun trap answered as one woman waits on both; nobody's eyes are green.
     expect(storedFor(book, claims, label('green-eyes-trap'))).toBeUndefined()
+  })
+})
+
+/**
+ * One failure of the live planted-error run of 2026-10-14
+ * (`test-results/eval-memory/planted-2026-10-14.md`), as the reader proposed it, and the code gate
+ * that now refuses it whatever the checker answers.
+ */
+interface LivePlant {
+  scene: string
+  p: number
+  record: string
+  slot: string
+  value: string
+  quote: string
+  voice?: 'dialogue'
+  /** The speaker's record label, for dialogue. */
+  speaker?: string
+  refused: 'subject' | 'value' | 'wish' | 'kind' | 'slot'
+}
+
+const LIVE_PLANTS: readonly LivePlant[] = [
+  // The shared surname: the checker picked Mr. Harrow, and "Harrow's temper" was stored.
+  {
+    scene: 'h03',
+    p: 1,
+    record: 'harrow-mr',
+    slot: 'traits',
+    value: 'short tempered',
+    quote: 'Harrow’s temper was short that morning',
+    refused: 'subject'
+  },
+  // Both sisters walk: one of them is never the fact's subject.
+  {
+    scene: 'h07',
+    p: 0,
+    record: 'johanna',
+    slot: 'location',
+    value: 'Callow Cross',
+    quote: 'the sisters walked to Callow Cross',
+    refused: 'subject'
+  },
+  {
+    scene: 'h07',
+    p: 0,
+    record: 'johanna',
+    slot: 'objects',
+    value: 'thread',
+    quote: 'Johanna wanted thread',
+    refused: 'wish'
+  },
+  {
+    scene: 'h07',
+    p: 1,
+    record: 'johanna',
+    slot: 'location',
+    value: 'the road',
+    quote: 'Johanna walked quickly',
+    refused: 'value'
+  },
+  {
+    scene: 'h07',
+    p: 1,
+    record: 'johanna',
+    slot: 'traits',
+    value: 'talked of everything except Thornmere',
+    quote: 'talked of everything except Thornmere',
+    refused: 'subject'
+  },
+  {
+    scene: 'h03',
+    p: 5,
+    record: 'harrow-mrs',
+    slot: 'detail:accent',
+    value: 'unfeeling',
+    quote: 'How can you be so unfeeling',
+    voice: 'dialogue',
+    speaker: 'harrow-mrs',
+    refused: 'subject'
+  },
+  {
+    scene: 'h09',
+    p: 0,
+    record: 'thornmere',
+    slot: 'detail:home',
+    value: 'Thornmere',
+    quote: 'Lise came back to Thornmere',
+    refused: 'kind'
+  },
+  {
+    scene: 's02',
+    p: 1,
+    record: 'harrow-mr',
+    slot: 'detail:occupation',
+    value: 'hope Mr. Ashby will like it',
+    quote: 'I hope Mr. Ashby will like it, Lise.',
+    voice: 'dialogue',
+    speaker: 'harrow-mr',
+    refused: 'wish'
+  },
+  {
+    scene: 'h03',
+    p: 8,
+    record: 'harrow-mr',
+    slot: 'location',
+    value: 'at the table',
+    quote: 'Mr. Harrow said nothing more until the cloth was drawn',
+    refused: 'value'
+  },
+  // An invented slot.
+  {
+    scene: 'h07',
+    p: 1,
+    record: 'johanna',
+    slot: 'emotion',
+    value: 'quickly',
+    quote: 'Johanna walked quickly',
+    refused: 'slot'
+  }
+]
+
+/**
+ * True facts the live run proposed, kept: h09's "Lise came back to Thornmere" (a sentence the
+ * earlier draft h10 shares, which the scorer once counted as a never-read claim), and a detail
+ * label written bare ("birthplace"), read as its slot.
+ */
+const LIVE_KEPT: readonly Omit<LivePlant, 'refused'>[] = [
+  {
+    scene: 'h09',
+    p: 0,
+    record: 'liesel',
+    slot: 'location',
+    value: 'Thornmere',
+    quote: 'Lise came back to Thornmere'
+  },
+  {
+    scene: 'h15',
+    p:
+      TEST_BOOK.find((scene) => scene.id === 'h15')?.paragraphs.findIndex((text) =>
+        text.includes('Miss Fenwick was born at Gullhaven')
+      ) ?? -1,
+    record: 'anne',
+    slot: 'birthplace',
+    value: 'Gullhaven',
+    quote: 'Miss Fenwick was born at Gullhaven'
+  }
+]
+
+/** The plants a reader request sent the paragraph of, in the reader's short-key form. */
+function plantsFor(
+  request: CompletionRequest,
+  plants: readonly Omit<LivePlant, 'refused'>[]
+): Record<string, unknown>[] {
+  const ids = rosterIds(request)
+  const sent = sentParagraphs(request)
+  const id = (record: string): string | null => ids.get(nameOf.get(record) ?? '') ?? null
+  return plants
+    .filter((plant) => {
+      const text = sent.get(plant.p)
+      return text !== undefined && normalizeForMatch(text).includes(normalizeForMatch(plant.quote))
+    })
+    .map((plant) => ({
+      p: plant.p,
+      r: id(plant.record),
+      s: plant.slot,
+      v: plant.value,
+      q: plant.quote,
+      ...(plant.voice === undefined
+        ? {}
+        : { voice: plant.voice, sp: plant.speaker === undefined ? null : id(plant.speaker) })
+    }))
+}
+
+/**
+ * A gullible checker: every fact item whose sentences hold a plant's quote is supported, about the
+ * plant's record, with the voice and mode the fact line gives; every other item as the oracle.
+ * Only the code gates stand between a plant and the memory.
+ */
+function gullibleVerify(request: CompletionRequest): string {
+  const honest = JSON.parse(oracleVerify(request)) as { v: { i: number }[] }
+  const plants = [...LIVE_PLANTS, ...LIVE_KEPT]
+  const verdicts = sentChecks(request).map((check) => {
+    const plant = plants.find(
+      (each) =>
+        check.kind === 'claim' &&
+        normalizeForMatch(check.text).includes(normalizeForMatch(each.quote))
+    )
+    if (plant === undefined) return honest.v.find((verdict) => verdict.i === check.i) ?? null
+    const said = /\((narration|dialogue|thought|rumour)(?: by \S+)?, (\w+)\)$/.exec(check.fact)
+    const at = check.names.indexOf(nameOf.get(plant.record) ?? '')
+    return {
+      i: check.i,
+      ok: true,
+      r: check.who[at] ?? check.who[0] ?? null,
+      voice: said?.[1] ?? 'narration',
+      mode: said?.[2] ?? 'now'
+    }
+  })
+  return JSON.stringify({ v: verdicts.filter((verdict) => verdict !== null) })
+}
+
+describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
+  let tmp: string
+  let book: TestBookProject
+  const events: { event: ReadingItemEvent; scene: string }[] = []
+
+  beforeAll(async () => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-memory-live-plants-'))
+    book = buildTestBookProject(tmp, NOW)
+    const ai = fakeAi((request) => {
+      if (requestKind(request) === 'verify') return { text: gullibleVerify(request) }
+      const answer = oracleAnswer(request)
+      return {
+        text: answerText({
+          ...answer,
+          c: [...answer.c, ...plantsFor(request, [...LIVE_PLANTS, ...LIVE_KEPT])]
+        })
+      }
+    })
+    await readBook(book, ai.deps, { observe: (event, scene) => events.push({ event, scene }) })
+  }, 60_000)
+  afterAll(() => {
+    book.session.close()
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('refuses each failure in code, before any checker could support it', () => {
+    for (const plant of LIVE_PLANTS) {
+      const ended = events.filter(
+        ({ event, scene }) =>
+          scene === plant.scene &&
+          event.slot === plant.slot &&
+          normalizeForMatch(event.quote) === normalizeForMatch(plant.quote)
+      )
+      // (h03's temper is also the oracle's own reject label, refused the same way.)
+      expect(ended.length, `${plant.scene} ${plant.slot} “${plant.value}”`).toBeGreaterThan(0)
+      expect(
+        [...new Set(ended.map(({ event }) => event.outcome))],
+        `${plant.scene} ${plant.slot} “${plant.value}”`
+      ).toEqual([plant.refused])
+    }
+    const live = liveFacts(book)
+    for (const plant of LIVE_PLANTS) {
+      const stored = live.filter(
+        (claim) =>
+          sceneOf(book, claim.nodeId) === plant.scene &&
+          claim.recordId === book.records.get(plant.record) &&
+          overlaps(claim.quote, plant.quote) &&
+          valueKey(claim.value) === valueKey(plant.value)
+      )
+      expect(stored, `${plant.scene} ${plant.slot} “${plant.value}”`).toEqual([])
+    }
+  })
+
+  it('stores no negative and nothing from a never-read scene, and keeps the true facts', () => {
+    const live = liveFacts(book)
+    expect(negativesStored(book, live)).toEqual([])
+    expect(neverRead(book)).toEqual([])
+    for (const kept of LIVE_KEPT) {
+      expect(
+        live.some(
+          (claim) =>
+            sceneOf(book, claim.nodeId) === kept.scene &&
+            claim.recordId === book.records.get(kept.record) &&
+            overlaps(claim.quote, kept.quote)
+        ),
+        `${kept.scene} ${kept.slot}`
+      ).toBe(true)
+    }
+    // The bare label was read as its slot.
+    expect(
+      live.some(
+        (claim) => claim.slot === 'detail:birthplace' && claim.recordId === book.records.get('anne')
+      )
+    ).toBe(true)
+    // The honest labels are all stored as labelled beside the plants.
+    for (const wanted of TEST_BOOK_LABELS.claims.filter((claim) => claim.expect !== 'reject')) {
+      expect(storedFor(book, live, wanted), wanted.id).toBeDefined()
+    }
+    expect(invariants(book)).toEqual([])
   })
 })
 

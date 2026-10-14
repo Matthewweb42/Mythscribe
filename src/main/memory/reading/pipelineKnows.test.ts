@@ -348,8 +348,8 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
     expect(outcome).toMatchObject({ read: true, topicIds: [map, heir].sort() })
     if (outcome.read) expect(outcome.recordIds).toEqual(expect.arrayContaining([tomas, orrin, map]))
     expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
-      promptVersion: 'reader.v2',
-      verifyVersion: 'verify.v2'
+      promptVersion: 'reader.v3',
+      verifyVersion: 'verify.v3'
     })
     expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toEqual({
       topicsCreated: 2
@@ -1055,7 +1055,9 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
       ]
     })
     const outcome = await read(ai)
-    expect(outcome).toMatchObject({ read: true, pages: 2 })
+    expect(outcome).toMatchObject({ read: true })
+    // Pages of 400 prose tokens (reader.v3): each long paragraph is cut at sentences.
+    expect(outcome.read && outcome.pages).toBeGreaterThan(2)
     const same = checksOf(ai).filter((check) => check.kind === 'same')
     expect(same.map((check) => check.topic)).toEqual([
       'x1 the map sale: “The map had been sold by Tomas” (1.1) | new the sold map: “Tomas sold the map” (1.1)'
@@ -1091,8 +1093,8 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
     })
     await read(ai)
     const readers = ai.requests.filter((request) => requestKind(request) === 'reader')
-    expect(readers).toHaveLength(2)
-    // The retry reads the whole page: the lost topics could stand anywhere in it.
+    expect(readers.length).toBeGreaterThanOrEqual(2)
+    // The retry reads the whole page (in halves): the lost topics could stand anywhere in it.
     expect(readers[1]?.messages.at(-1)?.content).toContain('¶0 Tomas sold the map')
     const map = topicNamed('the sold map')
     expect(

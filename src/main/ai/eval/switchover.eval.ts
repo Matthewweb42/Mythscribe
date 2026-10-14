@@ -1471,6 +1471,7 @@ describe('the switch-over report (F-16.31, SW-D13)', () => {
     unreviewed: [],
     facts: 15,
     strays: 0,
+    strayLines: [],
     falseAlarms: [],
     cut: { right: 0, of: 18 }
   }

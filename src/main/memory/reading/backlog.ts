@@ -3,7 +3,8 @@ import { estimateTokens } from '@shared/ai'
 import type { ReadDecision } from '@shared/memory/gate'
 import { readerMayRead } from '@shared/memory/sources'
 import type { RebuildEstimate } from '@shared/memory/switchover'
-import { PAGE_TOKENS, planPages, planWindows } from '@shared/memory/windows'
+import { planPages, planWindows } from '@shared/memory/windows'
+import { READER_V3_PAGE_TOKENS } from '../../ai/prompts/reader.v3'
 import { sceneRead } from '../../db/schema'
 import { estimateCost } from '../../knowledge/conversion'
 import type { TreeDb } from '../../tree/treeStore'
@@ -93,27 +94,28 @@ export function rebuildEstimate(
 }
 
 /**
- * What reading these scenes would cost now: a window read as `reader.v2:window` and one check
- * batch (`verify.v2`), a full read as `reader.v2:first` per page of 2,500 prose tokens and a
- * check batch per page; on the fast model, at the hosted quote on Cloud, free on a local model.
+ * What reading these scenes would cost now (`reader.v3`'s sizes, 2026-10-14): a window read as
+ * `reader.v3:window` and one check batch (`verify.v3`) per piece of 400 prose tokens, a full read
+ * as `reader.v3:first` per page of 400 prose tokens and a check batch per page; on the fast
+ * model, at the hosted quote on Cloud, free on a local model.
  */
 export function priceReads(
   scenes: readonly Pick<DueScene, 'read' | 'proseTokens'>[],
   context: RebuildContext
 ): { costUsd: number; priced: boolean } {
-  const first = plannedRow('reader.v2:first')
-  const window = plannedRow('reader.v2:window')
-  const verify = plannedRow('verify.v2')
-  const pageOverhead = first.typicalInTokens - PAGE_TOKENS
+  const first = plannedRow('reader.v3:first')
+  const window = plannedRow('reader.v3:window')
+  const verify = plannedRow('verify.v3')
+  const pageOverhead = first.typicalInTokens - READER_V3_PAGE_TOKENS
   let tokensIn = 0
   let tokensOut = 0
   for (const scene of scenes) {
+    const pages = Math.max(1, Math.ceil(scene.proseTokens / READER_V3_PAGE_TOKENS))
     if (scene.read === 'window') {
-      tokensIn += window.typicalInTokens + verify.typicalInTokens
-      tokensOut += window.typicalOutTokens + verify.typicalOutTokens
+      tokensIn += pages * (window.typicalInTokens + verify.typicalInTokens)
+      tokensOut += pages * (window.typicalOutTokens + verify.typicalOutTokens)
       continue
     }
-    const pages = Math.max(1, Math.ceil(scene.proseTokens / PAGE_TOKENS))
     tokensIn += scene.proseTokens + pages * (pageOverhead + verify.typicalInTokens)
     tokensOut += pages * (first.typicalOutTokens + verify.typicalOutTokens)
   }

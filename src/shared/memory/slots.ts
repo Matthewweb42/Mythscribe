@@ -119,6 +119,56 @@ export function parseSlot(text: string): Slot | null {
   return null
 }
 
+/**
+ * The slot a reader's answer names, read a little leniently (live planted-error run 2026-10-14:
+ * the model wrote a detail label bare, "occupation", or a base slot behind the prefix,
+ * "detail:location"): the exact slot, else the one detail label written bare, else the one base
+ * slot written as a detail; null for anything else ("emotion", "dialogue" stay refused). Nothing
+ * is guessed: each spelling names exactly one slot of the closed list.
+ */
+export function readSlot(text: string): Slot | null {
+  const trimmed = text.trim()
+  const exact = parseSlot(trimmed)
+  if (exact !== null) return exact
+  if (isDetailLabel(trimmed)) return `detail:${trimmed}`
+  if (trimmed.startsWith(DETAIL_PREFIX)) {
+    const base = trimmed.slice(DETAIL_PREFIX.length)
+    if ((BASE_SLOTS as readonly string[]).includes(base)) return base as BaseSlot
+  }
+  return null
+}
+
+/**
+ * The slots a place can hold (live planted-error run 2026-10-14: "Thornmere" was given a home):
+ * where it lies, its role, traits, history and relations, and the few details a place has. A
+ * place never has eyes, an age, clothes, a birthplace or an occupation. Only places are checked:
+ * a thing's kind covers the author's own categories (a creature may well have eyes), and a group
+ * may have a home or a faith.
+ */
+const PLACE_SLOTS: ReadonlySet<Slot> = new Set<Slot>([
+  'location',
+  'role',
+  'traits',
+  'history',
+  'relation',
+  'detail:allegiance',
+  'detail:faith',
+  'detail:language',
+  'detail:title',
+  'detail:wealth'
+])
+
+/**
+ * Whether a fact in `slot` can be about a record of `kind` (the ladder's `kind` refusal): a place
+ * only in `PLACE_SLOTS`, a secret or thread never (they are topics, read as knows lines and
+ * steps), every other kind in any slot.
+ */
+export function slotFitsKind(slot: Slot, kind: string | undefined): boolean {
+  if (kind === 'secret' || kind === 'thread') return false
+  if (kind === 'place') return PLACE_SLOTS.has(slot)
+  return true
+}
+
 /** A slot as stored and sent over IPC: any member of the closed list. */
 export const SlotSchema = z.custom<Slot>(
   (value) => typeof value === 'string' && parseSlot(value) !== null,

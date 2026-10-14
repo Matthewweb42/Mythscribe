@@ -235,8 +235,8 @@ describe('runReading (F-16.17)', () => {
     expect(reading).toMatchObject({
       purpose: 'first',
       pages: 1,
-      promptVersion: 'reader.v2',
-      verifyVersion: 'verify.v2',
+      promptVersion: 'reader.v3',
+      verifyVersion: 'verify.v3',
       model: 'gpt-5.4-mini',
       tokensIn: 2_000,
       tokensOut: 200,
@@ -341,7 +341,7 @@ describe('runReading (F-16.17)', () => {
     expect(claimsNow()).toHaveLength(3)
   })
 
-  it('salvages a reply cut off at its cap and reads the paragraphs after the last quote once more', async () => {
+  it('salvages a reply cut off at its cap and reads from the last quoted paragraph again, in halves', async () => {
     let calls = 0
     const ai = fakeAi((request) => {
       if (requestKind(request) === 'verify') return { text: verifyReply(request) }
@@ -355,8 +355,10 @@ describe('runReading (F-16.17)', () => {
     })
     const outcome = await read(ai)
     const readers = ai.requests.filter((request) => requestKind(request) === 'reader')
-    expect(readers).toHaveLength(2)
-    expect([...sentParagraphs(nth(readers, 1)).keys()]).toEqual([2])
+    // ¶1, the last one quoted (its list may stop midway), and ¶2, each with the whole cap.
+    expect(readers).toHaveLength(3)
+    expect([...sentParagraphs(nth(readers, 1)).keys()]).toEqual([1])
+    expect([...sentParagraphs(nth(readers, 2)).keys()]).toEqual([2])
     expect(outcome).toMatchObject({ read: true, cut: true })
     expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes', 'location', 'clothing'])
     expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
@@ -376,7 +378,8 @@ describe('runReading (F-16.17)', () => {
       return { text: '{"c":[', finishReason: 'length' }
     })
     await read(ai)
-    expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes'])
+    // ¶1's facts were dropped from the cut reply for the retry, which reached nothing.
+    expect(claimsNow()).toEqual([])
     // ¶1 and ¶2 stay unread, so the next reading reads them again.
     const again = standard()
     const outcome = await read(again)
@@ -395,7 +398,7 @@ describe('runReading (F-16.17)', () => {
       { p: 2, r: 'Tomas', s: 'mood', v: 'the secret', q: 'Tomas wore a blue coat' },
       { p: 1, r: 'Nobody', s: 'eyes', v: 'grey', q: "Mara's eyes were grey" },
       { p: 0, r: 'Mara Vell', s: 'traits', v: 'cold', q: 'The ridge was cold' },
-      { p: 2, r: 'Tomas', s: 'traits', v: 'dashing', q: 'Tomas wore a blue coat' }
+      { p: 2, r: 'Tomas', s: 'traits', v: 'blue coat', q: 'Tomas wore a blue coat' }
     ]
     // Mara's eyes twice in ¶1: a quote that is not once in the window.
     saveDocument(
@@ -456,7 +459,7 @@ describe('runReading (F-16.17)', () => {
       }
       return {
         text: readerReply(request, [
-          { p: 2, r: 'Tomas', s: 'traits', v: 'dashing', q: 'Tomas wore a blue coat' }
+          { p: 2, r: 'Tomas', s: 'traits', v: 'blue coat', q: 'Tomas wore a blue coat' }
         ])
       }
     })
@@ -852,10 +855,10 @@ describe('runReading: what changes under it, and what it cannot read (F-16.17, r
       return { text: 'I could not read that.' }
     })
     await read(ai)
-    expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes'])
-    // ¶2, the retry's, stays unread: not a whole read, and read again next time.
+    expect(claimsNow()).toEqual([])
+    // ¶1 and ¶2, the retries', stay unread: not a whole read, and read again next time.
     const reading = lastReading(db, one, activeDraftId(db))
-    expect(reading?.paras).toEqual([[0, 1]])
+    expect(reading?.paras).toEqual([[0, 0]])
     expect(getSceneRead(db, one, activeDraftId(db))?.partials).toBe(1)
   })
 
@@ -876,8 +879,9 @@ describe('runReading: what changes under it, and what it cannot read (F-16.17, r
     })
     await read(ai)
     const readers = ai.requests.filter((request) => requestKind(request) === 'reader')
-    expect(readers).toHaveLength(2)
-    expect([...sentParagraphs(nth(readers, 1)).keys()]).toEqual([0, 1, 2])
+    expect(readers).toHaveLength(3)
+    expect([...sentParagraphs(nth(readers, 1)).keys()]).toEqual([0, 1])
+    expect([...sentParagraphs(nth(readers, 2)).keys()]).toEqual([2])
     expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes', 'location', 'clothing'])
   })
 
@@ -924,8 +928,8 @@ describe('runReading: what changes under it, and what it cannot read (F-16.17, r
 describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', () => {
   const TRAITS: PlannedClaim[] = [
     { p: 1, r: 'Mara Vell', s: 'location', v: 'the quay', q: 'She walked to the quay' },
-    { p: 1, r: 'Mara Vell', s: 'traits', v: 'grey-eyed', q: "Mara's eyes were grey" },
-    { p: 2, r: 'Tomas', s: 'traits', v: 'blue-coated', q: 'Tomas wore a blue coat' }
+    { p: 1, r: 'Mara Vell', s: 'traits', v: 'grey eyes', q: "Mara's eyes were grey" },
+    { p: 2, r: 'Tomas', s: 'traits', v: 'a blue coat', q: 'Tomas wore a blue coat' }
   ]
 
   it('asks again for the verdicts a cut-off reply left out', async () => {
@@ -982,11 +986,11 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
       p: 2,
       r: 'Tomas',
       s: 'traits',
-      v: 'dashing',
+      v: 'blue coat',
       q: 'Tomas wore a blue coat'
     }
     await read(standard([dashing]))
-    expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([['dashing', 'live']])
+    expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([['blue coat', 'live']])
     // An edit two paragraphs up (its anchor holds): the window read proposes another value on the
     // same quote and says to drop c1.
     saveDocument(db, one, doc(SCENE[0] ?? '', "Mara's eyes were green. She walked to the quay.", SCENE[2] ?? ''))
@@ -995,9 +999,9 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
         return { text: verifyReply(request, () => ({ ok: false })) }
       }
       const tail = request.messages.at(-1)?.content ?? ''
-      const short = /(c\d+) r\d+ traits “dashing”/.exec(tail)?.[1]
+      const short = /(c\d+) r\d+ traits “blue coat”/.exec(tail)?.[1]
       return {
-        text: readerReply(request, [{ ...dashing, v: 'shabby' }], {
+        text: readerReply(request, [{ ...dashing, v: 'coat' }], {
           drop: short === undefined ? [] : [short]
         })
       }
@@ -1007,7 +1011,7 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
       claimsNow()
         .filter((claim) => claim.slot === 'traits')
         .map((claim) => [claim.value, claim.state])
-    ).toEqual([['dashing', 'live']])
+    ).toEqual([['blue coat', 'live']])
   })
 
   it('pins first person to a speaker only in what the checker confirms is their line', async () => {

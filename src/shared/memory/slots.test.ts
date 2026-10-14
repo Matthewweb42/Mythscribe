@@ -5,6 +5,8 @@ import {
   DETAIL_LABEL_NAMES,
   SlotSchema,
   parseSlot,
+  readSlot,
+  slotFitsKind,
   slotGroup,
   slotLabel
 } from './slots'
@@ -51,5 +53,28 @@ describe('the closed slot list (F-16.17, design §2.2)', () => {
     expect(slotLabel('location')).toBe('Last seen at')
     expect(slotLabel('detail:income')).toBe('Income')
     for (const slot of ALL_SLOTS) expect(slotLabel(slot)).not.toBe('')
+  })
+})
+
+describe('reading a slot leniently, and the slots a place holds (live run 2026-10-14)', () => {
+  it('reads a bare detail label and a base slot behind the prefix, and nothing invented', () => {
+    expect(readSlot('eyes')).toBe('eyes')
+    expect(readSlot('occupation')).toBe('detail:occupation')
+    expect(readSlot('birthplace')).toBe('detail:birthplace')
+    expect(readSlot('detail:location')).toBe('location')
+    for (const invented of ['action', 'dialogue', 'emotion', 'question', 'detail:smell', 'mood']) {
+      expect(readSlot(invented), invented).toBeNull()
+    }
+  })
+
+  it('gives a place no person’s slot, and a secret or thread no fact', () => {
+    expect(slotFitsKind('detail:home', 'place')).toBe(false)
+    expect(slotFitsKind('eyes', 'place')).toBe(false)
+    expect(slotFitsKind('history', 'place')).toBe(true)
+    expect(slotFitsKind('location', 'place')).toBe(true)
+    expect(slotFitsKind('detail:home', 'character')).toBe(true)
+    expect(slotFitsKind('eyes', 'thing')).toBe(true)
+    expect(slotFitsKind('traits', 'secret')).toBe(false)
+    expect(slotFitsKind('traits', undefined)).toBe(true)
   })
 })

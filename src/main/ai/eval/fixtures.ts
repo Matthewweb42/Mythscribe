@@ -71,7 +71,7 @@ import {
   VOICE_NOTES_SAMPLE_CHARS
 } from '@shared/voice'
 import { voiceBlock } from '../../voice/voiceBlock'
-import { MEMORY_EVAL_CASES, MEMORY_V2_EVAL_CASES } from './memoryFixtures'
+import { MEMORY_EVAL_CASES, MEMORY_V2_EVAL_CASES, MEMORY_V3_EVAL_CASES } from './memoryFixtures'
 import { citeEvalCases } from './citeFixtures'
 import { navigatorEvalCases } from './navigatorFixtures'
 import { judgeEvalCases } from './judgeFixtures'
@@ -6781,5 +6781,7 @@ export const EVAL_CASES: EvalCase[] = [
   // F-16.25 (P3 slice 4): Ms Scribe's navigator, in place of route.v2 in story memory v2.
   ...navigatorEvalCases(),
   // F-16.27 (P4 slice 2): the contradiction judge, its batches and Check the book's stronger check.
-  ...judgeEvalCases()
+  ...judgeEvalCases(),
+  // F-16.17 (2026-10-14): reader.v3 and verify.v3, after the live planted-error run.
+  ...MEMORY_V3_EVAL_CASES
 ]
