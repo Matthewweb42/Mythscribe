@@ -15,7 +15,7 @@ import { scanNamesFor } from '../nameIndexer'
 import { indexNodePassages, indexStaleRecords } from '../passageIndexer'
 import { createRecord, savePage } from '../recordStore'
 import { setSceneDetails } from '../sceneDetailStore'
-import { TEST_BOOK, testBookScene } from './book'
+import { TEST_BOOK, testBookScene, type TestBookScene } from './book'
 import { TEST_BOOK_LABELS } from './labels'
 import type { LabelQuestion } from './labels.schema'
 
@@ -45,13 +45,84 @@ const doc = (paragraphs: readonly string[]): TiptapNodeT => ({
   content: paragraphs.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] }))
 })
 
-/** The category a label record is made in (secrets and threads come from P2b, never a category). */
-const CATEGORY: Readonly<Record<string, string | undefined>> = {
+/**
+ * The category a label record is made in (secrets and threads come from P2b, never a category):
+ * the v2 builder's records and the v1 builder's sheets (`projectV1.ts`) alike.
+ */
+export const TEST_BOOK_CATEGORY: Readonly<Record<string, string | undefined>> = {
   character: 'character',
   place: 'setting',
   thing: 'item',
   group: 'faction',
   term: 'lore'
+}
+
+/** How a builder writes one scene of the book: its stored text, then whatever it adds. */
+export interface TestBookLayout {
+  /** The scene's stored document; null leaves it with no words (P4's planned card). */
+  content: (scene: TestBookScene) => TiptapNodeT | null
+  /** After the scene's text is saved (typed details, scene meta). */
+  placed: (scene: TestBookScene, nodeId: string) => void
+}
+
+/**
+ * Lays the book out in a new project, the same way for both builders: one chapter per book
+ * chapter with its scenes in book order, the seeded chapters gone, the cut scene (h12) left out
+ * of compile, and h10 as h09's scene in an inactive draft ("Earlier draft"). Answers the scenes
+ * (h10 maps to h09's node) and the inactive draft.
+ */
+export function layOutTestBook(
+  db: TreeDb,
+  scenes: readonly TestBookScene[],
+  layout: TestBookLayout
+): { scenes: Map<string, string>; inactiveDraftId: string } {
+  const nodes = listNodes(db)
+  const part = nodes.find((row) => row.hierarchyLevel === 'part')
+  if (part === undefined) throw new Error('The new project has no part')
+  const seeded = nodes.filter((row) => row.hierarchyLevel === 'chapter')
+  const chapters = new Map<number, string>()
+  const placed = new Map<string, string>()
+  const excluded: string[] = []
+  for (const scene of scenes) {
+    if (scene.source === 'inactiveDraft') continue
+    let chapter = chapters.get(scene.chapter)
+    if (chapter === undefined) {
+      chapter = createNode(db, 'novel', {
+        parentId: part.id,
+        kind: 'folder',
+        hierarchyLevel: 'chapter',
+        title: `Chapter ${scene.chapter}`
+      }).id
+      chapters.set(scene.chapter, chapter)
+    }
+    const node = createNode(db, 'novel', {
+      parentId: chapter,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: scene.title
+    }).id
+    placed.set(scene.id, node)
+    const content = layout.content(scene)
+    if (content !== null) saveDocument(db, node, content)
+    layout.placed(scene, node)
+    if (scene.source === 'excludedScene') excluded.push(node)
+  }
+  for (const chapter of seeded) deleteNode(db, chapter.id)
+  setCompileState(db, { ...getCompileState(db), excluded })
+
+  // h10 is the earlier draft of chapter 14: h09's scene in an inactive draft.
+  const later = scenes.find((scene) => scene.source === 'inactiveDraft')
+  const target = later === undefined ? undefined : placed.get('h09')
+  const active = activeDraftId(db)
+  const list = duplicateDraft(db, active, 'Earlier draft')
+  const inactiveDraftId = list.drafts.find((each) => each.id !== active)?.id ?? ''
+  if (later !== undefined && target !== undefined) {
+    switchDraft(db, inactiveDraftId)
+    saveDocument(db, target, layout.content(later) ?? doc([]))
+    switchDraft(db, active)
+    placed.set(later.id, target)
+  }
+  return { scenes: placed, inactiveDraftId }
 }
 
 /**
@@ -71,7 +142,7 @@ export function buildTestBookProject(
   const db = session.connection.orm
   const records = new Map<string, string>()
   for (const label of TEST_BOOK_LABELS.records.filter(kept)) {
-    const categoryId = CATEGORY[label.kind]
+    const categoryId = TEST_BOOK_CATEGORY[label.kind]
     if (categoryId === undefined) continue
     const main = normName(label.name)
     const made = createRecord(
@@ -107,73 +178,34 @@ export function buildTestBookProject(
     )
   }
 
-  const nodes = listNodes(db)
-  const part = nodes.find((row) => row.hierarchyLevel === 'part')
-  if (part === undefined) throw new Error('The new project has no part')
-  const seeded = nodes.filter((row) => row.hierarchyLevel === 'chapter')
-  const chapters = new Map<number, string>()
-  const scenes = new Map<string, string>()
-  const excluded: string[] = []
-  for (const scene of TEST_BOOK.filter(kept)) {
-    if (scene.source === 'inactiveDraft') continue
-    let chapter = chapters.get(scene.chapter)
-    if (chapter === undefined) {
-      chapter = createNode(db, 'novel', {
-        parentId: part.id,
-        kind: 'folder',
-        hierarchyLevel: 'chapter',
-        title: `Chapter ${scene.chapter}`
-      }).id
-      chapters.set(scene.chapter, chapter)
-    }
-    const node = createNode(db, 'novel', {
-      parentId: chapter,
-      kind: 'document',
-      hierarchyLevel: 'scene',
-      title: scene.title
-    }).id
-    scenes.set(scene.id, node)
+  const { scenes, inactiveDraftId } = layOutTestBook(db, TEST_BOOK.filter(kept), {
     // The planned card (h17, P4) has no words: a scene card the author has not drafted.
-    if (scene.paragraphs.length > 0) saveDocument(db, node, doc(scene.paragraphs))
-    const details = scene.details
-    if (details !== undefined) {
-      setSceneDetails(
-        db,
-        node,
-        {
-          povRecordId: details.pov === undefined ? null : (records.get(details.pov) ?? null),
-          place: {
-            recordId: details.place === undefined ? null : (records.get(details.place) ?? null),
-            text: ''
+    content: (scene) => (scene.paragraphs.length > 0 ? doc(scene.paragraphs) : null),
+    placed: (scene, node) => {
+      const details = scene.details
+      if (details !== undefined) {
+        setSceneDetails(
+          db,
+          node,
+          {
+            povRecordId: details.pov === undefined ? null : (records.get(details.pov) ?? null),
+            place: {
+              recordId: details.place === undefined ? null : (records.get(details.place) ?? null),
+              text: ''
+            },
+            time: { text: details.time ?? '' },
+            storyYear: details.year ?? null,
+            alsoHere: [],
+            flashback: null
           },
-          time: { text: details.time ?? '' },
-          storyYear: details.year ?? null,
-          alsoHere: [],
-          flashback: null
-        },
-        now
-      )
+          now
+        )
+      }
+      if (scene.source === 'ideaScene') {
+        setSceneMeta(db, node, { ...parseStoredSceneMeta(null), status: 'idea' })
+      }
     }
-    if (scene.source === 'ideaScene') {
-      setSceneMeta(db, node, { ...parseStoredSceneMeta(null), status: 'idea' })
-    }
-    if (scene.source === 'excludedScene') excluded.push(node)
-  }
-  for (const chapter of seeded) deleteNode(db, chapter.id)
-  setCompileState(db, { ...getCompileState(db), excluded })
-
-  // h10 is the earlier draft of chapter 14: h09's scene in an inactive draft.
-  const later = TEST_BOOK.find((scene) => scene.source === 'inactiveDraft')
-  const target = later === undefined ? undefined : scenes.get('h09')
-  const active = activeDraftId(db)
-  const list = duplicateDraft(db, active, 'Earlier draft')
-  const inactiveDraftId = list.drafts.find((each) => each.id !== active)?.id ?? ''
-  if (later !== undefined && target !== undefined) {
-    switchDraft(db, inactiveDraftId)
-    saveDocument(db, target, doc(later.paragraphs))
-    switchDraft(db, active)
-    scenes.set(later.id, target)
-  }
+  })
   for (const node of new Set(scenes.values())) scanNamesFor(db, node, now)
   return { session, db, records, scenes, inactiveDraftId }
 }

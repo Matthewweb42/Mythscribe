@@ -34,6 +34,7 @@ import {
 import { TEST_BOOK } from '../../memory/testBook/book'
 import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
 import { buildTestBookProject, type TestBookProject } from '../../memory/testBook/project'
+import { plantedBarLines, plantedFailures, plantedMeasures, unreviewedLines } from './plantedScore'
 import { fakeChatServer } from './fakeChatServer'
 import {
   liveProviderError,
@@ -54,13 +55,11 @@ import {
   proposal,
   readBook,
   readingStop,
-  sceneOf,
   sentLabels,
   slotOf,
   storedFor,
   wantsCard,
   oracleCard,
-  nameOf,
   type ClaimLabel
 } from './memoryOracle'
 
@@ -315,16 +314,6 @@ const PRESENCE = new Set([
   'record'
 ])
 
-/** The live run's pass bars (decided by Claude, unconfirmed; plan P2a §2.7). */
-export const PLANTED_PASS_BARS = {
-  quotesFound: 0.9,
-  verifierPass: 0.8,
-  attribution: 0.95,
-  literalPrecision: 0.98,
-  /** Verified claims on a labelled sentence, with the label's record (2026-10-12 review). */
-  supportPrecision: 0.9
-} as const
-
 /** The live run stops reading once its reported cost passes this. */
 const LIVE_STOP_USD = 0.5
 
@@ -569,90 +558,17 @@ function scoreLive(
     if (storedFor(book, claims, label) !== undefined) entry.recalled += 1
   }
 
-  // Attribution: stored facts on a labelled quote and slot, with the label's subject.
-  const matched = claims.flatMap((claim) => {
-    const hit = TEST_BOOK_LABELS.claims.find(
-      (label) =>
-        label.scene === sceneOf(book, claim.nodeId) &&
-        slotOf(label) === claim.slot &&
-        overlaps(label.quote, claim.quote)
-    )
-    return hit === undefined ? [] : [{ claim, label: hit }]
-  })
-  const attributed = matched.filter(
-    ({ claim, label }) => book.records.get(label.record) === claim.recordId
-  ).length
-  const literal = claims.filter((claim) => claim.proof === 'literal')
-  const literalRight = literal.filter((claim) =>
-    matched.some(
-      (entry) =>
-        entry.claim === claim &&
-        entry.label.expect !== 'reject' &&
-        book.records.get(entry.label.record) === claim.recordId
-    )
-  ).length
-  // Support: verified claims on a labelled sentence that the label proves, about its record.
-  const verified = claims.filter((claim) => claim.proof === 'verified')
-  const verifiedMatched = verified.filter((claim) => matched.some((entry) => entry.claim === claim))
-  const verifiedRight = verifiedMatched.filter((claim) =>
-    matched.some(
-      (entry) =>
-        entry.claim === claim &&
-        entry.label.expect !== 'reject' &&
-        book.records.get(entry.label.record) === claim.recordId
-    )
-  ).length
-  // Stored claims on no labelled sentence: no bar can judge them, so each is listed for review.
-  const nameOfRecord = new Map([...book.records].map(([labelId, id]) => [id, nameOf.get(labelId)]))
-  const unreviewed = claims
-    .filter((claim) => !matched.some((entry) => entry.claim === claim))
-    .map(
-      (claim) =>
-        `${sceneOf(book, claim.nodeId)} ¶${claim.para} ${nameOfRecord.get(claim.recordId ?? '') ?? '?'} ` +
-        `${claim.slot} “${claim.value}” (${claim.proof}, ${claim.voice}, ${claim.mode}) ← “${claim.quote}”`
-    )
+  // The bars' measures (`plantedScore.ts`, shared with the switch-over run).
+  const measures = plantedMeasures(book)
 
   // Names: proposed, and those the twin gate ties to a record (a twin it caught).
   const names = [...new Set(events.flatMap((event) => (event.name === null ? [] : [event.name])))]
   const roster = rosterOf(book.db)
   const dismissed = dismissedNames(book.db)
   const twins = names.filter((name) => twinGate(name, roster, dismissed).outcome === 'blocked')
-
-  // The health gate's measures, from the readings' own yields.
-  const readings = [...book.scenes]
-    .filter(([id]) => id !== 'h10')
-    .flatMap(([, node]) => {
-      const reading = lastReading(book.db, node, activeDraftId(book.db))
-      return reading === null ? [] : [reading]
-    })
-  const sum = (pick: (yields: (typeof readings)[number]['yields']) => number): number =>
-    readings.reduce((total, reading) => total + pick(reading.yields), 0)
-  const proposed = sum((yields) => yields.items)
-  const found = sum((yields) => yields.quotesFound)
-  const sentToVerifier = sum((yields) => yields.verifySent)
-  const passed = sum((yields) => yields.verified)
-  const cutReadings = readings.filter((reading) => reading.finishReason === 'length').length
   const readCount = [...outcomes.values()].filter((outcome) => outcome === 'read').length
-  const falseAlarms = negativesStored(book, claims)
-  const strays = neverRead(book)
 
-  const failures: string[] = []
-  const bar = (name: string, value: number, whole: number, min: number): void => {
-    if (whole > 0 && value / whole < min)
-      failures.push(`${name} ${percent(value, whole)} < ${min * 100} %`)
-  }
-  bar('quotes found', found, proposed, PLANTED_PASS_BARS.quotesFound)
-  bar('verifier pass', passed, sentToVerifier, PLANTED_PASS_BARS.verifierPass)
-  bar('attribution precision', attributed, matched.length, PLANTED_PASS_BARS.attribution)
-  bar('literal precision', literalRight, literal.length, PLANTED_PASS_BARS.literalPrecision)
-  bar(
-    'support precision',
-    verifiedRight,
-    verifiedMatched.length,
-    PLANTED_PASS_BARS.supportPrecision
-  )
-  if (strays.length > 0) failures.push(`${strays.length} claims from never-read scenes`)
-  if (falseAlarms.length > 0) failures.push(`${falseAlarms.length} negatives stored live`)
+  const failures = plantedFailures(measures)
   if (run.error !== null) failures.push(`stopped by a provider error (${run.error})`)
   if (run.costUnknown !== null) failures.push(run.costUnknown)
 
@@ -667,15 +583,8 @@ function scoreLive(
     '',
     '## Pass bars (decided by Claude, unconfirmed)',
     '',
-    `- Quotes found: ${percent(found, proposed)} (bar ${PLANTED_PASS_BARS.quotesFound * 100} %)`,
-    `- Verifier pass: ${percent(passed, sentToVerifier)} (bar ${PLANTED_PASS_BARS.verifierPass * 100} %)`,
-    `- Attribution precision: ${percent(attributed, matched.length)} (bar ${PLANTED_PASS_BARS.attribution * 100} %)`,
-    `- Literal precision: ${percent(literalRight, literal.length)} (bar ${PLANTED_PASS_BARS.literalPrecision * 100} %)`,
-    `- Support precision: ${percent(verifiedRight, verifiedMatched.length)} (bar ${PLANTED_PASS_BARS.supportPrecision * 100} %; verified claims on labelled sentences, the label's record)`,
-    `- Stored on no labelled sentence (unreviewed, listed below): ${unreviewed.length} of ${claims.length}`,
-    `- Claims from never-read scenes: ${strays.length} (bar 0)`,
-    `- Negatives stored live (false alarms): ${falseAlarms.length} (bar 0)${falseAlarms.length > 0 ? `: ${falseAlarms.join('; ')}` : ''}`,
-    `- Cut off at the cap (finish_reason length): ${percent(cutReadings, readCount)} of readings`,
+    ...plantedBarLines(measures),
+    `- Cut off at the cap (finish_reason length): ${percent(measures.cut.right, readCount)} of readings`,
     `- Names proposed: ${names.length}; tied to a record by the twin gate: ${twins.length}${twins.length > 0 ? ` (${twins.join(', ')})` : ''}`,
     `- Spot checks: fast ${spot.fastAgree} of ${spot.fastChecked} agree; strong ${spot.strongAgree} of ${spot.strongChecked} agree`,
     '',
@@ -696,12 +605,7 @@ function scoreLive(
           } | ${entry.recalled}/${entry.labels} |`
       ),
     '',
-    '## Unreviewed: stored on no labelled sentence',
-    '',
-    'No bar judges these: read each against its quote (a wrong person or an unsupported value is a',
-    'failure of the run even when every bar passed).',
-    '',
-    ...(unreviewed.length === 0 ? ['None.'] : unreviewed.map((line) => `- ${line}`)),
+    ...unreviewedLines(measures),
     '',
     'Recall has no bar: sheets may be thinner than the labels. No prompt text and no key are written here.'
   ]
@@ -715,15 +619,21 @@ function scoreLive(
       costUnknown: run.costUnknown,
       requests: run.requests,
       scenesRead: readCount,
-      quotesFound: { found, proposed },
-      verifierPass: { passed, sent: sentToVerifier },
-      attribution: { right: attributed, matched: matched.length },
-      literalPrecision: { right: literalRight, literal: literal.length },
-      supportPrecision: { right: verifiedRight, matched: verifiedMatched.length },
-      unreviewed,
-      neverRead: strays.length,
-      falseAlarms,
-      cutReadings,
+      quotesFound: { found: measures.quotesFound.right, proposed: measures.quotesFound.of },
+      verifierPass: { passed: measures.verifierPass.right, sent: measures.verifierPass.of },
+      attribution: { right: measures.attribution.right, matched: measures.attribution.of },
+      literalPrecision: {
+        right: measures.literalPrecision.right,
+        literal: measures.literalPrecision.of
+      },
+      supportPrecision: {
+        right: measures.supportPrecision.right,
+        matched: measures.supportPrecision.of
+      },
+      unreviewed: measures.unreviewed,
+      neverRead: measures.strays,
+      falseAlarms: measures.falseAlarms,
+      cutReadings: measures.cut.right,
       names: { proposed: names.length, twins },
       spot,
       slots: Object.fromEntries(slots),
