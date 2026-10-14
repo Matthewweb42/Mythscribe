@@ -409,7 +409,7 @@ describe('switchoverStore (F-16.31 part A)', () => {
     expect(calls).toHaveLength(before)
   })
 
-  it('drops the ask of a final screen the author closed, and a start answer too', async () => {
+  it('drops the ask of a final screen the author closed, and opens a rebuild that started anyway', async () => {
     await toConsent()
     const releaseStatus = hold('memory:status')
     const converting = store().convert()
@@ -428,10 +428,12 @@ describe('switchoverStore (F-16.31 part A)', () => {
     const releaseStart = hold('memory:rebuild')
     const starting = store().rebuildNow()
     expect(store().ask).toMatchObject({ kind: 'offer', starting: true })
+    // The dialog holds Later and Escape while it starts; left all the same, the rebuild main
+    // started runs and spends, so its progress and Stop open.
     store().close()
     releaseStart()
     await starting
     expect(store().phase).toBe('idle')
-    expect(useMemoryStore.getState().rebuildOpen).toBeNull()
+    expect(useMemoryStore.getState().rebuildOpen).toBe('summary')
   })
 })

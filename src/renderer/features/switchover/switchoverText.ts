@@ -7,8 +7,9 @@ import {
   type SwitchoverFailure,
   type SwitchoverStep
 } from '@shared/memory/switchover'
-import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
+import { formatCount } from '@renderer/features/ai/usageFormat'
 import { backupWhen } from '@renderer/features/backups/backupWhen'
+import { aboutMinutes, rebuildCost } from '@renderer/features/memory/memoryView'
 
 /**
  * The switch-over's words (F-16.15, F-16.31 part A, plan `Switchover.md` §3): the intro's list of
@@ -121,17 +122,12 @@ export function goBackLine(backup: string): string {
   return `To go back: in Settings › Backups choose Restore on ${which}. It opens as a new project beside this one, on the old story memory. You can also open the dated copy with File › Open project…. This project stays on the new story memory.`
 }
 
-/** The rebuild's line: what *Rebuild memory* will cost after the switch, and how long. */
+/**
+ * The dry run's rebuild line: what *Rebuild memory* will cost after the switch, and how long, in
+ * the words the final screen and the rebuild dialog use (`rebuildCost`, in cents).
+ */
 export function rebuildLine(rebuild: RebuildEstimate): string {
   if (rebuild.scenes === 0) return 'Rebuild memory: nothing to read yet.'
-  const scenes = formatCount(rebuild.scenes, 'scene')
-  const time = `about ${formatCount(rebuild.minutes, 'minute')}`
-  if (rebuild.source === 'local')
-    return `Rebuild memory: ${scenes}, free on your local model, ${time}.`
-  const cost = rebuild.priced
-    ? `about ${formatUsd(rebuild.costUsd)}`
-    : 'a cost not yet known (a model is not in the price table)'
-  const where =
-    rebuild.source === 'cloud' ? 'from your MythScribe Cloud balance' : 'on your own key'
-  return `Rebuild memory: ${scenes}, ${cost} ${where}, ${time}. It asks before it starts.`
+  const line = `Rebuild memory: ${formatCount(rebuild.scenes, 'scene')}, ${rebuildCost(rebuild)}, ${aboutMinutes(rebuild.minutes)}.`
+  return rebuild.source === 'local' ? line : `${line} It asks before it starts.`
 }

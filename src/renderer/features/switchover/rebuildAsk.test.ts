@@ -26,9 +26,11 @@ describe('the switch-over’s rebuild ask (F-16.31)', () => {
     expect(heldAsk({ paused: 'off' }, { dial: 0 })).toEqual({ kind: 'aiOff' })
     expect(heldAsk({ paused: 'off' }, { dial: 1 })).toEqual({ kind: 'readingOff' })
     expect(heldAsk({ paused: 'noProvider' }, { dial: 1 })).toEqual({ kind: 'noProvider' })
-    // Holds on background reading (the cap, the health gate, today's cap) do not stop the asked
-    // rebuild from being priced: main says why when it will not start.
-    for (const paused of [null, 'cloudCap', 'health', 'dailyCap', 'localCutoff'] as const) {
+    // Today's AI spending cap stops the asked rebuild too (main refuses it): it waits.
+    expect(heldAsk({ paused: 'dailyCap' }, { dial: 1 })).toEqual({ kind: 'dailyCap' })
+    // Holds on background reading only (the monthly Cloud cap, the health gate, a local cut-off)
+    // do not stop the asked rebuild from being priced: main says why when it will not start.
+    for (const paused of [null, 'cloudCap', 'health', 'localCutoff'] as const) {
       expect(heldAsk({ paused }, { dial: 1 })).toBeNull()
     }
   })
@@ -56,12 +58,11 @@ describe('the switch-over’s rebuild ask (F-16.31)', () => {
       false,
       false
     ])
-    expect([offer, unpriced, { kind: 'noProvider' } as const, null].map(laterAsk)).toEqual([
-      true,
-      true,
-      false,
-      false
-    ])
+    expect(
+      [offer, unpriced, { kind: 'dailyCap' } as const, { kind: 'noProvider' } as const, null].map(
+        laterAsk
+      )
+    ).toEqual([true, true, true, false, false])
   })
 
   it('words a long book in minutes and cents', () => {
@@ -69,5 +70,14 @@ describe('the switch-over’s rebuild ask (F-16.31)', () => {
       'Rebuild memory now: the AI reads 90 scenes once, about 14¢ on your own key (about 12 minutes). Your text, Pinned, Ideas and Dismissed stay as they are.'
     )
     expect(rebuildAskLine({ kind: 'reading' })).toBe('Working out what Rebuild memory would cost…')
+  })
+
+  it('says on a test copy that the rebuild reads the copy only', () => {
+    expect(rebuildAskLine(pricedAsk(ESTIMATE), true)).toBe(
+      'Rebuild memory now: the AI reads 90 scenes once, about 14¢ on your own key (about 12 minutes). Your text, Pinned, Ideas and Dismissed stay as they are. This reads the test copy only: when you switch your project, it needs its own Rebuild memory, at about the same price.'
+    )
+    expect(rebuildAskLine(pricedAsk({ ...ESTIMATE, source: 'local', costUsd: 0 }), true)).toContain(
+      'This reads the test copy only: when you switch your project, it needs its own Rebuild memory.'
+    )
   })
 })

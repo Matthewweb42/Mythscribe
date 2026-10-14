@@ -160,6 +160,42 @@ describe('Rebuild memory (F-16.19)', () => {
     expect(main.sent('jobs:cancel')).toEqual([undefined])
   })
 
+  it('on Cloud, says the balance pays and which caps apply before Rebuild (SW-D9)', async () => {
+    const cloud: RebuildEstimate = { ...ESTIMATE, source: 'cloud' }
+    main = installFakeMain({
+      'memory:rebuildEstimate': () => cloud,
+      'memory:rebuild': () => ({ ok: true, queued: 90, estimate: cloud }),
+      'memory:status': () => memoryStatusFixture({ rebuild: RUNNING })
+    })
+    act(() => useMemoryStore.getState().setRebuildOpen('start'))
+    render(<RebuildDialog />)
+    const dialog = screen.getByRole('dialog', { name: 'Rebuild memory' })
+    expect(await within(dialog).findByTestId('rebuild-cloud')).toHaveTextContent(
+      'Paid from your MythScribe Cloud balance. It is not counted toward your monthly reading cap; today’s AI spending cap still applies, so a long book may finish tomorrow.'
+    )
+    expect(within(dialog).getByRole('button', { name: 'Rebuild' })).toBeEnabled()
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+  })
+
+  it('on Cloud without a price (the notice’s and Settings’ way in), offers no Rebuild and says why (SW-D9)', async () => {
+    const unpriced: RebuildEstimate = { ...ESTIMATE, source: 'cloud', priced: false }
+    main = installFakeMain({ 'memory:rebuildEstimate': () => unpriced })
+    // Needs a look's *Rebuild…* and Settings' *Rebuild memory…* both open the dialog at its price.
+    act(() => useMemoryStore.getState().setRebuildOpen('start'))
+    render(<RebuildDialog />)
+    const dialog = screen.getByRole('dialog', { name: 'Rebuild memory' })
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'MythScribe Cloud has no price for a model story memory uses (deepseek-v4-flash, deepseek-v4-pro), so Rebuild memory does not start: on Cloud it starts only with its price. Pick another model in Settings › AI, or reset the models to their defaults.'
+    )
+    expect(within(dialog).queryByTestId('rebuild-estimate')).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: 'Rebuild' })).toBeNull()
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    })
+    expect(useMemoryStore.getState().rebuildOpen).toBeNull()
+    expect(main.sent('memory:rebuild')).toEqual([])
+  })
+
   it('says an unpriced model makes the price a lower bound', () => {
     expect(estimateLine({ ...ESTIMATE, priced: false, scenes: 1, minutes: 1 })).toBe(
       'About 12¢ (at least: a model’s price is unknown) for 1 scene (180 requests, about a minute) on deepseek-v4-flash'

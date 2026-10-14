@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
+import { bundledPricing } from '@shared/hostedPricing'
 import type { MemoryNotice, MemoryStatus } from '@shared/memory/views'
 import type { IndexQueueStatus } from '@shared/jobs'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -31,11 +32,7 @@ import {
 import { gateScene } from './pipeline'
 import { getRebuild, getSpotState, setSpotState, writeRow } from './readerRows'
 import { createReaderService, type ReaderService, type ReaderServiceDeps } from './readerService'
-import {
-  getSwitchoverRecord,
-  markRebuildStarted,
-  setSwitchoverRecord
-} from '../switchover/record'
+import { getSwitchoverRecord, markRebuildStarted, setSwitchoverRecord } from '../switchover/record'
 import { dayOf, defaultAiUsageState } from '../../ai/dailyCap'
 import { emptyCardFields, emptyYields, type Claim } from '@shared/memory/claims'
 import { emptySceneDetails } from '@shared/memory/sceneDetails'
@@ -1114,6 +1111,79 @@ describe('the rebuild after the switch-over (F-16.31 part A, SW-D8, plan Switcho
     reader.answerNotice('health:gpt-5.4-mini', 'keepReading')
     expect(reader.rebuild()).toMatchObject({ ok: true, queued: 3 })
     expect(getSwitchoverRecord(db)?.rebuild).toBe('started')
+    reader.cancelAll()
+    await drained(reader)
+  })
+
+  it('on Cloud, never starts a rebuild without its price (SW-D9), whichever button asks', async () => {
+    book(2)
+    switched()
+    settings = { ...defaultAiSettings(), dial: 1, source: 'cloud' }
+    const ai = reading({ providerId: 'cloud' })
+    // The fake's models are on neither Cloud price table: MythScribe Cloud does not offer them.
+    const unpriced = service(ai)
+    expect(unpriced.rebuildEstimate()).toMatchObject({ source: 'cloud', priced: false })
+    expect(unpriced.rebuild()).toEqual({
+      ok: false,
+      code: 'MODEL_UNAVAILABLE',
+      message:
+        'MythScribe Cloud has no price for a model story memory uses (gpt-5.4-mini, gpt-5.4), so Rebuild memory does not start: on Cloud it starts only with its price.',
+      nextStep: 'Pick another model in Settings › AI, or reset the models to their defaults.'
+    })
+    expect(getSwitchoverRecord(db)).toMatchObject({ rebuild: 'waiting', rebuildStartedAt: null })
+    expect(getRebuild(db)).toBeNull()
+    expect(listJobs(db)).toEqual([])
+    unpriced.clear()
+    // Once Cloud prices those models, the rebuild starts and ends the wait.
+    const bundled = bundledPricing()
+    const model = bundled.models[0]
+    if (model === undefined) throw new Error('The bundled table lists no model.')
+    const table = {
+      ...bundled,
+      models: [...bundled.models, { ...model, id: 'gpt-5.4-mini' }, { ...model, id: 'gpt-5.4' }]
+    }
+    const reader = service(ai, { pricing: () => table })
+    expect(reader.rebuildEstimate()).toMatchObject({ source: 'cloud', priced: true })
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 2 })
+    expect(getSwitchoverRecord(db)?.rebuild).toBe('started')
+    reader.cancelAll()
+    await drained(reader)
+  })
+
+  it('does not start a rebuild once today’s AI spending cap is reached, and says so', async () => {
+    book(2)
+    switched()
+    const ai = reading()
+    ai.deps.dailyCap = {
+      get: () => ({
+        ...defaultAiUsageState(),
+        dailyCapUsd: 1,
+        spentTodayUsd: 1,
+        spentDate: dayOf(NOW)
+      }),
+      spend: () => undefined
+    }
+    const reader = service(ai)
+    expect(reader.rebuild()).toEqual({
+      ok: false,
+      code: 'BUDGET',
+      message: 'Today’s AI spending cap is reached, so Rebuild memory does not start.',
+      nextStep: 'Raise the daily cap in Settings or wait until tomorrow.'
+    })
+    expect(getSwitchoverRecord(db)).toMatchObject({ rebuild: 'waiting', rebuildStartedAt: null })
+    expect(getRebuild(db)).toBeNull()
+    expect(listJobs(db)).toEqual([])
+    // Yesterday's tally does not count: on a new day the rebuild starts.
+    ai.deps.dailyCap = {
+      get: () => ({
+        ...defaultAiUsageState(),
+        dailyCapUsd: 1,
+        spentTodayUsd: 1,
+        spentDate: '2026-10-11'
+      }),
+      spend: () => undefined
+    }
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 2 })
     reader.cancelAll()
     await drained(reader)
   })

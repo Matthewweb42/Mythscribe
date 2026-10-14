@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MemoryNotice } from '@shared/memory/views'
 import {
+  aboutMinutes,
   cloudLine,
   lineText,
   noticeButtons,
@@ -8,6 +9,7 @@ import {
   otherLineText,
   readAgo,
   readNowMessage,
+  rebuildCost,
   staleNote,
   trueNowNote
 } from './memoryView'
@@ -178,6 +180,19 @@ describe('memoryView (F-16.18)', () => {
         },
         'Rebuild memory has not run since the switch-over: it reads 1 scene, a cost not yet known',
         ['Rebuild…', 'Later']
+      ],
+      [
+        // A local model prices the rebuild at 0: free, as the final screen says it (never "0¢").
+        {
+          id: 'switchoverRebuild',
+          kind: 'switchoverRebuild',
+          switchedAt: '2026-10-14T09:00:00.000Z',
+          scenes: 4,
+          priceUsd: 0,
+          priced: true
+        },
+        'Rebuild memory has not run since the switch-over: it reads 4 scenes at no cost',
+        ['Rebuild…', 'Later']
       ]
     ]
     for (const [notice, line, buttons] of cases) {
@@ -197,6 +212,25 @@ describe('memoryView (F-16.18)', () => {
       'Keep reading anyway',
       'Details'
     ])
+  })
+
+  it('words a rebuild’s cost and where it is paid from in one way, in cents (F-16.19, F-16.31)', () => {
+    const own = { source: 'ownKey', priced: true, costUsd: 0.136 } as const
+    expect(rebuildCost(own)).toBe('about 14¢ on your own key')
+    expect(rebuildCost({ ...own, priced: false })).toBe(
+      'a cost not yet known (a model is not in the price table) on your own key'
+    )
+    expect(rebuildCost({ ...own, source: 'cloud' })).toBe(
+      'about 14¢ from your MythScribe Cloud balance'
+    )
+    expect(rebuildCost({ ...own, source: 'cloud', priced: false })).toBe(
+      'a cost not yet known (MythScribe Cloud has no price for a model story memory uses)'
+    )
+    expect(rebuildCost({ source: 'local', priced: true, costUsd: 0 })).toBe(
+      'free on your local model'
+    )
+    expect(aboutMinutes(1)).toBe('about a minute')
+    expect(aboutMinutes(12)).toBe('about 12 minutes')
   })
 
   it('offers the switch-over’s rebuild through the price dialog, and Later as an answer (F-16.31)', () => {

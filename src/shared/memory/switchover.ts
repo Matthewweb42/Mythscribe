@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { aiFailure, type AiErrorCode } from '../ai'
 import { AiSource } from '../aiSettings'
 import { TwinRule } from './twinGate'
 
@@ -76,6 +77,29 @@ export const RebuildEstimate = z.object({
   minutes: z.number().int()
 })
 export type RebuildEstimate = z.infer<typeof RebuildEstimate>
+
+/**
+ * Decision SW-D9 (F-16.31): on MythScribe Cloud, *Rebuild memory* starts only with its price.
+ * Cloud prices every model it offers (its table, or the bundled one until that arrives), so an
+ * unpriced Cloud estimate means a model it does not offer. One rule for every way in: main's
+ * `memory:rebuild` refuses the start (`cloudUnpricedRefusal`), and the final screen and the
+ * rebuild dialog offer no Rebuild button.
+ */
+export const cloudUnpriced = (estimate: Pick<RebuildEstimate, 'source' | 'priced'>): boolean =>
+  estimate.source === 'cloud' && !estimate.priced
+
+/** Why a Cloud rebuild without its price does not start, and the next step (main's refusal). */
+export function cloudUnpricedRefusal(
+  estimate: Pick<RebuildEstimate, 'fastModel' | 'strongModel'>
+): { ok: false; code: AiErrorCode; message: string; nextStep: string } {
+  const models = [...new Set([estimate.fastModel, estimate.strongModel])]
+    .filter((model) => model !== '')
+    .join(', ')
+  return aiFailure(
+    'MODEL_UNAVAILABLE',
+    `MythScribe Cloud has no price for a model story memory uses${models === '' ? '' : ` (${models})`}, so Rebuild memory does not start: on Cloud it starts only with its price.`
+  )
+}
 
 /**
  * The dry run (`switchover:plan`): writes nothing. By name, what is kept as it is, what is

@@ -87,7 +87,14 @@ function SwitchoverBody(): React.JSX.Element {
     first.current?.focus()
   }, [state.phase, state.target])
 
-  const busy = state.phase === 'copying' || state.phase === 'safety' || state.phase === 'converting'
+  // Rebuild now's start is busy too: left meanwhile, a paid rebuild would run with no progress and
+  // no Stop in sight (Switch-over slice 4 review), so Later, Close and Escape wait for main's answer.
+  const starting = state.ask?.kind === 'offer' && state.ask.starting
+  const busy =
+    state.phase === 'copying' ||
+    state.phase === 'safety' ||
+    state.phase === 'converting' ||
+    starting
   const store = useSwitchoverStore.getState
   const close = (): void => store().close()
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -376,7 +383,11 @@ function SwitchoverBody(): React.JSX.Element {
           </p>
         )}
         {state.ask === null ? null : (
-          <RebuildAskBlock ask={state.ask} onRebuild={() => void store().rebuildNow()} />
+          <RebuildAskBlock
+            ask={state.ask}
+            onCopy={trial}
+            onRebuild={() => void store().rebuildNow()}
+          />
         )}
       </>
     )
@@ -385,14 +396,14 @@ function SwitchoverBody(): React.JSX.Element {
     const leave = laterAsk(state.ask) ? 'Later' : 'Close'
     actions = trial ? (
       <>
-        <button type="button" className={BUTTON} onClick={close}>
+        <button type="button" className={BUTTON} disabled={busy} onClick={close}>
           Close
         </button>
         <button
           ref={first}
           type="button"
           className={PRIMARY}
-          disabled={state.source === null}
+          disabled={state.source === null || busy}
           onClick={() => void store().openMyProject()}
         >
           Open my project
@@ -403,6 +414,7 @@ function SwitchoverBody(): React.JSX.Element {
         ref={first}
         type="button"
         className={offersRebuild(state.ask) ? BUTTON : PRIMARY}
+        disabled={busy}
         onClick={close}
       >
         {leave}
@@ -438,13 +450,16 @@ function SwitchoverBody(): React.JSX.Element {
 /**
  * The final screen's *Rebuild memory* ask (F-16.31 part A, decisions SW-D8 and SW-D9): its price
  * and *Rebuild now*, or why it waits and that Needs a look will offer it. A refused start shows
- * main's message and next step.
+ * main's message and next step. On a test copy the ask says it reads the copy only, and *Rebuild
+ * now* is not the screen's main button (*Open my project* is).
  */
 function RebuildAskBlock({
   ask,
+  onCopy,
   onRebuild
 }: {
   ask: RebuildAsk
+  onCopy: boolean
   onRebuild: () => void
 }): React.JSX.Element {
   const starting = ask.kind === 'offer' && ask.starting
@@ -454,7 +469,9 @@ function RebuildAskBlock({
       data-testid="switchover-rebuild-ask"
       className="flex flex-col gap-1.5 border-t border-line pt-2 text-sm"
     >
-      <p className={`m-0 ${ask.kind === 'reading' ? AI_WAIT_CLASS : ''}`}>{rebuildAskLine(ask)}</p>
+      <p className={`m-0 ${ask.kind === 'reading' ? AI_WAIT_CLASS : ''}`}>
+        {rebuildAskLine(ask, onCopy)}
+      </p>
       {ask.kind === 'offer' && ask.refused !== null ? (
         <p role="alert" className="m-0 text-danger" data-testid="switchover-rebuild-refused">
           {ask.refused}
@@ -462,7 +479,12 @@ function RebuildAskBlock({
       ) : null}
       {ask.kind === 'offer' ? (
         <div>
-          <button type="button" className={PRIMARY} disabled={starting} onClick={onRebuild}>
+          <button
+            type="button"
+            className={onCopy ? BUTTON : PRIMARY}
+            disabled={starting}
+            onClick={onRebuild}
+          >
             {starting ? <span className={AI_WAIT_CLASS}>Starting…</span> : 'Rebuild now'}
           </button>
         </div>

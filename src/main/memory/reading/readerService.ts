@@ -11,7 +11,12 @@ import type { IndexQueueStatus, JobKind } from '@shared/jobs'
 import type { CloudCapState } from '@shared/memory/cloudCap'
 import { modelHealth, probeDue } from '@shared/memory/health'
 import { SPOT_EVERY } from '@shared/memory/spot'
-import type { RebuildEstimate, SwitchoverRecord } from '@shared/memory/switchover'
+import {
+  cloudUnpriced,
+  cloudUnpricedRefusal,
+  type RebuildEstimate,
+  type SwitchoverRecord
+} from '@shared/memory/switchover'
 import type {
   CheckEstimate,
   CheckReport,
@@ -45,7 +50,7 @@ import {
   setCap,
   type MemoryCloudState
 } from '../../ai/cloudTally'
-import { dayOf } from '../../ai/dailyCap'
+import { dayOf, rollIfNewDay } from '../../ai/dailyCap'
 import { assertFeatureAllowed } from '../../ai/dial'
 import { registerInflight, releaseInflight } from '../../ai/inflight'
 import { AiCancelledError, AiProviderError } from '../../ai/providers/types'
@@ -417,6 +422,15 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     if (provider.id === 'cloud' && capReached(deps.cloud.get(), month())) return 'cloudCap'
     if (healthPaused(db, provider.fastModel)) return 'health'
     return null
+  }
+
+  /**
+   * Whether today's AI spending cap stops the next request (the request path's rule, `wouldExceed`):
+   * any request once the day is over the cap; a priced one already when it is reached.
+   */
+  const dayCapped = (db: TreeDb, priced: boolean): boolean => {
+    const day = rollIfNewDay(deps.requestDeps(db).dailyCap.get(), dayOf(now()))
+    return priced ? day.spentTodayUsd >= day.dailyCapUsd : day.spentTodayUsd > day.dailyCapUsd
   }
 
   /** What holds the bulk work the author asked for back now: the health gate only, or null. */
@@ -1392,6 +1406,17 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
         }
       }
       const estimate = priceRebuild(db)
+      // F-16.31 (SW-D9): on MythScribe Cloud a rebuild starts only with its price, whichever button
+      // asked (the final screen, the notice, Settings, the Book tab, a draft never read).
+      if (cloudUnpriced(estimate)) return cloudUnpricedRefusal(estimate)
+      // Today's AI spending cap reached: the first request would be refused and the rebuild would
+      // sit paused with no reason shown, so it does not start (as *Check the book* does not).
+      if (dayCapped(db, estimate.costUsd > 0)) {
+        return aiFailure(
+          'BUDGET',
+          'Today’s AI spending cap is reached, so Rebuild memory does not start.'
+        )
+      }
       const { nodeIds } = startRebuild(db, now())
       // F-16.31 (SW-D8): any rebuild that starts ends the switch-over's wait, whichever button
       // started it (the final screen, the notice, the Book tab); the notice goes with it.

@@ -1,5 +1,5 @@
 import { CLOUD_CAP_MAX_USD, CLOUD_CAP_STEP_USD } from '@shared/memory/cloudCap'
-import type { RebuildEstimate } from '@shared/memory/switchover'
+import { cloudUnpriced, type RebuildEstimate } from '@shared/memory/switchover'
 import type { TypedField } from '@shared/memory/typedVsText'
 import type {
   ClaimInfo,
@@ -11,7 +11,7 @@ import type {
   ReadNowResult,
   TrueNowView
 } from '@shared/memory/views'
-import { formatCents } from '@renderer/features/ai/usageFormat'
+import { formatCents, formatCount } from '@renderer/features/ai/usageFormat'
 
 /**
  * The pure words of story memory v2's reading in the renderer (F-16.16, F-16.18, F-16.19): how a
@@ -112,9 +112,15 @@ export function noticeLine(notice: MemoryNotice): string {
       return `${notice.pairs} possible contradiction${notice.pairs === 1 ? ' waits' : 's wait'} for Check the book: about ${formatCents(notice.priceUsd)}`
     case 'underlinePrecision':
       return `Of the last ${notice.counted} underlined contradictions, ${notice.notProblems} ${notice.notProblems === 1 ? 'was not a problem' : 'were not problems'}. Show contradictions in the panel only?`
-    case 'switchoverRebuild':
+    case 'switchoverRebuild': {
       // What the rebuild does, not what is unread: a scene written in and left is read meanwhile.
-      return `Rebuild memory has not run since the switch-over: it reads ${notice.scenes} scene${notice.scenes === 1 ? '' : 's'}, ${notice.priced ? `about ${formatCents(notice.priceUsd)}` : 'a cost not yet known'}`
+      // A priced 0 is a local model (or a free one): free, as the final screen says it.
+      const reads = `Rebuild memory has not run since the switch-over: it reads ${notice.scenes} scene${notice.scenes === 1 ? '' : 's'}`
+      if (!notice.priced) return `${reads}, a cost not yet known`
+      return notice.priceUsd === 0
+        ? `${reads} at no cost`
+        : `${reads}, about ${formatCents(notice.priceUsd)}`
+    }
   }
 }
 
@@ -294,6 +300,40 @@ export function contradictionStatsLine(report: MemoryHealthReport): string {
       : `${underlines.right} of the last ${underlines.counted} were right`
   return `Contradiction check: ${judged} · underlines: ${shown}`
 }
+
+/** "about a minute", "about 12 minutes": how long *Rebuild memory* takes, in the switch-over's words. */
+export function aboutMinutes(minutes: number): string {
+  return minutes <= 1 ? 'about a minute' : `about ${formatCount(minutes, 'minute')}`
+}
+
+/**
+ * What *Rebuild memory* costs and where it is paid from (F-16.19, F-16.31): one wording, in
+ * cents, for the switch-over's dry run, its final screen and the rebuild dialog. "free on your
+ * local model", "about 14¢ from your MythScribe Cloud balance", "about 14¢ on your own key", or
+ * a cost not yet known (on Cloud, a model it has no price for: that rebuild never starts, SW-D9).
+ */
+export function rebuildCost(
+  estimate: Pick<RebuildEstimate, 'source' | 'priced' | 'costUsd'>
+): string {
+  if (estimate.source === 'local') return 'free on your local model'
+  if (cloudUnpriced(estimate)) {
+    return 'a cost not yet known (MythScribe Cloud has no price for a model story memory uses)'
+  }
+  const cost = estimate.priced
+    ? `about ${formatCents(estimate.costUsd)}`
+    : 'a cost not yet known (a model is not in the price table)'
+  return estimate.source === 'cloud'
+    ? `${cost} from your MythScribe Cloud balance`
+    : `${cost} on your own key`
+}
+
+/**
+ * On MythScribe Cloud (decision SW-D9): every *Rebuild memory* is asked work, outside the monthly
+ * reading cap, and today's AI spending cap still applies. The final screen and the rebuild dialog
+ * say it in these words.
+ */
+export const CLOUD_REBUILD_CAPS =
+  'It is not counted toward your monthly reading cap; today’s AI spending cap still applies, so a long book may finish tomorrow.'
 
 /** The price line: "About 12¢ for 90 scenes (180 requests, about 4 min) on deepseek-v4-flash". */
 export function estimateLine(estimate: RebuildEstimate): string {

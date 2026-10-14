@@ -1,5 +1,9 @@
 import { useEffect, useId, useState, type KeyboardEvent } from 'react'
-import type { RebuildEstimate } from '@shared/memory/switchover'
+import {
+  cloudUnpriced,
+  cloudUnpricedRefusal,
+  type RebuildEstimate
+} from '@shared/memory/switchover'
 import type { RebuildAction, RebuildSummary } from '@shared/memory/views'
 import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
 import { useIndexingStore } from '@renderer/features/ai/indexingStore'
@@ -8,7 +12,7 @@ import { useDismissedStore } from '@renderer/features/thisScene/dismissedStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useMemoryStore } from './memoryStore'
-import { estimateLine, shortDate } from './memoryView'
+import { CLOUD_REBUILD_CAPS, estimateLine, shortDate } from './memoryView'
 import { findingRuleLine } from './needsALook/findingView'
 
 const BUTTON =
@@ -127,6 +131,9 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
   }
 
   const running = rebuild !== null && rebuild.finishedAt === null
+  // SW-D9: on MythScribe Cloud a rebuild without its price is never offered (main refuses it too).
+  const priced =
+    (stage.kind === 'confirm' || stage.kind === 'starting') && !cloudUnpriced(stage.estimate)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
       <div
@@ -152,9 +159,7 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
                 line proved by a quote. It replaces what it read before, scene by scene. Your text,
                 Pinned, Ideas and Dismissed stay as they are.
               </p>
-              <p className="mt-2 mb-0 text-fg-muted tabular-nums" data-testid="rebuild-estimate">
-                {estimateLine(stage.estimate)}
-              </p>
+              <EstimateLines estimate={stage.estimate} />
             </>
           ) : stage.kind === 'failed' ? (
             <p role="alert" className="m-0 text-danger">
@@ -169,7 +174,7 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
           )}
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          {stage.kind === 'confirm' || stage.kind === 'starting' ? (
+          {priced && (stage.kind === 'confirm' || stage.kind === 'starting') ? (
             <button
               type="button"
               className={BUTTON}
@@ -189,11 +194,39 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
             </button>
           ) : null}
           <button type="button" className={BUTTON} onClick={close}>
-            {stage.kind === 'confirm' ? 'Cancel' : 'Close'}
+            {stage.kind === 'confirm' && priced ? 'Cancel' : 'Close'}
           </button>
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * The price before the author confirms: the estimate, and on MythScribe Cloud where it is paid
+ * from and which caps apply (decision SW-D9, the final screen's words). Cloud without its price
+ * says why the rebuild does not start and what to do (main's refusal), with no price at all.
+ */
+function EstimateLines({ estimate }: { estimate: RebuildEstimate }): React.JSX.Element {
+  if (cloudUnpriced(estimate)) {
+    const refusal = cloudUnpricedRefusal(estimate)
+    return (
+      <p role="alert" className="mt-2 mb-0 text-danger" data-testid="rebuild-unpriced">
+        {refusal.message} {refusal.nextStep}
+      </p>
+    )
+  }
+  return (
+    <>
+      <p className="mt-2 mb-0 text-fg-muted tabular-nums" data-testid="rebuild-estimate">
+        {estimateLine(estimate)}
+      </p>
+      {estimate.source === 'cloud' ? (
+        <p className="mt-1 mb-0 text-fg-muted" data-testid="rebuild-cloud">
+          Paid from your MythScribe Cloud balance. {CLOUD_REBUILD_CAPS}
+        </p>
+      ) : null}
+    </>
   )
 }
 

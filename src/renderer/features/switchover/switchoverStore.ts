@@ -397,15 +397,16 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
       set({ ask: { ...ask, starting: true, refused: null } })
       try {
         const started = await ipc().invoke('memory:rebuild', undefined)
-        if (mine !== generation) return
         if (!started.ok) {
-          set({
-            ask: {
-              ...ask,
-              starting: false,
-              refused: `${started.message} ${started.nextStep}`.trim()
-            }
-          })
+          if (mine === generation) {
+            set({
+              ask: {
+                ...ask,
+                starting: false,
+                refused: `${started.message} ${started.nextStep}`.trim()
+              }
+            })
+          }
           return
         }
       } catch (err) {
@@ -414,7 +415,10 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
         }
         return
       }
-      reset()
+      // Started, the rebuild runs and spends whatever this screen does now: its progress and Stop
+      // open even if the screen was left meanwhile (the dialog holds Later and Escape while it
+      // starts; Switch-over slice 4 review).
+      if (mine === generation) reset()
       // The rebuild dialog watches the run the status carries (P2a's progress, Stop, then the
       // grouped summary), so the status is read before it opens.
       await useMemoryStore
