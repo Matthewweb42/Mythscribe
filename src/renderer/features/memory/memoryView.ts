@@ -112,13 +112,16 @@ export function noticeLine(notice: MemoryNotice): string {
       return `${notice.pairs} possible contradiction${notice.pairs === 1 ? ' waits' : 's wait'} for Check the book: about ${formatCents(notice.priceUsd)}`
     case 'underlinePrecision':
       return `Of the last ${notice.counted} underlined contradictions, ${notice.notProblems} ${notice.notProblems === 1 ? 'was not a problem' : 'were not problems'}. Show contradictions in the panel only?`
+    case 'switchoverRebuild':
+      return `Your book has not been read since the switch-over: ${notice.scenes} scene${notice.scenes === 1 ? '' : 's'}, ${notice.priced ? `about ${formatCents(notice.priceUsd)}` : 'a cost not yet known'}`
   }
 }
 
 /**
  * A notice's buttons: an action main takes, or one the renderer does itself (Settings, decision
  * 4's *Update my detail*, F-16.29's *Review* of a rebuild's grouped summary, F-16.30's *Check the
- * book…* for pairs waiting for it).
+ * book…* for pairs waiting for it, F-16.31's *Rebuild…*: the rebuild dialog, which prices it and
+ * asks).
  */
 export type NoticeButton =
   | { kind: 'answer'; action: MemoryNoticeAction; label: string }
@@ -126,6 +129,7 @@ export type NoticeButton =
   | { kind: 'updateDetail'; label: string }
   | { kind: 'review'; label: string }
   | { kind: 'checkBook'; label: string }
+  | { kind: 'rebuild'; label: string }
 
 /** A notice's buttons, in order. */
 export function noticeButtons(notice: MemoryNotice): NoticeButton[] {
@@ -162,6 +166,8 @@ export function noticeButtons(notice: MemoryNotice): NoticeButton[] {
       return [{ kind: 'checkBook', label: 'Check the book…' }, answer('dismiss', 'Not now')]
     case 'underlinePrecision':
       return [answer('panelOnly', 'Panel only'), answer('keepUnderlines', 'Keep underlines')]
+    case 'switchoverRebuild':
+      return [{ kind: 'rebuild', label: 'Rebuild…' }, answer('later', 'Later')]
   }
 }
 

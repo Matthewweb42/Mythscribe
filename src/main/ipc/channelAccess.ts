@@ -428,7 +428,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'switchover:safety': 'write',
   'switchover:plan': 'read',
   'switchover:consent': 'read',
-  'switchover:convert': 'write'
+  'switchover:convert': 'write',
+  'switchover:record': 'read'
 }
 
 /** Whether a channel is refused while the app is read-only. */
@@ -850,7 +851,9 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'switchover:safety': 'v1',
   'switchover:plan': 'v1',
   'switchover:consent': 'v1',
-  'switchover:convert': 'v1'
+  'switchover:convert': 'v1',
+  // F-16.31: what the switch-over left (when, the backup, the dated copy) is read once on v2.
+  'switchover:record': 'v2'
 }
 
 /** The message a channel of the other memory is refused with. */

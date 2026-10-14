@@ -774,9 +774,28 @@ export const MemoryNotice = z.discriminatedUnion('kind', [
     kind: z.literal('underlinePrecision'),
     counted: z.number().int().positive(),
     notProblems: z.number().int().nonnegative()
+  }),
+  /**
+   * F-16.31 (decision SW-D8, plan Switchover §2.2): the book has not been read since the
+   * switch-over. While the switch-over record waits for its first *Rebuild memory*, this one
+   * notice stands in for the unasked backlog: the scenes *Rebuild memory* would read and its price
+   * (`priced` false when a model's price is unknown, the cost then a lower bound). *Rebuild…*
+   * opens the rebuild dialog, which prices it again when the author confirms; *Later* or closing
+   * it (`later`, `dismiss`) hides it until the project opens again. Its id is `switchoverRebuild`.
+   */
+  z.object({
+    id: z.string(),
+    kind: z.literal('switchoverRebuild'),
+    switchedAt: z.string(),
+    /** Never 0: a book with nothing to read yet is offered nothing (the hold stays). */
+    scenes: z.number().int().positive(),
+    priceUsd: z.number().nonnegative(),
+    priced: z.boolean()
   })
 ])
 export type MemoryNotice = z.infer<typeof MemoryNotice>
+/** The switch-over's one notice (F-16.31): its id, fixed (one per project). */
+export const SWITCHOVER_NOTICE_ID = 'switchoverRebuild'
 /** Decision 4's typed-detail conflict (F-16.18), one of the notices. */
 export type DetailConflictNotice = Extract<MemoryNotice, { kind: 'detailConflict' }>
 

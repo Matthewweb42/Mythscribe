@@ -85,6 +85,7 @@ import {
   SwitchoverConvertInput,
   SwitchoverOutcome,
   SwitchoverPlan,
+  SwitchoverRecord,
   SwitchoverSafetyOutcome
 } from '../memory/switchover'
 import { CloudCapState, CloudCapUsd } from '../memory/cloudCap'
@@ -3801,7 +3802,14 @@ export const contract = {
    * own check, the switch-over record, `storyMemory` v2). Main then closes the project and the
    * renderer reopens `folder`. A step that fails answers `ok: false` with the project still v1.
    */
-  'switchover:convert': { input: SwitchoverConvertInput, output: SwitchoverOutcome }
+  'switchover:convert': { input: SwitchoverConvertInput, output: SwitchoverOutcome },
+  /**
+   * F-16.31 (decision SW-D7): the open v2 project's switch-over record: when it was switched, the
+   * kept backup and the dated copy (null on a test copy), whether it is a test copy, and whether
+   * *Rebuild memory* has started since. Null for a project made v2 another way. For Settings › AI
+   * › Story memory and the final screen after the reopen.
+   */
+  'switchover:record': { input: z.undefined(), output: SwitchoverRecord.nullable() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 export type Contract = typeof contract

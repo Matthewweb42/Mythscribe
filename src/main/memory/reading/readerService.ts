@@ -11,7 +11,7 @@ import type { IndexQueueStatus, JobKind } from '@shared/jobs'
 import type { CloudCapState } from '@shared/memory/cloudCap'
 import { modelHealth, probeDue } from '@shared/memory/health'
 import { SPOT_EVERY } from '@shared/memory/spot'
-import type { RebuildEstimate } from '@shared/memory/switchover'
+import type { RebuildEstimate, SwitchoverRecord } from '@shared/memory/switchover'
 import type {
   CheckEstimate,
   CheckReport,
@@ -29,6 +29,7 @@ import type {
   RebuildSummary,
   SettleResult
 } from '@shared/memory/views'
+import { SWITCHOVER_NOTICE_ID } from '@shared/memory/views'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import {
   addCloudSpend,
@@ -112,6 +113,7 @@ import {
   underlineNotice
 } from '../findings/underlineLog'
 import type { RebuildContext } from '../switchover/plan'
+import { getSwitchoverRecord, markRebuildStarted } from '../switchover/record'
 
 /**
  * The reader service (F-16.16, F-16.17, F-16.19; plan P2a §3, rule 8): the one owner of story
@@ -125,6 +127,10 @@ import type { RebuildContext } from '../switchover/plan'
  *   editor (2 s later) and on every open (up to 5 scenes queued, more asked with the price; a draft
  *   never read is priced like *Rebuild memory*); the **back-fill** of late names (up to 3 pages,
  *   more asked); *Rebuild memory*; the spot checks after a rebuild and every 5 strong ones due.
+ * - **After the switch-over** (F-16.31, decision SW-D8): while the project's switch-over record
+ *   waits for its first *Rebuild memory*, the backlog check reads nothing nobody asked for and
+ *   raises one `switchoverRebuild` notice with the rebuild's price instead; leave and idle reads
+ *   still run. Any rebuild that starts ends the wait (`markRebuildStarted`).
  * - **Gates, in order, before any request**: Use AI and the **Story memory reading** switch; a
  *   provider (the request path's); the health gate for the bulk work the author asked for
  *   (*Rebuild memory*, a priced backlog or back-fill; *Read now* of one scene passes); then, for
@@ -337,6 +343,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
   const closedHealth = new Set<string>()
   /** F-16.27: `findingsWaiting` notices closed this session, by day. */
   const closedWaiting = new Set<string>()
+  /** F-16.31 (SW-D8): the switch-over's notice answered *Later* or closed, until the next open. */
+  let switchoverHidden = false
   let backlogTimer: ReturnType<typeof setTimeout> | null = null
   let lastStatus: string | null = null
   let lastNotices: string | null = null
@@ -495,9 +503,13 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
   const computeNotices = (): MemoryNotice[] => {
     const db = v2Db()
     if (db === null) return []
-    const list = [...stored.values()]
+    const allowed = readingAllowed(db)
+    // SW-D8: the switch-over's notice offers a rebuild, so it shows only while reading may run.
+    const list = [...stored.values()].filter(
+      (notice) => notice.kind !== 'switchoverRebuild' || allowed
+    )
     const provider = deps.provider(db)
-    if (provider !== null && readingAllowed(db)) {
+    if (provider !== null && allowed) {
       const model = provider.fastModel
       if (healthPaused(db, model) && !closedHealth.has(model)) {
         const health = modelHealth(recentReadings(db, model).map((each) => each.yields))
@@ -599,6 +611,12 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     }
   }
 
+  /** F-16.31: the switch-over record while it waits for its first *Rebuild memory*, else null. */
+  const waitingSwitchover = (db: TreeDb): SwitchoverRecord | null => {
+    const record = getSwitchoverRecord(db)
+    return record?.rebuild === 'waiting' ? record : null
+  }
+
   // ---- Queueing -----------------------------------------------------------------------------
 
   /**
@@ -639,19 +657,41 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
 
   const root = (db: TreeDb): string | null => manuscriptRootId(db)
 
-  /** The backlog check (plan P2a §3.3): ≤5 scenes queued, more asked with the price. */
+  /**
+   * The backlog check (plan P2a §3.3): ≤5 scenes queued, more asked with the price. After the
+   * switch-over, until a rebuild starts (F-16.31, SW-D8), nothing is queued: one notice offers
+   * *Rebuild memory* with its price (the book has not been read since the switch).
+   */
   const checkBacklog = (): void => {
     const db = v2Db()
     if (db === null || !readingAllowed(db)) return
+    stored.delete('backlog')
+    stored.delete('draftUnread')
+    stored.delete(SWITCHOVER_NOTICE_ID)
+    offered = []
+    const switched = waitingSwitchover(db)
+    if (switched !== null) {
+      // A book with no scene to read yet is offered nothing; the hold stays all the same.
+      const estimate = switchoverHidden ? null : priceRebuild(db)
+      if (estimate !== null && estimate.scenes > 0) {
+        stored.set(SWITCHOVER_NOTICE_ID, {
+          id: SWITCHOVER_NOTICE_ID,
+          kind: 'switchoverRebuild',
+          switchedAt: switched.switchedAt,
+          scenes: estimate.scenes,
+          priceUsd: estimate.costUsd,
+          priced: estimate.priced
+        })
+      }
+      publish()
+      return
+    }
     const waiting = new Set(
       listJobs(db, ['read', 'rebuild'])
         .filter((job) => job.status === 'queued')
         .map((job) => job.nodeId)
     )
     const due = dueScenes(db).filter((scene) => !waiting.has(scene.nodeId))
-    stored.delete('backlog')
-    stored.delete('draftUnread')
-    offered = []
     if (due.length > BACKLOG_UNASKED) {
       offered = due
       const draftId = currentDraftId(db) ?? ''
@@ -1153,6 +1193,9 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       // the counts follow the switch (off, none are shown).
       queueJudge()
       deps.findingsChanged?.(findingCounts(db, deps.settings(db).features.judge))
+      // F-16.31 (SW-D8): Use AI or the reading switch on, a provider set up or another model: the
+      // switch-over's notice is raised, or priced again (it reads nothing, so it runs now).
+      if (waitingSwitchover(db) !== null) checkBacklog()
       publish()
     },
 
@@ -1191,6 +1234,13 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
         // F-16.28: asked once. *Panel only* is the renderer's write to the setting (the one owner
         // of the AI settings it holds); any answer, or closing it, records that it was asked.
         setUnderlineAsked(db)
+      } else if (id === SWITCHOVER_NOTICE_ID) {
+        // SW-D8: *Later* or closing it hides it until the project opens again (`clear`). Its
+        // *Rebuild…* is the renderer's: the price dialog, then `memory:rebuild`, which ends the wait.
+        if (action === 'later' || action === 'dismiss') {
+          switchoverHidden = true
+          stored.delete(id)
+        }
       } else if (id.startsWith('cloudCap:')) {
         if (action === 'allowMore') {
           deps.cloud.update((state) => markCapNotice(allowMore(state, month()), month()))
@@ -1322,6 +1372,10 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       }
       const estimate = priceRebuild(db)
       const { nodeIds } = startRebuild(db, now())
+      // F-16.31 (SW-D8): any rebuild that starts ends the switch-over's wait, whichever button
+      // started it (the final screen, the notice, the Book tab); the notice goes with it.
+      markRebuildStarted(db, now())
+      stored.delete(SWITCHOVER_NOTICE_ID)
       // The rebuild replaces scene by scene: leftover reads of those scenes are its to do.
       queue.indexAll('rebuild', nodeIds)
       resumeIfPaused()
@@ -1473,6 +1527,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       stored.clear()
       closedHealth.clear()
       closedWaiting.clear()
+      switchoverHidden = false
       offered = []
       skipped = 0
       heldBack = false

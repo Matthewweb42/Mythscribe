@@ -10591,6 +10591,8 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
     await vi.waitFor(() =>
       expect(sqlite.prepare('SELECT count(*) AS n FROM index_job').get()).toEqual({ n: 0 })
     )
+    // The record is v2's to read: refused on the v1 project.
+    await expect(invoke('switchover:record', undefined)).rejects.toThrow(/^VALIDATION: /)
     const safety = await invoke('switchover:safety', undefined)
     if (!safety.ok) throw new Error(safety.message)
     expect(fs.existsSync(safety.backup)).toBe(true)
@@ -10621,6 +10623,10 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
       datedCopy: safety.datedCopy,
       rebuild: 'waiting'
     })
+    // F-16.31 slice 2: Settings and the final screen read it over `switchover:record`.
+    expect(await invoke('switchover:record', undefined)).toEqual(
+      getSwitchoverRecord(manager.require().connection.orm)
+    )
     // v1 channels in a v2 project: refused before the handlers run.
     await expect(invoke('switchover:safety', undefined)).rejects.toThrow(/^VALIDATION: /)
     await expect(
@@ -10630,6 +10636,18 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
       })
     ).rejects.toThrow(/^VALIDATION: /)
     expect(safetyCopies()).toHaveLength(1)
+  })
+
+  it('answers no switch-over record for a project made v2 another way', async () => {
+    const created = await invoke('project:create', {
+      name: 'Book',
+      format: 'novel',
+      directory: tmp
+    })
+    setStoryMemory(manager.require().connection.orm, 'v2', new Date())
+    await invoke('project:close', undefined)
+    expect((await invoke('project:open', { path: created?.path ?? '' }))?.storyMemory).toBe('v2')
+    expect(await invoke('switchover:record', undefined)).toBeNull()
   })
 
   it('answers a failed step when the backup cannot be made, and changes nothing', async () => {

@@ -154,6 +154,30 @@ describe('memoryView (F-16.18)', () => {
         { id: 'underlinePrecision', kind: 'underlinePrecision', counted: 20, notProblems: 8 },
         'Of the last 20 underlined contradictions, 8 were not problems. Show contradictions in the panel only?',
         ['Panel only', 'Keep underlines']
+      ],
+      [
+        {
+          id: 'switchoverRebuild',
+          kind: 'switchoverRebuild',
+          switchedAt: '2026-10-14T09:00:00.000Z',
+          scenes: 12,
+          priceUsd: 0.02,
+          priced: true
+        },
+        'Your book has not been read since the switch-over: 12 scenes, about 2¢',
+        ['Rebuild…', 'Later']
+      ],
+      [
+        {
+          id: 'switchoverRebuild',
+          kind: 'switchoverRebuild',
+          switchedAt: '2026-10-14T09:00:00.000Z',
+          scenes: 1,
+          priceUsd: 0,
+          priced: false
+        },
+        'Your book has not been read since the switch-over: 1 scene, a cost not yet known',
+        ['Rebuild…', 'Later']
       ]
     ]
     for (const [notice, line, buttons] of cases) {

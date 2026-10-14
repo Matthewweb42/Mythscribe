@@ -235,4 +235,12 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
       expect(isWriteChannel(channel), channel).toBe(kind === 'write')
     }
   })
+
+  it('F-16.31: the switch-over record is read on v2, never a write', () => {
+    expect(CHANNEL_MEMORY['switchover:record']).toBe('v2')
+    expect(CHANNEL_ACCESS['switchover:record']).toBe('read')
+    expect(isWriteChannel('switchover:record')).toBe(false)
+    expect(() => assertChannelMemory('switchover:record', 'v1')).toThrow(OTHER_MEMORY_MESSAGE)
+    expect(() => assertChannelMemory('switchover:record', 'v2')).not.toThrow()
+  })
 })

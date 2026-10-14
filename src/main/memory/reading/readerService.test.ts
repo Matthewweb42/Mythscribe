@@ -31,6 +31,8 @@ import {
 import { gateScene } from './pipeline'
 import { getRebuild, getSpotState, setSpotState, writeRow } from './readerRows'
 import { createReaderService, type ReaderService, type ReaderServiceDeps } from './readerService'
+import { getSwitchoverRecord, setSwitchoverRecord } from '../switchover/record'
+import { dayOf, defaultAiUsageState } from '../../ai/dailyCap'
 import { emptyCardFields, emptyYields, type Claim } from '@shared/memory/claims'
 import { emptySceneDetails } from '@shared/memory/sceneDetails'
 import { listDismissed, undoDismissed } from '../dismissedStore'
@@ -905,6 +907,241 @@ describe('Rebuild memory (F-16.19, P2a §3.6)', () => {
     expect(listJobs(db)).toEqual([])
     expect(getRebuild(db)?.finishedAt).toEqual(expect.any(String))
     expect(ai.requests).toEqual([])
+  })
+})
+
+describe('the rebuild after the switch-over (F-16.31 part A, SW-D8, plan Switchover §2)', () => {
+  const SWITCHED_AT = '2026-10-12T09:00:00.000Z'
+
+  /** The record the conversion leaves: switched, waiting for its first *Rebuild memory*. */
+  function switched(): void {
+    setSwitchoverRecord(db, {
+      switchedAt: SWITCHED_AT,
+      trial: false,
+      backup: '/backups/Service before story memory 2026-10-12 090000.zip',
+      datedCopy: '/My Drive/Service (before story memory 2026-10-12 0900).mythscribe',
+      rebuild: 'waiting',
+      rebuildStartedAt: null
+    })
+  }
+
+  /** The book has `n` readable scenes, none read: the first one and `n - 1` more. */
+  function book(n: number): string[] {
+    return [
+      scene,
+      ...Array.from({ length: n - 1 }, (_, i) =>
+        addScene(`Scene ${i + 2}`, `Mara's eyes were green ${i}.`)
+      )
+    ]
+  }
+
+  const switchoverNotices = (reader: ReaderService): MemoryNotice[] =>
+    reader.notices().filter((notice) => notice.kind === 'switchoverRebuild')
+
+  /** The backlog check after an open (its timer is 0 here) has run: one more turn of the loop. */
+  const settled = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10))
+
+  it.each([3, 12])(
+    'holds the backlog of %i unread scenes: one priced notice, nothing queued, no backlog notice',
+    async (n) => {
+      book(n)
+      switched()
+      const ai = reading()
+      const reader = service(ai)
+      reader.opened()
+      await until(() => switchoverNotices(reader).length > 0, 'the switch-over notice')
+      await settled()
+      const estimate = reader.rebuildEstimate()
+      expect(reader.notices()).toEqual([
+        {
+          id: 'switchoverRebuild',
+          kind: 'switchoverRebuild',
+          switchedAt: SWITCHED_AT,
+          scenes: n,
+          priceUsd: estimate.costUsd,
+          priced: estimate.priced
+        }
+      ])
+      expect(estimate.scenes).toBe(n)
+      expect(noticeLists.at(-1)).toEqual(reader.notices())
+      expect(listJobs(db, ['read', 'rebuild'])).toEqual([])
+      expect(ai.requests).toEqual([])
+      // A later write outside the editor holds as well.
+      reader.bulkWritten()
+      await settled()
+      expect(listJobs(db, 'read')).toEqual([])
+      expect(reader.notices().map((notice) => notice.kind)).toEqual(['switchoverRebuild'])
+    }
+  )
+
+  it.each([3, 12])(
+    'without the record, reads or asks about %i unread scenes as before',
+    async (n) => {
+      book(n)
+      const ai = reading()
+      const reader = service(ai)
+      reader.opened()
+      if (n <= 5) {
+        await until(() => readerRequests(ai).length === n, 'the backlog readings')
+        await drained(reader)
+        expect(reader.notices()).toEqual([])
+      } else {
+        await until(() => reader.notices().length > 0, 'the draft-unread notice')
+        expect(reader.notices()).toEqual([
+          expect.objectContaining({ kind: 'draftUnread', scenes: n })
+        ])
+        expect(ai.requests).toEqual([])
+      }
+      expect(switchoverNotices(reader)).toEqual([])
+    }
+  )
+
+  it('still reads the scene the author leaves; the rest of the book waits', async () => {
+    const [first, second, third] = book(3)
+    switched()
+    const ai = reading()
+    const reader = service(ai)
+    reader.opened()
+    await until(() => switchoverNotices(reader).length > 0, 'the switch-over notice')
+    expect(reader.settle({ nodeId: second ?? '', reason: 'leave', caretPara: null })).toEqual({
+      queued: true,
+      reason: null
+    })
+    await until(() => readerRequests(ai).length === 1, 'the left scene read')
+    await drained(reader)
+    // Read as any scene left is: its first reading (no rebuild started).
+    expect(lastReading(db, second ?? '', activeDraftId(db))?.purpose).toBe('first')
+    for (const id of [first, third]) {
+      expect(gateScene(db, id ?? '', null)?.decision.read).not.toBe('nothing')
+    }
+    expect(readerRequests(ai)).toHaveLength(1)
+    expect(switchoverNotices(reader)).toHaveLength(1)
+  })
+
+  it('ends the wait when a rebuild starts; a refused rebuild leaves it waiting', async () => {
+    book(3)
+    switched()
+    const ai = reading()
+    // No provider: refused, nothing read, still waiting.
+    const none = service(ai, { provider: () => null })
+    expect(none.rebuild()).toMatchObject({ ok: false, code: 'NO_KEY' })
+    none.clear()
+    // Use AI off: refused too.
+    settings = defaultAiSettings()
+    const off = service(ai)
+    expect(off.rebuild()).toMatchObject({ ok: false, code: 'DISABLED' })
+    off.clear()
+    expect(getSwitchoverRecord(db)).toMatchObject({ rebuild: 'waiting', rebuildStartedAt: null })
+    expect(listJobs(db)).toEqual([])
+    settings = { ...defaultAiSettings(), dial: 1 }
+    const reader = service(ai)
+    reader.opened()
+    await until(() => switchoverNotices(reader).length > 0, 'the switch-over notice')
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 3 })
+    expect(getSwitchoverRecord(db)).toMatchObject({
+      rebuild: 'started',
+      rebuildStartedAt: NOW.toISOString()
+    })
+    expect(switchoverNotices(reader)).toEqual([])
+    expect(noticeLists.at(-1)?.some((notice) => notice.kind === 'switchoverRebuild')).toBe(false)
+    await until(() => typeof getRebuild(db)?.finishedAt === 'string', 'the rebuild')
+    await drained(reader)
+    expect(getRebuild(db)).toMatchObject({ total: 3, done: 3 })
+    // The wait is over: the backlog behaves as before (nothing left to read, no notice).
+    reader.bulkWritten()
+    await settled()
+    expect(switchoverNotices(reader)).toEqual([])
+  })
+
+  it('Later hides the notice until the project opens again; Use AI off or the reading switch off shows none', async () => {
+    book(2)
+    switched()
+    settings = defaultAiSettings()
+    const ai = reading()
+    const reader = service(ai)
+    reader.opened()
+    await settled()
+    expect(reader.notices()).toEqual([])
+    // Use AI turned on: the notice, at once.
+    settings = { ...defaultAiSettings(), dial: 1 }
+    reader.settingsChanged()
+    expect(switchoverNotices(reader)).toEqual([
+      expect.objectContaining({ kind: 'switchoverRebuild', scenes: 2 })
+    ])
+    // The reading switch off hides it; on again shows it.
+    settings = { ...settings, features: { ...settings.features, reader: false } }
+    reader.settingsChanged()
+    expect(reader.notices()).toEqual([])
+    settings = { ...defaultAiSettings(), dial: 1 }
+    reader.settingsChanged()
+    expect(switchoverNotices(reader)).toHaveLength(1)
+    // Later: gone until the next open, the hold still on.
+    expect(reader.answerNotice('switchoverRebuild', 'later')).toEqual([])
+    reader.bulkWritten()
+    reader.settingsChanged()
+    await settled()
+    expect(reader.notices()).toEqual([])
+    expect(listJobs(db, 'read')).toEqual([])
+    // Closing it does the same; the next open (a project change clears the service) brings it back.
+    reader.clear()
+    reader.opened()
+    await until(() => switchoverNotices(reader).length > 0, 'the notice again')
+    reader.answerNotice('switchoverRebuild', 'dismiss')
+    expect(reader.notices()).toEqual([])
+    reader.clear()
+    reader.opened()
+    await until(() => switchoverNotices(reader).length > 0, 'the notice once more')
+    expect(ai.requests).toEqual([])
+    expect(getSwitchoverRecord(db)?.rebuild).toBe('waiting')
+  })
+
+  it('on Cloud, rebuilds as asked spend past the monthly background cap', async () => {
+    book(2)
+    switched()
+    cloud = { ...defaultMemoryCloudState(), month: '2026-10', backgroundUsd: 1 }
+    const ai = reading({ providerId: 'cloud' })
+    const reader = service(ai)
+    reader.opened()
+    await until(() => switchoverNotices(reader).length > 0, 'the switch-over notice')
+    expect(reader.status().paused).toBe('cloudCap')
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 2 })
+    await until(() => typeof getRebuild(db)?.finishedAt === 'string', 'the rebuild')
+    await drained(reader)
+    expect(getRebuild(db)).toMatchObject({ total: 2, done: 2 })
+    expect(cloud.askedUsd).toBeGreaterThan(0)
+    expect(cloud.backgroundUsd).toBe(1)
+    expect(getSwitchoverRecord(db)?.rebuild).toBe('started')
+  })
+
+  it('pauses at the daily cap with the rebuild’s progress open, and Resume finishes it', async () => {
+    book(3)
+    switched()
+    const ai = reading()
+    // Today's AI cap is reached once the first scene is read, until the author raises it.
+    let raised = false
+    ai.deps.dailyCap = {
+      get: () => ({
+        ...defaultAiUsageState(),
+        dailyCapUsd: !raised && (getRebuild(db)?.done ?? 0) >= 1 ? 0 : 500,
+        spentDate: dayOf(NOW)
+      }),
+      spend: () => undefined
+    }
+    const reader = service(ai)
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 3 })
+    await until(() => reader.queueStatus().paused !== null, 'the daily-cap pause')
+    await drained(reader)
+    expect(reader.queueStatus().paused?.code).toBe('BUDGET')
+    expect(reader.status().paused).toBe('dailyCap')
+    expect(getRebuild(db)).toMatchObject({ total: 3, done: 1, finishedAt: null })
+    expect(reader.status().rebuild).toMatchObject({ total: 3, done: 1, finishedAt: null })
+    expect(listJobs(db, 'rebuild').filter((job) => job.status === 'queued')).toHaveLength(2)
+    raised = true
+    reader.resume()
+    await until(() => typeof getRebuild(db)?.finishedAt === 'string', 'the rebuild to finish')
+    await drained(reader)
+    expect(getRebuild(db)).toMatchObject({ total: 3, done: 3 })
+    expect(reader.status().paused).toBeNull()
   })
 })
 

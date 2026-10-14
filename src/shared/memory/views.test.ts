@@ -8,6 +8,7 @@ import {
   SceneMemory,
   SceneSecrets,
   SheetMemory,
+  SWITCHOVER_NOTICE_ID,
   ThreadMemoryView,
   TimelineRow
 } from './views'
@@ -74,6 +75,24 @@ describe('the reading views (F-16.18)', () => {
     expect(
       MemoryNotice.safeParse({ id: 'x', kind: 'backlog', scenes: 0, priceUsd: 0 }).success
     ).toBe(false)
+  })
+
+  it('F-16.31: parses the switch-over notice, an unpriced one too, never for no scene', () => {
+    const notice = {
+      id: SWITCHOVER_NOTICE_ID,
+      kind: 'switchoverRebuild',
+      switchedAt: '2026-10-14T09:00:00.000Z',
+      scenes: 90,
+      priceUsd: 0.14,
+      priced: true
+    }
+    expect(MemoryNotice.parse(notice)).toEqual(notice)
+    expect(
+      MemoryNotice.safeParse({ ...notice, scenes: 1, priceUsd: 0, priced: false }).success
+    ).toBe(true)
+    expect(MemoryNotice.safeParse({ ...notice, scenes: 0 }).success).toBe(false)
+    expect(MemoryNotice.safeParse({ ...notice, priced: undefined }).success).toBe(false)
+    expect(MemoryNotice.safeParse({ ...notice, priceUsd: -1 }).success).toBe(false)
   })
 })
 

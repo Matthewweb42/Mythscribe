@@ -1050,6 +1050,11 @@ function ReadingNotice({ notice }: { notice: MemoryNotice }): React.JSX.Element 
                 useMemoryStore.getState().setCheckOpen('start')
                 return
               }
+              // F-16.31: the switch-over's notice opens the rebuild dialog, which prices it.
+              if (button.kind === 'rebuild') {
+                useMemoryStore.getState().setRebuildOpen('start')
+                return
+              }
               if (button.kind === 'answer') {
                 void run(() => useMemoryStore.getState().answerNotice(notice.id, button.action))
               }

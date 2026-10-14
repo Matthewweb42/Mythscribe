@@ -36,7 +36,7 @@ import { buildFixtureV1, type FixtureV1 } from './fixtureV1'
 import { inlineTagReplacements } from './plan'
 import { checkConverted, takeConvertBefore, textWithTagWords } from './checkConverted'
 import { buildSwitchoverModel } from './model'
-import { getSwitchoverRecord, markRebuildStarted } from './record'
+import { getSwitchoverRecord } from './record'
 
 let tmp: string
 let fixture: FixtureV1
@@ -372,7 +372,8 @@ describe('convertSwitchover (F-16.15, plan P1 §6.2)', () => {
 })
 
 describe('the switch-over record and the check before commit (F-16.31, plan Switchover §1.3)', () => {
-  it('writes the record in the conversion, waiting for a rebuild, and marks the rebuild once', async () => {
+  // The record's own rules (lenient read, the first rebuild marked once) are `record.test.ts`'s.
+  it('writes the record in the conversion, waiting for a rebuild', async () => {
     expect(getSwitchoverRecord(db())).toBeNull()
     await convert()
     expect(getSwitchoverRecord(db())).toEqual({
@@ -381,22 +382,6 @@ describe('the switch-over record and the check before commit (F-16.31, plan Swit
       rebuild: 'waiting',
       rebuildStartedAt: null
     })
-    const later = new Date('2026-10-12T10:00:00.000Z')
-    expect(markRebuildStarted(db(), later)).toMatchObject({
-      rebuild: 'started',
-      rebuildStartedAt: later.toISOString()
-    })
-    expect(markRebuildStarted(db(), new Date('2026-10-13T10:00:00.000Z'))?.rebuildStartedAt).toBe(
-      later.toISOString()
-    )
-  })
-
-  it('reads a broken record as none', () => {
-    session.connection.sqlite
-      .prepare("INSERT INTO settings (key, value) VALUES ('switchover', '{\"switchedAt\": 3')")
-      .run()
-    expect(getSwitchoverRecord(db())).toBeNull()
-    expect(markRebuildStarted(db(), NOW)).toBeNull()
   })
 
   /**

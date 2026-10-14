@@ -512,6 +512,7 @@ import {
 import { answerNameQuestion, listNameQuestions, resetNameQuestionCache } from '../memory/questions'
 import { applyRename, clearRenameUndo, previewRename, undoRename } from '../memory/renameStore'
 import { inlineTagReplacements, planSwitchover } from '../memory/switchover/plan'
+import { getSwitchoverRecord } from '../memory/switchover/record'
 import { SwitchoverRun } from '../memory/switchover/run'
 import { createTrialCopy } from '../memory/switchover/trial'
 import {
@@ -5735,6 +5736,7 @@ export function registerHandlers({
   })
   register('switchover:consent', () => inlineTagReplacements(manager.require().connection.orm))
   register('switchover:convert', (input) => switchover.convert(input))
+  register('switchover:record', () => getSwitchoverRecord(manager.require().connection.orm))
 
   manager.onChange((info) => {
     // Open, create, and close all land here: a profile built for one project never answers for another.
