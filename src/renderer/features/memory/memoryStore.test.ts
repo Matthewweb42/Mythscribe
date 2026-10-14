@@ -7,9 +7,15 @@ import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetDismissedStore, useDismissedStore } from '@renderer/features/thisScene/dismissedStore'
 import { setIpcClient } from '@renderer/lib/ipc'
 import {
+  checkEstimateFixture,
+  checkReportFixture,
   claimViewFixture,
+  findingsViewFixture,
+  findingViewFixture,
   installFakeMain,
   knowsGridFixture,
+  looseEndFixture,
+  looseEndsFixture,
   memoryStatusFixture,
   sceneMemoryFixture,
   sheetMemoryFixture,
@@ -94,7 +100,25 @@ beforeEach(() => {
       timelineFixture({ recordId: (input as Input<'memory:timeline'>).recordId }),
     'memory:knewBefore': () => ({ changed: true }),
     'memory:splitTopic': () => ({ recordId: 's-new', dismissed: tombstone('d-split', 'split') }),
-    'memory:topicNotRight': () => ({ dismissed: [tombstone('d-gone', 'notRight')] })
+    'memory:topicNotRight': () => ({ dismissed: [tombstone('d-gone', 'notRight')] }),
+    'memory:findings': () =>
+      findingsViewFixture({
+        open: [findingViewFixture('f-1'), findingViewFixture('f-2', { slot: 'hair' })],
+        unclear: [findingViewFixture('f-3', { state: 'unclear' })]
+      }),
+    'memory:looseEnds': () => looseEndsFixture({ items: [looseEndFixture()] }),
+    'memory:checkReport': () => checkReportFixture(),
+    'memory:checkEstimate': () => checkEstimateFixture(),
+    'memory:checkBook': () => ({ ok: true, estimate: checkEstimateFixture() }),
+    'memory:findingAction': (input) => {
+      const action = input as Input<'memory:findingAction'>
+      return {
+        dismissed: tombstone(`d-${action.findingId}`, 'notRight'),
+        other: action.action === 'right' ? { nodeId: 'sc-2', ref: '1.2' } : null
+      }
+    },
+    'memory:looseEndAction': () => tombstone('d-loose', 'notRight'),
+    'dismissed:undo': () => ({ restored: true })
   })
   useMemoryStore.getState().subscribe()
 })
@@ -283,5 +307,128 @@ describe('useMemoryStore (F-16.18)', () => {
     expect(await useMemoryStore.getState().splitTopic('tq-1')).toBe('s-new')
     expect(await useMemoryStore.getState().topicNotRight('s-new')).toBe(true)
     expect(useDismissedStore.getState().items.map((row) => row.id)).toEqual(['d-gone', 'd-split'])
+  })
+})
+
+describe('useMemoryStore: findings, loose ends and Check the book (F-16.27, F-16.29, F-16.30)', () => {
+  it('keeps the findings by id in main’s order, and reads them again only once loaded', async () => {
+    act(() => main.emit('memory:changed', { nodeIds: ['sc-1'], recordIds: [] }))
+    await flush()
+    // Never loaded: a reading asks for none of it.
+    expect(main.sent('memory:findings')).toEqual([])
+    expect(main.sent('memory:looseEnds')).toEqual([])
+    await act(async () => {
+      await useMemoryStore.getState().loadFindings()
+      await useMemoryStore.getState().loadLooseEnds()
+    })
+    const findings = useMemoryStore.getState().findings
+    expect(findings?.open).toEqual(['f-1', 'f-2'])
+    expect(findings?.unclear).toEqual(['f-3'])
+    expect(findings?.byId['f-2']?.slot).toBe('hair')
+    expect(useMemoryStore.getState().looseEnds?.items).toHaveLength(1)
+    main.calls.length = 0
+    act(() => main.emit('memory:changed', { nodeIds: ['sc-1'], recordIds: [] }))
+    await flush()
+    expect(main.sent('memory:findings')).toEqual([{ nodeId: null }])
+    expect(main.sent('memory:looseEnds')).toHaveLength(1)
+    main.calls.length = 0
+    act(() => main.emit('names:changed', { nodeIds: ['sc-3'] }))
+    await flush()
+    expect(main.sent('memory:looseEnds')).toHaveLength(1)
+    expect(main.sent('memory:findings')).toEqual([])
+  })
+
+  it('reads the findings, and a loaded report, again when main says the findings moved', async () => {
+    act(() => main.emit('memory:findingsChanged', { open: 2, unclear: 1, waiting: 0 }))
+    await flush()
+    expect(main.sent('memory:findings')).toEqual([{ nodeId: null }])
+    expect(main.sent('memory:checkReport')).toEqual([])
+    await act(async () => {
+      await useMemoryStore.getState().loadCheckReport()
+    })
+    expect(useMemoryStore.getState().check.report?.confirmed).toBe(1)
+    main.calls.length = 0
+    act(() => main.emit('memory:findingsChanged', { open: 1, unclear: 1, waiting: 0 }))
+    await flush()
+    expect(main.sent('memory:checkReport')).toHaveLength(1)
+  })
+
+  it('reads the report when a check ends, once', async () => {
+    const running = memoryStatusFixture({
+      check: { startedAt: 'a', finishedAt: null, judged: 0, toJudge: 2, confirmed: 0, toConfirm: 2 }
+    })
+    act(() => main.emit('memory:statusChanged', running))
+    await flush()
+    expect(main.sent('memory:checkReport')).toEqual([])
+    const done = memoryStatusFixture({
+      check: { startedAt: 'a', finishedAt: 'b', judged: 2, toJudge: 2, confirmed: 2, toConfirm: 2 }
+    })
+    act(() => main.emit('memory:statusChanged', done))
+    await flush()
+    act(() => main.emit('memory:statusChanged', done))
+    await flush()
+    expect(main.sent('memory:checkReport')).toHaveLength(1)
+  })
+
+  it('takes an answered finding away at once, adds its Dismissed row, and keeps This one’s right’s line', async () => {
+    await act(async () => {
+      await useMemoryStore.getState().loadFindings()
+    })
+    const answered = await useMemoryStore
+      .getState()
+      .findingAction({ findingId: 'f-1', action: 'notProblem' })
+    expect(answered?.dismissed?.id).toBe('d-f-1')
+    expect(useMemoryStore.getState().findings?.open).toEqual(['f-2'])
+    expect(useDismissedStore.getState().items.map((row) => row.id)).toEqual(['d-f-1'])
+    expect(useMemoryStore.getState().rightMarks).toEqual([])
+
+    // This one's right on grey (side a): brown (1.2) is the side marked not right.
+    await useMemoryStore.getState().findingAction({ findingId: 'f-2', action: 'right', side: 'a' })
+    expect(useMemoryStore.getState().findings?.open).toEqual([])
+    expect(useMemoryStore.getState().rightMarks).toEqual([
+      {
+        findingId: 'f-2',
+        value: 'brown',
+        ref: '1.2',
+        nodeId: 'sc-2',
+        quote: "Mara's eyes were brown",
+        dismissedId: 'd-f-2'
+      }
+    ])
+    // Undo deletes its Dismissed row and closes the line.
+    expect(await useMemoryStore.getState().undoRightMark('f-2')).toBe(true)
+    expect(main.sent('dismissed:undo')).toEqual([{ id: 'd-f-2' }])
+    expect(useMemoryStore.getState().rightMarks).toEqual([])
+  })
+
+  it('takes a loose end away on Not a problem, and prices and starts a check', async () => {
+    await act(async () => {
+      await useMemoryStore.getState().loadLooseEnds()
+    })
+    expect(await useMemoryStore.getState().looseEndNotProblem(looseEndFixture())).toBe(true)
+    expect(main.sent('memory:looseEndAction')).toEqual([
+      { kind: 'planned', id: 'sc-plan', lastNodeId: null }
+    ])
+    expect(useMemoryStore.getState().looseEnds?.items).toEqual([])
+    expect(useDismissedStore.getState().items.map((row) => row.id)).toEqual(['d-loose'])
+
+    expect((await useMemoryStore.getState().estimateCheck())?.confirms.about).toBe(2)
+    expect(useMemoryStore.getState().check.estimate?.aboutUsd).toBe(0.0004)
+    expect(await useMemoryStore.getState().startCheck('sc-1')).toMatchObject({ ok: true })
+    expect(main.sent('memory:checkBook')).toEqual([{ nodeId: 'sc-1' }])
+  })
+
+  it('empties it all on clear', async () => {
+    await act(async () => {
+      await useMemoryStore.getState().loadFindings()
+      await useMemoryStore.getState().loadCheckReport()
+    })
+    useMemoryStore.getState().setCheckOpen('report')
+    useMemoryStore.getState().clear()
+    const state = useMemoryStore.getState()
+    expect(state.findings).toBeNull()
+    expect(state.looseEnds).toBeNull()
+    expect(state.check).toEqual({ estimate: null, report: null })
+    expect(state.checkOpen).toBeNull()
   })
 })

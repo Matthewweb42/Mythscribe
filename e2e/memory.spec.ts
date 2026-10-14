@@ -3232,10 +3232,9 @@ test('story memory v2: Check the book, Not a problem and note conflicts (P4 slic
   expect(providerBodies.length).toBe(sentAfterCheck)
 
   // Update my note: the book's year in the note's own words, saved; the C6 finding closes.
-  const patch = await invoke<{ before: string; after: string; index: number }>(
-    'memory:notePatch',
-    { findingId: c6?.id ?? '' }
-  )
+  const patch = await invoke<{ before: string; after: string; index: number }>('memory:notePatch', {
+    findingId: c6?.id ?? ''
+  })
   expect(patch).toMatchObject({ before: 'Born: 1790', after: 'Born: 1792', index: 0 })
   expect(
     await invoke('memory:applyNotePatch', {
@@ -3254,6 +3253,202 @@ test('story memory v2: Check the book, Not a problem and note conflicts (P4 slic
   expect(
     providerBodies.some((body) =>
       body.messages.some((message) => message.content.includes('No scene shows'))
+    )
+  ).toBe(false)
+})
+
+test('story memory v2: Needs a look and Check the book in the panel (P4 slice 4)', async () => {
+  // A new project, set up as slice 3's: Mara Vell's eyes grey in 1.1 and brown in a later scene;
+  // Orrin born in 1792 in 1.1 while his Pinned page says "Born: 1790"; a to-do; and a planned scene
+  // "The duel at dawn" (no words, a title no drafted card line shares) before the brown one.
+  const first = await newV2Project('Look Novel')
+  const record = async (name: string, aliases: string[]): Promise<string> => {
+    const made = await invoke<{ record?: { id: string } }>('record:create', {
+      name,
+      categoryId: 'character',
+      aliases: aliases.map((text) => ({ text })),
+      force: true
+    })
+    if (made.record === undefined) throw new Error(`${name} was not made`)
+    return made.record.id
+  }
+  await record('Mara Vell', ['Mara'])
+  const orrin = await record('Orrin', [])
+  const note = (text: string): TiptapNodeT => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+  })
+  await invoke('record:savePage', { id: orrin, page: 'pinned', doc: note('Born: 1790') })
+  const write = async (id: string, ...texts: string[]): Promise<void> => {
+    await invoke('document:save', {
+      id,
+      content: {
+        type: 'doc',
+        content: texts.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] }))
+      }
+    })
+  }
+  await write(first.id, "Mara's eyes were grey.", 'Orrin was born in 1792.')
+  expect(
+    await invoke('memory:readNow', { nodeId: first.id, requestId: 'e2e-p4s4-1' })
+  ).toMatchObject({ ok: true, read: true })
+  await invoke<TreeNode>('tree:create', {
+    parentId: first.parentId,
+    kind: 'document',
+    hierarchyLevel: 'scene',
+    title: 'The duel at dawn'
+  })
+  const brown = await invoke<TreeNode>('tree:create', {
+    parentId: first.parentId,
+    kind: 'document',
+    hierarchyLevel: 'scene',
+    title: 'Brown'
+  })
+  await write(brown.id, "Mara's eyes were brown.")
+  expect(
+    await invoke('memory:readNow', { nodeId: brown.id, requestId: 'e2e-p4s4-2' })
+  ).toMatchObject({ ok: true, read: true })
+  await invoke('authorTodo:create', { text: 'Check the tide tables' })
+  interface View {
+    rule: string
+    b: { label: string }
+  }
+  const findings = async (): Promise<View[]> =>
+    (await invoke<{ open: View[] }>('memory:findings', { nodeId: null })).open
+  // The background judge finds both, both ways.
+  await expect
+    .poll(async () => (await findings()).map((each) => each.rule).sort(), { timeout: 30_000 })
+    .toEqual(['C1', 'C6'])
+  const brownRef = (await findings()).find((each) => each.rule === 'C1')?.b.label ?? ''
+  expect(brownRef).toMatch(/^1\.\d$/u)
+  /** The findings job runs about 1.5 s after the memory moved, then the judge on the queue. */
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 4_000))
+  await settle()
+  const isNavigator = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(NAVIGATOR_SENTINEL) === true
+
+  // The renderer reads it all on open.
+  await reopenProject('Look Novel')
+  await showSection('Manuscript')
+  const tree = page.getByRole('tree', { name: 'Document tree' })
+  await tree.getByRole('treeitem', { name: 'Brown' }).first().click()
+  const panel = page.getByTestId('this-scene-panel')
+  if ((await panel.count()) === 0) {
+    await page.getByRole('button', { name: 'This scene', exact: true }).click()
+  }
+  await panel.getByRole('tab', { name: 'This scene' }).click()
+  const needs = panel.getByRole('region', { name: 'Needs a look' })
+  // My to-dos on top, then Conflicts; the badge counts the two contradictions only.
+  await expect(needs.getByRole('heading', { level: 4 }).first()).toHaveText('My to-dos')
+  await expect(needs.getByRole('heading', { level: 4 }).nth(1)).toHaveText('Conflicts')
+  const badge = panel.getByTestId('needs-a-look-badge')
+  await expect(badge).toHaveText('2', { timeout: 15_000 })
+  const conflicts = needs.getByRole('group', { name: 'Conflicts' })
+  const eyes = conflicts
+    .getByTestId('finding')
+    .filter({ hasText: `Mara Vell’s eyes: grey (1.1) · brown (${brownRef})` })
+  await expect(eyes).toBeVisible()
+  const born = conflicts.getByTestId('note-conflict')
+  await expect(born).toContainText('Your note on Orrin says born 1790; the book says 1792 (1.1)')
+
+  // Not a problem on Mara's eyes: the badge reads 1 and Dismissed grows; Undo brings it back,
+  // with nothing sent.
+  const quiet = providerBodies.length
+  const dismissedBefore = (await invoke<{ count: number }>('dismissed:list', undefined)).count
+  await eyes.getByRole('button', { name: /^Not a problem/ }).click()
+  await expect(badge).toHaveText('1')
+  const dismissedButton = panel.getByRole('button', { name: `Dismissed (${dismissedBefore + 1})` })
+  await expect(dismissedButton).toBeVisible()
+  await dismissedButton.click()
+  const dismissedDialog = page.getByRole('dialog', { name: /^Dismissed \(/ })
+  const undo = dismissedDialog.getByRole('button', {
+    name: `Undo: Not a problem: Mara Vell, eyes grey (1.1) and brown (${brownRef})`
+  })
+  await expect(undo).toBeVisible()
+  await undo.click()
+  await dismissedDialog.getByRole('button', { name: 'Close' }).click()
+  await expect(badge).toHaveText('2', { timeout: 15_000 })
+  expect(providerBodies.length).toBe(quiet)
+
+  // Update my note: the proposal in the note's own words, saved; the note conflict goes.
+  await born.getByRole('button', { name: 'Update my note' }).click()
+  const field = born.getByRole('textbox')
+  await expect(field).toHaveValue('Born: 1792')
+  await born.getByRole('button', { name: 'Save' }).click()
+  await expect
+    .poll(() => pageLines(orrin, 'pinned'), { timeout: 15_000 })
+    .toEqual([{ text: 'Born: 1792', written: false }])
+  await expect(conflicts.getByTestId('note-conflict')).toHaveCount(0, { timeout: 15_000 })
+  await expect(badge).toHaveText('1')
+  expect(providerBodies.length).toBe(quiet)
+
+  // Loose ends: the planned card, scoped; Ask Ms Scribe sends one navigator request with its
+  // question.
+  const loose = needs.getByRole('group', { name: 'Loose ends' })
+  const duel = loose.getByTestId('loose-end').filter({ hasText: 'The duel at dawn' })
+  await expect(duel).toContainText(
+    `Planned “The duel at dawn” sits before ${brownRef} and is not drafted`
+  )
+  const navigatorBefore = providerBodies.filter(isNavigator).length
+  await duel.getByRole('button', { name: 'Ask Ms Scribe' }).click()
+  await expect
+    .poll(() => providerBodies.filter(isNavigator).length, { timeout: 15_000 })
+    .toBe(navigatorBefore + 1)
+  const asked = providerBodies.filter(isNavigator).at(-1)
+  expect(
+    asked?.messages.some((m) =>
+      m.content.includes("Which drafted scene covers the plan 'The duel at dawn'?")
+    )
+  ).toBe(true)
+  const assistant = page.getByTestId('assistant-panel')
+  const turns = assistant.locator('[data-testid="chat-turn"]')
+  await expect(turns).toHaveCount(2)
+  await expect(assistant.getByTestId('chat-pending')).toHaveCount(0, { timeout: 30_000 })
+
+  // The chat's consistency check: the open scene's finding, answered with no request at all.
+  const beforeCheck = providerBodies.length
+  const messageBox = assistant.getByRole('textbox', { name: 'Message' })
+  await messageBox.fill('Check this scene for consistency')
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(4)
+  const answer = turns.nth(3).getByTestId('contradictions-turn')
+  await expect(answer).toContainText(`Mara Vell’s eyes: grey (1.1) · brown (${brownRef})`)
+  expect(providerBodies.length).toBe(beforeCheck)
+
+  // Book › Check the book: priced first, then run; the report names what it does not check. A
+  // second check is free and sends nothing.
+  await panel.getByRole('tab', { name: 'Book' }).click()
+  await expect(panel.getByTestId('check-last')).toHaveText('Not checked yet')
+  await panel.getByRole('button', { name: 'Check the book…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Check the book' })
+  await expect(dialog.getByTestId('check-price')).toContainText(/^About /u, { timeout: 15_000 })
+  await dialog.getByRole('button', { name: 'Check', exact: true }).click()
+  const report = dialog.getByTestId('check-report')
+  await expect(report).toBeVisible({ timeout: 30_000 })
+  await expect(report).toContainText('travel times')
+  await expect(report).toContainText(`Mara Vell’s eyes: grey (1.1) · brown (${brownRef})`)
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(panel.getByTestId('check-last')).toContainText(/^Last checked .* · 1 found/u)
+  const afterCheck = providerBodies.length
+  await panel.getByRole('button', { name: 'Check the book…' }).click()
+  await expect(dialog.getByTestId('check-price')).toHaveText(
+    'Nothing changed since your last check: free',
+    { timeout: 15_000 }
+  )
+  await dialog.getByRole('button', { name: 'Check', exact: true }).click()
+  await expect(dialog.getByTestId('check-report')).toBeVisible({ timeout: 30_000 })
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await settle()
+  expect(providerBodies.length).toBe(afterCheck)
+
+  // No request ever carried an absence.
+  expect(
+    providerBodies.some((body) =>
+      body.messages.some((message) =>
+        /No scene shows|No possible contradictions|nothing since/u.test(
+          message.content
+        )
+      )
     )
   ).toBe(false)
 })

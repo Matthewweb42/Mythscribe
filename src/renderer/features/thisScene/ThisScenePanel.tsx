@@ -36,6 +36,9 @@ import { ThreadsList } from '@renderer/features/memory/threads/ThreadsList'
 import { TimelineView } from '@renderer/features/memory/timeline/TimelineView'
 import { WhoKnowsWhat } from '@renderer/features/memory/knows/WhoKnowsWhat'
 import { RebuildMemory } from '@renderer/features/memory/RebuildMemory'
+import { CheckTheBook } from '@renderer/features/memory/checkBook/CheckBook'
+import { Contradictions } from '@renderer/features/memory/needsALook/Contradictions'
+import { LooseEnds } from '@renderer/features/memory/needsALook/LooseEnds'
 import { useNow } from '@renderer/features/memory/useNow'
 import { openPassage } from '@renderer/features/editor/openPassage'
 import { locateText } from '@renderer/features/editor/locateText'
@@ -63,6 +66,7 @@ import {
   ambiguousLabel,
   ambiguousWhy,
   castOf,
+  conflictCount,
   conflictLine,
   detailConflictsOf,
   INLINE_TAGS_NOTICE,
@@ -504,7 +508,11 @@ function AmbiguousCard({
   )
 }
 
-/** Needs a look: quiet and never required; its badge counts conflicts only. */
+/**
+ * Needs a look (design §2.7, P4-D20): quiet and never required. My to-dos on top, then Conflicts
+ * (filed lines, typed details, contradictions with the unclear ones apart), Questions, Loose ends
+ * and Notices; its badge counts conflicts only (filed lines, typed details, open contradictions).
+ */
 function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element {
   const headingId = useId()
   const todos = useAuthorTodoStore((s) => s.todos)
@@ -517,6 +525,16 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
   })
   const conflicts = useFiledConflictStore((s) => s.conflicts)
   const notices = useMemoryStore((s) => s.notices)
+  // F-16.27, F-16.29: the open and unclear contradictions, the loose ends, and the lines This
+  // one's right left this session.
+  const findings = useMemoryStore(
+    useShallow((s) => s.findings?.open.flatMap((id) => s.findings?.byId[id] ?? []) ?? [])
+  )
+  const unclear = useMemoryStore(
+    useShallow((s) => s.findings?.unclear.flatMap((id) => s.findings?.byId[id] ?? []) ?? [])
+  )
+  const looseEnds = useMemoryStore((s) => s.looseEnds)
+  const marks = useMemoryStore((s) => s.rightMarks.length)
   const [adding, setAdding] = useState(false)
   const groups = needsALookGroups({
     conflicts,
@@ -524,11 +542,22 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
     questions,
     notices: inlineTags > 0 ? [INLINE_TAGS_NOTICE] : [],
     memory: notices,
-    todosOpen: adding
+    findings,
+    unclear,
+    looseEnds,
+    todosOpen: adding,
+    conflictsOpen: marks > 0
   })
   // F-16.9: the filed lines whose Research source changed; F-16.18: the typed details the text
-  // disagrees with (decision 4).
-  const badge = needsALookBadge(conflicts.length + detailConflictsOf(notices).length)
+  // disagrees with (decision 4); F-16.27: the open contradictions (never unclear ones, loose ends,
+  // questions or notices).
+  const badge = needsALookBadge(
+    conflictCount({
+      filed: conflicts.length,
+      details: detailConflictsOf(notices).length,
+      findings: findings.length
+    })
+  )
   return (
     <section aria-labelledby={headingId}>
       <div className="mt-3 mb-1 flex items-center gap-2">
@@ -570,7 +599,10 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
             <>
               {group.details.length === 0 ? null : <DetailConflictList conflicts={group.details} />}
               {group.conflicts.length === 0 ? null : <ConflictList conflicts={group.conflicts} />}
+              <Contradictions findings={group.findings} unclear={group.unclear} sceneId={sceneId} />
             </>
+          ) : group.id === 'looseEnds' ? (
+            <LooseEnds items={group.items} more={group.more} />
           ) : group.id === 'todos' ? (
             <TodoList
               todos={group.todos}
@@ -854,7 +886,8 @@ function QuestionList({ questions }: { questions: NameQuestion[] }): React.JSX.E
 /**
  * The Book tab: **As of [scene ▾]** (the open scene by default), the Cast (a view of the Characters
  * category, most-named first), **Who knows what** as of that scene (F-16.22), **Threads** as of
- * that scene and the **Timeline** with years and ages (F-16.23), and *Rebuild memory*. `toGrid`:
+ * that scene and the **Timeline** with years and ages (F-16.23), *Check the book* (F-16.30) and
+ * *Rebuild memory*. `toGrid`:
  * opened from "+ N more in Book", so the grid is scrolled into view.
  */
 function BookTab({
@@ -908,6 +941,7 @@ function BookTab({
       </div>
       <ThreadsList asOf={asOf.asOf} />
       <TimelineView />
+      <CheckTheBook />
       <RebuildMemory />
     </>
   )
@@ -997,6 +1031,15 @@ function ReadingNotice({ notice }: { notice: MemoryNotice }): React.JSX.Element 
             onClick={() => {
               if (button.kind === 'settings') {
                 useShellDialogStore.getState().show('settings', 'ai')
+                return
+              }
+              // F-16.29: a rebuild's grouped summary; F-16.30: pairs waiting for Check the book.
+              if (button.kind === 'review') {
+                useMemoryStore.getState().setRebuildOpen('summary')
+                return
+              }
+              if (button.kind === 'checkBook') {
+                useMemoryStore.getState().setCheckOpen('start')
                 return
               }
               if (button.kind === 'answer') {

@@ -60,6 +60,7 @@ import {
   useAssistantStore
 } from './assistantStore'
 import { ContinuityLink, ContinuityView } from './ContinuityPanel'
+import { ContradictionsTurn } from './ContradictionsTurn'
 import { EditRequestCard } from './EditRequestCard'
 import { useContinuityStore } from './continuityStore'
 import { InstantCard } from './InstantCard'
@@ -436,7 +437,8 @@ function MessageLog(): React.JSX.Element {
  * has one (`model · cost · cached`, F-4.7's note). An empty assistant turn with a request in
  * flight reads as thinking; an Author turn shows the notice, its text went to the editor; a
  * Query turn (F-5.7) shows its citations through `QueryAnswer` (story memory v1); in v2 an instant
- * card draws through `InstantCard` (F-16.24) and Ms Scribe's answer through `ScribeAnswer`
+ * card draws through `InstantCard` (F-16.24), a consistency check through `ContradictionsTurn`
+ * (P4-D23) and Ms Scribe's answer through `ScribeAnswer`
  * (F-16.25), its cost line listing the navigator's, the answer's and the check's parts in its
  * title (P3-D23); a What should come next? turn
  * (F-5.17) shows its directions as cards through `Directions`. An agent turn (F-5.22) shows
@@ -501,6 +503,9 @@ function Turn({
       ) : !mine && message.card !== null ? (
         // F-16.24 (story memory v2): a question the memory answered with no AI call.
         <InstantCard card={message.card} />
+      ) : !mine && message.contradictions !== null ? (
+        // P4-D23 (story memory v2): the consistency check answered from the scene's findings.
+        <ContradictionsTurn turn={message.contradictions} />
       ) : !mine && message.scribe !== null ? (
         // F-16.25 (story memory v2): Ms Scribe's checked citations; v1 turns keep QueryAnswer.
         <ScribeAnswer answer={message.content} scribe={message.scribe} />

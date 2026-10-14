@@ -9,6 +9,7 @@ import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useMemoryStore } from './memoryStore'
 import { estimateLine, shortDate } from './memoryView'
+import { findingRuleLine } from './needsALook/findingView'
 
 const BUTTON =
   'rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-60'
@@ -70,7 +71,8 @@ type Stage =
  * then, confirmed, the rebuild (`memory:rebuild`) with its progress and *Stop* (the queue's Stop),
  * then one summary grouped by sheet with its bulk actions: *Not right* for a sheet's new lines,
  * *Not right* for the new secrets and threads (F-16.22: each goes to Dismissed as *Not a secret*
- * would) and *Not names* for the names whose lines wait. Mounted in the project screen (v2); open while the
+ * would), *Not names* for the names whose lines wait, and (F-16.29) *Not a problem* for the
+ * possible contradictions the rebuild's sweep opened. Mounted in the project screen (v2); open while the
  * memory store says so.
  */
 export function RebuildDialog(): React.JSX.Element | null {
@@ -232,7 +234,10 @@ function Summary(): React.JSX.Element {
     <div data-testid="rebuild-summary">
       <p className="m-0">
         Read {progress.done} of {progress.total} scenes.
-        {summary.sheets.length === 0 && summary.waiting.length === 0 && summary.topics.length === 0
+        {summary.sheets.length === 0 &&
+        summary.waiting.length === 0 &&
+        summary.topics.length === 0 &&
+        summary.findings.length === 0
           ? ' Nothing new: the memory already held what the book states.'
           : ''}
       </p>
@@ -277,6 +282,25 @@ function Summary(): React.JSX.Element {
           </button>
         </div>
       )}
+      {summary.findings.length === 0 ? null : (
+        <div className="mt-2" role="group" aria-label="Possible contradictions">
+          <p className="m-0 text-fg-muted">Possible contradictions ({summary.findings.length}):</p>
+          <ul className="m-0 list-none p-0">
+            {summary.findings.map((finding) => (
+              <li key={finding.id}>{findingRuleLine(finding)}</li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            className={SMALL}
+            aria-label="Not a problem: the possible contradictions"
+            disabled={busy}
+            onClick={() => void act({ action: 'notProblems' })}
+          >
+            Not a problem
+          </button>
+        </div>
+      )}
       {summary.waiting.length === 0 ? null : (
         <div className="mt-2" role="group" aria-label="Names to answer">
           <p className="m-0 text-fg-muted">Lines waiting on whether these are names:</p>
@@ -303,6 +327,6 @@ function Summary(): React.JSX.Element {
 
 async function runAction(action: RebuildAction): Promise<void> {
   await ipc().invoke('memory:rebuildAction', action)
-  // *Not right* and *Not names* wrote Dismissed rows.
+  // *Not right*, *Not names* and *Not a problem* wrote Dismissed rows.
   await useDismissedStore.getState().load()
 }

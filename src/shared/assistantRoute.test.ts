@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   localRoute,
+  memoryLocalRoute,
   ROUTE_ACTIONS,
   routeActionFeature,
   settleRoute,
@@ -165,6 +166,22 @@ describe('the consistency check in each story memory (F-16.4, P4-D23)', () => {
     )
     expect(routeActionFeature('continuity', 'v2')).toBe('judge')
     expect(routeActionFeature('continuity', 'v1')).toBe('continuity')
+  })
+})
+
+describe('memoryLocalRoute (story memory v2, P4-D23)', () => {
+  it('takes the consistency check’s own words, any case and end, and leaves v1’s router alone', () => {
+    expect(memoryLocalRoute('Check this scene for consistency', open)).toEqual(plain('continuity'))
+    expect(memoryLocalRoute('  check THIS scene for continuity slips! ', open)).toEqual(
+      plain('continuity')
+    )
+    expect(memoryLocalRoute('Check consistency', open)).toEqual(plain('continuity'))
+    // Without an open scene it falls back as any scene action does.
+    expect(memoryLocalRoute('Check this scene for consistency', closed)).toEqual(plain('chat'))
+    // localRoute's own decisions stand; anything else is the navigator's.
+    expect(memoryLocalRoute('Proofread', open)).toEqual(plain('proofread'))
+    expect(memoryLocalRoute('Check this scene for consistency with the map', open)).toBeNull()
+    expect(localRoute('Check this scene for consistency', open)).toBeNull()
   })
 })
 

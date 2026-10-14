@@ -50,6 +50,10 @@ export async function openNote(note: ActivityNote): Promise<void> {
       // F-16.19: what the rebuild changed, grouped by sheet.
       useMemoryStore.getState().setRebuildOpen('summary')
       return
+    case 'checkBook':
+      // F-16.30: the check's report.
+      useMemoryStore.getState().setCheckOpen('report')
+      return
   }
 }
 
@@ -79,6 +83,7 @@ export async function retryNote(note: ActivityNote): Promise<void> {
       await useConversionStore.getState().retryReread()
       return
     case 'rebuild':
+    case 'checkBook':
       return
   }
 }

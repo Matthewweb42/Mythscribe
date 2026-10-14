@@ -2,7 +2,7 @@ import { useEffect, useId, useState, type KeyboardEvent, type MouseEvent } from 
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { useDismissedStore } from './dismissedStore'
-import { DISMISSED_KIND_LABEL } from './thisSceneView'
+import { dismissedRow } from './thisSceneView'
 
 const BUTTON =
   'rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-60'
@@ -78,31 +78,34 @@ function DismissedList(): React.JSX.Element {
           <p className="m-0 mt-4 text-sm text-fg-muted">Nothing is dismissed.</p>
         ) : (
           <ul className="m-0 mt-3 min-h-0 flex-1 list-none overflow-y-auto p-0">
-            {items.map((item) => (
-              <li
-                key={item.id}
-                className="flex items-start gap-2 border-b border-line py-2 text-sm last:border-b-0"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="m-0 text-xs text-fg-muted">
-                    {DISMISSED_KIND_LABEL[item.kind]} · {dateOf(item.created)}
-                  </p>
-                  <p className="m-0">{item.label}</p>
-                  {item.quote === null || item.quote === item.label ? null : (
-                    <p className="m-0 text-xs text-fg-muted">“{item.quote}”</p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  aria-label={`Undo: ${item.label}`}
-                  disabled={busy !== null}
-                  onClick={() => void undo(item.id)}
-                  className={BUTTON}
+            {items.map((item) => {
+              const row = dismissedRow(item)
+              return (
+                <li
+                  key={item.id}
+                  className="flex items-start gap-2 border-b border-line py-2 text-sm last:border-b-0"
                 >
-                  Undo
-                </button>
-              </li>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    <p className="m-0 text-xs text-fg-muted">
+                      {row.kind} · {dateOf(item.created)}
+                    </p>
+                    <p className="m-0">{row.label}</p>
+                    {item.quote === null || item.quote === item.label ? null : (
+                      <p className="m-0 text-xs text-fg-muted">“{item.quote}”</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={`Undo: ${row.label}`}
+                    disabled={busy !== null}
+                    onClick={() => void undo(item.id)}
+                    className={BUTTON}
+                  >
+                    Undo
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         )}
         <div className="mt-4 flex justify-end">

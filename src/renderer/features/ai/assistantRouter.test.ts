@@ -2,7 +2,7 @@ import { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import type { RouteEdit } from '@shared/assistantRoute'
-import type { Conversations } from '@shared/chat'
+import type { ContradictionsTurn, Conversations } from '@shared/chat'
 import type { EditPassSummary } from '@shared/editPass'
 import { EDIT_ASK_QUESTION } from '@shared/editRequest'
 import type {
@@ -33,6 +33,10 @@ import {
 import { resetFocusStore } from '@renderer/features/focus/focusStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
+import {
+  CHECK_THE_BOOK_HINT,
+  contradictionsScoped
+} from '@renderer/features/memory/needsALook/findingView'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -103,6 +107,15 @@ const NO_FINDINGS: FindingsView = {
 }
 /** F-16.27 (P4-D23): what `memory:findings` answers in a story memory v2 project. */
 let findings: FindingsView = NO_FINDINGS
+/** A consistency turn's stand-in where a turn carried none (it fails the assertions after it). */
+const NO_TURN: ContradictionsTurn = {
+  nodeId: null,
+  on: false,
+  scene: null,
+  waiting: 0,
+  judging: false,
+  findings: []
+}
 
 function client(): IpcClient {
   return {
@@ -648,7 +661,14 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
     await useAssistantStore.getState().send('Check this scene for consistency')
     expect(sent('memory:findings')).toEqual([{ nodeId: 'sc-1' }])
     expect(calls.some(([channel]) => channel === 'ai:continuity')).toBe(false)
-    expect(turns()[1]?.content).toContain('No possible contradictions found in this scene so far')
+    // None touch the scene: the turn's text (sent later as history) states no absence; the scoped
+    // line is drawn from the turn alone.
+    const none = turns()[1]
+    expect(none?.content).toBe(CHECK_THE_BOOK_HINT)
+    expect(none?.contradictions).toMatchObject({ nodeId: 'sc-1', on: true, findings: [] })
+    expect(contradictionsScoped(none?.contradictions ?? NO_TURN)).toEqual([
+      'No possible contradictions found in this scene so far.'
+    ])
     const side = (value: string, label: string, nodeId: string): FindingView['a'] => ({
       kind: 'claim',
       ref: label,
@@ -679,35 +699,57 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
       costUsd: 0.0001,
       actions: { right: { a: true, b: true }, updateNote: false, notFlashback: null }
     }
-    findings = { ...findings, open: [open] }
+    // One elsewhere in the book is not this scene's.
+    const elsewhere: FindingView = {
+      ...open,
+      id: 'f2',
+      a: side('grey', '1.1', 'sc-0'),
+      b: side('blue', '1.3', 'sc-3')
+    }
+    findings = { ...findings, open: [open, elsewhere] }
     await useAssistantStore.getState().send('Check this scene for consistency')
-    expect(turns()[3]?.content).toContain('Mara Vell’s eyes: grey (1.1) · brown (1.2)')
+    const found = turns()[3]
+    expect(found?.content).toContain('Mara Vell’s eyes: grey (1.1) · brown (1.2)')
+    expect(found?.content).not.toContain('blue')
+    expect(found?.contradictions?.findings.map((each) => each.id)).toEqual(['f1'])
+    expect(contradictionsScoped(found?.contradictions ?? NO_TURN)).toEqual([])
     expect(sent('ai:navigate')).toHaveLength(2)
   })
 
   it('never states an absence it did not check: the switch off, an unread scene, unread sentences, pairs waiting', async () => {
     navigate = routedV2('continuity')
-    const ask = async (view: FindingsView): Promise<string> => {
+    const ask = async (view: FindingsView): Promise<{ text: string; scoped: string[] }> => {
       findings = view
       await useAssistantStore.getState().send('Check this scene for consistency')
-      return turns().at(-1)?.content ?? ''
+      const turn = turns().at(-1)
+      return {
+        text: turn?.content ?? '',
+        scoped: contradictionsScoped(turn?.contradictions ?? NO_TURN)
+      }
     }
     // The Contradiction check off: main answers an empty view; nothing is claimed.
     const off = await ask({ ...NO_FINDINGS, on: false, scene: null })
-    expect(off).toBe(
+    expect(off.text).toBe(
       'The Contradiction check is off, so nothing in this scene has been checked. Turn it on in Settings, AI tab.'
     )
-    expect(off).not.toContain('No possible contradictions')
+    expect(off.scoped).toEqual([])
     const unread = await ask({ ...NO_FINDINGS, scene: { read: false, unread: 4 } })
-    expect(unread).toContain('This scene has not been read yet, so it has not been checked')
-    expect(unread).not.toContain('No possible contradictions')
+    expect(unread.scoped).toEqual([
+      'This scene has not been read yet, so it has not been checked for contradictions.'
+    ])
     const partly = await ask({ ...NO_FINDINGS, waiting: 3, scene: { read: true, unread: 1 } })
-    expect(partly).toContain('No possible contradictions found in this scene so far.')
-    expect(partly).toContain('1 sentence here is not read yet, so not checked.')
-    expect(partly).toContain('3 pairs in the book are not judged yet.')
+    expect(partly.scoped).toEqual([
+      'No possible contradictions found in this scene so far.',
+      '1 sentence here is not read yet, so not checked.',
+      '3 pairs in the book are not judged yet.'
+    ])
     const running = await ask({ ...NO_FINDINGS, waiting: 3, judging: true })
-    expect(running).toContain('The check is running now, so more may turn up.')
-    expect(running).not.toContain('not judged yet')
+    expect(running.scoped).toContain('The check is running now, so more may turn up.')
+    expect(running.scoped.join(' ')).not.toContain('not judged yet')
+    // No turn's text (what later requests carry as history) states an absence.
+    for (const each of turns()) {
+      expect(each.content).not.toMatch(/No possible contradictions|not read yet|not judged/u)
+    }
     expect(calls.some(([channel]) => channel === 'ai:continuity')).toBe(false)
   })
 

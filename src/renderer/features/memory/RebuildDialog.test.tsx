@@ -5,7 +5,12 @@ import type { RebuildSummary } from '@shared/memory/views'
 import { resetIndexingStore } from '@renderer/features/ai/indexingStore'
 import { resetDismissedStore } from '@renderer/features/thisScene/dismissedStore'
 import { setIpcClient } from '@renderer/lib/ipc'
-import { installFakeMain, memoryStatusFixture, type FakeMain } from './memoryFixture'
+import {
+  findingViewFixture,
+  installFakeMain,
+  memoryStatusFixture,
+  type FakeMain
+} from './memoryFixture'
 import { resetMemoryStore, useMemoryStore } from './memoryStore'
 import { estimateLine } from './memoryView'
 import { RebuildDialog, RebuildMemory } from './RebuildMemory'
@@ -44,7 +49,7 @@ const SUMMARY: RebuildSummary = {
     { recordId: 's-map', kind: 'secret', label: 'the sold map' },
     { recordId: 't-heir', kind: 'thread', label: 'the missing heir' }
   ],
-  findings: []
+  findings: [findingViewFixture('f-1')]
 }
 
 let main: FakeMain
@@ -126,10 +131,22 @@ describe('Rebuild memory (F-16.19)', () => {
         within(topics).getByRole('button', { name: 'Not right: the new secrets and threads' })
       )
     })
+    // F-16.29: the possible contradictions its sweep opened, one Not a problem for them all.
+    const findings = within(summary).getByRole('group', { name: 'Possible contradictions' })
+    expect(findings).toHaveTextContent('Possible contradictions (1):')
+    expect(findings).toHaveTextContent('Mara Vell’s eyes: grey (1.1) · brown (1.2)')
+    await act(async () => {
+      fireEvent.click(
+        within(findings).getByRole('button', {
+          name: 'Not a problem: the possible contradictions'
+        })
+      )
+    })
     expect(main.sent('memory:rebuildAction')).toEqual([
       { action: 'notRightAll', recordId: 'r-mara' },
       { action: 'notNames' },
-      { action: 'notTopics' }
+      { action: 'notTopics' },
+      { action: 'notProblems' }
     ])
   })
 

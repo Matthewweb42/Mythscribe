@@ -1,7 +1,7 @@
 import { EDIT_PASS_LABEL, type EditPassSummary } from '@shared/editPass'
 import type { IndexQueueStatus } from '@shared/jobs'
 import { CONVERSION_SECONDS_PER_SCENE } from '@shared/knowledge'
-import type { RebuildProgress } from '@shared/memory/views'
+import type { CheckProgress, RebuildProgress } from '@shared/memory/views'
 import type { OrganiseRequest } from '@shared/organise'
 import type { ContinuityCheck, ContinuityOutcome } from '@renderer/features/ai/continuityStore'
 import type { EditPassView } from '@renderer/features/editPass/editPassViewStore'
@@ -19,7 +19,14 @@ import type { TodoCheckOutcome } from '@renderer/features/todo/todoStore'
  */
 
 export type ActivityKind =
-  'organise' | 'upload' | 'editPass' | 'todoCheck' | 'continuity' | 'conversion' | 'rebuild'
+  | 'organise'
+  | 'upload'
+  | 'editPass'
+  | 'todoCheck'
+  | 'continuity'
+  | 'conversion'
+  | 'rebuild'
+  | 'checkBook'
 
 /** One long job running now. */
 export interface ActivityJob {
@@ -57,8 +64,16 @@ export interface ActivitySnapshot {
   }
   conversion: { rereading: boolean }
   queue: IndexQueueStatus
-  /** F-16.19: story memory v2's last *Rebuild memory*, and whether its dialog is open. */
-  memory: { rebuild: RebuildProgress | null; dialogOpen: boolean }
+  /**
+   * F-16.19: story memory v2's last *Rebuild memory*, and whether its dialog is open; F-16.30: the
+   * last *Check the book* of this session, and whether its dialog is open.
+   */
+  memory: {
+    rebuild: RebuildProgress | null
+    dialogOpen: boolean
+    check: CheckProgress | null
+    checkOpen: boolean
+  }
 }
 
 /** A finished or failed job's notification (the drop from the top centre). */
@@ -146,6 +161,17 @@ export function readJobs(snap: ActivitySnapshot): ActivityJob[] {
       ref: null
     })
   }
+  if (memory.check !== null && memory.check.finishedAt === null) {
+    // The pairs judged, then the stronger check's confirmations, as one count.
+    const total = memory.check.toJudge + memory.check.toConfirm
+    jobs.push({
+      key: `checkBook:${memory.check.startedAt}`,
+      kind: 'checkBook',
+      name: 'Check the book',
+      steps: total > 0 ? { done: memory.check.judged + memory.check.confirmed, total } : null,
+      ref: null
+    })
+  }
   return jobs
 }
 
@@ -163,7 +189,8 @@ export const CRAWL_MS: Record<ActivityKind, number> = {
   todoCheck: 30_000,
   continuity: 15_000,
   conversion: CONVERSION_SECONDS_PER_SCENE * 1000,
-  rebuild: 20_000
+  rebuild: 20_000,
+  checkBook: 5_000
 }
 
 /** The estimated share of a step done after `elapsedMs`: creeps toward `CRAWL_CAP`, never past. */
@@ -369,6 +396,18 @@ export function outcomeOf(job: ActivityJob, snap: ActivitySnapshot): ActivityNot
         canRetry: false
       }
     }
+    case 'checkBook': {
+      const { check } = snap.memory
+      if (typeof check?.finishedAt !== 'string') return null
+      return {
+        ...base,
+        status: 'done',
+        title: 'Check the book finished',
+        detail: `Judged ${plural(check.judged, 'pair')}; ${check.confirmed} confirmed by a stronger AI read.`,
+        canOpen: true,
+        canRetry: false
+      }
+    }
   }
 }
 
@@ -407,5 +446,7 @@ export function noteStale(note: ActivityNote, snap: ActivitySnapshot): boolean {
       return snap.conversion.rereading
     case 'rebuild':
       return snap.memory.dialogOpen || snap.memory.rebuild?.finishedAt === null
+    case 'checkBook':
+      return snap.memory.checkOpen || snap.memory.check?.finishedAt === null
   }
 }

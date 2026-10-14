@@ -325,7 +325,8 @@ describe('getConversations / setConversations (F-5.4)', () => {
         edit: null,
         card: null,
         scribe: null,
-        costParts: null
+        costParts: null,
+        contradictions: null
       }
     ],
     created: '2026-09-15T10:00:00.000Z',

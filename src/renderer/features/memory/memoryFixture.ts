@@ -1,6 +1,13 @@
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
+import type { FindingSideView, FindingView } from '@shared/memory/findings'
+import { CHECK_NOT_COVERED } from '@shared/memory/views'
 import type {
   AgeView,
+  CheckEstimate,
+  CheckReport,
+  FindingsView,
+  LooseEnd,
+  LooseEndsView,
   ClaimView,
   ElapsedHintView,
   KnowsCellView,
@@ -255,6 +262,164 @@ export function elapsedHintFixture(
 /** F-16.23: the Timeline. */
 export function timelineFixture(over: Partial<TimelineMemory> = {}): TimelineMemory {
   return { recordId: null, rows: [], ...over }
+}
+
+/** F-16.27: a book side of a finding: Mara's eyes in a scene, narration now. */
+export function findingSideFixture(
+  value: string,
+  ref: string,
+  nodeId: string,
+  over: Partial<FindingSideView> = {}
+): FindingSideView {
+  return {
+    kind: 'claim',
+    ref,
+    nodeId,
+    para: 0,
+    quote: `Mara's eyes were ${value}`,
+    value,
+    voice: 'narration',
+    mode: 'now',
+    label: ref,
+    open: { kind: 'scene', id: nodeId, para: 0 },
+    ...over
+  }
+}
+
+/** F-16.27: an open C1 finding: Mara Vell's eyes grey in 1.1 (sc-1), brown in 1.2 (sc-2). */
+export function findingViewFixture(id: string, over: Partial<FindingView> = {}): FindingView {
+  return {
+    id,
+    rule: 'C1',
+    variant: null,
+    recordId: 'r-mara',
+    name: 'Mara Vell',
+    slot: 'eyes',
+    slotLabel: 'Eyes',
+    a: findingSideFixture('grey', '1.1', 'sc-1'),
+    b: findingSideFixture('brown', '1.2', 'sc-2'),
+    state: 'open',
+    verdictAb: 'c',
+    verdictBa: 'c',
+    confirmed: false,
+    why: 'grey eyes against brown',
+    costUsd: 0.0002,
+    actions: { right: { a: true, b: true }, updateNote: false, notFlashback: null },
+    ...over
+  }
+}
+
+/**
+ * F-16.29: a C6 note conflict: Orrin's Pinned page says born 1790; the book says 1792 in 1.1
+ * (sc-1), narration now, so *Update my note* is offered.
+ */
+export function noteFindingFixture(id: string, over: Partial<FindingView> = {}): FindingView {
+  return findingViewFixture(id, {
+    rule: 'C6',
+    recordId: 'r-orrin',
+    name: 'Orrin',
+    slot: 'born',
+    slotLabel: 'Born',
+    a: findingSideFixture('1792', '1.1', 'sc-1', { quote: 'Orrin was born in 1792' }),
+    b: {
+      kind: 'note',
+      ref: 'Orrin',
+      nodeId: null,
+      para: 0,
+      quote: 'Born: 1790',
+      value: '1790',
+      voice: null,
+      mode: null,
+      label: 'Orrin’s Pinned page',
+      open: { kind: 'record', id: 'r-orrin', para: 0 }
+    },
+    actions: { right: { a: false, b: false }, updateNote: true, notFlashback: null },
+    ...over
+  })
+}
+
+/** F-16.27: what `memory:findings` answers (the check on, nothing waiting). */
+export function findingsViewFixture(over: Partial<FindingsView> = {}): FindingsView {
+  return {
+    on: true,
+    open: [],
+    unclear: [],
+    counts: { unjudged: 0, held: 0, hidden: 0, open: 0, unclear: 0, fine: 0 },
+    waiting: 0,
+    judging: false,
+    scene: null,
+    ...over
+  }
+}
+
+/** F-16.29: a planned card left before the furthest drafted scene. */
+export function looseEndFixture(over: Partial<LooseEnd> = {}): LooseEnd {
+  return {
+    kind: 'planned',
+    id: 'sc-plan',
+    name: 'The duel at dawn',
+    lastRef: null,
+    lastNodeId: null,
+    horizonRef: '1.2',
+    checkedUpTo: { nodeId: 'sc-2', ref: '1.2' },
+    ask: "Which drafted scene covers the plan 'The duel at dawn'?",
+    ...over
+  }
+}
+
+/** F-16.29: Needs a look's Loose ends. */
+export function looseEndsFixture(over: Partial<LooseEndsView> = {}): LooseEndsView {
+  return {
+    items: [],
+    more: 0,
+    furthest: { nodeId: 'sc-2', ref: '1.2' },
+    checkedUpTo: { nodeId: 'sc-2', ref: '1.2' },
+    ...over
+  }
+}
+
+/** F-16.30: a check's price: two confirmations due, no new pairs, on an own key. */
+export function checkEstimateFixture(over: Partial<CheckEstimate> = {}): CheckEstimate {
+  return {
+    free: false,
+    pairs: 2,
+    uncached: 0,
+    fastCalls: 0,
+    confirms: { about: 2, most: 2 },
+    aboutUsd: 0.0004,
+    mostUsd: 0.0006,
+    priced: true,
+    hidden: 0,
+    unreadScenes: [],
+    cloud: false,
+    fastModel: 'deepseek-v4-flash',
+    strongModel: 'deepseek-v4-pro',
+    ...over
+  }
+}
+
+/** F-16.30: a check's report: one finding confirmed, nothing hidden. */
+export function checkReportFixture(over: Partial<CheckReport> = {}): CheckReport {
+  return {
+    at: '2026-10-14T10:00:00.000Z',
+    draftId: 'd-1',
+    costUsd: 0.0005,
+    stopped: false,
+    found: [findingViewFixture('f-1', { confirmed: true })],
+    unclear: [],
+    cleared: [],
+    confirmed: 1,
+    checked: {
+      pairs: 2,
+      byRule: { C1: 1, C2: 0, C3: 0, C4: 0, C5: 0, C6: 1, C7: 0 },
+      scenes: 2,
+      notes: 1
+    },
+    notChecked: { fixed: [...CHECK_NOT_COVERED], unreadScenes: [], pastConfirm: 0, unjudged: 0 },
+    hidden: [],
+    secretsNobodyLearns: [],
+    ...over
+  }
 }
 
 export function memoryStatusFixture(over: Partial<MemoryStatus> = {}): MemoryStatus {

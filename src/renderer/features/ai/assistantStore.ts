@@ -108,7 +108,10 @@ import { confirmLine } from '@renderer/features/editPass/passQuote'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { instantCardText } from './instantCardText'
 import { proposalStore } from './proposalStore'
-import { sceneContradictionsAnswer } from '@renderer/features/memory/needsALook/findingView'
+import {
+  contradictionsText,
+  contradictionsTurnOf
+} from '@renderer/features/memory/needsALook/findingView'
 import { currentStoryMemory } from '@renderer/features/project/storyMemory'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 
@@ -399,7 +402,8 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   edit: null,
   card: null,
   scribe: null,
-  costParts: null
+  costParts: null,
+  contradictions: null
 })
 
 /** Records one lookup of an agent turn on its way, under the request it belongs to. */
@@ -1291,16 +1295,21 @@ async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
   const navigation = routed.navigation ?? null
   const prior = routed.prior ?? null
   if (action === 'continuity' && currentStoryMemory() === 'v2') {
-    // P4-D23: answered locally from the open scene's findings; nothing is sent.
+    // P4-D23: answered locally from the open scene's findings; nothing is sent. The turn's text
+    // holds positive lines only (it rides along as history); the chat draws the scoped ones from
+    // `contradictions` (`ContradictionsTurn.tsx`).
     patchLastTurn(id, { action })
-    let content: string
     try {
       const view = await ipc().invoke('memory:findings', { nodeId })
-      content = sceneContradictionsAnswer(view, nodeId)
+      const contradictions = contradictionsTurnOf(view, nodeId)
+      finishTurn(
+        id,
+        { content: contradictionsText(contradictions), contradictions, ...cost },
+        false
+      )
     } catch (err) {
-      content = describeError(err)
+      finishTurn(id, { content: describeError(err), ...cost }, false)
     }
-    finishTurn(id, { content, ...cost }, false)
     return
   }
   switch (action) {

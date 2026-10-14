@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EditPassSummary } from '@shared/editPass'
 import { IDLE_INDEX_QUEUE } from '@shared/jobs'
-import type { RebuildProgress } from '@shared/memory/views'
+import type { CheckProgress, RebuildProgress } from '@shared/memory/views'
 import { contextReviewFixture } from '@renderer/features/library/libraryFixture'
 import { checkOutcome } from '@renderer/features/todo/todoStore'
 import {
@@ -59,7 +59,7 @@ function snapshot(over: Partial<ActivitySnapshot> = {}): ActivitySnapshot {
     continuity: { running: null, outcome: null, error: null, viewOpen: false },
     conversion: { rereading: false },
     queue: IDLE_INDEX_QUEUE,
-    memory: { rebuild: null, dialogOpen: false },
+    memory: { rebuild: null, dialogOpen: false, check: null, checkOpen: false },
     ...over
   }
 }
@@ -352,7 +352,9 @@ describe('Rebuild memory as a job (F-16.19)', () => {
   })
 
   it('runs with its scenes as steps, and says it finished with Open', () => {
-    const running = snapshot({ memory: { rebuild: progress(), dialogOpen: false } })
+    const running = snapshot({
+      memory: { rebuild: progress(), dialogOpen: false, check: null, checkOpen: false }
+    })
     const [job] = readJobs(running)
     expect(job).toEqual({
       key: 'rebuild:2026-10-12T10:00:00.000Z',
@@ -364,7 +366,9 @@ describe('Rebuild memory as a job (F-16.19)', () => {
     const done = snapshot({
       memory: {
         rebuild: progress({ done: 12, finishedAt: '2026-10-12T10:05:00.000Z' }),
-        dialogOpen: false
+        dialogOpen: false,
+        check: null,
+        checkOpen: false
       }
     })
     expect(readJobs(done)).toEqual([])
@@ -390,14 +394,91 @@ describe('Rebuild memory as a job (F-16.19)', () => {
       parked: false
     }
     const finished = progress({ finishedAt: '2026-10-12T10:05:00.000Z' })
-    expect(noteStale(note, snapshot({ memory: { rebuild: finished, dialogOpen: false } }))).toBe(
-      false
-    )
-    expect(noteStale(note, snapshot({ memory: { rebuild: finished, dialogOpen: true } }))).toBe(
-      true
-    )
-    expect(noteStale(note, snapshot({ memory: { rebuild: progress(), dialogOpen: false } }))).toBe(
-      true
-    )
+    expect(
+      noteStale(
+        note,
+        snapshot({
+          memory: { rebuild: finished, dialogOpen: false, check: null, checkOpen: false }
+        })
+      )
+    ).toBe(false)
+    expect(
+      noteStale(
+        note,
+        snapshot({ memory: { rebuild: finished, dialogOpen: true, check: null, checkOpen: false } })
+      )
+    ).toBe(true)
+    expect(
+      noteStale(
+        note,
+        snapshot({
+          memory: { rebuild: progress(), dialogOpen: false, check: null, checkOpen: false }
+        })
+      )
+    ).toBe(true)
+  })
+})
+
+describe('Check the book as a job (F-16.30)', () => {
+  const progress = (over: Partial<CheckProgress> = {}): CheckProgress => ({
+    startedAt: '2026-10-14T10:00:00.000Z',
+    finishedAt: null,
+    judged: 2,
+    toJudge: 6,
+    confirmed: 0,
+    toConfirm: 2,
+    ...over
+  })
+  const memory = (check: CheckProgress | null, checkOpen = false): ActivitySnapshot['memory'] => ({
+    rebuild: null,
+    dialogOpen: false,
+    check,
+    checkOpen
+  })
+
+  it('runs with its pairs and confirmations as steps, and says it finished with Open', () => {
+    const running = snapshot({ memory: memory(progress()) })
+    const [job] = readJobs(running)
+    expect(job).toEqual({
+      key: 'checkBook:2026-10-14T10:00:00.000Z',
+      kind: 'checkBook',
+      name: 'Check the book',
+      steps: { done: 2, total: 8 },
+      ref: null
+    })
+    // Nothing to judge or confirm: the bar estimates.
+    expect(
+      readJobs(snapshot({ memory: memory(progress({ toJudge: 0, toConfirm: 0, judged: 0 })) }))[0]
+        ?.steps
+    ).toBeNull()
+    const done = snapshot({
+      memory: memory(progress({ judged: 6, confirmed: 2, finishedAt: '2026-10-14T10:01:00.000Z' }))
+    })
+    expect(readJobs(done)).toEqual([])
+    expect(outcomeOf(job!, done)).toMatchObject({
+      status: 'done',
+      title: 'Check the book finished',
+      detail: 'Judged 6 pairs; 2 confirmed by a stronger AI read.',
+      canOpen: true
+    })
+    expect(outcomeOf(job!, running)).toBeNull()
+  })
+
+  it('drops its note once the report shows or another check runs', () => {
+    const note: ActivityNote = {
+      id: 'n',
+      kind: 'checkBook',
+      status: 'done',
+      title: 'Check the book finished',
+      detail: null,
+      ref: null,
+      canOpen: true,
+      canRetry: false,
+      parked: false
+    }
+    const finished = progress({ finishedAt: '2026-10-14T10:01:00.000Z' })
+    expect(noteStale(note, snapshot({ memory: memory(finished) }))).toBe(false)
+    expect(noteStale(note, snapshot({ memory: memory(finished, true) }))).toBe(true)
+    expect(noteStale(note, snapshot({ memory: memory(progress()) }))).toBe(true)
   })
 })

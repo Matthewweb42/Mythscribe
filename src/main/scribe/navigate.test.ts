@@ -157,6 +157,23 @@ describe('no request (F-16.24): a typed action, an instant card, a lookup handed
     expect(complete).not.toHaveBeenCalled()
   })
 
+  it('takes the consistency check’s own words as its action, with no request (P4-D23)', async () => {
+    for (const message of [
+      'Check this scene for consistency',
+      'check this scene for continuity slips.',
+      'Check consistency'
+    ]) {
+      const result = await run({ message })
+      expect(result).toMatchObject({
+        kind: 'route',
+        decision: { action: 'continuity', instruction: null, edit: null },
+        routedBy: 'local',
+        costUsd: 0
+      })
+    }
+    expect(complete).not.toHaveBeenCalled()
+  })
+
   it('answers "Mara’s eyes?" with an instant card and no AI call', async () => {
     const [claimId] = grey()
     const before = tableRows()

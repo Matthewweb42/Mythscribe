@@ -221,6 +221,7 @@ const message = (
   card: null,
   scribe: null,
   costParts: null,
+  contradictions: null,
   ...over
 })
 
@@ -1447,9 +1448,7 @@ describe('AssistantPanel Ms Scribe turns (F-16.24, F-16.25; story memory v2)', (
     })
     const [, card, , scribe, , v1] = turns()
     // The instant card: drawn from the turn's card, with its mark and no cost line (no request).
-    expect(within(card!).getByTestId('instant-card')).toHaveTextContent(
-      'Eyes: grey (1.1)'
-    )
+    expect(within(card!).getByTestId('instant-card')).toHaveTextContent('Eyes: grey (1.1)')
     expect(within(card!).getByTestId('instant-card-label')).toHaveTextContent(
       'Read by AI from your book · quote checked · no AI call now'
     )

@@ -50,7 +50,8 @@ describe('chat model (F-5.4)', () => {
               edit: null,
               card: null,
               scribe: null,
-              costParts: null
+              costParts: null,
+              contradictions: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',
@@ -110,7 +111,8 @@ describe('chat model (F-5.4)', () => {
       edit: null,
       card: null,
       scribe: null,
-      costParts: null
+      costParts: null,
+      contradictions: null
     })
     const conversation = (id: string, messages: Record<string, unknown>[]): unknown => ({
       id,
@@ -336,7 +338,8 @@ describe('chat model (F-5.4)', () => {
               edit: null,
               card: null,
               scribe: null,
-              costParts: null
+              costParts: null,
+              contradictions: null
               // no `usage` field at all, as a turn written before F-5.9 has.
             }
           ],
@@ -376,7 +379,8 @@ describe('chat model (F-5.4)', () => {
               edit: null,
               card: null,
               scribe: null,
-              costParts: null
+              costParts: null,
+              contradictions: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',

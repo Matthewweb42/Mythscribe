@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { AiFeatureId } from './ai'
+import { memoryLocalRoute } from './assistantRoute'
 import {
   SUGGESTION_MAX_CHARS,
   assistantSuggestions,
   type SuggestionContext
 } from './assistantSuggestions'
+
+/** An open scene with nothing selected, as the navigator sees it. */
+const SCENE = { hasNode: true, hasSelection: false }
 
 const EVERYTHING: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
   'chat',
@@ -169,6 +173,10 @@ describe('assistantSuggestions', () => {
         )
       )
     ).toContain('Check this scene for continuity slips')
+    // P4-D23: the navigator takes those words itself, with no request.
+    expect(memoryLocalRoute('Check this scene for continuity slips', SCENE)).toMatchObject({
+      action: 'continuity'
+    })
     expect(
       assistantSuggestions(context({ allowed: EVERYTHING, characters: ['Mara'] }), 0)
     ).not.toContain("Mara's eyes?")

@@ -113,11 +113,17 @@ export function noticeLine(notice: MemoryNotice): string {
   }
 }
 
-/** A notice's buttons: an action main takes, or one the renderer does itself. */
+/**
+ * A notice's buttons: an action main takes, or one the renderer does itself (Settings, decision
+ * 4's *Update my detail*, F-16.29's *Review* of a rebuild's grouped summary, F-16.30's *Check the
+ * book…* for pairs waiting for it).
+ */
 export type NoticeButton =
   | { kind: 'answer'; action: MemoryNoticeAction; label: string }
   | { kind: 'settings'; label: string }
   | { kind: 'updateDetail'; label: string }
+  | { kind: 'review'; label: string }
+  | { kind: 'checkBook'; label: string }
 
 /** A notice's buttons, in order. */
 export function noticeButtons(notice: MemoryNotice): NoticeButton[] {
@@ -149,9 +155,9 @@ export function noticeButtons(notice: MemoryNotice): NoticeButton[] {
     case 'detailConflict':
       return [{ kind: 'updateDetail', label: 'Update my detail' }, answer('keepMine', 'Keep mine')]
     case 'rebuildDone':
-      return [answer('dismiss', 'Done')]
+      return [{ kind: 'review', label: 'Review' }, answer('dismiss', 'Done')]
     case 'findingsWaiting':
-      return [answer('dismiss', 'Not now')]
+      return [{ kind: 'checkBook', label: 'Check the book…' }, answer('dismiss', 'Not now')]
   }
 }
 

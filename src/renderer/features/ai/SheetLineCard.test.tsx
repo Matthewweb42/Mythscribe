@@ -61,7 +61,8 @@ const turn = (
   edit: null,
   card: null,
   scribe: null,
-  costParts: null
+  costParts: null,
+  contradictions: null
 })
 
 const STORED: Conversation = {

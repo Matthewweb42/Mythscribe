@@ -39,7 +39,7 @@ import { useTagStore } from '@renderer/features/tags/tagStore'
 import { useFactStore } from '@renderer/features/entities/factStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
-import { pageKey, usePageStore } from '@renderer/features/research/pageStore'
+import { pageKey, PAGE_WRITE_TRIES, writeBehindPage } from '@renderer/features/research/pageStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useTodoStore } from '@renderer/features/todo/todoStore'
@@ -412,39 +412,19 @@ export async function applyAgentEdit(
 export const SHEET_PLACE_FIRST = 'Pick Idea or Canon first'
 
 /** How many times a sheet line is written again while the author keeps typing on its page. */
-export const SHEET_WRITE_TRIES = 3
+export const SHEET_WRITE_TRIES = PAGE_WRITE_TRIES
 
 /** What the change says when the author kept typing on the page through every try. */
 export const SHEET_BUSY = 'The sheet was being edited; ask again in a moment'
 
-/**
- * Writes behind the page store (the one writer of an open page): flush the author's typing, run
- * `write` in main, then read the page again (`reload`, which drops the store's draft of it). When
- * she typed on that page while `write` was on the wire, her draft predates the write: it is saved
- * first (her words win) and `write` runs again on the saved text, at most `SHEET_WRITE_TRIES`
- * times; then her draft is saved and the write given up (`SHEET_BUSY`), never her words.
- */
-async function writeBehindPage<R>(key: string, write: () => Promise<R>): Promise<R> {
-  const pages = usePageStore.getState
-  for (let tries = 1; ; tries++) {
-    await pages().flush()
-    const result = await write()
-    // Nothing was typed on the page meanwhile: the reload drops no words of hers.
-    if (pages().docs[key]?.dirty !== true) {
-      await pages().reload([key])
-      return result
-    }
-    if (tries >= SHEET_WRITE_TRIES) {
-      await pages().flush()
-      throw new AgentEditError(SHEET_BUSY)
-    }
-  }
-}
+/** A sheet line written behind the page store (`writeBehindPage`), given up with `SHEET_BUSY`. */
+const writeSheetLine = <R>(key: string, write: () => Promise<R>): Promise<R> =>
+  writeBehindPage(key, write, () => new AgentEditError(SHEET_BUSY))
 
 /**
  * F-16.26 (decision 3 as the author changed it): one line on a record's Pinned or Ideas page,
  * through `record:addLine` (main marks it `aiWritten` with the turn), written behind the page
- * store (`writeBehindPage`): the author's unsaved typing is saved first, the line lands after it,
+ * store (`writeBehindPage` in the page store): the author's unsaved typing is saved first, the line lands after it,
  * and an open page is read again, so the sheet shows the line; typing on that page during the
  * write is saved and the line written again after it. A Pinned line that contradicts one the sheet
  * already holds lands as asked, and the change says which. The Undo takes the line out through
@@ -457,7 +437,7 @@ async function applySheetLine(
   const place = edit.place
   if (place === null) throw new AgentEditError(SHEET_PLACE_FIRST)
   const key = pageKey({ kind: place, id: edit.recordId })
-  const added = await writeBehindPage(key, () =>
+  const added = await writeSheetLine(key, () =>
     ipc().invoke('record:addLine', {
       id: edit.recordId,
       page: place,
@@ -469,7 +449,7 @@ async function applySheetLine(
     onNotice(`It contradicts “${added.conflict.text}” on the sheet; both lines are there now.`)
   }
   return async () => {
-    await writeBehindPage(key, () =>
+    await writeSheetLine(key, () =>
       ipc().invoke('record:removeLine', {
         id: edit.recordId,
         page: place,

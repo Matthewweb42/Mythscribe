@@ -22,7 +22,7 @@ import {
 /**
  * The background activity in the renderer (F-7.12). The job stores own every fact (Organise's
  * phase, the upload's flow and progress, the edit passes, the To do check, the consistency check,
- * the conversion's re-read, story memory's *Rebuild memory*); `startActivityWatch` derives the running jobs from them on every
+ * the conversion's re-read, story memory's *Rebuild memory* and *Check the book*); `startActivityWatch` derives the running jobs from them on every
  * change (`readJobs`) and keeps here only what none of them holds: when each job was first seen
  * and last moved (for the crawl), the jobs that just ended (the bar fills and fades), and the
  * drop notifications with their focus-mode parking. `jobs` is the watch's last reading, written
@@ -110,7 +110,9 @@ export function readSnapshot(): ActivitySnapshot {
     queue: useIndexingStore.getState().status,
     memory: {
       rebuild: useMemoryStore.getState().status?.rebuild ?? null,
-      dialogOpen: useMemoryStore.getState().rebuildOpen !== null
+      dialogOpen: useMemoryStore.getState().rebuildOpen !== null,
+      check: useMemoryStore.getState().status?.check ?? null,
+      checkOpen: useMemoryStore.getState().checkOpen !== null
     }
   }
 }

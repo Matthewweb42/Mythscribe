@@ -219,3 +219,35 @@ export function localRoute(message: string, situation: RouteSituation): RouteDec
     ? null
     : settleRoute({ action, instruction: null, edit: null }, situation)
 }
+
+/**
+ * P4-D23 (story memory v2, decided by Claude in P4 slice 4, unconfirmed): the consistency check's
+ * own words, as the chat's suggestion and the turn's label give them, any case and trailing
+ * punctuation ignored. In v2 the check is answered locally from the open scene's findings, so a
+ * request to the navigator only to reach a free answer would cost for nothing.
+ */
+export const CONTINUITY_PHRASES: readonly string[] = [
+  'Check this scene for consistency',
+  'Check this scene for continuity slips',
+  ROUTE_ACTION_LABEL.continuity
+]
+
+const phraseKey = (text: string): string =>
+  text
+    .trim()
+    .replace(/[\s.!?]+$/u, '')
+    .replace(/\s+/gu, ' ')
+    .toLowerCase()
+
+/**
+ * The navigator's request-free decision (F-16.25, story memory v2): `localRoute`'s, then one of
+ * `CONTINUITY_PHRASES` is the consistency check. v1's router keeps `localRoute` alone.
+ */
+export function memoryLocalRoute(message: string, situation: RouteSituation): RouteDecision | null {
+  const local = localRoute(message, situation)
+  if (local !== null) return local
+  const key = phraseKey(message)
+  return CONTINUITY_PHRASES.some((phrase) => phraseKey(phrase) === key)
+    ? settleRoute({ action: 'continuity', instruction: null, edit: null }, situation)
+    : null
+}

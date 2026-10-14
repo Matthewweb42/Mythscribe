@@ -4,6 +4,7 @@ import { AiUsage } from './ai'
 import type { AssistantMode } from './aiSettings'
 import { RouteAction } from './assistantRoute'
 import { EditTurn } from './editRequest'
+import { FindingView } from './memory/findings'
 import { QueryTurn } from './query'
 import { InstantCard, ScribeTurn } from './scribe'
 import { toTagName } from './tags'
@@ -108,6 +109,27 @@ export const CostPart = z.object({
 })
 export type CostPart = z.infer<typeof CostPart>
 
+/** The most findings one consistency turn keeps (the open scene's; more are rare). */
+export const CONTRADICTIONS_TURN_MAX = 20
+
+/**
+ * P4-D23 (story memory v2): the chat's local answer to "Check this scene for consistency", as it
+ * stood: the open scene's open findings, and what was not checked (the Contradiction check off,
+ * the scene or some of its sentences not read yet, pairs waiting for a verdict or being judged).
+ * The chat draws the scoped lines from this (`ContradictionsTurn.tsx`); the turn's text holds
+ * positive lines only, since it rides along with later requests as history (rule 5: absence is
+ * never a fact).
+ */
+export const ContradictionsTurn = z.object({
+  nodeId: z.string().nullable(),
+  on: z.boolean(),
+  scene: z.object({ read: z.boolean(), unread: z.number().int().nonnegative() }).nullable(),
+  waiting: z.number().int().nonnegative(),
+  judging: z.boolean(),
+  findings: z.array(FindingView).max(CONTRADICTIONS_TURN_MAX)
+})
+export type ContradictionsTurn = z.infer<typeof ContradictionsTurn>
+
 export const ChatRole = z.enum(['user', 'assistant'])
 export type ChatRole = z.infer<typeof ChatRole>
 
@@ -168,7 +190,12 @@ export const ChatMessage = z.object({
    * navigator, the answer, the quote check), in that order; null for every other turn and for rows
    * written before it.
    */
-  costParts: z.array(CostPart).max(COST_PARTS.length).nullable().catch(null).default(null)
+  costParts: z.array(CostPart).max(COST_PARTS.length).nullable().catch(null).default(null),
+  /**
+   * P4-D23 (story memory v2): a consistency check answered locally from the open scene's
+   * findings, no request; null for every other turn and for rows written before it.
+   */
+  contradictions: ContradictionsTurn.nullable().catch(null).default(null)
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
 

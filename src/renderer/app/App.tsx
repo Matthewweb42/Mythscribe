@@ -108,6 +108,7 @@ import { useFilingStore } from '@renderer/features/research/filingStore'
 import { useFiledConflictStore } from '@renderer/features/thisScene/filedConflictStore'
 import { useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { RebuildDialog } from '@renderer/features/memory/RebuildMemory'
+import { CheckBookDialog } from '@renderer/features/memory/checkBook/CheckBook'
 import { startReaderTriggers, stopReaderTriggers } from '@renderer/features/memory/readerTriggers'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { EditPassReport } from '@renderer/features/editPass/EditPassReport'
@@ -470,6 +471,11 @@ export function App(): React.JSX.Element {
       startReaderTriggers()
       useMemoryStore.getState().subscribe()
       useMemoryStore.getState().load().catch(failed)
+      // F-16.27, F-16.29, F-16.30: Needs a look's contradictions and loose ends, and the last
+      // Check the book's report.
+      useMemoryStore.getState().loadFindings().catch(failed)
+      useMemoryStore.getState().loadLooseEnds().catch(failed)
+      useMemoryStore.getState().loadCheckReport().catch(failed)
     }
     useEditorSettingsStore
       .getState()
@@ -1162,6 +1168,7 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       {v2 ? <DismissedDialog /> : null}
       {/* F-16.19: Rebuild memory's price, progress and summary (v2). */}
       {v2 ? <RebuildDialog /> : null}
+      {v2 ? <CheckBookDialog /> : null}
       {/* F-7.12: the long jobs' finished / failed drops, and Open's big review dialog. */}
       <ActivityWatch />
       <ActivityDrops />

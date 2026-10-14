@@ -1,7 +1,7 @@
 import { isFeatureAllowed } from '@shared/aiSettings'
 import type { AgentFocus, AgentStep } from '@shared/agent'
 import {
-  localRoute,
+  memoryLocalRoute,
   ROUTE_HISTORY_TURNS,
   ROUTE_MESSAGE_CHARS,
   ROUTE_SELECTION_PREVIEW_CHARS,
@@ -69,7 +69,8 @@ import { runNavigatorTool, type NavigatorWorld } from './tools'
 
 /**
  * Ms Scribe's navigation (F-16.24, F-16.25; plan P3 §4.3, design §2.6): what one v2 chat message
- * gets before the answer. A typed action needs no request (`localRoute`). Then Step 0 (local): a
+ * gets before the answer. A typed action, or the consistency check's own words (P4-D23: answered
+ * locally from the findings), needs no request (`memoryLocalRoute`). Then Step 0 (local): a
  * question the memory answers is an **instant card** with no AI call, after reading the latest
  * change first when an unread sentence bears on it (one reader request, *Read now*'s path); a stale
  * or contested value goes to Ms Scribe as a lookup turn with that slot's evidence, with no
@@ -433,7 +434,7 @@ export async function runNavigate(
   const document = row !== undefined && row.parentId !== null && row.kind === 'document'
   const selection = input.focus.selection.replace(/\s+/gu, ' ').trim()
   const situation: RouteSituation = { hasNode: document, hasSelection: selection !== '' }
-  const local = localRoute(input.message, situation)
+  const local = memoryLocalRoute(input.message, situation)
   if (local !== null) {
     return { kind: 'route', decision: local, routedBy: 'local', ...NONE }
   }

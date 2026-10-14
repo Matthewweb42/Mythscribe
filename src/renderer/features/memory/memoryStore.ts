@@ -1,9 +1,18 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
+import type { FindingView } from '@shared/memory/findings'
 import type {
   CardNotRight,
+  CheckEstimate,
+  CheckReport,
+  CheckStartResult,
   ClaimView,
+  FindingAction,
+  FindingActionResult,
+  FindingsView,
   KnowsGrid,
+  LooseEnd,
+  LooseEndsView,
   MemoryNotice,
   MemoryNoticeAction,
   MemoryStatus,
@@ -50,10 +59,58 @@ import { ipc } from '@renderer/lib/ipc'
  * moved and when a Pinned "Born:" line changed) or roster change, as the grids are. A name-index
  * change reads again the sheets with Threads (their steps are matched by name). The Timeline's
  * *Ages of* choice (`agesOf`) lives here, so it outlives the Book tab each scene remounts.
+ *
+ * F-16.27, F-16.29, F-16.30 (P4 slice 4): the active draft's contradictions (`findings`, by id,
+ * the open and the unclear in main's order), Needs a look's Loose ends (`looseEnds`) and *Check the
+ * book* (`check`: its price, worked out when the dialog opens, and the last report), loaded on a v2
+ * open and read again when main says they moved: `memory:findingsChanged` (the findings, and the
+ * report, which reads them again), `memory:changed` (both: a reading moves a side's words and the
+ * threads and names behind a loose end), `names:changed` (a character's last naming) and the
+ * status pushing a finished check (the report). Each is read again only once loaded, so a view
+ * that never shows them asks for nothing. The answers on a finding (*Not a problem*, *This one's
+ * right*) and on a loose end take it away at once and add their Dismissed row; *This one's right*
+ * leaves a short line (`rightMarks`) with *Go there* and *Undo* until it is closed.
  */
 
 /** A scene's memory as stored here: its lines by id. */
 export type SceneEntry = Omit<SceneMemory, 'claims'> & { claimIds: string[] }
+
+/** F-16.27, F-16.29: the active draft's contradictions as Needs a look shows them. */
+export interface FindingsEntry {
+  byId: Record<string, FindingView>
+  /** The open findings, in main's order (by rule, then reading order). */
+  open: string[]
+  /** The unclear ones (shown muted, never counted). */
+  unclear: string[]
+  /** The Contradiction check switch: off, nothing is listed and nothing was judged. */
+  on: boolean
+  /** Pairs waiting for a verdict. */
+  waiting: number
+  /** A judge or check run is queued or running. */
+  judging: boolean
+}
+
+/** F-16.30: *Check the book*'s price (read when its dialog opens) and its last report. */
+export interface CheckEntry {
+  estimate: CheckEstimate | null
+  /** Null before any check, or before it was read. */
+  report: CheckReport | null
+}
+
+/**
+ * F-16.27 (P4-D17): a *This one's right* answered this session: "Marked 'brown' (1.2) not right",
+ * with *Go there* (the scene to fix the prose in) and *Undo* (its Dismissed row).
+ */
+export interface RightMark {
+  findingId: string
+  /** The side marked not right: its value, its scene's reference and node, its quote. */
+  value: string
+  ref: string
+  nodeId: string | null
+  quote: string
+  /** The Dismissed row *Undo* deletes. */
+  dismissedId: string | null
+}
 
 interface MemoryState {
   claims: Record<string, ClaimView>
@@ -79,6 +136,41 @@ interface MemoryState {
    */
   rebuildOpen: 'start' | 'summary' | null
   setRebuildOpen: (open: 'start' | 'summary' | null) => void
+  /** F-16.27: the active draft's contradictions; null until read. */
+  findings: FindingsEntry | null
+  /** F-16.29: Needs a look's Loose ends; null until read. */
+  looseEnds: LooseEndsView | null
+  /** F-16.30: *Check the book*'s price and last report. */
+  check: CheckEntry
+  /** F-16.30: the *Check the book* dialog: closed, opened to start one (price first), or on the report. */
+  checkOpen: 'start' | 'report' | null
+  setCheckOpen: (open: 'start' | 'report' | null) => void
+  /** F-16.27: the *This one's right* answers of this session, newest first. */
+  rightMarks: RightMark[]
+  /** F-16.27: the active draft's findings (`memory:findings`, local and free). */
+  loadFindings: () => Promise<void>
+  /** F-16.29: Needs a look's Loose ends (`memory:looseEnds`, local and free). */
+  loadLooseEnds: () => Promise<void>
+  /** F-16.30: the last *Check the book*'s report. */
+  loadCheckReport: () => Promise<void>
+  /** F-16.30: *Check the book*'s price now (nothing is sent); null when the call failed (toasted). */
+  estimateCheck: () => Promise<CheckEstimate | null>
+  /**
+   * F-16.30: *Check the book*, confirmed with its price (`nodeId`: the open scene, confirmed first).
+   * Pending saves are flushed first. Null when the call itself failed (toasted).
+   */
+  startCheck: (nodeId: string | null) => Promise<CheckStartResult | null>
+  /**
+   * F-16.27: *Not a problem* or *This one's right* on a finding: the finding goes from what is
+   * shown at once and its Dismissed row joins the list. Null when main refused (toasted).
+   */
+  findingAction: (action: FindingAction) => Promise<FindingActionResult | null>
+  /** F-16.29: *Not a problem* on a loose end; answers whether main took it. */
+  looseEndNotProblem: (end: LooseEnd) => Promise<boolean>
+  /** F-16.27: closes a *This one's right* line. */
+  dropRightMark: (findingId: string) => void
+  /** F-16.27: *Undo* on a *This one's right* line: its Dismissed row goes, the finding comes back. */
+  undoRightMark: (findingId: string) => Promise<boolean>
   /** The status, the notices and the card lines (what a v2 open loads). */
   load: () => Promise<void>
   loadCardLines: () => Promise<void>
@@ -131,6 +223,10 @@ export const knowsKey = (asOf: string | null): string => asOf ?? ''
 export const timelineKey = (recordId: string | null): string => recordId ?? ''
 
 let generation = 0
+/** The last read of each whole list asked for: an older answer landing later is dropped. */
+let findingsSeq = 0
+let looseSeq = 0
+let reportSeq = 0
 let counter = 0
 const nextRequestId = (): string => `mem-${Date.now().toString(36)}-${++counter}`
 const sceneWatchers = new Map<string, number>()
@@ -203,6 +299,34 @@ const readsWholeBook = (sheet: SheetMemory | undefined): boolean =>
   sheet !== undefined &&
   (sheet.knows !== null || sheet.topic !== null || sheet.threads !== null || sheet.age !== null)
 
+/** `memory:findings`'s answer as the store keeps it. */
+function findingsEntry(view: FindingsView): FindingsEntry {
+  const byId: Record<string, FindingView> = {}
+  for (const finding of [...view.open, ...view.unclear]) byId[finding.id] = finding
+  return {
+    byId,
+    open: view.open.map((finding) => finding.id),
+    unclear: view.unclear.map((finding) => finding.id),
+    on: view.on,
+    waiting: view.waiting,
+    judging: view.judging
+  }
+}
+
+/** The findings without one (answered: it closed in main). */
+function withoutFinding(entry: FindingsEntry, findingId: string): FindingsEntry {
+  const byId = { ...entry.byId }
+  delete byId[findingId]
+  return {
+    ...entry,
+    byId,
+    open: entry.open.filter((id) => id !== findingId),
+    unclear: entry.unclear.filter((id) => id !== findingId)
+  }
+}
+
+const NO_CHECK: CheckEntry = { estimate: null, report: null }
+
 export const useMemoryStore = create<MemoryState>((set, get) => {
   /** Reads again every shown scene and sheet that `pick` chooses. */
   const refresh = (
@@ -237,6 +361,11 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
     notices: [],
     cardLines: {},
     rebuildOpen: null,
+    findings: null,
+    looseEnds: null,
+    check: NO_CHECK,
+    checkOpen: null,
+    rightMarks: [],
 
     setAgesOf(recordId) {
       if (get().agesOf !== recordId) set({ agesOf: recordId })
@@ -244,6 +373,137 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
 
     setRebuildOpen(open) {
       if (get().rebuildOpen !== open) set({ rebuildOpen: open })
+    },
+
+    setCheckOpen(open) {
+      if (get().checkOpen !== open) set({ checkOpen: open })
+    },
+
+    async loadFindings() {
+      const mine = generation
+      const seq = ++findingsSeq
+      const view = await ipc().invoke('memory:findings', { nodeId: null })
+      if (mine !== generation || seq !== findingsSeq) return
+      set({ findings: findingsEntry(view) })
+    },
+
+    async loadLooseEnds() {
+      const mine = generation
+      const seq = ++looseSeq
+      const looseEnds = await ipc().invoke('memory:looseEnds', undefined)
+      if (mine !== generation || seq !== looseSeq) return
+      set({ looseEnds })
+    },
+
+    async loadCheckReport() {
+      const mine = generation
+      const seq = ++reportSeq
+      const last = await ipc().invoke('memory:checkReport', undefined)
+      if (mine !== generation || seq !== reportSeq) return
+      set({ check: { ...get().check, report: last } })
+    },
+
+    async estimateCheck() {
+      const mine = generation
+      try {
+        const estimate = await ipc().invoke('memory:checkEstimate', undefined)
+        if (mine === generation) set({ check: { ...get().check, estimate } })
+        return estimate
+      } catch (err) {
+        report(err)
+        return null
+      }
+    },
+
+    async startCheck(nodeId) {
+      try {
+        // The check reads the saved book: the words typed just before go first.
+        await flushPendingSaves()
+        return await ipc().invoke('memory:checkBook', { nodeId })
+      } catch (err) {
+        report(err)
+        return null
+      }
+    },
+
+    async findingAction(action) {
+      const mine = generation
+      const finding = get().findings?.byId[action.findingId]
+      let result: FindingActionResult
+      try {
+        result = await ipc().invoke('memory:findingAction', action)
+      } catch (err) {
+        report(err)
+        // Gone since (a re-read closed it): the list as main holds it now.
+        if (mine === generation) get().loadFindings().catch(report)
+        return null
+      }
+      if (mine !== generation) return result
+      if (result.dismissed !== null) useDismissedStore.getState().add(result.dismissed)
+      const findings = get().findings
+      if (findings !== null) set({ findings: withoutFinding(findings, action.findingId) })
+      if (action.action === 'right' && finding !== undefined) {
+        // The other side is the one marked not right.
+        const other = action.side === 'a' ? finding.b : finding.a
+        const mark: RightMark = {
+          findingId: finding.id,
+          value: other.value,
+          ref: result.other?.ref ?? other.ref,
+          nodeId: result.other?.nodeId ?? other.nodeId,
+          quote: other.quote,
+          dismissedId: result.dismissed?.id ?? null
+        }
+        set({
+          rightMarks: [mark, ...get().rightMarks.filter((each) => each.findingId !== finding.id)]
+        })
+      }
+      return result
+    },
+
+    async looseEndNotProblem(end) {
+      const mine = generation
+      try {
+        const row = await ipc().invoke('memory:looseEndAction', {
+          kind: end.kind,
+          id: end.id,
+          lastNodeId: end.lastNodeId
+        })
+        if (mine !== generation) return true
+        useDismissedStore.getState().add(row)
+        const looseEnds = get().looseEnds
+        if (looseEnds !== null) {
+          set({
+            looseEnds: {
+              ...looseEnds,
+              items: looseEnds.items.filter(
+                (each) => !(each.kind === end.kind && each.id === end.id)
+              )
+            }
+          })
+        }
+        return true
+      } catch (err) {
+        report(err)
+        return false
+      }
+    },
+
+    dropRightMark(findingId) {
+      const marks = get().rightMarks
+      if (marks.some((each) => each.findingId === findingId)) {
+        set({ rightMarks: marks.filter((each) => each.findingId !== findingId) })
+      }
+    },
+
+    async undoRightMark(findingId) {
+      const mark = get().rightMarks.find((each) => each.findingId === findingId)
+      if (mark === undefined) return false
+      if (mark.dismissedId !== null) {
+        const undone = await useDismissedStore.getState().undo(mark.dismissedId)
+        if (!undone) return false
+      }
+      get().dropRightMark(findingId)
+      return true
     },
 
     async load() {
@@ -515,6 +775,10 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         ipc().on('memory:changed', ({ nodeIds, recordIds }) => {
           // A reading (or an edit beside a card) may have moved a scene's card line.
           if (nodeIds.length > 0) get().loadCardLines().catch(report)
+          // F-16.27, F-16.29: a side's words, a thread's steps or a character's death may have
+          // moved; read again only what was loaded.
+          if (get().findings !== null) get().loadFindings().catch(report)
+          if (get().looseEnds !== null) get().loadLooseEnds().catch(report)
           const records = new Set(recordIds)
           // Every shown scene is read again (one or two at most): its memory is as of the scene
           // over the whole book, so a reading, a mark or an answer anywhere may move its True now,
@@ -529,6 +793,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         }),
         ipc().on('names:changed', ({ nodeIds }) => {
           const nodes = new Set(nodeIds)
+          // F-16.29: a character's last naming moves a loose end.
+          if (get().looseEnds !== null) get().loadLooseEnds().catch(report)
           // A sheet's Threads are the steps whose paragraph names the record: a new nickname or
           // *Not a mention* moves them.
           refresh(
@@ -543,7 +809,20 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
             () => true
           )
         }),
-        ipc().on('memory:statusChanged', (status) => set({ status })),
+        ipc().on('memory:statusChanged', (status) => {
+          const was = get().status?.check ?? null
+          set({ status })
+          // F-16.30: a check that just ended wrote its report.
+          const now = status.check
+          if (now !== null && now.finishedAt !== null && was?.finishedAt !== now.finishedAt) {
+            get().loadCheckReport().catch(report)
+          }
+        }),
+        ipc().on('memory:findingsChanged', () => {
+          get().loadFindings().catch(report)
+          // The report reads the findings again: a finding closed since drops out of it.
+          if (get().check.report !== null) get().loadCheckReport().catch(report)
+        }),
         ipc().on('memory:noticesChanged', (notices) => set({ notices }))
       ]
     },
@@ -566,7 +845,12 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         status: null,
         notices: [],
         cardLines: {},
-        rebuildOpen: null
+        rebuildOpen: null,
+        findings: null,
+        looseEnds: null,
+        check: NO_CHECK,
+        checkOpen: null,
+        rightMarks: []
       })
     }
   }

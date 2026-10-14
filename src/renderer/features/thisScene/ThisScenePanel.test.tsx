@@ -19,9 +19,15 @@ import {
   useNameMentionStore
 } from '@renderer/features/records/nameMentionStore'
 import {
+  findingSideFixture,
+  findingsViewFixture,
+  findingViewFixture,
   knowsCellFixture,
   knowsGridFixture,
+  looseEndFixture,
+  looseEndsFixture,
   memoryStatusFixture,
+  noteFindingFixture,
   sceneMemoryFixture,
   secretViewFixture,
   threadsMemoryFixture,
@@ -45,7 +51,9 @@ import {
   INLINE_TAGS_NOTICE,
   ambiguousLabel,
   castOf,
+  conflictCount,
   conflictLine,
+  dismissedRow,
   namedChips,
   namedWhy,
   needsALookBadge,
@@ -190,6 +198,9 @@ function install(overrides: Partial<Record<Channel, Handler>> = {}): void {
           return knowsGridFixture({
             asOf: (input as Input<'memory:knows'>).asOf
           }) as Output<C>
+        // F-16.30: no Check the book has run yet.
+        case 'memory:checkReport':
+          return null as Output<C>
         // F-16.23: the Book tab's Threads and Timeline, empty until a test says otherwise.
         case 'memory:threads':
           return threadsMemoryFixture({
@@ -524,7 +535,7 @@ describe('ThisScenePanel (F-16.12)', () => {
     expect(useRecordStore.getState().selectedId).toBe('r-mara')
   })
 
-  it('orders the Book tab: Cast, Who knows what, Threads, Timeline, Rebuild memory (F-16.23)', async () => {
+  it('orders the Book tab: Cast, Who knows what, Threads, Timeline, Check the book, Rebuild memory (F-16.23, F-16.30)', async () => {
     install({
       'memory:threads': (input) =>
         threadsMemoryFixture({
@@ -542,8 +553,10 @@ describe('ThisScenePanel (F-16.12)', () => {
       within(panel)
         .getAllByRole('heading', { level: 3 })
         .map((heading) => heading.textContent)
-    ).toEqual(['Cast', 'Who knows what', 'Threads', 'Timeline', 'Memory'])
+    ).toEqual(['Cast', 'Who knows what', 'Threads', 'Timeline', 'Contradictions', 'Memory'])
     expect(within(panel).getByRole('button', { name: 'Rebuild memory…' })).toBeVisible()
+    expect(within(panel).getByRole('button', { name: 'Check the book…' })).toBeVisible()
+    expect(within(panel).getByTestId('check-last')).toHaveTextContent('Not checked yet')
     // The Threads are as of the open scene, like the grid; the Timeline lists every scene.
     expect(sent('memory:threads')).toEqual([{ asOf: 'sc-1' }])
     expect(sent('memory:timeline')).toEqual([{ recordId: null }])
@@ -571,7 +584,7 @@ const CONFLICT: FiledConflict = {
 }
 
 describe('Needs a look’s filed-line conflicts (F-16.9)', () => {
-  it('puts the conflicts first and counts them in the badge', () => {
+  it('puts My to-dos first, then the conflicts (P4-D20)', () => {
     expect(
       needsALookGroups({
         conflicts: [CONFLICT],
@@ -579,7 +592,7 @@ describe('Needs a look’s filed-line conflicts (F-16.9)', () => {
         questions: [],
         notices: []
       }).map((group) => group.id)
-    ).toEqual(['conflicts', 'todos'])
+    ).toEqual(['todos', 'conflicts'])
     expect(conflictLine(CONFLICT)).toBe(
       'Filed from “Bestiary” ¶4, which now reads “Mara Vell has brown eyes.”'
     )
@@ -1062,5 +1075,121 @@ describe('Who knows what in the panel (F-16.22)', () => {
     await open()
     await waitFor(() => expect(sent('memory:scene')).toHaveLength(1))
     expect(screen.queryByRole('region', { name: 'Who knows what' })).toBeNull()
+  })
+})
+
+describe('Needs a look’s contradictions, loose ends and notices (F-16.27, F-16.29; P4 slice 4)', () => {
+  const OPEN = findingViewFixture('f-1')
+  const NOTE = noteFindingFixture('f-6')
+  const UNCLEAR = findingViewFixture('f-3', {
+    state: 'unclear',
+    slot: 'hair',
+    slotLabel: 'Hair',
+    a: findingSideFixture('dark', '1.4', 'sc-4'),
+    b: findingSideFixture('fair', '1.5', 'sc-5')
+  })
+
+  it('orders the groups with My to-dos on top, and counts conflicts only', () => {
+    const groups = needsALookGroups({
+      conflicts: [],
+      todos: [todo('t1', 'Tide', 0)],
+      questions: [HESK],
+      notices: ['n'],
+      findings: [OPEN],
+      unclear: [UNCLEAR],
+      looseEnds: { items: [looseEndFixture()], more: 0 }
+    })
+    expect(groups.map((group) => group.id)).toEqual([
+      'todos',
+      'conflicts',
+      'questions',
+      'looseEnds',
+      'notices'
+    ])
+    // Unclear ones alone still draw the group, never the badge.
+    expect(
+      needsALookGroups({ todos: [], questions: [], notices: [], unclear: [UNCLEAR] }).map(
+        (group) => group.id
+      )
+    ).toEqual(['conflicts'])
+    expect(conflictCount({ filed: 1, details: 1, findings: 2 })).toBe(4)
+  })
+
+  it('shows to-dos first, then the conflicts with the badge counting open findings only', async () => {
+    todos = [todo('t1', 'Check the tide tables', 0)]
+    install({
+      'authorTodo:list': () => [todo('t1', 'Check the tide tables', 0)],
+      'memory:findings': () => findingsViewFixture({ open: [OPEN, NOTE], unclear: [UNCLEAR] }),
+      'memory:looseEnds': () => looseEndsFixture({ items: [looseEndFixture()] })
+    })
+    await act(async () => {
+      await useAuthorTodoStore.getState().load()
+      await useMemoryStore.getState().loadFindings()
+      await useMemoryStore.getState().loadLooseEnds()
+    })
+    useMemoryStore.setState({
+      notices: [
+        {
+          id: 'rebuildDone:a',
+          kind: 'rebuildDone',
+          startedAt: 'a',
+          lines: 2,
+          sheets: 1,
+          names: 0,
+          findings: 1
+        },
+        { id: 'findingsWaiting:d', kind: 'findingsWaiting', pairs: 3, priceUsd: 0.001 }
+      ]
+    })
+    await open()
+    const needs = screen.getByRole('region', { name: 'Needs a look' })
+    expect(
+      within(needs)
+        .getAllByRole('heading', { level: 4 })
+        .map((heading) => heading.textContent)
+    ).toEqual(['My to-dos', 'Conflicts', 'Loose ends', 'Notices'])
+    // Two open findings (one book against book, one against a note); the unclear one and the
+    // loose end are not counted.
+    expect(screen.getByTestId('needs-a-look-badge')).toHaveTextContent('2')
+    const conflicts = within(needs).getByRole('group', { name: 'Conflicts' })
+    expect(within(conflicts).getByRole('group', { name: 'In this scene' })).toHaveTextContent(
+      'Mara Vell’s eyes: grey (1.1) · brown (1.2)'
+    )
+    expect(within(conflicts).getByTestId('note-conflict')).toHaveTextContent(
+      'Your note on Orrin says born 1790; the book says 1792 (1.1)'
+    )
+    expect(within(conflicts).getByTestId('unclear-findings')).toHaveTextContent('Unclear (1)')
+    expect(within(needs).getByTestId('loose-end')).toHaveTextContent(
+      'Planned “The duel at dawn” sits before 1.2 and is not drafted'
+    )
+    // The rebuild's notice opens its grouped summary; pairs waiting open Check the book.
+    fireEvent.click(within(needs).getByRole('button', { name: 'Review' }))
+    expect(useMemoryStore.getState().rebuildOpen).toBe('summary')
+    fireEvent.click(within(needs).getByRole('button', { name: 'Check the book…' }))
+    expect(useMemoryStore.getState().checkOpen).toBe('start')
+  })
+
+  it('says a contradiction’s or a loose end’s Not a problem in Dismissed', () => {
+    const base: Dismissed = tombstone('d-1', 'x')
+    expect(
+      dismissedRow({
+        ...base,
+        kind: 'notProblem',
+        key: 'finding|r-mara|eyes|sc-1|grey|sc-2|brown',
+        label: 'Mara Vell: eyes grey (1.1) and brown (1.2): not a problem'
+      })
+    ).toEqual({
+      kind: 'Contradiction',
+      label: 'Not a problem: Mara Vell, eyes grey (1.1) and brown (1.2)'
+    })
+    expect(
+      dismissedRow({
+        ...base,
+        kind: 'notProblem',
+        key: 'loose|planned|sc-plan|',
+        label: 'Loose end: planned scene “The duel at dawn”: not a problem'
+      })
+    ).toEqual({ kind: 'Loose end', label: 'Not a problem: planned scene “The duel at dawn”' })
+    expect(dismissedRow(base)).toEqual({ kind: 'Not a mention', label: 'x' })
   })
 })
