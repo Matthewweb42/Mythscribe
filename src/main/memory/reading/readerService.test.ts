@@ -31,7 +31,11 @@ import {
 import { gateScene } from './pipeline'
 import { getRebuild, getSpotState, setSpotState, writeRow } from './readerRows'
 import { createReaderService, type ReaderService, type ReaderServiceDeps } from './readerService'
-import { getSwitchoverRecord, setSwitchoverRecord } from '../switchover/record'
+import {
+  getSwitchoverRecord,
+  markRebuildStarted,
+  setSwitchoverRecord
+} from '../switchover/record'
 import { dayOf, defaultAiUsageState } from '../../ai/dailyCap'
 import { emptyCardFields, emptyYields, type Claim } from '@shared/memory/claims'
 import { emptySceneDetails } from '@shared/memory/sceneDetails'
@@ -618,34 +622,34 @@ describe('the lazy back-fill (F-16.17, P2a §3.4)', () => {
   })
 })
 
-describe('the health gate (F-16.17, design §2.3)', () => {
-  /** Ten readings by the fake's model, with few of their quotes found. */
-  function badReadings(): void {
-    for (let i = 0; i < 10; i += 1) {
-      insertReading(
-        db,
-        {
-          nodeId: scene,
-          draftId: activeDraftId(db),
-          purpose: 'window',
-          pages: 1,
-          paras: [],
-          promptVersion: 'reader.v1',
-          verifyVersion: null,
-          model: 'gpt-5.4-mini',
-          tokensIn: 0,
-          tokensOut: 0,
-          reasoningTokens: 0,
-          costUsd: 0,
-          cloud: false,
-          finishReason: null,
-          yields: { ...emptyYields(), items: 3, quotesFound: 1 }
-        },
-        new Date(NOW.getTime() - 60_000 + i)
-      )
-    }
+/** Ten readings by the fake's model, with few of their quotes found: the health gate pauses it. */
+function badReadings(): void {
+  for (let i = 0; i < 10; i += 1) {
+    insertReading(
+      db,
+      {
+        nodeId: scene,
+        draftId: activeDraftId(db),
+        purpose: 'window',
+        pages: 1,
+        paras: [],
+        promptVersion: 'reader.v1',
+        verifyVersion: null,
+        model: 'gpt-5.4-mini',
+        tokensIn: 0,
+        tokensOut: 0,
+        reasoningTokens: 0,
+        costUsd: 0,
+        cloud: false,
+        finishReason: null,
+        yields: { ...emptyYields(), items: 3, quotesFound: 1 }
+      },
+      new Date(NOW.getTime() - 60_000 + i)
+    )
   }
+}
 
+describe('the health gate (F-16.17, design §2.3)', () => {
   it('lets no probe past the Cloud cap', async () => {
     badReadings()
     cloud = { ...defaultMemoryCloudState(), month: '2026-10', backgroundUsd: 1 }
@@ -996,26 +1000,64 @@ describe('the rebuild after the switch-over (F-16.31 part A, SW-D8, plan Switcho
     }
   )
 
-  it('still reads the scene the author leaves; the rest of the book waits', async () => {
+  it('still reads the scene the author writes in and leaves; one she only looked at waits', async () => {
     const [first, second, third] = book(3)
     switched()
     const ai = reading()
     const reader = service(ai)
     reader.opened()
     await until(() => switchoverNotices(reader).length > 0, 'the switch-over notice')
+    // Opened to check the converted text and left, or paused in, unedited: nothing is read.
+    for (const reason of ['leave', 'idle'] as const) {
+      expect(reader.settle({ nodeId: first ?? '', reason, caretPara: null })).toEqual({
+        queued: false,
+        reason: 'paused'
+      })
+    }
+    expect(listJobs(db, 'read')).toEqual([])
+    // Saved from the editor, then left: read as any scene left is.
+    reader.editorSaved([second ?? ''])
     expect(reader.settle({ nodeId: second ?? '', reason: 'leave', caretPara: null })).toEqual({
       queued: true,
       reason: null
     })
     await until(() => readerRequests(ai).length === 1, 'the left scene read')
     await drained(reader)
-    // Read as any scene left is: its first reading (no rebuild started).
+    // Its first reading (no rebuild started).
     expect(lastReading(db, second ?? '', activeDraftId(db))?.purpose).toBe('first')
     for (const id of [first, third]) {
       expect(gateScene(db, id ?? '', null)?.decision.read).not.toBe('nothing')
     }
     expect(readerRequests(ai)).toHaveLength(1)
     expect(switchoverNotices(reader)).toHaveLength(1)
+    // A project change forgets what was saved: the next open starts the count again.
+    reader.clear()
+    reader.opened()
+    expect(reader.settle({ nodeId: third ?? '', reason: 'leave', caretPara: null }).queued).toBe(
+      false
+    )
+    reader.editorSaved([third ?? ''])
+    expect(reader.settle({ nodeId: third ?? '', reason: 'leave', caretPara: null }).queued).toBe(
+      true
+    )
+  })
+
+  it('reads a scene left unedited as before without a record, and once the wait is over', async () => {
+    const [first, second] = book(2)
+    const ai = reading()
+    const reader = service(ai)
+    // No record (a project made v2 another way): leaving reads, saved or not.
+    expect(reader.settle({ nodeId: first ?? '', reason: 'leave', caretPara: null }).queued).toBe(
+      true
+    )
+    // The wait over (a rebuild started): the same.
+    switched()
+    markRebuildStarted(db, NOW)
+    expect(reader.settle({ nodeId: second ?? '', reason: 'leave', caretPara: null }).queued).toBe(
+      true
+    )
+    await until(() => readerRequests(ai).length === 2, 'both scenes read')
+    await drained(reader)
   })
 
   it('ends the wait when a rebuild starts; a refused rebuild leaves it waiting', async () => {
@@ -1051,6 +1093,65 @@ describe('the rebuild after the switch-over (F-16.31 part A, SW-D8, plan Switcho
     reader.bulkWritten()
     await settled()
     expect(switchoverNotices(reader)).toEqual([])
+  })
+
+  it('a rebuild the health gate refuses leaves the record waiting, with nothing queued', async () => {
+    book(3)
+    switched()
+    badReadings()
+    const ai = reading()
+    const reader = service(ai)
+    expect(reader.rebuild()).toMatchObject({
+      ok: false,
+      code: 'DISABLED',
+      message: 'Story memory paused: this model’s readings aren’t reliable enough.'
+    })
+    expect(getSwitchoverRecord(db)).toMatchObject({ rebuild: 'waiting', rebuildStartedAt: null })
+    expect(listJobs(db)).toEqual([])
+    expect(getRebuild(db)).toBeNull()
+    // Keep reading anyway lifts the gate: the next rebuild starts and ends the wait.
+    reader.answerNotice('health:gpt-5.4-mini', 'keepReading')
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 3 })
+    expect(getSwitchoverRecord(db)?.rebuild).toBe('started')
+    reader.cancelAll()
+    await drained(reader)
+  })
+
+  it('shows the notice once a provider is set up (a key, a license) and drops it when it goes', async () => {
+    book(2)
+    switched()
+    const ai = reading()
+    const fake = ai.deps.providers.get()
+    if (fake === null) throw new Error('the fake has a provider')
+    let present = false
+    const reader = service(ai, {
+      provider: () =>
+        present
+          ? {
+              id: fake.id,
+              fastModel: fake.resolveModel('fast'),
+              strongModel: fake.resolveModel('strong')
+            }
+          : null
+    })
+    reader.opened()
+    await settled()
+    expect(reader.notices()).toEqual([])
+    // A key saved, or a license bought after the trial: the handlers call settingsChanged.
+    present = true
+    reader.settingsChanged()
+    expect(switchoverNotices(reader)).toEqual([
+      expect.objectContaining({ kind: 'switchoverRebuild', scenes: 2 })
+    ])
+    expect(noticeLists.at(-1)?.map((notice) => notice.kind)).toEqual(['switchoverRebuild'])
+    // The key cleared, or the trial ended: gone at once, and pushed so.
+    present = false
+    reader.settingsChanged()
+    expect(reader.notices()).toEqual([])
+    expect(noticeLists.at(-1)).toEqual([])
+    expect(reader.rebuild()).toMatchObject({ ok: false, code: 'NO_KEY' })
+    expect(getSwitchoverRecord(db)?.rebuild).toBe('waiting')
+    expect(ai.requests).toEqual([])
   })
 
   it('Later hides the notice until the project opens again; Use AI off or the reading switch off shows none', async () => {
@@ -1142,6 +1243,36 @@ describe('the rebuild after the switch-over (F-16.31 part A, SW-D8, plan Switcho
     await drained(reader)
     expect(getRebuild(db)).toMatchObject({ total: 3, done: 3 })
     expect(reader.status().paused).toBeNull()
+  })
+
+  it('carries a rebuild paused at the daily cap on when the project opens again', async () => {
+    book(3)
+    switched()
+    const ai = reading()
+    // Today's cap is reached after the first scene; the next open is on a new day (spent 0).
+    let nextDay = false
+    ai.deps.dailyCap = {
+      get: () => ({
+        ...defaultAiUsageState(),
+        dailyCapUsd: !nextDay && (getRebuild(db)?.done ?? 0) >= 1 ? 0 : 500,
+        spentDate: dayOf(NOW)
+      }),
+      spend: () => undefined
+    }
+    const reader = service(ai)
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 3 })
+    await until(() => reader.queueStatus().paused !== null, 'the daily-cap pause')
+    await drained(reader)
+    expect(getRebuild(db)).toMatchObject({ total: 3, done: 1, finishedAt: null })
+    // While the app stays open, nothing resumes it but the author (Resume, a settings change,
+    // Rebuild memory again). The pause lives with the open project: the next open carries on.
+    nextDay = true
+    reader.clear()
+    reader.opened()
+    await until(() => typeof getRebuild(db)?.finishedAt === 'string', 'the rebuild to finish')
+    await drained(reader)
+    expect(getRebuild(db)).toMatchObject({ total: 3, done: 3 })
+    expect(getSwitchoverRecord(db)?.rebuild).toBe('started')
   })
 })
 

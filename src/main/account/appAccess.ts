@@ -70,6 +70,7 @@ export class AppAccessService {
   private current: AppAccess
   private cancelTimer: (() => void) | null = null
   private disposed = false
+  private readonly listeners = new Set<(access: AppAccess) => void>()
 
   private readonly appState: AppStateStore
   private readonly licensed: () => boolean
@@ -112,8 +113,22 @@ export class AppAccessService {
   refresh(): AppAccess {
     const before = this.current
     this.current = this.compute()
-    if (!sameAccess(before, this.current)) this.onChange(this.current)
+    if (!sameAccess(before, this.current)) {
+      this.onChange(this.current)
+      for (const listener of this.listeners) listener(this.current)
+    }
     return this.current
+  }
+
+  /**
+   * Also tells `listener` of every change `onChange` hears (a main-side owner whose work follows
+   * the access, such as story memory's reader, F-16.31). Answers the way to stop listening.
+   */
+  subscribe(listener: (access: AppAccess) => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
   }
 
   dispose(): void {

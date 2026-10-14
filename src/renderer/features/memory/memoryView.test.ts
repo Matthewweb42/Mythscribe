@@ -164,7 +164,7 @@ describe('memoryView (F-16.18)', () => {
           priceUsd: 0.02,
           priced: true
         },
-        'Your book has not been read since the switch-over: 12 scenes, about 2¢',
+        'Rebuild memory has not run since the switch-over: it reads 12 scenes, about 2¢',
         ['Rebuild…', 'Later']
       ],
       [
@@ -176,7 +176,7 @@ describe('memoryView (F-16.18)', () => {
           priceUsd: 0,
           priced: false
         },
-        'Your book has not been read since the switch-over: 1 scene, a cost not yet known',
+        'Rebuild memory has not run since the switch-over: it reads 1 scene, a cost not yet known',
         ['Rebuild…', 'Later']
       ]
     ]

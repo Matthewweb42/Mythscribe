@@ -116,7 +116,7 @@ import { writeSceneRead } from '../memory/reading/sceneReadStore'
 import { activeDraftId } from '../draft/draftStore'
 import { listRecords } from '../memory/recordStore'
 import { enqueueJob, listJobs } from '../jobs/jobStore'
-import { getSwitchoverRecord } from '../memory/switchover/record'
+import { getSwitchoverRecord, setSwitchoverRecord } from '../memory/switchover/record'
 import { createTag } from '../tag/tagStore'
 import { MENTION_DEBOUNCE_MS } from '@shared/mentions'
 import type { TiptapNodeT } from '@shared/tiptap'
@@ -10648,6 +10648,69 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
     await invoke('project:close', undefined)
     expect((await invoke('project:open', { path: created?.path ?? '' }))?.storyMemory).toBe('v2')
     expect(await invoke('switchover:record', undefined)).toBeNull()
+  })
+
+  // F-16.31 slice 2 review: while the record waits, a scene only looked at is not read, and the
+  // notice follows the provider (a key cleared, the trial ending) at once.
+  it('after the switch-over reads only a scene saved from the editor; the notice follows the provider', async () => {
+    const created = await invoke('project:create', { name: 'Book', format: 'novel', directory: tmp })
+    const scenes = manuscriptReadingOrder(await invoke('tree:list', undefined)).slice(0, 1)
+    const scene = scenes[0] ?? ''
+    const text = (words: string): TiptapNodeT => ({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: words }] }]
+    })
+    await invoke('document:save', { id: scene, content: text('Mara walked the long quay.') })
+    const db = manager.require().connection.orm
+    setSwitchoverRecord(db, {
+      switchedAt: new Date().toISOString(),
+      trial: false,
+      backup: null,
+      datedCopy: null,
+      rebuild: 'waiting',
+      rebuildStartedAt: null
+    })
+    setStoryMemory(db, 'v2', new Date())
+    await invoke('project:close', undefined)
+    expect((await invoke('project:open', { path: created?.path ?? '' }))?.storyMemory).toBe('v2')
+    await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    const switchover = (notices: unknown): boolean =>
+      Array.isArray(notices) &&
+      notices.some(
+        (notice: unknown) =>
+          typeof notice === 'object' &&
+          notice !== null &&
+          'kind' in notice &&
+          notice.kind === 'switchoverRebuild'
+      )
+    expect(switchover(await invoke('memory:notices', undefined))).toBe(true)
+    // Opened and left unedited: it waits for the rebuild.
+    expect(
+      await invoke('memory:settle', { nodeId: scene, reason: 'leave', caretPara: null })
+    ).toEqual({ queued: false, reason: 'paused' })
+    // Written in, then left: read.
+    await invoke('document:save', { id: scene, content: text('Mara walked the long grey quay.') })
+    expect(
+      await invoke('memory:settle', { nodeId: scene, reason: 'leave', caretPara: null })
+    ).toEqual({ queued: true, reason: null })
+    await invoke('jobs:cancel', undefined)
+    const pushed = (): unknown =>
+      vi
+        .mocked(fakeWin.webContents.send)
+        .mock.calls.filter(([channel]) => channel === 'memory:noticesChanged')
+        .at(-1)?.[1]
+    // The key cleared: no provider, the notice goes at once.
+    await invoke('ai:clearKey', undefined)
+    expect(switchover(pushed())).toBe(false)
+    expect(switchover(await invoke('memory:notices', undefined))).toBe(false)
+    // A key again: it is back; the trial ending (no provider while read-only) takes it again.
+    await invoke('ai:setKey', { key: 'sk-test-secret-1234abcd' })
+    expect(switchover(pushed())).toBe(true)
+    accessNow += 31 * 24 * 60 * 60_000
+    access.refresh()
+    expect(switchover(pushed())).toBe(false)
+    expect(getSwitchoverRecord(manager.require().connection.orm)?.rebuild).toBe('waiting')
   })
 
   it('answers a failed step when the backup cannot be made, and changes nothing', async () => {

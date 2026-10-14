@@ -129,8 +129,10 @@ import { getSwitchoverRecord, markRebuildStarted } from '../switchover/record'
  *   more asked); *Rebuild memory*; the spot checks after a rebuild and every 5 strong ones due.
  * - **After the switch-over** (F-16.31, decision SW-D8): while the project's switch-over record
  *   waits for its first *Rebuild memory*, the backlog check reads nothing nobody asked for and
- *   raises one `switchoverRebuild` notice with the rebuild's price instead; leave and idle reads
- *   still run. Any rebuild that starts ends the wait (`markRebuildStarted`).
+ *   raises one `switchoverRebuild` notice with the rebuild's price instead; a scene left or
+ *   paused in is still read when it was saved from the editor since the open (`editorSaved`), so
+ *   the scene she is writing is read and one she only looked at waits. Any rebuild that starts
+ *   ends the wait (`markRebuildStarted`).
  * - **Gates, in order, before any request**: Use AI and the **Story memory reading** switch; a
  *   provider (the request path's); the health gate for the bulk work the author asked for
  *   (*Rebuild memory*, a priced backlog or back-fill; *Read now* of one scene passes); then, for
@@ -211,6 +213,11 @@ export interface ReaderService {
   settle(input: SettleInput): SettleResult
   /** A write outside the editor (Replace, a revert, a draft switch, the chat's new scenes). */
   bulkWritten(): void
+  /**
+   * Scenes saved from the editor (F-16.31, SW-D8): while the switch-over waits for its rebuild,
+   * only a scene saved this way since the project opened is read when it is left or paused in.
+   */
+  editorSaved(nodeIds: readonly string[]): void
   /** A v2 project opened: its leftover jobs, the backlog, the back-fills. */
   opened(): void
   /** The AI settings, the key or the source changed: a pause the change may have fixed lifts. */
@@ -345,6 +352,12 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
   const closedWaiting = new Set<string>()
   /** F-16.31 (SW-D8): the switch-over's notice answered *Later* or closed, until the next open. */
   let switchoverHidden = false
+  /**
+   * F-16.31 (SW-D8): the scenes saved from the editor since the project opened. While the
+   * switch-over waits, a scene settled (left or paused in) is read only when it is here: the scene
+   * the author is writing, never one she only opened to look at (the rebuild reads that one).
+   */
+  const editedHere = new Set<string>()
   let backlogTimer: ReturnType<typeof setTimeout> | null = null
   let lastStatus: string | null = null
   let lastNotices: string | null = null
@@ -1167,12 +1180,20 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       const gated = gateScene(db, nodeId, caret)
       if (gated === null) return { queued: false, reason: 'notReadable' }
       if (gated.decision.read === 'nothing') return { queued: false, reason: gated.decision.reason }
+      // SW-D8: after the switch-over, until a rebuild starts, a scene only looked at waits for it.
+      if (!editedHere.has(nodeId) && waitingSwitchover(db) !== null) {
+        return { queued: false, reason: 'paused' }
+      }
       const queued = queueBackground(db, nodeId, caret)
       publish()
       return queued ? { queued: true, reason: null } : { queued: false, reason: 'paused' }
     },
 
     bulkWritten: () => scheduleBacklog(),
+
+    editorSaved(nodeIds) {
+      for (const id of nodeIds) editedHere.add(id)
+    },
 
     opened() {
       if (v2Db() === null) return
@@ -1528,6 +1549,7 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       closedHealth.clear()
       closedWaiting.clear()
       switchoverHidden = false
+      editedHere.clear()
       offered = []
       skipped = 0
       heldBack = false

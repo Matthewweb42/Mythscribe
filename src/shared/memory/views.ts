@@ -776,10 +776,12 @@ export const MemoryNotice = z.discriminatedUnion('kind', [
     notProblems: z.number().int().nonnegative()
   }),
   /**
-   * F-16.31 (decision SW-D8, plan Switchover §2.2): the book has not been read since the
+   * F-16.31 (decision SW-D8, plan Switchover §2.2): *Rebuild memory* has not run since the
    * switch-over. While the switch-over record waits for its first *Rebuild memory*, this one
-   * notice stands in for the unasked backlog: the scenes *Rebuild memory* would read and its price
-   * (`priced` false when a model's price is unknown, the cost then a lower bound). *Rebuild…*
+   * notice stands in for the unasked backlog: the scenes *Rebuild memory* would read (every
+   * readable scene, not only those still unread: a scene written in and left is read meanwhile)
+   * and its price (`priced` false when a model's price is unknown, the cost then a lower bound),
+   * both as at the last look (the open, a write outside the editor, a settings change). *Rebuild…*
    * opens the rebuild dialog, which prices it again when the author confirms; *Later* or closing
    * it (`later`, `dismiss`) hides it until the project opens again. Its id is `switchoverRebuild`.
    */

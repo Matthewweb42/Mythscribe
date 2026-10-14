@@ -113,7 +113,8 @@ export function noticeLine(notice: MemoryNotice): string {
     case 'underlinePrecision':
       return `Of the last ${notice.counted} underlined contradictions, ${notice.notProblems} ${notice.notProblems === 1 ? 'was not a problem' : 'were not problems'}. Show contradictions in the panel only?`
     case 'switchoverRebuild':
-      return `Your book has not been read since the switch-over: ${notice.scenes} scene${notice.scenes === 1 ? '' : 's'}, ${notice.priced ? `about ${formatCents(notice.priceUsd)}` : 'a cost not yet known'}`
+      // What the rebuild does, not what is unread: a scene written in and left is read meanwhile.
+      return `Rebuild memory has not run since the switch-over: it reads ${notice.scenes} scene${notice.scenes === 1 ? '' : 's'}, ${notice.priced ? `about ${formatCents(notice.priceUsd)}` : 'a cost not yet known'}`
   }
 }
 

@@ -125,6 +125,22 @@ describe('AppAccessService (AI-BILLING-SPEC M1)', () => {
     expect(changes).toHaveLength(1)
   })
 
+  it('tells a subscriber of each change onChange hears, until it stops listening', () => {
+    appState.update((s) => ({ ...s, trial: { startedAt: now - 40 * DAY, lastSeenAt: now } }))
+    const service = build()
+    const heard: string[] = []
+    const stop = service.subscribe((access) => heard.push(access.state))
+    licensed = true
+    service.refresh()
+    service.refresh()
+    expect(heard).toEqual(['licensed'])
+    stop()
+    licensed = false
+    service.refresh()
+    expect(changes.map((c) => c.state)).toEqual(['licensed', 'expired'])
+    expect(heard).toEqual(['licensed'])
+  })
+
   it('stops its timer on dispose', () => {
     const service = build()
     service.dispose()

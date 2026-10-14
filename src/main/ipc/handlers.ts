@@ -1137,6 +1137,9 @@ export function registerHandlers({
     findingsChanged: (counts) => emit(windows(), 'memory:findingsChanged', counts),
     log: (message) => devtools.record('warn', 'ai', message, null)
   })
+  // F-16.31: a license bought after the trial (or the trial ending) gives the reader its provider
+  // back (or takes it): a pause may lift, and the switch-over's notice shows or goes at once.
+  access.subscribe(() => reader.settingsChanged())
 
   /**
    * F-14.14: automatic voice learning's own queue, one `voice` job per project keyed to the
@@ -1453,6 +1456,9 @@ export function registerHandlers({
       // F-16.16: a write outside the editor: the backlog is checked once the burst settles.
       reader.bulkWritten()
     }
+    // F-16.31 (SW-D8): the scene the author is writing is read when she leaves it, even while the
+    // switch-over waits for its rebuild.
+    if (v2 && origin === 'editor') reader.editorSaved(ids)
     // F-14.14: one debounced voice job per burst of saves, whichever documents they were.
     const root = manuscriptRootId(db)
     if (root !== null) voiceQueue.touch('voice', root)
@@ -3367,15 +3373,16 @@ export function registerHandlers({
 
   register('ai:clearKey', () => {
     keyStore.clearKey(ownKey())
+    // F-16.31: no provider now: notices that offer reading (the switch-over's) go at once.
+    reader.settingsChanged()
     return aiStatus()
   })
 
   register('ai:setOwnKeyProvider', ({ provider }) => {
     appState.update((s) => ({ ...s, ownKeyProvider: provider }))
-    if (keyStore.hasKey(provider)) {
-      backfillSummaries(true)
-      reader.settingsChanged()
-    }
+    if (keyStore.hasKey(provider)) backfillSummaries(true)
+    // F-16.31: with or without a key for it, reading's notices follow the provider now.
+    reader.settingsChanged()
     return aiStatus()
   })
 
