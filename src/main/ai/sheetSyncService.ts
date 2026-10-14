@@ -27,7 +27,15 @@ export interface SheetSyncService {
   statuses(): SheetSyncStatus[]
   /** A project opened: take up the job it left behind. */
   load(): void
-  /** The project closed: drop every pause, status, and run. */
+  /**
+   * F-16.31: holds the sync through the switch-over (`IndexQueue.hold`): no sheet is written and a
+   * sheet whose pause ends waits off the due list (a settings row) until `release`. Answers once
+   * the run in flight, if any, has ended.
+   */
+  hold(): Promise<void>
+  /** Lets a held sync go: the sheets whose pause ended meanwhile join the due list now. */
+  release(): void
+  /** The project closed: drop every pause, status, hold, and run. */
   clear(): void
 }
 
@@ -64,17 +72,27 @@ export function createSheetSyncService(options: SheetSyncServiceOptions): SheetS
     if (root !== null) queue.touch('sheetSync', root)
   }
 
+  /** `hold()`: the sheets whose pause ended while held, joined to the due list on `release`. */
+  let held = false
+  const heldDue = new Set<string>()
+
+  const onDue = (entityId: string): void => {
+    if (held) {
+      heldDue.add(entityId)
+      return
+    }
+    const db = options.db()
+    if (db === null) return
+    if (!allowed(db)) {
+      dropStatus(entityId)
+      return
+    }
+    queueDue(db, entityId)
+  }
+
   const scheduler = createSheetSyncScheduler({
     delayMs: options.delayMs ?? SHEET_SYNC_DELAY_MS,
-    onDue: (entityId) => {
-      const db = options.db()
-      if (db === null) return
-      if (!allowed(db)) {
-        dropStatus(entityId)
-        return
-      }
-      queueDue(db, entityId)
-    }
+    onDue
   })
 
   /** Works the due list, oldest first, until it is empty; a cancel leaves the rest for the next run. */
@@ -155,7 +173,23 @@ export function createSheetSyncService(options: SheetSyncServiceOptions): SheetS
       queue.load()
     },
 
+    hold() {
+      held = true
+      return queue.hold()
+    },
+
+    release() {
+      if (!held) return
+      held = false
+      const due = [...heldDue]
+      heldDue.clear()
+      for (const entityId of due) onDue(entityId)
+      queue.release()
+    },
+
     clear() {
+      held = false
+      heldDue.clear()
       scheduler.clear()
       queue.clear()
       if (statuses.size > 0) {

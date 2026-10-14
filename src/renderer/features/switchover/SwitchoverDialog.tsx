@@ -8,12 +8,12 @@ import { mergeKey, useSwitchoverStore } from './switchoverStore'
 import {
   THIS_IS_A_COPY,
   TRY_COPY_FIRST,
-  WHAT_CHANGES,
   cloudLabel,
   countsLine,
   goBackLine,
   rebuildLine,
-  safetyProgress
+  safetyProgress,
+  whatChanges
 } from './switchoverText'
 
 /**
@@ -25,7 +25,8 @@ import {
  * (each inline tag's words, editable), then the final screen (what was written, the kept backup
  * with *Show backups*, the dated copy, how to go back; a test copy's names the project it was made
  * from and offers *Open my project*). A failed step shows its block (`SwitchoverFailure`) where it
- * failed. Escape or Cancel leaves the project as it is (still v1) until Convert.
+ * failed. Escape or Cancel (on every screen but the progress ones) leaves the project as it is
+ * (still v1) until Convert; in a test copy the flow made, it opens the author's project again.
  */
 export function SwitchoverDialog(): React.JSX.Element | null {
   const phase = useSwitchoverStore((s) => s.phase)
@@ -84,8 +85,7 @@ function SwitchoverBody(): React.JSX.Element {
     first.current?.focus()
   }, [state.phase, state.target])
 
-  const busy =
-    state.phase === 'copying' || state.phase === 'safety' || state.phase === 'converting'
+  const busy = state.phase === 'copying' || state.phase === 'safety' || state.phase === 'converting'
   const store = useSwitchoverStore.getState
   const close = (): void => store().close()
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -119,7 +119,7 @@ function SwitchoverBody(): React.JSX.Element {
           data-testid="switchover-what-changes"
           className="m-0 flex list-disc flex-col gap-1 pl-5 text-sm"
         >
-          {WHAT_CHANGES.map((line) => (
+          {whatChanges(onCopy).map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
@@ -310,6 +310,9 @@ function SwitchoverBody(): React.JSX.Element {
     )
     actions = (
       <>
+        <button type="button" className={BUTTON} disabled={busy} onClick={close}>
+          Cancel
+        </button>
         <button
           ref={first}
           type="button"
@@ -350,10 +353,11 @@ function SwitchoverBody(): React.JSX.Element {
           </p>
         ) : null}
         {backup === null ? null : (
-          <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="switchover-backup">
-            <span className="min-w-0 break-all">
-              Backup: {backup} (kept until you delete it)
-            </span>
+          <div
+            className="flex flex-wrap items-center gap-2 text-sm"
+            data-testid="switchover-backup"
+          >
+            <span className="min-w-0 break-all">Backup: {backup} (kept until you delete it)</span>
             <button type="button" className={BUTTON} onClick={() => void showBackups()}>
               Show backups
             </button>
@@ -361,9 +365,7 @@ function SwitchoverBody(): React.JSX.Element {
         )}
         {datedCopy === null ? null : (
           <p className="m-0 break-all text-sm" data-testid="switchover-dated-copy">
-            {where === null
-              ? `Dated copy: ${datedCopy}`
-              : `Dated copy (in ${where}): ${datedCopy}`}
+            {where === null ? `Dated copy: ${datedCopy}` : `Dated copy (in ${where}): ${datedCopy}`}
           </p>
         )}
         {trial || backup === null ? null : (

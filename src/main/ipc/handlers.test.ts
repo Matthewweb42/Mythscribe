@@ -3837,6 +3837,32 @@ describe('scene summaries (F-5.6)', () => {
     }
   })
 
+  it('F-16.31: holds the summary from the switch-over’s safety step until the dialog closes', async () => {
+    vi.useFakeTimers()
+    try {
+      const { scene } = await ready()
+      // The save the dialog flushes just before the safety step: its summary would land while the
+      // author reads the dry run and make Convert back up and copy the project again.
+      await write(scene, `${SCENE} The wind pushed the flame flat.`)
+      const safety = await invoke('switchover:safety', undefined)
+      if (!safety.ok) throw new Error(safety.message)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(complete).not.toHaveBeenCalled()
+      expect((await invoke('summary:get', { id: scene })).summary).toBeNull()
+      // Nothing written meanwhile: the copies made a moment ago still stand.
+      expect(await invoke('switchover:safety', undefined)).toEqual(safety)
+      // The dialog closed: the summary runs.
+      expect(await invoke('switchover:leave', undefined)).toBeNull()
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(complete).toHaveBeenCalledTimes(1)
+      expect((await invoke('summary:get', { id: scene })).stale).toBe(false)
+      // With nothing held, closing again changes nothing.
+      expect(await invoke('switchover:leave', undefined)).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('indexes the text written before AI was on, a moment after the dial and the key, unasked', async () => {
     vi.useFakeTimers()
     try {
@@ -10655,7 +10681,11 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
   // F-16.31 slice 2 review: while the record waits, a scene only looked at is not read, and the
   // notice follows the provider (a key cleared, the trial ending) at once.
   it('after the switch-over reads only a scene saved from the editor; the notice follows the provider', async () => {
-    const created = await invoke('project:create', { name: 'Book', format: 'novel', directory: tmp })
+    const created = await invoke('project:create', {
+      name: 'Book',
+      format: 'novel',
+      directory: tmp
+    })
     const scenes = manuscriptReadingOrder(await invoke('tree:list', undefined)).slice(0, 1)
     const scene = scenes[0] ?? ''
     const text = (words: string): TiptapNodeT => ({

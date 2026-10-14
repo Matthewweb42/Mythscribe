@@ -3806,6 +3806,13 @@ export const contract = {
    */
   'switchover:convert': { input: SwitchoverConvertInput, output: SwitchoverOutcome },
   /**
+   * F-16.31 (Switch-over slice 3 review): the dialog closed (Cancel, Escape, Close). v1's
+   * background jobs (summaries, To do, voice, plan links, sheet sync), held since the safety step
+   * so nothing moves the project between its copies and the conversion, run again. Writes
+   * nothing; a call with nothing held does nothing. Any project, or none.
+   */
+  'switchover:leave': { input: z.undefined(), output: z.null() },
+  /**
    * F-16.31 (decision SW-D7): the open v2 project's switch-over record: when it was switched, the
    * kept backup and the dated copy (null on a test copy), whether it is a test copy, and whether
    * *Rebuild memory* has started since. Null for a project made v2 another way. For Settings › AI

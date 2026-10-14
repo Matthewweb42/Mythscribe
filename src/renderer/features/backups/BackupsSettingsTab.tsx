@@ -12,6 +12,7 @@ import { useProjectStore } from '@renderer/features/project/projectStore'
 import { dialogs } from '@renderer/features/shell/dialogs/dialogStore'
 import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
 import { useBackupStore } from './backupStore'
+import { backupWhen } from './backupWhen'
 
 const BUTTON =
   'shrink-0 rounded-md border border-line px-2 py-1 text-sm hover:bg-surface disabled:opacity-50 disabled:hover:bg-transparent'
@@ -31,9 +32,6 @@ function intervalLabel(minutes: number): string {
   const hours = minutes / 60
   return hours === 1 ? 'Every hour' : `Every ${hours} hours`
 }
-
-const when = (iso: string): string =>
-  new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
 function size(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
@@ -84,7 +82,7 @@ export function BackupsSettingsTab(): React.JSX.Element {
     const ok = await dialogs.confirm({
       title: 'Restore as a copy?',
       message:
-        `The backup from ${when(entry.createdAt)} opens as a new project next to the original. ` +
+        `The backup from ${backupWhen(entry.createdAt)} opens as a new project next to the original. ` +
         'Nothing is overwritten; the project you have open now stays as it is.',
       confirmLabel: 'Restore'
     })
@@ -220,7 +218,7 @@ export function BackupsSettingsTab(): React.JSX.Element {
                 className="flex items-center justify-between gap-3 border-b border-line py-1 last:border-b-0"
               >
                 <span className="min-w-0 truncate">
-                  {when(entry.createdAt)}
+                  {backupWhen(entry.createdAt)}
                   {entry.kept ? (
                     <span className="text-fg-muted"> (kept: {KEPT_BACKUP_LABEL})</span>
                   ) : null}
@@ -228,7 +226,7 @@ export function BackupsSettingsTab(): React.JSX.Element {
                 <span className="ml-auto shrink-0 text-xs text-fg-muted">{size(entry.bytes)}</span>
                 <button
                   type="button"
-                  aria-label={`Restore the backup from ${when(entry.createdAt)}`}
+                  aria-label={`Restore the backup from ${backupWhen(entry.createdAt)}`}
                   disabled={busy || projectBusy}
                   onClick={() => void restoreListed(entry)}
                   className={BUTTON}

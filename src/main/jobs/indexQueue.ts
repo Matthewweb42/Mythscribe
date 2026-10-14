@@ -140,7 +140,16 @@ export interface IndexQueue<T> {
   cancelAll(): IndexQueueStatus
   /** Try again: clear the pause, put the failed jobs back in the queue, start working. */
   resume(): IndexQueueStatus
-  /** The project closed: drop every timer and everything remembered; the rows stay. */
+  /**
+   * Holds the background lane (F-16.31: the switch-over, from its safety step until Convert or
+   * the dialog closes): no background job starts while held, however much is touched or queued
+   * (the rows wait in `index_job`); the author's `runNow` still runs. Answers once the work in the
+   * lane now (the run in flight, if any) has ended, so nothing this queue started writes after it.
+   */
+  hold(): Promise<void>
+  /** Lets a held lane go: what waited runs now. A lane not held is left as it is. */
+  release(): void
+  /** The project closed: drop every timer, the hold and everything remembered; the rows stay. */
   clear(): void
   status(): IndexQueueStatus
   /** What the summary pane shows for a node: queued, running, or debouncing is `pending`. */
@@ -244,6 +253,8 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
   const dirty = new Set<string>()
   let running: { id: string; job: QueuedJob; requestId: string } | null = null
   let paused: JobFailure | null = null
+  /** `hold()`: no background job starts until `release()` (or `clear()`). */
+  let held = false
   let done = 0
   /** Bumped by `clear()`; a run from an older generation writes nothing. */
   let generation = 0
@@ -349,7 +360,7 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
   }
 
   function kick(): void {
-    if (paused !== null) return
+    if (paused !== null || held) return
     if (pumping) {
       // A pump that is just finishing may have looked before this job was queued: look again.
       again = true
@@ -366,7 +377,7 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
 
   async function pump(at: number): Promise<void> {
     for (;;) {
-      if (at !== generation || paused !== null) return
+      if (at !== generation || paused !== null || held) return
       const db = database()
       if (db === null) return
       const next = pickNext(db)
@@ -411,9 +422,9 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
   async function runBackground(job: IndexJob, at: number): Promise<T> {
     const gone = (reason: string): AppError =>
       new AppError('NOT_FOUND', reason, { job: job.id, nodeId: job.nodeId })
-    if (at !== generation || paused !== null) throw gone('The job is no longer due')
+    if (at !== generation || paused !== null || held) throw gone('The job is no longer due')
     await waitForSlot()
-    if (at !== generation || paused !== null) throw gone('The job is no longer due')
+    if (at !== generation || paused !== null || held) throw gone('The job is no longer due')
     const db = database()
     if (db === null) throw gone('No project is open')
     // The row may have gone while the job waited: cancelled, or its node was deleted.
@@ -658,8 +669,22 @@ export function createIndexQueue<T>(options: IndexQueueOptions<T>): IndexQueue<T
       return status
     },
 
+    hold() {
+      held = true
+      // The lane is serial: once what is in it now has ended, no background run writes again
+      // until `release`. The chain never rejects.
+      return chain.then(() => undefined)
+    },
+
+    release() {
+      if (!held) return
+      held = false
+      kick()
+    },
+
     clear() {
       generation += 1
+      held = false
       for (const timer of timers.values()) clearTimeout(timer)
       timers.clear()
       if (retryTimer !== null) {

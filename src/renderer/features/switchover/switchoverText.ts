@@ -1,3 +1,4 @@
+import { KEPT_BACKUP_LABEL, parseBackupFileName } from '@shared/backups'
 import { CLOUD_PROVIDER_LABEL, type CloudProvider } from '@shared/cloudSync'
 import {
   SWITCHOVER_NOTHING_CHANGED,
@@ -7,6 +8,7 @@ import {
   type SwitchoverStep
 } from '@shared/memory/switchover'
 import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
+import { backupWhen } from '@renderer/features/backups/backupWhen'
 
 /**
  * The switch-over's words (F-16.15, F-16.31 part A, plan `Switchover.md` §3): the intro's list of
@@ -14,15 +16,23 @@ import { formatCount, formatUsd } from '@renderer/features/ai/usageFormat'
  * dialog and its tests read the same text.
  */
 
-/** What changes, in plain words: the intro's one list (§3.2). */
-export const WHAT_CHANGES: readonly string[] = [
-  'Tags become names and labels. Every character, place and thing you tagged becomes a record with its nicknames; tone, content and your own tags become labels you filter by.',
-  'Inline tags in your scenes become plain words. You choose the words on the next screens.',
-  'Everything you wrote stays: scenes, notes, sheets (as Pinned lines), Plan and Idea sheets (in Ideas), uploads, story years and what you dismissed.',
-  'Sheet text the AI wrote goes under “Filed by AI earlier: please check”, marked Not canon.',
-  'What the AI made goes: summaries, AI facts and tags, Changes, To do and consistency findings. The AI reads your book again (Rebuild memory), and asks with its price first.',
-  'Snapshots are not changed. A backup and a dated copy of the project are made first. It runs once; to go back, you restore the backup.'
-]
+/**
+ * What changes, in plain words: the intro's one list (§3.2), as the dry run counts it (`model.ts`:
+ * dismissals that still apply convert, old ones and sheets only the AI wrote are dropped). The
+ * last line differs on a test copy, which gets no backup or dated copy of its own (SW-D4).
+ */
+export function whatChanges(onCopy: boolean): readonly string[] {
+  return [
+    'Tags become names and labels. Every character, place and thing you tagged becomes a record with its nicknames; tone, content and your own tags become labels you filter by.',
+    'Inline tags in your scenes become plain words. You choose the words on the next screens.',
+    'Everything you wrote stays: scenes, notes, sheets (as Pinned lines), Plan and Idea sheets (in Ideas), uploads, story years and what you dismissed that still applies.',
+    'Sheet text the AI added to your sheets goes under “Filed by AI earlier: please check”, marked Not canon.',
+    'What the AI made goes: summaries, AI facts and tags, sheets only the AI wrote, Changes, To do, consistency findings and old dismissals nothing reads any more. The AI reads your book again (Rebuild memory), and asks with its price first.',
+    onCopy
+      ? 'Snapshots are not changed. It runs once on this copy; the project it was made from stays as it is.'
+      : 'Snapshots are not changed. A backup and a dated copy of the project are made first. It runs once; to go back, you restore the backup.'
+  ]
+}
 
 /** The intro's recommendation of the copy, under the list. */
 export const TRY_COPY_FIRST =
@@ -88,14 +98,27 @@ export function countsLine(counts: SwitchoverCounts): string {
   ].join(', ')
 }
 
-/** The last path segment of a file or folder, for "pick <name>" in the way back. */
+/** The last path segment of a file or folder. */
 export function baseName(file: string): string {
-  return file.split(/[\\/]/).filter((part) => part !== '').pop() ?? file
+  return (
+    file
+      .split(/[\\/]/)
+      .filter((part) => part !== '')
+      .pop() ?? file
+  )
 }
 
-/** How to go back (decision SW-D11): restore the kept backup, or open the dated copy. */
+/**
+ * How to go back (decision SW-D11): restore the kept backup, named the way Settings › Backups
+ * lists it (its date, marked kept; the list shows no file names), or open the dated copy.
+ */
 export function goBackLine(backup: string): string {
-  return `To go back: in Settings › Backups choose Restore and pick “${baseName(backup)}”. It opens as a new project beside this one, on the old story memory. You can also open the dated copy with File › Open project…. This project stays on the new story memory.`
+  const made = parseBackupFileName(baseName(backup))
+  const which =
+    made === null
+      ? `the backup marked (kept: ${KEPT_BACKUP_LABEL})`
+      : `the backup from ${backupWhen(made.toISOString())} marked (kept: ${KEPT_BACKUP_LABEL})`
+  return `To go back: in Settings › Backups choose Restore on ${which}. It opens as a new project beside this one, on the old story memory. You can also open the dated copy with File › Open project…. This project stays on the new story memory.`
 }
 
 /** The rebuild's line: what *Rebuild memory* will cost after the switch, and how long. */

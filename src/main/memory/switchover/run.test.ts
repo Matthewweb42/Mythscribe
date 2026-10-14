@@ -18,7 +18,7 @@ import { BackupService } from '../../backups/backupService'
 import { rollbackSnapshot } from '../../db/snapshot'
 import { saveDocument } from '../../document/documentStore'
 import { ProjectManager } from '../../project/manager'
-import { getStoryMemory } from '../../project/settingsStore'
+import { getStoryMemory, setStoryMemory } from '../../project/settingsStore'
 import { WorkingCopy } from '../../project/workingCopy'
 import type { Schedule } from '../../schedule'
 import { buildFixtureV1, type FixtureV1 } from './fixtureV1'
@@ -48,6 +48,8 @@ let fixture: FixtureV1
 let manager: ProjectManager
 let backups: BackupService
 let calls: string[]
+/** What the run asked of v1's background writers (`hold`, `release`). */
+let holds: string[]
 let clock: number
 
 const CONTEXT = { source: 'ownKey' as const, fastModel: 'm', strongModel: 'm', pricing: null }
@@ -79,6 +81,7 @@ beforeEach(async () => {
   manager.onChange((info) => (info ? backups.projectOpened() : backups.projectClosed()))
   manager.open(folder)
   calls = []
+  holds = []
   const realSync = WorkingCopy.prototype.syncNow
   vi.spyOn(WorkingCopy.prototype, 'syncNow').mockImplementation(function (
     this: WorkingCopy,
@@ -106,6 +109,11 @@ function deps(overrides: Partial<SwitchoverRunDeps> = {}): SwitchoverRunDeps {
     current: () => manager.current(),
     close: () => manager.close(),
     now: () => new Date((clock += 60_000)),
+    hold: () => {
+      holds.push('hold')
+      return Promise.resolve()
+    },
+    release: () => void holds.push('release'),
     ...overrides
   }
 }
@@ -432,7 +440,7 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
         }
       })
     )
-    expect(run.safety()).toMatchObject({ ok: true })
+    expect(await run.safety()).toMatchObject({ ok: true })
     sqlite().exec(`CREATE TEMP TRIGGER plant AFTER INSERT ON record
       BEGIN SELECT RAISE(ABORT, 'planted'); END`)
     clearing = true
@@ -447,8 +455,120 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
     clearing = false
     // The memo the conversion answered was dropped: the next safety step makes everything again.
     calls = []
-    expect(run.safety()).toMatchObject({ ok: true })
+    expect(await run.safety()).toMatchObject({ ok: true })
     expect(calls).toEqual(['flush', 'backup'])
+  })
+
+  describe('v1’s background writers are held from the safety step (slice 3 review)', () => {
+    /** A v1 job's write (the To do sync's) that lands when its run in flight ends. */
+    const todoWrite = (): void => {
+      const n = holds.length + calls.length
+      sqlite()
+        .prepare(
+          `INSERT INTO todo_item (id, key, kind, rule, source, subject, why, target, created_at, updated_at)
+           VALUES (?, ?, 'gap', 'emptyRecord', 'local', 'Mara', 'Her sheet is empty.', 'Mara', ?, ?)`
+        )
+        .run(`todo-${n}`, `key-${n}`, '2026-10-14T10:00:00Z', '2026-10-14T10:00:00Z')
+    }
+
+    it('makes the copies after the run in flight has written, and nothing again at Convert', async () => {
+      let finish = (): void => undefined
+      const run = new SwitchoverRun(
+        deps({
+          hold: () => {
+            holds.push('hold')
+            // The To do sync is mid-run when the safety step comes: it writes, then ends.
+            return new Promise<void>((resolve) => {
+              finish = () => {
+                todoWrite()
+                resolve()
+              }
+            })
+          }
+        })
+      )
+      const pending = run.safety()
+      await Promise.resolve()
+      expect(calls).toEqual([])
+      finish()
+      const safety = await pending
+      if (!safety.ok) throw new Error(safety.message)
+      expect(holds).toEqual(['hold'])
+      // Held: nothing else writes until Convert, which makes no second backup or dated copy.
+      calls = []
+      const outcome = await run.convert({ consent: consent(), projectId: projectId() })
+      expect(outcome).toMatchObject({
+        ok: true,
+        backup: safety.backup,
+        datedCopy: safety.datedCopy
+      })
+      expect(calls).toEqual(['flush'])
+      expect(driveCopies()).toEqual([path.basename(safety.datedCopy)])
+      // The copies hold the write that landed before them.
+      const copy = readDb(path.join(safety.datedCopy, 'project.db'))
+      try {
+        expect(copy.prepare('SELECT count(*) AS n FROM todo_item').get()).toEqual({ n: 1 })
+      } finally {
+        copy.close()
+      }
+    })
+
+    it('a write after the copies (one the hold does not cover) still makes Convert copy again', async () => {
+      const run = new SwitchoverRun(deps())
+      const safety = await run.safety()
+      if (!safety.ok) throw new Error(safety.message)
+      todoWrite()
+      calls = []
+      const outcome = await run.convert({ consent: consent(), projectId: projectId() })
+      expect(outcome).toMatchObject({ ok: true })
+      expect(calls).toEqual(['flush', 'backup', 'flush'])
+      if (outcome.ok) expect(outcome.backup).not.toBe(safety.backup)
+    })
+
+    it('lets go when the dialog closes, the project changes, or the step is refused', async () => {
+      const run = new SwitchoverRun(deps())
+      expect(await run.safety()).toMatchObject({ ok: true })
+      run.leave()
+      run.leave()
+      expect(holds).toEqual(['hold', 'release'])
+      expect(await run.safety()).toMatchObject({ ok: true })
+      run.clear()
+      expect(holds).toEqual(['hold', 'release', 'hold', 'release'])
+      // A project already switched: refused, and nothing stays held.
+      holds = []
+      setStoryMemory(db(), 'v2', new Date())
+      await expect(run.safety()).rejects.toThrow(/already uses the new story memory/)
+      expect(holds).toEqual(['hold', 'release'])
+    })
+
+    it('goes on after the longest wait when a run in flight does not end', async () => {
+      const run = new SwitchoverRun(
+        deps({
+          holdWaitMs: 5,
+          hold: () => {
+            holds.push('hold')
+            return new Promise<void>(() => undefined)
+          }
+        })
+      )
+      expect(await run.safety()).toMatchObject({ ok: true })
+    })
+
+    it('answers the project step when the project changed while it waited', async () => {
+      const run = new SwitchoverRun(
+        deps({
+          hold: () => {
+            manager.close()
+            manager.open(folder)
+            run.clear()
+            return Promise.resolve()
+          }
+        })
+      )
+      const outcome = await run.safety()
+      expect(outcome).toMatchObject({ ok: false, step: 'project' })
+      expect(keptBackups()).toEqual([])
+    })
   })
 
   describe('a step that fails changes nothing and says what to do next', () => {

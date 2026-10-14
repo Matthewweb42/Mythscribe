@@ -5708,12 +5708,20 @@ export function registerHandlers({
   // itself, in every build (Help › Switch to the new story memory… and Settings › AI). The steps
   // live in `memory/switchover/` (`run.ts` holds the safety memo between the channels); these
   // handlers only reach them.
+  // v1's background writers, held from the safety step until Convert or the dialog closes
+  // (Switch-over slice 3 review): what they write would move the project between the copies and
+  // the conversion. The mention scan writes only derived indexes, which the safety memo ignores.
+  const v1Writers = [queue, todoQueue, voiceQueue, planQueue, sheetSync]
   const switchover = new SwitchoverRun({
     session: () => manager.require(),
     backupNow: (options) => backups.backupNow(options).file,
     current: () => manager.current(),
     close: () => manager.close(),
-    now: () => new Date()
+    now: () => new Date(),
+    hold: () => Promise.all(v1Writers.map((writer) => writer.hold())).then(() => undefined),
+    release: () => {
+      for (const writer of v1Writers) writer.release()
+    }
   })
   register('switchover:trialCopy', () => {
     const session = manager.require()
@@ -5742,6 +5750,10 @@ export function registerHandlers({
   })
   register('switchover:consent', () => inlineTagReplacements(manager.require().connection.orm))
   register('switchover:convert', (input) => switchover.convert(input))
+  register('switchover:leave', () => {
+    switchover.leave()
+    return null
+  })
   register('switchover:record', () => getSwitchoverRecord(manager.require().connection.orm))
 
   manager.onChange((info) => {

@@ -429,6 +429,8 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'switchover:plan': 'read',
   'switchover:consent': 'read',
   'switchover:convert': 'write',
+  // Lets v1's held background jobs go: never refused, even read-only.
+  'switchover:leave': 'read',
   'switchover:record': 'read'
 }
 
@@ -852,6 +854,8 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'switchover:plan': 'v1',
   'switchover:consent': 'v1',
   'switchover:convert': 'v1',
+  // The dialog may close on a project that is now v2 (after Convert), or with none open.
+  'switchover:leave': 'any',
   // F-16.31: what the switch-over left (when, the backup, the dated copy) is read once on v2.
   'switchover:record': 'v2'
 }

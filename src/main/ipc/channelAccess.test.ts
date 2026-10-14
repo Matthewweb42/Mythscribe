@@ -237,6 +237,13 @@ describe('story memory per channel (F-16.4; plan P1 §0)', () => {
     }
   })
 
+  it('F-16.31: the switch-over dialog lets v1’s held jobs go on any project, or none, even read-only', () => {
+    expect(CHANNEL_MEMORY['switchover:leave']).toBe('any')
+    expect(() => assertChannelMemory('switchover:leave', 'v2')).not.toThrow()
+    expect(() => assertChannelMemory('switchover:leave', 'v1')).not.toThrow()
+    expect(isWriteChannel('switchover:leave')).toBe(false)
+  })
+
   it('F-16.31: the switch-over record is read on v2, never a write', () => {
     expect(CHANNEL_MEMORY['switchover:record']).toBe('v2')
     expect(CHANNEL_ACCESS['switchover:record']).toBe('read')

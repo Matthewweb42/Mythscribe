@@ -142,9 +142,7 @@ describe('BackupsSettingsTab (F-8.4)', () => {
     const rows = screen.getAllByTestId('backup-row')
     expect(rows[0]).not.toHaveTextContent('kept')
     expect(rows[1]).toHaveTextContent('(kept: before story memory)')
-    expect(
-      within(rows[1]!).getByRole('button', { name: /^Restore the backup from/ })
-    ).toBeEnabled()
+    expect(within(rows[1]!).getByRole('button', { name: /^Restore the backup from/ })).toBeEnabled()
   })
 
   it('forwards the switch, the interval, and the retention', async () => {

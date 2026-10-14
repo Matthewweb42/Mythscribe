@@ -24,6 +24,8 @@ import { ipc } from '@renderer/lib/ipc'
  * itself, after which main closes it and the project store opens the same folder again on v2 (no
  * restart). A step that fails shows where it failed (`failure`), with nothing changed. App-wide (it
  * outlives the project switch it causes), so the dialog is mounted outside the project screen.
+ * Leaving it (`close`) lets main's held v1 jobs go (`switchover:leave`); leaving a test copy this
+ * flow made opens the author's project again, and leaving one that was already open offers to.
  */
 
 /**
@@ -31,14 +33,7 @@ import { ipc } from '@renderer/lib/ipc'
  * `safety` is the backup and the dated copy being made, then the dry run read.
  */
 export type SwitchoverPhase =
-  | 'idle'
-  | 'intro'
-  | 'copying'
-  | 'safety'
-  | 'plan'
-  | 'consent'
-  | 'converting'
-  | 'done'
+  'idle' | 'intro' | 'copying' | 'safety' | 'plan' | 'consent' | 'converting' | 'done'
 
 /** What the flow switches: the open project itself, or a test copy of it. */
 export type SwitchoverTarget = 'project' | 'copy'
@@ -63,6 +58,14 @@ interface SwitchoverState {
   source: string | null
   /** The test copy's folder, once made (or the open copy's). */
   copy: string | null
+  /**
+   * The project the flow is for (decision SW-D5): the open project when it started, then the test
+   * copy once made. Convert sends it, so a dialog left open across a project switch is refused by
+   * main as the `project` step rather than converting another book.
+   */
+  projectId: string | null
+  /** This flow made the test copy and opened it: leaving before the end opens the source again. */
+  madeCopy: boolean
   /** The cloud folder the project lives in, for the progress and the final screen's wording. */
   cloud: CloudProvider | null
   safety: SwitchoverSafety | null
@@ -93,6 +96,12 @@ interface SwitchoverState {
   convert: () => Promise<void>
   /** A test copy's final screen: closes the dialog and opens the project the copy was made from. */
   openMyProject: () => Promise<void>
+  /**
+   * Cancel, Escape or Close. Nothing changes; main's held v1 jobs go again. After the safety step
+   * on the project itself, a toast names the copies that stay. In a test copy before the end: the
+   * copy this flow made gives way to the author's project again; a copy that was already open
+   * offers *Open my project*.
+   */
   close: () => void
 }
 
@@ -101,6 +110,8 @@ const EMPTY = {
   target: null,
   source: null,
   copy: null,
+  projectId: null,
+  madeCopy: false,
   cloud: null,
   safety: null,
   plan: null,
@@ -118,7 +129,29 @@ let generation = 0
 /** The cloud folder the open project lives in (the status bar's), or null for a plain folder. */
 const cloudNow = (): CloudProvider | null => useCloudSyncStore.getState().status?.provider ?? null
 
+/** Opens the author's project again; a failure says why. */
+async function openSource(source: string): Promise<boolean> {
+  try {
+    return (await useProjectStore.getState().open(source)) !== null
+  } catch (err) {
+    toast.error(describeError(err))
+    return false
+  }
+}
+
 export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
+  /** Ends the flow: answers still on their way are dropped, and main's held v1 jobs go again. */
+  const reset = (): void => {
+    const { target } = get()
+    generation += 1
+    set({ ...EMPTY })
+    // Only the project itself holds them (from its safety step); a call with nothing held is free.
+    if (target === 'project')
+      void ipc()
+        .invoke('switchover:leave', undefined)
+        .catch(() => undefined)
+  }
+
   /** The dry run of the open project (or copy), then `plan`; an error goes back to the intro. */
   const loadPlan = async (mine: number): Promise<void> => {
     try {
@@ -136,7 +169,13 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
       if (get().phase !== 'idle') return
       const mine = ++generation
       const current = useProjectStore.getState().current
-      set({ ...EMPTY, phase: 'intro', source: current?.path ?? null, cloud: cloudNow() })
+      set({
+        ...EMPTY,
+        phase: 'intro',
+        source: current?.path ?? null,
+        projectId: current?.id ?? null,
+        cloud: cloudNow()
+      })
       try {
         const trial = await ipc().invoke('switchover:trial', undefined)
         if (mine !== generation) return
@@ -165,8 +204,15 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
         return
       }
       if (mine !== generation) return
-      // The copy is open from here on: a failed dry run leaves the intro offering *Switch this copy…*.
-      set({ target: 'copy', copy, cloud: cloudNow() })
+      // The copy is open from here on: a failed dry run leaves the intro offering *Switch this copy…*,
+      // and leaving the flow before the end opens the author's project again.
+      set({
+        target: 'copy',
+        copy,
+        projectId: useProjectStore.getState().current?.id ?? null,
+        madeCopy: true,
+        cloud: cloudNow()
+      })
       await loadPlan(mine)
     },
 
@@ -225,13 +271,17 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
     },
 
     setReplacement(key, text) {
-      set({ rows: get().rows.map((row) => (row.key === key ? { ...row, replacement: text } : row)) })
+      set({
+        rows: get().rows.map((row) => (row.key === key ? { ...row, replacement: text } : row))
+      })
     },
 
     toggleMerge(keep, merge) {
       const key = mergeKey(keep, merge)
       const ticked = get().ticked
-      set({ ticked: ticked.includes(key) ? ticked.filter((each) => each !== key) : [...ticked, key] })
+      set({
+        ticked: ticked.includes(key) ? ticked.filter((each) => each !== key) : [...ticked, key]
+      })
     },
 
     async convert() {
@@ -247,10 +297,11 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
           .filter((pair) => ticked.includes(mergeKey(pair.keep, pair.merge)))
           .map((pair) => ({ keep: pair.keep, merge: pair.merge }))
       }
-      // F-16.31 (decision SW-D5): Convert names the project it is for, so a dialog left open across
-      // a project switch never converts another book.
-      const projectId = useProjectStore.getState().current?.id
-      if (projectId === undefined) {
+      // F-16.31 (decision SW-D5): Convert names the project the flow is for, not whichever is open
+      // now, so a dialog left open across a project switch never converts another book (main
+      // answers the `project` step).
+      const { projectId } = get()
+      if (projectId === null || useProjectStore.getState().current === null) {
         set({ error: 'No project is open.' })
         return
       }
@@ -290,26 +341,39 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
 
     async openMyProject() {
       const { source } = get()
-      get().close()
-      if (source === null) return
-      try {
-        await useProjectStore.getState().open(source)
-      } catch (err) {
-        toast.error(describeError(err))
-      }
+      reset()
+      if (source !== null) await openSource(source)
     },
 
     close() {
-      const { phase, target, safety } = get()
-      generation += 1
-      set({ ...EMPTY })
+      const { phase, target, safety, source, copy, madeCopy } = get()
+      reset()
       // Left after the safety step on the project itself: nothing changed, and the copies made a
       // moment ago stay (decision SW-D11's way back needs no undo here).
       if (target === 'project' && safety !== null && (phase === 'plan' || phase === 'consent')) {
         toast.info(
           `Nothing was changed. The backup and the dated copy made a moment ago stay where they are: ${safety.backup} · ${safety.datedCopy}`
         )
+        return
       }
+      // Left in a test copy before the end: what the author writes next belongs in her project,
+      // not the copy (Switch-over slice 3 review). The done screen asks with its own buttons.
+      if (target !== 'copy' || source === null || phase === 'done') return
+      const where = copy === null ? '' : ` It stays at ${copy}.`
+      if (madeCopy) {
+        void openSource(source).then((opened) => {
+          if (opened) {
+            toast.info(
+              `Your project is open again and unchanged. The test copy was not switched.${where}`
+            )
+          }
+        })
+        return
+      }
+      toast.warningWithAction(
+        `You are working in the test copy.${where} Your project at ${source} is unchanged.`,
+        { label: 'Open my project', run: () => void openSource(source) }
+      )
     }
   }
 })

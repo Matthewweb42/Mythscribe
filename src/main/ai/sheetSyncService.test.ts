@@ -110,6 +110,22 @@ describe('createSheetSyncService (F-9.18)', () => {
     expect(published.some((list) => list.some((s) => s.phase === 'running'))).toBe(true)
   })
 
+  it('F-16.31: held through the switch-over, a sheet whose pause ends writes nothing until released', async () => {
+    const id = mara()
+    writeUp()
+    service.touch(id)
+    await service.hold()
+    await vi.advanceTimersByTimeAsync(60_000)
+    // Not even the due list (a settings row) moves while held.
+    expect(getSheetSyncDue(db)).toEqual([])
+    expect(complete).not.toHaveBeenCalled()
+    service.release()
+    await vi.advanceTimersByTimeAsync(10)
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(getEntity(db, id)?.body).toBe('Mara is twenty-seven.')
+    expect(getSheetSyncDue(db)).toEqual([])
+  })
+
   it('schedules nothing while AI is off or no provider is ready: the sheet just reads out of date', async () => {
     const id = mara()
     ready = false

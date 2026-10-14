@@ -119,6 +119,8 @@ beforeEach(() => {
           return { ...PROJECT, storyMemory: 'v2' } as Output<C>
         case 'project:cloudSyncNow':
           return null as Output<C>
+        case 'switchover:leave':
+          return null as Output<C>
         case 'recovery:list':
           return [] as Output<C>
         default:
@@ -179,18 +181,30 @@ describe('switchoverStore (F-16.31 part A)', () => {
     expect(channels()).not.toContain('switchover:safety')
   })
 
-  it('sends the open project id with the consent, and refuses with no project open', async () => {
+  it('sends the id of the project the flow is for with the consent, and refuses with no project open', async () => {
     await toConsent()
     useProjectStore.setState({ current: null })
     await store().convert()
     expect(store().error).toBe('No project is open.')
     expect(channels()).not.toContain('switchover:convert')
-    useProjectStore.setState({ current: PROJECT })
+    // Another project opened under the dialog (Settings › Backups › Restore, say): Convert still
+    // names the one the dry run and the consent were for, so main refuses it as the project step.
+    useProjectStore.setState({
+      current: { ...PROJECT, id: 'restored', path: '/books/Old.mythscribe' }
+    })
     await store().convert()
     expect(calls.find((call) => call.channel === 'switchover:convert')?.input).toEqual({
       consent: { replacements: [], merges: [] },
       projectId: 'real'
     })
+  })
+
+  it('names the test copy once the flow has made it', async () => {
+    await store().open()
+    expect(store().projectId).toBe('real')
+    await store().tryCopy()
+    expect(store().projectId).toBe('copy')
+    expect(store().madeCopy).toBe(true)
   })
 
   it('drops the safety answer of a flow the author left', async () => {
@@ -274,12 +288,32 @@ describe('switchoverStore (F-16.31 part A)', () => {
       `Nothing was changed. The backup and the dated copy made a moment ago stay where they are: ${BACKUP} · ${DATED}`
     ])
 
-    // A copy has no safety step, so leaving it says nothing.
-    useDialogStore.setState({ toasts: [] })
-    await store().open()
-    await store().tryCopy()
-    store().close()
-    expect(toasts()).toEqual([])
+    // Leaving lets main's held v1 jobs go.
+    expect(channels().filter((c) => c === 'switchover:leave')).toHaveLength(2)
+  })
+
+  it('opens the author’s project again when she leaves the copy the flow made, from any screen before the end', async () => {
+    for (const leaveAt of ['plan', 'consent', 'intro'] as const) {
+      calls = []
+      useProjectStore.setState({ current: PROJECT })
+      useDialogStore.setState({ toasts: [] })
+      if (leaveAt === 'intro') failing['switchover:plan'] = new Error('The copy could not be read.')
+      await store().open()
+      await store().tryCopy()
+      if (leaveAt === 'consent') await store().toConsent()
+      expect(store().phase).toBe(leaveAt)
+      expect(useProjectStore.getState().current?.id).toBe('copy')
+      store().close()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(calls).toContainEqual({ channel: 'project:open', input: { path: PROJECT.path } })
+      expect(toasts()).toEqual([
+        `Your project is open again and unchanged. The test copy was not switched. It stays at ${COPY_PATH}.`
+      ])
+      // A copy flow holds nothing in main.
+      expect(channels()).not.toContain('switchover:leave')
+      delete failing['switchover:plan']
+    }
   })
 
   it('opens the project the copy was made from on Open my project', async () => {

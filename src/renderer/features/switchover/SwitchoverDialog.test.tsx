@@ -16,7 +16,8 @@ import { registerPendingSave, resetPendingSaves } from '@renderer/features/proje
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { SwitchoverDialog } from './SwitchoverDialog'
-import { WHAT_CHANGES, rebuildLine } from './switchoverText'
+import { backupWhen } from '@renderer/features/backups/backupWhen'
+import { rebuildLine, whatChanges } from './switchoverText'
 import { resetSwitchoverStore, useSwitchoverStore } from './switchoverStore'
 
 const ORIGINAL: ProjectInfo = {
@@ -182,6 +183,8 @@ beforeEach(() => {
           return null as Output<C>
         case 'backups:reveal':
           return null as Output<C>
+        case 'switchover:leave':
+          return null as Output<C>
         case 'recovery:list':
           return [] as Output<C>
         default:
@@ -212,9 +215,15 @@ describe('SwitchoverDialog: the intro (F-16.31 part A)', () => {
   it('says what changes and recommends a copy first, focused, beside Switch this project… and Cancel', async () => {
     const intro = await openIntro()
     const list = within(intro).getByRole('list', { name: 'What changes' })
-    expect(within(list).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-      ...WHAT_CHANGES
-    ])
+    const lines = within(list)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent)
+    expect(lines).toEqual([...whatChanges(false)])
+    // What the dry run drops is named, not promised as kept (Switch-over slice 3 review).
+    expect(lines[2]).toContain('what you dismissed that still applies')
+    expect(lines[3]).toContain('Sheet text the AI added to your sheets')
+    expect(lines[4]).toContain('sheets only the AI wrote')
+    expect(lines[5]).toContain('A backup and a dated copy of the project are made first.')
     expect(intro).toHaveTextContent('Try it on a copy first (recommended)')
     const copy = within(intro).getByRole('button', { name: 'Try it on a copy first' })
     await waitFor(() => expect(copy).toHaveFocus())
@@ -232,6 +241,15 @@ describe('SwitchoverDialog: the intro (F-16.31 part A)', () => {
     const user = userEvent.setup()
     const intro = await openIntro()
     expect(intro).toHaveTextContent('This is a test copy.')
+    // A copy gets no backup or dated copy of its own: its list does not promise one.
+    const lines = within(intro)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent)
+    expect(lines).toEqual([...whatChanges(true)])
+    expect(lines.at(-1)).toBe(
+      'Snapshots are not changed. It runs once on this copy; the project it was made from stays as it is.'
+    )
+    expect(intro).not.toHaveTextContent('A backup and a dated copy of the project are made first.')
     expect(within(intro).queryByRole('button', { name: 'Switch this project…' })).toBeNull()
     expect(within(intro).queryByRole('button', { name: 'Try it on a copy first' })).toBeNull()
     await user.click(await within(intro).findByRole('button', { name: 'Switch this copy…' }))
@@ -398,8 +416,10 @@ describe('SwitchoverDialog: the project itself (F-16.31 part A)', () => {
       `Dated copy (in Google Drive): ${DATED}`
     )
     const back = screen.getByTestId('switchover-go-back')
+    // Named as the Backups list shows it: its date, marked kept (the list shows no file names).
+    const made = backupWhen(new Date(2026, 9, 14, 10, 15, 0).toISOString())
     expect(back).toHaveTextContent(
-      'To go back: in Settings › Backups choose Restore and pick “Book before story memory 2026-10-14 101500.zip”.'
+      `To go back: in Settings › Backups choose Restore on the backup from ${made} marked (kept: before story memory).`
     )
     expect(back).toHaveTextContent('You can also open the dated copy with File › Open project….')
     expect(screen.queryByTestId('switchover-original')).toBeNull()
@@ -436,9 +456,21 @@ describe('SwitchoverDialog: the project itself (F-16.31 part A)', () => {
     await user.click(screen.getByRole('button', { name: 'Back' }))
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([
-      `Nothing was changed. The backup and the dated copy made a moment ago stay where they are: ${BACKUP} · ${DATED}`
-    ])
+    const cancelled = `Nothing was changed. The backup and the dated copy made a moment ago stay where they are: ${BACKUP} · ${DATED}`
+    expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([cancelled])
+    expect(channels()).not.toContain('switchover:convert')
+    // Main's held v1 jobs go again.
+    expect(channels().at(-1)).toBe('switchover:leave')
+
+    // The consent screen has its own Cancel beside Back and Convert.
+    useDialogStore.setState({ toasts: [] })
+    await useSwitchoverStore.getState().open()
+    await user.click(await screen.findByRole('button', { name: 'Switch this project…' }))
+    await user.click(await screen.findByRole('button', { name: 'Next' }))
+    const consent = await screen.findByRole('dialog', { name: 'Inline tags become words' })
+    await user.click(within(consent).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([cancelled])
     expect(channels()).not.toContain('switchover:convert')
   })
 })
@@ -479,6 +511,44 @@ describe('SwitchoverDialog: a copy first (F-16.15)', () => {
     await waitFor(() => expect(useProjectStore.getState().current?.id).toBe('real'))
     expect(calls.at(-2)).toEqual({ channel: 'project:open', input: { path: ORIGINAL.path } })
     expect(useProjectStore.getState().current?.storyMemory).toBe('v1')
+  })
+
+  it('opens the author’s project again when she leaves the copy it made before the end', async () => {
+    const user = userEvent.setup()
+    const intro = await openIntro()
+    await user.click(within(intro).getByRole('button', { name: 'Try it on a copy first' }))
+    const dryRun = await screen.findByRole('dialog', { name: 'Switch-over dry run' })
+    expect(useProjectStore.getState().current?.id).toBe('copy')
+    await user.click(within(dryRun).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(useProjectStore.getState().current?.id).toBe('real'))
+    expect(calls).toContainEqual({ channel: 'project:open', input: { path: ORIGINAL.path } })
+    await waitFor(() =>
+      expect(useDialogStore.getState().toasts.map((t) => t.message)).toEqual([
+        `Your project is open again and unchanged. The test copy was not switched. It stays at ${COPY.path}.`
+      ])
+    )
+    // A copy flow holds nothing in main.
+    expect(channels()).not.toContain('switchover:leave')
+  })
+
+  it('offers Open my project when the author leaves a copy that was already open', async () => {
+    useProjectStore.setState({ current: COPY })
+    trial = { source: ORIGINAL.path, createdAt: '2026-10-12T09:00:00.000Z' }
+    const user = userEvent.setup()
+    const intro = await openIntro()
+    await within(intro).findByRole('button', { name: 'Switch this copy…' })
+    await user.click(within(intro).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    // She opened the copy herself: it stays open, and the toast offers the way back.
+    expect(useProjectStore.getState().current?.id).toBe('copy')
+    const [shown] = useDialogStore.getState().toasts
+    expect(shown?.message).toBe(
+      `You are working in the test copy. It stays at ${COPY.path}. Your project at ${ORIGINAL.path} is unchanged.`
+    )
+    expect(shown?.action?.label).toBe('Open my project')
+    shown?.action?.run()
+    await waitFor(() => expect(useProjectStore.getState().current?.id).toBe('real'))
   })
 
   it('settles the open project before the copy, as every project switch does', async () => {

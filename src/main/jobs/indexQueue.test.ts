@@ -350,6 +350,49 @@ describe('createIndexQueue (F-5.13)', () => {
     expect(queue.status()).toEqual(IDLE_INDEX_QUEUE)
   })
 
+  it('F-16.31: a hold waits for the run in flight, starts nothing until released, and keeps the rows', async () => {
+    const [a, b] = scenes
+    if (a === undefined || b === undefined) throw new Error('no scenes')
+    const first = gate()
+    run.mockReturnValueOnce(first.promise)
+    queue.indexAll('summary', [a])
+    await settle()
+    expect(nodesRun()).toEqual([a])
+    let idle = false
+    void queue.hold().then(() => {
+      idle = true
+    })
+    await settle()
+    // The run in flight is not cut short: the hold answers once it has ended.
+    expect(idle).toBe(false)
+    first.release()
+    await settle()
+    expect(idle).toBe(true)
+    // Held: saves and queued jobs wait as rows, and nothing starts, however long.
+    queue.touch('summary', b)
+    queue.indexAll('summary', [a])
+    await advance(DELAY * 3)
+    expect(nodesRun()).toEqual([a])
+    expect(rows().map((row) => row.status)).toEqual(['queued', 'queued'])
+    // The author's own run still goes.
+    await expect(queue.runNow('summary', a, 'sum-1')).resolves.toBe(`ran ${a}`)
+    expect(nodesRun()).toEqual([a, a])
+    // Released: what waited runs.
+    queue.release()
+    await settle()
+    expect(nodesRun()).toEqual([a, a, b])
+    expect(listJobs(db)).toEqual([])
+    // A second release, or one with nothing held, changes nothing; a hold with nothing in flight
+    // answers at once.
+    queue.release()
+    await expect(queue.hold()).resolves.toBeUndefined()
+    queue.clear()
+    // The project closed: the hold went with it.
+    queue.indexAll('summary', [b])
+    await settle()
+    expect(nodesRun()).toEqual([a, a, b, b])
+  })
+
   it('pauses when the feature is turned off mid-queue', async () => {
     const [a] = scenes
     if (a === undefined) throw new Error('no scene')

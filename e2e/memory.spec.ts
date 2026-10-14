@@ -3795,19 +3795,35 @@ test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', asy
 
   // Help › Switch to the new story memory… › Try it on a copy first (F-16.31 slice 3): the dry
   // run lists the tag as a record.
-  await page
-    .getByRole('menubar', { name: 'Application menu' })
-    .getByRole('menuitem', { name: 'Help' })
-    .click()
-  await page
-    .getByRole('menu', { name: 'Help' })
-    .getByRole('menuitem', { name: 'Switch to the new story memory…' })
-    .click()
-  await page
-    .getByRole('dialog', { name: 'Switch to the new story memory' })
-    .getByRole('button', { name: 'Try it on a copy first' })
-    .click()
+  const tryOnACopy = async (): Promise<void> => {
+    await page
+      .getByRole('menubar', { name: 'Application menu' })
+      .getByRole('menuitem', { name: 'Help' })
+      .click()
+    await page
+      .getByRole('menu', { name: 'Help' })
+      .getByRole('menuitem', { name: 'Switch to the new story memory…' })
+      .click()
+    await page
+      .getByRole('dialog', { name: 'Switch to the new story memory' })
+      .getByRole('button', { name: 'Try it on a copy first' })
+      .click()
+  }
   const dryRun = page.getByRole('dialog', { name: 'Switch-over dry run' })
+  // Cancel on the copy's dry run opens the author's project again, so what she writes next goes
+  // into it, not into the test copy (Switch-over slice 3 review).
+  await tryOnACopy()
+  await expect(dryRun).toBeVisible({ timeout: 15_000 })
+  expect((await invoke<ProjectInfo | null>('project:current', undefined))?.path).not.toBe(
+    projectPath
+  )
+  await dryRun.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dryRun).toHaveCount(0)
+  await expect
+    .poll(async () => (await invoke<ProjectInfo | null>('project:current', undefined))?.path)
+    .toBe(projectPath)
+  await expect(page.getByTestId('project-name')).toHaveText('Switch Novel')
+  await tryOnACopy()
   // (A character tag arrives with its sheet in v1, F-9.12, so the record comes from both.)
   await expect(dryRun.getByRole('list', { name: 'Converted' })).toContainText(
     'Mara: Record (character): from its sheet and tag.'
@@ -3825,8 +3841,9 @@ test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', asy
   // The copy opens on v2: the edited words in the scene, and a Mara record.
   const copy = await invoke<ProjectInfo | null>('project:current', undefined)
   expect(copy?.storyMemory).toBe('v2')
+  // (A second test copy made within the same minute as the one left above is numbered.)
   expect(path.basename(copy?.path ?? '')).toMatch(
-    /^Switch Novel \(story memory test \d{4}-\d\d-\d\d \d{4}\)\.mythscribe$/
+    /^Switch Novel \(story memory test \d{4}-\d\d-\d\d \d{4}\)( \d+)?\.mythscribe$/
   )
   const converted = await storedText()
   expect(converted).not.toContain('inlineTag')
@@ -3969,9 +3986,12 @@ test('story memory: the switch-over of a v1 project in place, as the installed a
   // the backup, and nothing changed.
   const blocker = path.join(tmp, 'not-a-folder.txt')
   fs.writeFileSync(blocker, 'a file where the backup folder should be')
-  await app.evaluate(({ dialog }, chosen) => {
-    dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] })
-  }, path.join(blocker, 'backups'))
+  await app.evaluate(
+    ({ dialog }, chosen) => {
+      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [chosen] })
+    },
+    path.join(blocker, 'backups')
+  )
   await invoke('backups:chooseFolder', undefined)
   await intro.getByRole('button', { name: 'Switch this project…' }).click()
   const failure = intro.getByTestId('switchover-failure')
@@ -4030,8 +4050,16 @@ test('story memory: the switch-over of a v1 project in place, as the installed a
     `Dated copy (in Google Drive): ${datedCopy}`
   )
   const goBack = done.getByTestId('switchover-go-back')
-  await expect(goBack).toContainText('in Settings › Backups choose Restore')
-  await expect(goBack).toContainText(path.basename(backup))
+  // Named as Settings › Backups lists it (a date, marked kept), not by its file name.
+  await expect(goBack).toContainText('in Settings › Backups choose Restore on the backup from')
+  await expect(goBack).toContainText('marked (kept: before story memory)')
+  // One dated copy and one kept backup: Convert reused what the safety step made after Try
+  // again, and the dated copy is the project from before the conversion, its inline tag in place.
+  expect(datedCopies()).toEqual([path.basename(datedCopy)])
+  expect(
+    fs.readdirSync(path.dirname(backup)).filter((name) => name.includes('before story memory'))
+  ).toEqual([path.basename(backup)])
+  expect(fs.readFileSync(path.join(datedCopy, 'project.db')).includes('inlineTag')).toBe(true)
   const switched = await invoke<ProjectInfo | null>('project:current', undefined)
   expect(switched?.path).toBe(projectPath)
   expect(switched?.storyMemory).toBe('v2')
@@ -4052,6 +4080,8 @@ test('story memory: the switch-over of a v1 project in place, as the installed a
   await menubar.getByRole('menuitem', { name: 'Help' }).click()
   const help = page.getByRole('menu', { name: 'Help' })
   await expect(help.getByRole('menuitem', { name: 'Keyboard shortcuts' })).toBeVisible()
-  await expect(help.getByRole('menuitem', { name: 'Switch to the new story memory…' })).toHaveCount(0)
+  await expect(help.getByRole('menuitem', { name: 'Switch to the new story memory…' })).toHaveCount(
+    0
+  )
   await page.keyboard.press('Escape')
 })

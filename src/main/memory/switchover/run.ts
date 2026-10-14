@@ -47,7 +47,21 @@ export interface SwitchoverRunDeps {
   /** Closes the open project (`manager.close()`): Google Drive gets the converted database. */
   close: () => void
   now: () => Date
+  /**
+   * Holds v1's background writers (summaries, To do, voice, plan links, sheet sync) from the
+   * safety step until Convert or the dialog closes, so nothing they write moves the project
+   * between the copies and the conversion (Switch-over slice 3 review); answers once the runs in
+   * flight have ended. The mention scan is not held: it writes only what `projectDigest` ignores.
+   */
+  hold: () => Promise<void>
+  /** Lets the held writers go (`hold`); what waited runs. */
+  release: () => void
+  /** The longest the safety step waits for a run in flight (`hold`); default 30 s. */
+  holdWaitMs?: number
 }
+
+/** How long the safety step waits for a background run in flight before it goes on anyway. */
+export const SWITCHOVER_HOLD_WAIT_MS = 30_000
 
 /**
  * What the safety step made of one open session, at one state of it: reused only while it is that
@@ -99,7 +113,10 @@ export function projectDigest(sqlite: Database.Database): string {
   for (const { name } of tables) {
     if (isDerived(name)) continue
     hash.update(name).update('\u0000')
-    const rows = sqlite.prepare(`SELECT * FROM "${name.replace(/"/g, '""')}"`).raw().iterate()
+    const rows = sqlite
+      .prepare(`SELECT * FROM "${name.replace(/"/g, '""')}"`)
+      .raw()
+      .iterate()
     for (const row of rows) hash.update(JSON.stringify(row)).update('\u0001')
   }
   return hash.digest('hex')
@@ -352,21 +369,50 @@ export async function runConvert(
   return { outcome: { ok: true, folder, trial, backup, datedCopy, counts }, memo: null }
 }
 
+/** Resolves after `ms`, on a timer that never holds the process open. */
+function after(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    if (typeof timer === 'object' && typeof timer.unref === 'function') timer.unref()
+  })
+}
+
 /**
  * The run's state between channels: the safety memo, dropped whenever the open project changes
- * (`manager.onChange` → `clear`). A conversion that was running when `clear` came answers its
- * outcome but leaves no memo behind.
+ * (`manager.onChange` → `clear`), and the hold on v1's background writers (`deps.hold`), taken
+ * by the safety step and let go when the dialog closes (`leave`), the project changes (`clear`,
+ * which a successful Convert causes) or the safety step refuses. A conversion that was running
+ * when `clear` came answers its outcome but leaves no memo behind.
  */
 export class SwitchoverRun {
   private memo: SafetyMemo | null = null
   private generation = 0
+  private held = false
 
   constructor(private readonly deps: SwitchoverRunDeps) {}
 
-  safety(): SwitchoverSafetyOutcome {
-    const { outcome, memo } = switchoverSafety(this.deps, this.memo)
-    this.memo = memo
-    return outcome
+  /**
+   * The safety step (`switchoverSafety`) once v1's background writers are held and the runs in
+   * flight have ended (at most `holdWaitMs`: a run that ends later only makes Convert copy
+   * again), so the copies stay the project as it is until Convert.
+   */
+  async safety(): Promise<SwitchoverSafetyOutcome> {
+    const started = this.generation
+    const info = this.deps.session().info
+    this.held = true
+    await Promise.race([this.deps.hold(), after(this.deps.holdWaitMs ?? SWITCHOVER_HOLD_WAIT_MS)])
+    if (started !== this.generation || this.deps.current() !== info) {
+      return failure('project', 'The open project changed during the switch-over.', AGAIN)
+    }
+    try {
+      const { outcome, memo } = switchoverSafety(this.deps, this.memo)
+      this.memo = memo
+      return outcome
+    } catch (err) {
+      // Refused (a test copy, a project already switched): nothing to hold for.
+      this.leave()
+      throw err
+    }
   }
 
   async convert(input: SwitchoverConvertInput): Promise<SwitchoverOutcome> {
@@ -376,8 +422,19 @@ export class SwitchoverRun {
     return outcome
   }
 
+  /**
+   * The dialog closed (`switchover:leave`): v1's background writers go again. The memo stays,
+   * so a flow started again with nothing written since reuses the copies.
+   */
+  leave(): void {
+    if (!this.held) return
+    this.held = false
+    this.deps.release()
+  }
+
   clear(): void {
     this.memo = null
     this.generation += 1
+    this.leave()
   }
 }
