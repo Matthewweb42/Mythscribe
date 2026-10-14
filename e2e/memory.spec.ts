@@ -146,6 +146,15 @@ import { caretToEnd, clickIntoEditor } from './support'
  * final screen names the backup zip and the dated copy (both on disk) and how to go back; the same
  * folder reopens on v2 with "Mara's eyes were grey." and a Mara record, and Help no longer lists
  * the item.
+ *
+ * Switch-over slice 4 (F-16.31 part A, F-16.19, F-16.29), the same test on: the final screen says
+ * Use AI is off with no Rebuild button, and nothing has reached the provider; Use AI on with an
+ * own key at the fake, Settings › AI › Story memory shows the record (the switch date, the backup,
+ * the dated copy, the rebuild still waiting); This scene › Needs a look shows "Rebuild memory has
+ * not run since the switch-over: it reads 1 scene, about …" with no reader request yet; Rebuild…
+ * prices it in the rebuild dialog, Rebuild reads with `reader.v2` and `verify.v2` (never
+ * `summary.v5`) and ends with the grouped summary listing Mara (her sheet: "Eyes: grey"); the
+ * notice goes and the record says the rebuild started.
  */
 
 let app: ElectronApplication
@@ -193,6 +202,9 @@ const READER_SENTINEL = 'You are the story-memory reader inside a novel-writing 
 /** F-5.6: `summary.v5`'s opening (version 1's, byte for byte); never sent in v2 (P2a slice 3). */
 const SUMMARY_SENTINEL = 'You are the scene-summary feature inside a novel-writing app.'
 const VERIFY_SENTINEL = 'You are the fact checker inside a novel-writing app.'
+/** P2b: `reader.v2`'s topics roster heading and `verify.v2`'s knows rule (neither in version 1). */
+const READER_TOPICS_LINE = 'Secrets and threads (id label · kind):'
+const VERIFY_V2_KNOWS = '- A knows item: ok only when'
 /** F-16.20: `synopsis.v2`'s opening (`SYNOPSIS_V2_SENTINEL`), which tells it from `synopsis.v1`. */
 const SYNOPSIS_V2_SENTINEL =
   'You are the synopsis feature inside a novel-writing app. Read the scene below, with the card'
@@ -399,7 +411,8 @@ function judgeAnswer(messages: { content: string }[]): string {
 
 /**
  * The fake reader (F-16.17): in the numbered paragraphs it finds `Mara's eyes were <colour>.` and
- * `She walked to <place>.`, and answers those two facts about Mara Vell (by her roster id) with
+ * `She walked to <place>.`, and answers those two facts about Mara Vell (by her roster id; a
+ * character named Mara alone where there is no Mara Vell, as the switch-over makes) with
  * their paragraph numbers, and, when the card is due, a card whose place is the quay with Mara on
  * the page. Its line is "Mara walks to the quay." unless a paragraph has Mara waiting somewhere.
  *
@@ -418,7 +431,6 @@ function judgeAnswer(messages: { content: string }[]): string {
 function readerAnswer(messages: { content: string }[]): string {
   const system = messages[0]?.content ?? ''
   const user = messages.at(-1)?.content ?? ''
-  const mara = /^(r\d+) Mara Vell /m.exec(system)?.[1] ?? null
   const claims: Record<string, unknown>[] = []
   const topics: Record<string, unknown>[] = []
   const present: [string, number, string][] = []
@@ -436,6 +448,8 @@ function readerAnswer(messages: { content: string }[]): string {
   for (const match of system.matchAll(/^([st]\d+) (.+) · (?:secret|thread)$/gm)) {
     listed.set(match[2] ?? '', match[1] ?? '')
   }
+  // Mara Vell, or (the switch-over's record from "#mara", F-16.31) a character named Mara alone.
+  const mara = /^(r\d+) Mara Vell /m.exec(system)?.[1] ?? people.get('Mara') ?? null
   let latestSecret = [...listed].filter(([, id]) => id.startsWith('s')).at(-1)?.[1] ?? null
   for (const line of user.split('\n')) {
     const paragraph = /^¶(\d+) (.*)$/.exec(line)
@@ -3889,6 +3903,12 @@ test('story memory: the switch-over of a v1 project in place, as the installed a
   // A third launch without the override, with its own app data: new projects run v1, and nothing
   // turns the switch-over on but the author.
   if (!exited) await app.close()
+  // Nothing reaches the provider until the author asks for the rebuild (steps 8 to 10).
+  const bodiesAtLaunch = providerBodies.length
+  const isReader = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(READER_SENTINEL) === true
+  const isVerify = (body: (typeof providerBodies)[number]): boolean =>
+    body.messages[0]?.content.startsWith(VERIFY_SENTINEL) === true
   const userData = path.join(tmp, 'userData-in-place')
   app = await electron.launch({ args: ['.'], env: { ...baseEnv, MYTHSCRIBE_USER_DATA: userData } })
   exited = false
@@ -4073,6 +4093,15 @@ test('story memory: the switch-over of a v1 project in place, as the installed a
   expect((await invoke<{ name: string }[]>('record:list', undefined)).map((r) => r.name)).toEqual([
     'Mara'
   ])
+
+  // 8. Switch-over slice 4: Use AI is off, so the final screen asks nothing: no Rebuild button,
+  // why, and that Needs a look will offer it; nothing has reached the provider.
+  const ask = done.getByTestId('switchover-rebuild-ask')
+  await expect(ask).toContainText(
+    'Use AI is off, so nothing is read and nothing is spent. When you turn it on in Settings › AI, This scene › Needs a look offers Rebuild memory with its price.'
+  )
+  await expect(done.getByRole('button', { name: 'Rebuild now' })).toHaveCount(0)
+  expect(providerBodies).toHaveLength(bodiesAtLaunch)
   await done.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(done).toHaveCount(0)
 
@@ -4084,4 +4113,82 @@ test('story memory: the switch-over of a v1 project in place, as the installed a
     0
   )
   await page.keyboard.press('Escape')
+
+  // 9. Use AI on with an own OpenAI key at the fake; Settings › AI › Story memory keeps the
+  // record: when, the kept backup, how to go back, and the rebuild still waiting.
+  await page.keyboard.press('Control+,')
+  await expect(settingsDialog).toBeVisible()
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  await settingsDialog.getByRole('switch', { name: 'Use AI' }).check()
+  await settingsDialog
+    .getByRole('radiogroup', { name: 'Key provider' })
+    .getByTestId('own-key-provider-openai')
+    .click()
+  await expect(settingsDialog.getByRole('form', { name: 'OpenAI API key' })).toBeVisible()
+  await settingsDialog.getByLabel('API key', { exact: true }).fill(OWN_KEY)
+  await settingsDialog.getByRole('button', { name: 'Save' }).click()
+  await expect(settingsDialog.getByTestId('ai-key-hint')).toHaveText('Key saved: sk-…5678')
+  const recordBlock = settingsDialog.getByTestId('switchover-record')
+  await expect(recordBlock).toContainText('Switched to the new story memory on')
+  await expect(recordBlock).toContainText(`Backup: ${backup}`)
+  await expect(recordBlock).toContainText(`Dated copy: ${datedCopy}`)
+  await expect(recordBlock).toContainText('Rebuild memory has not run since the switch.')
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settingsDialog).toHaveCount(0)
+
+  // 10. This scene › Needs a look offers the rebuild with its price; still nothing read.
+  await showSection('Manuscript')
+  await page
+    .getByRole('tree', { name: 'Document tree' })
+    .getByText(scene.title, { exact: true })
+    .click()
+  const panel = page.getByTestId('this-scene-panel')
+  if ((await panel.count()) === 0) {
+    await page.getByRole('button', { name: 'This scene', exact: true }).click()
+  }
+  await panel.getByRole('tab', { name: 'This scene' }).click()
+  const needs = panel.getByRole('region', { name: 'Needs a look' })
+  const waiting = needs
+    .getByTestId('reading-notice')
+    .filter({ hasText: 'Rebuild memory has not run since the switch-over' })
+  await expect(waiting).toContainText('it reads 1 scene, about', { timeout: 15_000 })
+  expect(providerBodies.slice(bodiesAtLaunch).filter(isReader)).toEqual([])
+
+  // 11. Rebuild… prices it in the rebuild dialog; Rebuild reads the book with reader.v2 and
+  // verify.v2, and ends with the grouped summary (Mara's new lines, her eyes grey); the notice goes.
+  await waiting.getByRole('button', { name: 'Rebuild…' }).click()
+  const rebuild = page.getByRole('dialog', { name: 'Rebuild memory' })
+  await expect(rebuild.getByTestId('rebuild-estimate')).toContainText(/^About .+ for 1 scene /)
+  expect(providerBodies.slice(bodiesAtLaunch).filter(isReader)).toEqual([])
+  await rebuild.getByRole('button', { name: 'Rebuild', exact: true }).click()
+  const summary = rebuild.getByTestId('rebuild-summary')
+  await expect(summary).toBeVisible({ timeout: 90_000 })
+  await expect(summary).toContainText('Read 1 of 1 scenes.')
+  await expect(summary.getByRole('list', { name: 'New lines by sheet' })).toContainText(
+    /Mara: \d+ new lines?/
+  )
+  const sent = providerBodies.slice(bodiesAtLaunch)
+  const reads = sent.filter(isReader)
+  expect(reads.length).toBeGreaterThan(0)
+  // reader.v2's topics roster and verify.v2's knows rule: the rebuild reads with P2b's versions.
+  expect(reads.every((body) => body.messages[0]?.content.includes(READER_TOPICS_LINE))).toBe(true)
+  const checks = sent.filter(isVerify)
+  expect(checks.length).toBeGreaterThan(0)
+  expect(checks.every((body) => body.messages[0]?.content.includes(VERIFY_V2_KNOWS))).toBe(true)
+  expect(sent.some((body) => body.messages[0]?.content.startsWith(SUMMARY_SENTINEL))).toBe(false)
+  const maraId =
+    (await invoke<{ id: string; name: string }[]>('record:list', undefined)).find(
+      (each) => each.name === 'Mara'
+    )?.id ?? ''
+  const sheet = await invoke<{ fixed: { label: string; value: { value: string } }[] }>(
+    'memory:sheet',
+    { recordId: maraId, asOf: null }
+  )
+  expect(sheet.fixed.map((line) => `${line.label}: ${line.value.value}`)).toContain('Eyes: grey')
+  await rebuild.getByRole('button', { name: 'Close' }).click()
+  await expect(rebuild).toHaveCount(0)
+  await expect(waiting).toHaveCount(0)
+  expect((await invoke<{ rebuild: string } | null>('switchover:record', undefined))?.rebuild).toBe(
+    'started'
+  )
 })

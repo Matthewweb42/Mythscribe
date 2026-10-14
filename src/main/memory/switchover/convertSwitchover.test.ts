@@ -68,6 +68,7 @@ function consent(overrides: Partial<SwitchoverConsent> = {}): SwitchoverConsent 
 
 const RECORD = {
   trial: false,
+  source: null,
   backup: '/backups/Harbour Book before story memory.zip',
   datedCopy: '/books/Harbour Book (before story memory)'
 }

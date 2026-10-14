@@ -1172,11 +1172,44 @@ describe('Needs a look’s contradictions, loose ends and notices (F-16.27, F-16
     expect(useMemoryStore.getState().checkOpen).toBe('start')
   })
 
+  it('shows the switch-over’s notice: Rebuild… opens the rebuild dialog at its price, Later answers later (F-16.31)', async () => {
+    install({ 'memory:answerNotice': () => [] })
+    useMemoryStore.setState({
+      notices: [
+        {
+          id: 'switchoverRebuild',
+          kind: 'switchoverRebuild',
+          switchedAt: '2026-10-14T09:00:00.000Z',
+          scenes: 1,
+          priceUsd: 0.0004,
+          priced: true
+        }
+      ]
+    })
+    await open()
+    const needs = screen.getByRole('region', { name: 'Needs a look' })
+    const notices = within(needs).getByRole('group', { name: 'Notices' })
+    expect(within(notices).getByTestId('reading-notice')).toHaveTextContent(
+      'Rebuild memory has not run since the switch-over: it reads 1 scene, about 0.04¢'
+    )
+    // Rebuild… asks main nothing: the dialog prices it and asks.
+    fireEvent.click(within(notices).getByRole('button', { name: 'Rebuild…' }))
+    expect(useMemoryStore.getState().rebuildOpen).toBe('start')
+    expect(sent('memory:answerNotice')).toEqual([])
+    await act(async () => {
+      fireEvent.click(within(notices).getByRole('button', { name: 'Later' }))
+    })
+    expect(sent('memory:answerNotice')).toEqual([{ id: 'switchoverRebuild', action: 'later' }])
+    expect(useMemoryStore.getState().notices).toEqual([])
+  })
+
   it('asks once to show contradictions in the panel only, and opens This scene for a hover card’s Update my note (F-16.28)', async () => {
     install({ 'memory:answerNotice': () => [] })
     useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1 } })
     useMemoryStore.setState({
-      notices: [{ id: 'underlinePrecision', kind: 'underlinePrecision', counted: 20, notProblems: 8 }]
+      notices: [
+        { id: 'underlinePrecision', kind: 'underlinePrecision', counted: 20, notProblems: 8 }
+      ]
     })
     await open()
     const needs = screen.getByRole('region', { name: 'Needs a look' })

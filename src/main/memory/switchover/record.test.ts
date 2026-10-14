@@ -13,6 +13,7 @@ const SWITCHED = '2026-10-14T09:00:00.000Z'
 const RECORD: SwitchoverRecord = {
   switchedAt: SWITCHED,
   trial: false,
+  source: null,
   backup: '/backups/Book before story memory 2026-10-14 090000.zip',
   datedCopy: '/My Drive/Book (before story memory 2026-10-14 0900).mythscribe',
   rebuild: 'waiting',
@@ -40,6 +41,16 @@ describe('the switch-over record (F-16.31, decision SW-D7)', () => {
     expect(getSwitchoverRecord(db())).toBeNull()
     expect(setSwitchoverRecord(db(), RECORD)).toEqual(RECORD)
     expect(getSwitchoverRecord(db())).toEqual(RECORD)
+  })
+
+  it('keeps a test copy’s source, and reads a row written before it had one as none named', () => {
+    const copy = { ...RECORD, trial: true, source: '/My Drive/Book.mythscribe', backup: null }
+    expect(setSwitchoverRecord(db(), copy)).toEqual(copy)
+    expect(getSwitchoverRecord(db())?.source).toBe('/My Drive/Book.mythscribe')
+    // Switch-over slices 1 to 3 wrote no source.
+    const { source: _none, ...older } = RECORD
+    writeRaw(JSON.stringify(older))
+    expect(getSwitchoverRecord(db())).toEqual({ ...RECORD, source: null })
   })
 
   it('reads a broken or misshapen row as none, and never writes a misshapen one', () => {

@@ -2,10 +2,17 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import type { CloudCapState } from '@shared/memory/cloudCap'
+import type { SwitchoverRecord } from '@shared/memory/switchover'
 import type { MemoryHealthReport } from '@shared/memory/views'
 import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import {
+  resetShellDialogStore,
+  useShellDialogStore
+} from '@renderer/features/shell/shellDialogStore'
+import { goBackLine } from '@renderer/features/switchover/switchoverText'
 import { setIpcClient } from '@renderer/lib/ipc'
 import { installFakeMain, type FakeMain } from './memoryFixture'
+import { resetMemoryStore, useMemoryStore } from './memoryStore'
 import { MemorySettings } from './MemorySettings'
 import { agreementLine, capFromText, contradictionStatsLine } from './memoryView'
 
@@ -52,8 +59,23 @@ const CAP: CloudCapState = {
   reached: false
 }
 
+const BACKUP = '/backups/Book before story memory 2026-10-14 120000.zip'
+const DATED = '/My Drive/Book (before story memory 2026-10-14 1200).mythscribe'
+/** The switch-over record of the project itself, waiting for its first rebuild. */
+const SWITCHED: SwitchoverRecord = {
+  switchedAt: '2026-10-14T12:00:00.000Z',
+  trial: false,
+  source: null,
+  backup: BACKUP,
+  datedCopy: DATED,
+  rebuild: 'waiting',
+  rebuildStartedAt: null
+}
+
 let main: FakeMain
 let saved: AiSettings[]
+/** What `switchover:record` answers: none for a project made v2 another way. */
+let record: SwitchoverRecord | null
 
 function settle(settings: AiSettings): void {
   useAiSettingsStore.setState({ settings })
@@ -61,8 +83,11 @@ function settle(settings: AiSettings): void {
 
 beforeEach(() => {
   resetAiSettingsStore()
+  resetMemoryStore()
   saved = []
+  record = null
   main = installFakeMain({
+    'switchover:record': () => record,
     'memory:health': () => HEALTH,
     'scribe:searchMisses': () => ({ count: 0, recent: [] }),
     'cloudCap:get': () => CAP,
@@ -75,6 +100,8 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetAiSettingsStore()
+  resetMemoryStore()
+  resetShellDialogStore()
   setIpcClient(null)
 })
 
@@ -162,5 +189,62 @@ describe('MemorySettings (F-16.16, F-16.19)', () => {
         spot: { fast: { checked: 0, agreed: 0 }, strong: { checked: 0, agreed: 0 } }
       })
     ).toBeNull()
+  })
+
+  it('shows no switch-over record for a project made v2 another way', async () => {
+    settle({ ...defaultAiSettings(), dial: 1 })
+    render(<MemorySettings />)
+    await screen.findByTestId('memory-health')
+    expect(main.sent('switchover:record')).toEqual([undefined])
+    expect(screen.queryByTestId('switchover-record')).toBeNull()
+  })
+})
+
+describe('MemorySettings: the switch-over record (F-16.31 part A, decision SW-D7)', () => {
+  it('names the switch date, the backup, the dated copy and how to go back, and offers the waiting rebuild', async () => {
+    record = SWITCHED
+    settle({ ...defaultAiSettings(), dial: 1 })
+    useShellDialogStore.getState().show('settings', 'ai')
+    render(<MemorySettings />)
+    const block = await screen.findByTestId('switchover-record')
+    expect(block).toHaveTextContent('Switched to the new story memory on 14 October 2026.')
+    expect(block).toHaveTextContent(`Backup: ${BACKUP}`)
+    expect(block).toHaveTextContent(`Dated copy: ${DATED}`)
+    expect(block).toHaveTextContent(goBackLine(BACKUP))
+    expect(block).toHaveTextContent('Rebuild memory has not run since the switch.')
+    // Rebuild memory… closes Settings and opens the rebuild dialog at its price; nothing is sent.
+    fireEvent.click(screen.getByRole('button', { name: 'Rebuild memory…' }))
+    expect(useShellDialogStore.getState().open).toBeNull()
+    expect(useMemoryStore.getState().rebuildOpen).toBe('start')
+    expect(main.sent('memory:rebuild')).toEqual([])
+  })
+
+  it('says when the first rebuild ran once it has, with no button', async () => {
+    record = { ...SWITCHED, rebuild: 'started', rebuildStartedAt: '2026-10-15T12:00:00.000Z' }
+    settle({ ...defaultAiSettings(), dial: 1 })
+    render(<MemorySettings />)
+    const block = await screen.findByTestId('switchover-record')
+    expect(block).toHaveTextContent('Rebuild memory first ran after the switch on 15 October 2026.')
+    expect(screen.queryByRole('button', { name: 'Rebuild memory…' })).toBeNull()
+    expect(screen.queryByTestId('switchover-waiting')).toBeNull()
+  })
+
+  it('on a test copy, names the project it was made from, with no way back to offer', async () => {
+    record = {
+      ...SWITCHED,
+      trial: true,
+      source: '/My Drive/Book.mythscribe',
+      backup: null,
+      datedCopy: null
+    }
+    settle({ ...defaultAiSettings(), dial: 1 })
+    render(<MemorySettings />)
+    const block = await screen.findByTestId('switchover-record')
+    expect(block).toHaveTextContent(
+      'This is a test copy of /My Drive/Book.mythscribe, switched to the new story memory on 14 October 2026. The project it was made from still uses the old one.'
+    )
+    expect(block).not.toHaveTextContent('Backup:')
+    expect(block).not.toHaveTextContent('To go back')
+    expect(block).toHaveTextContent('Rebuild memory has not run since the switch.')
   })
 })

@@ -922,6 +922,7 @@ describe('the rebuild after the switch-over (F-16.31 part A, SW-D8, plan Switcho
     setSwitchoverRecord(db, {
       switchedAt: SWITCHED_AT,
       trial: false,
+      source: null,
       backup: '/backups/Service before story memory 2026-10-12 090000.zip',
       datedCopy: '/My Drive/Service (before story memory 2026-10-12 0900).mythscribe',
       rebuild: 'waiting',

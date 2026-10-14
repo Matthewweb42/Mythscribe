@@ -6,12 +6,16 @@ import {
   type UnderlineMode
 } from '@shared/aiSettings'
 import { CLOUD_CAP_MAX_USD, CLOUD_CAP_STEP_USD, type CloudCapState } from '@shared/memory/cloudCap'
+import type { SwitchoverRecord } from '@shared/memory/switchover'
 import type { MemoryHealthReport } from '@shared/memory/views'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { formatCents } from '@renderer/features/ai/usageFormat'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { useShellDialogStore } from '@renderer/features/shell/shellDialogStore'
+import { goBackLine } from '@renderer/features/switchover/switchoverText'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import { useMemoryStore } from './memoryStore'
 import { agreementLine, capFromText, contradictionStatsLine, percentOf } from './memoryView'
 import { SearchMisses } from './SearchMisses'
 
@@ -26,7 +30,8 @@ const FIELD = 'w-20 rounded-md border border-line bg-bg px-2 py-1 text-sm'
  * their cap; and each model's health (quotes found, checks passed, paused or not). F-16.28: where
  * contradictions show ("underlined in the text" or "in the panel only", `reading.underlines`).
  * Under **Details**, the contradiction check's judge order agreement and underline precision
- * (F-16.28, never "accuracy") and Ms Scribe's search misses (F-16.25, `SearchMisses`).
+ * (F-16.28, never "accuracy") and Ms Scribe's search misses (F-16.25, `SwitchoverRecordBlock` first
+ * for a switched project, F-16.31: when, the backup, the dated copy and how to go back).
  */
 export function MemorySettings(): React.JSX.Element | null {
   const settings = useAiSettingsStore((s) => s.settings)
@@ -62,6 +67,7 @@ export function MemorySettings(): React.JSX.Element | null {
       <h3 id={headingId} className="m-0 text-sm font-medium">
         Story memory
       </h3>
+      <SwitchoverRecordBlock />
       <IdleMinutesField
         minutes={idle}
         onCommit={(idleMinutes) => update({ reading: { ...settings.reading, idleMinutes } })}
@@ -108,6 +114,81 @@ export function MemorySettings(): React.JSX.Element | null {
         <SearchMisses />
       </details>
     </section>
+  )
+}
+
+/** "14 October 2026". */
+const longDate = (iso: string): string =>
+  new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+
+/**
+ * The switch-over record (F-16.31 part A, decision SW-D7), for good: when the project was
+ * switched, the kept backup, the dated copy and how to go back (the final screen's words), or, on
+ * a test copy, the project it was made from. While no *Rebuild memory* has started since the
+ * switch, it says so with *Rebuild memory…* (Settings closes; the rebuild dialog prices it and
+ * asks). Nothing for a project made v2 another way.
+ */
+function SwitchoverRecordBlock(): React.JSX.Element | null {
+  const [record, setRecord] = useState<SwitchoverRecord | null>(null)
+  useEffect(() => {
+    let live = true
+    ipc()
+      .invoke('switchover:record', undefined)
+      .then((answer) => {
+        if (live) setRecord(answer)
+      })
+      .catch((err: unknown) => {
+        if (live) toast.error(describeError(err))
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+  if (record === null) return null
+  const rebuild = (): void => {
+    useShellDialogStore.getState().close()
+    useMemoryStore.getState().setRebuildOpen('start')
+  }
+  const switched = longDate(record.switchedAt)
+  return (
+    <div
+      data-testid="switchover-record"
+      className="flex flex-col gap-1 rounded-md border border-line px-2 py-1.5 text-xs"
+    >
+      {record.trial ? (
+        <p className="m-0 break-all">
+          {`This is a test copy of ${record.source ?? 'your project'}, switched to the new story memory on ${switched}. The project it was made from still uses the old one.`}
+        </p>
+      ) : (
+        <p className="m-0">Switched to the new story memory on {switched}.</p>
+      )}
+      {record.backup === null ? null : (
+        <p className="m-0 break-all text-fg-muted">Backup: {record.backup}</p>
+      )}
+      {record.datedCopy === null ? null : (
+        <p className="m-0 break-all text-fg-muted">Dated copy: {record.datedCopy}</p>
+      )}
+      {record.trial || record.backup === null ? null : (
+        <p className="m-0 text-fg-muted">{goBackLine(record.backup)}</p>
+      )}
+      {record.rebuild === 'waiting' ? (
+        <div className="flex items-center justify-between gap-3" data-testid="switchover-waiting">
+          <span>Rebuild memory has not run since the switch.</span>
+          <button
+            type="button"
+            className="shrink-0 rounded-md border border-line px-2 py-1 hover:bg-surface"
+            onClick={rebuild}
+          >
+            Rebuild memory…
+          </button>
+        </div>
+      ) : (
+        <p className="m-0 text-fg-muted">
+          Rebuild memory first ran after the switch on{' '}
+          {longDate(record.rebuildStartedAt ?? record.switchedAt)}.
+        </p>
+      )}
+    </div>
   )
 }
 

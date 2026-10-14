@@ -223,6 +223,12 @@ export const SwitchoverRecord = z.object({
   backup: z.string().nullable(),
   /** The dated copy's folder (null on a test copy). */
   datedCopy: z.string().nullable(),
+  /**
+   * A test copy's original: the folder it was made from (`switchoverTrial.source`), which
+   * Settings › AI › Story memory names; null on the project itself, and on a record written
+   * before Switch-over slice 4.
+   */
+  source: z.string().nullable().default(null),
   rebuild: z.enum(['waiting', 'started']),
   rebuildStartedAt: z.string().nullable()
 })

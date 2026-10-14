@@ -202,6 +202,9 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
               cutRate: 0,
               contradictions: { pairs: 0, agreed: 0, underlines: { counted: 0, right: 0 } }
             } as Output<C>
+          // F-16.31: a project made v2 another way has no switch-over record.
+          case 'switchover:record':
+            return null as Output<C>
           case 'scribe:searchMisses':
             return {
               count: 1,

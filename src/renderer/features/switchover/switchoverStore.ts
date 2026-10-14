@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { CloudProvider } from '@shared/cloudSync'
+import type { ProjectInfo } from '@shared/ipc/contract'
 import type {
   InlineTagReplacement,
   SwitchoverConsent,
@@ -7,12 +8,14 @@ import type {
   SwitchoverPlan,
   SwitchoverResult
 } from '@shared/memory/switchover'
+import { useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { useCloudSyncStore } from '@renderer/features/project/cloudSyncStore'
 import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import { heldAsk, pricedAsk, type RebuildAsk } from './rebuildAsk'
 
 /**
  * The story-memory switch-over (F-16.15; F-16.31 part A, plan `Switchover.md` §3): Help › Switch to
@@ -22,8 +25,10 @@ import { ipc } from '@renderer/lib/ipc'
  * the Google Drive working copy copied back, a kept backup, a dated copy beside the project), then
  * the dry run, the consent screen with each inline tag's words, and the conversion of the project
  * itself, after which main closes it and the project store opens the same folder again on v2 (no
- * restart). A step that fails shows where it failed (`failure`), with nothing changed. App-wide (it
- * outlives the project switch it causes), so the dialog is mounted outside the project screen.
+ * restart). A step that fails shows where it failed (`failure`), with nothing changed. The final
+ * screen then asks once for *Rebuild memory* with its price (`ask`, Switch-over slice 4), or says
+ * why it waits for Needs a look. App-wide (it outlives the project switch it causes), so the
+ * dialog is mounted outside the project screen.
  * Leaving it (`close`) lets main's held v1 jobs go (`switchover:leave`); leaving a test copy this
  * flow made opens the author's project again, and leaving one that was already open offers to.
  */
@@ -77,6 +82,11 @@ interface SwitchoverState {
   /** Ticked merges (`mergeKey`); none by default. */
   ticked: string[]
   result: SwitchoverResult | null
+  /**
+   * The final screen's *Rebuild memory* ask (decisions SW-D8, SW-D9), read once the project is
+   * open again on the new story memory; null before then, and when the reopen failed.
+   */
+  ask: RebuildAsk | null
   /** A step that failed (nothing changed), shown in the phase it failed in, with *Try again*. */
   failure: SwitchoverFailure | null
   /** Anything else that went wrong (a channel's error), shown as one line. */
@@ -96,6 +106,12 @@ interface SwitchoverState {
   convert: () => Promise<void>
   /** A test copy's final screen: closes the dialog and opens the project the copy was made from. */
   openMyProject: () => Promise<void>
+  /**
+   * *Rebuild now* on the final screen: `memory:rebuild` (P2a's, priced again by main as it
+   * starts); started, the dialog closes and the rebuild dialog opens on its progress, *Stop* and
+   * the grouped summary. Refused, the ask says why and keeps *Later*.
+   */
+  rebuildNow: () => Promise<void>
   /**
    * Cancel, Escape or Close. Nothing changes; main's held v1 jobs go again. After the safety step
    * on the project itself, a toast names the copies that stay. In a test copy before the end: the
@@ -119,6 +135,7 @@ const EMPTY = {
   defaults: {},
   ticked: [],
   result: null,
+  ask: null,
   failure: null,
   error: null
 }
@@ -159,6 +176,30 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
       if (mine === generation) set({ phase: 'plan', plan })
     } catch (err) {
       if (mine === generation) set({ phase: 'intro', error: describeError(err) })
+    }
+  }
+
+  /**
+   * The rebuild ask, once the project is open again on v2: main's reading status (Use AI and the
+   * reading switch, a provider) and the settings for the words; then, when reading may run, the
+   * price (`memory:rebuildEstimate`, nothing sent).
+   */
+  const loadAsk = async (mine: number): Promise<void> => {
+    try {
+      const [status, settings] = await Promise.all([
+        ipc().invoke('memory:status', undefined),
+        ipc().invoke('aiSettings:get', undefined)
+      ])
+      if (mine !== generation) return
+      const held = heldAsk(status, settings)
+      if (held !== null) {
+        set({ ask: held })
+        return
+      }
+      const estimate = await ipc().invoke('memory:rebuildEstimate', undefined)
+      if (mine === generation) set({ ask: pricedAsk(estimate) })
+    } catch (err) {
+      if (mine === generation) set({ ask: { kind: 'unknown', message: describeError(err) } })
     }
   }
 
@@ -326,9 +367,9 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
       // Converted: main closed the project. A failure from here on is the reopen's, never the
       // conversion's, so the done screen says so rather than offering Convert again.
       set({ result })
+      let reopened: ProjectInfo | null
       try {
-        await useProjectStore.getState().open(result.folder)
-        if (mine === generation) set({ phase: 'done' })
+        reopened = await useProjectStore.getState().open(result.folder)
       } catch (err) {
         if (mine !== generation) return
         const what = target === 'copy' ? 'The copy is converted' : 'Your project is switched'
@@ -336,7 +377,51 @@ export const useSwitchoverStore = create<SwitchoverState>((set, get) => {
           phase: 'done',
           error: `${what}, but it did not open again: ${describeError(err)} Open it from File › Open project….`
         })
+        return
       }
+      if (mine !== generation) return
+      // The ask reads the project on the new story memory; a reopen that opened nothing (a
+      // question the author declined) has no ask, and the record waits for Needs a look.
+      if (reopened?.storyMemory !== 'v2') {
+        set({ phase: 'done' })
+        return
+      }
+      set({ phase: 'done', ask: { kind: 'reading' } })
+      await loadAsk(mine)
+    },
+
+    async rebuildNow() {
+      const { ask } = get()
+      if (ask?.kind !== 'offer' || ask.starting) return
+      const mine = generation
+      set({ ask: { ...ask, starting: true, refused: null } })
+      try {
+        const started = await ipc().invoke('memory:rebuild', undefined)
+        if (mine !== generation) return
+        if (!started.ok) {
+          set({
+            ask: {
+              ...ask,
+              starting: false,
+              refused: `${started.message} ${started.nextStep}`.trim()
+            }
+          })
+          return
+        }
+      } catch (err) {
+        if (mine === generation) {
+          set({ ask: { ...ask, starting: false, refused: describeError(err) } })
+        }
+        return
+      }
+      reset()
+      // The rebuild dialog watches the run the status carries (P2a's progress, Stop, then the
+      // grouped summary), so the status is read before it opens.
+      await useMemoryStore
+        .getState()
+        .load()
+        .catch(() => undefined)
+      useMemoryStore.getState().setRebuildOpen('summary')
     },
 
     async openMyProject() {

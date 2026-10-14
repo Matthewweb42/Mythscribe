@@ -1,15 +1,19 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import type { CloudSyncStatus } from '@shared/cloudSync'
 import type { Channel, Input, Output, ProjectInfo } from '@shared/ipc/contract'
 import type {
+  RebuildEstimate,
   SwitchoverConsent,
   SwitchoverFailure,
   SwitchoverPlan,
   SwitchoverSafetyOutcome
 } from '@shared/memory/switchover'
+import type { MemoryStatus, RebuildStartResult } from '@shared/memory/views'
 import { resetBackupStore } from '@renderer/features/backups/backupStore'
+import { resetMemoryStore, useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { resetCloudSyncStore, useCloudSyncStore } from '@renderer/features/project/cloudSyncStore'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { registerPendingSave, resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -106,6 +110,19 @@ const CONVERT_FAILED: SwitchoverFailure = {
   nextStep: `Try again. If it stops again, your backup is ${BACKUP}; please send this message to support.`
 }
 
+/** What `memory:status` answers after the reopen: reading may run, nothing read yet. */
+const STATUS: MemoryStatus = {
+  lastRead: null,
+  paused: null,
+  todayUsd: 0,
+  cloud: null,
+  rebuild: null,
+  check: null
+}
+
+/** The price `memory:rebuildEstimate` answers on the switched project. */
+const ESTIMATE: RebuildEstimate = { ...PLAN.rebuild, scenes: 12, costUsd: 0.04, minutes: 2 }
+
 const DRIVE: CloudSyncStatus = {
   provider: 'googleDrive',
   state: 'synced',
@@ -126,6 +143,13 @@ let convertFailures: SwitchoverFailure[]
 let reopen: (path: string) => ProjectInfo
 /** Holds `switchover:safety` until the test lets it go (a stale answer). */
 let holdSafety: Promise<void> | null
+/** After the reopen: main's reading status, the project's AI settings, the price, the start. */
+let status: MemoryStatus
+let settings: AiSettings
+let estimate: RebuildEstimate
+let started: RebuildStartResult
+/** `memory:rebuildEstimate` throws (the project busy, a read failing). */
+let estimateFails: boolean
 
 const channels = (): Channel[] => calls.map((call) => call.channel)
 
@@ -141,6 +165,12 @@ beforeEach(() => {
   safety = [{ ok: true, backup: BACKUP, datedCopy: DATED }]
   convertFailures = []
   holdSafety = null
+  resetMemoryStore()
+  status = STATUS
+  settings = { ...defaultAiSettings(), dial: 1 }
+  estimate = ESTIMATE
+  started = { ok: true, queued: 12, estimate: ESTIMATE }
+  estimateFails = false
   reopen = (path) => ({
     ...(path === COPY.path ? COPY : ORIGINAL),
     storyMemory: path === ORIGINAL.path && channels().includes('switchover:trialCopy') ? 'v1' : 'v2'
@@ -187,6 +217,25 @@ beforeEach(() => {
           return null as Output<C>
         case 'recovery:list':
           return [] as Output<C>
+        case 'memory:status':
+          return (
+            calls.some((call) => call.channel === 'memory:rebuild') && started.ok
+              ? {
+                  ...status,
+                  rebuild: { startedAt: 's', finishedAt: null, draftId: 'd', total: 12, done: 0 }
+                }
+              : status
+          ) as Output<C>
+        case 'aiSettings:get':
+          return settings as Output<C>
+        case 'memory:rebuildEstimate':
+          if (estimateFails) throw new Error('The project is busy.')
+          return estimate as Output<C>
+        case 'memory:rebuild':
+          return started as Output<C>
+        case 'memory:notices':
+        case 'memory:cardLines':
+          return (channel === 'memory:notices' ? [] : {}) as Output<C>
         default:
           throw new Error(`unexpected ${channel}`)
       }
@@ -200,6 +249,9 @@ afterEach(() => {
   resetSwitchoverStore()
   resetCloudSyncStore()
   resetBackupStore()
+  resetMemoryStore()
+  // A switched project left open would run the next file's stores on the new memory.
+  useProjectStore.setState({ current: null, busy: false })
   setIpcClient(null)
 })
 
@@ -426,7 +478,8 @@ describe('SwitchoverDialog: the project itself (F-16.31 part A)', () => {
     expect(within(done).queryByRole('button', { name: 'Open my project' })).toBeNull()
     await user.click(within(done).getByRole('button', { name: 'Show backups' }))
     await waitFor(() => expect(channels()).toContain('backups:reveal'))
-    await user.click(within(done).getByRole('button', { name: 'Close' }))
+    // The rebuild is offered (slice 4), so the way out is Later.
+    await user.click(within(done).getByRole('button', { name: 'Later' }))
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
@@ -570,5 +623,191 @@ describe('SwitchoverDialog: a copy first (F-16.15)', () => {
     expect(rebuildLine({ ...PLAN.rebuild, source: 'cloud', priced: false })).toContain(
       'a cost not yet known'
     )
+  })
+})
+
+/** Runs the switch-over of the project itself to its final screen. */
+async function switchToDone(): Promise<HTMLElement> {
+  const user = userEvent.setup()
+  const intro = await openIntro()
+  await user.click(within(intro).getByRole('button', { name: 'Switch this project…' }))
+  await user.click(await screen.findByRole('button', { name: 'Next' }))
+  await user.click(await screen.findByRole('button', { name: 'Convert' }))
+  return screen.findByRole('dialog', { name: 'Switched over' })
+}
+
+/** The ask once it has read the status, the settings and (when it may) the price. */
+async function settledAsk(): Promise<HTMLElement> {
+  const ask = await screen.findByTestId('switchover-rebuild-ask')
+  await waitFor(() => expect(ask).not.toHaveTextContent('Working out'))
+  return ask
+}
+
+describe('SwitchoverDialog: the rebuild ask (F-16.31 part A, Switch-over slice 4)', () => {
+  it('on an own key, asks with the price and Rebuild now starts it and opens the rebuild dialog on its progress', async () => {
+    const done = await switchToDone()
+    const ask = await settledAsk()
+    expect(ask).toHaveTextContent(
+      'Rebuild memory now: the AI reads 12 scenes once, about 4¢ on your own key (about 2 minutes). Your text, Pinned, Ideas and Dismissed stay as they are.'
+    )
+    // The reads come after the reopen, the price only once reading may run; nothing is started.
+    const order = channels()
+    expect(order.indexOf('memory:status')).toBeGreaterThan(order.indexOf('project:open'))
+    expect(order).toContain('aiSettings:get')
+    expect(order.indexOf('memory:rebuildEstimate')).toBeGreaterThan(order.indexOf('memory:status'))
+    expect(order).not.toContain('memory:rebuild')
+    expect(within(done).getByRole('button', { name: 'Later' })).toHaveFocus()
+    expect(within(done).queryByRole('button', { name: 'Close' })).toBeNull()
+    await userEvent.click(within(ask).getByRole('button', { name: 'Rebuild now' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(channels().filter((c) => c === 'memory:rebuild')).toHaveLength(1)
+    // The rebuild dialog opens watching the run (P2a's progress, Stop, the grouped summary).
+    expect(useMemoryStore.getState().rebuildOpen).toBe('summary')
+    expect(useMemoryStore.getState().status?.rebuild?.finishedAt).toBeNull()
+    expect(channels().at(-1)).not.toBe('memory:rebuild')
+  })
+
+  it('on Cloud, asks from the balance and says the monthly cap does not count it and today’s cap still applies', async () => {
+    settings = { ...defaultAiSettings(), dial: 1, source: 'cloud' }
+    estimate = { ...ESTIMATE, source: 'cloud', costUsd: 0.05 }
+    await switchToDone()
+    const ask = await settledAsk()
+    expect(ask).toHaveTextContent(
+      'Rebuild memory now: the AI reads 12 scenes once, about 5¢ from your MythScribe Cloud balance (about 2 minutes).'
+    )
+    expect(ask).toHaveTextContent(
+      'It is not counted toward your monthly reading cap; today’s AI spending cap still applies, so a long book may finish tomorrow.'
+    )
+    expect(within(ask).getByRole('button', { name: 'Rebuild now' })).toBeEnabled()
+  })
+
+  it('on Cloud without its prices yet, offers no Rebuild button and says Needs a look will', async () => {
+    settings = { ...defaultAiSettings(), dial: 1, source: 'cloud' }
+    estimate = { ...ESTIMATE, source: 'cloud', priced: false }
+    const done = await switchToDone()
+    const ask = await settledAsk()
+    expect(ask).toHaveTextContent(
+      'MythScribe Cloud has not sent its prices yet. Needs a look will offer Rebuild memory with its price.'
+    )
+    expect(within(done).queryByRole('button', { name: 'Rebuild now' })).toBeNull()
+    expect(within(done).getByRole('button', { name: 'Later' })).toBeEnabled()
+  })
+
+  it('on an own key with a model not in the price table, says the cost is not known and may still start', async () => {
+    estimate = { ...ESTIMATE, priced: false }
+    await switchToDone()
+    const ask = await settledAsk()
+    expect(ask).toHaveTextContent(
+      'the AI reads 12 scenes once, a cost not yet known (a model is not in the price table) on your own key'
+    )
+    expect(within(ask).getByRole('button', { name: 'Rebuild now' })).toBeEnabled()
+  })
+
+  it('on a local model, says it is free', async () => {
+    settings = { ...defaultAiSettings(), dial: 1, source: 'local' }
+    estimate = { ...ESTIMATE, source: 'local', costUsd: 0, minutes: 1 }
+    await switchToDone()
+    const ask = await settledAsk()
+    expect(ask).toHaveTextContent(
+      'Rebuild memory now: the AI reads 12 scenes once, free on your local model (about a minute).'
+    )
+    expect(within(ask).getByRole('button', { name: 'Rebuild now' })).toBeEnabled()
+  })
+
+  it('with Use AI off, offers no Rebuild button, asks no price and closes', async () => {
+    settings = { ...defaultAiSettings(), dial: 0 }
+    status = { ...STATUS, paused: 'off' }
+    const done = await switchToDone()
+    const ask = await settledAsk()
+    expect(ask).toHaveTextContent(
+      'Use AI is off, so nothing is read and nothing is spent. When you turn it on in Settings › AI, This scene › Needs a look offers Rebuild memory with its price.'
+    )
+    expect(within(done).queryByRole('button', { name: 'Rebuild now' })).toBeNull()
+    expect(channels()).not.toContain('memory:rebuildEstimate')
+    await userEvent.click(within(done).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(channels()).not.toContain('memory:rebuild')
+    expect(useMemoryStore.getState().rebuildOpen).toBeNull()
+  })
+
+  it('with Use AI on and the reading switch off, says so', async () => {
+    status = { ...STATUS, paused: 'off' }
+    await switchToDone()
+    expect(await settledAsk()).toHaveTextContent(
+      'Story memory reading is off, so nothing is read and nothing is spent. When you turn it on in Settings › AI,'
+    )
+    expect(screen.queryByRole('button', { name: 'Rebuild now' })).toBeNull()
+  })
+
+  it('with no provider, says to add a key or sign in, and that Needs a look then offers it', async () => {
+    status = { ...STATUS, paused: 'noProvider' }
+    const done = await switchToDone()
+    expect(await settledAsk()).toHaveTextContent(
+      'Story memory needs an AI provider: add a key or sign in to MythScribe Cloud in Settings › AI. Needs a look then offers Rebuild memory with its price.'
+    )
+    expect(within(done).queryByRole('button', { name: 'Rebuild now' })).toBeNull()
+    expect(within(done).getByRole('button', { name: 'Close' })).toBeEnabled()
+    expect(channels()).not.toContain('memory:rebuildEstimate')
+  })
+
+  it('shows a refused start with its next step and keeps Later and the dialog', async () => {
+    started = {
+      ok: false,
+      code: 'DISABLED',
+      message: 'Story memory paused: this model’s readings aren’t reliable enough.',
+      nextStep: 'Switch to DeepSeek V4 Flash in Settings › AI.'
+    }
+    const done = await switchToDone()
+    const ask = await settledAsk()
+    await userEvent.click(within(ask).getByRole('button', { name: 'Rebuild now' }))
+    expect(await within(ask).findByRole('alert')).toHaveTextContent(
+      'Story memory paused: this model’s readings aren’t reliable enough. Switch to DeepSeek V4 Flash in Settings › AI.'
+    )
+    expect(screen.getByRole('dialog', { name: 'Switched over' })).toBe(done)
+    expect(within(done).getByRole('button', { name: 'Later' })).toBeEnabled()
+    expect(within(ask).getByRole('button', { name: 'Rebuild now' })).toBeEnabled()
+    expect(useMemoryStore.getState().rebuildOpen).toBeNull()
+    // Later closes; the notice in Needs a look takes it up.
+    await userEvent.click(within(done).getByRole('button', { name: 'Later' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('offers nothing for a book with no scene to read', async () => {
+    estimate = { ...ESTIMATE, scenes: 0 }
+    const done = await switchToDone()
+    expect(await settledAsk()).toHaveTextContent('Rebuild memory: nothing to read yet.')
+    expect(within(done).queryByRole('button', { name: 'Rebuild now' })).toBeNull()
+    expect(within(done).getByRole('button', { name: 'Close' })).toBeEnabled()
+  })
+
+  it('says why when the price cannot be read, and that Needs a look offers it', async () => {
+    estimateFails = true
+    const done = await switchToDone()
+    expect(await settledAsk()).toHaveTextContent(
+      'Could not work out what Rebuild memory would cost: The project is busy. This scene › Needs a look offers Rebuild memory with its price.'
+    )
+    expect(within(done).queryByRole('button', { name: 'Rebuild now' })).toBeNull()
+  })
+
+  it('asks nothing when the reopen fails', async () => {
+    reopen = () => {
+      throw new Error('The folder is busy.')
+    }
+    await switchToDone()
+    expect(screen.queryByTestId('switchover-rebuild-ask')).toBeNull()
+    expect(channels()).not.toContain('memory:status')
+  })
+
+  it('asks on a test copy too, beside Open my project', async () => {
+    const user = userEvent.setup()
+    const intro = await openIntro()
+    await user.click(within(intro).getByRole('button', { name: 'Try it on a copy first' }))
+    await user.click(await screen.findByRole('button', { name: 'Next' }))
+    await user.click(await screen.findByRole('button', { name: 'Convert' }))
+    const done = await screen.findByRole('dialog', { name: 'Switched over' })
+    const ask = await settledAsk()
+    expect(ask).toHaveTextContent('Rebuild memory now: the AI reads 12 scenes once')
+    expect(within(done).getByRole('button', { name: 'Open my project' })).toBeEnabled()
+    expect(within(done).getByRole('button', { name: 'Close' })).toBeEnabled()
   })
 })

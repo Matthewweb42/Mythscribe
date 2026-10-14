@@ -79,9 +79,12 @@ export async function prepareSwitchover(db: TreeDb, folder: string): Promise<Pre
 export const ALREADY_SWITCHED =
   'This project already uses the new story memory; the switch-over runs once.'
 
-/** What the run knows for the switch-over record (F-16.31): a test copy, and its safety copies. */
+/**
+ * What the run knows for the switch-over record (F-16.31): a test copy and the folder it was made
+ * from, and its safety copies.
+ */
 export interface ConvertOptions {
-  record: Pick<SwitchoverRecord, 'trial' | 'backup' | 'datedCopy'>
+  record: Pick<SwitchoverRecord, 'trial' | 'source' | 'backup' | 'datedCopy'>
 }
 
 /**
@@ -287,6 +290,7 @@ export function convertSwitchover(
     setSwitchoverRecord(tx, {
       switchedAt: now.toISOString(),
       trial: options.record.trial,
+      source: options.record.source,
       backup: options.record.backup,
       datedCopy: options.record.datedCopy,
       rebuild: 'waiting',

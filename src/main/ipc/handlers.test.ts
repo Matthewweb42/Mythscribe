@@ -10697,6 +10697,7 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
     setSwitchoverRecord(db, {
       switchedAt: new Date().toISOString(),
       trial: false,
+      source: null,
       backup: null,
       datedCopy: null,
       rebuild: 'waiting',

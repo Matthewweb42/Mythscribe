@@ -353,7 +353,7 @@ export async function runConvert(
   let counts: ReturnType<typeof convertSwitchover>
   try {
     counts = convertSwitchover(db, session.info.format, prepared, input.consent, deps.now(), {
-      record: { trial, backup, datedCopy }
+      record: { trial, source: trialMarker?.source ?? null, backup, datedCopy }
     })
   } catch (err) {
     // Rolled back: the project reads as it did when the copies were made, though SQLite counted

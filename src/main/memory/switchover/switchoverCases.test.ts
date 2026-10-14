@@ -120,7 +120,7 @@ async function convertAll(): Promise<void> {
   }))
   const prepared = await prepareSwitchover(db(), session.folder)
   convertSwitchover(db(), 'novel', prepared, { replacements, merges: [] }, NOW, {
-    record: { trial: false, backup: null, datedCopy: null }
+    record: { trial: false, source: null, backup: null, datedCopy: null }
   })
 }
 

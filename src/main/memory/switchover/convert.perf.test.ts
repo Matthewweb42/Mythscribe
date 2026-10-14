@@ -97,7 +97,7 @@ describe('the switch-over on a 200-scene book (F-16.31)', () => {
       { replacements, merges: [] },
       new Date(),
       {
-        record: { trial: false, backup: null, datedCopy: null }
+        record: { trial: false, source: null, backup: null, datedCopy: null }
       }
     )
     const elapsed = performance.now() - started

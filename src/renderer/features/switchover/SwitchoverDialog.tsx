@@ -3,6 +3,7 @@ import { INLINE_TAG_REPLACEMENT_MAX, type SwitchoverItem } from '@shared/memory/
 import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
 import { useBackupStore } from '@renderer/features/backups/backupStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { laterAsk, offersRebuild, rebuildAskLine, type RebuildAsk } from './rebuildAsk'
 import { SwitchoverFailure } from './SwitchoverFailure'
 import { mergeKey, useSwitchoverStore } from './switchoverStore'
 import {
@@ -24,7 +25,8 @@ import {
  * and time; on the project itself, where the backup and the dated copy are), the consent screen
  * (each inline tag's words, editable), then the final screen (what was written, the kept backup
  * with *Show backups*, the dated copy, how to go back; a test copy's names the project it was made
- * from and offers *Open my project*). A failed step shows its block (`SwitchoverFailure`) where it
+ * from and offers *Open my project*; then, once the project is open again, *Rebuild memory* asked
+ * for once with its price, or why it waits for Needs a look). A failed step shows its block (`SwitchoverFailure`) where it
  * failed. Escape or Cancel (on every screen but the progress ones) leaves the project as it is
  * (still v1) until Convert; in a test copy the flow made, it opens the author's project again.
  */
@@ -373,8 +375,14 @@ function SwitchoverBody(): React.JSX.Element {
             {goBackLine(backup)}
           </p>
         )}
+        {state.ask === null ? null : (
+          <RebuildAskBlock ask={state.ask} onRebuild={() => void store().rebuildNow()} />
+        )}
       </>
     )
+    // Offered or waiting on a price, the way out is *Later* (the notice in Needs a look takes it
+    // up); otherwise *Close*.
+    const leave = laterAsk(state.ask) ? 'Later' : 'Close'
     actions = trial ? (
       <>
         <button type="button" className={BUTTON} onClick={close}>
@@ -391,8 +399,13 @@ function SwitchoverBody(): React.JSX.Element {
         </button>
       </>
     ) : (
-      <button ref={first} type="button" className={PRIMARY} onClick={close}>
-        Close
+      <button
+        ref={first}
+        type="button"
+        className={offersRebuild(state.ask) ? BUTTON : PRIMARY}
+        onClick={close}
+      >
+        {leave}
       </button>
     )
   }
@@ -419,6 +432,42 @@ function SwitchoverBody(): React.JSX.Element {
         {actions === null ? null : <div className="flex justify-end gap-2">{actions}</div>}
       </div>
     </div>
+  )
+}
+
+/**
+ * The final screen's *Rebuild memory* ask (F-16.31 part A, decisions SW-D8 and SW-D9): its price
+ * and *Rebuild now*, or why it waits and that Needs a look will offer it. A refused start shows
+ * main's message and next step.
+ */
+function RebuildAskBlock({
+  ask,
+  onRebuild
+}: {
+  ask: RebuildAsk
+  onRebuild: () => void
+}): React.JSX.Element {
+  const starting = ask.kind === 'offer' && ask.starting
+  return (
+    <section
+      aria-label="Rebuild memory"
+      data-testid="switchover-rebuild-ask"
+      className="flex flex-col gap-1.5 border-t border-line pt-2 text-sm"
+    >
+      <p className={`m-0 ${ask.kind === 'reading' ? AI_WAIT_CLASS : ''}`}>{rebuildAskLine(ask)}</p>
+      {ask.kind === 'offer' && ask.refused !== null ? (
+        <p role="alert" className="m-0 text-danger" data-testid="switchover-rebuild-refused">
+          {ask.refused}
+        </p>
+      ) : null}
+      {ask.kind === 'offer' ? (
+        <div>
+          <button type="button" className={PRIMARY} disabled={starting} onClick={onRebuild}>
+            {starting ? <span className={AI_WAIT_CLASS}>Starting…</span> : 'Rebuild now'}
+          </button>
+        </div>
+      ) : null}
+    </section>
   )
 }
 

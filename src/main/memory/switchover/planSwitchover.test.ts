@@ -238,7 +238,7 @@ describe('the dry run prices the rebuild it asks for (F-16.31, decision SW-D10)'
       }))
       const prepared = await prepareSwitchover(db, own.session.folder)
       convertSwitchover(db, 'novel', prepared, { replacements, merges: [] }, new Date(), {
-        record: { trial: false, backup: null, datedCopy: null }
+        record: { trial: false, source: null, backup: null, datedCopy: null }
       })
       expect(getStoryMemory(db).version).toBe('v2')
       expect(rebuildEstimate(db, CONTEXT, sweepCalls)).toEqual(withSweep)

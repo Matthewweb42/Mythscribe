@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { defaultAiSettings } from '@shared/aiSettings'
 import type { Channel, Input, Output, ProjectInfo } from '@shared/ipc/contract'
-import type { SwitchoverPlan } from '@shared/memory/switchover'
+import type { RebuildEstimate, SwitchoverPlan } from '@shared/memory/switchover'
+import type { RebuildStartResult } from '@shared/memory/views'
+import { resetMemoryStore, useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { resetCloudSyncStore } from '@renderer/features/project/cloudSyncStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useProjectStore } from '@renderer/features/project/projectStore'
@@ -45,7 +48,12 @@ const PLAN: SwitchoverPlan = {
   }
 }
 
+/** The switched project's rebuild price. */
+const ESTIMATE: RebuildEstimate = { ...PLAN.rebuild, scenes: 4, costUsd: 0.01, minutes: 1 }
+
 let calls: { channel: Channel; input: unknown }[]
+/** What `memory:rebuild` answers. */
+let started: RebuildStartResult
 /** Answers held until the test releases them, by channel. */
 let held: Partial<Record<Channel, Promise<void>>>
 /** Channels that throw. */
@@ -72,6 +80,8 @@ beforeEach(() => {
   calls = []
   held = {}
   failing = {}
+  started = { ok: true, queued: 4, estimate: ESTIMATE }
+  resetMemoryStore()
   phases.length = 0
   unsubscribe = useSwitchoverStore.subscribe((state, before) => {
     if (state.phase !== before.phase) phases.push(state.phase)
@@ -123,6 +133,25 @@ beforeEach(() => {
           return null as Output<C>
         case 'recovery:list':
           return [] as Output<C>
+        case 'memory:status':
+          return {
+            lastRead: null,
+            paused: null,
+            todayUsd: 0,
+            cloud: null,
+            rebuild: null,
+            check: null
+          } as Output<C>
+        case 'aiSettings:get':
+          return { ...defaultAiSettings(), dial: 1 } as Output<C>
+        case 'memory:rebuildEstimate':
+          return ESTIMATE as Output<C>
+        case 'memory:rebuild':
+          return started as Output<C>
+        case 'memory:notices':
+          return [] as Output<C>
+        case 'memory:cardLines':
+          return {} as Output<C>
         default:
           throw new Error(`unexpected ${channel}`)
       }
@@ -134,6 +163,9 @@ beforeEach(() => {
 
 afterEach(() => {
   unsubscribe()
+  resetMemoryStore()
+  // A switched project left open would run the next file's stores on the new memory.
+  useProjectStore.setState({ current: null, busy: false })
   resetSwitchoverStore()
   resetCloudSyncStore()
   setIpcClient(null)
@@ -166,8 +198,18 @@ describe('switchoverStore (F-16.31 part A)', () => {
       'switchover:convert',
       'project:cloudSyncNow',
       'project:open',
-      'recovery:list'
+      'recovery:list',
+      // Switch-over slice 4: the rebuild ask, read once the project is open on v2.
+      'memory:status',
+      'aiSettings:get',
+      'memory:rebuildEstimate'
     ])
+    expect(store().ask).toEqual({
+      kind: 'offer',
+      estimate: ESTIMATE,
+      starting: false,
+      refused: null
+    })
   })
 
   it('goes intro → copying → plan for a copy first, with no safety step', async () => {
@@ -322,5 +364,74 @@ describe('switchoverStore (F-16.31 part A)', () => {
     await store().openMyProject()
     expect(store().phase).toBe('idle')
     expect(calls.at(-2)).toEqual({ channel: 'project:open', input: { path: PROJECT.path } })
+  })
+
+  it('asks for the rebuild once the project is open, and Rebuild now opens the rebuild dialog (slice 4)', async () => {
+    await toConsent()
+    await store().convert()
+    await store().rebuildNow()
+    expect(store().phase).toBe('idle')
+    expect(channels().filter((c) => c === 'memory:rebuild')).toHaveLength(1)
+    // The status is read before the rebuild dialog opens on its progress.
+    expect(channels().slice(-3)).toEqual(['memory:status', 'memory:notices', 'memory:cardLines'])
+    expect(useMemoryStore.getState().rebuildOpen).toBe('summary')
+    // Leaving the project's flow lets main's held v1 jobs go, as any close does.
+    expect(channels()).toContain('switchover:leave')
+  })
+
+  it('keeps the screen with main’s reason when the rebuild will not start, and starts only what is offered', async () => {
+    started = {
+      ok: false,
+      code: 'NO_KEY',
+      message: 'Story memory needs an AI provider to rebuild.',
+      nextStep: 'Add a key in Settings › AI.'
+    }
+    await toConsent()
+    await store().convert()
+    await store().rebuildNow()
+    expect(store().phase).toBe('done')
+    expect(store().ask).toEqual({
+      kind: 'offer',
+      estimate: ESTIMATE,
+      starting: false,
+      refused: 'Story memory needs an AI provider to rebuild. Add a key in Settings › AI.'
+    })
+    expect(useMemoryStore.getState().rebuildOpen).toBeNull()
+    // A start that throws says why the same way.
+    failing['memory:rebuild'] = new Error('The project is busy.')
+    await store().rebuildNow()
+    expect(store().ask).toMatchObject({ kind: 'offer', refused: 'The project is busy.' })
+    // Nothing offered (a held ask): Rebuild now does nothing.
+    store().close()
+    useSwitchoverStore.setState({ phase: 'done', ask: { kind: 'aiOff' } })
+    const before = calls.length
+    await store().rebuildNow()
+    expect(calls).toHaveLength(before)
+  })
+
+  it('drops the ask of a final screen the author closed, and a start answer too', async () => {
+    await toConsent()
+    const releaseStatus = hold('memory:status')
+    const converting = store().convert()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(store().ask).toEqual({ kind: 'reading' })
+    store().close()
+    releaseStatus()
+    await converting
+    expect(store().ask).toBeNull()
+    expect(channels()).not.toContain('memory:rebuildEstimate')
+
+    delete held['memory:status']
+    await toConsent()
+    await store().convert()
+    const releaseStart = hold('memory:rebuild')
+    const starting = store().rebuildNow()
+    expect(store().ask).toMatchObject({ kind: 'offer', starting: true })
+    store().close()
+    releaseStart()
+    await starting
+    expect(store().phase).toBe('idle')
+    expect(useMemoryStore.getState().rebuildOpen).toBeNull()
   })
 })

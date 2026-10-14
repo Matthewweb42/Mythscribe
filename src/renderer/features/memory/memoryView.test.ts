@@ -198,4 +198,24 @@ describe('memoryView (F-16.18)', () => {
       'Details'
     ])
   })
+
+  it('offers the switch-over’s rebuild through the price dialog, and Later as an answer (F-16.31)', () => {
+    const waiting: MemoryNotice = {
+      id: 'switchoverRebuild',
+      kind: 'switchoverRebuild',
+      switchedAt: '2026-10-14T09:00:00.000Z',
+      scenes: 90,
+      priceUsd: 0.136,
+      priced: true
+    }
+    expect(noticeLine(waiting)).toBe(
+      'Rebuild memory has not run since the switch-over: it reads 90 scenes, about 14¢'
+    )
+    // *Rebuild…* is the renderer's own button (the rebuild dialog at its price, nothing sent
+    // here); *Later* is main's answer, which hides the notice until the project opens again.
+    expect(noticeButtons(waiting)).toEqual([
+      { kind: 'rebuild', label: 'Rebuild…' },
+      { kind: 'answer', action: 'later', label: 'Later' }
+    ])
+  })
 })

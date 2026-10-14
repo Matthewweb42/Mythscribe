@@ -248,6 +248,7 @@ describe('the switch-over of the project itself (F-16.31 part A)', () => {
     expect(settingOf(driveDb, 'storyMemory')).toMatchObject({ version: 'v2' })
     expect(settingOf(driveDb, SWITCHOVER_RECORD_KEY)).toMatchObject({
       trial: false,
+      source: null,
       backup: memo.backup,
       datedCopy: memo.datedCopy,
       rebuild: 'waiting',
@@ -796,8 +797,10 @@ describe('a test copy (decision SW-D4)', () => {
     })
     expect(calls).not.toContain('backup')
     expect(folderHash(folder)).toBe(before)
+    // The record names the original (Settings › AI › Story memory says whose copy it is).
     expect(settingOf(path.join(copy, 'project.db'), SWITCHOVER_RECORD_KEY)).toMatchObject({
       trial: true,
+      source: folder,
       backup: null,
       datedCopy: null,
       rebuild: 'waiting'
