@@ -36,10 +36,16 @@ import {
 import { KNOWER_KINDS, keepsFrom, parseHow } from '@shared/memory/knows'
 import {
   ANTECEDENT_SENTENCES,
+  absentValue,
+  diesInQuote,
   groupHeadIn,
+  locationStated,
   nameInSentence,
+  possessedOnly,
   quotePointsAtSubject,
   resolveSubject,
+  sameQuote,
+  valueOfKind,
   valueStated,
   wishWord,
   type LadderReject,
@@ -74,12 +80,12 @@ import {
 import { cardDue, planPages, planWindows, type ReadPiece } from '@shared/memory/windows'
 import { activeDraftId, currentDraftId } from '../../draft/draftStore'
 import { STEP_VALUE_MAX_WORDS } from '../../ai/prompts/reader.v2'
+import { readerV3PageTokens } from '../../ai/prompts/reader.v3'
 import {
-  READER_V3_PROMPT_VERSION,
-  buildReaderV3Prompt,
-  readerV3OutputCap,
-  readerV3PageTokens
-} from '../../ai/prompts/reader.v3'
+  READER_V4_PROMPT_VERSION,
+  buildReaderV4Prompt,
+  readerV4OutputCap
+} from '../../ai/prompts/reader.v4'
 import { VERIFY_UNNAMED_MARK, verifyV2Batches, type VerifyV2Item } from '../../ai/prompts/verify.v2'
 import { VERIFY_V3_PROMPT_VERSION, buildVerifyV3Prompt } from '../../ai/prompts/verify.v3'
 import { cancelInflight } from '../../ai/inflight'
@@ -304,7 +310,7 @@ async function send(
     messages: AiMessage[]
     maxTokens: number
     childId: string
-    promptVersion: typeof READER_V3_PROMPT_VERSION | typeof VERIFY_V3_PROMPT_VERSION
+    promptVersion: typeof READER_V4_PROMPT_VERSION | typeof VERIFY_V3_PROMPT_VERSION
   }
 ): Promise<AiRequestResult> {
   stopIfCancelled(input.signal)
@@ -1117,6 +1123,13 @@ export async function runReading(
    */
   const rechecks = (reveal: { state: string }): boolean => reveal.state === 'stale' || rebuild
   const yields = emptyYields()
+  /**
+   * Cut-off replies whose re-read did not recover them (a retry cut again or unreadable, or a cut
+   * reply with nothing left to read again): what the reading's `finishReason` reports. A reply cut
+   * and then read whole by its re-read counts only in `yields.cut` (second live run of 2026-10-14:
+   * the report counted every cut reply, recovered or not, as a reading cut off).
+   */
+  let lost = 0
   const reject = (reason: LadderReject | 'unparsed'): void => {
     yields.rejected += 1
     yields.rejections[reason] = (yields.rejections[reason] ?? 0) + 1
@@ -1196,12 +1209,12 @@ export async function runReading(
         near: nearLines(named, draft, roster),
         anchored,
         cardDue: withCard,
-        maxTokens: readerV3OutputCap({ proseTokens: piece.tokens, cardDue: withCard })
+        maxTokens: readerV4OutputCap({ proseTokens: piece.tokens, cardDue: withCard })
       }
       const ask = async (
         parts: ReadPiece['paragraphs']
       ): Promise<{ answer: ReaderAnswer | null; cut: boolean }> => {
-        const prompt = buildReaderV3Prompt({
+        const prompt = buildReaderV4Prompt({
           ...base,
           paragraphs: parts.map((part) => ({ p: part.p, text: texts[part.p] ?? '' }))
         })
@@ -1213,7 +1226,7 @@ export async function runReading(
           messages: prompt.messages,
           maxTokens: prompt.maxTokens,
           childId: `${input.requestId}:r${requests}`,
-          promptVersion: READER_V3_PROMPT_VERSION
+          promptVersion: READER_V4_PROMPT_VERSION
         })
         return { answer: parseReaderAnswer(result.text), cut: result.finishReason === 'length' }
       }
@@ -1244,12 +1257,17 @@ export async function runReading(
         // cut once is mostly cut again when asked whole).
         const half = Math.ceil(rest.length / 2)
         const halves = rest.length >= 2 ? [rest.slice(0, half), rest.slice(half)] : [rest]
+        let recovered = rest.length > 0
         for (const parts of halves) {
           if (parts.length === 0) continue
           const retry = await ask(parts)
-          if (retry.cut) yields.cut += 1
+          if (retry.cut) {
+            yields.cut += 1
+            recovered = false
+          }
           if (retry.answer === null) {
             // A retry that does not parse reads nothing: its paragraphs stay unread.
+            recovered = false
             for (const part of parts) unread.add(part.p)
             continue
           }
@@ -1268,6 +1286,7 @@ export async function runReading(
               ? retry.answer
               : mergeAnswers(answer, retry.answer, isListed, "'".repeat(merges))
         }
+        if (!recovered) lost += 1
       }
       if (answer === null) {
         // Prose, a refusal, an empty reply: nothing was read here, so nothing counts as read.
@@ -1606,6 +1625,10 @@ export async function runReading(
           return refuse('kind', claim, who)
         }
         if (!valueStated(slot, item.value, claim.q)) return refuse('value', claim, who)
+        // The second live run's (2026-10-14, 19:20): an age that is no age, a feeling as an
+        // object, an absence as a value.
+        if (!valueOfKind(slot, item.value)) return refuse('valueKind', claim, who)
+        if (absentValue(slot, item.value) !== null) return refuse('absence', claim, who)
         if (wishWord(slot, claim.mode, claim.q) !== null) return refuse('wish', claim, who)
         const subject = item.subject
         const calledBy =
@@ -1616,15 +1639,48 @@ export async function runReading(
                   .filter((name) => name.recordId === item.recordId)
                   .map((name) => sentence.text.slice(name.start, name.end))
               )
+        // The subject's own words: "I" is them, whether the sentence names them or not.
+        const firstPerson =
+          subject.kind === 'firstPerson' || (speakerId !== null && speakerId === item.recordId)
         const pointed = quotePointsAtSubject({
           slot,
           quote: claim.q,
           names: calledBy,
-          // The subject's own words: "I" is them, whether the sentence names them or not.
-          firstPerson:
-            subject.kind === 'firstPerson' || (speakerId !== null && speakerId === item.recordId)
+          firstPerson
         })
         if (!pointed) return refuse('subject', claim, who)
+        // The second live run's: a relative's fact reached through the subject ("My father was
+        // a clergyman" is no occupation of the speaker's; never asked for a subject that is the
+        // relative itself, "his wife"), a location not stated as where they are or go, a state
+        // at their death, and one fact proposed twice.
+        const relative = subject.kind === 'antecedent' && subject.unnamed === item.recordId
+        if (!relative && possessedOnly({ slot, quote: claim.q, names: calledBy, firstPerson })) {
+          return refuse('possessed', claim, who)
+        }
+        if (
+          slot === 'location' &&
+          !locationStated({ value: item.value, quote: claim.q, names: calledBy, firstPerson })
+        ) {
+          return refuse('where', claim, who)
+        }
+        const said = quote.map((sentence) => sentence.text)
+        if (diesInQuote({ slot, sentences: said, names: calledBy, firstPerson })) {
+          return refuse('past', claim, who)
+        }
+        const key = valueKey(item.value)
+        const about = item.recordId ?? item.name?.norm ?? null
+        const twice =
+          about !== null &&
+          items.some(
+            (other) =>
+              other.kind === 'fact' &&
+              other.slot !== slot &&
+              other.claim.p === claim.p &&
+              (other.recordId ?? other.name?.norm ?? null) === about &&
+              valueKey(other.value) === key &&
+              sameQuote(other.claim.q, claim.q)
+          )
+        if (twice) return refuse('duplicate', claim, who)
       }
       const single = quote.length === 1 ? quote[0] : undefined
       const span = scene.spans[claim.p]?.[location.sentences[0] ?? -1]
@@ -2110,7 +2166,9 @@ export async function runReading(
         // The items a cut-off reply did not reach are asked once more.
         const missing = batch.filter((entry) => !verdicts.has(entry.at))
         for (const again of verifyV2Batches(missing)) {
-          if (await runBatch(again)) yields.cut += 1
+          if (!(await runBatch(again))) continue
+          yields.cut += 1
+          lost += 1
         }
       }
     }
@@ -2585,7 +2643,7 @@ export async function runReading(
           purpose,
           pages: requests,
           paras: ranges([...readParas]),
-          promptVersion: READER_V3_PROMPT_VERSION,
+          promptVersion: READER_V4_PROMPT_VERSION,
           verifyVersion: spend.verifySent ? VERIFY_V3_PROMPT_VERSION : null,
           model: spend.model,
           tokensIn: spend.tokensIn,
@@ -2593,7 +2651,8 @@ export async function runReading(
           reasoningTokens: spend.reasoning,
           costUsd: spend.costUsd,
           cloud: spend.cloud,
-          finishReason: yields.cut > 0 ? 'length' : null,
+          // A cut-off the re-read recovered is no cut-off of the reading (`lost`).
+          finishReason: lost > 0 ? 'length' : null,
           yields
         },
         at0

@@ -1328,7 +1328,7 @@ export function knowsReport(
     ),
     row('From never-read scenes', (pass) => String(pass.score.neverRead.length), '0'),
     row(
-      'Cut off at the cap',
+      'Cut off at the cap and not recovered by the re-read',
       (pass) => `${pass.score.cut} of ${pass.score.readings} readings`,
       'no bar'
     ),

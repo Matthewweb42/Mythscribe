@@ -1572,7 +1572,7 @@ test('story memory v2: the evidence reader (P2a)', async () => {
   }>('memory:claim', { claimId: location?.id ?? '' })
   expect(info.claim.quote).toBe('She walked to the quay')
   // P2b slice 2: the reading is `reader.v2`'s (the same sentinel and the same facts here).
-  expect(info.reading?.promptVersion).toBe('reader.v3')
+  expect(info.reading?.promptVersion).toBe('reader.v4')
 
   // Nothing changed since: a second Read now sends nothing.
   const before = providerBodies.length

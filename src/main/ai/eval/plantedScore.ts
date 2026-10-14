@@ -57,8 +57,15 @@ export interface PlantedMeasures {
   strayLines: string[]
   /** Negatives the labels forbid, stored live. */
   falseAlarms: string[]
-  /** Readings cut off at their cap (finish_reason length), and readings. */
+  /**
+   * Readings left cut off at the cap (a reply cut and not recovered by its re-read, so paragraphs
+   * or verdicts were lost; the reading's `finishReason` is `length`), and readings.
+   */
   cut: Part
+  /** Readings with a reply cut at the cap that the re-read recovered whole, and readings. */
+  recovered: Part
+  /** Replies cut at the cap in all readings, recovered or not (reader and checker). */
+  cutReplies: number
 }
 
 const share = (right: number, of: number): Part => ({ right, of })
@@ -131,15 +138,36 @@ export function plantedMeasures(book: TestBookProject): PlantedMeasures {
         `${claim.slot} “${claim.value}” ← “${claim.quote}”`
     ),
     falseAlarms: negativesStored(book, claims),
+    // A reading's finishReason is `length` only for a cut its re-read did not recover (second live
+    // run of 2026-10-14: every cut reply used to count, so the share could not fall as pages grew
+    // smaller and the requests per reading more); a recovered one is counted apart.
     cut: share(
       readings.filter((reading) => reading.finishReason === 'length').length,
       readings.length
-    )
+    ),
+    recovered: share(
+      readings.filter((reading) => reading.yields.cut > 0 && reading.finishReason !== 'length')
+        .length,
+      readings.length
+    ),
+    cutReplies: sum((yields) => yields.cut)
   }
 }
 
 export const percentOf = (part: Part): string =>
   part.of === 0 ? 'n/a' : `${((part.right / part.of) * 100).toFixed(1)} %`
+
+/**
+ * The report's cut-off lines: readings left cut off (paragraphs or verdicts lost), and apart from
+ * them the readings whose cut reply the re-read recovered, with every cut reply counted.
+ */
+export function cutLines(measures: PlantedMeasures): string[] {
+  const { cut, recovered } = measures
+  return [
+    `- Cut off at the cap and not recovered (paragraphs or verdicts lost): ${percentOf(cut)} of readings (${cut.right} of ${cut.of})`,
+    `- Cut off at the cap and recovered by the re-read: ${recovered.right} of ${recovered.of} readings (replies cut, reader and checker: ${measures.cutReplies})`
+  ]
+}
 
 /** The bars the measures miss, each as a report line names it. */
 export function plantedFailures(measures: PlantedMeasures): string[] {

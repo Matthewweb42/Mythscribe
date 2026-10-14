@@ -1,4 +1,3 @@
-import { outputBudget } from '@shared/ai'
 import {
   CARD_GIST_MAX_WORDS,
   CARD_GIST_MIN_WORDS,
@@ -52,6 +51,13 @@ export const READER_V3_RULES_TOKENS = 1_200
  * compact facts. A reply still cut off is read again from its last quoted paragraph, in halves.
  */
 export const READER_V3_PAGE_TOKENS = 400
+
+/**
+ * `reader.v3`'s ceiling: the reader's budget when it shipped (720). Pinned here since `reader.v4`
+ * raised the budget (second live run of 2026-10-14), so v3's requests and token rows stay as they
+ * were.
+ */
+export const READER_V3_OUTPUT_MAX = 720
 
 /** What a card takes of the output (`reader.v2` counted 120; the live run's cards took ~230). */
 export const READER_V3_CARD_OUTPUT = 240
@@ -135,7 +141,7 @@ export function readerV3PageTokens(topics: readonly string[]): number {
  */
 export function readerV3OutputCap(input: { proseTokens: number; cardDue: boolean }): number {
   return Math.min(
-    outputBudget('reader'),
+    READER_V3_OUTPUT_MAX,
     READER_V3_OUTPUT_BASE +
       Math.ceil(READER_V3_OUTPUT_PER_TOKEN * input.proseTokens) +
       (input.cardDue ? READER_V3_CARD_OUTPUT : 0)
@@ -148,5 +154,8 @@ export interface BuiltReaderV3Prompt extends Omit<BuiltReaderV2Prompt, 'version'
 
 /** `reader.v3`'s messages: `reader.v2`'s layout and fit with the v3 rules. */
 export function buildReaderV3Prompt(input: BuildReaderV2PromptInput): BuiltReaderV3Prompt {
-  return { version: READER_V3_PROMPT_VERSION, ...buildReaderMessages(READER_V3_RULES, input) }
+  return {
+    version: READER_V3_PROMPT_VERSION,
+    ...buildReaderMessages(READER_V3_RULES, input, READER_V3_OUTPUT_MAX)
+  }
 }

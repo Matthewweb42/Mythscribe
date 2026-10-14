@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
+import { estimateTokens, inputBudget } from '@shared/ai'
 import { parseReaderAnswer } from '@shared/memory/readerAnswer'
 import { ALL_SLOTS } from '@shared/memory/slots'
 import { TOPIC_ROSTER_MAX_TOKENS, topicLinesTokens } from '@shared/memory/topics'
@@ -14,6 +14,7 @@ import {
 } from './reader.v2'
 import {
   READER_V3_CARD_OUTPUT,
+  READER_V3_OUTPUT_MAX,
   READER_V3_PAGE_TOKENS,
   READER_V3_PROMPT_VERSION,
   READER_V3_RULES,
@@ -127,11 +128,12 @@ describe('reader.v3 prompt (F-16.17, the live run of 2026-10-14)', () => {
     })
   })
 
-  it('sizes pages to 400 prose tokens and asks at most the reader’s 720', () => {
+  it('sizes pages to 400 prose tokens and asks at most its 720', () => {
     expect(readerV3PageTokens(TOPICS)).toBe(READER_V3_PAGE_TOKENS)
     expect(readerV3OutputCap({ proseTokens: READER_V3_PAGE_TOKENS, cardDue: true })).toBe(
-      outputBudget('reader')
+      READER_V3_OUTPUT_MAX
     )
+    expect(READER_V3_OUTPUT_MAX).toBe(720)
     expect(readerV3OutputCap({ proseTokens: 100, cardDue: false })).toBe(160 + 120)
     expect(readerV3OutputCap({ proseTokens: 100, cardDue: true })).toBe(
       160 + 120 + READER_V3_CARD_OUTPUT
@@ -190,6 +192,6 @@ describe('reader.v3 prompt (F-16.17, the live run of 2026-10-14)', () => {
     const all = text(worst.messages)
     for (const line of [...roster, ...topics]) expect(all).toContain(line)
     expect(all).toContain(`¶${lines - 1} ${'word '.repeat(80).trim()}`)
-    expect(worst.maxTokens).toBeLessThanOrEqual(outputBudget('reader'))
+    expect(worst.maxTokens).toBeLessThanOrEqual(READER_V3_OUTPUT_MAX)
   })
 })

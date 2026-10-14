@@ -54,7 +54,7 @@ export const REBUILD_PAGE_TOKENS = READER_V3_PAGE_TOKENS
 export { REBUILD_FAST_CHECKS, REBUILD_STRONG_CHECKS }
 
 /**
- * The rebuild's price and time: each scene read whole once (`reader.v3:first`, one request per
+ * The rebuild's price and time: each scene read whole once (`reader.v4:first`, one request per
  * page of `REBUILD_PAGE_TOKENS` prose tokens, the row's other input on each page) and its claims
  * verified once per page (`verify.v3`), then the spot checks, and (F-16.27, P4 slice 3) the
  * contradiction sweep's `judgeCalls` (`judge.v1`, with the Contradiction check on); priced on the
@@ -65,7 +65,7 @@ export function estimateRebuild(
   context: RebuildContext,
   judgeCalls = 0
 ): RebuildEstimate {
-  const reader = plannedRow('reader.v3:first')
+  const reader = plannedRow('reader.v4:first')
   const verify = plannedRow('verify.v3')
   const strong = plannedRow('verify.v2:pro')
   const spot = plannedRow('verify.v2:spot')

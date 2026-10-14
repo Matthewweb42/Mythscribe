@@ -226,9 +226,9 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   reader: {
     trigger: 'background',
-    when: 'Story memory v2 (F-16.17; F-16.22, F-16.23): reader.v3 since the live planted-error run of 2026-10-14 (reader.v2 from P2b, reader.v1 before), fast tier, reasoning off. Only when a finished sentence of a scene changed (a local gate decides, nothing is sent while typing): the changed paragraphs ±2 when the author leaves the scene or pauses (from P2a slice 3; Read now meanwhile), the whole scene in pages of 400 prose tokens (2,500 until reader.v3: 83 % of those replies were cut off at the 720-token cap) on a first read, after half of it changed, or after five window reads. One request per window piece or page, max_tokens min(720, 160 + 1.2 per prose token + 240 with the card), facts in a compact form (defaults left out); a reply cut off at its cap is read again once from the last paragraph it quoted, in two halves. The rules, the record roster and the topics roster (the secrets and threads found, a short label each, never dropped) are a stable prefix (provider caching), the record roster rebuilt only on a removal, rename, merge or split. reader.v2 also reads who learns or holds which secret (how, and from whom: the learner must be on the page or the point of view), thread steps (opens, advances, resolves) and new secrets and threads, and its tail carries, for the secrets the changed paragraphs touch, who is known to know them (never who does not). Once after the switch-over (F-16.31), Rebuild memory is asked once with its price; until it starts, nothing nobody asked for is read but a scene the author wrote in and then leaves or pauses in (one Needs a look notice offers the rebuild instead of the backlog), and its spend counts as asked (outside the Cloud monthly reading cap, inside the daily cap). Figures (reader.v3, decided by Claude, unconfirmed until the next live run): about 4,400 tokens in and 380 out for a window, 2,230 / 600 for a first-read page of 400 prose tokens (`READING_V3_ROWS`).',
+    when: 'Story memory v2 (F-16.17; F-16.22, F-16.23): reader.v4 since the second live planted-error run of 2026-10-14 (the slot list first and alone, what each value must be, max_tokens min(1,000, 160 + 1.4 per prose token + 240 with the card): v3 clipped a 400-token page with its card to 720, so most pages were read again in halves), reader.v3 since the first run that day, reader.v2 from P2b, reader.v1 before; fast tier, reasoning off. The rest describes reader.v3, which v4 keeps but for its rules and cap; figures for v4: about 4,550 / 400 for a window, 2,380 / 650 for a first-read page (`READING_V3_ROWS`). Only when a finished sentence of a scene changed (a local gate decides, nothing is sent while typing): the changed paragraphs ±2 when the author leaves the scene or pauses (from P2a slice 3; Read now meanwhile), the whole scene in pages of 400 prose tokens (2,500 until reader.v3: 83 % of those replies were cut off at the 720-token cap) on a first read, after half of it changed, or after five window reads. One request per window piece or page, max_tokens min(720, 160 + 1.2 per prose token + 240 with the card), facts in a compact form (defaults left out); a reply cut off at its cap is read again once from the last paragraph it quoted, in two halves. The rules, the record roster and the topics roster (the secrets and threads found, a short label each, never dropped) are a stable prefix (provider caching), the record roster rebuilt only on a removal, rename, merge or split. reader.v2 also reads who learns or holds which secret (how, and from whom: the learner must be on the page or the point of view), thread steps (opens, advances, resolves) and new secrets and threads, and its tail carries, for the secrets the changed paragraphs touch, who is known to know them (never who does not). Once after the switch-over (F-16.31), Rebuild memory is asked once with its price; until it starts, nothing nobody asked for is read but a scene the author wrote in and then leaves or pauses in (one Needs a look notice offers the rebuild instead of the backlog), and its spend counts as asked (outside the Cloud monthly reading cap, inside the daily cap). Figures (reader.v3, decided by Claude, unconfirmed until the next live run): about 4,400 tokens in and 380 out for a window, 2,230 / 600 for a first-read page of 400 prose tokens (`READING_V3_ROWS`).',
     callsPerUse: 1,
-    typicalOutTokens: 450,
+    typicalOutTokens: 500,
     ideas:
       'Skip the card when it is not due (already: +120 output only then); a smaller window when the edit is one sentence; batch Rebuild memory through the provider batch API; measure the cut-off rate in the ledger and trim the claim list before raising the cap.'
   },
@@ -718,6 +718,47 @@ export const READING_V3_ROWS: readonly PlannedCostNote[] = [
     when: 'One batch per reading page: the facts code could not prove on a 400-token page, under the v3 rules (+130 tokens).',
     typicalInTokens: 1_000,
     typicalOutTokens: 120,
+    callsPerUse: 1
+  },
+  // reader.v4 (the second live run of 2026-10-14): rules +152 tokens, max_tokens up to 960 for a
+  // page and its card (v3 clipped it to 720, so most pages were read again in halves).
+  {
+    id: 'reader.v4:first',
+    prompt: 'reader.v4',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'A page of a scene read whole: reader.v3:first’s input with the v4 rules (+152 tokens), a 400-token page, its facts and the card out within the larger cap (no re-read in halves).',
+    typicalInTokens: 2_380,
+    typicalOutTokens: 650,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v4:window',
+    prompt: 'reader.v4',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'A window read (pieces of at most 400 prose tokens): reader.v3:window’s input with the v4 rules, compact facts out.',
+    typicalInTokens: 4_550,
+    typicalOutTokens: 400,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v4:card',
+    prompt: 'reader.v4',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'An instant card that is out of date: one reader.v4 window read for its scene (about one card in five).',
+    typicalInTokens: 4_550,
+    typicalOutTokens: 400,
     callsPerUse: 1
   }
 ]

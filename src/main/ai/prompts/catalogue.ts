@@ -107,6 +107,7 @@ import { CITE_PROMPT_VERSION } from './cite.v1'
 import { NAVIGATOR_PROMPT_VERSION } from './navigator.v1'
 import { JUDGE_PROMPT_VERSION } from './judge.v1'
 import { READER_V3_PROMPT_VERSION } from './reader.v3'
+import { READER_V4_PROMPT_VERSION } from './reader.v4'
 import { VERIFY_V3_PROMPT_VERSION } from './verify.v3'
 
 /**
@@ -244,7 +245,9 @@ export const PROMPT_VERSIONS = [
   // F-16.17 (story memory v2 only, after the live planted-error run of 2026-10-14): compact facts,
   // the slot list, the subject in the quote; smaller pages. v2 stays for its rows.
   READER_V3_PROMPT_VERSION,
-  VERIFY_V3_PROMPT_VERSION
+  VERIFY_V3_PROMPT_VERSION,
+  // F-16.17 (second live run of 2026-10-14): the slot list first, the value rules, a 1,000 cap.
+  READER_V4_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -735,7 +738,8 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   // version on the strong tier, one pair at a time.
   [JUDGE_PROMPT_VERSION]: { feature: 'judge', tier: 'fast', output: 'json', since: 'F-16.27' },
   [READER_V3_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
-  [VERIFY_V3_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' }
+  [VERIFY_V3_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' },
+  [READER_V4_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' }
 }
 
 /**

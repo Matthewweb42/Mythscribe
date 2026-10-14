@@ -6,6 +6,7 @@ import { OPENROUTER_BASE_URL, OPENROUTER_DEFAULT_MODELS, type Tier } from '@shar
 import { valueKey, type Claim } from '@shared/memory/claims'
 import { normalizeForMatch } from '@shared/critique'
 import { parseVerifyAnswer, type VerifyVerdict } from '@shared/memory/readerAnswer'
+import { readSlot } from '@shared/memory/slots'
 import { SPOT_STRONG_AROUND } from '@shared/memory/spot'
 import { dismissedNames, rosterOf } from '../../memory/recordStore'
 import { twinGate } from '@shared/memory/twinGate'
@@ -35,7 +36,13 @@ import {
 import { TEST_BOOK } from '../../memory/testBook/book'
 import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
 import { buildTestBookProject, type TestBookProject } from '../../memory/testBook/project'
-import { plantedBarLines, plantedFailures, plantedMeasures, unreviewedLines } from './plantedScore'
+import {
+  cutLines,
+  plantedBarLines,
+  plantedFailures,
+  plantedMeasures,
+  unreviewedLines
+} from './plantedScore'
 import { fakeChatServer } from './fakeChatServer'
 import {
   liveProviderError,
@@ -312,7 +319,19 @@ interface LivePlant {
   voice?: 'dialogue'
   /** The speaker's record label, for dialogue. */
   speaker?: string
-  refused: 'subject' | 'value' | 'wish' | 'kind' | 'slot'
+  mode?: 'dream'
+  refused:
+    | 'subject'
+    | 'value'
+    | 'wish'
+    | 'kind'
+    | 'slot'
+    | 'valueKind'
+    | 'absence'
+    | 'where'
+    | 'past'
+    | 'possessed'
+    | 'duplicate'
 }
 
 const LIVE_PLANTS: readonly LivePlant[] = [
@@ -412,6 +431,95 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     value: 'quickly',
     quote: 'Johanna walked quickly',
     refused: 'slot'
+  },
+  // The second live run of 2026-10-14 (19:20): what the checker passed that was wrong.
+  // h07: the road is described beside her, not stated as where she is (the h07 negative).
+  {
+    scene: 'h07',
+    p: 1,
+    record: 'johanna',
+    slot: 'location',
+    value: 'the road',
+    quote:
+      'The road was hard with frost, and the hedges were full of fieldfares. Johanna walked quickly, with her hands in her muff',
+    refused: 'where'
+  },
+  // Another person's fact: "my father" is not the speaker.
+  {
+    scene: 'h02',
+    p: 5,
+    record: 'dunmore',
+    slot: 'detail:occupation',
+    value: 'My father was a clergyman in Elsdale',
+    quote: 'My father was a clergyman in Elsdale',
+    voice: 'dialogue',
+    speaker: 'dunmore',
+    refused: 'possessed'
+  },
+  // A count of daughters is no age.
+  {
+    scene: 's01',
+    p: 19,
+    record: 'harrow-mrs',
+    slot: 'age',
+    value: 'four grown-up daughters',
+    quote: 'When a woman has four grown-up daughters',
+    voice: 'dialogue',
+    speaker: 'harrow-mrs',
+    refused: 'valueKind'
+  },
+  // An absence, in a dream: never a value.
+  {
+    scene: 'h06',
+    p: 2,
+    record: 'lottie',
+    slot: 'location',
+    value: 'not there',
+    quote: 'Lottie was not there',
+    mode: 'dream',
+    refused: 'absence'
+  },
+  // Where Hobb died is his history, not where he is.
+  {
+    scene: 'h03',
+    p: 3,
+    record: 'hobb',
+    slot: 'location',
+    value: 'in his chair by the lodge fire',
+    quote: 'He died in the night, in his chair by the lodge fire',
+    refused: 'past'
+  },
+  // Attention is no object.
+  {
+    scene: 's04',
+    p: 4,
+    record: 'ashby',
+    slot: 'objects',
+    value: 'attentions',
+    quote: "Mr. Ashby's attentions to her sister",
+    refused: 'valueKind'
+  },
+  // One claim, one slot: the relation (kept, `LIVE_KEPT`) proposed again as a trait.
+  {
+    scene: 's03',
+    p: 5,
+    record: 'harrow-mrs',
+    slot: 'traits',
+    value: 'violent against him',
+    quote: 'Amongst the most violent against him was Mrs. Harrow',
+    refused: 'duplicate'
+  },
+  // The most invented slot of the second run.
+  {
+    scene: 'h02',
+    p: 5,
+    record: 'dunmore',
+    slot: 'voice',
+    value: 'left me nothing but his good name',
+    quote: 'he left me nothing but his good name',
+    voice: 'dialogue',
+    speaker: 'dunmore',
+    refused: 'slot'
   }
 ]
 
@@ -439,6 +547,24 @@ const LIVE_KEPT: readonly Omit<LivePlant, 'refused'>[] = [
     slot: 'birthplace',
     value: 'Gullhaven',
     quote: 'Miss Fenwick was born at Gullhaven'
+  },
+  // The second live run: a slot in its other number ("trait"), read as traits.
+  {
+    scene: 's03',
+    p: 3,
+    record: 'harrow-mrs',
+    slot: 'trait',
+    value: 'quite disconcerted',
+    quote: 'Mrs. Harrow was quite disconcerted'
+  },
+  // The first of one fact proposed in two slots: kept; the trait after it is the duplicate.
+  {
+    scene: 's03',
+    p: 5,
+    record: 'harrow-mrs',
+    slot: 'relation',
+    value: 'violent against him',
+    quote: 'Amongst the most violent against him was Mrs. Harrow'
   }
 ]
 
@@ -463,7 +589,8 @@ function plantsFor(
       q: plant.quote,
       ...(plant.voice === undefined
         ? {}
-        : { voice: plant.voice, sp: plant.speaker === undefined ? null : id(plant.speaker) })
+        : { voice: plant.voice, sp: plant.speaker === undefined ? null : id(plant.speaker) }),
+      ...(plant.mode === undefined ? {} : { mode: plant.mode })
     }))
 }
 
@@ -476,10 +603,13 @@ function gullibleVerify(request: CompletionRequest): string {
   const honest = JSON.parse(oracleVerify(request)) as { v: { i: number }[] }
   const plants = [...LIVE_PLANTS, ...LIVE_KEPT]
   const verdicts = sentChecks(request).map((check) => {
+    // A plant's own fact only: an honest fact whose sentences hold a plant's quote (s04's dark
+    // eyes beside Mr. Ashby's attentions) is answered as the oracle answers it.
     const plant = plants.find(
       (each) =>
         check.kind === 'claim' &&
-        normalizeForMatch(check.text).includes(normalizeForMatch(each.quote))
+        normalizeForMatch(check.text).includes(normalizeForMatch(each.quote)) &&
+        normalizeForMatch(check.fact).includes(normalizeForMatch(each.value))
     )
     if (plant === undefined) return honest.v.find((verdict) => verdict.i === check.i) ?? null
     const said = /\((narration|dialogue|thought|rumour)(?: by \S+)?, (\w+)\)$/.exec(check.fact)
@@ -509,7 +639,8 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
       return {
         text: answerText({
           ...answer,
-          c: [...answer.c, ...plantsFor(request, [...LIVE_PLANTS, ...LIVE_KEPT])]
+          // The kept ones first: a duplicate's first proposal is among them.
+          c: [...answer.c, ...plantsFor(request, [...LIVE_KEPT, ...LIVE_PLANTS])]
         })
       }
     })
@@ -537,10 +668,13 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
     }
     const live = liveFacts(book)
     for (const plant of LIVE_PLANTS) {
+      const slot = readSlot(plant.slot)
       const stored = live.filter(
         (claim) =>
           sceneOf(book, claim.nodeId) === plant.scene &&
           claim.recordId === book.records.get(plant.record) &&
+          // A duplicate's first proposal, in its own slot, is kept (`LIVE_KEPT`).
+          (slot === null || claim.slot === slot) &&
           overlaps(claim.quote, plant.quote) &&
           valueKey(claim.value) === valueKey(plant.value)
       )
@@ -563,6 +697,15 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
         `${kept.scene} ${kept.slot}`
       ).toBe(true)
     }
+    // A slot in its other number ("trait") was read as its slot (second live run).
+    expect(
+      live.some(
+        (claim) =>
+          claim.slot === 'traits' &&
+          claim.recordId === book.records.get('harrow-mrs') &&
+          claim.quote === 'Mrs. Harrow was quite disconcerted'
+      )
+    ).toBe(true)
     // The bare label was read as its slot.
     expect(
       live.some(
@@ -788,9 +931,6 @@ describe.skipIf(!LIVE)('the live planted-error run (MYTHSCRIBE_EVAL_LIVE=1)', ()
   }, 900_000)
 })
 
-const percent = (part: number, whole: number): string =>
-  whole === 0 ? 'n/a' : `${((part / whole) * 100).toFixed(1)} %`
-
 /** Scores the live run per slot against the labels; answers the report and the failed bars. */
 function scoreLive(
   book: TestBookProject,
@@ -869,7 +1009,7 @@ function scoreLive(
     '## Pass bars (decided by Claude, unconfirmed)',
     '',
     ...plantedBarLines(measures),
-    `- Cut off at the cap (finish_reason length): ${percent(measures.cut.right, readCount)} of readings`,
+    ...cutLines(measures),
     `- Names proposed: ${names.length}; tied to a record by the twin gate: ${twins.length}${twins.length > 0 ? ` (${twins.join(', ')})` : ''}`,
     `- Spot checks: fast ${spot.fastAgree} of ${spot.fastChecked} agree; strong ${spot.strongAgree} of ${spot.strongChecked} agree`,
     '',
@@ -919,6 +1059,8 @@ function scoreLive(
       neverRead: measures.strays,
       falseAlarms: measures.falseAlarms,
       cutReadings: measures.cut.right,
+      recoveredReadings: measures.recovered.right,
+      cutReplies: measures.cutReplies,
       names: { proposed: names.length, twins },
       spot,
       slots: Object.fromEntries(slots),

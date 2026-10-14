@@ -89,7 +89,7 @@ import {
 } from './liveProvider'
 import { invariants, oracleRead, oracleVerify, sceneOf } from './memoryOracle'
 import {
-  percentOf,
+  cutLines,
   plantedBarLines,
   plantedFailures,
   plantedMeasures,
@@ -919,7 +919,7 @@ export function switchoverReport(
     '### The memory bars of the planted-error run (`-- memory`), on the converted book',
     '',
     ...plantedBarLines(score.memory),
-    `- Cut off at the cap (finish_reason length): ${percentOf(score.memory.cut)} of readings`,
+    ...cutLines(score.memory),
     '',
     failures.length === 0 ? '**Passed.**' : `**Failed:** ${failures.join('; ')}.`,
     '',
@@ -1473,7 +1473,9 @@ describe('the switch-over report (F-16.31, SW-D13)', () => {
     strays: 0,
     strayLines: [],
     falseAlarms: [],
-    cut: { right: 0, of: 18 }
+    cut: { right: 0, of: 18 },
+    recovered: { right: 2, of: 18 },
+    cutReplies: 2
   }
   const score: SwitchoverScore = {
     conversion: [],

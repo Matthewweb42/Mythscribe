@@ -457,8 +457,12 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // wrapping included); a filing asks `REFILE_MAX_TOKENS` (900) of compact edits.
   sheetSync: 1_200,
   // F-16.17: a first or full-read page asks 720 (600 for the claims, 120 for the card); a window
-  // min(600, 120 + 0.3 × its prose tokens), plus 120 when a card is due (`outputCap`).
-  reader: 720,
+  // min(600, 120 + 0.3 × its prose tokens), plus 120 when a card is due (`outputCap`). reader.v3
+  // keeps its own 720 (`READER_V3_OUTPUT_MAX`). Raised to 1,000 for reader.v4 (second live run of
+  // 2026-10-14): v3's own estimate for a 400-token page with its card was 880, clipped to 720, so
+  // most full-read pages were cut and read again in halves (two more requests, each resending the
+  // ~1,500-token prefix); max_tokens is not billed, only what is written.
+  reader: 1_000,
   // F-16.17: batches per page, min(400, 20 + 28 per fact + 12 per card or on-page item); a
   // strong spot check asks 40.
   verify: 400,

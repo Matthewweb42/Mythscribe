@@ -235,7 +235,7 @@ describe('runReading (F-16.17)', () => {
     expect(reading).toMatchObject({
       purpose: 'first',
       pages: 1,
-      promptVersion: 'reader.v3',
+      promptVersion: 'reader.v4',
       verifyVersion: 'verify.v3',
       model: 'gpt-5.4-mini',
       tokensIn: 2_000,
@@ -335,7 +335,10 @@ describe('runReading (F-16.17)', () => {
     expect(readers.length).toBeGreaterThan(1)
     for (const request of readers) {
       expect(request.messages.at(-1)?.content).toMatch(/page \d of \d \(the whole scene\)/)
-      expect(request.maxTokens).toBe(720)
+      // reader.v4's cap for a page of up to 400 prose tokens and its card: past v3's 720 (second
+      // live run of 2026-10-14), within the reader's 1,000.
+      expect(request.maxTokens).toBeGreaterThan(720)
+      expect(request.maxTokens).toBeLessThanOrEqual(1_000)
     }
     expect(getCard(db, one, activeDraftId(db))?.line).toBe('Mara walks to the quay.')
     expect(claimsNow()).toHaveLength(3)
@@ -361,8 +364,9 @@ describe('runReading (F-16.17)', () => {
     expect([...sentParagraphs(nth(readers, 2)).keys()]).toEqual([2])
     expect(outcome).toMatchObject({ read: true, cut: true })
     expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes', 'location', 'clothing'])
+    // The re-read recovered the cut reply: one reply cut, no cut-off left in the reading.
     expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
-      finishReason: 'length',
+      finishReason: null,
       yields: { cut: 1 }
     })
   })
@@ -380,6 +384,11 @@ describe('runReading (F-16.17)', () => {
     await read(ai)
     // ¶1's facts were dropped from the cut reply for the retry, which reached nothing.
     expect(claimsNow()).toEqual([])
+    // Cut again on the re-read (both halves): the reading reports the cut-off, and every cut reply.
+    expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
+      finishReason: 'length',
+      yields: { cut: 3 }
+    })
     // ¶1 and ¶2 stay unread, so the next reading reads them again.
     const again = standard()
     const outcome = await read(again)
@@ -450,6 +459,100 @@ describe('runReading (F-16.17)', () => {
         'unsupported'
       ].sort()
     )
+  })
+
+  it('refuses in code what the second live run’s checker passed, before any check (2026-10-14)', async () => {
+    const events: ReadingItemEvent[] = []
+    saveDocument(
+      db,
+      one,
+      doc(
+        'The road was hard with frost. Mara walked quickly.',
+        '“My father was a clergyman,” said Mara.',
+        'Tomas was not there. Tomas had four grown-up daughters.',
+        'He died in the night, in his chair by the fire.',
+        'Amongst the most violent against him was Tomas.',
+        "Tomas's attentions to Mara were plain."
+      )
+    )
+    scanNamesFor(db, one, NOW)
+    const plan: PlannedClaim[] = [
+      {
+        p: 0,
+        r: 'Mara Vell',
+        s: 'location',
+        v: 'the road',
+        q: 'The road was hard with frost. Mara walked quickly'
+      },
+      {
+        p: 1,
+        r: 'Mara Vell',
+        s: 'detail:occupation',
+        v: 'a clergyman',
+        q: 'My father was a clergyman',
+        voice: 'dialogue',
+        sp: 'Mara Vell'
+      },
+      { p: 2, r: 'Tomas', s: 'location', v: 'not there', q: 'Tomas was not there' },
+      {
+        p: 2,
+        r: 'Tomas',
+        s: 'age',
+        v: 'four grown-up daughters',
+        q: 'Tomas had four grown-up daughters'
+      },
+      {
+        p: 3,
+        r: 'Tomas',
+        s: 'location',
+        v: 'in his chair by the fire',
+        q: 'He died in the night, in his chair by the fire'
+      },
+      {
+        p: 4,
+        r: 'Tomas',
+        s: 'relation',
+        v: 'violent against him',
+        q: 'Amongst the most violent against him was Tomas'
+      },
+      {
+        p: 4,
+        r: 'Tomas',
+        s: 'trait',
+        v: 'violent against him',
+        q: 'Amongst the most violent against him was Tomas'
+      },
+      { p: 5, r: 'Tomas', s: 'objects', v: 'attentions', q: "Tomas's attentions to Mara" }
+    ]
+    const ai = fakeAi((request) => {
+      if (requestKind(request) === 'verify') return { text: verifyReply(request) }
+      return { text: readerReply(request, plan) }
+    })
+    await runReading(
+      db,
+      { ai: ai.deps },
+      { nodeId: one, caretPara: null, requestId: 'r-3', observe: (event) => events.push(event) }
+    )
+    // The refusals are told as the ladder meets them; the relation once the checker answered.
+    expect(events.map((event) => [event.p, event.slot, event.outcome])).toEqual([
+      [0, 'location', 'where'],
+      [1, 'detail:occupation', 'possessed'],
+      [2, 'location', 'absence'],
+      [2, 'age', 'valueKind'],
+      [3, 'location', 'past'],
+      [4, 'trait', 'duplicate'],
+      [5, 'objects', 'valueKind'],
+      [4, 'relation', 'verified']
+    ])
+    // Only the relation reached the checker; the "trait" was read as traits, one claim one slot.
+    expect(claimsNow().map((claim) => [claim.slot, claim.value])).toEqual([
+      ['relation', 'violent against him']
+    ])
+    expect(lastReading(db, one, activeDraftId(db))?.yields).toMatchObject({
+      verifySent: 1,
+      verified: 1,
+      rejections: { where: 1, possessed: 1, absence: 1, valueKind: 2, past: 1, duplicate: 1 }
+    })
   })
 
   it('refuses a check that names no subject, voice or mode, or another record', async () => {
@@ -952,8 +1055,9 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
       ['location', 'live'],
       ['traits', 'live']
     ])
+    // Every verdict came on the second ask: a recovered cut, no cut-off of the reading.
     expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
-      finishReason: 'length',
+      finishReason: null,
       yields: { cut: 1, verifySent: 3, verified: 3, rejected: 0 }
     })
   })
@@ -973,6 +1077,7 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
       rejections: { unanswered: 1 },
       cut: 2
     })
+    expect(reading?.finishReason).toBe('length')
     // ¶2 (Tomas) was not read through: it is read again.
     expect(reading?.paras).toEqual([[0, 1]])
     const again = standard()

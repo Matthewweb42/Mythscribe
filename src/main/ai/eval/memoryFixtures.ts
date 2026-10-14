@@ -43,6 +43,11 @@ import {
   readerV3OutputCap
 } from '../prompts/reader.v3'
 import { buildVerifyV3Prompt, VERIFY_V3_PROMPT_VERSION } from '../prompts/verify.v3'
+import {
+  buildReaderV4Prompt,
+  READER_V4_PROMPT_VERSION,
+  readerV4OutputCap
+} from '../prompts/reader.v4'
 import { topicLinesTokens, topicRosterLine } from '@shared/memory/topics'
 import type { EvalCase, ReaderEvalLabel, ReaderKnowsLabel, ReaderStepLabel } from './fixtures'
 
@@ -444,6 +449,8 @@ function readerV2Case(
     notKnowing?: string[]
     /** `reader.v3` (2026-10-14): its rules and its output cap, the same input otherwise. */
     v3?: boolean
+    /** `reader.v4` (the second live run of 2026-10-14): its rules and its larger cap. */
+    v4?: boolean
   } = {}
 ): EvalCase {
   const scene = testBookScene(id)
@@ -451,8 +458,9 @@ function readerV2Case(
   const paragraphs = paras.map((p) => ({ p, text: scene.paragraphs[p] ?? '' }))
   const full = options.window === undefined
   const proseTokens = paragraphs.reduce((sum, paragraph) => sum + estimateTokens(paragraph.text), 0)
-  const v3 = options.v3 === true
-  const build = v3 ? buildReaderV3Prompt : buildReaderV2Prompt
+  const v4 = options.v4 === true
+  const v3 = options.v3 === true || v4
+  const build = v4 ? buildReaderV4Prompt : v3 ? buildReaderV3Prompt : buildReaderV2Prompt
   const built = build({
     roster: TEST_BOOK_ROSTER_V2,
     topics: topicsRoster(...listed),
@@ -466,9 +474,11 @@ function readerV2Case(
     anchored: options.anchored ?? [],
     paragraphs,
     cardDue: full,
-    maxTokens: v3
-      ? readerV3OutputCap({ proseTokens, cardDue: full })
-      : outputCap({ purpose: full ? 'full' : 'window', proseTokens, cardDue: full })
+    maxTokens: v4
+      ? readerV4OutputCap({ proseTokens, cardDue: full })
+      : v3
+        ? readerV3OutputCap({ proseTokens, cardDue: full })
+        : outputCap({ purpose: full ? 'full' : 'window', proseTokens, cardDue: full })
   })
   const sent = new Set(paras)
   const listedShort = (topic: string): string | null =>
@@ -493,7 +503,11 @@ function readerV2Case(
     }))
   const labels = labelsOf(id, sent)
   return {
-    version: v3 ? READER_V3_PROMPT_VERSION : READER_V2_PROMPT_VERSION,
+    version: v4
+      ? READER_V4_PROMPT_VERSION
+      : v3
+        ? READER_V3_PROMPT_VERSION
+        : READER_V2_PROMPT_VERSION,
     name,
     note,
     messages: built.messages,
@@ -516,7 +530,7 @@ function readerV2Case(
  * The worst `reader.v2` input: full rosters, a 2,500-token page, every tail block at its cap; for
  * `reader.v3` the same at its 400-token page.
  */
-function worstReaderV2Case(v3 = false): EvalCase {
+function worstReaderV2Case(v3 = false, v4 = false): EvalCase {
   const source = TEST_BOOK.filter((scene) => scene.source === 'scene').flatMap(
     (scene) => scene.paragraphs
   )
@@ -568,7 +582,7 @@ function worstReaderV2Case(v3 = false): EvalCase {
     (_, i) =>
       `c${i + 1} r${i + 1} knows s${(i % 4) + 1} overheard from r${i + 2} ¶${i % 20}, re-checking`
   )
-  const build = v3 ? buildReaderV3Prompt : buildReaderV2Prompt
+  const build = v4 ? buildReaderV4Prompt : v3 ? buildReaderV3Prompt : buildReaderV2Prompt
   const built = build({
     roster,
     topics,
@@ -580,12 +594,18 @@ function worstReaderV2Case(v3 = false): EvalCase {
     anchored,
     paragraphs,
     cardDue: true,
-    maxTokens: v3
-      ? readerV3OutputCap({ proseTokens: tokens, cardDue: true })
-      : outputCap({ purpose: 'full', proseTokens: tokens, cardDue: true })
+    maxTokens: v4
+      ? readerV4OutputCap({ proseTokens: tokens, cardDue: true })
+      : v3
+        ? readerV3OutputCap({ proseTokens: tokens, cardDue: true })
+        : outputCap({ purpose: 'full', proseTokens: tokens, cardDue: true })
   })
   return {
-    version: v3 ? READER_V3_PROMPT_VERSION : READER_V2_PROMPT_VERSION,
+    version: v4
+      ? READER_V4_PROMPT_VERSION
+      : v3
+        ? READER_V3_PROMPT_VERSION
+        : READER_V2_PROMPT_VERSION,
     name: 'maxed',
     note: `the worst input: a ${pageTokens}-token page, the record roster at its ${READER_V2_RECORD_ROSTER_TOKENS} and the topics at ${READER_V2_TOPICS_TOKENS}, near ${READER_V2_NEAR_TOKENS}, topic lines ${READER_V2_TOPIC_LINES_TOKENS}, anchored ${READER_V2_ANCHORED_TOKENS}, the card due`,
     messages: built.messages,
@@ -991,4 +1011,79 @@ export const MEMORY_V3_EVAL_CASES: readonly EvalCase[] = [
     true,
     true
   )
+]
+
+/**
+ * `reader.v4`'s cases (the second live run of 2026-10-14, 19:20): the scenes of its wrong facts and
+ * invented slots (h02's "my father", h03's death place, h06's dream absence, h07's road, s03's one
+ * claim in two slots and its speech, s04's attentions), the knows scene v3 was measured on, a
+ * window and the worst input at its 400-token page with the larger cap.
+ */
+export const MEMORY_V4_EVAL_CASES: readonly EvalCase[] = [
+  readerV2Case(
+    'h02 father',
+    'h02: Mr. Dunmore’s “my father was a clergyman” (kinship, never his occupation), the Captain’s scar and slate eyes, the not-blue trap',
+    'h02',
+    [],
+    { v4: true }
+  ),
+  readerV2Case(
+    'h03 temper',
+    'h03: Hobb dies in his chair (alive, never a location), the shared surname, a reproach in speech that is no one’s accent',
+    'h03',
+    [],
+    { v4: true }
+  ),
+  readerV2Case(
+    'h06 dream',
+    'h06: the dream (Johanna dead in it, Lottie not there: no absence stored), the service read in the dream',
+    'h06',
+    [],
+    { v4: true }
+  ),
+  readerV2Case(
+    'h07 walk',
+    'h07: the road described beside Johanna (no location), the sisters walk, wanting thread, the hypothetical return',
+    'h07',
+    [],
+    { v4: true }
+  ),
+  readerV2Case(
+    's03 ball',
+    's03 ¶5 (a window of one page): the ball, dense with traits (Mrs. Harrow violent against him in one slot, no voice or dialogue slot)',
+    's03',
+    [],
+    { window: [5], v4: true }
+  ),
+  readerV2Case(
+    's04 attentions',
+    's04 ¶4 (a window of one page): Mr. Ashby’s attentions (no object), Liesel’s dark eyes',
+    's04',
+    [],
+    { window: [4], v4: true }
+  ),
+  readerV2Case(
+    'h05 overheard',
+    'h05: Lottie tells Bel, and Lise overhears every word behind the door; the secret and the match are listed',
+    'h05',
+    ['secret-engagement', 'thread-lottie-match'],
+    { v4: true }
+  ),
+  readerV2Case(
+    'window',
+    'a window read (h05 ¶4–6): the topic lines of the engagement, and the knows line anchored there',
+    'h05',
+    ['secret-engagement', 'thread-lottie-match'],
+    {
+      window: [4, 5, 6],
+      near: [`${shortV2('lottie')} age “not yet sixteen”`],
+      topicLines: [
+        `s1 Lottie's engagement to Mr. Dunmore: ${shortV2('clara')} told 9.1 (from ${shortV2('bel')}); ${shortV2('bel')} tells 9.1`
+      ],
+      anchored: [`c1 ${shortV2('liesel')} knows s1 overheard from ${shortV2('lottie')} ¶5`],
+      card: `Lise overhears Lottie tell Bel of the engagement. · where Wexley · POV ${shortV2('liesel')}`,
+      v4: true
+    }
+  ),
+  worstReaderV2Case(true, true)
 ]

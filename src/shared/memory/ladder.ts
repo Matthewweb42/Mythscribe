@@ -1,4 +1,4 @@
-import { straightenQuotes } from '../critique'
+import { normalizeForMatch, straightenQuotes } from '../critique'
 import type { ClaimVoice } from './claims'
 import type { LiteralName } from './literal'
 import { nameSpans } from './nameQuestions'
@@ -71,6 +71,21 @@ export type LadderReject =
   | 'kind'
   /** A state fact read as now from a want, wish, hope or plan (`wishWord`; "Johanna wanted thread"). */
   | 'wish'
+  /*
+   * The gates of the second live run of 2026-10-14 (each before the checker):
+   */
+  /** A value that states an absence or a negation ("not there"; `absentValue`). */
+  | 'absence'
+  /** A value not of its slot's kind: an age that is no age, a feeling as an object (`valueOfKind`). */
+  | 'valueKind'
+  /** A location not stated as where the subject is or goes (`locationStated`; "the road"). */
+  | 'where'
+  /** A state of the subject's at their death, which is history, not now (`diesInQuote`). */
+  | 'past'
+  /** The quote states it of another person reached through the subject ("my father"; `possessedOnly`). */
+  | 'possessed'
+  /** The same fact again in another slot or quote of this reading: one claim, one slot. */
+  | 'duplicate'
 
 /** One sentence of the scene as the ladder reads it. */
 export interface LadderSentence {
@@ -483,4 +498,377 @@ const WISH_FREE_SLOTS = new Set(['traits', 'history', 'relation', 'knows', 'thre
 export function wishWord(slot: string, mode: string, quote: string): string | null {
   if (mode !== 'now' || WISH_FREE_SLOTS.has(slot)) return null
   return WISH.exec(straightenQuotes(quote))?.[0] ?? null
+}
+
+/*
+ * The gates of the second live run of 2026-10-14 (`test-results/eval-memory/planted-2026-10-14.md`,
+ * 19:20): facts the checker passed that the quote does not make true of their subject now. Each
+ * runs before the checker, so a gullible verdict cannot let one in.
+ */
+
+/** Slots whose value may well hold a "not" (a trait, a past act, a relation, a death, an age). */
+const NEGATION_FREE_SLOTS = new Set([
+  'traits',
+  'history',
+  'relation',
+  'alive',
+  'kinship',
+  'age',
+  'knows',
+  'thread'
+])
+const NEGATION =
+  /(?<![\p{L}\p{N}'’])(?:not|never|no|nowhere|nobody|none|nothing|absent|missing|without)(?![\p{L}\p{N}])|n['’]t(?![\p{L}\p{N}])/iu
+
+/**
+ * The negation in a fact's value that makes it an absence ("not there", "nowhere", "no hat"), or
+ * null: the text states no value by saying what is not (design §2.3: a negation states nothing;
+ * an absence is never stored as a value). Not for traits, history, relations, alive, kinship or
+ * an age ("not yet sixteen" is an age).
+ */
+export function absentValue(slot: string, value: string): string | null {
+  if (NEGATION_FREE_SLOTS.has(slot)) return null
+  return NEGATION.exec(straightenQuotes(value))?.[0] ?? null
+}
+
+/** The words an age may be written in beside its count ("about forty", "not yet sixteen"). */
+const AGE_WORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'of',
+  'his',
+  'her',
+  'their',
+  'years',
+  'year',
+  'yrs',
+  'old',
+  'aged',
+  'age',
+  'months',
+  'month',
+  'weeks',
+  'week',
+  'days',
+  'day',
+  'about',
+  'nearly',
+  'almost',
+  'past',
+  'over',
+  'under',
+  'some',
+  'just',
+  'barely',
+  'not',
+  'yet',
+  'quite',
+  'full',
+  'turned',
+  'turning',
+  'odd',
+  'young',
+  'younger',
+  'youngest',
+  'older',
+  'oldest',
+  'elderly',
+  'middle',
+  'grown',
+  'adult',
+  'teens',
+  'twenties',
+  'thirties',
+  'forties',
+  'fifties',
+  'sixties',
+  'seventies',
+  'eighties',
+  'nineties'
+])
+
+/** Feelings, acts and attention: no thing a person holds or carries (`objects`). */
+const ABSTRACT_NOUNS = new Set([
+  'attention',
+  'attentions',
+  'affection',
+  'affections',
+  'admiration',
+  'regard',
+  'esteem',
+  'respect',
+  'love',
+  'hope',
+  'hopes',
+  'fear',
+  'fears',
+  'interest',
+  'notice',
+  'care',
+  'cares',
+  'thought',
+  'thoughts',
+  'idea',
+  'ideas',
+  'opinion',
+  'opinions',
+  'advice',
+  'news',
+  'time',
+  'favour',
+  'favours',
+  'favor',
+  'favors',
+  'kindness',
+  'civility',
+  'civilities',
+  'compliment',
+  'compliments',
+  'manners',
+  'intention',
+  'intentions',
+  'feeling',
+  'feelings',
+  'spirits',
+  'temper',
+  'approval',
+  'consent',
+  'permission',
+  'promise',
+  'promises',
+  'knowledge',
+  'memory',
+  'memories',
+  'praise',
+  'pity',
+  'sympathy',
+  'gratitude',
+  'suspicion',
+  'suspicions'
+])
+
+const tokensOf = (text: string): string[] =>
+  straightenQuotes(text)
+    .toLowerCase()
+    .match(/[\p{L}\p{N}]+/gu) ?? []
+
+/**
+ * Whether a fact's value is of its slot's kind: an age is a count of years (or months) in digits
+ * or words, with only the words an age is said in ("seven-and-twenty", "about forty", "not yet
+ * sixteen"), never "four grown-up daughters"; an object is no feeling, act or attention
+ * ("attentions", "his regard"). Every other slot: true.
+ */
+export function valueOfKind(slot: string, value: string): boolean {
+  const words = tokensOf(value)
+  if (slot === 'age') {
+    return (
+      words.some((word) => ageYears(word) !== null) &&
+      words.every((word) => AGE_WORDS.has(word) || ageYears(word) !== null)
+    )
+  }
+  if (slot === 'objects') {
+    const head = words.find((word) => !VALUE_STOPWORDS.has(word))
+    return head === undefined || !ABSTRACT_NOUNS.has(head)
+  }
+  return true
+}
+
+/** Words that put someone at, in, into or towards a place ("called at Wexley", "came up the stairs"). */
+const PLACE_CUES = new Set([
+  'at',
+  'in',
+  'on',
+  'to',
+  'into',
+  'onto',
+  'upon',
+  'by',
+  'near',
+  'from',
+  'towards',
+  'toward',
+  'inside',
+  'outside',
+  'beside',
+  'behind',
+  'before',
+  'across',
+  'along',
+  'over',
+  'under',
+  'through',
+  'up',
+  'down',
+  'within',
+  'beyond',
+  'past',
+  'around',
+  'round',
+  'among',
+  'amongst',
+  'between',
+  'off',
+  'reached',
+  'entered',
+  'visited',
+  'left',
+  'crossed',
+  'climbed',
+  'passed',
+  'reach',
+  'enter',
+  'visit'
+])
+/** A place said in one word, with no preposition ("she was abroad", "he stayed home"). */
+const PLACE_ADVERBS = new Set([
+  'abroad',
+  'home',
+  'upstairs',
+  'downstairs',
+  'overseas',
+  'ashore',
+  'aboard',
+  'indoors',
+  'outdoors',
+  'away',
+  'inside',
+  'outside'
+])
+
+/** Where one sentence of a quote ends: a stop (not after a title, "Mr."), or a semicolon. */
+const SENTENCE_BREAK = /(?<!(?:^|[^\p{L}])(?:Mr|Mrs|Ms|Dr|St|Capt|Col|Rev|Lt|Sgt))[.!?]+(?=\s|$)|;/u
+
+/**
+ * Whether a location's value is stated as where its subject is or goes (second live run: "the
+ * road" from "The road was hard with frost, and the hedges were full of fieldfares. Johanna walked
+ * quickly…"): the value's words stand in one sentence of the quote that also names or points at
+ * the subject (`quotePointsAtSubject`), after a word that puts someone somewhere ("at", "to",
+ * "up", "reached"…: the value's own first word or one of the three before it), or the value is a
+ * place in one word ("abroad", "home"). A place merely described beside them is no location of
+ * theirs; "here" and "there" alone name none.
+ */
+export function locationStated(input: {
+  value: string
+  quote: string
+  names: readonly string[]
+  firstPerson: boolean
+}): boolean {
+  const own = wordsOf(input.value).filter((word) => !VALUE_STOPWORDS.has(word))
+  if (own.length === 0 || own.every((word) => word === 'here' || word === 'there')) return false
+  const valueTokens = tokensOf(input.value)
+  const first = own[0] ?? ''
+  return straightenQuotes(input.quote)
+    .split(SENTENCE_BREAK)
+    .some((segment) => {
+      const tokens = tokensOf(segment)
+      if (!own.every((word) => tokens.some((token) => sameWord(word, token)))) return false
+      const pointed = quotePointsAtSubject({
+        slot: 'location',
+        quote: segment,
+        names: input.names,
+        firstPerson: input.firstPerson
+      })
+      if (!pointed) return false
+      if (valueTokens.length === 1 && PLACE_ADVERBS.has(valueTokens[0] ?? '')) return true
+      if (PLACE_CUES.has(valueTokens[0] ?? '')) return true
+      const at = tokens.findIndex((token) => sameWord(first, token))
+      return tokens.slice(Math.max(0, at - 3), at).some((token) => PLACE_CUES.has(token))
+    })
+}
+
+/** Slots that say how someone is now: at their death they are history ("died in his chair"). */
+const STATE_SLOTS = new Set(['location', 'clothing', 'objects', 'injuries'])
+const DEATH_WORDS =
+  '(?:died|dies|perished|drowned|lay\\s+dead|(?:was|were)\\s+(?:killed|buried|drowned|found\\s+dead)|passed\\s+away)'
+
+const escapeName = (name: string): string =>
+  straightenQuotes(name)
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s+/g, '\\s+')
+
+/**
+ * Whether a state fact's sentences tell its subject's death (second live run: Hobb's "in his
+ * chair by the lodge fire" from "He died in the night, in his chair by the lodge fire"): the
+ * subject's name, a he or she, or their I, then within three words died, drowned, was killed,
+ * passed away. Where someone died, and what they wore or held then, is their history, never where
+ * or how they are now. Only for location, clothing, objects and injuries; another's death in the
+ * sentence ("for her father had died") does not count.
+ */
+export function diesInQuote(input: {
+  slot: string
+  sentences: readonly string[]
+  names: readonly string[]
+  firstPerson: boolean
+}): boolean {
+  if (!STATE_SLOTS.has(input.slot)) return false
+  const pointers = [
+    'he',
+    'she',
+    ...(input.firstPerson ? ['I'] : []),
+    ...input.names.map(escapeName).filter((name) => name !== '')
+  ]
+  const death = new RegExp(
+    `(?<![\\p{L}\\p{N}])(?:${pointers.join('|')})\\s+(?:[\\p{L}'’-]+\\s+){0,3}?${DEATH_WORDS}(?![\\p{L}\\p{N}])`,
+    'iu'
+  )
+  return input.sentences.some((sentence) => death.test(straightenQuotes(sentence)))
+}
+
+/**
+ * Whether two quotes are one, or one stands inside the other, case and spacing aside (one claim,
+ * one slot: the second live run proposed "violent against him" as both a relation and a trait).
+ */
+export function sameQuote(a: string, b: string): boolean {
+  const x = normalizeForMatch(a).toLowerCase()
+  const y = normalizeForMatch(b).toLowerCase()
+  return x !== '' && y !== '' && (x.includes(y) || y.includes(x))
+}
+
+/** A person reached through someone: "my father", "her late husband's", "Mr. Harrow's daughters". */
+const POSSESSED_PERSON = `(?:[\\p{L}'’-]+\\s+){0,2}?(?:${PERSON_NOUNS.join('|')})(?:s|es)?(?:['’]s|['’])?(?![\\p{L}\\p{N}])`
+const POSSESSIVE_PHRASE = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:my|his|her|their|our|your)\\s+${POSSESSED_PERSON}`,
+  'giu'
+)
+
+/** Slots in which a fact about a relative is the subject's own ("My father was a clergyman"). */
+const POSSESSED_FREE_SLOTS = new Set(['kinship', 'relation', 'history', 'knows', 'thread'])
+
+/**
+ * Whether a fact's quote points at its subject only through another person reached by them
+ * (second live run: Mr. Dunmore's occupation from "My father was a clergyman in Elsdale"): with
+ * every "my father", "his wife", "Mr. Harrow's daughters" taken out, no name of the subject, no I
+ * of theirs and no he or she is left in the quote, so it states the relative's fact, not theirs (a
+ * description left, "a clergyman", is the relative's value, not a pointer at the subject). Not for
+ * kinship, relation or history, where a relative's fact is the subject's own ("son of a
+ * clergyman", "the Captain's father was a merchant"). The pipeline does not ask it for a subject
+ * that is the relative itself ("his wife" as the wife, the ladder's `unnamed`).
+ */
+export function possessedOnly(input: {
+  slot: string
+  quote: string
+  names: readonly string[]
+  firstPerson: boolean
+}): boolean {
+  if (POSSESSED_FREE_SLOTS.has(input.slot)) return false
+  const straight = straightenQuotes(input.quote)
+  let stripped = straight.replace(POSSESSIVE_PHRASE, ' ')
+  for (const name of input.names.map(escapeName)) {
+    if (name === '') continue
+    stripped = stripped.replace(
+      new RegExp(`(?<![\\p{L}\\p{N}])${name}['’]s\\s+${POSSESSED_PERSON}`, 'giu'),
+      ' '
+    )
+  }
+  if (stripped === straight) return false
+  const left =
+    input.names.some((name) => nameIn(stripped, name)) ||
+    (input.firstPerson && pronounPerson(stripped) === 'first') ||
+    SINGULAR_THIRD.test(stripped) ||
+    (PART_SLOTS.has(input.slot) && PLURAL_OR_IT.test(stripped))
+  return !left
 }

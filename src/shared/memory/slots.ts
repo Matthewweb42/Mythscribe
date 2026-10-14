@@ -120,21 +120,48 @@ export function parseSlot(text: string): Slot | null {
 }
 
 /**
- * The slot a reader's answer names, read a little leniently (live planted-error run 2026-10-14:
- * the model wrote a detail label bare, "occupation", or a base slot behind the prefix,
- * "detail:location"): the exact slot, else the one detail label written bare, else the one base
- * slot written as a detail; null for anything else ("emotion", "dialogue" stay refused). Nothing
- * is guessed: each spelling names exactly one slot of the closed list.
+ * The other number of a slot word, where it is the same slot spelled singular or plural (second
+ * live planted-error run, 2026-10-14: "trait", "roles", "detail:scar"): only these exact pairs,
+ * each naming one slot of the closed list. Never a word of another meaning ("voice", "speech",
+ * "memory", "secret", "event" stay refused).
+ */
+const OTHER_NUMBER: Readonly<Record<string, string>> = {
+  eye: 'eyes',
+  trait: 'traits',
+  scar: 'scars',
+  injury: 'injuries',
+  object: 'objects',
+  roles: 'role',
+  ages: 'age',
+  locations: 'location',
+  relations: 'relation',
+  histories: 'history',
+  ...Object.fromEntries(DETAIL_LABEL_NAMES.map((label) => [`${label}s`, label]))
+}
+
+/** A slot word as written, or its other number when that is the closed list's spelling. */
+const numbered = (word: string): string => {
+  const lower = word.toLowerCase()
+  return OTHER_NUMBER[lower] ?? lower
+}
+
+/**
+ * The slot a reader's answer names, read a little leniently (live planted-error runs of
+ * 2026-10-14: the model wrote a detail label bare, "occupation", a base slot behind the prefix,
+ * "detail:location", or a slot in its other number, "trait", "roles", "detail:scar"): the exact
+ * slot, else the one detail label written bare, else the one base slot written as a detail, each
+ * also in its other number (`OTHER_NUMBER`) and any case; null for anything else ("emotion",
+ * "dialogue", "voice" stay refused). Nothing is guessed: each spelling names exactly one slot of
+ * the closed list, with the same meaning.
  */
 export function readSlot(text: string): Slot | null {
   const trimmed = text.trim()
   const exact = parseSlot(trimmed)
   if (exact !== null) return exact
-  if (isDetailLabel(trimmed)) return `detail:${trimmed}`
-  if (trimmed.startsWith(DETAIL_PREFIX)) {
-    const base = trimmed.slice(DETAIL_PREFIX.length)
-    if ((BASE_SLOTS as readonly string[]).includes(base)) return base as BaseSlot
-  }
+  const prefixed = trimmed.toLowerCase().startsWith(DETAIL_PREFIX)
+  const word = numbered(prefixed ? trimmed.slice(DETAIL_PREFIX.length).trim() : trimmed)
+  if ((BASE_SLOTS as readonly string[]).includes(word)) return word as BaseSlot
+  if (isDetailLabel(word)) return `detail:${word}`
   return null
 }
 

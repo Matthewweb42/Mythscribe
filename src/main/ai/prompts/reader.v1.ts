@@ -1,4 +1,4 @@
-import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
+import { estimateTokens, inputBudget } from '@shared/ai'
 import {
   CARD_GIST_MAX_WORDS,
   CARD_GIST_MIN_WORDS,
@@ -6,6 +6,7 @@ import {
 } from '@shared/memory/claims'
 import { QUOTE_MAX_WORDS, QUOTE_MIN_WORDS } from '@shared/memory/quote'
 import { DETAIL_LABEL_NAMES } from '@shared/memory/slots'
+import { FULL_OUTPUT_CAP } from '@shared/memory/windows'
 import type { AiMessage } from '../providers/types'
 
 /**
@@ -184,7 +185,8 @@ export function buildReaderPrompt(input: BuildReaderPromptInput): BuiltReaderPro
       { role: 'system', content: system },
       { role: 'user', content: userTurn(input, near, anchored) }
     ],
-    maxTokens: Math.min(input.maxTokens, outputBudget('reader')),
+    // v1's ceiling as shipped (720); `reader.v4` raised the feature's budget.
+    maxTokens: Math.min(input.maxTokens, FULL_OUTPUT_CAP),
     trimmed: {
       near: input.near.length - near.length,
       anchored: input.anchored.length - anchored.length

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
+import { estimateTokens, inputBudget } from '@shared/ai'
 import {
   TOPIC_ROSTER_MAX_TOKENS,
   TOPIC_ROSTER_TOKENS,
   topicLinesTokens
 } from '@shared/memory/topics'
-import { PAGE_TOKENS, outputCap } from '@shared/memory/windows'
+import { FULL_OUTPUT_CAP, PAGE_TOKENS, outputCap } from '@shared/memory/windows'
 import { READER_ROSTER_HEADING, READER_RULES } from './reader.v1'
 import {
   READER_ANCHORED_HEADING,
@@ -209,7 +209,7 @@ describe('reader.v2 prompt (F-16.22, F-16.23)', () => {
     expect(inputBudget('reader')).toBe(6_000)
     expect(worst.trimmed.near).toBeGreaterThan(0)
     expect(worst.trimmed.rosterOver).toBe(0)
-    expect(worst.maxTokens).toBe(outputBudget('reader'))
+    expect(worst.maxTokens).toBe(FULL_OUTPUT_CAP)
     // The window and both rosters are never trimmed.
     const all = text(worst.messages)
     for (const line of [...roster, ...topics]) expect(all).toContain(line)

@@ -67,6 +67,36 @@ describe('reading a slot leniently, and the slots a place holds (live run 2026-1
     }
   })
 
+  it('reads a slot in its other number, and never one whose meaning differs (second live run)', () => {
+    expect(readSlot('trait')).toBe('traits')
+    expect(readSlot('roles')).toBe('role')
+    expect(readSlot('detail:scar')).toBe('scars')
+    expect(readSlot('detail:trait')).toBe('traits')
+    expect(readSlot('Injury')).toBe('injuries')
+    expect(readSlot('eye')).toBe('eyes')
+    expect(readSlot('object')).toBe('objects')
+    expect(readSlot('occupations')).toBe('detail:occupation')
+    expect(readSlot('detail:titles')).toBe('detail:title')
+    for (const other of [
+      'voice',
+      'dialogue',
+      'memory',
+      'secret',
+      'trait-like',
+      'detail:action',
+      'detail:belief',
+      'detail:breathing',
+      'detail:event',
+      'detail:return',
+      'detail:speech',
+      'detail:voice',
+      'event',
+      'speech'
+    ]) {
+      expect(readSlot(other), other).toBeNull()
+    }
+  })
+
   it('gives a place no person’s slot, and a secret or thread no fact', () => {
     expect(slotFitsKind('detail:home', 'place')).toBe(false)
     expect(slotFitsKind('eyes', 'place')).toBe(false)

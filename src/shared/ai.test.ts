@@ -171,7 +171,7 @@ describe('budgets', () => {
       organise: 6_000,
       todo: 1_200,
       sheetSync: 1_200,
-      reader: 720,
+      reader: 1_000,
       verify: 400,
       cite: 200,
       navigator: 150,

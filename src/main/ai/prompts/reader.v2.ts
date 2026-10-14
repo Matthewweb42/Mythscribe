@@ -13,7 +13,7 @@ import {
   TOPIC_ROSTER_TOKENS,
   topicLinesTokens
 } from '@shared/memory/topics'
-import { PAGE_TOKENS } from '@shared/memory/windows'
+import { FULL_OUTPUT_CAP, PAGE_TOKENS } from '@shared/memory/windows'
 import type { AiMessage } from '../providers/types'
 import {
   READER_ROSTER_HEADING,
@@ -213,7 +213,10 @@ function userTurn(
 }
 
 export function buildReaderV2Prompt(input: BuildReaderV2PromptInput): BuiltReaderV2Prompt {
-  return { version: READER_V2_PROMPT_VERSION, ...buildReaderMessages(READER_V2_RULES, input) }
+  return {
+    version: READER_V2_PROMPT_VERSION,
+    ...buildReaderMessages(READER_V2_RULES, input, FULL_OUTPUT_CAP)
+  }
 }
 
 /**
@@ -223,7 +226,9 @@ export function buildReaderV2Prompt(input: BuildReaderV2PromptInput): BuiltReade
  */
 export function buildReaderMessages(
   rules: string,
-  input: BuildReaderV2PromptInput
+  input: BuildReaderV2PromptInput,
+  /** The version's own ceiling: v2 and v3 keep the 720 they shipped with (`reader.v4` raised the budget). */
+  ceiling: number = outputBudget('reader')
 ): Omit<BuiltReaderV2Prompt, 'version'> {
   const system = readerSystem(rules, input.roster, input.topics)
   // P2b-D10: the topics roster never drops a topic; what it runs past its 400 the near lines give.
@@ -243,7 +248,7 @@ export function buildReaderMessages(
       { role: 'system', content: system },
       { role: 'user', content: userTurn(input, near, topicLines, anchored) }
     ],
-    maxTokens: Math.min(input.maxTokens, outputBudget('reader')),
+    maxTokens: Math.min(input.maxTokens, ceiling, outputBudget('reader')),
     trimmed: {
       near: input.near.length - near.length,
       topics: input.topicLines.length - topicLines.length,

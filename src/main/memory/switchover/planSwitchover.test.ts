@@ -179,14 +179,14 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
     expect(plan.rebuild.priced).toBe(true)
     expect(plan.rebuild.costUsd).toBeGreaterThan(0)
     // F-16.17, F-16.22: the reader and verify rows shipped (v2 since P2b, v3 since the live run
-    // of 2026-10-14); the rebuild prices from the v3 sizes.
+    // of 2026-10-14, v4 since its second run); the rebuild prices from the v4 sizes.
     const shipped = (id: string) => READING_V3_ROWS.find((note) => note.id === id)
     expect(PLANNED_COST_NOTES.some((note) => note.id.startsWith('reader.'))).toBe(false)
     expect(SHIPPED_PLAN_ROWS.some((note) => note.id === 'reader.v2:first')).toBe(true)
-    const reader = shipped('reader.v3:first')
+    const reader = shipped('reader.v4:first')
     const verify = shipped('verify.v3')
     if (reader === undefined || verify === undefined) throw new Error('shipped rows are missing')
-    expect(plannedRow('reader.v3:first')).toBe(reader)
+    expect(plannedRow('reader.v4:first')).toBe(reader)
     expect(REBUILD_PAGE_TOKENS).toBe(400)
     expect(() => plannedRow('nothing.v1')).toThrow('No planned cost row nothing.v1')
     const one = estimateRebuild([REBUILD_PAGE_TOKENS], { ...CONTEXT, source: 'local' })

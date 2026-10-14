@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  absentValue,
+  diesInQuote,
   groupHeadIn,
+  locationStated,
+  possessedOnly,
+  sameQuote,
+  valueOfKind,
   nameInSentence,
   pointsAtOne,
   pronounPerson,
@@ -336,5 +342,116 @@ describe('the code gates of the live run of 2026-10-14', () => {
     expect(wishWord('traits', 'now', 'she always wished to travel')).toBeNull()
     // "long" is no longing.
     expect(wishWord('hair', 'now', "Lottie's hair was long that morning")).toBeNull()
+  })
+})
+
+describe('the code gates of the second live run of 2026-10-14', () => {
+  it('refuses an absence as a value, but not in a trait, a history, an age or alive', () => {
+    expect(absentValue('location', 'not there')).toBe('not')
+    expect(absentValue('location', 'nowhere')).toBe('nowhere')
+    expect(absentValue('clothing', 'no hat')).toBe('no')
+    expect(absentValue('objects', "wasn't carrying it")).not.toBeNull()
+    expect(absentValue('location', 'in the morning room')).toBeNull()
+    expect(absentValue('location', 'Nottingham')).toBeNull()
+    expect(absentValue('traits', 'not to be comforted')).toBeNull()
+    expect(absentValue('history', 'had never told a soul')).toBeNull()
+    expect(absentValue('age', 'not yet sixteen')).toBeNull()
+    expect(absentValue('alive', 'not alive')).toBeNull()
+  })
+
+  it('keeps an age that is an age and an object that is a thing', () => {
+    for (const age of [
+      'seven-and-twenty',
+      'two-and-twenty',
+      'eighteen',
+      '22',
+      'about forty',
+      'not yet sixteen',
+      'six months old',
+      'nineteen years of age'
+    ]) {
+      expect(valueOfKind('age', age), age).toBe(true)
+    }
+    for (const notAge of ['four grown-up daughters', 'young', 'grown-up', 'her daughters']) {
+      expect(valueOfKind('age', notAge), notAge).toBe(false)
+    }
+    expect(valueOfKind('objects', 'attentions')).toBe(false)
+    expect(valueOfKind('objects', 'his regard')).toBe(false)
+    expect(valueOfKind('objects', 'his hat in his hand')).toBe(true)
+    expect(valueOfKind('objects', 'the mending')).toBe(true)
+    expect(valueOfKind('traits', 'four grown-up daughters')).toBe(true)
+  })
+
+  it('takes a location only as where the quote puts its subject', () => {
+    const at = (value: string, quote: string, names: string[], firstPerson = false): boolean =>
+      locationStated({ value, quote, names, firstPerson })
+    expect(
+      at(
+        'the road',
+        'The road was hard with frost, and the hedges were full of fieldfares. Johanna walked quickly, with her hands in her muff',
+        ['Johanna']
+      )
+    ).toBe(false)
+    expect(at('Greyhallow', 'Anne Fenwick was at Greyhallow that summer', ['Anne Fenwick'])).toBe(
+      true
+    )
+    expect(at('Thornmere', 'Lise came back to Thornmere', ['Lise'])).toBe(true)
+    expect(at('Wexley', 'Clara Pell called at Wexley', ['Clara Pell'])).toBe(true)
+    expect(at('the back stairs', 'Lise came up the back stairs', ['Lise'])).toBe(true)
+    expect(at('on the bridge', 'they passed the Captain on the bridge', ['the Captain'])).toBe(true)
+    expect(at('town', 'Mr. Ashby has gone to town', ['Mr. Ashby'])).toBe(true)
+    expect(at('abroad', 'He was abroad', [])).toBe(true)
+    expect(at('the quay', 'She walked to the quay', [])).toBe(true)
+    expect(at('there', 'Lottie was there', ['Lottie'])).toBe(false)
+    // A place in the sentence, but not where she is.
+    expect(at('the hall', 'The hall was cold, and Mara shivered', ['Mara'])).toBe(false)
+    expect(at('Bath', 'I was in Bath', [], true)).toBe(true)
+  })
+
+  it('takes no state from a sentence that tells the subject’s death', () => {
+    const dies = (slot: string, sentence: string, names: string[] = []): boolean =>
+      diesInQuote({ slot, sentences: [sentence], names, firstPerson: false })
+    expect(dies('location', 'He died in the night, in his chair by the lodge fire')).toBe(true)
+    expect(
+      dies(
+        'objects',
+        'He died in the night, in his chair by the lodge fire, with his pipe still warm in his hand'
+      )
+    ).toBe(true)
+    expect(dies('location', 'Mr. Fenwick had drowned off Vellmouth', ['Mr. Fenwick'])).toBe(true)
+    expect(dies('clothing', 'She wore black, for her father had died')).toBe(false)
+    expect(dies('location', 'He sat by the lodge fire')).toBe(false)
+    expect(dies('alive', 'He died in the night')).toBe(false)
+    expect(dies('history', 'He died in the night, in his chair')).toBe(false)
+  })
+
+  it('refuses a relative’s fact reached through the subject, outside kinship, relation and history', () => {
+    const through = (slot: string, quote: string, names: string[], firstPerson = false): boolean =>
+      possessedOnly({ slot, quote, names, firstPerson })
+    expect(through('detail:occupation', 'My father was a clergyman in Elsdale', [], true)).toBe(
+      true
+    )
+    expect(through('kinship', 'My father was a clergyman in Elsdale', [], true)).toBe(false)
+    expect(
+      through('history', "The Captain's father was a merchant in Vellmouth", ['the Captain'])
+    ).toBe(false)
+    expect(through('traits', "Lottie's mother was angry", ['Lottie'])).toBe(true)
+    expect(through('eyes', 'his wife had grey eyes', [])).toBe(true)
+    // A pointer at the subject outside the relative keeps it.
+    expect(through('hair', "She remembered her mother's red hair", [])).toBe(false)
+    expect(through('traits', 'Her sister Johanna was the gentlest', ['Johanna'])).toBe(false)
+    expect(through('eyes', "Mr. Varrow's eyes were a cold, clear grey", ['Mr. Varrow'])).toBe(false)
+    expect(through('clothing', 'with her hands in her muff', [])).toBe(false)
+  })
+
+  it('reads two quotes as one when one holds the other', () => {
+    expect(
+      sameQuote(
+        'Amongst the most violent against him was Mrs. Harrow',
+        'amongst the most  violent against him'
+      )
+    ).toBe(true)
+    expect(sameQuote('Lottie was eighteen now', 'Lottie was nineteen')).toBe(false)
+    expect(sameQuote('', 'x')).toBe(false)
   })
 })
