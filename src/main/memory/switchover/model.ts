@@ -132,11 +132,6 @@ export interface PlannedDetails {
   timeText: string
   storyYear: number | null
   alsoHere: string[]
-  /**
-   * The Flashback switch: true where v1's reading-order view showed the scene as a flashback (its
-   * event before the latest event of a scene read earlier); null (follow the book) elsewhere.
-   */
-  flashback: true | null
 }
 
 export type PlannedDismissal =
@@ -470,8 +465,7 @@ export interface BuildModelOptions {
  *   AI run wrote that still stands goes to the Not canon block (in Ideas on a Plan or Idea sheet);
  *   page paragraphs a write-up made are dropped;
  * - typed details from scene meta (POV and place by name or alias; a POV no record answers to
- *   becomes a character), timeline years on the first scene of each run and on each flashback
- *   (v1's reading-order view's flashbacks set the Flashback switch), "+ also here" from the
+ *   becomes a character), timeline years on the first scene of each run, "+ also here" from the
  *   author's character and place links on scenes that do not name the record; the timeline's
  *   events as a written Research note;
  * - uploads become Research documents; dismissals that still mean something are mapped.
@@ -765,31 +759,30 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
   const index = byNorm()
   const pick = (text: string, prefer: string): PlannedRecord | null => lookup(index, text, prefer)
 
-  // Story years: the first scene of each run of consecutive scenes linked to one event, and every
-  // flashback scene (v1's reading-order view's rule): there the Flashback switch is set, so its
-  // year applies to it alone and the year before it carries on after it (F-16.23, 2026-10-14).
+  // Story years: the first scene of each run of consecutive scenes linked to one event.
   const years = new Map<string, number>()
   const timeline = getProjectTimeline(db).events
   const events = new Map(timeline.map((event) => [event.id, event]))
-  const flashbacks = new Set(
-    readingOrderRows(
-      timeline,
-      scenes.map((scene) => scene.id),
-      (id) => metaOf.get(id)?.eventId
-    ).flatMap((row) => (row.flashback ? [row.id] : []))
-  )
   let previous: string | undefined
   for (const scene of scenes) {
     const eventId = metaOf.get(scene.id)?.eventId
     const year = eventId === undefined ? null : (events.get(eventId)?.year ?? null)
-    if (
-      eventId !== undefined &&
-      year !== null &&
-      (eventId !== previous || flashbacks.has(scene.id))
-    ) {
-      years.set(scene.id, year)
-    }
+    if (eventId !== undefined && eventId !== previous && year !== null) years.set(scene.id, year)
     previous = eventId
+  }
+  // The scenes v1's reading-order view showed as set earlier than one before them (F-11.2's
+  // rule). That flag was computed from the event links, never typed, so the Flashback switch (the
+  // author's alone) is left to follow the book; a note names them, so the author can turn it on
+  // where one is a flashback (review 2026-10-14).
+  const setEarlier = readingOrderRows(
+    timeline,
+    scenes.map((scene) => scene.id),
+    (id) => metaOf.get(id)?.eventId
+  ).flatMap((row) => (row.flashback ? [sceneRef(row.id) ?? ''] : []))
+  if (setEarlier.length > 0) {
+    notes.push(
+      `v1’s Timeline showed ${setEarlier.join(', ')} as set earlier than a scene before ${setEarlier.length === 1 ? 'it' : 'them'}. The Flashback switch is left to follow the book: turn it on in a scene’s details where it is a flashback, so its story year does not carry into the scenes after it.`
+    )
   }
   // The events themselves (the author's labels, times and notes, linked or not) stay readable in
   // v2, where the Timeline section is hidden until P2b: one written Research note, a line each.
@@ -839,7 +832,7 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
   )
   const details: PlannedDetails[] = []
   let alsoHereCount = 0
-  const detailIds = new Set([...metaOf.keys(), ...years.keys(), ...flashbacks])
+  const detailIds = new Set([...metaOf.keys(), ...years.keys()])
   for (const link of links) if (manuscriptIds.has(link.nodeId)) detailIds.add(link.nodeId)
   const order = new Map(rows.map((row, at) => [row.id, at]))
   for (const nodeId of [...detailIds].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))) {
@@ -880,14 +873,12 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
     }
     const timeText = meta?.timeline.trim() ?? ''
     const storyYear = years.get(nodeId) ?? null
-    const flashback = flashbacks.has(nodeId) ? true : null
     if (
       pov === null &&
       place === null &&
       placeText === '' &&
       timeText === '' &&
       storyYear === null &&
-      flashback === null &&
       here.length === 0
     ) {
       continue
@@ -900,8 +891,7 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
       placeText,
       timeText,
       storyYear,
-      alsoHere: here.slice(0, ALSO_HERE_MAX),
-      flashback
+      alsoHere: here.slice(0, ALSO_HERE_MAX)
     })
   }
 
@@ -1086,10 +1076,9 @@ export function buildSwitchoverModel(db: TreeDb, options: BuildModelOptions = {}
     const povs = details.filter((each) => each.povKey !== null).length
     const places = details.filter((each) => each.placeKey !== null).length
     const yearsSet = details.filter((each) => each.storyYear !== null).length
-    const flashbackSet = details.filter((each) => each.flashback === true).length
     converted.push({
       name: 'Scene details',
-      detail: `${plural(details.length, 'scene')}: ${plural(povs, 'POV')} and ${plural(places, 'place')} as records, ${plural(yearsSet, 'story year')}, ${plural(alsoHereCount, '“also here”', '“also here”')}${flashbackSet === 0 ? '' : `, ${plural(flashbackSet, 'flashback')}`}.`
+      detail: `${plural(details.length, 'scene')}: ${plural(povs, 'POV')} and ${plural(places, 'place')} as records, ${plural(yearsSet, 'story year')}, ${plural(alsoHereCount, '“also here”', '“also here”')}.`
     })
   }
   for (const pov of createdPovs) {

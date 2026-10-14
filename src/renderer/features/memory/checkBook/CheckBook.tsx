@@ -197,7 +197,8 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
                 <p className="m-0 mt-1 text-xs text-fg-muted">
                   {stage.estimate.hidden} possible{' '}
                   {stage.estimate.hidden === 1 ? 'contradiction is' : 'contradictions are'} set
-                  aside because a scene looks like a flashback; the report lists them.
+                  aside because a scene is a flashback (set in its scene details, or read so by the
+                  AI); the report lists them.
                 </p>
               ) : null}
             </>

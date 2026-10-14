@@ -203,7 +203,9 @@ export function convertSwitchover(
           storyYear:
             year !== null && year >= STORY_YEAR_MIN && year <= STORY_YEAR_MAX ? year : null,
           alsoHere: details.alsoHere.flatMap((key) => idOf(key) ?? []),
-          flashback: details.flashback
+          // v1 has no typed flashback (its reading order's flag was computed): the author's
+          // switch follows the book (the plan's notes name the scenes v1 showed as set earlier).
+          flashback: null
         },
         now
       )

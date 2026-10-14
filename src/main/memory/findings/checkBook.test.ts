@@ -18,6 +18,7 @@ import { createNode, getNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
 import { nameScanShared } from '../nameIndexer'
 import { createRecord } from '../recordStore'
+import { setSceneDetails, storedSceneDetails } from '../sceneDetailStore'
 import { upsertCard } from '../reading/cardStore'
 import { cardAnchorOf, revealIn, seedClaims } from '../reading/claimFixture'
 import { fakeAi, type FakeAi } from '../reading/readingFixture'
@@ -281,6 +282,22 @@ describe('the price of Check the book (P4-D22)', () => {
 })
 
 describe('Check the book (F-16.30)', () => {
+  it('lists each scene that hides a pair, saying when the scene’s Flashback switch is the cause', async () => {
+    // Lena's hair (C2 body): scene one switched to Flashback with no card, scene two's card reads
+    // one. Both hide the pair, so both are listed, each with what makes it a flashback.
+    setSceneDetails(db, one, { ...storedSceneDetails(db, one), flashback: true }, NOW)
+    await createFindingsService(deps(judge())).checkBook(db, 'check-1')
+    expect(checkReport(db)?.hidden).toEqual([
+      expect.objectContaining({ nodeId: one, label: 'Lena: Hair', typed: true }),
+      expect.objectContaining({ nodeId: two, label: 'Lena: Hair', typed: false })
+    ])
+    // The switch on two wins over its card, and says so.
+    setSceneDetails(db, one, { ...storedSceneDetails(db, one), flashback: null }, NOW)
+    setSceneDetails(db, two, { ...storedSceneDetails(db, two), flashback: true }, NOW)
+    await createFindingsService(deps(judge())).checkBook(db, 'check-2')
+    expect(checkReport(db)?.hidden).toEqual([expect.objectContaining({ nodeId: two, typed: true })])
+  })
+
   it('judges every pair (C7 included), confirms the open ones, and reports; a repeat is free', async () => {
     const ai = judge()
     const service = createFindingsService(deps(ai))
@@ -327,8 +344,11 @@ describe('Check the book (F-16.30)', () => {
       }
     })
     expect(report?.notChecked.fixed.join(' ')).toContain('travel times')
-    // Hidden as a flashback, with the scene Not a flashback? marks.
-    expect(report?.hidden).toEqual([expect.objectContaining({ nodeId: two, label: 'Lena: Hair' })])
+    // Hidden as a flashback, with the scene Not a flashback? marks: the card's reading, not a
+    // switch the author set.
+    expect(report?.hidden).toEqual([
+      expect.objectContaining({ nodeId: two, label: 'Lena: Hair', typed: false })
+    ])
     // Secrets nobody learns: the scene readers know it since, and "checked up to" only.
     expect(report?.secretsNobodyLearns).toEqual([
       {

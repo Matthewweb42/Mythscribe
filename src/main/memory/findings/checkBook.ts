@@ -554,20 +554,20 @@ export function checkReport(db: TreeDb): CheckReport | null {
     confirmed: stored.confirmed,
     checked: stored.checked,
     notChecked: { fixed: [...CHECK_NOT_COVERED], ...stored.notChecked },
-    hidden: viewsOf(stored.keys.hidden, 'hidden').flatMap((view) => {
-      const nodeId = view.actions.notFlashback
-      if (nodeId === null) return []
-      const side = [view.a, view.b].find((each) => each.nodeId === nodeId)
-      return [
-        {
+    // One line per scene that hides a finding (both sides of a C2 body change can), each naming
+    // whether the scene's Flashback switch or the card's reading makes it one.
+    hidden: viewsOf(stored.keys.hidden, 'hidden').flatMap((view) =>
+      view.actions.notFlashback.map((nodeId) => {
+        const side = [view.a, view.b].find((each) => each.nodeId === nodeId)
+        return {
           findingId: view.id,
           nodeId,
           ref: side?.ref ?? '',
           label: `${view.name}: ${view.slotLabel}`,
           typed: ctx?.inputs.typed.get(nodeId)?.flashback === true
         }
-      ]
-    }),
+      })
+    ),
     secretsNobodyLearns: stored.secrets.flatMap((secret) => {
       const record = getRecord(db, secret.secretId)
       return record === null

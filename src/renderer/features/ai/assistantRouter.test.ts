@@ -698,7 +698,7 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
       why: 'values differ',
       costUsd: 0.0001,
       year: null,
-      actions: { right: { a: true, b: true }, updateNote: false, notFlashback: null }
+      actions: { right: { a: true, b: true }, updateNote: false, notFlashback: [] }
     }
     // One elsewhere in the book is not this scene's.
     const elsewhere: FindingView = {

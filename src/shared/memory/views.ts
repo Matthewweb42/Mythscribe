@@ -1081,7 +1081,8 @@ export const CHECK_NOT_COVERED = [
  * the open findings not yet confirmed and a quarter of the new pairs; at most: all that could be
  * due, never more than 20), priced from the cost registry on the models set up. `free` when
  * nothing would be sent (the book has not changed since the last check). Also: the candidates
- * hidden because a scene looks like a flashback, the scenes not read yet, and whether it goes
+ * hidden because a scene is a flashback (`sceneFlashback`: the author's switch, else the card's
+ * checked reading), the scenes not read yet, and whether it goes
  * through MythScribe Cloud (spent from the Balance).
  */
 export const CheckEstimate = z.object({

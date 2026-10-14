@@ -255,14 +255,10 @@ describe('convertSwitchover (F-16.15, plan P1 §6.2)', () => {
     expect(nameOf(detail(s3)?.povRecordId)).toBe('Oren Hale')
     expect(detail(s3)?.storyYear).toBe(1821)
     expect(detail(s4)?.storyYear).toBe(1820)
-    // v1's reading order shows scene 4 (back at the flood after the trial) as a flashback: its
-    // Flashback switch is set, so its 1820 stays its own (2026-10-14); the others follow the book.
-    expect([s1, s2, s3, s4].map((id) => detail(id)?.flashback ?? null)).toEqual([
-      null,
-      null,
-      null,
-      true
-    ])
+    // v1's reading order shows scene 4 (back at the flood after the trial) as set earlier, but
+    // that flag was computed, never typed: every Flashback switch follows the book (review
+    // 2026-10-14); the plan's notes name scene 4.
+    expect([s1, s2, s3, s4].map((id) => detail(id)?.flashback)).toEqual([null, null, null, null])
   })
 
   it('by default names each record in the prose, so a scene that names it lists it under no “also here”', async () => {

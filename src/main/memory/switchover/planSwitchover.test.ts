@@ -108,8 +108,7 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
     )
     expect(detailOf(plan.converted, 'Scene details')).toBe(
       // Oren only: with the default words, scene 1 names Tomas, so he is not "also here".
-      // Scene 4 returns to the flood after the trial: v1's reading order shows it as a flashback.
-      '4 scenes: 3 POVs and 2 places as records, 3 story years, 1 “also here”, 1 flashback.'
+      '4 scenes: 3 POVs and 2 places as records, 3 story years, 1 “also here”.'
     )
     expect(detailOf(plan.converted, 'Dismissals')).toBe(
       '4 dismissals that still apply, into Dismissed.'
@@ -153,6 +152,9 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
       { name: 'Bell Tower', lines: ['Atmosphere: Cold and loud'] }
     ])
     expect(plan.notes).toEqual([
+      // Scene 4 returns to the flood after the trial: v1's reading order showed it as set earlier,
+      // a computed flag, so its Flashback switch follows the book and the note names it.
+      "v1’s Timeline showed 4.1 'Scene 1' as set earlier than a scene before it. The Flashback switch is left to follow the book: turn it on in a scene’s details where it is a flashback, so its story year does not carry into the scenes after it.",
       'Ilse: a POV no sheet or tag names; a Character record is made for it.',
       'Tag nesting is dropped: #grief under #melancholy.',
       'Custom tags become custom labels, which only filter: in v1 they steered prose as themes. Change a label’s kind to Theme to keep that.',

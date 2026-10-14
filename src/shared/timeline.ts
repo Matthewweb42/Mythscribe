@@ -166,9 +166,10 @@ export interface ReadingOrderRow {
 
 /**
  * The documents in reading order, each placed on the timeline, with the rows set earlier than one
- * before them flagged (F-11.2's reading-order view; the switch-over reads the same rule to set
- * story memory v2's Flashback switch, F-16.31). `eventOf(id)` answers the event a document links
- * to, or undefined; a link to an event the timeline no longer has reads as none.
+ * before them flagged (F-11.2's reading-order view; the switch-over, F-16.31, names those scenes
+ * in its plan's notes and leaves v2's Flashback switch to the author). `eventOf(id)` answers the
+ * event a document links to, or undefined; a link to an event the timeline no longer has reads as
+ * none.
  */
 export function readingOrderRows(
   events: readonly TimelineEvent[],

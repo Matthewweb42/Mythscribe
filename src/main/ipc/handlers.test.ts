@@ -9371,7 +9371,7 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
         why: 'values differ',
         a: { kind: 'claim', value: 'grey', quote: "Mara's eyes were grey", nodeId: scene, para: 0 },
         b: { kind: 'claim', value: 'brown', para: 1 },
-        actions: { right: { a: true, b: true }, updateNote: false, notFlashback: null }
+        actions: { right: { a: true, b: true }, updateNote: false, notFlashback: [] }
       })
       expect(view.counts.open).toBe(1)
       expect(sentOf('memory:findingsChanged')).toContainEqual({ open: 1, unclear: 0, waiting: 0 })
@@ -10142,6 +10142,32 @@ describe('story memory v2 (F-16.4, F-16.5)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('carries the Flashback switch through sceneDetail:set and :get, and refuses a save that leaves it out (2026-10-14)', async () => {
+    const scene = await openV2()
+    const details = {
+      povRecordId: null,
+      place: { recordId: null, text: '' },
+      time: { text: '' },
+      storyYear: 1798,
+      alsoHere: []
+    }
+    await invoke('sceneDetail:set', { nodeId: scene, details: { ...details, flashback: true } })
+    expect(await invoke('sceneDetail:get', { nodeId: scene })).toMatchObject({
+      storyYear: 1798,
+      flashback: true
+    })
+    // An older caller's save without the switch is refused, never read as "follow the book".
+    const refused = await handlerFor('sceneDetail:set')(undefined, { nodeId: scene, details })
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) expect(refused.error.code).toBe('VALIDATION')
+    expect((await invoke('sceneDetail:get', { nodeId: scene })).flashback).toBe(true)
+    // Not a flashback is kept as false, never as unset.
+    await invoke('sceneDetail:set', { nodeId: scene, details: { ...details, flashback: false } })
+    expect((await invoke('sceneDetail:get', { nodeId: scene })).flashback).toBe(false)
+    await invoke('sceneDetail:set', { nodeId: scene, details: { ...details, flashback: null } })
+    expect((await invoke('sceneDetail:get', { nodeId: scene })).flashback).toBeNull()
   })
 
   it('keeps labels, to-dos, scene details and record pages through their channels', async () => {

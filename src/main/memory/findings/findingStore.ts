@@ -155,7 +155,8 @@ const sameKeys = (x: FindingRendered['keys'], y: FindingRendered['keys']): boole
  * (design §2.4: a verdict is keyed by the quotes, their context, their order, the modes and the
  * flashback): a side moved (a claim read again under a new id, a revival's new quote or a free
  * re-proof's new sentences, both hashed in `seen`; a note line that moved), the two sides swapped
- * order, the story year changed, or the flashback a scene's card gives came or went. A held row's
+ * order, the story year changed, or a scene's flashback (`sceneFlashback`: the author's switch,
+ * else the card's checked reading) came or went. A held row's
  * flashback is unknown (held masks it), so it is compared only between rows that are not held.
  */
 function judgedPairMoved(

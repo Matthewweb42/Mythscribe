@@ -4,7 +4,10 @@ import { emptySceneDetails, type SceneDetailsView } from '@shared/memory/sceneDe
 import type { CheckEstimate, CheckReport } from '@shared/memory/views'
 import type { Input } from '@shared/ipc/contract'
 import { resetActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
-import { resetSceneDetailStore } from '@renderer/features/editor/sceneDetailStore'
+import {
+  resetSceneDetailStore,
+  useSceneDetailStore
+} from '@renderer/features/editor/sceneDetailStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
@@ -190,8 +193,10 @@ describe('Check the book (F-16.30)', () => {
     expect(hidden).toHaveTextContent(
       'Hobb dies in 1.1 and is here in 1.3 (1.3 looks like a flashback)'
     )
-    // A flashback by the author's own switch says so.
-    expect(hidden).toHaveTextContent('Mara Vell’s age (you set 1.2 as a flashback)')
+    // A flashback by the scene's Flashback switch says so, in words true whoever set it.
+    expect(hidden).toHaveTextContent(
+      'Mara Vell’s age (1.2 is set as a flashback in its scene details)'
+    )
     // 2026-10-14: Not a flashback? sets the scene's Flashback switch (the author's setting wins),
     // keeping what else the details hold; the card is not marked.
     const [first] = within(hidden).getAllByRole('button', { name: 'Not a flashback?' })
@@ -212,6 +217,38 @@ describe('Check the book (F-16.30)', () => {
       nodeId: 'sc-3',
       details: { ...emptySceneDetails(), storyYear: 1811, flashback: null }
     })
+  })
+
+  it('Undo leaves the switch alone when it was changed in the scene details since (review 2026-10-14)', async () => {
+    report = checkReportFixture({
+      hidden: [
+        {
+          findingId: 'f-h',
+          nodeId: 'sc-3',
+          ref: '1.3',
+          label: 'Hobb dies in 1.1 and is here in 1.3',
+          typed: false
+        }
+      ]
+    })
+    useMemoryStore.getState().setCheckOpen('report')
+    render(<CheckBookDialog />)
+    const hidden = await screen.findByTestId('check-hidden')
+    fireEvent.click(within(hidden).getByRole('button', { name: 'Not a flashback?' }))
+    await waitFor(() => expect(main.sent('sceneDetail:set')).toHaveLength(1))
+    const toast = useDialogStore.getState().toasts.at(-1)
+    expect(toast?.message).toBe('1.3 is set to Not a flashback; that pair is judged next.')
+    // The author turns the switch on in 1.3's scene details while the toast is up.
+    await act(() => useSceneDetailStore.getState().setFlashback('sc-3', true))
+    expect(main.sent('sceneDetail:set')).toHaveLength(2)
+    act(() => toast?.action?.run())
+    await waitFor(() =>
+      expect(useDialogStore.getState().toasts.at(-1)?.message).toBe(
+        '1.3’s Flashback switch has changed since, so Undo left it as it is.'
+      )
+    )
+    expect(main.sent('sceneDetail:set')).toHaveLength(2)
+    expect(stored.flashback).toBe(true)
   })
 
   it('says why when the check it started ended before it began (a hold met since Check)', async () => {

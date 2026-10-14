@@ -305,7 +305,7 @@ export function findingViewFixture(id: string, over: Partial<FindingView> = {}):
     why: 'grey eyes against brown',
     costUsd: 0.0002,
     year: null,
-    actions: { right: { a: true, b: true }, updateNote: false, notFlashback: null },
+    actions: { right: { a: true, b: true }, updateNote: false, notFlashback: [] },
     ...over
   }
 }
@@ -334,7 +334,7 @@ export function noteFindingFixture(id: string, over: Partial<FindingView> = {}):
       label: 'Orrin’s Pinned page',
       open: { kind: 'record', id: 'r-orrin', para: 0 }
     },
-    actions: { right: { a: false, b: false }, updateNote: true, notFlashback: null },
+    actions: { right: { a: false, b: false }, updateNote: true, notFlashback: [] },
     ...over
   })
 }

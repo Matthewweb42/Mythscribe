@@ -99,10 +99,14 @@ export function CheckReportView({
   )
 }
 
-/** A hidden finding's line: "Hobb: alive (1.3 looks like a flashback)", or "(you set 1.3 as a flashback)". */
+/**
+ * A hidden finding's line: "Hobb: alive (1.3 looks like a flashback)" when the card's reading is
+ * the cause, "(1.3 is set as a flashback in its scene details)" when the Flashback switch is (true
+ * whoever set it).
+ */
 function hiddenLine(entry: CheckReport['hidden'][number]): string {
   const why = entry.typed
-    ? `you set ${entry.ref} as a flashback`
+    ? `${entry.ref} is set as a flashback in its scene details`
     : `${entry.ref} looks like a flashback`
   return `${entry.label} (${why})`
 }
@@ -111,8 +115,8 @@ function hiddenLine(entry: CheckReport['hidden'][number]): string {
  * The findings hidden because a scene is a flashback, each with *Not a flashback?*: the scene's
  * Flashback switch set to Not a flashback (2026-10-14; P4-D13 marked the card's flashback not
  * right), so the author's answer lives in one place, the scene details, and wins over the card;
- * *Undo* puts the switch back as it was. The finding is judged next, in the background or the next
- * check.
+ * *Undo* puts the switch back as it was while it still says Not a flashback (a later change in the
+ * scene details is left as it is). The finding is judged next, in the background or the next check.
  */
 function HiddenFlashbacks({ hidden }: { hidden: CheckReport['hidden'] }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
@@ -121,10 +125,18 @@ function HiddenFlashbacks({ hidden }: { hidden: CheckReport['hidden'] }): React.
     try {
       const details = useSceneDetailStore.getState()
       const before = await details.setFlashback(entry.nodeId, false)
+      // Undo reverses this one change only: a switch changed since in the scene details is left.
       const undo = (): void => {
         details
-          .setFlashback(entry.nodeId, before)
-          .then(() => useMemoryStore.getState().loadCheckReport())
+          .setFlashback(entry.nodeId, before, false)
+          .then((now) => {
+            if (now !== false) {
+              toast.info(
+                `${entry.ref}’s Flashback switch has changed since, so Undo left it as it is.`
+              )
+            }
+            return useMemoryStore.getState().loadCheckReport()
+          })
           .catch((err: unknown) => toast.error(describeError(err)))
       }
       toast.successWithAction(`${entry.ref} is set to Not a flashback; that pair is judged next.`, {
@@ -140,10 +152,15 @@ function HiddenFlashbacks({ hidden }: { hidden: CheckReport['hidden'] }): React.
   }
   return (
     <>
-      <h3 className={HEADING}>Hidden as flashbacks ({hidden.length})</h3>
+      <h3 className={HEADING}>
+        Hidden as flashbacks ({new Set(hidden.map((entry) => entry.findingId)).size})
+      </h3>
       <ul className="m-0 list-none space-y-1 p-0 text-xs" data-testid="check-hidden">
         {hidden.map((entry) => (
-          <li key={entry.findingId} className="flex flex-wrap items-center gap-1">
+          <li
+            key={`${entry.findingId}:${entry.nodeId}`}
+            className="flex flex-wrap items-center gap-1"
+          >
             <span className="min-w-0 flex-1 text-fg-muted">{hiddenLine(entry)}</span>
             <button
               type="button"

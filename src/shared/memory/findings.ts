@@ -230,8 +230,11 @@ export const FindingView = z.object({
     right: z.object({ a: z.boolean(), b: z.boolean() }),
     /** *Update my note* (a C6 finding whose book side is narration in `now` mode, P4-D18). */
     updateNote: z.boolean(),
-    /** *Not a flashback?*: the flashback scene that hides it (the switch it sets, 2026-10-14). */
-    notFlashback: z.string().nullable()
+    /**
+     * *Not a flashback?*: the flashback scenes that hide it (`hidingScenes`; the switch each sets,
+     * 2026-10-14), empty when it is not hidden; both sides of a C2 body change can be one.
+     */
+    notFlashback: z.array(z.string())
   })
 })
 export type FindingView = z.infer<typeof FindingView>
@@ -276,6 +279,50 @@ export function findingKey(
   notProblemKey: string
 ): string {
   return `${rule}${variant === null ? '' : `:${variant}`}|${notProblemKey}`
+}
+
+/**
+ * The sides of a pair whose scene, as a flashback (`sceneFlashback`), hides it (design §2.4): C2
+ * `dead`'s presence (B), either side of a C2 `body` change, C3's learning line (B), C4 `birth`'s
+ * stated age (A), C4 `falls`' later age (B) and C5's advance (B); C1, C6 and C7 are never hidden.
+ * The one table both the rules (`candidates.ts`) and *Not a flashback?* read (review 2026-10-14),
+ * so the switch it sets is the scene that hides the pair, never the other side's.
+ */
+export function flashbackSides(
+  rule: FindingRule,
+  variant: FindingVariant | null
+): readonly ('a' | 'b')[] {
+  switch (rule) {
+    case 'C2':
+      return variant === 'body' ? ['a', 'b'] : ['b']
+    case 'C3':
+    case 'C5':
+      return ['b']
+    case 'C4':
+      return variant === 'birth' ? ['a'] : ['b']
+    default:
+      return []
+  }
+}
+
+/**
+ * The flashback scenes that hide a pair (`flashbackSides`' scenes that `isFlashback` says are
+ * flashbacks, A's first, each once): empty when the pair is not hidden.
+ */
+export function hidingScenes(
+  rule: FindingRule,
+  variant: FindingVariant | null,
+  a: FindingSide,
+  b: FindingSide,
+  isFlashback: (nodeId: string) => boolean
+): string[] {
+  const out: string[] = []
+  for (const which of flashbackSides(rule, variant)) {
+    const side = which === 'a' ? a : b
+    if (side.kind === 'note' || out.includes(side.nodeId)) continue
+    if (isFlashback(side.nodeId)) out.push(side.nodeId)
+  }
+  return out
 }
 
 /**

@@ -144,7 +144,7 @@ describe('ContradictionCard (F-16.28)', () => {
     // Not offered (the book side is speech, a memory …): no Update my note.
     open(
       noteFindingFixture('f-7', {
-        actions: { right: { a: false, b: false }, updateNote: false, notFlashback: null }
+        actions: { right: { a: false, b: false }, updateNote: false, notFlashback: [] }
       }),
       'a'
     )

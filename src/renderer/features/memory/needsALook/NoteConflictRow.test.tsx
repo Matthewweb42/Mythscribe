@@ -153,7 +153,7 @@ describe('NoteConflictRow (F-16.29)', () => {
         <NoteConflictRow
           finding={noteFindingFixture('f-7', {
             a: findingSideFixture('1792', '1.1', 'sc-1', { voice: 'dialogue' }),
-            actions: { right: { a: false, b: false }, updateNote: false, notFlashback: null }
+            actions: { right: { a: false, b: false }, updateNote: false, notFlashback: [] }
           })}
         />
       </ul>

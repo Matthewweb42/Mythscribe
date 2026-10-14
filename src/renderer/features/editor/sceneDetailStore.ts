@@ -21,9 +21,15 @@ interface SceneDetailState {
   /**
    * Sets the scene's Flashback switch (true, false, or null to follow the book) over its details
    * as stored, reading them first when they are not loaded; answers the switch as it was (for
-   * *Undo*). *Check the book*'s *Not a flashback?* sets it to false (2026-10-14).
+   * *Undo*). With `expected`, it writes only while the switch still holds that value, so an *Undo*
+   * never overwrites a later change made in the scene details (the answer then differs from
+   * `expected`). *Check the book*'s *Not a flashback?* sets it to false (2026-10-14).
    */
-  setFlashback: (nodeId: string, flashback: boolean | null) => Promise<boolean | null>
+  setFlashback: (
+    nodeId: string,
+    flashback: boolean | null,
+    expected?: boolean | null
+  ) => Promise<boolean | null>
   /** Opens the `record:changed` subscription (idempotent); call it where a v2 project opens. */
   subscribe: () => void
   clear: () => void
@@ -73,9 +79,10 @@ export const useSceneDetailStore = create<SceneDetailState>((set, get) => ({
     }
   },
 
-  async setFlashback(nodeId, flashback) {
+  async setFlashback(nodeId, flashback, expected) {
     if (get().docs[nodeId] === undefined) await get().load(nodeId)
     const view = get().docs[nodeId] ?? (await ipc().invoke('sceneDetail:get', { nodeId }))
+    if (expected !== undefined && view.flashback !== expected) return view.flashback
     await get().save(nodeId, { ...detailsOf(view), flashback })
     return view.flashback
   },

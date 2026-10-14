@@ -157,7 +157,10 @@ export interface JudgeSide {
   /** The claim's voice and mode; null for a presence or a note. */
   voice: ClaimVoice | null
   mode: ClaimMode | null
-  /** The scene's card says (verified) it is a flashback. */
+  /**
+   * The scene is a flashback (`sceneFlashback`: the author's Flashback switch when set, else the
+   * card's checked reading). A doc comment only: the prompt text is unchanged.
+   */
   flashback: boolean
   /** The scene's story year as typed or stated there (never carried); null for none or a note. */
   year: number | null

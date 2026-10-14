@@ -490,6 +490,16 @@ describe('C3: passing on a secret before learning it', () => {
       })
     )
     expect(found.map((each) => each.hidden)).toEqual([true])
+    // Only the learning line's scene hides it (`flashbackSides`): a flashback where she tells it
+    // leaves the pair to judge (review 2026-10-14).
+    expect(
+      candidatesC3(
+        inputs({
+          claims: [line('s2', 'tells'), line('s4', 'told')],
+          facts: { s2: { flashback: true } }
+        })
+      ).map((each) => each.hidden)
+    ).toEqual([false])
   })
 
   it('is skipped when she knew before the book, or her group knew it earlier (P4-D5)', () => {
@@ -691,6 +701,15 @@ describe('C5: a thread advancing after it was resolved (P4-D7)', () => {
       })
     )
     expect(found.map((each) => each.hidden)).toEqual([true])
+    // A resolve told in a flashback hides nothing: only the advance's scene does.
+    expect(
+      candidatesC5(
+        inputs({
+          claims: [step('s3', 'resolves'), step('s6', 'advances')],
+          facts: { s3: { flashback: true } }
+        })
+      ).map((each) => each.hidden)
+    ).toEqual([false])
   })
 })
 

@@ -23,8 +23,9 @@ import { setSceneDetails } from '../sceneDetailStore'
 import { upsertCard } from '../reading/cardStore'
 import { anchoredClaim, cardAnchorOf, seedClaims } from '../reading/claimFixture'
 import { deleteClaims, reviveClaim, setClaimsState } from '../reading/claimStore'
+import { cardNotRight } from '../reading/notRight'
 import { readingOrder } from '../reading/readingFrame'
-import { candidateInputs } from './candidateInputs'
+import { candidateInputs, looseEndInputs } from './candidateInputs'
 import {
   findingRows,
   findingsOf,
@@ -32,7 +33,9 @@ import {
   upsertFindings,
   type PairReader
 } from './findingStore'
+import { findingView } from './findingViews'
 import { findingCounts, runFindingsJob } from './findingsJob'
+import { judgeContext } from './judge'
 import { recomputeFindings } from './recompute'
 import { cachedVerdict, cacheVerdict, verdictKey } from './verdictCache'
 
@@ -260,6 +263,29 @@ describe('the Flashback switch (F-16.11, F-16.23; the author’s decision 2026-1
   }
   const hair = (): string | undefined =>
     findingsOf(db, activeDraftId(db)).find((row) => row.rule === 'C2')?.state
+  /** A verified card on `nodeId` that reads the scene as a flashback. */
+  function flashbackCard(nodeId: string): void {
+    upsertCard(
+      db,
+      {
+        nodeId,
+        draftId: activeDraftId(db),
+        readingId: null,
+        line: 'A scene.',
+        gist: 'A scene.',
+        fields: {
+          ...emptyCardFields(),
+          flashback: { value: 'yes', quote: 'The rain came', p: 0, verified: true }
+        },
+        present: [],
+        mood: null,
+        theme: null,
+        anchor: cardAnchorOf(db, nodeId),
+        seen: cardAnchorOf(db, nodeId)
+      },
+      NOW
+    )
+  }
 
   beforeEach(() => {
     // Mara's hair, dark then fair in her next appearance: a C2 body pair (it needs no flashback).
@@ -296,26 +322,7 @@ describe('the Flashback switch (F-16.11, F-16.23; the author’s decision 2026-1
   })
 
   it('ignores the card’s flashback when the switch says Not a flashback, and follows it when unset', () => {
-    upsertCard(
-      db,
-      {
-        nodeId: two,
-        draftId: activeDraftId(db),
-        readingId: null,
-        line: 'A scene.',
-        gist: 'A scene.',
-        fields: {
-          ...emptyCardFields(),
-          flashback: { value: 'yes', quote: 'The rain came', p: 0, verified: true }
-        },
-        present: [],
-        mood: null,
-        theme: null,
-        anchor: cardAnchorOf(db, two),
-        seen: cardAnchorOf(db, two)
-      },
-      NOW
-    )
+    flashbackCard(two)
     recomputeFindings(db, NOW)
     expect(hair()).toBe('hidden')
     flashback(two, false)
@@ -325,6 +332,70 @@ describe('the Flashback switch (F-16.11, F-16.23; the author’s decision 2026-1
     flashback(two, null)
     recomputeFindings(db, NOW)
     expect(hair()).toBe('hidden')
+  })
+
+  it('unhides a pair when the card’s flashback is marked Not right and the switch is unset', () => {
+    // The Timeline's ⓘ and the card still offer *Not right* on the card's flashback.
+    flashbackCard(two)
+    recomputeFindings(db, NOW)
+    expect(hair()).toBe('hidden')
+    cardNotRight(db, { nodeId: two, field: 'flashback', value: 'yes' }, NOW)
+    expect(candidateInputs(db, activeDraftId(db)).scene(two).flashback).toBe(false)
+    recomputeFindings(db, NOW)
+    expect(hair()).toBe('unjudged')
+    expect(findingViolations()).toEqual([])
+  })
+
+  it('names every scene that hides the pair for Not a flashback?, by its rule’s own sides', () => {
+    const notFlashback = (): string[] | undefined => {
+      const draftId = activeDraftId(db)
+      const row = findingsOf(db, draftId).find((each) => each.rule === 'C2')
+      return row === undefined
+        ? undefined
+        : findingView(judgeContext(db, draftId), row)?.actions.notFlashback
+    }
+    flashback(two, true)
+    recomputeFindings(db, NOW)
+    expect(notFlashback()).toEqual([two])
+    // A body change with both scenes flashbacks: both are named, so one answer never leaves it
+    // hidden behind the other without saying so.
+    flashback(one, true)
+    recomputeFindings(db, NOW)
+    expect(notFlashback()).toEqual([one, two])
+    flashback(one, null)
+    flashback(two, null)
+    recomputeFindings(db, NOW)
+    expect(notFlashback()).toEqual([])
+  })
+
+  it('keeps a living value in a switched flashback from cancelling a death in loose ends', () => {
+    // Mara dies in one; "alive" in two, the last scene naming her, is earlier in story time when
+    // two is a flashback (the switch, with no card and Use AI off), so she is still dead there.
+    seedClaims(
+      db,
+      one,
+      [{ recordId: mara, slot: 'alive', value: 'dead', quote: 'Mara climbed the ridge', para: 0 }],
+      NOW
+    )
+    seedClaims(
+      db,
+      two,
+      [{ recordId: mara, slot: 'alive', value: 'alive', quote: 'The rain came', para: 0 }],
+      NOW
+    )
+    const deadInTwo = (): boolean | undefined =>
+      looseEndInputs(db, activeDraftId(db))
+        .characters.find((each) => each.recordId === mara)
+        ?.deadAt(two)
+    expect(deadInTwo()).toBe(false)
+    flashback(two, true)
+    expect(deadInTwo()).toBe(true)
+    // Set to Not a flashback, the switch wins over a card that reads one.
+    flashbackCard(two)
+    flashback(two, false)
+    expect(deadInTwo()).toBe(false)
+    flashback(two, null)
+    expect(deadInTwo()).toBe(true)
   })
 })
 

@@ -182,4 +182,19 @@ describe('sceneDetailStore (F-16.11)', () => {
     expect(sent('sceneDetail:get')).toHaveLength(1)
     expect(useSceneDetailStore.getState().docs['sc-1']?.flashback).toBeNull()
   })
+
+  it('with an expected value, writes only while the switch still holds it (Undo, review 2026-10-14)', async () => {
+    handlers['sceneDetail:get'] = () => view({ flashback: false })
+    handlers['sceneDetail:set'] = (input) => {
+      const { details } = input as Input<'sceneDetail:set'>
+      return { ...details, gone: [] }
+    }
+    // The switch says Not a flashback, as expected: the Undo lands.
+    expect(await useSceneDetailStore.getState().setFlashback('sc-1', null, false)).toBe(false)
+    expect(sent('sceneDetail:set')).toHaveLength(1)
+    // It was changed since (now following the book): nothing is sent, and the answer says so.
+    expect(await useSceneDetailStore.getState().setFlashback('sc-1', true, false)).toBeNull()
+    expect(sent('sceneDetail:set')).toHaveLength(1)
+    expect(useSceneDetailStore.getState().docs['sc-1']?.flashback).toBeNull()
+  })
 })

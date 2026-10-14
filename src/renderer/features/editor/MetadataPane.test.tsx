@@ -1053,6 +1053,67 @@ describe('MetadataPane in story memory v2 (F-16.11, F-16.7)', () => {
     expect(screen.queryByTestId('flashback-ai-read')).toBeNull()
   })
 
+  it('counts no card flashback whose quote no longer stands, as main does (review 2026-10-14)', async () => {
+    let typed: boolean | null = null
+    const { release } = install({
+      'record:list': () => [MARA, QUAY, TOMAS],
+      'label:list': () => [WRY],
+      'label:links': () => [],
+      'sceneDetail:get': () => ({
+        ...emptySceneDetails(),
+        storyYear: 1798,
+        flashback: typed,
+        gone: []
+      }),
+      // The card read a flashback, checked, but its sentence changed since: it is stale.
+      'memory:scene': (input) =>
+        sceneMemoryFixture((input as Input<'memory:scene'>).nodeId, {
+          card: {
+            line: 'Mara remembers the winter.',
+            gist: 'Mara remembers the winter.',
+            fields: {
+              where: null,
+              when: null,
+              pov: null,
+              year: null,
+              flashback: { value: 'yes', quote: 'Mara remembered', p: 0, verified: true },
+              elapsed: null
+            },
+            stale: ['flashback'],
+            mood: null,
+            theme: null,
+            readingId: 'rd',
+            created: '2026-10-14T10:00:00.000Z'
+          }
+        }),
+      'sceneDetail:set': (input) => {
+        const sent = input as Input<'sceneDetail:set'>
+        typed = sent.details.flashback
+        return { ...sent.details, gone: [] }
+      }
+    })
+    release()
+    ready()
+    await act(async () => {
+      await useRecordStore.getState().load()
+      await useLabelStore.getState().load()
+    })
+    render(<MetadataPane id="sc-1" />)
+    const flashback = await screen.findByRole('switch', { name: 'Flashback' })
+    await waitFor(() => expect(flashback).toBeEnabled())
+    // Unset: the stale reading counts for nothing, so the switch is off and says nothing.
+    expect(flashback).not.toBeChecked()
+    expect(screen.queryByText('AI read: flashback')).toBeNull()
+    expect(screen.queryByTestId('flashback-ai-read')).toBeNull()
+    // Set to Not a flashback: no disagreement is shown against a reading that does not stand.
+    fireEvent.click(flashback)
+    await waitFor(() => expect(typed).toBe(true))
+    fireEvent.click(flashback)
+    await waitFor(() => expect(typed).toBe(false))
+    await screen.findByRole('button', { name: 'Follow the book' })
+    expect(screen.queryByTestId('flashback-ai-read')).toBeNull()
+  })
+
   it('has no Flashback switch on a chapter (only a scene is read in story order)', async () => {
     installV2()
     ready()

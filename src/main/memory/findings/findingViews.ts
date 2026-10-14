@@ -1,5 +1,6 @@
 import { setsState } from '@shared/memory/claims'
 import {
+  hidingScenes,
   RULE_ORDER,
   type Finding,
   type FindingSide,
@@ -118,11 +119,18 @@ export function findingView(ctx: JudgeContext, finding: Finding): FindingView | 
   const a = resolveSide(ctx, finding.a)
   const b = resolveSide(ctx, finding.b)
   if (a === null || b === null) return null
+  // The scenes whose flashback hides it, by its rule's own sides (`flashbackSides`), so *Not a
+  // flashback?* sets the switch of the scene that hides the pair, never the other side's.
   const flashback =
     finding.state === 'hidden'
-      ? ([a, b].find((side) => side.nodeId !== null && ctx.inputs.scene(side.nodeId).flashback)
-          ?.nodeId ?? null)
-      : null
+      ? hidingScenes(
+          finding.rule,
+          finding.variant,
+          finding.a,
+          finding.b,
+          (nodeId) => ctx.inputs.scene(nodeId).flashback
+        )
+      : []
   return {
     id: finding.id,
     rule: finding.rule,

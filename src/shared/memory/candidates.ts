@@ -4,6 +4,7 @@ import type { ClaimMode, ClaimVoice } from './claims'
 import {
   claimSeen,
   findingKey,
+  hidingScenes,
   npKey,
   raisesAlone,
   RULE_ORDER,
@@ -223,6 +224,19 @@ function candidate(
   }
 }
 
+/**
+ * Whether a pair is hidden: a scene `flashbackSides` names for its rule is a flashback (the one
+ * table *Not a flashback?* reads too, `hidingScenes`).
+ */
+const hides = (
+  inputs: CandidateInputs,
+  rule: FindingRule,
+  variant: FindingVariant | null,
+  a: FindingSide,
+  b: FindingSide
+): boolean =>
+  hidingScenes(rule, variant, a, b, (nodeId) => inputs.scene(nodeId).flashback).length > 0
+
 /** A claim's place in reading order: its scene's order, then its paragraph. */
 interface Placed {
   claim: CandidateClaim
@@ -419,21 +433,14 @@ export function candidatesC2Dead(inputs: CandidateInputs): Candidate[] {
       if (living) continue
       const nodeId = nodeAt.get(order)
       if (nodeId === undefined) continue
-      const facts = inputs.scene(nodeId)
-      if (!facts.present.has(recordId)) continue
+      if (!inputs.scene(nodeId).present.has(recordId)) continue
+      const deathSide = claimSide(death.claim)
+      const presence: FindingSide = { kind: 'presence', nodeId, recordId }
       out.push(
-        candidate(
-          'C2',
-          'dead',
-          recordId,
-          'alive',
-          claimSide(death.claim),
-          { kind: 'presence', nodeId, recordId },
-          {
-            held: stale(death.claim),
-            hidden: facts.flashback
-          }
-        )
+        candidate('C2', 'dead', recordId, 'alive', deathSide, presence, {
+          held: stale(death.claim),
+          hidden: hides(inputs, 'C2', 'dead', deathSide, presence)
+        })
       )
     }
   }
@@ -487,10 +494,12 @@ export function candidatesC2Body(inputs: CandidateInputs): Candidate[] {
         (entry) => entry.claim.change && before(a, entry) && !before(b, entry)
       )
       if (changed) continue
+      const sideA = claimSide(a.claim)
+      const sideB = claimSide(b.claim)
       out.push(
-        candidate('C2', 'body', recordId, a.claim.slot, claimSide(a.claim), claimSide(b.claim), {
+        candidate('C2', 'body', recordId, a.claim.slot, sideA, sideB, {
           held: stale(a.claim, b.claim),
-          hidden: inputs.scene(a.claim.nodeId).flashback || inputs.scene(b.claim.nodeId).flashback
+          hidden: hides(inputs, 'C2', 'body', sideA, sideB)
         })
       )
     }
@@ -566,20 +575,14 @@ export function candidatesC3(inputs: CandidateInputs): Candidate[] {
         )
     )
     if (groupKnew) continue
+    const told = claimSide(first.claim)
+    const learnt = claimSide(learning.claim)
     out.push(
-      candidate(
-        'C3',
-        null,
-        first.claim.recordId,
-        `knows:${secretId}`,
-        claimSide(first.claim),
-        claimSide(learning.claim),
-        {
-          held: stale(first.claim, learning.claim),
-          // A learning line in a flashback scene is earlier in story time (a memory, design §2.4).
-          hidden: inputs.scene(learning.claim.nodeId).flashback
-        }
-      )
+      candidate('C3', null, first.claim.recordId, `knows:${secretId}`, told, learnt, {
+        held: stale(first.claim, learning.claim),
+        // A learning line in a flashback scene is earlier in story time (a memory, design §2.4).
+        hidden: hides(inputs, 'C3', null, told, learnt)
+      })
     )
   }
   return out
@@ -640,11 +643,12 @@ export function candidatesC4Birth(inputs: CandidateInputs): Candidate[] {
       if (at !== undefined) side = noteSide(at, String(birth.year), null)
     }
     if (side === null) continue
+    const ageSide = claimSide(age.claim)
     out.push(
-      candidate('C4', 'birth', age.claim.recordId, 'age', claimSide(age.claim), side, {
+      candidate('C4', 'birth', age.claim.recordId, 'age', ageSide, side, {
         extra: { year: { value: year.value, source: year.source, nodeId: age.claim.nodeId } },
         held: stale(age.claim, ...(birth.claim === null ? [] : [birth.claim])),
-        hidden: inputs.scene(age.claim.nodeId).flashback
+        hidden: hides(inputs, 'C4', 'birth', ageSide, side)
       })
     )
   }
@@ -667,19 +671,13 @@ export function candidatesC4Falls(inputs: CandidateInputs): Candidate[] {
     for (const entry of run) {
       const flashback = inputs.scene(entry.claim.nodeId).flashback
       if (last !== null && (ageYears(entry.claim.value) ?? 0) < (ageYears(last.claim.value) ?? 0)) {
+        const earlier = claimSide(last.claim)
+        const later = claimSide(entry.claim)
         out.push(
-          candidate(
-            'C4',
-            'falls',
-            entry.claim.recordId,
-            'age',
-            claimSide(last.claim),
-            claimSide(entry.claim),
-            {
-              held: stale(last.claim, entry.claim),
-              hidden: flashback
-            }
-          )
+          candidate('C4', 'falls', entry.claim.recordId, 'age', earlier, later, {
+            held: stale(last.claim, entry.claim),
+            hidden: hides(inputs, 'C4', 'falls', earlier, later)
+          })
         )
       }
       if (!flashback) last = entry
@@ -721,19 +719,13 @@ export function candidatesC5(inputs: CandidateInputs): Candidate[] {
             (entry.order === step.order && entry.claim.para <= step.claim.para))
       )
       if (reopened) continue
+      const resolved = claimSide(resolve.claim)
+      const advance = claimSide(step.claim)
       out.push(
-        candidate(
-          'C5',
-          null,
-          step.claim.recordId,
-          'thread',
-          claimSide(resolve.claim),
-          claimSide(step.claim),
-          {
-            held: stale(resolve.claim, step.claim),
-            hidden: inputs.scene(step.claim.nodeId).flashback
-          }
-        )
+        candidate('C5', null, step.claim.recordId, 'thread', resolved, advance, {
+          held: stale(resolve.claim, step.claim),
+          hidden: hides(inputs, 'C5', null, resolved, advance)
+        })
       )
     }
   }

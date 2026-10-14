@@ -5,6 +5,8 @@ import {
   FindingSide,
   findingKey,
   findingState,
+  flashbackSides,
+  hidingScenes,
   npKey,
   raisesAlone,
   RULE_ORDER,
@@ -178,5 +180,30 @@ describe('Not a problem keys for findings and loose ends (F-16.27, F-16.29)', ()
       'finding|anne|kinship:kept|s1|sister|s2|cousin'
     )
     expect(rekeyFinding('loose|thread|old|s1', 'old', 'kept')).toBeNull()
+  })
+})
+
+describe('the sides a flashback hides (review 2026-10-14)', () => {
+  it('names each rule’s own sides: C2 dead B, C2 body both, C3 B, C4 birth A, C4 falls B, C5 B', () => {
+    expect(flashbackSides('C2', 'dead')).toEqual(['b'])
+    expect(flashbackSides('C2', 'body')).toEqual(['a', 'b'])
+    expect(flashbackSides('C3', null)).toEqual(['b'])
+    expect(flashbackSides('C4', 'birth')).toEqual(['a'])
+    expect(flashbackSides('C4', 'falls')).toEqual(['b'])
+    expect(flashbackSides('C5', null)).toEqual(['b'])
+    for (const rule of ['C1', 'C6', 'C7'] as const) expect(flashbackSides(rule, null)).toEqual([])
+  })
+
+  it('answers the flashback scenes among them, each once, never a note', () => {
+    const a = claim('c1', 's2', 'tells')
+    const b = claim('c2', 's5', 'told')
+    const both = (): boolean => true
+    // A C3 pair with both scenes flashbacks is hidden by the learning line's scene alone.
+    expect(hidingScenes('C3', null, a, b, both)).toEqual(['s5'])
+    expect(hidingScenes('C3', null, a, b, (nodeId) => nodeId === 's2')).toEqual([])
+    expect(hidingScenes('C2', 'body', a, b, both)).toEqual(['s2', 's5'])
+    expect(hidingScenes('C2', 'body', a, claim('c3', 's2', 'x'), both)).toEqual(['s2'])
+    expect(hidingScenes('C4', 'birth', a, note, both)).toEqual(['s2'])
+    expect(hidingScenes('C1', null, a, b, both)).toEqual([])
   })
 })
