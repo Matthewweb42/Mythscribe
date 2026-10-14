@@ -64,12 +64,16 @@ export function contested(
     : null
 }
 
-/** The rules whose open findings contest a slot's instant card (P4-D25): C1, C6, and C4 for an age. */
+/**
+ * The rules whose open findings contest a slot's instant card (P4-D25): C1, C6, and for an age C4
+ * and C1 or C6 on the birth year it is computed from.
+ */
 const CONTESTING_RULES = ['C1', 'C6'] as const
 
 /**
- * Whether an open finding of the active draft names the record and slot (C1 or C6 on that slot; C4
- * for `age`), while the Contradiction check is on (off, findings are hidden everywhere, P4-D21).
+ * Whether an open finding of the active draft names the record and slot (C1 or C6 on that slot;
+ * for `age`, C4, or C1 or C6 on `born`, since a disputed birth year disputes the age computed from
+ * it), while the Contradiction check is on (off, findings are hidden everywhere, P4-D21).
  */
 export function openFindingOn(
   db: TreeDb,
@@ -82,7 +86,8 @@ export function openFindingOn(
     (finding) =>
       finding.recordId === recordId &&
       ((slot === 'age' && finding.rule === 'C4') ||
-        (finding.slot === slot && (CONTESTING_RULES as readonly string[]).includes(finding.rule)))
+        ((finding.slot === slot || (slot === 'age' && finding.slot === 'born')) &&
+          (CONTESTING_RULES as readonly string[]).includes(finding.rule)))
   )
 }
 

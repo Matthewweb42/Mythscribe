@@ -9,6 +9,8 @@ import {
   aiWrittenOf,
   isNotCanon,
   markedParagraphs,
+  pageTextBlocks,
+  replaceBlockText,
   withoutAiMarks
 } from './pageMarks'
 
@@ -78,5 +80,75 @@ describe('page marks in stored JSON (F-16.6, F-16.8)', () => {
     expect(withoutAiMarks(plain)).toBe(plain)
     const bare = { type: 'paragraph' }
     expect(withoutAiMarks(bare)).toBe(bare)
+  })
+})
+
+describe('replaceBlockText (Update my note, F-16.29)', () => {
+  const italic = [{ type: 'italic' }]
+  const bold = [{ type: 'bold' }]
+  const lines = {
+    type: 'paragraph',
+    content: [
+      { type: 'text', text: 'Born: ' },
+      { type: 'text', text: '1790', marks: italic },
+      { type: 'hardBreak' },
+      { type: 'text', text: 'Eyes: ', marks: bold },
+      { type: 'text', text: 'green' }
+    ]
+  }
+  const textOf = (block: Parameters<typeof replaceBlockText>[0]): string =>
+    pageTextBlocks({ type: 'doc', content: [block] })[0]?.text ?? ''
+
+  it('changes only the changed words, keeping marks and line breaks around them', () => {
+    expect(textOf(lines)).toBe('Born: 1790\nEyes: green')
+    const next = replaceBlockText(lines, 'Born: 1792\nEyes: green')
+    expect(next.content).toEqual([
+      { type: 'text', text: 'Born: ' },
+      { type: 'text', text: '1792', marks: italic },
+      { type: 'hardBreak' },
+      { type: 'text', text: 'Eyes: ', marks: bold },
+      { type: 'text', text: 'green' }
+    ])
+    expect(textOf(next)).toBe('Born: 1792\nEyes: green')
+  })
+
+  it('gives new words the marks where the change starts, and a typed line break a hardBreak', () => {
+    const next = replaceBlockText(lines, 'Born: 1790\nEyes: grey\nHair: dark')
+    expect(next.content).toEqual([
+      { type: 'text', text: 'Born: ' },
+      { type: 'text', text: '1790', marks: italic },
+      { type: 'hardBreak' },
+      { type: 'text', text: 'Eyes: ', marks: bold },
+      { type: 'text', text: 'grey' },
+      { type: 'hardBreak' },
+      { type: 'text', text: 'Hair: dark' }
+    ])
+    // A whole value replaced at a node boundary takes that node's marks.
+    const swapped = replaceBlockText(lines, 'Born: 1801\nEyes: green')
+    expect(swapped.content?.[1]).toEqual({ type: 'text', text: '1801', marks: italic })
+  })
+
+  it('drops a line break or leaf inside the changed words, merges equal neighbours, and keeps an unchanged block', () => {
+    const joined = replaceBlockText(lines, 'Born: 1790. Eyes: green')
+    expect(textOf(joined)).toBe('Born: 1790. Eyes: green')
+    expect(joined.content?.some((node) => node.type === 'hardBreak')).toBe(false)
+    const plain = {
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Orrin has ' },
+        { type: 'text', text: 'green', marks: italic },
+        { type: 'text', text: ' eyes.' }
+      ]
+    }
+    expect(replaceBlockText(plain, 'Orrin has  eyes.').content).toEqual([
+      { type: 'text', text: 'Orrin has  eyes.' }
+    ])
+    expect(replaceBlockText(plain, 'Orrin has green eyes.')).toBe(plain)
+  })
+
+  it('never splits a surrogate pair', () => {
+    const block = { type: 'paragraph', content: [{ type: 'text', text: 'Sign: \u{1F600}' }] }
+    const next = replaceBlockText(block, 'Sign: \u{1F601}')
+    expect(textOf(next)).toBe('Sign: \u{1F601}')
   })
 })

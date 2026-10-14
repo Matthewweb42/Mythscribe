@@ -269,6 +269,41 @@ describe('an age as of now (decision 5, P2b-D15)', () => {
     expect(InstantCard.safeParse('card' in outcome ? outcome.card : null).success).toBe(true)
   })
 
+  it('hands the age over while an open finding disputes the birth year it is computed from (P4-D25)', () => {
+    savePage(book.db, book.mara, 'pinned', doc('Born: 1790'), SCRIBE_NOW)
+    indexStaleRecords(book.db, SCRIBE_NOW)
+    years(1800, 1805, 1810)
+    seedClaims(
+      book.db,
+      book.two,
+      [
+        {
+          recordId: book.mara,
+          slot: 'born',
+          value: '1792',
+          quote: 'Mara waited at the harbour',
+          para: 0
+        }
+      ],
+      SCRIBE_NOW
+    )
+    runFindingsJob(book.db, SCRIBE_NOW)
+    const disputing = findingsOf(book.db, activeDraftId(book.db)).find(
+      (each) => each.slot === 'born'
+    )
+    if (disputing === undefined) throw new Error('no finding on the birth year')
+    expect(disputing.rule).toBe('C6')
+    expect(age()).toMatchObject({ card: { kind: 'age' } })
+    setVerdicts(book.db, disputing.id, {
+      ab: 'c',
+      ba: 'c',
+      why: 'two birth years',
+      costUsd: 0,
+      now: SCRIBE_NOW
+    })
+    expect(age()).toMatchObject({ handover: 'contested' })
+  })
+
   it('hands a stated age over once time has passed since, and gives it while none has', () => {
     ten()
     expect(age()).toMatchObject({ card: { kind: 'slot', value: 'ten', since: '1.1' } })

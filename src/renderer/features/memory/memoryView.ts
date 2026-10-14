@@ -109,7 +109,7 @@ export function noticeLine(notice: MemoryNotice): string {
     case 'rebuildDone':
       return `Rebuild finished: ${notice.lines} new line${notice.lines === 1 ? '' : 's'} on ${notice.sheets} sheet${notice.sheets === 1 ? '' : 's'}, ${notice.names} name${notice.names === 1 ? '' : 's'}, ${notice.findings} possible contradiction${notice.findings === 1 ? '' : 's'}`
     case 'findingsWaiting':
-      return `${notice.pairs} possible contradiction${notice.pairs === 1 ? '' : 's'} wait for Check the book: about ${formatCents(notice.priceUsd)}`
+      return `${notice.pairs} possible contradiction${notice.pairs === 1 ? ' waits' : 's wait'} for Check the book: about ${formatCents(notice.priceUsd)}`
   }
 }
 

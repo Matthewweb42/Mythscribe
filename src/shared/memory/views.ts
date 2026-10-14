@@ -982,11 +982,19 @@ export type TimelineMemory = z.infer<typeof TimelineMemory>
  * running. Empty while the Contradiction check is off.
  */
 export const FindingsView = z.object({
+  /** The Contradiction check switch (`features.judge`): off, nothing is listed and none was judged. */
+  on: z.boolean(),
   open: z.array(FindingView),
   unclear: z.array(FindingView),
   counts: z.record(z.enum(FINDING_STATES), z.number().int().nonnegative()),
   waiting: z.number().int().nonnegative(),
-  judging: z.boolean()
+  judging: z.boolean(),
+  /**
+   * The asked scene's reading (null with no scene, or not a manuscript scene): whether the active
+   * draft read it, and its finished sentences not read yet, which no rule has looked at. A scoped
+   * answer about the scene (P4-D23) names what it has not checked.
+   */
+  scene: z.object({ read: z.boolean(), unread: z.number().int().nonnegative() }).nullable()
 })
 export type FindingsView = z.infer<typeof FindingsView>
 

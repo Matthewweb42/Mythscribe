@@ -792,7 +792,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'gives for the same thing, a character present after their death, someone passing on a ' +
       'secret before learning it, a stated age against a birth year and that scene’s story year, ' +
       'a plot thread advancing after it was resolved, the book against your notes or a Research ' +
-      'page): the name and what each side says (eyes: grey, brown), the label of the secret or ' +
+      'page, and on Check the book two different histories or details given for the same ' +
+      'thing): the name and what each side says (eyes: grey, brown), the label of the secret or ' +
       'plot thread, the title of the note or Research page, the quoted sentences with one ' +
       'sentence either side, whether each sits earlier or later in the book, in a flashback or a ' +
       'remembered moment, or in a note, whether it is narration, speech, thought or rumour, the ' +

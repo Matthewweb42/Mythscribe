@@ -1,10 +1,7 @@
-import { setsState } from '@shared/memory/claims'
 import type { Dismissed } from '@shared/memory/dismissed'
 import type { Finding, FindingSide } from '@shared/memory/findings'
-import { kinWords } from '@shared/memory/literal'
 import { looseEnds, looseKey } from '@shared/memory/looseEnds'
-import { patchNoteParagraph } from '@shared/memory/noteValues'
-import { pageTextBlocks, withoutAiMarks } from '@shared/memory/pageMarks'
+import { pageTextBlocks, replaceBlockText, withoutAiMarks } from '@shared/memory/pageMarks'
 import type {
   LooseEndKey,
   LooseEndsView,
@@ -23,8 +20,8 @@ import { getRecord } from '../recordStore'
 import { cardNotRight, wrongValue } from '../reading/notRight'
 import { findingsFrame, looseEndInputs } from './candidateInputs'
 import { closeFindings, findingsOf } from './findingStore'
-import { findingView } from './findingViews'
-import { judgeContext, recordName, resolveSide } from './judge'
+import { findingView, noteEdit } from './findingViews'
+import { judgeContext, recordName, resolveSide, type JudgeContext } from './judge'
 
 /**
  * The answers on a finding and a loose end, main side (F-16.27, F-16.29; plan P4 §3.2, P4-D17,
@@ -65,8 +62,19 @@ const quoted = (text: string): string => `“${text}”`
  * verdicts at no cost.
  */
 export function findingNotProblem(db: TreeDb, findingId: string, now: Date): Dismissed {
-  const finding = requireFinding(db, findingId)
-  const ctx = judgeContext(db, finding.draftId)
+  return notProblemFor(db, requireFinding(db, findingId), now)
+}
+
+/**
+ * *Not a problem* on a finding already loaded, with the judge's context when the caller has one
+ * (the rebuild review's *Not a problem* for them all builds it once).
+ */
+export function notProblemFor(
+  db: TreeDb,
+  finding: Finding,
+  now: Date,
+  ctx: JudgeContext = judgeContext(db, finding.draftId)
+): Dismissed {
   const view = findingView(ctx, finding)
   const name = recordName(ctx, finding.recordId)
   const label =
@@ -129,56 +137,42 @@ export function findingRight(
   return { dismissed, other: { nodeId: other.nodeId, ref } }
 }
 
-/** A C6 finding's note side and book side, or null for any other finding. */
-function noteConflict(finding: Finding): {
-  note: Extract<FindingSide, { kind: 'note' }>
-  book: Extract<FindingSide, { kind: 'claim' }>
-} | null {
-  if (finding.rule !== 'C6') return null
-  const [note, book] = finding.a.kind === 'note' ? [finding.a, finding.b] : [finding.b, finding.a]
-  return note.kind === 'note' && book.kind === 'claim' ? { note, book } : null
-}
-
 /**
  * *Update my note*'s proposal (P4-D18), in code: offered only for a book-against-note finding
  * whose book side is narration in `now` mode (never speech, rumour, a memory, a thought, a dream or
  * a hypothetical); the note sentence with the note's value replaced by the book's (for kinship,
- * the book's kin word). Null when it is not offered or code cannot place the value.
+ * the book's kin word). Null when it is not offered (`noteEdit`: code cannot place the value, or
+ * the paragraph is longer than the save takes).
  */
 export function notePatch(db: TreeDb, findingId: string): NotePatch | null {
-  const finding = requireFinding(db, findingId)
-  const conflict = noteConflict(finding)
-  if (conflict === null) return null
+  return proposalOf(db, requireFinding(db, findingId))
+}
+
+function proposalOf(db: TreeDb, finding: Finding): NotePatch | null {
+  if (finding.rule !== 'C6') return null
   const ctx = judgeContext(db, finding.draftId)
-  const claim = ctx.claims.get(conflict.book.claimId)
-  const note = resolveSide(ctx, conflict.note)
-  if (claim === undefined || note === null || !setsState(claim)) return null
-  const bookValue = finding.slot.startsWith('kinship:')
-    ? (kinWords(claim.value)[0]?.word ?? claim.value)
-    : claim.value
-  const patched = patchNoteParagraph(
-    note.paragraph,
-    conflict.note.sentence,
-    conflict.note.value,
-    bookValue
-  )
-  if (patched === null) return null
+  const a = resolveSide(ctx, finding.a)
+  const b = resolveSide(ctx, finding.b)
+  const edit = a === null || b === null ? null : noteEdit(finding, a, b)
+  if (edit === null) return null
   return {
-    findingId,
-    owner: { kind: conflict.note.ownerKind, id: conflict.note.ownerId, name: note.ref },
-    page: conflict.note.page,
-    index: conflict.note.para,
-    before: note.paragraph,
-    after: patched.after,
-    sentence: patched.sentence,
-    value: bookValue
+    findingId: finding.id,
+    owner: { kind: edit.note.ownerKind, id: edit.note.ownerId, name: edit.resolved.ref },
+    page: edit.note.page,
+    index: edit.note.para,
+    before: edit.resolved.paragraph,
+    after: edit.after,
+    sentence: edit.sentence,
+    value: edit.value
   }
 }
 
 /**
- * `doc` with its text block `index` (`pageTextBlocks` numbering, the passage index's) replaced by
- * `text`, found by index and its text as it read (`before`); the block's AI marks go (the words are
- * the author's now, F-16.6). VALIDATION when the block moved or changed since.
+ * `doc` with its text block `index` (`pageTextBlocks` numbering, the passage index's) changed to
+ * `text`, found by index and its text as it read (`before`): only the words that changed are
+ * replaced (`replaceBlockText`), so the paragraph's other sentences keep their marks and line
+ * breaks; the block's AI marks go (the words are the author's now, F-16.6). VALIDATION when the
+ * block moved or changed since.
  */
 export function patchedPage(
   doc: TiptapNodeT,
@@ -191,9 +185,7 @@ export function patchedPage(
     throw new AppError('VALIDATION', 'That line changed since; open the page to edit it')
   }
   const replace = (node: TiptapNodeT): TiptapNodeT => {
-    if (node === target.block) {
-      return withoutAiMarks({ ...node, content: [{ type: 'text', text }] })
-    }
+    if (node === target.block) return withoutAiMarks(replaceBlockText(node, text))
     return node.content === undefined ? node : { ...node, content: node.content.map(replace) }
   }
   return replace(doc)
@@ -220,17 +212,26 @@ export function applyNotePatch(
   now: Date
 ): NotePatchApplied {
   const finding = requireFinding(db, input.findingId)
-  const conflict = noteConflict(finding)
-  if (conflict === null) {
-    throw new AppError('VALIDATION', 'Update my note is only for a note against the book')
+  // The proposal's own checks again (P4-D18): offered for this finding, on this paragraph as read.
+  const proposal = proposalOf(db, finding)
+  if (proposal === null) {
+    throw new AppError('VALIDATION', 'Update my note is not offered for this one')
   }
-  const text = input.text.replace(/\s+/g, ' ').trim()
-  if (text === '') throw new AppError('VALIDATION', 'A note line needs some words')
-  if (text === input.before.replace(/\s+/g, ' ').trim()) {
+  if (proposal.index !== input.index || proposal.before !== input.before) {
+    throw new AppError('VALIDATION', 'That line changed since; open the page to edit it')
+  }
+  // The author's lines stay lines; only the ends are trimmed, to the paragraph's own.
+  const raw = input.text.replace(/\r\n?/g, '\n').trim()
+  if (raw === '') throw new AppError('VALIDATION', 'A note line needs some words')
+  const squash = (line: string): string => line.replace(/\s+/g, ' ').trim()
+  if (squash(raw) === squash(input.before)) {
     throw new AppError('VALIDATION', 'The line is unchanged')
   }
-  const owner = { kind: conflict.note.ownerKind, id: conflict.note.ownerId }
-  if (owner.kind === 'record' && conflict.note.page !== 'pinned') {
+  const lead = /^\s*/u.exec(input.before)?.[0] ?? ''
+  const trail = /\s*$/u.exec(input.before)?.[0] ?? ''
+  const text = lead + raw + trail
+  const owner = { kind: proposal.owner.kind, id: proposal.owner.id }
+  if (owner.kind === 'record' && proposal.page !== 'pinned') {
     throw new AppError('VALIDATION', 'That line changed since; open the page to edit it')
   }
   const stored = writers.read(owner)
@@ -256,13 +257,18 @@ export function looseEndsView(db: TreeDb): LooseEndsView {
  * last touched, so a later touch brings it back.
  */
 export function looseEndNotProblem(db: TreeDb, input: LooseEndKey, now: Date): Dismissed {
+  const gone = (): AppError =>
+    new AppError('NOT_FOUND', 'That loose end is no longer there', { id: input.id })
+  // A planned card, or the scene a thread or character was last in, deleted since the list was
+  // read (a stale Loose ends list): NOT_FOUND, never a Dismissed row naming a missing scene.
+  const node = input.kind === 'planned' ? getNode(db, input.id) : null
+  if (input.kind === 'planned' && node === undefined) throw gone()
+  if (input.lastNodeId !== null && getNode(db, input.lastNodeId) === undefined) throw gone()
   const name =
     input.kind === 'planned'
-      ? searchableText(getNode(db, input.id)?.title ?? '').trim() || 'Untitled scene'
+      ? searchableText(node?.title ?? '').trim() || 'Untitled scene'
       : (getRecord(db, input.id)?.name ?? '')
-  if (name === '') {
-    throw new AppError('NOT_FOUND', 'That loose end is no longer there', { id: input.id })
-  }
+  if (name === '') throw gone()
   const frame = findingsFrame(db)
   const last = input.lastNodeId === null ? null : (frame.reading.refs.get(input.lastNodeId) ?? null)
   const what =

@@ -42,8 +42,12 @@ function warmJob(): number {
 }
 
 const BUDGET_MS = 50
-/** What the job's pair stamps may add to the recompute on the cast book (about 6 ms measured). */
+/**
+ * What the job's pair stamps may add to the recompute on the cast book (about 6 ms measured): 15 ms,
+ * or 60 % of the recompute when the machine is slowed (the suite's parallel load).
+ */
 const STAMPS_MS = 15
+const STAMPS_SHARE = 0.6
 const CAST = 30
 const RESEARCH_PARAGRAPHS = 2000
 
@@ -203,10 +207,15 @@ describe('the findings recompute at novel size (F-16.27)', () => {
     expect(notes.filter((row) => cast.includes(row.recordId))).toHaveLength(CAST + 20)
     const ms = fastest(5, () => recomputeFindings(db, PERF_NOW))
     expect(ms, `recompute with the cast: ${ms.toFixed(1)} ms`).toBeLessThan(BUDGET_MS)
-    // The job as the app runs it adds only the pairs' stamps to the recompute (none rendered).
+    // The job as the app runs it adds only the pairs' stamps to the recompute (none rendered),
+    // within the budget too. The stamps' share is measured against the recompute just before
+    // it, so the suite's parallel load (which slows both) does not trip it.
     const job = warmJob()
     const plain = fastest(5, () => recomputeFindings(db, PERF_NOW))
-    expect(job - plain, `the job's stamps: ${(job - plain).toFixed(1)} ms`).toBeLessThan(STAMPS_MS)
+    expect(job, `the job with the cast: ${job.toFixed(1)} ms`).toBeLessThan(BUDGET_MS)
+    expect(job - plain, `the job's stamps: ${(job - plain).toFixed(1)} ms`).toBeLessThan(
+      Math.max(STAMPS_MS, plain * STAMPS_SHARE)
+    )
     // The budget is the recompute's; seeding 900 claims and indexing the upload takes about 4 s
     // alone and more under the full suite's load, past Vitest's 5 s default.
   }, 30_000)

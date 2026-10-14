@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import { defaultAiSettings, type AiSettings } from '@shared/aiSettings'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { JUDGE_SENTINEL } from '../../ai/prompts/judge.v1'
@@ -14,6 +15,7 @@ import { createNode, getNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
 import { createRecord } from '../recordStore'
 import { seedClaims } from '../reading/claimFixture'
+import { readRow } from '../reading/readerRows'
 import { fakeAi } from '../reading/readingFixture'
 import { findingsOf } from './findingStore'
 import { runFindingsJob } from './findingsJob'
@@ -21,8 +23,11 @@ import {
   HOLD,
   JUDGE_DAY_PAIRS,
   JUDGE_RUN_PAIRS,
+  MEMORY_JUDGE_SWEEP_KEY,
   createFindingsService,
   judgeDay,
+  sweepCalls,
+  sweepPairs,
   type FindingsServiceDeps
 } from './findingsService'
 
@@ -270,6 +275,66 @@ describe('background judging (F-16.27, P4-D12)', () => {
     await service.judge(db, 'first')
     const firstItem = (ai.requests.find(isJudge)?.messages.at(-1)?.content ?? '').split('\n')[1]
     expect(firstItem).toBe('1. Late · eyes. Can both be true?')
+  })
+})
+
+describe('the rebuild sweep (P4-D12, P4 slice 3 review)', () => {
+  const REBUILT = '2026-10-13T09:00:00.000Z'
+  const sweepRow = (): unknown => readRow(db, MEMORY_JUDGE_SWEEP_KEY, z.unknown().nullable(), null)
+
+  it('judges at most the pairs its price covered, as asked spend, and reports what it opened', async () => {
+    seed(12)
+    const ai = allC()
+    const swept: { rebuildAt: string; keys: string[] }[] = []
+    const service = createFindingsService({
+      ...deps(ai),
+      swept: (_db, rebuildAt, keys) => void swept.push({ rebuildAt, keys })
+    })
+    // A 15-scene rebuild is priced at one batch: two calls, 10 pairs.
+    expect(sweepCalls(15)).toBe(2)
+    expect(sweepPairs(15)).toBe(10)
+    expect(sweepCalls(400)).toBe(12)
+    expect(sweepCalls(0)).toBe(0)
+    service.sweepDue(db, REBUILT, 15)
+    expect(service.wanted(db)).toBe(true)
+    const run = await service.judge(db, 'sweep')
+    expect(run.run?.sent).toBe(10)
+    expect(ai.requests.filter(isJudge)).toHaveLength(2)
+    expect(spent.every((each) => each.asked)).toBe(true)
+    expect(sweepRow()).toBeNull()
+    expect(swept).toEqual([{ rebuildAt: REBUILT, keys: expect.any(Array) as string[] }])
+    expect(swept[0]?.keys).toHaveLength(10)
+    // Background judging takes up the rest, within its own limits.
+    expect(run.again).toBe(true)
+  })
+
+  it('is tried once: held back (the daily cap) or during another rebuild, it is dropped, never run later', async () => {
+    seed(1)
+    const ai = allC()
+    const service = createFindingsService(deps(ai))
+    const today = ai.deps.dailyCap.get()
+    const capped = (): ReturnType<typeof ai.deps.dailyCap.get> => ({
+      ...today,
+      dailyCapUsd: 0.5,
+      spentTodayUsd: 0.5,
+      spentDate: '2026-10-13'
+    })
+    const free = ai.deps.dailyCap.get
+    ai.deps.dailyCap.get = capped
+    service.sweepDue(db, REBUILT, 30)
+    expect(service.wanted(db)).toBe(false)
+    expect(sweepRow()).toBeNull()
+    // The cap lifts: the next run is a background one (its own spend, its own limits).
+    ai.deps.dailyCap.get = free
+    expect(service.wanted(db)).toBe(true)
+    await service.judge(db, 'later')
+    expect(spent.length).toBeGreaterThan(0)
+    expect(spent.every((each) => !each.asked)).toBe(true)
+    // During another rebuild: dropped too (that rebuild's own sweep follows it).
+    service.sweepDue(db, REBUILT, 30)
+    rebuilding = true
+    expect(service.wanted(db)).toBe(false)
+    expect(sweepRow()).toBeNull()
   })
 })
 

@@ -90,6 +90,7 @@ import {
   startRebuild,
   stopRebuild,
   noteRebuildDone,
+  noteRebuildFindings,
   rebuildDoneNotice,
   reviewRebuild
 } from './rebuild'
@@ -826,6 +827,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
     ...(deps.findingsChanged === undefined ? {} : { findingsChanged: deps.findingsChanged }),
     // F-16.30: Check the book's progress is the status the activity bar reads.
     progressed: () => publish(),
+    // F-16.29: the post-rebuild review lists what the sweep opened.
+    swept: (db, rebuildAt, keys) => noteRebuildFindings(db, rebuildAt, keys),
     now
   })
 
@@ -933,7 +936,9 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
       markRebuilt(db, now())
       queue.indexAll('spotCheck', [at])
       // F-16.27, F-16.29: its contradiction sweep (asked, priced with it) and its review notice.
-      if (isFeatureAllowed(deps.settings(db), 'judge')) findings.sweepDue(db, progress.startedAt)
+      if (isFeatureAllowed(deps.settings(db), 'judge')) {
+        findings.sweepDue(db, progress.startedAt, progress.total)
+      }
       noteRebuildDone(db, progress.startedAt)
     }
     // F-16.27: background judging waited for the rebuild (the sweep runs first when due).

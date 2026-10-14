@@ -157,14 +157,27 @@ export function hereValues(
 
 /** Finished sentences of the scene the active draft has not read yet. */
 function unreadCount(db: TreeDb, nodeId: string, draftId: string | null): number {
+  return sceneReadState(db, nodeId, draftId)?.unread ?? 0
+}
+
+/**
+ * Whether the active draft `draftId` ever read manuscript scene `nodeId`, and how many of its
+ * finished sentences are not read yet; null when it is not a manuscript scene. What a scoped
+ * answer about the scene says it has not looked at (P4-D23's chat answer too).
+ */
+export function sceneReadState(
+  db: TreeDb,
+  nodeId: string,
+  draftId: string | null
+): { read: boolean; unread: number } | null {
   const row = manuscriptDocuments(db).find((document) => document.id === nodeId)
-  if (row === undefined) return 0
+  if (row === undefined) return null
   const texts = rowTexts(row)
   const names = nameScanShared(db).index
   const current = gateSentences(texts, { caretPara: null, names })
   const read = draftId === null ? null : getSceneRead(db, nodeId, draftId)
-  if (read === null) return current.length
-  return unreadSentences(current, readSetOf(read.entries, names)).length
+  if (read === null) return { read: false, unread: current.length }
+  return { read: true, unread: unreadSentences(current, readSetOf(read.entries, names)).length }
 }
 
 /**

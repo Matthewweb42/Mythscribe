@@ -113,6 +113,42 @@ describe('memoryView (F-16.18)', () => {
         },
         '14.2: the text says the quay; you typed the harbour',
         ['Update my detail', 'Keep mine']
+      ],
+      [
+        {
+          id: 'rebuildDone:2026-10-13T09:00:00.000Z',
+          kind: 'rebuildDone',
+          startedAt: '2026-10-13T09:00:00.000Z',
+          lines: 14,
+          sheets: 6,
+          names: 2,
+          findings: 3
+        },
+        'Rebuild finished: 14 new lines on 6 sheets, 2 names, 3 possible contradictions',
+        ['Done']
+      ],
+      [
+        {
+          id: 'rebuildDone:2026-10-14T09:00:00.000Z',
+          kind: 'rebuildDone',
+          startedAt: '2026-10-14T09:00:00.000Z',
+          lines: 1,
+          sheets: 1,
+          names: 1,
+          findings: 1
+        },
+        'Rebuild finished: 1 new line on 1 sheet, 1 name, 1 possible contradiction',
+        ['Done']
+      ],
+      [
+        { id: 'findingsWaiting:2026-10-13', kind: 'findingsWaiting', pairs: 4, priceUsd: 0.002 },
+        '4 possible contradictions wait for Check the book: about 0.2¢',
+        ['Not now']
+      ],
+      [
+        { id: 'findingsWaiting:2026-10-14', kind: 'findingsWaiting', pairs: 1, priceUsd: 0.0005 },
+        '1 possible contradiction waits for Check the book: about 0.05¢',
+        ['Not now']
       ]
     ]
     for (const [notice, line, buttons] of cases) {

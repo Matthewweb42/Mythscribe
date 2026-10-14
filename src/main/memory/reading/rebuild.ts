@@ -1,5 +1,6 @@
 import { and, eq, gte } from 'drizzle-orm'
 import type { Claim } from '@shared/memory/claims'
+import type { Finding } from '@shared/memory/findings'
 import { z } from 'zod'
 import type {
   MemoryNotice,
@@ -10,7 +11,7 @@ import type {
 import { reading } from '../../db/schema'
 import { activeDraftId, currentDraftId } from '../../draft/draftStore'
 import type { TreeDb } from '../../tree/treeStore'
-import { findingNotProblem, findingTouches } from '../findings/findingActions'
+import { findingTouches, notProblemFor } from '../findings/findingActions'
 import { findingsOf } from '../findings/findingStore'
 import { findingView } from '../findings/findingViews'
 import { judgeContext } from '../findings/judge'
@@ -113,14 +114,22 @@ function rebuildTopics(
 }
 
 /**
- * F-16.27, F-16.29 (P4 slice 3): the possible contradictions the rebuild opened: open findings of
- * its draft (the active one) made since it started, as `memory:findings` lists them.
+ * F-16.27, F-16.29 (P4 slice 3): the rows of the possible contradictions the rebuild opened: the
+ * open findings of its draft (the active one) whose keys its sweep recorded as it ended
+ * (`noteRebuildFindings`), so a finding later writing opens is never one of them. A finding the
+ * author brought back with *Undo* keeps its key, so it is listed again.
  */
-function rebuildFindings(db: TreeDb, progress: RebuildProgress): RebuildSummary['findings'] {
+function rebuildFindingRows(db: TreeDb, progress: RebuildProgress): Finding[] {
   if (currentDraftId(db) !== progress.draftId) return []
-  const opened = findingsOf(db, progress.draftId, ['open']).filter(
-    (finding) => finding.created >= progress.startedAt
-  )
+  const review = readReview(db)
+  if (review?.startedAt !== progress.startedAt || review.findings.length === 0) return []
+  const keys = new Set(review.findings)
+  return findingsOf(db, progress.draftId, ['open']).filter((finding) => keys.has(finding.key))
+}
+
+/** The rebuild's possible contradictions as `memory:findings` lists them. */
+function rebuildFindings(db: TreeDb, progress: RebuildProgress): RebuildSummary['findings'] {
+  const opened = rebuildFindingRows(db, progress)
   if (opened.length === 0) return []
   const ctx = judgeContext(db, progress.draftId)
   return opened.flatMap((finding) => {
@@ -189,15 +198,14 @@ export function applyRebuildAction(
     return { changed: 0, nodeIds: [], recordIds: [], names: false, topicIds: [] }
   }
   if (action.action === 'notProblems') {
-    // F-16.29: *Not a problem* on every possible contradiction the rebuild opened.
+    // F-16.29: *Not a problem* on every possible contradiction the rebuild opened (one context for
+    // them all).
     const nodeIds = new Set<string>()
     const recordIds = new Set<string>()
-    const opened = rebuildFindings(db, progress)
-    const byId = new Map(findingsOf(db, progress.draftId).map((each) => [each.id, each]))
-    for (const view of opened) {
-      const finding = byId.get(view.id)
-      if (finding === undefined) continue
-      findingNotProblem(db, finding.id, now)
+    const opened = rebuildFindingRows(db, progress)
+    const ctx = opened.length === 0 ? null : judgeContext(db, progress.draftId)
+    for (const finding of opened) {
+      if (ctx !== null) notProblemFor(db, finding, now, ctx)
       const touched = findingTouches(finding)
       for (const id of touched.nodeIds) nodeIds.add(id)
       for (const id of touched.recordIds) recordIds.add(id)
@@ -280,20 +288,50 @@ export function stopRebuild(db: TreeDb, now: Date): boolean {
 }
 
 /**
- * F-16.29 (P4 slice 3): the settings row of the post-rebuild review: the rebuild it is for, and
- * whether the author closed its notice (*Done*). Written when a rebuild that read scenes closes.
+ * F-16.29 (P4 slice 3): the settings row of the post-rebuild review: the rebuild it is for,
+ * whether the author closed its notice (*Done*), what the rebuild added as it closed (the notice's
+ * counts, so no publish recomputes the summary), and the keys of the possible contradictions its
+ * sweep opened. Written when a rebuild that read scenes closes.
  */
 export const MEMORY_REBUILD_REVIEW_KEY = 'memoryRebuildReview'
-const RebuildReview = z.object({ startedAt: z.string(), reviewed: z.boolean() })
+const RebuildReview = z.object({
+  startedAt: z.string(),
+  reviewed: z.boolean(),
+  lines: z.number().int().nonnegative(),
+  sheets: z.number().int().nonnegative(),
+  names: z.number().int().nonnegative(),
+  findings: z.array(z.string())
+})
+type RebuildReview = z.infer<typeof RebuildReview>
+
+const readReview = (db: TreeDb): RebuildReview | null =>
+  readRow(db, MEMORY_REBUILD_REVIEW_KEY, RebuildReview.nullable(), null)
 
 /** A rebuild that read scenes closed: its review is due (the `rebuildDone` notice). */
 export function noteRebuildDone(db: TreeDb, startedAt: string): void {
-  writeRow(db, MEMORY_REBUILD_REVIEW_KEY, { startedAt, reviewed: false })
+  const summary = rebuildSummary(db, false)
+  const review: RebuildReview = {
+    startedAt,
+    reviewed: false,
+    lines: summary?.sheets.reduce((sum, sheet) => sum + sheet.lines, 0) ?? 0,
+    sheets: summary?.sheets.length ?? 0,
+    names: summary?.waiting.length ?? 0,
+    findings: []
+  }
+  writeRow(db, MEMORY_REBUILD_REVIEW_KEY, review)
+}
+
+/** The sweep of the rebuild started `startedAt` ended: the possible contradictions it opened. */
+export function noteRebuildFindings(db: TreeDb, startedAt: string, keys: readonly string[]): void {
+  const row = readReview(db)
+  if (row?.startedAt === startedAt) {
+    writeRow(db, MEMORY_REBUILD_REVIEW_KEY, { ...row, findings: [...new Set(keys)].sort() })
+  }
 }
 
 /** *Done* on the `rebuildDone` notice: never shown again for that rebuild. */
 export function reviewRebuild(db: TreeDb, startedAt: string): void {
-  const row = readRow(db, MEMORY_REBUILD_REVIEW_KEY, RebuildReview.nullable(), null)
+  const row = readReview(db)
   if (row?.startedAt === startedAt)
     writeRow(db, MEMORY_REBUILD_REVIEW_KEY, { ...row, reviewed: true })
 }
@@ -301,12 +339,14 @@ export function reviewRebuild(db: TreeDb, startedAt: string): void {
 /**
  * The `rebuildDone` notice (design §2.7: after a rebuild, one summary grouped by page, with bulk
  * actions): "Rebuild finished: 14 new lines on 6 sheets, 2 names, 3 possible contradictions" while
- * the last rebuild's review is due and the rebuild has finished. Null otherwise.
+ * the last rebuild's review is due and the rebuild has finished; null otherwise. The lines, sheets
+ * and names are what the rebuild added as it closed; the contradictions are those of its sweep
+ * still open. Cheap: no summary is built (it runs on every publish).
  */
 export function rebuildDoneNotice(db: TreeDb, findingsOn: boolean): MemoryNotice | null {
   const progress = getRebuild(db)
   if (progress === null) return null
-  const review = readRow(db, MEMORY_REBUILD_REVIEW_KEY, RebuildReview.nullable(), null)
+  const review = readReview(db)
   if (
     progress.finishedAt === null ||
     review === null ||
@@ -315,15 +355,13 @@ export function rebuildDoneNotice(db: TreeDb, findingsOn: boolean): MemoryNotice
   ) {
     return null
   }
-  const summary = rebuildSummary(db, findingsOn)
-  if (summary === null) return null
   return {
     id: `rebuildDone:${progress.startedAt}`,
     kind: 'rebuildDone',
     startedAt: progress.startedAt,
-    lines: summary.sheets.reduce((sum, sheet) => sum + sheet.lines, 0),
-    sheets: summary.sheets.length,
-    names: summary.waiting.length,
-    findings: summary.findings.length
+    lines: review.lines,
+    sheets: review.sheets,
+    names: review.names,
+    findings: findingsOn ? rebuildFindingRows(db, progress).length : 0
   }
 }

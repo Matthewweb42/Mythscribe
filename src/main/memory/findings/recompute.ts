@@ -59,6 +59,12 @@ export interface RecomputeOptions {
    * like any other; without it C7 rows are kept (they close only when a side is gone).
    */
   checkRules?: boolean
+  /**
+   * *Not a problem* keys just undone (F-16.29): a C7 finding (*Check the book*'s rule) under one of
+   * them is found again now, not at the next check, so *Undo* brings it back with its remembered
+   * verdicts at no cost, as it does a finding of any other rule.
+   */
+  restore?: ReadonlySet<string>
 }
 
 const NOTHING: RecomputeResult = { opened: [], closed: [], unjudged: 0, changed: false }
@@ -99,10 +105,12 @@ export function recomputeFindings(
   const draftId = currentDraftId(db)
   if (draftId === null) return NOTHING
   const inputs = options.inputs ?? candidateInputs(db, draftId, findingsFrame(db))
-  const candidates =
-    options.checkRules === true
-      ? [...backgroundCandidates(inputs), ...candidatesC7(inputs)]
-      : backgroundCandidates(inputs)
+  const restore = options.restore ?? new Set<string>()
+  const c7 = options.checkRules === true || restore.size > 0 ? candidatesC7(inputs) : []
+  const candidates = [
+    ...backgroundCandidates(inputs),
+    ...(options.checkRules === true ? c7 : c7.filter((each) => restore.has(each.npKey)))
+  ]
   const produced = new Set(candidates.map((each) => each.key))
   const claims = new Map(inputs.claims.map((each) => [each.id, each]))
   const closing: { key: string; reason: FindingCloseReason }[] = []

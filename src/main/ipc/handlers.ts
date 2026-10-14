@@ -963,9 +963,13 @@ export function registerHandlers({
         // (when the gates allow). Nothing moved, nothing is queued: a judge run's own pushes come
         // back here, and must not queue it again. The counts follow the switch (off, none).
         if (!v2) return Promise.resolve({ requested: false, value: NO_SCAN })
+        // A *Not a problem* undone since: its finding is found again even when it is C7.
+        const restore = new Set(restoreFindings)
+        restoreFindings.clear()
         const result = runFindingsJob(db, now, {
           cachedVerdicts: true,
-          shown: getAiSettings(db).features.judge
+          shown: getAiSettings(db).features.judge,
+          restore
         })
         if (result.counts !== null) emit(windows(), 'memory:findingsChanged', result.counts)
         if (result.changed) reader.queueJudge()
@@ -1018,6 +1022,12 @@ export function registerHandlers({
    * F-16.27 (v2): the contradiction candidates are found again, once the burst of changes settles
    * (the `findings` job, keyed to the manuscript root on the mention queue, debounced there).
    */
+  /**
+   * F-16.29: the *Not a problem* keys undone since the last findings job, which finds their
+   * findings again (C7 included, `RecomputeOptions.restore`).
+   */
+  const restoreFindings = new Set<string>()
+
   const queueFindings = (db: TreeDb): void => {
     if (memory() !== 'v2') return
     const root = manuscriptRootId(db)
@@ -5159,7 +5169,8 @@ export function registerHandlers({
     }
     if (undone.kind === 'notProblem') {
       reader.detailsChanged()
-      // F-16.27: a finding the author had said is not a problem is found again.
+      // F-16.27: a finding the author had said is not a problem is found again (a C7 one too).
+      restoreFindings.add(undone.key)
       queueFindings(db)
     }
     // F-16.21: *Undo* of an *Unlink* puts the plan link back as it was (the author's or automatic).

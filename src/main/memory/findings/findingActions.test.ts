@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { emptyCardFields, type ClaimMode, type ClaimVoice } from '@shared/memory/claims'
 import { AI_FILED_ATTR, pageTextBlocks } from '@shared/memory/pageMarks'
+import { NOTE_PATCH_MAX } from '@shared/memory/views'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { getDocumentContent, saveDocument } from '../../document/documentStore'
 import { activeDraftId } from '../../draft/draftStore'
@@ -28,6 +29,7 @@ import {
   type NoteWriters
 } from './findingActions'
 import { findingsOf, setVerdicts } from './findingStore'
+import { findingsView } from './findingViews'
 import { runFindingsJob } from './findingsJob'
 import { judgeContext, pairItem } from './judge'
 import { cacheVerdict } from './verdictCache'
@@ -64,8 +66,8 @@ function record(name: string): string {
 }
 
 /** Every finding judged a contradiction in both orders (as the judge would, remembered too). */
-function judgeAll(): void {
-  runFindingsJob(db, NOW, { cachedVerdicts: true })
+function judgeAll(checkRules = false): void {
+  runFindingsJob(db, NOW, { cachedVerdicts: true, checkRules })
   const draft = activeDraftId(db)
   const ctx = judgeContext(db, draft)
   for (const finding of findingsOf(db, draft, ['unjudged'])) {
@@ -209,6 +211,45 @@ describe('Not a problem (P4-D14)', () => {
     expect(open()[0]).toMatchObject({ verdictAb: 'c', verdictBa: 'c', costUsd: 0 })
     // A finding that is gone is NOT_FOUND.
     expect(() => findingNotProblem(db, finding.id, NOW)).toThrow(/NOT_FOUND|no longer there/u)
+  })
+
+  it('brings a C7 finding (Check the book’s) back on Undo too, with its verdicts, at no cost', () => {
+    const tomas = record('Tomas')
+    saveDocument(db, one, doc('His father kept a tavern in Vellmouth.'))
+    saveDocument(db, two, doc('His father kept a forge in Vellmouth.'))
+    for (const [nodeId, trade] of [
+      [one, 'tavern'],
+      [two, 'forge']
+    ] as const) {
+      seedClaims(
+        db,
+        nodeId,
+        [
+          {
+            recordId: tomas,
+            slot: 'history',
+            value: `his father kept a ${trade} in Vellmouth`,
+            quote: `His father kept a ${trade} in Vellmouth`,
+            para: 0
+          }
+        ],
+        NOW
+      )
+    }
+    judgeAll(true)
+    const c7 = open().find((each) => each.rule === 'C7')
+    if (c7 === undefined) throw new Error('no C7 finding')
+    const row = findingNotProblem(db, c7.id, NOW)
+    expect(open().filter((each) => each.rule === 'C7')).toEqual([])
+    undoDismissed(db, row.id)
+    // The background recompute alone never finds C7 again ...
+    runFindingsJob(db, NOW, { cachedVerdicts: true })
+    expect(open().filter((each) => each.rule === 'C7')).toEqual([])
+    // ... the undone key does, from the remembered verdicts.
+    runFindingsJob(db, NOW, { cachedVerdicts: true, restore: new Set([row.key]) })
+    expect(open().filter((each) => each.rule === 'C7')).toEqual([
+      expect.objectContaining({ verdictAb: 'c', verdictBa: 'c', costUsd: 0 })
+    ])
   })
 })
 
@@ -389,6 +430,86 @@ describe('Update my note (P4-D18)', () => {
     ])
   })
 
+  it('changes only the value: the paragraph’s line breaks and marks stay as the author wrote them', () => {
+    seedClaims(
+      db,
+      one,
+      [{ recordId: orrin, slot: 'eyes', value: 'grey', quote: "Orrin's eyes were grey", para: 0 }],
+      NOW
+    )
+    const italic = [{ type: 'italic' }]
+    savePage(
+      db,
+      orrin,
+      'pinned',
+      doc({
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Eyes: ' },
+          { type: 'text', text: 'green', marks: italic },
+          { type: 'hardBreak' },
+          { type: 'text', text: 'Hair: dark', marks: [{ type: 'bold' }] }
+        ]
+      }),
+      NOW
+    )
+    indexStaleRecords(db, NOW)
+    judgeAll()
+    const id = open().find((each) => each.rule === 'C6')?.id ?? ''
+    const patch = notePatch(db, id)
+    expect(patch).toMatchObject({
+      before: 'Eyes: green\nHair: dark',
+      after: 'Eyes: grey\nHair: dark'
+    })
+    // Not the proposal's paragraph: refused before anything is written.
+    expect(() =>
+      applyNotePatch(
+        db,
+        { findingId: id, index: 1, before: patch?.before ?? '', text: patch?.after ?? '' },
+        writers,
+        NOW
+      )
+    ).toThrow(/That line changed since/u)
+    applyNotePatch(
+      db,
+      { findingId: id, index: 0, before: patch?.before ?? '', text: patch?.after ?? '' },
+      writers,
+      NOW
+    )
+    const block = pageTextBlocks(requireRecord(db, orrin).pinned ?? doc())[0]?.block
+    expect(block?.content).toEqual([
+      { type: 'text', text: 'Eyes: ' },
+      { type: 'text', text: 'grey', marks: italic },
+      { type: 'hardBreak' },
+      { type: 'text', text: 'Hair: dark', marks: [{ type: 'bold' }] }
+    ])
+  })
+
+  it('is not offered for a paragraph longer than its save takes, and the view agrees', () => {
+    seedClaims(
+      db,
+      one,
+      [{ recordId: orrin, slot: 'eyes', value: 'grey', quote: "Orrin's eyes were grey", para: 0 }],
+      NOW
+    )
+    ensureResearchRoot(db, NOW)
+    const page = createResearchNote(db, 'novel', { title: 'Long source' }, NOW)
+    const filler = 'The tide came in over the flats. '.repeat(Math.ceil(NOTE_PATCH_MAX / 33))
+    saveDocument(db, page.id, doc(`Orrin has green eyes. ${filler}`))
+    indexNodePassages(db, page.id, NOW)
+    judgeAll()
+    const finding = open().find((each) => each.rule === 'C6')
+    if (finding === undefined) throw new Error('no note conflict')
+    expect(notePatch(db, finding.id)).toBeNull()
+    const view = findingsView(db, one, { on: true, judging: false }).open.find(
+      (each) => each.id === finding.id
+    )
+    expect(view?.actions.updateNote).toBe(false)
+    expect(() =>
+      applyNotePatch(db, { findingId: finding.id, index: 0, before: 'x', text: 'y' }, writers, NOW)
+    ).toThrow(/not offered/u)
+  })
+
   it('is not offered when the book’s side is speech, rumour, a memory, a thought or a dream', () => {
     const cases: [ClaimVoice, ClaimMode][] = [
       ['dialogue', 'now'],
@@ -404,6 +525,19 @@ describe('Update my note (P4-D18)', () => {
     }
     // Narration now: offered.
     expect(notePatch(db, noteConflict())).not.toBeNull()
+  })
+})
+
+describe('memory:findings for the chat’s scoped answer (P4-D23)', () => {
+  it('says whether the check is on and what of the asked scene is not read yet', () => {
+    expect(findingsView(db, two, { on: false, judging: false })).toMatchObject({
+      on: false,
+      open: [],
+      scene: null
+    })
+    const view = findingsView(db, two, { on: true, judging: false })
+    expect(view).toMatchObject({ on: true, scene: { read: false, unread: 2 } })
+    expect(findingsView(db, null, { on: true, judging: false }).scene).toBeNull()
   })
 })
 
@@ -433,5 +567,14 @@ describe('loose ends (F-16.29)', () => {
     expect(looseEndsView(db).items).toEqual([])
     undoDismissed(db, row.id)
     expect(looseEndsView(db).items).toHaveLength(1)
+  })
+
+  it('answers NOT_FOUND for a planned card or a last scene deleted since the list was read', () => {
+    expect(() =>
+      looseEndNotProblem(db, { kind: 'planned', id: 'gone-node', lastNodeId: null }, NOW)
+    ).toThrow(/no longer there/u)
+    expect(() =>
+      looseEndNotProblem(db, { kind: 'thread', id: orrin, lastNodeId: 'gone-node' }, NOW)
+    ).toThrow(/no longer there/u)
   })
 })

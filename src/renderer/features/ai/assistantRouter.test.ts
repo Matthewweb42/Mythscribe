@@ -93,11 +93,13 @@ let route: AiRouteResult
 /** F-16.25: what `ai:navigate` answers in a story memory v2 project. */
 let navigate: AiNavigateResult
 const NO_FINDINGS: FindingsView = {
+  on: true,
   open: [],
   unclear: [],
   counts: { unjudged: 0, held: 0, hidden: 0, open: 0, unclear: 0, fine: 0 },
   waiting: 0,
-  judging: false
+  judging: false,
+  scene: { read: true, unread: 0 }
 }
 /** F-16.27 (P4-D23): what `memory:findings` answers in a story memory v2 project. */
 let findings: FindingsView = NO_FINDINGS
@@ -681,6 +683,32 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
     await useAssistantStore.getState().send('Check this scene for consistency')
     expect(turns()[3]?.content).toContain('Mara Vell’s eyes: grey (1.1) · brown (1.2)')
     expect(sent('ai:navigate')).toHaveLength(2)
+  })
+
+  it('never states an absence it did not check: the switch off, an unread scene, unread sentences, pairs waiting', async () => {
+    navigate = routedV2('continuity')
+    const ask = async (view: FindingsView): Promise<string> => {
+      findings = view
+      await useAssistantStore.getState().send('Check this scene for consistency')
+      return turns().at(-1)?.content ?? ''
+    }
+    // The Contradiction check off: main answers an empty view; nothing is claimed.
+    const off = await ask({ ...NO_FINDINGS, on: false, scene: null })
+    expect(off).toBe(
+      'The Contradiction check is off, so nothing in this scene has been checked. Turn it on in Settings, AI tab.'
+    )
+    expect(off).not.toContain('No possible contradictions')
+    const unread = await ask({ ...NO_FINDINGS, scene: { read: false, unread: 4 } })
+    expect(unread).toContain('This scene has not been read yet, so it has not been checked')
+    expect(unread).not.toContain('No possible contradictions')
+    const partly = await ask({ ...NO_FINDINGS, waiting: 3, scene: { read: true, unread: 1 } })
+    expect(partly).toContain('No possible contradictions found in this scene so far.')
+    expect(partly).toContain('1 sentence here is not read yet, so not checked.')
+    expect(partly).toContain('3 pairs in the book are not judged yet.')
+    const running = await ask({ ...NO_FINDINGS, waiting: 3, judging: true })
+    expect(running).toContain('The check is running now, so more may turn up.')
+    expect(running).not.toContain('not judged yet')
+    expect(calls.some(([channel]) => channel === 'ai:continuity')).toBe(false)
   })
 
   it('shows an instant card as the turn’s text with no AI call', async () => {

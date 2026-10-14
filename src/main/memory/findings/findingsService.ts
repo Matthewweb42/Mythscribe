@@ -4,6 +4,7 @@ import { isFeatureAllowed, type AiSettings } from '@shared/aiSettings'
 import { RULE_ORDER, type Finding, type FindingSide } from '@shared/memory/findings'
 import type { CheckProgress } from '@shared/memory/views'
 import { dayOf, rollIfNewDay } from '../../ai/dailyCap'
+import { JUDGE_PAIRS_MAX } from '../../ai/prompts/judge.v1'
 import { registerInflight, releaseInflight } from '../../ai/inflight'
 import { AiBudgetError, AiCancelledError } from '../../ai/providers/types'
 import type { AiRequestDeps } from '../../ai/request'
@@ -72,13 +73,24 @@ export const JUDGE_DAY_PAIRS = 30
 /** Pairs at most the rebuild's sweep judges (P4-D12). */
 export const JUDGE_SWEEP_PAIRS = 60
 
-/** The settings row saying a finished rebuild's sweep is due (asked, priced with the rebuild). */
+/**
+ * The settings row saying a finished rebuild's sweep is due (asked, priced with the rebuild): the
+ * pairs its price covered, which the sweep judges at most.
+ */
 export const MEMORY_JUDGE_SWEEP_KEY = 'memoryJudgeSweep'
-const JudgeSweep = z.object({ rebuildAt: z.string() })
+const JudgeSweep = z.object({ rebuildAt: z.string(), pairs: z.number().int().positive() })
 
-/** The rebuild sweep's calls, as *Rebuild memory*'s price counts them (both orders of ≤ 6 batches). */
+/**
+ * The pairs the rebuild sweep of a `scenes`-scene rebuild judges at most: a batch (one call per
+ * order) per 15 scenes, at most `JUDGE_SWEEP_PAIRS`; what *Rebuild memory*'s price covers.
+ */
+export function sweepPairs(scenes: number): number {
+  return Math.min(JUDGE_SWEEP_PAIRS, JUDGE_PAIRS_MAX * Math.ceil(scenes / 15))
+}
+
+/** The rebuild sweep's calls, as *Rebuild memory*'s price counts them (both orders of each batch). */
 export function sweepCalls(scenes: number): number {
-  return scenes === 0 ? 0 : 2 * Math.min(JUDGE_SWEEP_PAIRS / 10, Math.ceil(scenes / 15))
+  return 2 * Math.ceil(sweepPairs(scenes) / JUDGE_PAIRS_MAX)
 }
 
 /** The settings row counting today's background pairs. */
@@ -127,6 +139,11 @@ export interface FindingsServiceDeps {
   findingsChanged?: (counts: FindingCounts) => void
   /** *Check the book*'s progress moved (the status the activity bar reads). */
   progressed?: () => void
+  /**
+   * The sweep of the rebuild started `rebuildAt` ended (however it ended): the keys of the open
+   * findings made since that rebuild started, which the post-rebuild review lists.
+   */
+  swept?: (db: TreeDb, rebuildAt: string, keys: string[]) => void
   now: () => Date
 }
 
@@ -155,8 +172,11 @@ export interface FindingsService {
   askedHold(db: TreeDb): string | null
   /** *Check the book* was asked for with this scene open (its findings are confirmed first). */
   checkAsked(openNodeId: string | null): void
-  /** A *Rebuild memory* that read scenes finished: its sweep is due. */
-  sweepDue(db: TreeDb, rebuildAt: string): void
+  /**
+   * A *Rebuild memory* of `scenes` scenes that read some finished: its sweep is due, at most the
+   * pairs its price covered (`sweepPairs`).
+   */
+  sweepDue(db: TreeDb, rebuildAt: string, scenes: number): void
   /**
    * The background pairs left for *Check the book* while the day's limit or the Cloud cap holds
    * background judging (the `findingsWaiting` notice), or 0.
@@ -239,8 +259,18 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
     return null
   }
 
-  const sweepRow = (db: TreeDb): z.infer<typeof JudgeSweep> | null =>
-    readRow(db, MEMORY_JUDGE_SWEEP_KEY, JudgeSweep.nullable(), null)
+  /**
+   * The due sweep, or null. A sweep is tried once: held back when it would run (the switch off, no
+   * provider, the daily cap) or while another rebuild runs, it is dropped, never run later as spend
+   * nobody asked for then (that rebuild's own sweep follows it).
+   */
+  const dueSweep = (db: TreeDb): z.infer<typeof JudgeSweep> | null => {
+    const row = readRow(db, MEMORY_JUDGE_SWEEP_KEY, JudgeSweep.nullable(), null)
+    if (row === null) return null
+    if (askedHold(db) === null && !deps.rebuilding(db)) return row
+    writeRow(db, MEMORY_JUDGE_SWEEP_KEY, null)
+    return null
+  }
 
   /** Pushes what a run moved: the counts, and the settled findings' scenes and records. */
   const pushed = (db: TreeDb, settled: readonly Finding[]): void => {
@@ -284,14 +314,15 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
     requestId: string,
     mode: RunMode,
     signal: AbortSignal,
-    result: JudgeRunResult
+    result: JudgeRunResult,
+    sweepRoom = JUDGE_SWEEP_PAIRS
   ): Promise<{ err: unknown } | null> => {
     const day = judgeDay(db, today())
     const room =
       mode === 'background'
         ? Math.min(JUDGE_RUN_PAIRS, JUDGE_DAY_PAIRS - day.pairs)
         : mode === 'sweep'
-          ? JUDGE_SWEEP_PAIRS
+          ? sweepRoom
           : Number.MAX_SAFE_INTEGER
     const ctx = judgeContext(db, draftId)
     const findings = judgeOrder(unjudgedFor(db, draftId, mode), ctx, lastRead)
@@ -337,11 +368,11 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
 
   /** A background run, or the rebuild's sweep when one is due. */
   const judge = async (db: TreeDb, requestId: string): Promise<FindingsJobResult> => {
-    const sweep = sweepRow(db) !== null
+    const due = dueSweep(db)
+    const sweep = due !== null
     const mode: RunMode = sweep ? 'sweep' : 'background'
     const hold = holdOf(db, mode)
-    // A sweep is tried once: held back (the switch off, no provider, the daily cap), it is not
-    // run later as spend nobody asked for then.
+    // Tried once (`dueSweep`): run now, it is due no more.
     if (sweep) writeRow(db, MEMORY_JUDGE_SWEEP_KEY, null)
     if (hold !== null) throw new JobSkippedError(hold)
     const draftId = currentDraftId(db)
@@ -352,9 +383,23 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
     const result = emptyJudgeRun()
     let failed: { err: unknown } | null
     try {
-      failed = await judgeRun(db, draftId, requestId, mode, controller.signal, result)
+      failed = await judgeRun(
+        db,
+        draftId,
+        requestId,
+        mode,
+        controller.signal,
+        result,
+        due?.pairs ?? JUDGE_SWEEP_PAIRS
+      )
     } finally {
       releaseInflight(requestId)
+      if (due !== null) {
+        const keys = findingsOf(db, draftId, ['open'])
+          .filter((finding) => finding.created >= due.rebuildAt)
+          .map((finding) => finding.key)
+        deps.swept?.(db, due.rebuildAt, keys)
+      }
     }
     if (failed !== null) rethrow(failed.err, mode)
     // After a sweep, background judging takes up what is left (within its own limits).
@@ -448,9 +493,10 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
     wanted(db) {
       const draftId = currentDraftId(db)
       if (draftId === null) return false
-      const mode: RunMode = sweepRow(db) !== null ? 'sweep' : 'background'
-      // A due sweep is wanted even with nothing unjudged yet: it recomputes first.
-      if (mode === 'sweep') return askedHold(db) === null
+      const mode: RunMode = dueSweep(db) !== null ? 'sweep' : 'background'
+      // A due sweep (not held: `dueSweep`) is wanted even with nothing unjudged yet: it recomputes
+      // first.
+      if (mode === 'sweep') return true
       return holdOf(db, mode) === null && unjudgedFor(db, draftId, mode).length > 0
     },
 
@@ -464,8 +510,9 @@ export function createFindingsService(deps: FindingsServiceDeps): FindingsServic
       openScene = openNodeId
     },
 
-    sweepDue(db, rebuildAt) {
-      writeRow(db, MEMORY_JUDGE_SWEEP_KEY, { rebuildAt })
+    sweepDue(db, rebuildAt, scenes) {
+      const pairs = sweepPairs(scenes)
+      if (pairs > 0) writeRow(db, MEMORY_JUDGE_SWEEP_KEY, { rebuildAt, pairs })
     },
 
     waiting(db) {

@@ -85,6 +85,12 @@ export interface MarkedParagraph {
 /** Inline leaves that read as a line break; every other inline leaf reads as a space. */
 const LINE_BREAK = 'hardBreak'
 
+/** One inline child of a text block as the page's text reads it. */
+function inlineText(child: TiptapNodeT): string {
+  if (typeof child.text === 'string') return child.text
+  return child.type === LINE_BREAK ? '\n' : ' '
+}
+
 /** One paragraph of a stored page with the block itself (its attributes: `aiFiled`, …). */
 export interface PageTextBlock extends MarkedParagraph {
   block: TiptapNodeT
@@ -101,11 +107,7 @@ export function pageTextBlocks(doc: TiptapNodeT): PageTextBlock[] {
     const children = node.content ?? []
     const marked = inherited || isNotCanon(node)
     if (children.some((child) => typeof child.text === 'string')) {
-      let text = ''
-      for (const child of children) {
-        if (typeof child.text === 'string') text += child.text
-        else text += child.type === LINE_BREAK ? '\n' : ' '
-      }
+      const text = children.map(inlineText).join('')
       if (text.trim() !== '') {
         found.push({ index: found.length, text, notCanon: marked, block: node })
       }
@@ -124,4 +126,100 @@ export function pageTextBlocks(doc: TiptapNodeT): PageTextBlock[] {
  */
 export function markedParagraphs(doc: TiptapNodeT): MarkedParagraph[] {
   return pageTextBlocks(doc).map(({ index, text, notCanon }) => ({ index, text, notCanon }))
+}
+
+const isLowSurrogate = (code: number): boolean => code >= 0xdc00 && code <= 0xdfff
+
+/** `text` as inline nodes carrying `marks`: each line break a `hardBreak`, no empty text node. */
+function inlineNodes(text: string, marks: TiptapNodeT['marks']): TiptapNodeT[] {
+  return text
+    .split('\n')
+    .flatMap((line, i) => [
+      ...(i === 0 ? [] : [{ type: LINE_BREAK }]),
+      ...(line === ''
+        ? []
+        : [
+            marks === undefined || marks.length === 0
+              ? { type: 'text', text: line }
+              : { type: 'text', text: line, marks }
+          ])
+    ])
+}
+
+const sameMarks = (x: TiptapNodeT, y: TiptapNodeT): boolean =>
+  JSON.stringify(x.marks ?? []) === JSON.stringify(y.marks ?? [])
+
+/**
+ * A text block (one `pageTextBlocks` returns) with its text, as `pageTextBlocks` reads it, changed
+ * to `text` by the smallest edit: the words both share at the start and the end keep their nodes,
+ * so the marks (bold, italic, links), line breaks and inline leaves outside the change stay as
+ * they are. The new words take the marks of the text where the change starts (the text before
+ * it, for a pure insertion); a line break in them is a `hardBreak`. The same block when nothing
+ * changed. Used by *Update my note* (F-16.29), which must change only what the author changed.
+ */
+export function replaceBlockText(block: TiptapNodeT, text: string): TiptapNodeT {
+  const children = block.content ?? []
+  const before = children.map(inlineText).join('')
+  if (before === text) return block
+  const most = Math.min(before.length, text.length)
+  let start = 0
+  while (start < most && before[start] === text[start]) start += 1
+  if (start > 0 && start < before.length && isLowSurrogate(before.charCodeAt(start))) start -= 1
+  let tail = 0
+  while (tail < most - start && before[before.length - 1 - tail] === text[text.length - 1 - tail]) {
+    tail += 1
+  }
+  if (tail > 0 && isLowSurrogate(before.charCodeAt(before.length - tail))) tail -= 1
+  const end = before.length - tail
+  const inserted = text.slice(start, text.length - tail)
+  const out: TiptapNodeT[] = []
+  let marks: TiptapNodeT['marks'] = undefined
+  let placed = false
+  const place = (): void => {
+    if (placed) return
+    out.push(...inlineNodes(inserted, marks))
+    placed = true
+  }
+  let at = 0
+  for (const child of children) {
+    const from = at
+    const to = at + inlineText(child).length
+    at = to
+    if (to <= start) {
+      out.push(child)
+      if (typeof child.text === 'string') marks = child.marks
+      continue
+    }
+    if (from >= end) {
+      place()
+      out.push(child)
+      continue
+    }
+    // The child holds part of the change.
+    if (typeof child.text === 'string') {
+      if (start > from) out.push({ ...child, text: child.text.slice(0, start - from) })
+      if (!placed) marks = child.marks
+      place()
+      if (end < to) out.push({ ...child, text: child.text.slice(end - from) })
+    } else {
+      // An inline leaf inside the changed words goes with them.
+      place()
+    }
+  }
+  place()
+  const merged: TiptapNodeT[] = []
+  for (const node of out) {
+    const last = merged[merged.length - 1]
+    if (
+      last !== undefined &&
+      typeof last.text === 'string' &&
+      typeof node.text === 'string' &&
+      sameMarks(last, node)
+    ) {
+      merged[merged.length - 1] = { ...last, text: last.text + node.text }
+    } else if (typeof node.text !== 'string' || node.text !== '') {
+      merged.push(node)
+    }
+  }
+  return { ...block, content: merged }
 }

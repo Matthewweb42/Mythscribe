@@ -1485,6 +1485,33 @@ describe('Check the book and the rebuild sweep on the reader’s queue (F-16.27,
     expect(reader.notices().some((notice) => notice.kind === 'rebuildDone')).toBe(false)
   })
 
+  it('lists and dismisses only what the rebuild’s sweep opened, never a later finding', async () => {
+    addScene('Second', "Mara's eyes were brown.")
+    const ai = reading()
+    const reader = service(ai)
+    expect(reader.rebuild()).toMatchObject({ ok: true, queued: 2 })
+    await until(() => typeof getRebuild(db)?.finishedAt === 'string', 'the rebuild to finish')
+    await drained(reader)
+    const startedAt = getRebuild(db)?.startedAt ?? ''
+    expect(reader.rebuildSummary()?.findings).toHaveLength(1)
+    // Later writing opens another possible contradiction while the review is still due.
+    const third = addScene('Third', "Mara's eyes were green.")
+    await reader.readNow(third, 'read-third')
+    runFindingsJob(db, NOW, { cachedVerdicts: true })
+    reader.queueJudge()
+    await drained(reader)
+    const open = findingsOf(db, activeDraftId(db), ['open'])
+    expect(open.length).toBeGreaterThan(1)
+    expect(reader.rebuildSummary()?.findings).toHaveLength(1)
+    expect(reader.notices()).toContainEqual(
+      expect.objectContaining({ id: `rebuildDone:${startedAt}`, findings: 1 })
+    )
+    // Not a problem for them all: the rebuild's one; the later one stays open.
+    expect(reader.rebuildAction({ action: 'notProblems' })).toEqual({ changed: 1 })
+    expect(findingsOf(db, activeDraftId(db), ['open'])).toHaveLength(open.length - 1)
+    expect(reader.rebuildSummary()?.findings).toEqual([])
+  })
+
   it('says how many pairs wait for Check the book once the day’s background limit is reached', async () => {
     const ai = reading()
     const reader = service(ai)

@@ -310,7 +310,8 @@ describe('Check the book (F-16.30)', () => {
     expect(report).toMatchObject({
       stopped: false,
       confirmed: 1,
-      checked: { pairs: 3, byRule: { C1: 2, C7: 1 }, scenes: 3 },
+      // Scene three was never read: listed as not checked, never counted as checked.
+      checked: { pairs: 3, byRule: { C1: 2, C7: 1 }, scenes: 2 },
       notChecked: {
         fixed: [...CHECK_NOT_COVERED],
         unreadScenes: [{ nodeId: three }],

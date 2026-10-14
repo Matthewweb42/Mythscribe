@@ -121,6 +121,21 @@ export function unreadScenes(
     .map((nodeId) => ({ nodeId, ref: frame.reading.refs.get(nodeId) ?? '' }))
 }
 
+/**
+ * The scenes the check looked at: the readable scenes with words in reading order, less those it
+ * lists as not read yet (`unreadScenes`), which no rule has seen.
+ */
+function checkedScenes(frame: FindingsFrame, unread: readonly SceneRefView[]): number {
+  const left = new Set(unread.map((scene) => scene.nodeId))
+  return frame.nodes.filter(
+    (row) =>
+      row.kind === 'document' &&
+      (row.wordCount ?? 0) > 0 &&
+      frame.reading.order.has(row.id) &&
+      !left.has(row.id)
+  ).length
+}
+
 const sameSide = (x: FindingSide, y: FindingSide): boolean =>
   JSON.stringify(x) === JSON.stringify(y)
 
@@ -488,7 +503,7 @@ export function writeCheckReport(db: TreeDb, figures: CheckRunFigures): StoredCh
     checked: {
       pairs: judged.filter((finding) => finding.state !== 'unjudged').length,
       byRule,
-      scenes: frame.reading.order.size,
+      scenes: checkedScenes(frame, figures.unreadScenes),
       notes: notes.size
     },
     notChecked: {
