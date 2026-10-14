@@ -37,13 +37,15 @@ import { replyObject } from '../agent'
 import { AGENT_V9_EDIT_TOOLS, AGENT_V9_RULES, AGENT_V9_SENTINEL } from '../prompts/agent.v9'
 import { parseCiteReply } from '../prompts/cite.v1'
 import { NAVIGATOR_RULES, NAVIGATOR_SENTINEL } from '../prompts/navigator.v1'
-import type { AiMessage, Provider, StreamChunk } from '../providers/types'
+import type { AiMessage } from '../providers/types'
 import type { UsageEntry } from '../usageStore'
 import { fakeChatServer, type ChatServer } from './fakeChatServer'
 import {
   liveProviderError,
   liveProviderFromEnv,
   liveRequestDeps,
+  recordingProvider,
+  type CapturedCall,
   type LiveProvider,
   type LiveRequestDeps
 } from './liveProvider'
@@ -173,48 +175,7 @@ const withoutRules = (content: string): string =>
 // ---- One request as the run saw it -----------------------------------------------------------
 
 /** A request and its reply, kept in memory for scoring (never written to a report). */
-export interface Captured {
-  kind: ScribeRequestKind
-  messages: AiMessage[]
-  text: string
-  finishReason: string | null
-}
-
-async function* recordStream(
-  chunks: AsyncIterable<StreamChunk>,
-  messages: AiMessage[],
-  sink: Captured[]
-): AsyncGenerator<StreamChunk> {
-  let text = ''
-  let finishReason: string | null = null
-  for await (const chunk of chunks) {
-    text += chunk.delta
-    if (chunk.finishReason !== undefined) finishReason = chunk.finishReason
-    yield chunk
-  }
-  sink.push({ kind: scribeRequestKind(messages), messages, text, finishReason })
-}
-
-/** The provider with every request and reply kept in `sink` (for the citation and cite scores). */
-export function recordingProvider(provider: Provider, sink: Captured[]): Provider {
-  return {
-    id: provider.id,
-    resolveModel: (tier) => provider.resolveModel(tier),
-    complete: async (request) => {
-      const result = await provider.complete(request)
-      sink.push({
-        kind: scribeRequestKind(request.messages),
-        messages: request.messages,
-        text: result.text,
-        finishReason: result.finishReason ?? null
-      })
-      return result
-    },
-    stream: (request) => recordStream(provider.stream(request), request.messages, sink),
-    testConnection: () => provider.testConnection(),
-    ...(provider.price === undefined ? {} : { price: provider.price })
-  }
-}
+export type Captured = CapturedCall<ScribeRequestKind>
 
 // ---- The book and the questions ------------------------------------------------------------
 
@@ -240,7 +201,7 @@ export async function openScribeSession(
 ): Promise<ScribeSession> {
   const captured: Captured[] = []
   const run = liveRequestDeps({
-    provider: recordingProvider(live.provider, captured),
+    provider: recordingProvider(live.provider, captured, scribeRequestKind),
     local: live.local
   })
   const stopUsd = options.stopUsd ?? Infinity

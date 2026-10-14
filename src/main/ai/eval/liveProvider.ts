@@ -9,20 +9,27 @@ import { autoTable, defaultAiRouting } from '@shared/aiRouting'
 import type { CachedResponse } from '../cacheStore'
 import { dayOf, defaultAiUsageState } from '../dailyCap'
 import { buildOpenAiProvider, type FetchLike } from '../providers/openai'
-import { AiProviderError, type Provider } from '../providers/types'
+import {
+  AiProviderError,
+  type AiMessage,
+  type Provider,
+  type StreamChunk
+} from '../providers/types'
 import type { AiRequestDeps } from '../request'
 import type { UsageEntry } from '../usageStore'
 
 /**
  * One key for every live path (F-16.22; plan P2b §3.1): the live prompt fidelity run
  * (`prompts.eval.ts`), the live planted-error run (`memory.eval.ts`), the live knows run
- * (`knows.eval.ts`), the live Ms Scribe run (`scribe.eval.ts`, P3) and the price probe
- * (`aiProbe.probe.ts`) all start from `OPENROUTER_API_KEY` alone, so the author keeps one secret:
+ * (`knows.eval.ts`), the live Ms Scribe run (`scribe.eval.ts`, P3), the live contradictions run
+ * (`findings.eval.ts`, P4) and the price probe (`aiProbe.probe.ts`) all start from
+ * `OPENROUTER_API_KEY` alone, so the author keeps one secret:
  *
- *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai             # fidelity, planted errors, knows, Ms Scribe
+ *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai             # fidelity, planted errors, knows, Ms Scribe, contradictions
  *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- memory   # planted errors only
  *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- knows    # who knows what only
  *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- scribe   # Ms Scribe only (stops at $1)
+ *     MYTHSCRIBE_EVAL_LIVE=1 OPENROUTER_API_KEY=sk-or-… npm run eval:ai -- findings # contradictions only (stops at 50¢)
  *     OPENROUTER_API_KEY=sk-or-… npm run ai:probe                                  # the price probe
  *
  * `OPENROUTER_API_KEY` set: OpenRouter's base URL, its reasoning control (the app's "off" for
@@ -251,4 +258,57 @@ export function liveRequestDeps(live: Pick<LiveProvider, 'provider' | 'local'>):
  */
 export function liveProviderError(err: unknown): string | null {
   return err instanceof AiProviderError ? `${err.code}: ${err.message}` : null
+}
+
+/** A request and its reply as a live run saw it, kept in memory for scoring (never in a report). */
+export interface CapturedCall<K extends string> {
+  kind: K
+  messages: AiMessage[]
+  text: string
+  finishReason: string | null
+}
+
+async function* recordStream<K extends string>(
+  chunks: AsyncIterable<StreamChunk>,
+  messages: AiMessage[],
+  sink: CapturedCall<K>[],
+  kindOf: (messages: AiMessage[]) => K
+): AsyncGenerator<StreamChunk> {
+  let text = ''
+  let finishReason: string | null = null
+  for await (const chunk of chunks) {
+    text += chunk.delta
+    if (chunk.finishReason !== undefined) finishReason = chunk.finishReason
+    yield chunk
+  }
+  sink.push({ kind: kindOf(messages), messages, text, finishReason })
+}
+
+/**
+ * The provider with every request and reply kept in `sink`, each named by `kindOf` (the live runs'
+ * scores read what was sent and how it ended: the Ms Scribe run's citations, the contradictions
+ * run's cut-off replies).
+ */
+export function recordingProvider<K extends string>(
+  provider: Provider,
+  sink: CapturedCall<K>[],
+  kindOf: (messages: AiMessage[]) => K
+): Provider {
+  return {
+    id: provider.id,
+    resolveModel: (tier) => provider.resolveModel(tier),
+    complete: async (request) => {
+      const result = await provider.complete(request)
+      sink.push({
+        kind: kindOf(request.messages),
+        messages: request.messages,
+        text: result.text,
+        finishReason: result.finishReason ?? null
+      })
+      return result
+    },
+    stream: (request) => recordStream(provider.stream(request), request.messages, sink, kindOf),
+    testConnection: () => provider.testConnection(),
+    ...(provider.price === undefined ? {} : { price: provider.price })
+  }
 }
