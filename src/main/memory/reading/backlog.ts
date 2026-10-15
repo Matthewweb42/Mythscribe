@@ -96,17 +96,17 @@ export function rebuildEstimate(
 }
 
 /**
- * What reading these scenes would cost now (`reader.v7`'s sizes, plan `Suggestions.md`,
- * 2026-10-14): a window read as `reader.v7:window` and one check batch (`verify.v4`) per piece of
- * 400 prose tokens, a full read as `reader.v7:first` per page of 400 prose tokens and a check batch
+ * What reading these scenes would cost now (`reader.v6`'s sizes, plan `ReaderNarrow.md`,
+ * 2026-10-14, kept by plan `Suggestions.md` 2026-10-15): a window read as `reader.v6:window` and one check batch (`verify.v4`) per piece of
+ * 400 prose tokens, a full read as `reader.v6:first` per page of 400 prose tokens and a check batch
  * per page; on the fast model, at the hosted quote on Cloud, free on a local model.
  */
 export function priceReads(
   scenes: readonly Pick<DueScene, 'read' | 'proseTokens'>[],
   context: RebuildContext
 ): { costUsd: number; priced: boolean } {
-  const first = plannedRow('reader.v7:first')
-  const window = plannedRow('reader.v7:window')
+  const first = plannedRow('reader.v6:first')
+  const window = plannedRow('reader.v6:window')
   const verify = plannedRow('verify.v4')
   const pageOverhead = first.typicalInTokens - READER_V3_PAGE_TOKENS
   let tokensIn = 0

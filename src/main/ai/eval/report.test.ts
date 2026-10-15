@@ -301,6 +301,11 @@ describe('the planned story-memory costs (F-16.1, design Part 5)', () => {
     )
   })
 
+  it('prices the reader at the version the app sends, reader.v6, not the catalogued reader.v7', () => {
+    const registry = renderCostRegistry([])
+    expect(registry).toMatch(/\| `reader` \| [^|]+ \| background \| reader\.v6 \|/)
+  })
+
   it('renders both planned tables into the registry', () => {
     const registry = renderCostRegistry([])
     expect(registry).toContain('## Planned: story memory (F-16)')

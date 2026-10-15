@@ -62,3 +62,17 @@ data (the author's own sheets stay hers), and v1 for installed builds until the 
 
 Lean: one implementer, unit tests for what changes, full gates (e2e included) once at the end;
 the main session runs `npm run eval:ai -- -u` after the merge. Then one live run by the author.
+
+## Sixth live run and the author's decision (2026-10-15, confirmed)
+
+The sixth run (reader.v7, reports 2026-10-15T14:40 and 14:48 UTC) failed: suggestion precision
+42.1 % and 56.3 % (41 and 24 unjudged), one planted negative suggested (the Captain "owed Mr.
+Varrow money" as `detail:wealth`). The concrete slots stayed about 90 % right; traits and history
+were about half noise (dialogue and single acts as traits, Mrs. Harrow's lines filed under Lady
+Pell and Mrs. Tull, trivia as history).
+
+**Decision: concrete-only suggestions, then the copy trial.** Traits and history are not read
+again (back to `reader.v6`'s slot set and prompt; `reader.v7` stays in the catalogue, unused);
+everything stays a suggestion the author accepts. Ms Scribe answers history and character
+questions from the text. No more test-book live runs for now: the author tries suggestions on a
+copy of the real book.

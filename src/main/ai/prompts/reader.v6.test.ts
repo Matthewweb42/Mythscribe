@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
-import { ALL_SLOTS, READER_V6_NOT_READ_SLOTS, readSlot } from '@shared/memory/slots'
+import { ALL_SLOTS, NOT_READ_SLOTS, readSlot, slotIsRead } from '@shared/memory/slots'
 import { TOPIC_ROSTER_MAX_TOKENS, topicLinesTokens } from '@shared/memory/topics'
 import { READER_ROSTER_HEADING } from './reader.v1'
 import {
@@ -101,7 +101,7 @@ describe('reader.v6 prompt (F-16.17, concrete facts only: plan ReaderNarrow.md)'
         expect(asked, slot).toContain(`${slot}`)
         continue
       }
-      if (!READER_V6_NOT_READ_SLOTS.has(slot)) {
+      if (slotIsRead(slot)) {
         expect(asked, slot).toMatch(new RegExp(`\\b${slot}\\b`))
         expect(refused, slot).not.toMatch(new RegExp(`\\b${slot}\\b`))
       } else {
@@ -109,7 +109,7 @@ describe('reader.v6 prompt (F-16.17, concrete facts only: plan ReaderNarrow.md)'
         expect(asked, slot).not.toMatch(new RegExp(`\\b${slot} \\(`))
       }
     }
-    expect([...READER_V6_NOT_READ_SLOTS].sort()).toEqual(
+    expect([...NOT_READ_SLOTS].sort()).toEqual(
       ['clothing', 'history', 'objects', 'relation', 'role', 'traits'].sort()
     )
     for (const word of ['src', 'voice', 'dialogue', 'speech', 'memory', 'action']) {

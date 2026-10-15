@@ -4,7 +4,6 @@ import {
   BASE_SLOTS,
   DETAIL_LABEL_NAMES,
   NOT_READ_SLOTS,
-  READER_V6_NOT_READ_SLOTS,
   SlotSchema,
   parseSlot,
   readSlot,
@@ -58,13 +57,10 @@ describe('the closed slot list (F-16.17, design §2.2)', () => {
     for (const slot of ALL_SLOTS) expect(slotLabel(slot)).not.toBe('')
   })
 
-  it('reads the concrete slots, traits and history, keeping the rest on the closed list (plans ReaderNarrow.md, Suggestions.md)', () => {
+  it('reads only the concrete slots, keeping the rest on the closed list (plan ReaderNarrow.md; Suggestions.md, 2026-10-15)', () => {
     const notRead = ALL_SLOTS.filter((slot) => !slotIsRead(slot))
-    expect(notRead).toEqual(['role', 'clothing', 'objects', 'relation'])
-    expect(slotIsRead('traits') && slotIsRead('history')).toBe(true)
-    expect([...READER_V6_NOT_READ_SLOTS].sort()).toEqual(
-      ['clothing', 'history', 'objects', 'relation', 'role', 'traits'].sort()
-    )
+    expect(notRead).toEqual(['role', 'clothing', 'objects', 'traits', 'history', 'relation'])
+    expect(slotIsRead('traits') || slotIsRead('history')).toBe(false)
     expect([...NOT_READ_SLOTS].every((slot) => parseSlot(slot) === slot)).toBe(true)
     for (const slot of ['eyes', 'born', 'species', 'kinship', 'hair', 'alive', 'age'] as const) {
       expect(slotIsRead(slot), slot).toBe(true)

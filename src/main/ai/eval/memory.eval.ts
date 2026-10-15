@@ -353,13 +353,8 @@ interface LivePlant {
   mode?: 'dream'
   /** A kinship's or relation's other record. */
   object?: string
-  /**
-   * The gate that refuses it, or `suggested` (plan `Suggestions.md`): since `reader.v7` reads
-   * traits again no gate refuses it, and the checker passes it, so it is a suggestion the author
-   * dismisses (judged wrong in `storedVerdicts`, a judgment call each).
-   */
+  /** The gate that refuses it. */
   refused:
-    | 'suggested'
     | 'notRead'
     | 'ambiguous'
     | 'actor'
@@ -378,10 +373,11 @@ interface LivePlant {
 }
 
 /*
- * Since plan ReaderNarrow.md (2026-10-14) a plant in a slot no longer read (relation, role,
- * clothing, objects) is refused as `notRead` before any other gate. Since plan Suggestions.md
- * (reader.v7) traits and history are read again: their plants meet the gates of the earlier rounds
- * (subject, actor), and two pass as suggestions for the author to dismiss.
+ * Since plan ReaderNarrow.md (2026-10-14) a plant in a slot no longer read (traits, history,
+ * relation, role, clothing, objects) is refused as `notRead` before any other gate: the earlier
+ * runs' plants there stay, each now refused for that. (Under `reader.v7`, plan Suggestions.md,
+ * traits and history were read again; the author went back to concrete-only suggestions on
+ * 2026-10-15.)
  */
 const LIVE_PLANTS: readonly LivePlant[] = [
   // The shared surname: the checker picked Mr. Harrow, and "Harrow's temper" was stored.
@@ -392,7 +388,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'traits',
     value: 'short tempered',
     quote: 'Harrow’s temper was short that morning',
-    refused: 'subject'
+    refused: 'notRead'
   },
   // Both sisters walk: one of them is never the fact's subject.
   {
@@ -429,7 +425,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'traits',
     value: 'talked of everything except Thornmere',
     quote: 'talked of everything except Thornmere',
-    refused: 'subject'
+    refused: 'notRead'
   },
   {
     scene: 'h03',
@@ -557,7 +553,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'traits',
     value: 'violent against him',
     quote: 'Amongst the most violent against him was Mrs. Harrow',
-    refused: 'suggested'
+    refused: 'notRead'
   },
   // The most invented slot of the second run.
   {
@@ -593,7 +589,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     quote: 'he asked Miss Pell',
     voice: 'dialogue',
     speaker: 'harrow-mrs',
-    refused: 'actor'
+    refused: 'notRead'
   },
   // Wrong person: the sugar plum is Hobb's ("he"), not Johanna's.
   {
@@ -603,7 +599,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'history',
     value: 'When they were children he had kept a sugar plum in his coat',
     quote: 'When they were children he had kept a sugar plum in his coat',
-    refused: 'subject'
+    refused: 'notRead'
   },
   // Wrong kind: forty years at the gate is no age.
   {
@@ -697,7 +693,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'trait',
     value: 'quite disconcerted',
     quote: 'Mrs. Harrow was quite disconcerted',
-    refused: 'suggested'
+    refused: 'notRead'
   },
   {
     scene: 's03',
@@ -925,16 +921,14 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
       )
       // (h03's temper is also the oracle's own reject label, refused the same way.)
       expect(ended.length, `${plant.scene} ${plant.slot} “${plant.value}”`).toBeGreaterThan(0)
-      const said = [...new Set(ended.map(({ event }) => event.outcome))]
-        .map((outcome) => (outcome === 'verified' ? 'suggested' : outcome))
-        .join(', ')
+      const said = [...new Set(ended.map(({ event }) => event.outcome))].join(', ')
       outcomes.push(`${plant.scene} ${plant.slot} “${plant.value}”: ${said}`)
     }
     expect(outcomes).toEqual(
       LIVE_PLANTS.map((plant) => `${plant.scene} ${plant.slot} “${plant.value}”: ${plant.refused}`)
     )
     const live = liveFacts(book)
-    for (const plant of LIVE_PLANTS.filter((each) => each.refused !== 'suggested')) {
+    for (const plant of LIVE_PLANTS) {
       const slot = readSlot(plant.slot)
       const stored = live.filter(
         (claim) =>
@@ -976,13 +970,10 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
       expect(storedFor(book, live, wanted), wanted.id).toBeDefined()
     }
     expect(invariants(book)).toEqual([])
-    // The bar holds with every live failure planted (plan Suggestions.md): every suggestion right
-    // but the two traits no gate refuses, each a judgment call the author dismisses.
+    // The bar holds with every live failure planted, every suggestion right (plan
+    // ReaderNarrow.md, kept by plan Suggestions.md: traits and history are not read).
     const { stored } = plantedMeasures(book)
-    expect(stored.wrong).toEqual([
-      expect.stringMatching(/^s03 ¶3 Mrs\. Harrow traits “quite disconcerted”.*\(judgment call\)$/),
-      expect.stringMatching(/^s03 ¶5 Mrs\. Harrow traits “violent against him”.*\(judgment call\)$/)
-    ])
+    expect(stored.wrong).toEqual([])
     expect(stored.unjudged).toEqual([])
     expect(stored.precision.right / stored.precision.of).toBeGreaterThanOrEqual(
       PLANTED_PASS_BARS.storedPrecision
@@ -1048,8 +1039,7 @@ describe('the fourth live run, re-scored on the slots still read (plan ReaderNar
         voice: 'narration',
         proof: 'literal'
       },
-      // A role and clothing: no longer read, left out (traits and history are read again since
-      // reader.v7, plan Suggestions.md).
+      // A role and clothing: no longer read, left out (as traits and history are).
       { ...fact, slot: 'role', value: 'steward', quote: 'never judged' },
       { ...fact, slot: 'clothing', value: 'a grey coat', quote: 'never judged' }
     ])

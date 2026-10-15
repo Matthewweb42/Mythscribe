@@ -12,6 +12,13 @@ do. Review, then confirm, change, or delete the entry.
 - To change it: (files or feature to revisit)
 -->
 
+## 2026-10-15 · F-16.17 · Sixth live run; concrete-only suggestions (plan Suggestions.md)
+- Question: the sixth live run (`reader.v7`, reports 2026-10-15T14:40 and 14:48 UTC) failed: suggestion precision 42.1 % and 56.3 % (41 and 24 unjudged), one planted negative suggested (the Captain "owed Mr. Varrow money" as `detail:wealth`). The concrete slots stayed about 90 % right; traits and history were about half noise. Your decision (confirmed): concrete-only suggestions, then the copy trial.
+- Chosen: the reader goes back to `reader.v6` (prompt and slot set: traits and history in `NOT_READ_SLOTS` again, one set); the pipeline sends `reader.v6`; *Rebuild memory*, the backlog and the switch-over price from the `reader.v6:*` rows, and the cost registry's reader row is pinned to `reader.v6` (`costRegistry.ts`, beside `agent.v8`). `reader.v7` stays in the catalogue with its file, golden and eval cases, but nothing in the app sends it. Everything from the Suggestions build stays (every fact a suggestion, Accept/Dismiss, the deck, the panel). The replays are back to v6's: the planted traits and histories are refused as `notRead`, and the Captain's two fathers are no findable C7 pair. The sixth run's unjudged facts are not judged (no new verdicts).
+- Not run here: `npm run eval:ai -- -u` (the token report and cost registry: the reader row back to `reader.v6`; the worktree guard refuses "eval").
+- Owed by you: no more test-book live runs for now; try suggestions on a copy of the real book.
+- To change it: `src/shared/memory/slots.ts` (`NOT_READ_SLOTS`), `src/main/memory/reading/pipeline.ts`, `backlog.ts`, `src/main/memory/switchover/plan.ts`, `src/shared/aiCostNotes.ts`.
+
 ## 2026-10-14 · F-16.17, F-16.12, F-16.18, F-16.19 · Suggestions you approve (plan Suggestions.md)
 - Question: five live runs never reached 95 % stored-fact precision, because a fact filed with nobody looking must be near perfect. Your decision and answers (confirmed): every fact a reading proves is a suggestion you accept or dismiss; traits and history read again, relation/role/clothing/objects off; nothing auto-applied; no limit per scene, best first. Everything below is decided by Claude, unconfirmed.
 - Chosen:

@@ -1,5 +1,5 @@
 import { estimateTokens } from '@shared/ai'
-import { READER_V6_NOT_READ_SLOTS, readSlot, slotIsRead } from '@shared/memory/slots'
+import { readSlot, slotIsRead } from '@shared/memory/slots'
 import { normalizeForMatch } from '@shared/critique'
 import { splitSentences } from '@shared/memory/sentences'
 import { outputCap, PAGE_TOKENS } from '@shared/memory/windows'
@@ -109,12 +109,14 @@ const labelsOf = (sceneId: string, paras: ReadonlySet<number>): TestBookLabel[] 
   TEST_BOOK_LABELS.claims.filter((claim) => claim.scene === sceneId && paras.has(claim.p))
 
 /**
- * Whether the reader still reads a label's slot (`slotIsRead`; a relation label is
- * `relation:<id>`); `v6`: as `reader.v6` did, without traits and history.
+ * Whether the reader still reads a label's slot (`slotIsRead`, `reader.v6`'s set; a relation
+ * label is `relation:<id>`); `v7`: as `reader.v7` did, traits and history too (plan
+ * `Suggestions.md`; unsent since 2026-10-15, its cases kept).
  */
-const labelIsRead = (claim: TestBookLabel, v6 = false): boolean => {
+const labelIsRead = (claim: TestBookLabel, v7 = false): boolean => {
   const slot = readSlot(claim.slot.startsWith('relation:') ? 'relation' : claim.slot)
-  return slot !== null && (v6 ? !READER_V6_NOT_READ_SLOTS.has(slot) : slotIsRead(slot))
+  if (slot === null) return false
+  return slotIsRead(slot) || (v7 && (slot === 'traits' || slot === 'history'))
 }
 
 const toLabel = (claim: (typeof TEST_BOOK_LABELS.claims)[number]): ReaderEvalLabel => ({
@@ -540,7 +542,7 @@ function readerV2Case(
       p: label.p,
       quote: label.quote
     }))
-  const labels = labelsOf(id, sent).filter((claim) => !v6 || labelIsRead(claim, !v7))
+  const labels = labelsOf(id, sent).filter((claim) => !v6 || labelIsRead(claim, v7))
   return {
     version: v7
       ? READER_V7_PROMPT_VERSION

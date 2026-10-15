@@ -1601,7 +1601,7 @@ test('story memory v2: the evidence reader (P2a)', async () => {
   }>('memory:claim', { claimId: location?.id ?? '' })
   expect(info.claim.quote).toBe('She walked to the quay')
   // P2b slice 2: the reading is `reader.v2`'s (the same sentinel and the same facts here).
-  expect(info.reading?.promptVersion).toBe('reader.v7')
+  expect(info.reading?.promptVersion).toBe('reader.v6')
 
   // Plan Suggestions.md: the status bar says how many suggestions wait; its review in the
   // assistant column accepts them, a character at a time, and the item goes.

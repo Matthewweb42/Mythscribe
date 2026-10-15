@@ -231,29 +231,22 @@ export const OBJECT_SLOTS: readonly Slot[] = ['kinship', 'relation']
 
 /**
  * The slots the reader no longer reads (F-16.17, the author's decision of 2026-10-14, plan
- * `ReaderNarrow.md`): relation, role, clothing and objects, where most wrong facts of four live
- * runs sat. They stay on the closed list, so stored v1 data, the author's own notes and the
- * switch-over keep working; the reader is not asked for them and the pipeline refuses one it
- * proposes anyway (`notRead`). Ms Scribe answers such questions by searching the text and quoting
- * the passage (`agent.v9`, `cite.v1`). Traits and history are read again since `reader.v7` (the
- * author's answer 1 of plan `Suggestions.md`, 2026-10-14): every fact is a suggestion she accepts
- * or dismisses, so an open-ended slot no longer files anything unseen.
+ * `ReaderNarrow.md`): the open-ended ones (traits, history, relation, role) and clothing and
+ * objects, where nearly every wrong fact of four live runs sat. They stay on the closed list, so
+ * stored v1 data, the author's own notes and the switch-over keep working; the reader is not asked
+ * for them (`reader.v6`) and the pipeline refuses one it proposes anyway (`notRead`). Ms Scribe
+ * answers such questions by searching the text and quoting the passage (`agent.v9`, `cite.v1`).
+ * `reader.v7` read traits and history again as suggestions (plan `Suggestions.md`); its sixth live
+ * run found them about half noise, so the author went back to concrete-only suggestions
+ * (2026-10-15): `reader.v7` stays in the catalogue, unused, with its own set in its test.
  */
 export const NOT_READ_SLOTS: ReadonlySet<Slot> = new Set<Slot>([
+  'traits',
+  'history',
   'relation',
   'role',
   'clothing',
   'objects'
-])
-
-/**
- * `reader.v6`'s set (plan `ReaderNarrow.md`): traits and history too. Kept for its eval cases and
- * the re-scores of the runs it read; nothing in the app reads it.
- */
-export const READER_V6_NOT_READ_SLOTS: ReadonlySet<Slot> = new Set<Slot>([
-  ...NOT_READ_SLOTS,
-  'traits',
-  'history'
 ])
 
 /** Whether the reader still reads `slot` into facts (`NOT_READ_SLOTS` aside). */

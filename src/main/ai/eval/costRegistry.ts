@@ -36,8 +36,15 @@ import type { TokenRow } from './report'
  * the switch-over), and the newer one's calls are priced as shipped rows of the planned section
  * (`SHIPPED_PLAN_ROWS`). `agent`: v1 runs agent.v8 (up to three calls a message, lookups between);
  * v2's agent.v9 answers in one call (`agent.v9:open`, `:lookup`, `:need`, `:widened`).
+ *
+ * Also the features whose newest catalogued prompt the app does not send: `reader` sends
+ * `reader.v6` (concrete-only suggestions, the author's decision of 2026-10-15); `reader.v7` stays
+ * catalogued with its cases, unsent.
  */
-const V1_PRICED: Partial<Record<AiFeatureId, PromptVersion>> = { agent: 'agent.v8' }
+const V1_PRICED: Partial<Record<AiFeatureId, PromptVersion>> = {
+  agent: 'agent.v8',
+  reader: 'reader.v6'
+}
 
 /** The version a feature asks for first: its newest non-regenerate prompt (`V1_PRICED` aside). */
 function currentVersion(feature: AiFeatureId): PromptVersion | null {

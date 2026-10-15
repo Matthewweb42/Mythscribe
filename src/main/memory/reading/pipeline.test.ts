@@ -245,7 +245,7 @@ describe('runReading (F-16.17)', () => {
     expect(reading).toMatchObject({
       purpose: 'first',
       pages: 1,
-      promptVersion: 'reader.v7',
+      promptVersion: 'reader.v6',
       verifyVersion: 'verify.v4',
       model: 'gpt-5.4-mini',
       tokensIn: 2_000,
@@ -669,8 +669,8 @@ describe('runReading (F-16.17)', () => {
     scanNamesFor(db, one, NOW)
     const events: ReadingItemEvent[] = []
     const plan: PlannedClaim[] = [
-      // A history done to Lise is the one's who did it, never hers (read again since
-      // reader.v7, plan Suggestions.md: the actor gate refuses it).
+      // A history: not read (plan ReaderNarrow.md; concrete-only suggestions, plan
+      // Suggestions.md, 2026-10-15), whoever did it.
       {
         p: 0,
         r: 'Lise',
@@ -726,7 +726,7 @@ describe('runReading (F-16.17)', () => {
       { nodeId: one, caretPara: null, requestId: 'r-4', observe: (event) => events.push(event) }
     )
     expect(events.map((event) => [event.p, event.slot, event.outcome])).toEqual([
-      [0, 'history', 'actor'],
+      [0, 'history', 'notRead'],
       [1, 'scars', 'subject'],
       [2, 'age', 'valueKind'],
       [3, 'kinship', 'possessed'],

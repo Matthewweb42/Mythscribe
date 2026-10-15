@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { estimateTokens, inputBudget, outputBudget } from '@shared/ai'
-import { ALL_SLOTS, NOT_READ_SLOTS, readSlot, slotIsRead } from '@shared/memory/slots'
+import { ALL_SLOTS, readSlot, type Slot } from '@shared/memory/slots'
 import { TOPIC_ROSTER_MAX_TOKENS, topicLinesTokens } from '@shared/memory/topics'
 import { READER_ROSTER_HEADING } from './reader.v1'
 import {
@@ -27,6 +27,12 @@ const ROSTER = [
   'r4 the Quay · place',
   'r1 +Ry'
 ]
+/**
+ * `reader.v7`'s slots not read (plan `Suggestions.md`): traits and history were read again. The
+ * app went back to `reader.v6`'s set (`NOT_READ_SLOTS`, 2026-10-15); this prompt stays catalogued.
+ */
+const READER_V7_NOT_READ: ReadonlySet<Slot> = new Set<Slot>(['relation', 'role', 'clothing', 'objects'])
+
 const TOPICS = ['s1 the sold map · secret', "t1 Ashby's return · thread"]
 
 const SCENE = [
@@ -103,7 +109,7 @@ describe('reader.v7 prompt (F-16.17, suggestions you approve: plan Suggestions.m
         expect(asked, slot).toContain(`${slot}`)
         continue
       }
-      if (slotIsRead(slot)) {
+      if (!READER_V7_NOT_READ.has(slot)) {
         expect(asked, slot).toMatch(new RegExp(`\\b${slot}\\b`))
         expect(refused, slot).not.toMatch(new RegExp(`\\b${slot}\\b`))
       } else {
@@ -111,7 +117,7 @@ describe('reader.v7 prompt (F-16.17, suggestions you approve: plan Suggestions.m
         expect(asked, slot).not.toMatch(new RegExp(`\\b${slot} \\(`))
       }
     }
-    expect([...NOT_READ_SLOTS].sort()).toEqual(['clothing', 'objects', 'relation', 'role'])
+    expect([...READER_V7_NOT_READ].sort()).toEqual(['clothing', 'objects', 'relation', 'role'])
     for (const word of ['src', 'voice', 'dialogue', 'speech', 'memory', 'action']) {
       expect(refused, word).toContain(word)
       expect(readSlot(word), word).toBeNull()

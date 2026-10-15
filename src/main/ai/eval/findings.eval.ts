@@ -1000,10 +1000,11 @@ describe('contradictions over the test book: the oracle replay (F-16.27, F-16.28
     })
     expect(report.failures).toEqual([])
     expect(report.score.planted.right).toBe(report.score.planted.of)
-    // The book's one planted C7 is two histories (the Captain's two fathers): read again since
-    // reader.v7 (plan Suggestions.md), so it is a pair to recall once accepted.
-    expect(FINDABLE_CONTRADICTIONS.filter((each) => each.rule === 'C7')).toHaveLength(1)
-    expect(report.score.recall.C7).toEqual({ right: 1, of: 1 })
+    // The book's one planted C7 is two histories (the Captain's two fathers), not read (plan
+    // ReaderNarrow.md; concrete-only suggestions, plan Suggestions.md, 2026-10-15): C7 has no
+    // planted pair to recall; it still pairs detail: claims.
+    expect(FINDABLE_CONTRADICTIONS.filter((each) => each.rule === 'C7')).toEqual([])
+    expect(report.score.recall.C7).toEqual({ right: 0, of: 0 })
     expect(report.score.orders.right).toBe(report.score.orders.of)
     expect(report.score.labels.right).toBe(report.score.labels.of)
     expect(report.score.underlines.precision.right).toBe(report.score.underlines.precision.of)
