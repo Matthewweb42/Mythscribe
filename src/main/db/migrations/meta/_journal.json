@@ -288,6 +288,13 @@
       "when": 1791962578343,
       "tag": "0040_scene_flashback",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1792099377167,
+      "tag": "0041_notebook",
+      "breakpoints": true
     }
   ]
 }

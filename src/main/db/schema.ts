@@ -29,6 +29,7 @@ import { CATEGORY_ICONS, CATEGORY_ORIGINS } from '../../shared/categories'
 import { ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
 import { FACT_ORIGINS, FACT_STATUSES } from '../../shared/facts'
 import { CHANGE_KINDS, CHANGE_STATUSES } from '../../shared/changes'
+import { NOTEBOOK_AUTHORS, NOTEBOOK_KINDS } from '../../shared/notebook'
 import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { SNAPSHOT_KINDS, SNAPSHOT_SCOPES } from '../../shared/snapshots'
@@ -1549,3 +1550,46 @@ export const verdictCache = sqliteTable(
 )
 export type VerdictCacheRow = typeof verdictCache.$inferSelect
 export type VerdictCacheInsert = typeof verdictCache.$inferInsert
+
+/**
+ * The notebook (notes redesign phase 1, migration `0041_notebook`): the author's note pages and
+ * folders. `content` is Tiptap JSON (null for a folder or an empty page), `plain` its derived text
+ * (search and prompts), `deleted` set while a delete can still be undone.
+ */
+export const notebookItem = sqliteTable(
+  'notebook_item',
+  {
+    id: text('id').primaryKey(),
+    parentId: text('parent_id').references((): AnySQLiteColumn => notebookItem.id, {
+      onDelete: 'cascade'
+    }),
+    kind: text('kind', { enum: NOTEBOOK_KINDS }).notNull(),
+    title: text('title').notNull(),
+    content: text('content'),
+    plain: text('plain').notNull().default(''),
+    position: real('position').notNull(),
+    deleted: text('deleted'),
+    created: text('created').notNull(),
+    modified: text('modified').notNull()
+  },
+  (t) => [index('notebook_item_parent_idx').on(t.parentId, t.position)]
+)
+export type NotebookItemRow = typeof notebookItem.$inferSelect
+export type NotebookItemInsert = typeof notebookItem.$inferInsert
+
+/** A kept version of a notebook page (the Undo of Ms Scribe's edits; at most 20 per page). */
+export const notebookVersion = sqliteTable(
+  'notebook_version',
+  {
+    id: text('id').primaryKey(),
+    pageId: text('page_id')
+      .notNull()
+      .references(() => notebookItem.id, { onDelete: 'cascade' }),
+    author: text('author', { enum: NOTEBOOK_AUTHORS }).notNull(),
+    title: text('title').notNull(),
+    content: text('content'),
+    created: text('created').notNull()
+  },
+  (t) => [index('notebook_version_page_idx').on(t.pageId, t.created)]
+)
+export type NotebookVersionRow = typeof notebookVersion.$inferSelect

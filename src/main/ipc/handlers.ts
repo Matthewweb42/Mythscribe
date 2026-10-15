@@ -274,6 +274,17 @@ import { clearStoryBible } from '../knowledge/bibleClear'
 import { convertKnowledgeFacts } from '../knowledge/factConversion'
 import { listTodo, reopenTodo, settleTodo, syncLocalTodo } from '../knowledge/todoStore'
 import {
+  createNotebookItem,
+  deleteNotebookItem,
+  getNotebookPage,
+  listNotebook,
+  listNotebookVersions,
+  moveNotebookItem,
+  restoreNotebookItem,
+  restoreNotebookVersion,
+  updateNotebookItem
+} from '../notebook/notebookStore'
+import {
   runTodoPass,
   suggestTodo,
   todoCheckEstimate,
@@ -2746,6 +2757,43 @@ export function registerHandlers({
 
   // F-9.16: the To do list. Settling or reopening an item is the author's; a dismissed name
   // reaches the Tags panel's proposals, a dismissed contradiction the Continuity panel.
+  // Notes redesign phase 1: the notebook. Every write tells the windows which items moved.
+  const notebookMoved = (ids: string[]): void => emit(windows(), 'notebook:changed', { ids })
+  const notebookDb = (): TreeDb => manager.require().connection.orm
+  register('notebook:list', () => listNotebook(notebookDb()))
+  register('notebook:get', ({ id }) => getNotebookPage(notebookDb(), id))
+  register('notebook:create', ({ parentId, kind, title, content }) => {
+    const page = createNotebookItem(notebookDb(), { parentId, kind, title, content })
+    notebookMoved([page.id])
+    return page
+  })
+  register('notebook:update', ({ id, title, content }) => {
+    const { page } = updateNotebookItem(notebookDb(), { id, title, content })
+    notebookMoved([id])
+    return page
+  })
+  register('notebook:move', ({ id, parentId, position }) => {
+    moveNotebookItem(notebookDb(), { id, parentId, position })
+    notebookMoved([id])
+    return null
+  })
+  register('notebook:delete', ({ id }) => {
+    deleteNotebookItem(notebookDb(), id)
+    notebookMoved([id])
+    return null
+  })
+  register('notebook:restore', ({ id }) => {
+    const item = restoreNotebookItem(notebookDb(), id)
+    notebookMoved([id])
+    return item
+  })
+  register('notebook:versions', ({ id }) => listNotebookVersions(notebookDb(), id))
+  register('notebook:restoreVersion', ({ versionId }) => {
+    const page = restoreNotebookVersion(notebookDb(), versionId)
+    notebookMoved([page.id])
+    return page
+  })
+
   register('todo:list', () => {
     const db = manager.require().connection.orm
     return listTodo(

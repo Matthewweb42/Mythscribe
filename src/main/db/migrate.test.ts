@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(41)
+    expect(result.version).toBe(42)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1939,5 +1939,34 @@ describe('the Flashback switch (0040, F-16.11, F-16.23) leaves every older row a
         flashback: value
       })
     }
+  })
+})
+
+describe('the notebook (0041, notes redesign phase 1) leaves every older row and column', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, loadMigrations().slice(0, 41))
+    fillEveryTable(db)
+  })
+  afterEach(() => db.close())
+
+  it('adds only the notebook tables, every older object and row unchanged', () => {
+    const tables = tableNamesOf(db).filter((table) => table !== 'schema_migrations')
+    const objectsBefore = schemaOf(db)
+    const rowsBefore = dumpOf(db, tables)
+
+    expect(migrate(db, loadMigrations().slice(0, 42)).applied).toEqual(['0041_notebook'])
+
+    const after = tableNamesOf(db).filter((table) => table !== 'schema_migrations')
+    expect(after.filter((table) => !tables.includes(table)).sort()).toEqual([
+      'notebook_item',
+      'notebook_version'
+    ])
+    const older = (objects: ReturnType<typeof schemaOf>): ReturnType<typeof schemaOf> =>
+      objects.filter((object) => !/^(sqlite_autoindex_)?notebook_/.test(object.name))
+    expect(JSON.stringify(older(schemaOf(db)))).toBe(JSON.stringify(older(objectsBefore)))
+    expect(JSON.stringify(dumpOf(db, tables))).toBe(JSON.stringify(rowsBefore))
   })
 })

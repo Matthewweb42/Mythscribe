@@ -172,6 +172,13 @@ import { RELATION_LABEL_MAX, RelationType } from '../relations'
 import { THREAD_NOTE_MAX, ThreadEvent, ThreadView } from '../threads'
 import { TodoCheckResult, TodoSuggestResult, TodoView } from '../todo'
 import {
+  NotebookItem,
+  NotebookKind,
+  NotebookPage,
+  NotebookTitle,
+  NotebookVersion
+} from '../notebook'
+import {
   CHANGES_PAGE,
   CHANGES_PAGE_MAX,
   ChangeEntry,
@@ -1256,6 +1263,45 @@ export const contract = {
     input: z.object({ id: z.string(), notes: TiptapNode }),
     output: z.object({ modified: z.string() })
   },
+  /**
+   * The notebook (notes redesign phase 1): every live folder and page, without content, ordered
+   * by parent then position. Refetched on `notebook:changed`.
+   */
+  'notebook:list': { input: z.undefined(), output: z.array(NotebookItem) },
+  /** One page with its content. NOT_FOUND for a deleted or unknown id. */
+  'notebook:get': { input: z.object({ id: z.string() }), output: NotebookPage },
+  /** A new folder or page at the end of `parentId` (null: the top level). VALIDATION for a page as parent. */
+  'notebook:create': {
+    input: z.object({
+      parentId: z.string().nullable(),
+      kind: NotebookKind,
+      title: NotebookTitle,
+      content: TiptapNode.nullable().optional()
+    }),
+    output: NotebookPage
+  },
+  /** The author's rename or edit (autosave; keeps no version). Pushes `notebook:changed`. */
+  'notebook:update': {
+    input: z.object({
+      id: z.string(),
+      title: NotebookTitle.optional(),
+      content: TiptapNode.nullable().optional()
+    }),
+    output: NotebookPage
+  },
+  /** Moves an item under `parentId` at `position`. VALIDATION for a folder inside itself. */
+  'notebook:move': {
+    input: z.object({ id: z.string(), parentId: z.string().nullable(), position: z.number() }),
+    output: z.null()
+  },
+  /** Deletes an item and everything in it; `notebook:restore` undoes it. */
+  'notebook:delete': { input: z.object({ id: z.string() }), output: z.null() },
+  /** Undo of a delete. */
+  'notebook:restore': { input: z.object({ id: z.string() }), output: NotebookItem },
+  /** A page's kept versions, newest first (Ms Scribe's and imports' edits). */
+  'notebook:versions': { input: z.object({ id: z.string() }), output: z.array(NotebookVersion) },
+  /** Puts a page back as a version had it (Undo of Ms Scribe's edit). Pushes `notebook:changed`. */
+  'notebook:restoreVersion': { input: z.object({ versionId: z.string() }), output: NotebookPage },
   /**
    * Crash recovery (F-8.3): writes the editor's latest unsaved state of one record to the
    * project's recovery journal (`recovery/<kind>-<id>.json`, atomic replace), overwriting any
@@ -3923,6 +3969,8 @@ export const events = {
   'knowledge:conversionChanged': KnowledgeConversion,
   /** The To do list moved (F-9.16): a sync, a settle, a reopen, or the AI check; the store refetches `todo:list`. */
   'todo:changed': z.object({}),
+  /** The notebook moved (notes redesign phase 1): `ids` are the items written; the tree refetches `notebook:list`. */
+  'notebook:changed': z.object({ ids: z.array(z.string()) }),
   /** The findings of these scenes changed (F-13.4): a check ran in the background or on demand, or one was settled; the store refetches `continuity:list`. */
   'continuity:changed': z.object({ nodeIds: z.array(z.string()) }),
   /**
