@@ -978,7 +978,7 @@ describe('App', () => {
     expect(useFindStore.getState()).toMatchObject({ open: false, query: '' })
   })
 
-  it('a project created with AI on opens in the assistant panel, chat in Ask, no actions menu (F-5.18, 2026-10-07)', async () => {
+  it('a project created with AI on opens in the assistant panel, chat in Write, no actions menu (F-5.18; notes redesign phase 1)', async () => {
     const invoke = install({
       'project:create': info,
       'tree:list': treeFixture,
@@ -1000,8 +1000,8 @@ describe('App', () => {
       within(modes)
         .getAllByRole('radio')
         .map((r) => r.textContent)
-    ).toEqual(['Auto', 'Ask', 'Plan'])
-    expect(within(modes).getByRole('radio', { name: 'Ask' })).toBeChecked()
+    ).toEqual(['Brainstorm', 'Write', 'Vibe'])
+    expect(within(modes).getByRole('radio', { name: 'Write' })).toBeChecked()
     expect(within(panel).queryByRole('button', { name: 'AI actions' })).not.toBeInTheDocument()
     expect(within(panel).getByRole('textbox', { name: 'Message' })).toBeInTheDocument()
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)

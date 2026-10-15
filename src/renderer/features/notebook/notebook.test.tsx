@@ -18,6 +18,7 @@ import { NotebookPageView } from './NotebookPageView'
 import { resetNotebookPageStore, useNotebookPageStore } from './notebookPageStore'
 import { NEW_PAGE_TITLE, resetNotebookStore, unseenAiEdit, useNotebookStore } from './notebookStore'
 import { NotesTab } from './NotesTab'
+import { openNotebookPage, resetOpenNotebookPage } from './openPage'
 
 /**
  * Notes redesign phase 1, slice 1: the notebook store over a fake main that keeps the items and
@@ -220,6 +221,7 @@ beforeEach(() => {
   resetNotebookPageStore()
   resetPendingSaves()
   resetEntityStore()
+  resetOpenNotebookPage()
   install()
 })
 afterEach(() => {
@@ -227,6 +229,7 @@ afterEach(() => {
   resetNotebookPageStore()
   resetPendingSaves()
   resetEntityStore()
+  resetOpenNotebookPage()
   setIpcClient(null)
 })
 
@@ -240,6 +243,16 @@ describe('the notebook store', () => {
     rows.push(row('Places', 'folder', null, 2))
     act(() => emit(['Places']))
     await waitFor(() => expect(store().childrenOf['']).toEqual(['People', 'Ideas', 'Places']))
+  })
+
+  it('opens the page Ms Scribe links to, refetching the tree for a page she just made', async () => {
+    const store = useNotebookStore.getState
+    await store().load()
+    openNotebookPage('Mara')
+    expect(store().openId).toBe('Mara')
+    rows.push(row('Powers', 'page', null, 2, 'Blood over dragon.'))
+    openNotebookPage('Powers')
+    await waitFor(() => expect(store().openId).toBe('Powers'))
   })
 
   it('makes a page in the selected folder, opens it and starts its rename', async () => {

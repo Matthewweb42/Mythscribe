@@ -2006,6 +2006,19 @@ test('create, close, reopen a project on disk', async () => {
   await useAi.uncheck()
   await expect(ghostTextToggle).toBeDisabled()
   await expect.poll(async () => (await aiSettings()).dial).toBe(0)
+  // Notes redesign phase 1: the features this smoke covers below (writing presets, the voice
+  // profile, author rules, editor's notes, proofread…) are archived by default; Settings ›
+  // Archived features brings each one back, so the steps below still cover them.
+  await settingsDialog.getByRole('tab', { name: 'Archived features' }).click()
+  const archiveSwitches = settingsDialog
+    .getByRole('list', { name: 'Archived features' })
+    .getByRole('switch')
+  await expect(archiveSwitches.first()).toBeEnabled()
+  for (let i = 0; i < (await archiveSwitches.count()); i++) {
+    await archiveSwitches.nth(i).uncheck()
+    await expect(archiveSwitches.nth(i)).not.toBeChecked()
+  }
+  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
   // F-5.2: the writing presets start on General; Suspense/Mystery lands in the settings table
   // and survives closing the dialog, with its parameters shown read-only; Custom exposes the
   // fields and a new instruction persists; back to General so nothing below depends on it.
@@ -6490,6 +6503,7 @@ test('create, close, reopen a project on disk', async () => {
   await sectionPicker.click()
   await expect(sectionOptions()).toHaveText([
     /^Manuscript\d+$/,
+    /^Notes\d*$/,
     /^Characters\d+$/,
     /^Places\d+$/,
     /^World\d+$/,

@@ -14,6 +14,7 @@ import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useNotebookPageStore } from './notebookPageStore'
+import { useOpenNotebookPageStore } from './openPage'
 import {
   buildNotebookIndex,
   isWithin,
@@ -384,6 +385,22 @@ useRecordStore.subscribe((state, previous) => {
 })
 useEditPassViewStore.subscribe((state, previous) => {
   if (state.view !== null && state.view !== previous.view) useNotebookStore.getState().close()
+})
+
+// Ms Scribe's sources and note edits ask for a page through `openNotebookPage`: show it, after a
+// refetch when it is new (her `create_note` can land before `notebook:changed` is read).
+useOpenNotebookPageStore.subscribe((state, previous) => {
+  const id = state.openNotebookPageId
+  if (id === null || state.requested === previous.requested) return
+  const notebook = useNotebookStore.getState()
+  if (notebook.byId[id] !== undefined) {
+    notebook.open(id)
+    return
+  }
+  notebook
+    .refetch()
+    .then(() => useNotebookStore.getState().open(id))
+    .catch(failed)
 })
 
 /** Empties the store and drops the subscription. For tests only. */
