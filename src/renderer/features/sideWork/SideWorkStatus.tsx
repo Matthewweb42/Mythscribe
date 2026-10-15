@@ -3,8 +3,10 @@ import { openAssistant } from '@renderer/features/ai/aiActions'
 import { AiWaitText } from '@renderer/features/ai/AiWaitText'
 import { AI_WAIT_CLASS } from '@renderer/features/ai/aiWaitPhrases'
 import { uploadInPanel, useLibraryStore } from '@renderer/features/library/libraryStore'
+import { useMemoryStore } from '@renderer/features/memory/memoryStore'
+import { suggestionCountText } from '@renderer/features/memory/suggestions/suggestionView'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
-import { showSideWork, useShownSideWork, type SideWork } from './sideWork'
+import { hideSideWork, showSideWork, useShownSideWork, type SideWork } from './sideWork'
 import { useAssistantName } from '@renderer/features/shell/viewStore'
 
 const ITEM =
@@ -15,13 +17,15 @@ const ITEM =
  * Organise ("Organising…", then "Organise: ready to review", or its failure) and the upload's
  * sort (its progress, then "Upload: ready to review", or its failure). A click shows the run in
  * the assistant column (opening the column if it is closed) and hides the other; a second click
- * goes back to the conversation. Nothing while no run is under way.
+ * goes back to the conversation. Nothing while no run is under way. F-16.17 (plan
+ * `Suggestions.md`): "4 suggestions" while story memory's suggestions wait (or their review shows).
  */
 export function SideWorkStatus(): React.JSX.Element | null {
   const organise = useOrganiseStore((s) => (s.open ? s.phase : null))
   const flow = useLibraryStore((s) => (uploadInPanel(s.flow) ? s.flow : null))
+  const suggestions = useSuggestionsWaiting()
   const shown = useShownSideWork()
-  if (organise === null && flow === null) return null
+  if (organise === null && flow === null && suggestions === null) return null
   return (
     <span className="flex items-center gap-2" aria-live="polite">
       {organise !== null ? (
@@ -52,8 +56,20 @@ export function SideWorkStatus(): React.JSX.Element | null {
           )}
         </Item>
       ) : null}
+      {suggestions !== null ? (
+        <Item work="suggestions" shown={shown === 'suggestions'}>
+          {suggestionCountText(suggestions)}
+        </Item>
+      ) : null}
     </span>
   )
+}
+
+/** How many suggestions wait, or null while none do and their review is not showing. */
+function useSuggestionsWaiting(): number | null {
+  const count = useMemoryStore((s) => s.status?.suggestions ?? 0)
+  const shown = useMemoryStore((s) => s.suggestionsShown)
+  return count > 0 || shown ? count : null
 }
 
 const ORGANISING = ['Organising…']
@@ -77,8 +93,7 @@ function Item({
       title={shown ? 'Back to the conversation' : `Show it in the ${assistantName} column`}
       onClick={() => {
         if (shown) {
-          if (work === 'organise') useOrganiseStore.getState().hide()
-          else useLibraryStore.getState().hide()
+          hideSideWork(work)
           return
         }
         showSideWork(work)
@@ -99,7 +114,8 @@ function Item({
 export function SideWorkBar(): React.JSX.Element | null {
   const organise = useOrganiseStore((s) => s.open)
   const upload = useLibraryStore((s) => uploadInPanel(s.flow))
-  if (!organise && !upload) return null
+  const suggestions = useSuggestionsWaiting()
+  if (!organise && !upload && suggestions === null) return null
   return (
     <footer
       data-testid="side-work-bar"

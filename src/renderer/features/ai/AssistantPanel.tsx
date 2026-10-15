@@ -43,6 +43,7 @@ import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useAssistantName } from '@renderer/features/shell/viewStore'
 import { useShownSideWork } from '@renderer/features/sideWork/sideWork'
+import { SuggestionsPanel } from '@renderer/features/memory/suggestions/SuggestionsPanel'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { prefersReducedMotion } from '@renderer/lib/motion'
 import { CONVERSATION_BUSY_MESSAGE, useOpenScene } from './aiActions'
@@ -166,7 +167,13 @@ export function AssistantBody(): React.JSX.Element {
     return (
       <>
         <AiResults />
-        {sideWork === 'organise' ? <OrganisePanel /> : <UploadReviewPanel />}
+        {sideWork === 'organise' ? (
+          <OrganisePanel />
+        ) : sideWork === 'upload' ? (
+          <UploadReviewPanel />
+        ) : (
+          <SuggestionsPanel />
+        )}
       </>
     )
   }

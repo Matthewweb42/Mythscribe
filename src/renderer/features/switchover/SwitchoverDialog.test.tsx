@@ -117,7 +117,8 @@ const STATUS: MemoryStatus = {
   todayUsd: 0,
   cloud: null,
   rebuild: null,
-  check: null
+  check: null,
+  suggestions: 0
 }
 
 /** The price `memory:rebuildEstimate` answers on the switched project. */

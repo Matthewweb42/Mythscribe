@@ -16,6 +16,7 @@ import type {
   SceneMemory,
   SecretView,
   SheetMemory,
+  SuggestionView,
   ThreadMemoryView,
   ThreadsMemory,
   ThreadStepView,
@@ -47,6 +48,7 @@ export function sceneMemoryFixture(nodeId: string, over: Partial<SceneMemory> = 
     paused: null,
     claims: [],
     secrets: { touched: [], tension: [], more: 0, checkedUpTo: null },
+    suggestions: [],
     ...over
   }
 }
@@ -70,6 +72,20 @@ export function claimViewFixture(id: string, over: Partial<ClaimView> = {}): Cla
     ref: '1.1',
     para: 0,
     quote: "Mara's eyes were grey",
+    ...over
+  }
+}
+
+/** Plan Suggestions.md: a suggestion as `memory:suggestions` answers it (Mara's grey eyes). */
+export function suggestionViewFixture(
+  id: string,
+  over: Partial<SuggestionView> = {}
+): SuggestionView {
+  return {
+    ...claimViewFixture(id, { state: 'suggested' }),
+    name: 'Mara Vell',
+    line: 'Eyes: grey',
+    note: null,
     ...over
   }
 }
@@ -431,6 +447,7 @@ export function memoryStatusFixture(over: Partial<MemoryStatus> = {}): MemorySta
     cloud: null,
     rebuild: null,
     check: null,
+    suggestions: 0,
     ...over
   }
 }

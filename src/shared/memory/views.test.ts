@@ -33,6 +33,7 @@ describe('the reading views (F-16.18)', () => {
         paused: null,
         claims: [],
         secrets: { touched: [], tension: [], more: 0, checkedUpTo: null },
+        suggestions: [],
         underlines: []
       }).success
     ).toBe(true)

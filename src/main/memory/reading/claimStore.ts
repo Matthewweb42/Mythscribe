@@ -260,7 +260,8 @@ export function setClaimPara(db: TreeDb, id: string, para: number): void {
 }
 
 /**
- * A stale claim whose anchor holds in place again (`restored`): back to `live`, or to `waiting`
+ * A stale claim whose anchor holds in place again (`restored`): back to `live` (a stale claim is
+ * always one the author accepted: a suggestion whose anchor breaks is deleted), or to `waiting`
  * when it still waits on its subject, with its quote's paragraph now. Its proof stands as it was.
  */
 export function restoreClaim(
@@ -272,7 +273,10 @@ export function restoreClaim(
   db.update(claim).set({ para, state }).where(eq(claim.id, id)).run()
 }
 
-/** A literal claim re-proved for free: live, with its new paragraph and anchor. */
+/**
+ * A literal claim re-proved for free: its new paragraph and anchor, in the state it had (a live
+ * line stays the author's, a suggestion stays a suggestion).
+ */
 export function reanchorClaim(
   db: TreeDb,
   id: string,
@@ -283,7 +287,6 @@ export function reanchorClaim(
     .set({
       para: fresh.para,
       anchor: JSON.stringify(fresh.anchor),
-      state: 'live',
       proved: now.toISOString()
     })
     .where(eq(claim.id, id))
@@ -321,23 +324,22 @@ export function deleteClaims(db: TreeDb, ids: readonly string[]): void {
 
 /**
  * Waiting claims settled onto a record (the author's Yes, or a shared alias the name scan now
- * resolves): live, the record set, nothing pending. The caller checks the anchor first (design
- * §2.2 identity rule 7).
+ * resolves): suggestions for the author (plan `Suggestions.md`), the record set, nothing pending.
+ * The caller checks the anchor first (design §2.2 identity rule 7).
  */
 export function attachClaims(
   db: TreeDb,
   ids: readonly string[],
   recordId: string,
-  now: Date,
-  state: 'live' | 'stale' = 'live'
+  now: Date
 ): void {
   if (ids.length === 0) return
   db.update(claim)
     .set({
       recordId,
       pending: null,
-      state,
-      ...(state === 'live' ? { proved: now.toISOString() } : {})
+      state: 'suggested',
+      proved: now.toISOString()
     })
     .where(inArray(claim.id, [...ids]))
     .run()

@@ -3228,6 +3228,121 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       right: true,
       reason:
         'Named, narration, in a scene typed as a flashback: where he stood then (run 2’s one "wrong" literal fact, on a sentence no claim label covered).'
+    },
+    // F-16.17 (plan Suggestions.md, 2026-10-14): the fifth live run's facts on no judged sentence
+    // (two readings, 2026-10-15T04:23 and 04:30 UTC), judged by the main session from the text
+    // alone; the two judgment calls are flagged and listed in QUESTIONS.md.
+    {
+      scene: 's01',
+      p: 33,
+      record: 'harrow-mr',
+      slot: 'age',
+      value: 'three and twenty years',
+      quote: 'the experience of three and twenty years',
+      right: false,
+      reason: 'How long he has been married, not his age.'
+    },
+    {
+      scene: 's02',
+      p: 21,
+      record: 'harrow-mr',
+      slot: 'location',
+      value: 'left the room',
+      quote: 'he left the room',
+      right: false,
+      reason: 'An act (leaving), not a place he is at or goes to.'
+    },
+    {
+      scene: 's03',
+      p: 3,
+      record: 'ashby',
+      slot: 'detail:companion',
+      value: 'his two sisters, the husband of the eldest, and another young man',
+      quote: 'Mr. Ashby, his two sisters, the husband of the eldest, and another young man',
+      right: true,
+      reason: 'Named, narration: the party he came with.'
+    },
+    {
+      scene: 's03',
+      p: 5,
+      record: 'ashby',
+      slot: 'location',
+      value: 'the room',
+      quote: 'Mr. Ashby had soon made himself acquainted with all the principal people in the room',
+      right: true,
+      call: true,
+      reason: 'Named, narration: he is in the room (the assembly room), if a vague place.'
+    },
+    {
+      scene: 'h04',
+      p: 0,
+      record: 'bel',
+      slot: 'location',
+      value: 'Pell House',
+      quote: 'Bel Harrow came to Pell House',
+      right: true,
+      reason: 'Named, narration: where she comes.'
+    },
+    {
+      scene: 'h09',
+      p: 3,
+      record: 'lottie',
+      slot: 'alive',
+      value: 'alive',
+      quote: 'Lottie was eighteen now',
+      right: true,
+      reason: 'Named, narration: eighteen now, and married, so living (the same call as h14’s).'
+    },
+    {
+      scene: 'h13',
+      p: 0,
+      record: 'dunmore',
+      slot: 'alive',
+      value: 'married',
+      quote: 'a married man now',
+      right: false,
+      reason: 'Married is no value of alive.'
+    },
+    {
+      scene: 's01',
+      p: 33,
+      record: 'harrow-mrs',
+      slot: 'detail:occupation',
+      value: 'The business of her life was to get her daughters married',
+      quote: 'The business of her life was to get her daughters married',
+      right: false,
+      reason: 'Her aim in life, not an occupation; and a sentence, not a short value.'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'ashby',
+      slot: 'detail:build',
+      value: 'good-looking and gentlemanlike',
+      quote: 'Mr. Ashby was good-looking and gentlemanlike',
+      right: false,
+      call: true,
+      reason: 'True of him, but his looks and manner, not his build: the wrong slot.'
+    },
+    {
+      scene: 's05',
+      p: 1,
+      record: 'dunmore',
+      slot: 'detail:occupation',
+      value: 'son of the late steward',
+      quote: 'Mr. Dunmore was the son of the late steward at Greyhallow',
+      right: false,
+      reason: 'Kinship, not an occupation.'
+    },
+    {
+      scene: 'h13',
+      p: 0,
+      record: 'dunmore',
+      slot: 'detail:occupation',
+      value: 'a married man now',
+      quote: 'a married man now',
+      right: false,
+      reason: 'Being married is no occupation.'
     }
   ]
 }

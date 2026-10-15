@@ -398,8 +398,9 @@ export async function notAbout(
         recordId: input.recordId,
         pending: null,
         ...(current.slot === 'knows' ? { fromId } : {}),
-        // A line that waited on its subject has it now.
-        state: current.state === 'waiting' ? 'live' : current.state,
+        // A line that waited on its subject has it now: a suggestion until accepted (plan
+        // `Suggestions.md`); an accepted or suggested line keeps its state.
+        state: current.state === 'waiting' ? 'suggested' : current.state,
         proof: 'verified',
         spot: null,
         spotTier: null,

@@ -5,6 +5,8 @@ import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { resetFocusStore } from '@renderer/features/focus/focusStore'
 import { contextReviewFixture } from '@renderer/features/library/libraryFixture'
 import { resetLibraryStore, useLibraryStore } from '@renderer/features/library/libraryStore'
+import { memoryStatusFixture } from '@renderer/features/memory/memoryFixture'
+import { resetMemoryStore, useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { resetOrganiseStore, useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { setIpcClient } from '@renderer/lib/ipc'
@@ -23,11 +25,13 @@ beforeEach(() => {
   resetLibraryStore()
   resetLayoutStore()
   resetFocusStore()
+  resetMemoryStore()
 })
 afterEach(() => {
   resetLayoutStore()
   resetOrganiseStore()
   resetLibraryStore()
+  resetMemoryStore()
 })
 
 const closeAssistant = (): void => {
@@ -99,5 +103,24 @@ describe('SideWorkStatus (2026-10-10, side work)', () => {
       })
     )
     expect(upload).toHaveTextContent('Upload: ready to review')
+  })
+
+  it('says how many story-memory suggestions wait, and shows their review in the column (plan Suggestions.md)', async () => {
+    useMemoryStore.setState({ status: memoryStatusFixture({ suggestions: 0 }) })
+    const { container } = render(<SideWorkBar />)
+    expect(container).toBeEmptyDOMElement()
+    act(() => useMemoryStore.setState({ status: memoryStatusFixture({ suggestions: 4 }) }))
+    const item = screen.getByTestId('side-work-suggestions')
+    expect(item).toHaveTextContent('4 suggestions')
+    useOrganiseStore.setState({ open: true, phase: 'ready', shown: true })
+    await userEvent.click(item)
+    expect(useMemoryStore.getState().suggestionsShown).toBe(true)
+    expect(useOrganiseStore.getState().shown).toBe(false)
+    expect(item).toHaveAttribute('aria-pressed', 'true')
+    // Every one answered: the item stays while the review shows, then goes.
+    act(() => useMemoryStore.setState({ status: memoryStatusFixture({ suggestions: 1 }) }))
+    expect(item).toHaveTextContent('1 suggestion')
+    await userEvent.click(item)
+    expect(useMemoryStore.getState().suggestionsShown).toBe(false)
   })
 })

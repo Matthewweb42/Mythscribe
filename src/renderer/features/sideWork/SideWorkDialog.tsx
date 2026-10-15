@@ -1,4 +1,5 @@
 import { UploadReviewPanel } from '@renderer/features/library/ContextUploadDialog'
+import { SuggestionsPanel } from '@renderer/features/memory/suggestions/SuggestionsPanel'
 import { OrganisePanel } from '@renderer/features/organise/OrganisePanel'
 import { SideWorkPlaceContext, useShownSideWork } from './sideWork'
 
@@ -13,7 +14,13 @@ export function SideWorkDialog(): React.JSX.Element | null {
   if (work === null) return null
   return (
     <SideWorkPlaceContext.Provider value="dialog">
-      {work === 'organise' ? <OrganisePanel /> : <UploadReviewPanel />}
+      {work === 'organise' ? (
+        <OrganisePanel />
+      ) : work === 'upload' ? (
+        <UploadReviewPanel />
+      ) : (
+        <SuggestionsPanel />
+      )}
     </SideWorkPlaceContext.Provider>
   )
 }

@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { Card, Claim, emptyCardFields, emptyYields, Reading, setsState, valueKey } from './claims'
+import {
+  Card,
+  Claim,
+  emptyCardFields,
+  emptyYields,
+  isAccepted,
+  Reading,
+  setsState,
+  valueKey
+} from './claims'
 
 describe('valueKey (F-16.17)', () => {
   it('folds case, quotes, spaces, outer punctuation and a leading article', () => {
@@ -99,5 +108,14 @@ describe('the schemas', () => {
     const base = { slot: 'mood', proof: 'guessed' }
     expect(Claim.shape.slot.safeParse(base.slot).success).toBe(false)
     expect(Claim.shape.proof.safeParse(base.proof).success).toBe(false)
+  })
+})
+
+describe('isAccepted (plan Suggestions.md)', () => {
+  it('is the author’s memory: live and stale lines, never a suggestion or a waiting line', () => {
+    expect(isAccepted({ state: 'live' })).toBe(true)
+    expect(isAccepted({ state: 'stale' })).toBe(true)
+    expect(isAccepted({ state: 'suggested' })).toBe(false)
+    expect(isAccepted({ state: 'waiting' })).toBe(false)
   })
 })

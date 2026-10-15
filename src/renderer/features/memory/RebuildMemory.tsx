@@ -14,6 +14,7 @@ import { ipc } from '@renderer/lib/ipc'
 import { useMemoryStore } from './memoryStore'
 import { CLOUD_REBUILD_CAPS, estimateLine, shortDate } from './memoryView'
 import { findingRuleLine } from './needsALook/findingView'
+import { SuggestionsReview } from './suggestions/SuggestionsReview'
 
 const BUTTON =
   'rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-60'
@@ -37,8 +38,8 @@ export function RebuildMemory(): React.JSX.Element {
         Memory
       </h3>
       <p className="m-0 text-xs text-fg-muted">
-        Rebuild reads the whole book once and keeps what your prose states, each line with its
-        quote. Your text, Pinned, Ideas and Dismissed stay as they are.
+        Rebuild reads the whole book once and suggests what your prose states, each line with its
+        quote, for you to accept. Your text, Pinned, Ideas and Dismissed stay as they are.
       </p>
       {rebuild === null ? null : (
         <p className="m-0 mt-1 text-xs text-fg-muted" data-testid="rebuild-state">
@@ -73,8 +74,8 @@ type Stage =
 /**
  * The *Rebuild memory* dialog (F-16.19): the price first (`memory:rebuildEstimate`, nothing sent),
  * then, confirmed, the rebuild (`memory:rebuild`) with its progress and *Stop* (the queue's Stop),
- * then one summary grouped by sheet with its bulk actions: *Not right* for a sheet's new lines,
- * *Not right* for the new secrets and threads (F-16.22: each goes to Dismissed as *Not a secret*
+ * then one summary: its suggestions on the review deck grouped by character, with *Accept all
+ * for Mara* (F-16.17, plan `Suggestions.md`), *Not right* for the new secrets and threads (F-16.22: each goes to Dismissed as *Not a secret*
  * would), *Not names* for the names whose lines wait, and (F-16.29) *Not a problem* for the
  * possible contradictions the rebuild's sweep opened. Mounted in the project screen (v2); open while the
  * memory store says so.
@@ -155,9 +156,10 @@ function Dialog({ start }: { start: boolean }): React.JSX.Element {
           ) : stage.kind === 'confirm' || stage.kind === 'starting' ? (
             <>
               <p className="m-0">
-                The AI reads every scene of this draft once and keeps what the prose states, each
-                line proved by a quote. It replaces what it read before, scene by scene. Your text,
-                Pinned, Ideas and Dismissed stay as they are.
+                The AI reads every scene of this draft once and suggests what the prose states, each
+                line proved by a quote; nothing is used until you accept it. It replaces the
+                suggestions it made before, scene by scene; the lines you accepted stay while their
+                sentences do. Your text, Pinned, Ideas and Dismissed stay as they are.
               </p>
               <EstimateLines estimate={stage.estimate} />
             </>
@@ -230,7 +232,10 @@ function EstimateLines({ estimate }: { estimate: RebuildEstimate }): React.JSX.E
   )
 }
 
-/** What the last rebuild changed, grouped by sheet, with the bulk actions. */
+/**
+ * What the last rebuild changed: its suggestions on the review deck, grouped by character, then
+ * the new secrets and threads, the possible contradictions and the names, with their bulk actions.
+ */
 function Summary(): React.JSX.Element {
   const [summary, setSummary] = useState<RebuildSummary | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
@@ -275,24 +280,18 @@ function Summary(): React.JSX.Element {
           : ''}
       </p>
       {summary.sheets.length === 0 ? null : (
-        <ul className="m-0 mt-2 list-none p-0" aria-label="New lines by sheet">
-          {summary.sheets.map((sheet) => (
-            <li key={sheet.recordId} className="flex items-center gap-2 border-b border-line py-1">
-              <span className="min-w-0 flex-1">
-                {sheet.name}: {sheet.lines} new line{sheet.lines === 1 ? '' : 's'}
-              </span>
-              <button
-                type="button"
-                className={SMALL}
-                aria-label={`Not right: ${sheet.name}’s new lines`}
-                disabled={busy}
-                onClick={() => void act({ action: 'notRightAll', recordId: sheet.recordId })}
-              >
-                Not right
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div
+          className="mt-2 flex h-[min(55vh,26rem)] flex-col"
+          role="group"
+          aria-label="Suggestions by character"
+          data-testid="rebuild-suggestions"
+        >
+          <SuggestionsReview
+            scope={{ claimIds: summary.sheets.flatMap((sheet) => sheet.claimIds) }}
+            compact
+            empty="Every suggestion from this rebuild is answered."
+          />
+        </div>
       )}
       {summary.topics.length === 0 ? null : (
         <div className="mt-2" role="group" aria-label="New secrets and threads">

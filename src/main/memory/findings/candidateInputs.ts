@@ -10,7 +10,13 @@ import {
   type SceneFacts,
   type TypedScene
 } from '@shared/memory/candidates'
-import { emptyCardFields, setsState, type Card, type Claim } from '@shared/memory/claims'
+import {
+  type Card,
+  type Claim,
+  emptyCardFields,
+  isAccepted,
+  setsState
+} from '@shared/memory/claims'
 import { sceneFlashback } from '@shared/memory/flashback'
 import type { FindingSide } from '@shared/memory/findings'
 import type {
@@ -197,7 +203,10 @@ export const findingsFrame = (db: TreeDb): FindingsFrame => {
   return { nodes, reading: readingOrder(db, nodes) }
 }
 
-/** The active draft's claims the rules read: a record, in a readable scene, not waiting. */
+/**
+ * The active draft's claims the rules read: a record, in a readable scene, accepted by the author
+ * (`isAccepted`: never a suggestion or a waiting line, plan `Suggestions.md`).
+ */
 function readableClaims(
   db: TreeDb,
   draftId: string,
@@ -205,7 +214,7 @@ function readableClaims(
 ): (Claim & { recordId: string })[] {
   return draftClaims(db, draftId).filter(
     (claim): claim is Claim & { recordId: string } =>
-      claim.recordId !== null && claim.state !== 'waiting' && reading.order.has(claim.nodeId)
+      claim.recordId !== null && isAccepted(claim) && reading.order.has(claim.nodeId)
   )
 }
 
@@ -300,7 +309,7 @@ export function sideInputs(
         claim !== null &&
         claim.draftId === draftId &&
         claim.recordId !== null &&
-        claim.state !== 'waiting' &&
+        isAccepted(claim) &&
         reading.order.has(claim.nodeId)
     )
   const scenes = new Set(

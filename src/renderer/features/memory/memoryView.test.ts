@@ -126,7 +126,7 @@ describe('memoryView (F-16.18)', () => {
           names: 2,
           findings: 3
         },
-        'Rebuild finished: 14 new lines on 6 sheets, 2 names, 3 possible contradictions',
+        'Rebuild finished: 14 suggestions for 6 sheets, 2 names, 3 possible contradictions',
         ['Review', 'Done']
       ],
       [
@@ -139,7 +139,7 @@ describe('memoryView (F-16.18)', () => {
           names: 1,
           findings: 1
         },
-        'Rebuild finished: 1 new line on 1 sheet, 1 name, 1 possible contradiction',
+        'Rebuild finished: 1 suggestion for 1 sheet, 1 name, 1 possible contradiction',
         ['Review', 'Done']
       ],
       [

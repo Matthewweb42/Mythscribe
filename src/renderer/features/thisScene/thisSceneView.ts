@@ -5,7 +5,12 @@ import type { FindingView } from '@shared/memory/findings'
 import type { NameQuestion } from '@shared/memory/nameQuestions'
 import type { NameMentionView } from '@shared/memory/nameScan'
 import type { StoryRecordSummary } from '@shared/memory/records'
-import type { DetailConflictNotice, LooseEnd, MemoryNotice } from '@shared/memory/views'
+import type {
+  DetailConflictNotice,
+  LooseEnd,
+  MemoryNotice,
+  SuggestionView
+} from '@shared/memory/views'
 
 /**
  * The pure rules of the This scene panel (F-16.12; story memory v2): how a scene's mentions
@@ -116,6 +121,11 @@ export type NeedsALookGroup =
       /** The ticked ones, drawn behind a collapsed "n done" line (no upkeep: they never crowd it). */
       done: AuthorTodo[]
     }
+  | {
+      id: 'suggestions'
+      /** F-16.17 (plan `Suggestions.md`): what a reading proved here, waiting for Accept. */
+      suggestions: SuggestionView[]
+    }
   | { id: 'questions'; questions: NameQuestion[] }
   | {
       id: 'looseEnds'
@@ -134,6 +144,7 @@ export type NeedsALookGroup =
 export const NEEDS_A_LOOK_HEADING: Record<NeedsALookGroup['id'], string> = {
   conflicts: 'Conflicts',
   todos: 'My to-dos',
+  suggestions: 'Suggestions from this scene',
   questions: 'Questions',
   looseEnds: 'Loose ends',
   notices: 'Notices'
@@ -144,7 +155,8 @@ export const NEEDS_A_LOOK_HEADING: Record<NeedsALookGroup['id'], string> = {
  * **Conflicts** (F-16.9's filed lines whose source changed, decision 4's typed details the text
  * disagrees with, and F-16.27's open contradictions, with the unclear ones apart), the name
  * **Questions**, **Loose ends** (F-16.29) and **Notices** (the reading's among them); a group with
- * nothing in it is not drawn. Ticked to-dos sit apart from the open ones (`done`). `todosOpen`
+ * nothing in it is not drawn. F-16.17 (plan `Suggestions.md`): **Suggestions from this scene**
+ * right after the to-dos, never counted in the badge. Ticked to-dos sit apart from the open ones (`done`). `todosOpen`
  * keeps the to-do group drawn while the author is adding the first one; `conflictsOpen` keeps the
  * Conflicts drawn while a *This one's right* line shows there. `memory` is every reading notice;
  * the typed-detail conflicts among them go under Conflicts.
@@ -158,6 +170,7 @@ export function needsALookGroups(input: {
   findings?: readonly FindingView[]
   unclear?: readonly FindingView[]
   looseEnds?: { items: readonly LooseEnd[]; more: number } | null
+  suggestions?: readonly SuggestionView[]
   todosOpen?: boolean
   conflictsOpen?: boolean
 }): NeedsALookGroup[] {
@@ -174,6 +187,8 @@ export function needsALookGroups(input: {
       done: input.todos.filter((todo) => todo.done)
     })
   }
+  const suggestions = input.suggestions ?? []
+  if (suggestions.length > 0) groups.push({ id: 'suggestions', suggestions: [...suggestions] })
   if (
     conflicts.length > 0 ||
     details.length > 0 ||

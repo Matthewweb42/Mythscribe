@@ -8,7 +8,12 @@ import type { NameQuestion } from '@shared/memory/nameQuestions'
 import { AUTHOR_TODO_TEXT_MAX, type AuthorTodo } from '@shared/memory/authorTodo'
 import { detailFromText } from '@shared/memory/typedVsText'
 import { detailsOf } from '@shared/memory/sceneDetails'
-import type { DetailConflictNotice, HereChip, MemoryNotice } from '@shared/memory/views'
+import type {
+  DetailConflictNotice,
+  HereChip,
+  MemoryNotice,
+  SuggestionView
+} from '@shared/memory/views'
 import { formatCents } from '@renderer/features/ai/usageFormat'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { openNameMention } from '@renderer/features/editor/openPassage'
@@ -40,6 +45,7 @@ import { RebuildMemory } from '@renderer/features/memory/RebuildMemory'
 import { CheckTheBook } from '@renderer/features/memory/checkBook/CheckBook'
 import { Contradictions } from '@renderer/features/memory/needsALook/Contradictions'
 import { LooseEnds } from '@renderer/features/memory/needsALook/LooseEnds'
+import { SuggestionList } from '@renderer/features/memory/suggestions/SuggestionList'
 import { useNow } from '@renderer/features/memory/useNow'
 import { openPassage } from '@renderer/features/editor/openPassage'
 import { locateText } from '@renderer/features/editor/locateText'
@@ -516,6 +522,8 @@ function AmbiguousCard({
   )
 }
 
+const NO_SUGGESTIONS: readonly SuggestionView[] = []
+
 /**
  * Needs a look (design §2.7, P4-D20): quiet and never required. My to-dos on top, then Conflicts
  * (filed lines, typed details, contradictions with the unclear ones apart), Questions, Loose ends
@@ -543,6 +551,10 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
   )
   const looseEnds = useMemoryStore((s) => s.looseEnds)
   const marks = useMemoryStore((s) => s.rightMarks.length)
+  // F-16.17 (plan Suggestions.md): what a reading proved here, waiting for Accept.
+  const suggestions = useMemoryStore((s) =>
+    sceneId === null ? NO_SUGGESTIONS : (s.scenes[sceneId]?.suggestions ?? NO_SUGGESTIONS)
+  )
   const [adding, setAdding] = useState(false)
   const groups = needsALookGroups({
     conflicts,
@@ -553,6 +565,7 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
     findings,
     unclear,
     looseEnds,
+    suggestions,
     todosOpen: adding,
     conflictsOpen: marks > 0
   })
@@ -619,6 +632,8 @@ function NeedsALook({ sceneId }: { sceneId: string | null }): React.JSX.Element 
               adding={adding}
               onDoneAdding={() => setAdding(false)}
             />
+          ) : group.id === 'suggestions' ? (
+            <SuggestionList suggestions={group.suggestions} />
           ) : group.id === 'questions' ? (
             <QuestionList questions={group.questions} />
           ) : (

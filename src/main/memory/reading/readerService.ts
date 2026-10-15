@@ -17,7 +17,9 @@ import {
   type RebuildEstimate,
   type SwitchoverRecord
 } from '@shared/memory/switchover'
+import type { Dismissed } from '@shared/memory/dismissed'
 import type {
+  AcceptSuggestionsResult,
   CheckEstimate,
   CheckReport,
   CheckStartResult,
@@ -32,7 +34,9 @@ import type {
   RebuildAction,
   RebuildStartResult,
   RebuildSummary,
-  SettleResult
+  SettleResult,
+  SuggestionScope,
+  SuggestionView
 } from '@shared/memory/views'
 import { SWITCHOVER_NOTICE_ID } from '@shared/memory/views'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
@@ -104,6 +108,12 @@ import { linkPlansAfterReading } from './planLinks'
 import { markRebuilt, pickStrongDue, runSpotChecks } from './spotChecks'
 import { detailConflicts, keepMine } from './detailConflicts'
 import { notAbout, wrongValue } from './notRight'
+import {
+  acceptSuggestions,
+  dismissSuggestions,
+  listSuggestions,
+  suggestionCount
+} from './suggestions'
 import { checkReport, estimateCheck, priceWaiting } from '../findings/checkBook'
 import {
   HOLD as HOLD_FINDINGS,
@@ -249,6 +259,12 @@ export interface ReaderService {
   rebuildAction(action: RebuildAction): { changed: number }
   /** *Not right* on an AI line (F-16.18): *Wrong value*, or *Not about* with one check. */
   notRight(claimId: string, choice: NotRightChoice, requestId: string): Promise<NotRightResult>
+  /** Plan `Suggestions.md`: the suggestions waiting in a scope, best first. */
+  suggestions(scope: SuggestionScope): SuggestionView[]
+  /** Plan `Suggestions.md`: *Accept* (or, with `undo`, back to suggestions). */
+  accept(claimIds: readonly string[], undo: boolean): AcceptSuggestionsResult
+  /** Plan `Suggestions.md`: *Dismiss* (to the Dismissed list, keyed by the sentence). */
+  dismiss(claimIds: readonly string[]): { dismissed: Dismissed[] }
   /** Typed details were saved: the typed-detail conflicts are looked at again. */
   detailsChanged(): void
   /**
@@ -319,7 +335,8 @@ const NO_STATUS: MemoryStatus = {
   todayUsd: 0,
   cloud: null,
   rebuild: null,
-  check: null
+  check: null,
+  suggestions: 0
 }
 
 /** The start of the local day of `now`, as an ISO string (the footer's "today"). */
@@ -523,7 +540,8 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
             }
           : null,
       rebuild: getRebuild(db),
-      check: findings.progress()
+      check: findings.progress(),
+      suggestions: suggestionCount(db)
     }
   }
 
@@ -1492,6 +1510,30 @@ export function createReaderService(deps: ReaderServiceDeps): ReaderService {
         if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
         throw err
       }
+    },
+
+    suggestions(scope) {
+      return listSuggestions(requireDb(), scope)
+    },
+
+    accept(claimIds, undo) {
+      const db = requireDb()
+      const change = acceptSuggestions(db, claimIds, undo)
+      if (change.claimIds.length > 0) {
+        deps.changed({ nodeIds: change.nodeIds, recordIds: change.recordIds })
+        publish()
+      }
+      return { claimIds: change.claimIds }
+    },
+
+    dismiss(claimIds) {
+      const db = requireDb()
+      const change = dismissSuggestions(db, claimIds, now())
+      if (change.claimIds.length > 0) {
+        deps.changed({ nodeIds: change.nodeIds, recordIds: change.recordIds })
+        publish()
+      }
+      return { dismissed: change.dismissed }
     },
 
     detailsChanged: () => publish(),

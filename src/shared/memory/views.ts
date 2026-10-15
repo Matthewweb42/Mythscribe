@@ -53,6 +53,35 @@ export const ClaimView = z.object({
 })
 export type ClaimView = z.infer<typeof ClaimView>
 
+/**
+ * A suggestion (plan `Suggestions.md`, the author's decision of 2026-10-14): a line a reading
+ * proved, waiting for the author's *Accept* or *Dismiss*. `name` is whose it is, `line` its words
+ * as a sheet would say them ("Eyes: grey", "knows the sold map (overheard)"), `note` who says it
+ * when that is not the narration, or its mode ("Mara says", "remembered"), or null.
+ */
+export const SuggestionView = ClaimView.extend({
+  name: z.string(),
+  line: z.string(),
+  note: z.string().nullable()
+})
+export type SuggestionView = z.infer<typeof SuggestionView>
+
+/**
+ * Which suggestions `memory:suggestions` lists: one scene's, one record's (a knows line counts for
+ * its secret too), these claims (a rebuild's review), or every one of the active draft when none is
+ * given. Best first: literal, then verified; then in reading order.
+ */
+export const SuggestionScope = z.object({
+  nodeId: z.string().optional(),
+  recordId: z.string().optional(),
+  claimIds: z.array(z.string()).optional()
+})
+export type SuggestionScope = z.infer<typeof SuggestionScope>
+
+/** What `memory:accept` answers: the claims it changed (accepted, or with `undo` back to suggested). */
+export const AcceptSuggestionsResult = z.object({ claimIds: z.array(z.string()) })
+export type AcceptSuggestionsResult = z.infer<typeof AcceptSuggestionsResult>
+
 /** A True now line: "Mara: at the quay, last stated in 1.1", "hair: red since 2.1". */
 export const TrueNowView = z.object({
   recordId: z.string(),
@@ -518,7 +547,12 @@ export const SceneMemory = z.object({
    * F-16.22 (P2b slice 4): the secrets the scene touches and its tension lines, as of the scene;
    * every "has none" is scoped by `checkedUpTo` and worded in the renderer alone.
    */
-  secrets: SceneSecrets
+  secrets: SceneSecrets,
+  /**
+   * Plan `Suggestions.md`: the scene's suggestions waiting for the author, best first (Needs a
+   * look's "Suggestions from this scene").
+   */
+  suggestions: z.array(SuggestionView)
 })
 export type SceneMemory = z.infer<typeof SceneMemory>
 
@@ -676,7 +710,12 @@ export const MemoryStatus = z.object({
     .object({ spentUsd: z.number().nonnegative(), capUsd: z.number().nonnegative() })
     .nullable(),
   rebuild: RebuildProgress.nullable(),
-  check: CheckProgress.nullable()
+  check: CheckProgress.nullable(),
+  /**
+   * Plan `Suggestions.md`: how many suggestions of the active draft wait for the author (the
+   * status bar's "4 suggestions").
+   */
+  suggestions: z.number().int().nonnegative()
 })
 export type MemoryStatus = z.infer<typeof MemoryStatus>
 
@@ -884,9 +923,10 @@ export const MemoryHealthReport = z.object({
 export type MemoryHealthReport = z.infer<typeof MemoryHealthReport>
 
 /**
- * What a rebuild changed, grouped by sheet (`memory:rebuildSummary`): the new live lines per
- * record (each can go at once with *Not right*), and the names whose lines wait on a question
- * (*Not names* answers them all).
+ * What a rebuild changed, grouped by sheet (`memory:rebuildSummary`): its suggestions still
+ * waiting per record (plan `Suggestions.md`: the summary reviews them on the deck, grouped by
+ * character, with *Accept all* for one), and the names whose lines wait on a question (*Not names*
+ * answers them all).
  */
 export const RebuildSummary = z.object({
   progress: RebuildProgress,
@@ -930,7 +970,6 @@ export type RebuildStartResult = z.infer<typeof RebuildStartResult>
 
 /** The rebuild summary's bulk actions (`memory:rebuildAction`). */
 export const RebuildAction = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('notRightAll'), recordId: z.string() }),
   z.object({ action: z.literal('notNames') }),
   /** F-16.22: *Not right* on every secret and thread the rebuild made (*Not a secret* each). */
   z.object({ action: z.literal('notTopics') }),

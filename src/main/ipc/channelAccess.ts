@@ -381,6 +381,9 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'memory:scene': 'read',
   'memory:cardLines': 'read',
   'memory:claim': 'read',
+  'memory:suggestions': 'read',
+  'memory:accept': 'write',
+  'memory:dismiss': 'write',
   'memory:sheet': 'read',
   // F-16.22: the grid only reads; Knew before the book, Split and Not a secret change what the
   // author said (Dismissed rows and her own marks), so they are refused after the trial.
@@ -814,6 +817,9 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'memory:scene': 'v2',
   'memory:cardLines': 'v2',
   'memory:claim': 'v2',
+  'memory:suggestions': 'v2',
+  'memory:accept': 'v2',
+  'memory:dismiss': 'v2',
   'memory:sheet': 'v2',
   'memory:knows': 'v2',
   'memory:threads': 'v2',

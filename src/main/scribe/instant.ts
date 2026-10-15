@@ -1,3 +1,4 @@
+import { isAccepted } from '@shared/memory/claims'
 import { holdsSlotCue, type AskIndex, type InstantShape } from '@shared/memory/askParse'
 import type { Claim } from '@shared/memory/claims'
 import { gateSentences, readSetOf, unreadSentences } from '@shared/memory/gate'
@@ -232,9 +233,7 @@ export function instantCard(
         ? []
         : recordClaims(db, shape.recordId, frame.draftId).filter(
             (claim) =>
-              claim.slot === shape.slot &&
-              claim.state !== 'waiting' &&
-              orderOf(frame, claim.nodeId) <= now
+              claim.slot === shape.slot && isAccepted(claim) && orderOf(frame, claim.nodeId) <= now
           )
     const keys = slotKeys(frame, shape.recordId, shape.slot, claims)
     // P4-D25: a possible contradiction on the slot is Ms Scribe's to answer, with both sides.

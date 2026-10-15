@@ -1,5 +1,5 @@
 import type { ReadingOrder } from './asOf'
-import type { ClaimMode, ClaimState, ClaimVoice } from './claims'
+import { isAccepted, type ClaimMode, type ClaimState, type ClaimVoice } from './claims'
 import type { RecordOrigin } from './records'
 import { parseStep, stepRank, type ThreadStep } from './topics'
 import type { SceneRefView, ThreadMemoryView, ThreadStepView } from './views'
@@ -80,7 +80,7 @@ export function threadsAsOf(input: ThreadsAsOfInput): ThreadMemoryView[] {
         const order = reading.order.get(claim.nodeId)
         if (
           claim.recordId !== thread.recordId ||
-          claim.state === 'waiting' ||
+          !isAccepted(claim) ||
           step === null ||
           order === undefined
         ) {

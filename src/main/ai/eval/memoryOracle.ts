@@ -26,7 +26,13 @@ import type { AiRequestDeps } from '../request'
 import { activeDraftId } from '../../draft/draftStore'
 import { invariantIndexed } from '../../memory/nameIndexer'
 import { invariantAliases } from '../../memory/recordStore'
-import { draftClaims, invariantClaims, invariantKnows } from '../../memory/reading/claimStore'
+import {
+  claimsByState,
+  draftClaims,
+  invariantClaims,
+  invariantKnows
+} from '../../memory/reading/claimStore'
+import { acceptSuggestions } from '../../memory/reading/suggestions'
 import { runReading, type ReadingItemEvent } from '../../memory/reading/pipeline'
 import { STEP_VALUE_MAX_WORDS } from '../prompts/reader.v2'
 import {
@@ -695,10 +701,29 @@ export function readingStop(outcomes: ReadonlyMap<string, string>): string | nul
   return `${stop[0]}: ${stop[1].slice(PROVIDER_ERROR.length)} after ${read} scenes read`
 }
 
+/**
+ * What a reading stored and stands: the author's lines (`live`) and the suggestions waiting for her
+ * (plan `Suggestions.md`: every fact a reading proves is a suggestion, so the planted-error bars
+ * judge the suggestions).
+ */
 export const liveClaims = (book: TestBookProject): Claim[] =>
-  draftClaims(book.db, activeDraftId(book.db)).filter((claim) => claim.state === 'live')
+  draftClaims(book.db, activeDraftId(book.db)).filter(
+    (claim) => claim.state === 'live' || claim.state === 'suggested'
+  )
 
-/** P2a's facts: every live claim but the knows lines and thread steps (P2b's, scored apart). */
+/**
+ * An author who accepts every suggestion of the active draft (plan `Suggestions.md`): the replays
+ * of what reads accepted memory (who knows what, Ms Scribe, contradictions, the switch-over) run
+ * on the book as read and accepted whole.
+ */
+export function acceptAll(book: TestBookProject): void {
+  acceptSuggestions(
+    book.db,
+    claimsByState(book.db, 'suggested', activeDraftId(book.db)).map((claim) => claim.id)
+  )
+}
+
+/** P2a's facts: every stored claim but the knows lines and thread steps (P2b's, scored apart). */
 export const liveFacts = (book: TestBookProject): Claim[] =>
   liveClaims(book).filter((claim) => claim.slot !== 'knows' && claim.slot !== 'thread')
 

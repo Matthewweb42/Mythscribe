@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
+import type { Dismissed } from '@shared/memory/dismissed'
 import type { FindingView } from '@shared/memory/findings'
 import { UNDERLINE_SCENES_MAX, type UnderlineView } from '@shared/memory/underlines'
 import type {
@@ -85,6 +86,12 @@ import { ipc } from '@renderer/lib/ipc'
  * *Update my note* hands its proposal to that note conflict's row in Needs a look (`noteEdit`),
  * opening the This scene panel first. *Panel only* on the one-time precision question sets
  * Settings' "Show contradictions" through the AI settings store (their one owner).
+ *
+ * F-16.17 (plan `Suggestions.md`): a reading's lines are suggestions until the author accepts
+ * them. A scene's suggestions ride its memory (`SceneEntry.suggestions`, read again with it), the
+ * status carries how many wait (the status bar's item), and `suggestionsShown` says whether the
+ * review shows in the assistant column (side work). *Accept* and *Dismiss* go to main and offer
+ * *Undo* in a toast; main's `memory:changed` reads the shown scenes and sheets again.
  */
 
 /** A scene's memory as stored here: its lines by id. */
@@ -200,6 +207,19 @@ interface MemoryState {
   dropRightMark: (findingId: string) => void
   /** F-16.27: *Undo* on a *This one's right* line: its Dismissed row goes, the finding comes back. */
   undoRightMark: (findingId: string) => Promise<boolean>
+  /** Plan `Suggestions.md`: the review of every suggestion shows in the assistant column. */
+  suggestionsShown: boolean
+  setSuggestionsShown: (shown: boolean) => void
+  /**
+   * Plan `Suggestions.md`: *Accept* on suggestions, with *Undo* in a toast; answers how many main
+   * accepted, or null when the call failed (toasted).
+   */
+  acceptSuggestions: (claimIds: readonly string[]) => Promise<number | null>
+  /**
+   * Plan `Suggestions.md`: *Dismiss* on suggestions (to the Dismissed list), with *Undo* in a
+   * toast; answers how many main dismissed, or null when the call failed (toasted).
+   */
+  dismissSuggestions: (claimIds: readonly string[]) => Promise<number | null>
   /** The status, the notices and the card lines (what a v2 open loads). */
   load: () => Promise<void>
   loadCardLines: () => Promise<void>
@@ -443,6 +463,59 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
     checkOpen: null,
     rightMarks: [],
     noteEdit: null,
+    suggestionsShown: false,
+
+    setSuggestionsShown(shown) {
+      set({ suggestionsShown: shown })
+    },
+
+    async acceptSuggestions(claimIds) {
+      if (claimIds.length === 0) return 0
+      let accepted: string[]
+      try {
+        accepted = (await ipc().invoke('memory:accept', { claimIds: [...claimIds], undo: false }))
+          .claimIds
+      } catch (err) {
+        report(err)
+        return null
+      }
+      if (accepted.length > 0) {
+        const n = accepted.length
+        toast.successWithAction(`Accepted ${n} suggestion${n === 1 ? '' : 's'}.`, {
+          label: 'Undo',
+          run: () => {
+            ipc().invoke('memory:accept', { claimIds: accepted, undo: true }).catch(report)
+          }
+        })
+      }
+      return accepted.length
+    },
+
+    async dismissSuggestions(claimIds) {
+      if (claimIds.length === 0) return 0
+      const mine = generation
+      let dismissed: Dismissed[]
+      try {
+        dismissed = (await ipc().invoke('memory:dismiss', { claimIds: [...claimIds] })).dismissed
+      } catch (err) {
+        report(err)
+        return null
+      }
+      if (mine === generation) {
+        for (const row of dismissed) useDismissedStore.getState().add(row)
+      }
+      if (dismissed.length > 0) {
+        const n = claimIds.length
+        toast.successWithAction(`Dismissed ${n} suggestion${n === 1 ? '' : 's'}.`, {
+          label: 'Undo',
+          run: () => {
+            const undo = useDismissedStore.getState().undo
+            Promise.all(dismissed.map((row) => undo(row.id))).catch(report)
+          }
+        })
+      }
+      return dismissed.length
+    },
 
     async requestNoteEdit(findingId) {
       const mine = generation
@@ -1038,7 +1111,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => {
         check: NO_CHECK,
         checkOpen: null,
         rightMarks: [],
-        noteEdit: null
+        noteEdit: null,
+        suggestionsShown: false
       })
     }
   }

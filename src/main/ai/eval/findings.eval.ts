@@ -80,6 +80,7 @@ import {
   type LiveRequestDeps
 } from './liveProvider'
 import {
+  acceptAll,
   FINDABLE_CONTRADICTIONS,
   invariants,
   oracleRead,
@@ -261,6 +262,8 @@ export async function openFindingsSession(
             { now: options.now }
           ).deps
     const outcomes = await readBook(book, memory, { providerErrors: 'stop', stopAt: over })
+    // Plan Suggestions.md: contradictions are found in the memory as read and accepted whole.
+    acceptAll(book)
     const settings: AiSettings = { ...defaultAiSettings(), dial: 1 }
     const service = createFindingsService({
       settings: () => settings,
@@ -749,6 +752,8 @@ beforeAll(async () => {
     { now: NOW }
   )
   outcomes = await readBook(book, ai.deps)
+  // Plan Suggestions.md: the book as read and accepted whole (an author who accepts everything).
+  acceptAll(book)
   const inputs = candidateInputs(book.db, activeDraftId(book.db))
   background = backgroundCandidates(inputs)
   check = candidatesC7(inputs)
@@ -995,10 +1000,10 @@ describe('contradictions over the test book: the oracle replay (F-16.27, F-16.28
     })
     expect(report.failures).toEqual([])
     expect(report.score.planted.right).toBe(report.score.planted.of)
-    // The book's one planted C7 is two histories (the Captain's two fathers), no longer read (plan
-    // ReaderNarrow.md): C7 has no planted pair to recall; it still pairs detail: claims.
-    expect(FINDABLE_CONTRADICTIONS.filter((each) => each.rule === 'C7')).toEqual([])
-    expect(report.score.recall.C7).toEqual({ right: 0, of: 0 })
+    // The book's one planted C7 is two histories (the Captain's two fathers): read again since
+    // reader.v7 (plan Suggestions.md), so it is a pair to recall once accepted.
+    expect(FINDABLE_CONTRADICTIONS.filter((each) => each.rule === 'C7')).toHaveLength(1)
+    expect(report.score.recall.C7).toEqual({ right: 1, of: 1 })
     expect(report.score.orders.right).toBe(report.score.orders.of)
     expect(report.score.labels.right).toBe(report.score.labels.of)
     expect(report.score.underlines.precision.right).toBe(report.score.underlines.precision.of)

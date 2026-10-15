@@ -107,7 +107,7 @@ export function noticeLine(notice: MemoryNotice): string {
     case 'detailConflict':
       return `${notice.ref}: the text says ${notice.text}; you typed ${notice.typed}`
     case 'rebuildDone':
-      return `Rebuild finished: ${notice.lines} new line${notice.lines === 1 ? '' : 's'} on ${notice.sheets} sheet${notice.sheets === 1 ? '' : 's'}, ${notice.names} name${notice.names === 1 ? '' : 's'}, ${notice.findings} possible contradiction${notice.findings === 1 ? '' : 's'}`
+      return `Rebuild finished: ${notice.lines} suggestion${notice.lines === 1 ? '' : 's'} for ${notice.sheets} sheet${notice.sheets === 1 ? '' : 's'}, ${notice.names} name${notice.names === 1 ? '' : 's'}, ${notice.findings} possible contradiction${notice.findings === 1 ? '' : 's'}`
     case 'findingsWaiting':
       return `${notice.pairs} possible contradiction${notice.pairs === 1 ? ' waits' : 's wait'} for Check the book: about ${formatCents(notice.priceUsd)}`
     case 'underlinePrecision':

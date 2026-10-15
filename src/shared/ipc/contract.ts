@@ -274,6 +274,7 @@ import {
 } from '../filing'
 import { TwinGateBlocked, TwinGateVerdict } from '../memory/twinGate'
 import {
+  AcceptSuggestionsResult,
   CardNotRight,
   CheckEstimate,
   CheckReport,
@@ -301,6 +302,8 @@ import {
   SettleResult,
   SheetMemory,
   SplitTopicResult,
+  SuggestionScope,
+  SuggestionView,
   ThreadsMemory,
   FindingsView,
   TimelineMemory,
@@ -3763,7 +3766,32 @@ export const contract = {
   'memory:rebuild': { input: z.undefined(), output: RebuildStartResult },
   /** F-16.19: what the last rebuild changed, grouped by sheet; null before any rebuild. */
   'memory:rebuildSummary': { input: z.undefined(), output: RebuildSummary.nullable() },
-  /** F-16.19: the summary's bulk actions (*Not right* for a sheet's new lines, *Not names*). */
+  /**
+   * Plan `Suggestions.md` (F-16.17, the author's decision of 2026-10-14): the suggestions waiting
+   * for the author in `scope` (one scene, one record, some claims, or the active draft), best
+   * first. Local.
+   */
+  'memory:suggestions': { input: SuggestionScope, output: z.array(SuggestionView) },
+  /**
+   * Plan `Suggestions.md`: *Accept* on suggestions (they become the author's memory: sheets, True
+   * now, ages, the Timeline, contradictions and Ms Scribe read them from then on), or with `undo`
+   * (the toast's *Undo*) accepted lines back to suggestions. Claims in another state are left as
+   * they are. Pushes `memory:changed` and the status. Local.
+   */
+  'memory:accept': {
+    input: z.object({ claimIds: z.array(z.string()), undo: z.boolean().default(false) }),
+    output: AcceptSuggestionsResult
+  },
+  /**
+   * Plan `Suggestions.md`: *Dismiss* on suggestions: each goes to the Dismissed list as *Not right*
+   * does (keyed by its sentence, so the same sentence never suggests it again); *Undo* in Dismissed
+   * or on the toast brings it back. Claims that are not suggestions are left. Local.
+   */
+  'memory:dismiss': {
+    input: z.object({ claimIds: z.array(z.string()) }),
+    output: z.object({ dismissed: z.array(Dismissed) })
+  },
+  /** F-16.19: the summary's bulk actions (*Not names*, *Not right* for its topics and findings). */
   'memory:rebuildAction': {
     input: RebuildAction,
     output: z.object({ changed: z.number().int().nonnegative() })

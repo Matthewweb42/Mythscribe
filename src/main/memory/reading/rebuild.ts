@@ -19,7 +19,6 @@ import { answerNameQuestion } from '../questions'
 import { getRecord } from '../recordStore'
 import { readableScenes } from './backlog'
 import { draftClaims } from './claimStore'
-import { dismissClaimsNotRight } from './notRight'
 import { getRebuild, readRow, setRebuild, writeRow } from './readerRows'
 import { markRosterForRebuild } from './roster'
 import { topicNotRight } from './topicActions'
@@ -139,7 +138,9 @@ function rebuildFindings(db: TreeDb, progress: RebuildProgress): RebuildSummary[
 }
 
 /**
- * What the last rebuild changed, grouped by sheet; null before any rebuild. `findingsOn` (the
+ * What the last rebuild changed, grouped by sheet; null before any rebuild. A sheet's lines are
+ * the rebuild's suggestions still waiting for the author (plan `Suggestions.md`): the summary
+ * reviews them on the deck, and one accepted or dismissed leaves its count. `findingsOn` (the
  * Contradiction check switch): off, the possible contradictions are left out, as everywhere.
  */
 export function rebuildSummary(db: TreeDb, findingsOn = true): RebuildSummary | null {
@@ -153,7 +154,7 @@ export function rebuildSummary(db: TreeDb, findingsOn = true): RebuildSummary | 
   const sheets = new Map<string, string[]>()
   const waiting = new Map<string, { text: string; lines: number }>()
   for (const claim of claims) {
-    if (claim.state === 'live' && claim.recordId !== null && !fresh.has(claim.recordId)) {
+    if (claim.state === 'suggested' && claim.recordId !== null && !fresh.has(claim.recordId)) {
       sheets.set(claim.recordId, [...(sheets.get(claim.recordId) ?? []), claim.id])
     }
     if (claim.state === 'waiting' && claim.pending?.kind === 'name') {
@@ -242,20 +243,6 @@ export function applyRebuildAction(
     }
   }
   const claims = rebuildClaims(db, progress, readings)
-  if (action.action === 'notRightAll') {
-    const lines = claims.filter(
-      (claim) => claim.state === 'live' && claim.recordId === action.recordId
-    )
-    db.transaction((tx) => dismissClaimsNotRight(tx, lines, now))
-    const changed = lines.length
-    return {
-      changed,
-      nodeIds: [...new Set(lines.map((claim) => claim.nodeId))],
-      recordIds: [action.recordId],
-      names: false,
-      topicIds: []
-    }
-  }
   const names = new Map<string, string>()
   for (const claim of claims) {
     if (claim.state === 'waiting' && claim.pending?.kind === 'name') {
@@ -338,7 +325,7 @@ export function reviewRebuild(db: TreeDb, startedAt: string): void {
 
 /**
  * The `rebuildDone` notice (design §2.7: after a rebuild, one summary grouped by page, with bulk
- * actions): "Rebuild finished: 14 new lines on 6 sheets, 2 names, 3 possible contradictions" while
+ * actions): "Rebuild finished: 14 suggestions for 6 sheets, 2 names, 3 possible contradictions" while
  * the last rebuild's review is due and the rebuild has finished; null otherwise. The lines, sheets
  * and names are what the rebuild added as it closed; the contradictions are those of its sweep
  * still open. Cheap: no summary is built (it runs on every publish).

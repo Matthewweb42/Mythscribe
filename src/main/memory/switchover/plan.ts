@@ -21,8 +21,8 @@ import { buildSwitchoverModel } from './model'
 /**
  * The switch-over's dry run (F-16.15, plan P1 §6.1 step 2) and consent rows (step 3). Both read
  * only: the model (`buildSwitchoverModel`) is reported by name, and the rebuild that follows the
- * switch (P2a's *Rebuild memory*) is priced from the `reader.v6` and `verify.v4` rows (2026-10-14,
- * plan `ReaderNarrow.md`) over this book's own scene sizes, on the models the author has set up.
+ * switch (P2a's *Rebuild memory*) is priced from the `reader.v7` and `verify.v4` rows (2026-10-14,
+ * plan `Suggestions.md`) over this book's own scene sizes, on the models the author has set up.
  */
 
 /** Where the rebuild's requests would go and at what price. */
@@ -54,7 +54,7 @@ export const REBUILD_PAGE_TOKENS = READER_V3_PAGE_TOKENS
 export { REBUILD_FAST_CHECKS, REBUILD_STRONG_CHECKS }
 
 /**
- * The rebuild's price and time: each scene read whole once (`reader.v6:first`, one request per
+ * The rebuild's price and time: each scene read whole once (`reader.v7:first`, one request per
  * page of `REBUILD_PAGE_TOKENS` prose tokens, the row's other input on each page) and its claims
  * verified once per page (`verify.v4`, every batch on the fast tier since plan `ReaderNarrow.md`),
  * then the spot checks, and (F-16.27, P4 slice 3) the contradiction sweep's `judgeCalls`
@@ -66,7 +66,7 @@ export function estimateRebuild(
   context: RebuildContext,
   judgeCalls = 0
 ): RebuildEstimate {
-  const reader = plannedRow('reader.v6:first')
+  const reader = plannedRow('reader.v7:first')
   const verify = plannedRow('verify.v4')
   const strong = plannedRow('verify.v2:pro')
   const spot = plannedRow('verify.v2:spot')

@@ -21,8 +21,11 @@ export interface InvariantClaim {
   sceneId: string
   /** Where the claim was read from; only `scene` is ever readable. */
   source: MemorySource
-  /** `live` claims are shown and used; `stale` and `waiting` ones are not. */
-  state: 'live' | 'stale' | 'waiting'
+  /**
+   * `live` claims are shown and used; `stale`, `waiting` and `suggested` ones are not (a
+   * suggestion's anchor must hold like a live claim's).
+   */
+  state: 'live' | 'stale' | 'waiting' | 'suggested'
   /** `literal` or `verified` for every stored claim; anything else is a violation. */
   proof: string | null
   anchor: MemoryAnchor
@@ -47,7 +50,7 @@ export interface InvariantCitation {
 /** A knows claim (P2b): its learner's kind and its object's (null when either is gone). */
 export interface InvariantKnows {
   claimId: string
-  state: 'live' | 'stale' | 'waiting'
+  state: 'live' | 'stale' | 'waiting' | 'suggested'
   learnerKind: RecordKind | null
   objectKind: RecordKind | null
 }
@@ -136,9 +139,10 @@ export function checkMemoryInvariants(input: InvariantInput): InvariantViolation
   const violations: InvariantViolation[] = []
 
   for (const claim of input.claims) {
-    if (claim.state === 'live' && claim.anchor.length === 0) {
+    const held = claim.state === 'live' || claim.state === 'suggested'
+    if (held && claim.anchor.length === 0) {
       violations.push({ kind: 'anchorEmpty', claimId: claim.id, sceneId: claim.sceneId })
-    } else if (claim.state === 'live') {
+    } else if (held) {
       const present = input.sceneHashes.get(claim.sceneId) ?? NO_HASHES
       if (!anchorHolds(claim.anchor, present)) {
         violations.push({

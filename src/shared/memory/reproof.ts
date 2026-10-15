@@ -128,8 +128,9 @@ const waitsOnSubject = (claim: ReproofClaim): boolean =>
   claim.state === 'waiting' && claim.pending?.kind === 'subject'
 
 /**
- * Each claim's verdict after a save: a live claim `holds`, `moved` (with its quote's paragraph
- * now), `reproved` (with its new paragraph and anchor) or goes `stale`; a claim waiting on its
+ * Each claim's verdict after a save: a live claim or a suggestion `holds`, `moved` (with its
+ * quote's paragraph now), `reproved` (with its new paragraph and anchor) or goes `stale` (the
+ * caller deletes a suggestion instead: plan `Suggestions.md`); a claim waiting on its
  * subject `holds`, `moved` or goes `stale`; a stale claim is `restored` when its anchor holds in
  * place again (else it is left out). Claims waiting on a new name are left out.
  */
@@ -148,7 +149,8 @@ export function checkAnchors(
       if (inPlace(claim)) verdicts.push({ id: claim.id, verdict: 'restored', para: paraOf(claim) })
       continue
     }
-    if (claim.state !== 'live' && !waitsOnSubject(claim)) continue
+    const held = claim.state === 'live' || claim.state === 'suggested'
+    if (!held && !waitsOnSubject(claim)) continue
     if (inPlace(claim)) {
       const para = paraOf(claim)
       verdicts.push(
@@ -158,7 +160,7 @@ export function checkAnchors(
       )
       continue
     }
-    const fresh = claim.state === 'live' ? reprove(claim, scene) : null
+    const fresh = held ? reprove(claim, scene) : null
     verdicts.push(
       fresh === null
         ? { id: claim.id, verdict: 'stale' }

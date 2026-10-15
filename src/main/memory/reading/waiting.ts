@@ -22,10 +22,10 @@ import {
  * once (P1's name questions), and nothing is guessed onto a look-alike record meanwhile. Her
  * answer settles them:
  * - **Yes** (*Add as* a new record, or a nickname's *Yes*): an anchor check first. A fact whose
- *   sentences still stand in place, in a scene the reader may read, goes live on the record; any
- *   other is attached stale, so the next reading of its paragraph proves it again through the
- *   ladder or drops it (P2a-D23). Facts in another draft are attached stale too: their text is
- *   not the scene's now.
+ *   sentences still stand in place, in a scene the reader may read, becomes a suggestion on the
+ *   record (plan `Suggestions.md`); any other is dropped, so the next reading of its paragraph
+ *   suggests it again through the ladder (P2a-D23). Facts in another draft are dropped too: their
+ *   text is not the scene's now.
  * - The name given to a record **another way** (made in the Story bible, a nickname added there):
  *   `settleOwnedNames` settles its waits as a Yes would; a name two records now share makes its
  *   facts wait on those records, as a shared alias in a fact's sentence does (P2a-D22).
@@ -35,7 +35,7 @@ import {
 
 export interface SettledName {
   attached: string[]
-  /** Attached stale: read again through the ladder at the next reading of their paragraph. */
+  /** Dropped (their sentences no longer stand): suggested again at the next reading of their paragraph. */
   restaled: string[]
   deleted: string[]
   /** The scenes whose facts moved. */
@@ -82,9 +82,12 @@ export function settleWaitingName(
     if (holds) settled.attached.push(claim.id)
     else settled.restaled.push(claim.id)
   }
+  // Plan `Suggestions.md`: a settled fact is a suggestion; one whose sentences no longer stand (or
+  // stand only in a draft or scene not read) is dropped, and the next reading of its paragraph
+  // suggests it again for the record if the text still says it.
   db.transaction((tx) => {
     attachClaims(tx, settled.attached, recordId, now)
-    attachClaims(tx, settled.restaled, recordId, now, 'stale')
+    deleteClaims(tx, settled.restaled)
   })
   return settled
 }

@@ -32,6 +32,7 @@ import { dismissedKeys } from '../../memory/dismissedStore'
 import { findingsFrame } from '../../memory/findings/candidateInputs'
 import { sweepCalls } from '../../memory/findings/findingsService'
 import { findingsOf, invariantFindings } from '../../memory/findings/findingStore'
+import { runFindingsJob } from '../../memory/findings/findingsJob'
 import { scanNamesFor, staleNameScans } from '../../memory/nameIndexer'
 import {
   indexNodePassages,
@@ -87,7 +88,7 @@ import {
   type LiveProvider,
   type LiveRequestDeps
 } from './liveProvider'
-import { invariants, oracleRead, oracleVerify, sceneOf } from './memoryOracle'
+import { acceptAll, invariants, oracleRead, oracleVerify, sceneOf } from './memoryOracle'
 import {
   cutLines,
   plantedBarLines,
@@ -664,6 +665,19 @@ export async function rebuildMemory(
       }
       // The queue's last change lands a moment after its last job.
       await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    if (started.ok && error === null && !stopped) {
+      // Plan Suggestions.md: the rebuild's lines are suggestions, which the contradictions never
+      // read; the author accepts every one, and the contradictions are found among them and
+      // judged, as the rebuild's sweep did while lines were stored live.
+      acceptAll(book)
+      runFindingsJob(book.db, options.now(), { cachedVerdicts: true })
+      reader.queueJudge()
+      const end = Date.now() + (options.limitMs ?? REBUILD_LIMIT_MS)
+      while (reader.judging() && Date.now() < end && options.over?.() !== true) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      error = options.providerError?.() ?? null
     }
     return {
       notice,

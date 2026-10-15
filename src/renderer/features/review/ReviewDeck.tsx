@@ -60,6 +60,11 @@ export interface ReviewDeckProps {
   editLabel?: string
   /** Offer "Accept group" (the default); off where each item needs its own look (the To do list). */
   groupAccept?: boolean
+  /**
+   * The group accept's words for this many open items of `group` ("Accept group (3)" by default;
+   * "Accept all for Mara (3)" on the suggestions review, plan `Suggestions.md`).
+   */
+  groupAcceptLabel?: (count: number, group: ReviewDeckGroup) => string
   /** The footer's Apply button; none where accepting applies at once (edit passes). */
   apply?: ReviewDeckApply
   /** Apply by itself once every item is decided and none was skipped. */
@@ -291,7 +296,7 @@ export function ReviewDeck(props: ReviewDeckProps): React.JSX.Element {
         data-testid="review-accept-group"
         onClick={() => decide(groupOpen, 'accepted')}
       >
-        {`Accept group (${groupOpen.length}) ▸`}
+        {`${props.groupAcceptLabel?.(groupOpen.length, group) ?? `Accept group (${groupOpen.length})`} ▸`}
       </button>
     ) : (
       <span aria-hidden="true" className={`${LINK} invisible`}>

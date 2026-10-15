@@ -1,3 +1,4 @@
+import { isAccepted } from '@shared/memory/claims'
 import { z } from 'zod'
 import { backgroundCandidates, candidatesC7 } from '@shared/memory/candidates'
 import {
@@ -430,7 +431,7 @@ export function secretsNobodyLearns(
     slotClaims(db, 'knows', draftId).flatMap((claim) => {
       const how = parseHow(claim.how)
       return claim.objectId !== null &&
-        claim.state !== 'waiting' &&
+        isAccepted(claim) &&
         frame.reading.order.has(claim.nodeId) &&
         how !== null &&
         LEARNS.includes(how) &&

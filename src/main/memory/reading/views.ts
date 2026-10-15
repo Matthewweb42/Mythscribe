@@ -46,6 +46,7 @@ import { secretTopic, sheetKnows, storedGrid, storedKnows } from './knowsViews'
 import type { KnowsAsOf } from '@shared/memory/whoKnows'
 import { getReading, lastReading } from './readingStore'
 import { getSceneRead } from './sceneReadStore'
+import { listSuggestions } from './suggestions'
 import { heldCard, hereChips, readingOrder, rowTexts } from './readingFrame'
 import { sheetTime, timeFrame, type TimeFrame } from './timeViews'
 
@@ -315,7 +316,8 @@ export function sceneMemory(db: TreeDb, nodeId: string): SceneMemory {
       nodeId,
       knowers.map((chip) => chip.recordId),
       povOf(knowers)
-    )
+    ),
+    suggestions: listSuggestions(db, { nodeId })
   }
 }
 

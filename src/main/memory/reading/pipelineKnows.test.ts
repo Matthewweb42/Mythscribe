@@ -39,6 +39,7 @@ import {
 } from './readingFixture'
 import { notAbout, wrongValue } from './notRight'
 import { getSceneRead } from './sceneReadStore'
+import { acceptSuggestions } from './suggestions'
 import { markRebuilt, runSpotChecks } from './spotChecks'
 import { invariantTopics, listTopics, recordTopicQuotes, sceneTopicQuotes } from './topicStore'
 
@@ -348,7 +349,7 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
     expect(outcome).toMatchObject({ read: true, topicIds: [map, heir].sort() })
     if (outcome.read) expect(outcome.recordIds).toEqual(expect.arrayContaining([tomas, orrin, map]))
     expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
-      promptVersion: 'reader.v6',
+      promptVersion: 'reader.v7',
       verifyVersion: 'verify.v4'
     })
     expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toEqual({
@@ -364,6 +365,11 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
 
   it('lists the topics after the record roster from then on, and never sends an absence', async () => {
     await read(fake(SCENE_ONE_PLAN))
+    // Plan Suggestions.md: only the knows lines the author accepted are told to the reader.
+    acceptSuggestions(
+      db,
+      claimsOf().map((claim) => claim.id)
+    )
     saveDocument(db, two, doc('The map had been sold by Tomas.'))
     scanNamesFor(db, two, NOW)
     const ai = fake({ lines: [] })

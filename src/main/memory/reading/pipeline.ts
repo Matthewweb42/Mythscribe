@@ -100,7 +100,7 @@ import { activeDraftId, currentDraftId } from '../../draft/draftStore'
 import { STEP_VALUE_MAX_WORDS } from '../../ai/prompts/reader.v2'
 import { readerV3PageTokens } from '../../ai/prompts/reader.v3'
 import { readerV4OutputCap } from '../../ai/prompts/reader.v4'
-import { READER_V6_PROMPT_VERSION, buildReaderV6Prompt } from '../../ai/prompts/reader.v6'
+import { READER_V7_PROMPT_VERSION, buildReaderV7Prompt } from '../../ai/prompts/reader.v7'
 import { VERIFY_UNNAMED_MARK, verifyV2Batches, type VerifyV2Item } from '../../ai/prompts/verify.v2'
 import { VERIFY_V4_PROMPT_VERSION, buildVerifyV4Prompt } from '../../ai/prompts/verify.v4'
 import { cancelInflight } from '../../ai/inflight'
@@ -325,7 +325,7 @@ async function send(
     messages: AiMessage[]
     maxTokens: number
     childId: string
-    promptVersion: typeof READER_V6_PROMPT_VERSION | typeof VERIFY_V4_PROMPT_VERSION
+    promptVersion: typeof READER_V7_PROMPT_VERSION | typeof VERIFY_V4_PROMPT_VERSION
   }
 ): Promise<AiRequestResult> {
   stopIfCancelled(input.signal)
@@ -1235,7 +1235,7 @@ export async function runReading(
       const ask = async (
         parts: ReadPiece['paragraphs']
       ): Promise<{ answer: ReaderAnswer | null; cut: boolean }> => {
-        const prompt = buildReaderV6Prompt({
+        const prompt = buildReaderV7Prompt({
           ...base,
           paragraphs: parts.map((part) => ({ p: part.p, text: texts[part.p] ?? '' }))
         })
@@ -1247,7 +1247,7 @@ export async function runReading(
           messages: prompt.messages,
           maxTokens: prompt.maxTokens,
           childId: `${input.requestId}:r${requests}`,
-          promptVersion: READER_V6_PROMPT_VERSION
+          promptVersion: READER_V7_PROMPT_VERSION
         })
         return { answer: parseReaderAnswer(result.text), cut: result.finishReason === 'length' }
       }
@@ -2757,7 +2757,7 @@ export async function runReading(
           purpose,
           pages: requests,
           paras: ranges([...readParas]),
-          promptVersion: READER_V6_PROMPT_VERSION,
+          promptVersion: READER_V7_PROMPT_VERSION,
           verifyVersion: spend.verifySent ? VERIFY_V4_PROMPT_VERSION : null,
           model: spend.model,
           tokensIn: spend.tokensIn,
@@ -2880,7 +2880,9 @@ export async function runReading(
         anchor: claim.anchor,
         proof: claim.proof,
         change: claim.change,
-        state: claim.pending === null ? 'live' : 'waiting',
+        // Plan `Suggestions.md` (the author's decision of 2026-10-14): every fact a reading proves
+        // is a suggestion until she accepts it; nothing reads it as memory before then.
+        state: claim.pending === null ? 'suggested' : 'waiting',
         how: claim.how,
         fromId: claim.fromId,
         topicQuoteId: claim.topicQuoteId

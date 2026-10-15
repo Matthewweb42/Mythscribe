@@ -9,6 +9,7 @@ import {
   findingViewFixture,
   installFakeMain,
   memoryStatusFixture,
+  suggestionViewFixture,
   type FakeMain
 } from './memoryFixture'
 import { resetMemoryStore, useMemoryStore } from './memoryStore'
@@ -17,8 +18,9 @@ import { RebuildDialog, RebuildMemory } from './RebuildMemory'
 
 /**
  * F-16.19 (plan P2a §4): *Rebuild memory* from the Book tab: the price first, nothing sent, then
- * the rebuild with its progress and Stop, then one summary grouped by sheet with *Not right* for
- * a sheet's new lines and *Not names* for the names waiting.
+ * the rebuild with its progress and Stop, then one summary: its suggestions on the review deck
+ * grouped by character with *Accept all for Mara Vell* (plan Suggestions.md), and *Not names* for
+ * the names waiting.
  */
 
 const ESTIMATE: RebuildEstimate = {
@@ -53,12 +55,27 @@ const SUMMARY: RebuildSummary = {
 }
 
 let main: FakeMain
+/** The rebuild's suggestions still waiting (`memory:suggestions` answers them). */
+let waiting = [
+  suggestionViewFixture('a'),
+  suggestionViewFixture('b', { line: 'Hair: red', value: 'red', slot: 'hair', label: 'Hair' })
+]
 
 beforeEach(() => {
   resetMemoryStore()
   resetIndexingStore()
   resetDismissedStore()
+  waiting = [
+    suggestionViewFixture('a'),
+    suggestionViewFixture('b', { line: 'Hair: red', value: 'red', slot: 'hair', label: 'Hair' })
+  ]
   main = installFakeMain({
+    'memory:suggestions': () => waiting,
+    'memory:accept': (input) => {
+      const ids = (input as { claimIds: string[] }).claimIds
+      waiting = waiting.filter((each) => !ids.includes(each.id))
+      return { claimIds: ids }
+    },
     'memory:rebuildEstimate': () => ESTIMATE,
     'memory:rebuild': () => ({ ok: true, queued: 90, estimate: ESTIMATE }),
     'memory:status': () => memoryStatusFixture({ rebuild: RUNNING }),
@@ -111,13 +128,23 @@ describe('Rebuild memory (F-16.19)', () => {
     })
     const summary = await within(dialog).findByTestId('rebuild-summary')
     expect(summary).toHaveTextContent('Read 90 of 90 scenes.')
-    expect(summary).toHaveTextContent('Mara Vell: 5 new lines')
     expect(summary).toHaveTextContent('Hesk: 2 lines')
+    // Plan Suggestions.md: the rebuild's suggestions on the deck, grouped by character.
+    const review = await within(summary).findByTestId('suggestions-review')
+    expect(main.sent('memory:suggestions')).toEqual([{ claimIds: ['a', 'b'] }])
+    expect(within(review).getByTestId('suggestion-card')).toHaveTextContent(
+      'Mara Vell · Eyes: grey'
+    )
     await act(async () => {
-      fireEvent.click(
-        within(summary).getByRole('button', { name: 'Not right: Mara Vell’s new lines' })
-      )
+      const [acceptAll] = within(review).getAllByTestId('review-accept-group')
+      if (acceptAll === undefined) throw new Error('no Accept all')
+      expect(acceptAll).toHaveTextContent('Accept all for Mara Vell (2)')
+      fireEvent.click(acceptAll)
     })
+    expect(main.sent('memory:accept')).toEqual([{ claimIds: ['a', 'b'], undo: false }])
+    expect(await within(summary).findByTestId('suggestions-none')).toHaveTextContent(
+      'Every suggestion from this rebuild is answered.'
+    )
     await act(async () => {
       fireEvent.click(within(summary).getByRole('button', { name: 'Not names' }))
     })
@@ -143,7 +170,6 @@ describe('Rebuild memory (F-16.19)', () => {
       )
     })
     expect(main.sent('memory:rebuildAction')).toEqual([
-      { action: 'notRightAll', recordId: 'r-mara' },
       { action: 'notNames' },
       { action: 'notTopics' },
       { action: 'notProblems' }

@@ -155,7 +155,7 @@ describe('the claim store (F-16.17)', () => {
     expect(claimsByState(db, 'live', activeDraftId(db))).toHaveLength(1)
   })
 
-  it('attaches waiting claims to a record, live with nothing pending', () => {
+  it('attaches waiting claims to a record, a suggestion with nothing pending', () => {
     const [id] = seedClaims(
       db,
       one,
@@ -173,7 +173,11 @@ describe('the claim store (F-16.17)', () => {
       NOW
     )
     attachClaims(db, [id ?? ''], mara, NOW)
-    expect(getClaim(db, id ?? '')).toMatchObject({ recordId: mara, pending: null, state: 'live' })
+    expect(getClaim(db, id ?? '')).toMatchObject({
+      recordId: mara,
+      pending: null,
+      state: 'suggested'
+    })
   })
 
   it('revives a stale claim with a fresh quote, paragraph, anchor and proof', () => {
@@ -566,7 +570,11 @@ describe('the anchors job (F-16.17, P2a-D19, P2a-D22)', () => {
       NOW
     )
     expect(runAnchors(db, one, NOW).attached).toEqual([id])
-    expect(getClaim(db, id ?? '')).toMatchObject({ recordId: mara, state: 'live', pending: null })
+    expect(getClaim(db, id ?? '')).toMatchObject({
+      recordId: mara,
+      state: 'suggested',
+      pending: null
+    })
   })
 
   it('parks the claims of a scene marked as an Idea, uncounted, and brings them back after', () => {

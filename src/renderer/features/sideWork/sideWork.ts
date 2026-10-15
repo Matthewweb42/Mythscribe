@@ -1,6 +1,7 @@
 import { createContext, useContext, useState } from 'react'
 import { create } from 'zustand'
 import { uploadInPanel, useLibraryStore } from '@renderer/features/library/libraryStore'
+import { useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 
 /**
@@ -8,8 +9,10 @@ import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
  * upload review run in the background under a status-bar item, and show in the assistant
  * column only when the author opens them there. Each run's store owns whether it shows
  * (`organiseStore.shown`, `libraryStore.shown`); this is the one read of which one does.
+ * F-16.17 (plan `Suggestions.md`): story memory's suggestions are side work too
+ * (`memoryStore.suggestionsShown`), shown in the column only.
  */
-export type SideWork = 'organise' | 'upload'
+export type SideWork = 'organise' | 'upload' | 'suggestions'
 
 /**
  * Where the shown side work sits (F-7.12): the assistant column (the status-bar item), or the
@@ -24,9 +27,10 @@ export const useSideWorkPlaceStore = create<{ place: SideWorkPlace }>(() => ({ p
 export function useShownSideWork(place: SideWorkPlace = 'column'): SideWork | null {
   const organise = useOrganiseStore((s) => s.open && s.shown)
   const upload = useLibraryStore((s) => s.shown && uploadInPanel(s.flow))
+  const suggestions = useMemoryStore((s) => s.suggestionsShown)
   const here = useSideWorkPlaceStore((s) => s.place === place)
   if (!here) return null
-  return organise ? 'organise' : upload ? 'upload' : null
+  return organise ? 'organise' : upload ? 'upload' : suggestions ? 'suggestions' : null
 }
 
 /** Shows one piece of side work in `place` (the assistant column by default) and hides the other. */
@@ -34,11 +38,24 @@ export function showSideWork(work: SideWork, place: SideWorkPlace = 'column'): v
   useSideWorkPlaceStore.setState({ place })
   if (work === 'organise') {
     useLibraryStore.getState().hide()
+    useMemoryStore.getState().setSuggestionsShown(false)
     useOrganiseStore.getState().show()
+  } else if (work === 'upload') {
+    useOrganiseStore.getState().hide()
+    useMemoryStore.getState().setSuggestionsShown(false)
+    useLibraryStore.getState().show()
   } else {
     useOrganiseStore.getState().hide()
-    useLibraryStore.getState().show()
+    useLibraryStore.getState().hide()
+    useMemoryStore.getState().setSuggestionsShown(true)
   }
+}
+
+/** Hides one piece of side work (the run goes on under its status-bar item). */
+export function hideSideWork(work: SideWork): void {
+  if (work === 'organise') useOrganiseStore.getState().hide()
+  else if (work === 'upload') useLibraryStore.getState().hide()
+  else useMemoryStore.getState().setSuggestionsShown(false)
 }
 
 /** Back to the column for the next show. For tests only. */

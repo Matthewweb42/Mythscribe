@@ -38,12 +38,14 @@ import { TEST_BOOK_LABELS } from '../../memory/testBook/labels'
 import { buildTestBookProject, type TestBookProject } from '../../memory/testBook/project'
 import {
   cutLines,
+  judgeStored,
   PLANTED_PASS_BARS,
   plantedBarLines,
   plantedFailures,
   plantedMeasures,
   scoreStored,
-  unreviewedLines
+  unreviewedLines,
+  type StoredJudgment
 } from './plantedScore'
 import { fakeChatServer } from './fakeChatServer'
 import {
@@ -351,7 +353,13 @@ interface LivePlant {
   mode?: 'dream'
   /** A kinship's or relation's other record. */
   object?: string
+  /**
+   * The gate that refuses it, or `suggested` (plan `Suggestions.md`): since `reader.v7` reads
+   * traits again no gate refuses it, and the checker passes it, so it is a suggestion the author
+   * dismisses (judged wrong in `storedVerdicts`, a judgment call each).
+   */
   refused:
+    | 'suggested'
     | 'notRead'
     | 'ambiguous'
     | 'actor'
@@ -370,9 +378,10 @@ interface LivePlant {
 }
 
 /*
- * Since plan ReaderNarrow.md (2026-10-14) a plant in a slot no longer read (traits, history,
- * relation, role, clothing, objects) is refused as `notRead` before any other gate: the earlier
- * runs' plants there stay, each now refused for that.
+ * Since plan ReaderNarrow.md (2026-10-14) a plant in a slot no longer read (relation, role,
+ * clothing, objects) is refused as `notRead` before any other gate. Since plan Suggestions.md
+ * (reader.v7) traits and history are read again: their plants meet the gates of the earlier rounds
+ * (subject, actor), and two pass as suggestions for the author to dismiss.
  */
 const LIVE_PLANTS: readonly LivePlant[] = [
   // The shared surname: the checker picked Mr. Harrow, and "Harrow's temper" was stored.
@@ -383,7 +392,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'traits',
     value: 'short tempered',
     quote: 'Harrow’s temper was short that morning',
-    refused: 'notRead'
+    refused: 'subject'
   },
   // Both sisters walk: one of them is never the fact's subject.
   {
@@ -420,7 +429,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'traits',
     value: 'talked of everything except Thornmere',
     quote: 'talked of everything except Thornmere',
-    refused: 'notRead'
+    refused: 'subject'
   },
   {
     scene: 'h03',
@@ -548,7 +557,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'traits',
     value: 'violent against him',
     quote: 'Amongst the most violent against him was Mrs. Harrow',
-    refused: 'notRead'
+    refused: 'suggested'
   },
   // The most invented slot of the second run.
   {
@@ -584,7 +593,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     quote: 'he asked Miss Pell',
     voice: 'dialogue',
     speaker: 'harrow-mrs',
-    refused: 'notRead'
+    refused: 'actor'
   },
   // Wrong person: the sugar plum is Hobb's ("he"), not Johanna's.
   {
@@ -594,7 +603,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'history',
     value: 'When they were children he had kept a sugar plum in his coat',
     quote: 'When they were children he had kept a sugar plum in his coat',
-    refused: 'notRead'
+    refused: 'subject'
   },
   // Wrong kind: forty years at the gate is no age.
   {
@@ -688,7 +697,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'trait',
     value: 'quite disconcerted',
     quote: 'Mrs. Harrow was quite disconcerted',
-    refused: 'notRead'
+    refused: 'suggested'
   },
   {
     scene: 's03',
@@ -905,6 +914,7 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
   })
 
   it('refuses each failure in code, before any checker could support it', () => {
+    const outcomes: string[] = []
     for (const plant of LIVE_PLANTS) {
       const ended = events.filter(
         ({ event, scene }) =>
@@ -915,13 +925,16 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
       )
       // (h03's temper is also the oracle's own reject label, refused the same way.)
       expect(ended.length, `${plant.scene} ${plant.slot} “${plant.value}”`).toBeGreaterThan(0)
-      expect(
-        [...new Set(ended.map(({ event }) => event.outcome))],
-        `${plant.scene} ${plant.slot} “${plant.value}”`
-      ).toEqual([plant.refused])
+      const said = [...new Set(ended.map(({ event }) => event.outcome))]
+        .map((outcome) => (outcome === 'verified' ? 'suggested' : outcome))
+        .join(', ')
+      outcomes.push(`${plant.scene} ${plant.slot} “${plant.value}”: ${said}`)
     }
+    expect(outcomes).toEqual(
+      LIVE_PLANTS.map((plant) => `${plant.scene} ${plant.slot} “${plant.value}”: ${plant.refused}`)
+    )
     const live = liveFacts(book)
-    for (const plant of LIVE_PLANTS) {
+    for (const plant of LIVE_PLANTS.filter((each) => each.refused !== 'suggested')) {
       const slot = readSlot(plant.slot)
       const stored = live.filter(
         (claim) =>
@@ -963,10 +976,13 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
       expect(storedFor(book, live, wanted), wanted.id).toBeDefined()
     }
     expect(invariants(book)).toEqual([])
-    // The author's bar holds with every live failure planted, every stored fact right (plan
-    // ReaderNarrow.md: the trait judged a passing state is no longer read).
+    // The bar holds with every live failure planted (plan Suggestions.md): every suggestion right
+    // but the two traits no gate refuses, each a judgment call the author dismisses.
     const { stored } = plantedMeasures(book)
-    expect(stored.wrong).toEqual([])
+    expect(stored.wrong).toEqual([
+      expect.stringMatching(/^s03 ¶3 Mrs\. Harrow traits “quite disconcerted”.*\(judgment call\)$/),
+      expect.stringMatching(/^s03 ¶5 Mrs\. Harrow traits “violent against him”.*\(judgment call\)$/)
+    ])
     expect(stored.unjudged).toEqual([])
     expect(stored.precision.right / stored.precision.of).toBeGreaterThanOrEqual(
       PLANTED_PASS_BARS.storedPrecision
@@ -1032,9 +1048,10 @@ describe('the fourth live run, re-scored on the slots still read (plan ReaderNar
         voice: 'narration',
         proof: 'literal'
       },
-      // A trait and a history: no longer read, left out.
-      { ...fact, slot: 'traits', value: 'proud', quote: 'never judged' },
-      { ...fact, slot: 'history', value: 'came', quote: 'never judged' }
+      // A role and clothing: no longer read, left out (traits and history are read again since
+      // reader.v7, plan Suggestions.md).
+      { ...fact, slot: 'role', value: 'steward', quote: 'never judged' },
+      { ...fact, slot: 'clothing', value: 'a grey coat', quote: 'never judged' }
     ])
     expect(score.precision).toEqual({ right: 2, of: 3 })
     expect(score.notRead).toBe(2)
@@ -1042,6 +1059,143 @@ describe('the fourth live run, re-scored on the slots still read (plan ReaderNar
     expect(score.wrong).toEqual([
       expect.stringMatching(/detail:wealth .*\(verified, narration, now\).*\(judgment call\)$/)
     ])
+  })
+})
+
+describe('the fifth live run, re-scored under the suggestions bar (plan Suggestions.md)', () => {
+  const fact = {
+    p: 0,
+    voice: 'narration',
+    mode: 'now',
+    proof: 'verified'
+  }
+  // The thirteen facts the fifth run (2026-10-15T04:23 and 04:30 UTC) stored on no judged
+  // sentence, as its two reports list them; each judged in `storedVerdicts`.
+  const unjudged = [
+    {
+      scene: 's01',
+      p: 33,
+      record: 'harrow-mr',
+      slot: 'age',
+      value: 'three and twenty years',
+      quote:
+        'the experience of three and twenty years had been insufficient to make his wife understand his character.'
+    },
+    {
+      scene: 's02',
+      p: 21,
+      record: 'harrow-mr',
+      slot: 'location',
+      value: 'left the room',
+      quote: 'he left the room'
+    },
+    {
+      scene: 's03',
+      p: 3,
+      record: 'ashby',
+      slot: 'detail:companion',
+      value: 'his two sisters, the husband of the eldest, and another young man',
+      quote:
+        'it consisted of only five altogether: Mr. Ashby, his two sisters, the husband of the eldest, and another young man'
+    },
+    {
+      scene: 's03',
+      p: 5,
+      record: 'ashby',
+      slot: 'location',
+      value: 'the room',
+      quote: 'Mr. Ashby had soon made himself acquainted with all the principal people in the room'
+    },
+    {
+      scene: 'h04',
+      p: 0,
+      record: 'bel',
+      slot: 'location',
+      value: 'Pell House',
+      quote:
+        'Bel Harrow came to Pell House on the Saturday with her bonnet askew and her cheeks very pink.'
+    },
+    {
+      scene: 'h09',
+      p: 3,
+      record: 'lottie',
+      slot: 'alive',
+      value: 'alive',
+      quote: 'Lottie was eighteen now, and married'
+    },
+    {
+      scene: 'h13',
+      p: 0,
+      record: 'dunmore',
+      slot: 'alive',
+      value: 'married',
+      quote: 'a married man now'
+    },
+    {
+      scene: 's01',
+      p: 33,
+      record: 'harrow-mrs',
+      slot: 'detail:occupation',
+      value: 'The business of her life was to get her daughters married',
+      quote: 'The business of her life was to get her daughters married'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'ashby',
+      slot: 'detail:build',
+      value: 'good-looking and gentlemanlike',
+      quote: 'Mr. Ashby was good-looking and gentlemanlike'
+    },
+    {
+      scene: 's05',
+      p: 1,
+      record: 'dunmore',
+      slot: 'detail:occupation',
+      value: 'son of the late steward',
+      quote: 'Mr. Dunmore was the son of the late steward at Greyhallow,'
+    },
+    {
+      scene: 'h09',
+      p: 3,
+      record: 'lottie',
+      slot: 'alive',
+      value: 'alive',
+      quote: 'Lottie was eighteen now'
+    },
+    {
+      scene: 'h13',
+      p: 0,
+      record: 'dunmore',
+      slot: 'detail:occupation',
+      value: 'a married man now',
+      quote: 'Mr. Dunmore came with it, a married man now'
+    }
+  ].map((each) => ({ ...fact, ...each }))
+
+  it('judges every fact the fifth run left unjudged, with the judgment calls flagged', () => {
+    const judged = unjudged.map((each) => judgeStored(each))
+    expect(judged.filter((each) => each.kind === 'unjudged')).toEqual([])
+    const right = (each: StoredJudgment): boolean => each.kind === 'verdict' && each.right
+    expect(judged.map(right)).toEqual([
+      false, // Mr. Harrow's three and twenty years: how long he was married.
+      false, // he left the room: an act, no place.
+      true, // Mr. Ashby's party.
+      true, // in the room (a judgment call).
+      true, // Bel at Pell House.
+      true, // Lottie alive.
+      false, // married is no state of alive.
+      false, // the business of her life is no occupation.
+      false, // good-looking and gentlemanlike is no build (a judgment call).
+      false, // son of the late steward is kinship, no occupation.
+      true, // Lottie alive (run 2's quote).
+      false // a married man now is no occupation.
+    ])
+    expect(
+      judged.flatMap((each, i) =>
+        each.kind === 'verdict' && each.call ? [unjudged[i]?.value] : []
+      )
+    ).toEqual(['the room', 'good-looking and gentlemanlike'])
   })
 })
 

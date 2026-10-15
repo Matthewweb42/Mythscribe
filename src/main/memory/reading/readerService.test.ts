@@ -18,7 +18,7 @@ import { createProject, projectFolderFor, type ProjectSession } from '../../proj
 import { createNode, getNode, type TreeDb } from '../../tree/treeStore'
 import { manuscriptDocuments } from '../../voice/profile'
 import { createRecord, listRecords, setAliases } from '../recordStore'
-import { getClaim, sceneClaims } from './claimStore'
+import { claimsByState, getClaim, sceneClaims } from './claimStore'
 import { cardAnchorOf, seedClaims } from './claimFixture'
 import { lastReading, insertReading } from './readingStore'
 import {
@@ -436,7 +436,7 @@ describe('leaving a scene and the idle pause (F-16.16)', () => {
     expect(gateScene(db, scene, null)?.decision.read).toBe('nothing')
     expect(
       sceneClaims(db, scene, activeDraftId(db))
-        .filter((claim) => claim.state === 'live')
+        .filter((claim) => claim.state === 'suggested')
         .map((claim) => claim.value)
     ).toEqual(['blue'])
   })
@@ -892,10 +892,23 @@ describe('Rebuild memory (F-16.19, P2a §3.6)', () => {
     ).toBe(true)
     const summary = second2.rebuildSummary()
     expect(summary?.sheets).toEqual([expect.objectContaining({ name: 'Mara Vell', lines: 2 })])
-    // Not right for the sheet's new lines: both go, and stay gone.
-    const recordId = summary?.sheets[0]?.recordId ?? ''
-    expect(second2.rebuildAction({ action: 'notRightAll', recordId })).toEqual({ changed: 2 })
-    expect(sceneClaims(db, second, activeDraftId(db))).toEqual([])
+    // Plan Suggestions.md: the rebuild's lines are suggestions; the status counts them, and an
+    // answer takes each out of the summary.
+    expect(second2.status().suggestions).toBe(2)
+    const ids = summary?.sheets[0]?.claimIds ?? []
+    const [keep, drop] = ids
+    expect(
+      second2
+        .suggestions({ claimIds: ids })
+        .map((each) => each.id)
+        .sort()
+    ).toEqual([...ids].sort())
+    expect(second2.accept([keep ?? ''], false)).toEqual({ claimIds: [keep] })
+    expect(second2.dismiss([drop ?? '']).dismissed).toHaveLength(1)
+    expect(getClaim(db, keep ?? '')?.state).toBe('live')
+    expect(getClaim(db, drop ?? '')).toBeNull()
+    expect(second2.status().suggestions).toBe(0)
+    expect(second2.rebuildSummary()?.sheets).toEqual([])
   })
 
   it('ends where it stood when the queue is stopped, with no spot checks', async () => {
@@ -1363,6 +1376,11 @@ describe('Not right (F-16.18)', () => {
   const readScene = async (ai: FakeAi): Promise<ReaderService> => {
     const reader = service(ai)
     expect(await reader.readNow(scene, 'read-1')).toMatchObject({ ok: true, read: true })
+    // *Not right* is on the author's accepted lines (plan Suggestions.md).
+    reader.accept(
+      sceneClaims(db, scene, activeDraftId(db)).map((claim) => claim.id),
+      false
+    )
     return reader
   }
   const eyes = (): Claim | undefined =>
@@ -1766,6 +1784,14 @@ describe('typed details against the text (decision 4, F-16.18)', () => {
   })
 })
 
+/** Plan Suggestions.md: the author accepts every suggestion of the active draft. */
+function acceptEverything(reader: ReaderService): void {
+  reader.accept(
+    claimsByState(db, 'suggested', activeDraftId(db)).map((claim) => claim.id),
+    false
+  )
+}
+
 describe('the contradiction judge on the reader’s queue (F-16.27, P4 slice 2)', () => {
   const judgeRequests = (ai: FakeAi): CompletionRequest[] =>
     ai.requests.filter((request) => request.messages[0]?.content.startsWith(JUDGE_SENTINEL))
@@ -1776,6 +1802,8 @@ describe('the contradiction judge on the reader’s queue (F-16.27, P4 slice 2)'
     for (const nodeId of [scene, second]) {
       expect(await reader.readNow(nodeId, `read-${nodeId}`)).toMatchObject({ ok: true, read: true })
     }
+    // Contradictions are found only among the author's accepted lines (plan Suggestions.md).
+    acceptEverything(reader)
     runFindingsJob(db, NOW, { cachedVerdicts: true })
     return second
   }
@@ -1812,6 +1840,7 @@ describe('the contradiction judge on the reader’s queue (F-16.27, P4 slice 2)'
     reader.opened()
     expect(await reader.readNow(second, 'read-again')).toMatchObject({ ok: true, read: true })
     await drained(reader)
+    acceptEverything(reader)
     expect(judgeRequests(ai)).toHaveLength(0)
     expect(reader.queueStatus().paused).toBeNull()
     expect(listJobs(db, 'judge')).toEqual([])
@@ -1884,7 +1913,7 @@ describe('Check the book and the rebuild sweep on the reader’s queue (F-16.27,
     ai.requests.filter((request) => request.messages[0]?.content.startsWith(JUDGE_SENTINEL))
 
   it('prices the rebuild’s sweep with the switch on, sweeps once as asked, and asks for a review', async () => {
-    addScene('Second', "Mara's eyes were brown.")
+    const second = addScene('Second', "Mara's eyes were brown.")
     const ai = reading({ providerId: 'cloud' })
     const reader = service(ai)
     const withSweep = reader.rebuildEstimate()
@@ -1893,6 +1922,9 @@ describe('Check the book and the rebuild sweep on the reader’s queue (F-16.27,
     expect(withSweep.requests - without.requests).toBe(2)
     expect(withSweep.costUsd).toBeGreaterThan(without.costUsd)
     settings = { ...settings, features: { ...settings.features, judge: true } }
+    // Plan Suggestions.md: the sweep reads the author's accepted lines, which a rebuild keeps.
+    for (const nodeId of [scene, second]) await reader.readNow(nodeId, `read-${nodeId}`)
+    acceptEverything(reader)
     // Background spend is capped: the sweep is asked spend and runs past it.
     cloud = { ...cloud, capUsd: 0, backgroundUsd: 0 }
     expect(reader.rebuild()).toMatchObject({ ok: true, queued: 2 })
@@ -1911,8 +1943,9 @@ describe('Check the book and the rebuild sweep on the reader’s queue (F-16.27,
       expect.objectContaining({
         id: `rebuildDone:${startedAt}`,
         kind: 'rebuildDone',
-        lines: 2,
-        sheets: 1,
+        // The lines were accepted before the rebuild, which kept them: no new suggestions.
+        lines: 0,
+        sheets: 0,
         findings: 1
       })
     )
@@ -1926,9 +1959,11 @@ describe('Check the book and the rebuild sweep on the reader’s queue (F-16.27,
   })
 
   it('lists and dismisses only what the rebuild’s sweep opened, never a later finding', async () => {
-    addScene('Second', "Mara's eyes were brown.")
+    const second = addScene('Second', "Mara's eyes were brown.")
     const ai = reading()
     const reader = service(ai)
+    for (const nodeId of [scene, second]) await reader.readNow(nodeId, `read-${nodeId}`)
+    acceptEverything(reader)
     expect(reader.rebuild()).toMatchObject({ ok: true, queued: 2 })
     await until(() => typeof getRebuild(db)?.finishedAt === 'string', 'the rebuild to finish')
     await drained(reader)
@@ -1937,6 +1972,7 @@ describe('Check the book and the rebuild sweep on the reader’s queue (F-16.27,
     // Later writing opens another possible contradiction while the review is still due.
     const third = addScene('Third', "Mara's eyes were green.")
     await reader.readNow(third, 'read-third')
+    acceptEverything(reader)
     runFindingsJob(db, NOW, { cachedVerdicts: true })
     reader.queueJudge()
     await drained(reader)
@@ -1957,6 +1993,7 @@ describe('Check the book and the rebuild sweep on the reader’s queue (F-16.27,
     const reader = service(ai)
     const second = addScene('Second', "Mara's eyes were brown.")
     for (const nodeId of [scene, second]) await reader.readNow(nodeId, `read-${nodeId}`)
+    acceptEverything(reader)
     runFindingsJob(db, NOW, { cachedVerdicts: true })
     expect(reader.notices().some((notice) => notice.kind === 'findingsWaiting')).toBe(false)
     writeRow(db, MEMORY_JUDGE_DAY_KEY, { day: '2026-10-12', pairs: JUDGE_DAY_PAIRS })
@@ -1999,6 +2036,7 @@ describe('Check the book and the rebuild sweep on the reader’s queue (F-16.27,
     const reader = service(ai)
     const second = addScene('Second', "Mara's eyes were brown.")
     for (const nodeId of [scene, second]) await reader.readNow(nodeId, `read-${nodeId}`)
+    acceptEverything(reader)
     settings = { ...settings, features: { ...settings.features, judge: false } }
     expect(reader.checkBook(second)).toMatchObject({ ok: false, code: 'DISABLED' })
     settings = { ...settings, features: { ...settings.features, judge: true } }

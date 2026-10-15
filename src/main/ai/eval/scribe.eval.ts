@@ -50,6 +50,7 @@ import {
   type LiveRequestDeps
 } from './liveProvider'
 import {
+  acceptAll,
   invariants,
   oracleRead,
   oracleVerify,
@@ -227,6 +228,8 @@ export async function openScribeSession(
       providerErrors: 'stop',
       stopAt: () => run.spent() > stopUsd || run.costUnknown() !== null
     })
+    // Plan Suggestions.md: Ms Scribe answers from the memory as read and accepted whole.
+    acceptAll(book)
     addTestBookPages(book, options.now)
     for (const question of SCRIBE_QUESTIONS) {
       if (question.edit === undefined) continue
@@ -247,6 +250,8 @@ export async function openScribeSession(
             requestId
           }
         )
+        // A read-first's suggestions accepted as an author who accepts everything would.
+        acceptAll(book)
         if (outcome.read) {
           return {
             ok: true,

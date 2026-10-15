@@ -1,3 +1,4 @@
+import { isAccepted } from '@shared/memory/claims'
 import { estimateTokens } from '@shared/ai'
 import type { ReadingOrder } from '@shared/memory/asOf'
 import { HOW_LABEL } from '@shared/memory/knows'
@@ -301,7 +302,8 @@ export function claimFact(
 function claimNow(frame: EvidenceFrame, claimId: string): Omit<EvidenceItem, 'id' | 'key'> | null {
   const claim = getClaim(frame.db, claimId)
   if (claim === null) return null
-  if (claim.draftId !== frame.draftId || claim.state === 'waiting') return null
+  // Only the author's accepted lines are evidence: never a suggestion (plan `Suggestions.md`).
+  if (claim.draftId !== frame.draftId || !isAccepted(claim)) return null
   const row = frame.documents.get(claim.nodeId)
   const paragraph = row === undefined ? undefined : rowTexts(row)[claim.para]
   if (row === undefined || paragraph === undefined) return null

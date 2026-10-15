@@ -52,12 +52,16 @@ export interface SpotRunInput {
   onSpend?: (usd: number) => void
 }
 
-/** Live claims of the active draft with no spot check yet, proved this way, in a stable order. */
+/**
+ * Suggestions of the active draft with no spot check yet, proved this way, in a stable order: the
+ * spot checks measure the reader's own work (plan `Suggestions.md`), and a refusal deletes only a
+ * suggestion, never a line the author accepted.
+ */
 function unchecked(db: TreeDb, proof: Claim['proof']): Claim[] {
   return draftClaims(db, activeDraftId(db))
     .filter(
       (claim) =>
-        claim.state === 'live' &&
+        claim.state === 'suggested' &&
         claim.proof === proof &&
         claim.spot === null &&
         claim.recordId !== null
@@ -204,7 +208,7 @@ export async function runSpotChecks(
         if (claim !== null) sent.delete(id)
         continue
       }
-      if (claim.state !== 'live' || claim.spot !== null) continue
+      if (claim.state !== 'suggested' || claim.spot !== null) continue
       const check = checkOf(claim, SPOT_STRONG_AROUND)
       if (check === null) continue
       const verdict = (await ask([check], true)).get(1)

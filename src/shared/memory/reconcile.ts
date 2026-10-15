@@ -8,8 +8,12 @@ import { threadNotRightSlot } from './topics'
  * Reconciliation (F-16.17; design §2.3 "Reconciliation"): what a reading's fresh claims do to
  * the scene's stored ones. Pure: the pipeline (slice 2) applies the result in one transaction.
  *
- * - `same` (the reader's word that a stored claim is unchanged) counts only for a live claim whose
- *   anchor still holds in place.
+ * - `same` (the reader's word that a stored claim is unchanged) counts only for a live claim or a
+ *   suggestion whose anchor still holds in place.
+ * - Plan `Suggestions.md` (2026-10-14): what a reading stores is a suggestion (the pipeline's
+ *   inserts); a stale claim is always one the author accepted, so a revival brings it back live.
+ *   A rebuild (`replace`) keeps the author's accepted lines whose sentences still stand, whether or
+ *   not the reading stated them again: they are hers.
  * - A stale claim with a record comes back only through a fresh item with its own quote that
  *   passed the ladder, about the same record, slot, voice, mode and value: the item replaces its
  *   quote and anchor (a revival). A waiting claim is never revived: a claim waiting on its subject
@@ -22,8 +26,8 @@ import { threadNotRightSlot } from './topics'
  *   sentences) is dropped before storing, unless the author moved that line to another record
  *   (*Not right › Not about*, `movedTo`): it is then stored for that record, so a rebuild keeps
  *   her choice.
- * - A fresh item that states a stored live or waiting claim again, word for word, is not stored
- *   twice: the stored claim stays as it is.
+ * - A fresh item that states a stored live, suggested or waiting claim again, word for word, is
+ *   not stored twice: the stored claim stays as it is (an accepted line stays accepted).
  * - P2a-D23: a stale claim whose paragraph lay inside the window read, and that no fresh item
  *   revived, is deleted (a claim waiting on its subject whose sentences changed is stale too); a
  *   full read deletes every stale and pronoun-waiting claim it did not revive or restate. Claims
@@ -249,7 +253,7 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
   const byId = new Map(input.stored.map((claim) => [claim.id, claim]))
   const holds = (claim: StoredClaim): boolean => anchorInPlace(claim.anchor, input.hashes)
   const revived = new Set<string>()
-  /** Stored live or waiting claims a fresh item stated again word for word (kept as they are). */
+  /** Stored live, suggested or waiting claims a fresh item stated again word for word (kept). */
   const restated = new Set<string>()
   const deleted = new Set<string>()
 
@@ -257,7 +261,7 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
     const key = identity(item)
     const already = input.stored.find(
       (claim) =>
-        (claim.state === 'live' || claim.state === 'waiting') &&
+        (claim.state === 'live' || claim.state === 'suggested' || claim.state === 'waiting') &&
         identity(claim) === key &&
         claim.valueKey === item.valueKey &&
         claim.quote === item.quote
@@ -291,7 +295,9 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
 
   for (const id of input.same) {
     const claim = byId.get(id)
-    if (claim?.state === 'live' && holds(claim)) result.kept.push(id)
+    if ((claim?.state === 'live' || claim?.state === 'suggested') && holds(claim)) {
+      result.kept.push(id)
+    }
   }
   for (const id of input.drop) {
     const claim = byId.get(id)
@@ -313,7 +319,8 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
       const waitsOnOthers =
         claim.pending?.kind === 'name' ||
         (claim.pending?.kind === 'subject' && claim.subjectText !== null)
-      if (!waitsOnOthers) deleted.add(claim.id)
+      const accepted = claim.state === 'live' && holds(claim)
+      if (!waitsOnOthers && !accepted) deleted.add(claim.id)
     }
   }
   result.deletes = [...deleted]

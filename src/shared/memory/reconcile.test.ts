@@ -297,13 +297,21 @@ describe('reconcile (F-16.17, design §2.3 Reconciliation)', () => {
     expect(result.deletes.sort()).toEqual(['pronoun', 'stale'])
   })
 
-  it('replaces on a rebuild read every claim it did not state, revive or confirm (P2a-D25)', () => {
+  it('replaces on a rebuild read every suggestion it did not state, revive or confirm (P2a-D25), never an accepted line', () => {
     const result = reconcile(
       input({
         stored: [
           stored({ id: 'restated' }),
           stored({ id: 'confirmed', slot: 'hair', valueKey: 'red', quote: "Mara's hair was red" }),
-          stored({ id: 'unproved', slot: 'age', valueKey: '30', quote: 'Mara was thirty' }),
+          stored({
+            id: 'unproved',
+            state: 'suggested',
+            slot: 'age',
+            valueKey: '30',
+            quote: 'Mara was thirty'
+          }),
+          // Plan Suggestions.md: a line the author accepted stays while its sentences stand.
+          stored({ id: 'accepted', slot: 'scars', valueKey: 'one', quote: 'Mara had a scar' }),
           stored({
             id: 'shared',
             state: 'waiting',
@@ -428,5 +436,37 @@ describe('knows lines in reconciliation (P2b)', () => {
     )
     expect(result.dismissed).toBe(1)
     expect(result.inserts.map((item) => item.how)).toEqual(['refers'])
+  })
+})
+
+describe('reconcile with suggestions (plan Suggestions.md)', () => {
+  it('keeps a suggestion a reading states again, never storing it twice', () => {
+    const result = reconcile(
+      input({ stored: [stored({ id: 'sugg', state: 'suggested' })], fresh: [fresh()] })
+    )
+    expect(result).toMatchObject({ inserts: [], revivals: [], deletes: [] })
+  })
+
+  it('brings a stale accepted line back live through a fresh item, as before', () => {
+    const result = reconcile(
+      input({
+        stored: [stored({ id: 'mine', state: 'stale', quote: "Mara's eyes were grey once" })],
+        fresh: [fresh()]
+      })
+    )
+    expect(result.revivals.map((each) => each.id)).toEqual(['mine'])
+    expect(result.inserts).toEqual([])
+  })
+
+  it('counts the reader’s same for a suggestion whose anchor holds', () => {
+    const result = reconcile(
+      input({
+        stored: [stored({ id: 'sugg', state: 'suggested' })],
+        same: ['sugg'],
+        window: { paras: new Set([1]), full: true, replace: true }
+      })
+    )
+    expect(result.kept).toEqual(['sugg'])
+    expect(result.deletes).toEqual([])
   })
 })

@@ -38,26 +38,27 @@ import { buildTestBookProject, type TestBookProject } from '../../memory/testBoo
 import { fakeChatServer } from './fakeChatServer'
 import { liveProviderFromEnv, liveRequestDeps, type LiveProvider } from './liveProvider'
 import {
-  BOOK_ORDER,
-  TOPIC_LABELS,
+  acceptAll,
   answerText,
+  BOOK_ORDER,
   invariants,
+  type KnowsLabel,
   neverRead,
   oracleAnswer,
   oracleChatServer,
   oracleRead,
+  type OracleTruth,
   oracleVerify,
   overlaps,
   readBook,
   readingStop,
+  type ReadOrder,
   requestScene,
   sceneOf,
   storedFor,
+  TOPIC_LABELS,
   topicByLabel,
-  topicQuotes,
-  type KnowsLabel,
-  type OracleTruth,
-  type ReadOrder
+  topicQuotes
 } from './memoryOracle'
 
 /**
@@ -524,6 +525,8 @@ async function replay(
     { now: NOW }
   )
   const outcomes = await readBook(book, ai.deps, { order: readOrder })
+  // Plan Suggestions.md: the book as read and accepted whole (an author who accepts everything).
+  acceptAll(book)
   return { tmp, book, ai, outcomes }
 }
 
@@ -1191,6 +1194,8 @@ export async function runLiveKnows(
         stopAt: () => over() || unknownBefore !== null || run.costUnknown() !== null,
         providerErrors: 'stop'
       })
+      // Plan Suggestions.md: the knows lines as read and accepted whole.
+      acceptAll(book)
       const costUnknown: string | null = unknownBefore ?? run.costUnknown()
       passes.push({
         order: readOrder,

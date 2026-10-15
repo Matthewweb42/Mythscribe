@@ -19,6 +19,7 @@ import { getCard, moveCardParas } from './cardStore'
 import {
   attachClaims,
   claimSources,
+  deleteClaims,
   invariantClaims,
   invariantKnows,
   reanchorClaim,
@@ -70,6 +71,12 @@ export interface AnchorsResult {
   attached: string[]
   /** Live claims parked as stale because their scene is not readable (not a fault, not counted). */
   parked: string[]
+  /**
+   * Suggestions deleted (plan `Suggestions.md`): their sentences changed, their scene is not
+   * readable, or they broke an invariant. The next reading of their paragraph suggests them again
+   * if the text still says it.
+   */
+  dropped: string[]
   /** Invariant violations found and healed (each claim demoted to stale). */
   violations: InvariantViolation['kind'][]
   /** The records whose lines changed state (what a shown sheet reads again); topics included. */
@@ -120,6 +127,7 @@ const nothing = (): AnchorsResult => ({
   restored: [],
   attached: [],
   parked: [],
+  dropped: [],
   violations: [],
   recordIds: [],
   topicQuotes: [],
@@ -135,6 +143,7 @@ export function anchorsChanged(result: AnchorsResult): boolean {
       result.restored.length +
       result.attached.length +
       result.parked.length +
+      result.dropped.length +
       result.violations.length +
       result.topicQuotes.length >
       0 || result.unsettled
@@ -226,9 +235,16 @@ export function runAnchors(
     result.card = card !== null && standingMoved(db, standingAt, standingKey(card, null))
     result.parked = claims.filter((each) => each.state === 'live').map((each) => each.id)
     setClaimsState(db, result.parked, 'stale')
+    result.dropped = claims.filter((each) => each.state === 'suggested').map((each) => each.id)
+    deleteClaims(db, result.dropped)
     result.topicQuotes = quotes.filter((quote) => quote.state === 'live').map((quote) => quote.id)
     setTopicQuotesState(db, result.topicQuotes, 'stale')
-    result.recordIds = [...new Set([...recordsOf(result.parked), ...topicsOf(result.topicQuotes)])]
+    result.recordIds = [
+      ...new Set([
+        ...recordsOf([...result.parked, ...result.dropped]),
+        ...topicsOf(result.topicQuotes)
+      ])
+    ]
     return result
   }
 
@@ -273,7 +289,9 @@ export function runAnchors(
           result.reproved.push(verdict.id)
           break
         case 'stale':
-          result.staled.push(verdict.id)
+          // A suggestion is never stale: it goes, and is suggested again when read.
+          if (byId.get(verdict.id)?.state === 'suggested') result.dropped.push(verdict.id)
+          else result.staled.push(verdict.id)
           break
         case 'restored': {
           const claim = byId.get(verdict.id)
@@ -288,6 +306,7 @@ export function runAnchors(
       }
     }
     setClaimsState(tx, result.staled, 'stale')
+    deleteClaims(tx, result.dropped)
 
     const staled = new Set(result.staled)
     const restored = new Set(result.restored)
@@ -347,11 +366,12 @@ export function runAnchors(
       }
     }
 
-    // The invariants, over what is stored now: a live claim that breaks one is demoted.
-    const live = new Set(
-      sceneClaims(tx, nodeId, draftId)
-        .filter((each) => each.state === 'live')
-        .map((each) => each.id)
+    // The invariants, over what is stored now: a live claim that breaks one is demoted, a
+    // suggestion deleted.
+    const stored = sceneClaims(tx, nodeId, draftId)
+    const live = new Set(stored.filter((each) => each.state === 'live').map((each) => each.id))
+    const suggested = new Set(
+      stored.filter((each) => each.state === 'suggested').map((each) => each.id)
     )
     const violations = checkMemoryInvariants({
       claims: invariantClaims(tx, nodeId),
@@ -360,15 +380,21 @@ export function runAnchors(
       citations: [],
       knows: invariantKnows(tx, nodeId)
     }).flatMap((violation) =>
-      'claimId' in violation && live.has(violation.claimId) ? [violation] : []
+      'claimId' in violation && (live.has(violation.claimId) || suggested.has(violation.claimId))
+        ? [violation]
+        : []
     )
+    const violators = [
+      ...new Set(violations.map((violation) => ('claimId' in violation ? violation.claimId : '')))
+    ]
     setClaimsState(
       tx,
-      [
-        ...new Set(violations.map((violation) => ('claimId' in violation ? violation.claimId : '')))
-      ],
+      violators.filter((id) => live.has(id)),
       'stale'
     )
+    const unproved = violators.filter((id) => suggested.has(id))
+    deleteClaims(tx, unproved)
+    result.dropped.push(...unproved)
     result.violations = violations.map((violation) => violation.kind)
   })
   const attachedTo = sceneClaims(db, nodeId, draftId).flatMap((each) =>
@@ -376,7 +402,7 @@ export function runAnchors(
   )
   result.recordIds = [
     ...new Set([
-      ...recordsOf([...result.staled, ...result.reproved, ...result.restored]),
+      ...recordsOf([...result.staled, ...result.reproved, ...result.restored, ...result.dropped]),
       ...attachedTo,
       ...topicsOf(result.topicQuotes)
     ])

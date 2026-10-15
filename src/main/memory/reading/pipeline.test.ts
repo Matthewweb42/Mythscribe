@@ -37,6 +37,7 @@ import {
   type FakeAnswer
 } from './readingFixture'
 import { getSceneRead } from './sceneReadStore'
+import { acceptSuggestions } from './suggestions'
 import { settleOwnedNames } from './waiting'
 
 let tmp: string
@@ -182,6 +183,13 @@ const read = (ai: FakeAi, extra: { caretPara?: number | null } = {}): Promise<Re
   )
 
 const claimsNow = (): ReturnType<typeof sceneClaims> => sceneClaims(db, one, activeDraftId(db))
+/** Plan Suggestions.md: the author accepts every suggestion of the scene. */
+const acceptAll = (): void => {
+  acceptSuggestions(
+    db,
+    claimsNow().map((claim) => claim.id)
+  )
+}
 
 /** The request at `i`; throws when there is none. */
 function nth(requests: readonly CompletionRequest[], i: number): CompletionRequest {
@@ -214,9 +222,9 @@ describe('runReading (F-16.17)', () => {
     }
     const claims = claimsNow()
     expect(claims.map((c) => [c.recordId, c.slot, c.value, c.proof, c.state])).toEqual([
-      [mara, 'eyes', 'grey', 'literal', 'live'],
-      [mara, 'location', 'the quay', 'verified', 'live'],
-      [tomas, 'location', 'by the nets', 'literal', 'live']
+      [mara, 'eyes', 'grey', 'literal', 'suggested'],
+      [mara, 'location', 'the quay', 'verified', 'suggested'],
+      [tomas, 'location', 'by the nets', 'literal', 'suggested']
     ])
     // The pronoun went to the checker with Mara as its one candidate and its sentence ±1.
     const checks = sentChecks(nth(ai.requests, 1))
@@ -237,7 +245,7 @@ describe('runReading (F-16.17)', () => {
     expect(reading).toMatchObject({
       purpose: 'first',
       pages: 1,
-      promptVersion: 'reader.v6',
+      promptVersion: 'reader.v7',
       verifyVersion: 'verify.v4',
       model: 'gpt-5.4-mini',
       tokensIn: 2_000,
@@ -286,6 +294,8 @@ describe('runReading (F-16.17)', () => {
     scanNamesFor(db, one, NOW)
     const ai = standard()
     await read(ai)
+    // Plan Suggestions.md: only the author's accepted lines are near facts.
+    acceptAll()
     ai.requests.length = 0
     saveDocument(db, one, doc(...long.slice(0, 6), 'He waved at the boat.'))
     scanNamesFor(db, one, NOW)
@@ -534,7 +544,7 @@ describe('runReading (F-16.17)', () => {
         q: "Tomas's attentions to Mara",
         o: 'Mara Vell'
       },
-      { p: 5, r: 'Tomas', s: 'trait', v: 'attentions', q: "Tomas's attentions to Mara" },
+      { p: 5, r: 'Tomas', s: 'roles', v: 'attentions', q: "Tomas's attentions to Mara" },
       { p: 5, r: 'Tomas', s: 'objects', v: 'attentions', q: "Tomas's attentions to Mara" }
     ]
     const ai = fakeAi((request) => {
@@ -555,7 +565,7 @@ describe('runReading (F-16.17)', () => {
       [3, 'location', 'past'],
       [4, 'detail:rank', 'duplicate'],
       [5, 'relation', 'notRead'],
-      [5, 'trait', 'notRead'],
+      [5, 'roles', 'notRead'],
       [5, 'objects', 'notRead'],
       [4, 'detail:occupation', 'verified']
     ])
@@ -659,7 +669,8 @@ describe('runReading (F-16.17)', () => {
     scanNamesFor(db, one, NOW)
     const events: ReadingItemEvent[] = []
     const plan: PlannedClaim[] = [
-      // A history: no longer read (plan ReaderNarrow.md), whoever did it.
+      // A history done to Lise is the one's who did it, never hers (read again since
+      // reader.v7, plan Suggestions.md: the actor gate refuses it).
       {
         p: 0,
         r: 'Lise',
@@ -715,7 +726,7 @@ describe('runReading (F-16.17)', () => {
       { nodeId: one, caretPara: null, requestId: 'r-4', observe: (event) => events.push(event) }
     )
     expect(events.map((event) => [event.p, event.slot, event.outcome])).toEqual([
-      [0, 'history', 'notRead'],
+      [0, 'history', 'actor'],
       [1, 'scars', 'subject'],
       [2, 'age', 'valueKind'],
       [3, 'kinship', 'possessed'],
@@ -807,7 +818,7 @@ describe('runReading (F-16.17)', () => {
       [5, 'eyes', 'verified']
     ])
     expect(claimsNow().map((claim) => [claim.slot, claim.value, claim.state])).toEqual([
-      ['eyes', 'grey', 'live']
+      ['eyes', 'grey', 'suggested']
     ])
     expect(invariants()).toEqual([])
   })
@@ -912,13 +923,13 @@ describe('runReading (F-16.17)', () => {
     expect(settled?.attached).toEqual([waiting?.id])
     expect(claimsNow()[0]).toMatchObject({
       recordId: result.record.id,
-      state: 'live',
+      state: 'suggested',
       pending: null
     })
     expect(invariants()).toEqual([])
   })
 
-  it('attaches a waiting fact whose sentence changed stale, and deletes them all on No', async () => {
+  it('drops a waiting fact whose sentence changed on Yes (suggested again when read), and deletes them all on No', async () => {
     saveDocument(
       db,
       one,
@@ -972,7 +983,8 @@ describe('runReading (F-16.17)', () => {
     expect(yes.settled?.restaled).toHaveLength(1)
     const no = answerNameQuestion(db, { kind: 'notAName', name: 'Ry' }, NOW)
     expect(no.settled?.deleted).toHaveLength(1)
-    expect(claimsNow().map((claim) => [claim.state, claim.pending])).toEqual([['stale', null]])
+    // Plan Suggestions.md: a fact whose sentence no longer stands is dropped, not kept stale.
+    expect(claimsNow()).toEqual([])
   })
 
   it('drops a new name the author dismissed, and one the manuscript does not write there', async () => {
@@ -1095,7 +1107,7 @@ describe('runReading (F-16.17)', () => {
 })
 
 describe('runReading: what changes under it, and what it cannot read (F-16.17, review 2026-10-12)', () => {
-  it('stales what an edit saved while the checker was out leaves unproved, instead of storing it live', async () => {
+  it('drops what an edit saved while the checker was out leaves unproved, instead of suggesting it', async () => {
     const ai = fakeAi((request): FakeAnswer => {
       if (requestKind(request) === 'verify') {
         // The author changes grey to brown mid-reading; the anchors job runs on that save.
@@ -1110,15 +1122,15 @@ describe('runReading: what changes under it, and what it cannot read (F-16.17, r
       return { text: readerReply(request, PLAN) }
     })
     await read(ai)
+    // Plan Suggestions.md: a suggestion whose sentence changed goes (it is suggested again when
+    // read), where a line the author accepted would go stale.
     expect(claimsNow().map((claim) => [claim.slot, claim.value, claim.state])).toEqual([
-      ['eyes', 'grey', 'stale'],
-      ['location', 'the quay', 'stale'],
-      ['location', 'by the nets', 'live']
+      ['location', 'by the nets', 'suggested']
     ])
     expect(invariants()).toEqual([])
   })
 
-  it('parks what it wrote when the scene became an Idea while the requests were out', async () => {
+  it('drops what it suggested when the scene became an Idea while the requests were out', async () => {
     const ai = fakeAi((request): FakeAnswer => {
       if (requestKind(request) === 'verify') {
         setSceneMeta(db, one, { ...parseStoredSceneMeta(null), status: 'idea' })
@@ -1127,7 +1139,7 @@ describe('runReading: what changes under it, and what it cannot read (F-16.17, r
       return { text: readerReply(request, PLAN) }
     })
     await read(ai)
-    expect(claimsNow().map((claim) => claim.state)).toEqual(['stale', 'stale', 'stale'])
+    expect(claimsNow()).toEqual([])
   })
 
   it('reads nothing from a reply that does not parse: the scene stays unread and is read again', async () => {
@@ -1148,6 +1160,7 @@ describe('runReading: what changes under it, and what it cannot read (F-16.17, r
 
   it('keeps the stale claims of a window whose reply does not parse, and reads the window again', async () => {
     await read(standard())
+    acceptAll()
     saveDocument(
       db,
       one,
@@ -1270,9 +1283,9 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
     expect(sentChecks(nth(checks, 1))).toHaveLength(2)
     expect(checks.every((request) => request.tier === 'fast')).toBe(true)
     expect(claimsNow().map((claim) => [claim.slot, claim.state])).toEqual([
-      ['detail:mark', 'live'],
-      ['detail:home', 'live'],
-      ['detail:home', 'live']
+      ['detail:mark', 'suggested'],
+      ['detail:home', 'suggested'],
+      ['detail:home', 'suggested']
     ])
     // Every verdict came on the second ask: a recovered cut, no cut-off of the reading.
     expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
@@ -1314,7 +1327,9 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
       q: 'Tomas sat by the nets'
     }
     await read(standard([dashing]))
-    expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([['the nets', 'live']])
+    expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([
+      ['the nets', 'suggested']
+    ])
     // An edit two paragraphs up (its anchor holds): the window read proposes another value on the
     // same quote and says to drop c1.
     saveDocument(
@@ -1339,7 +1354,7 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
       claimsNow()
         .filter((claim) => claim.slot === 'detail:home')
         .map((claim) => [claim.value, claim.state])
-    ).toEqual([['the nets', 'live']])
+    ).toEqual([['the nets', 'suggested']])
   })
 
   it('pins first person to a speaker only in what the checker confirms is their line', async () => {
@@ -1436,7 +1451,7 @@ describe('runReading: who a pronoun may mean (F-16.17, review 2026-10-12)', () =
     const [check] = sentChecks(nth(ai.requests, 1))
     expect([...(check?.names ?? [])].sort()).toEqual(['Clara Pell', 'Tomas'])
     const [claim] = claimsNow()
-    expect(claim).toMatchObject({ recordId: clara, state: 'live', value: 'green' })
+    expect(claim).toMatchObject({ recordId: clara, state: 'suggested', value: 'green' })
   })
 
   it('refuses a fact whose sentence names someone the roster does not know (the twin rule)', async () => {
@@ -1479,7 +1494,7 @@ describe('runReading: who a pronoun may mean (F-16.17, review 2026-10-12)', () =
     expect(check?.names).toEqual(['Tomas', 'Lise'])
     expect(check?.unnamed).toHaveLength(1)
     expect(claimsNow().map((claim) => [claim.recordId, claim.slot, claim.state])).toEqual([
-      [lise, 'scars', 'live']
+      [lise, 'scars', 'suggested']
     ])
     expect(invariants()).toEqual([])
   })
@@ -1556,10 +1571,10 @@ describe('runReading: new names (F-16.17, review 2026-10-12)', () => {
     expect(listNameQuestions(db).map((question) => question.name)).not.toContain('Hesk')
     const settled = settleOwnedNames(db, NOW)
     expect(settled.attached).toHaveLength(1)
-    expect(claimsNow()).toMatchObject([{ recordId: hesk, state: 'live', pending: null }])
+    expect(claimsNow()).toMatchObject([{ recordId: hesk, state: 'suggested', pending: null }])
   })
 
-  it('attaches a waiting fact stale when its scene is no longer readable', async () => {
+  it('drops a waiting fact on Yes when its scene is no longer readable', async () => {
     saveDocument(db, one, doc(...SCENE, 'By then Hesk was a smuggler from the marsh.'))
     scanNamesFor(db, one, NOW)
     await read(
@@ -1575,7 +1590,7 @@ describe('runReading: new names (F-16.17, review 2026-10-12)', () => {
       NOW
     )
     expect(settled?.restaled).toHaveLength(1)
-    expect(claimsNow().map((claim) => claim.state)).toEqual(['stale'])
+    expect(claimsNow()).toEqual([])
   })
 })
 
@@ -1600,7 +1615,7 @@ describe('runReading: slice 3 purposes and spot checks (F-16.16, F-16.17)', () =
     const eyes = claimsNow().find((claim) => claim.slot === 'eyes')
     expect(eyes).toMatchObject({
       proof: 'literal',
-      state: 'live',
+      state: 'suggested',
       spot: 'disagree',
       spotTier: 'fast'
     })

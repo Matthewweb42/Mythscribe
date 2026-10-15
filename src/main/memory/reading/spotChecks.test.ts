@@ -70,7 +70,9 @@ function seed(from: number, count: number, proof: 'literal' | 'verified'): strin
       value: `counts ${from + i + 1} gulls`,
       quote: `Mara counted ${from + i + 1} gulls on the quay`,
       para: from + i,
-      proof
+      proof,
+      // Plan Suggestions.md: the spot checks measure the reader's suggestions.
+      state: 'suggested' as const
     })),
     NOW
   )

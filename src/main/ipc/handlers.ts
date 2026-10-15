@@ -5583,6 +5583,11 @@ export function registerHandlers({
     return reader.notRight(claimId, choice, requestId)
   })
 
+  // F-16.17 (plan Suggestions.md): the suggestions a reading proved, and the author's answers.
+  register('memory:suggestions', (scope) => reader.suggestions(scope))
+  register('memory:accept', ({ claimIds, undo }) => reader.accept(claimIds, undo))
+  register('memory:dismiss', ({ claimIds }) => reader.dismiss(claimIds))
+
   register('memory:cardNotRight', (input) => {
     const db = manager.require().connection.orm
     const row = cardNotRight(db, input, new Date())

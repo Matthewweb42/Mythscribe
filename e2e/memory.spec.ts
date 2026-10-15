@@ -7,6 +7,7 @@ import {
   expect,
   test,
   type ElectronApplication,
+  type Locator,
   type Page
 } from '@playwright/test'
 import type { AiSettings } from '../src/shared/aiSettings'
@@ -1230,6 +1231,34 @@ async function storedText(id: string): Promise<string> {
   return (await storedParagraphs(id)).map((paragraph) => paragraph.text).join('\n')
 }
 
+/**
+ * Plan Suggestions.md (F-16.17): what a reading proves waits as suggestions; the author accepts
+ * every one waiting, so the steps after read the memory as she accepted it. Answers how many.
+ */
+async function acceptSuggestions(): Promise<number> {
+  const waiting = await invoke<{ id: string }[]>('memory:suggestions', {})
+  if (waiting.length > 0) {
+    await invoke('memory:accept', { claimIds: waiting.map((each) => each.id), undo: false })
+  }
+  return waiting.length
+}
+
+/** On a suggestions deck: *Accept all for <name>* for each character until none waits. */
+async function acceptOnDeck(container: Locator): Promise<void> {
+  const none = container.getByTestId('suggestions-none')
+  for (let i = 0; i < 12 && !(await none.isVisible()); i += 1) {
+    const accept = container.getByTestId('review-accept-group').filter({ visible: true }).first()
+    const label = await accept.textContent()
+    await accept.click()
+    await expect
+      .poll(async () => (await none.isVisible()) || (await accept.textContent()) !== label, {
+        timeout: 15_000
+      })
+      .toBe(true)
+  }
+  await expect(none).toBeVisible({ timeout: 15_000 })
+}
+
 test('story memory v2: This scene, Needs a look, Dismissed and Rename in book (P1 slice 4)', async () => {
   // Continues in the project the slice 3 test made (Mara Vell, nickname "Mara", and Tomas Harrow).
   const scenes = (await invoke<TreeNode[]>('tree:list', undefined)).filter(
@@ -1562,8 +1591,8 @@ test('story memory v2: the evidence reader (P2a)', async () => {
     { nodeId: first.id }
   )
   const facts = memory.claims.map((claim) => [claim.slot, claim.value, claim.proof, claim.state])
-  expect(facts).toContainEqual(['eyes', 'grey', 'literal', 'live'])
-  expect(facts).toContainEqual(['location', 'the quay', 'verified', 'live'])
+  expect(facts).toContainEqual(['eyes', 'grey', 'literal', 'suggested'])
+  expect(facts).toContainEqual(['location', 'the quay', 'verified', 'suggested'])
   expect(memory.card?.line).toBe('Mara walks to the quay.')
   const location = memory.claims.find((claim) => claim.slot === 'location')
   const info = await invoke<{
@@ -1572,7 +1601,27 @@ test('story memory v2: the evidence reader (P2a)', async () => {
   }>('memory:claim', { claimId: location?.id ?? '' })
   expect(info.claim.quote).toBe('She walked to the quay')
   // P2b slice 2: the reading is `reader.v2`'s (the same sentinel and the same facts here).
-  expect(info.reading?.promptVersion).toBe('reader.v6')
+  expect(info.reading?.promptVersion).toBe('reader.v7')
+
+  // Plan Suggestions.md: the status bar says how many suggestions wait; its review in the
+  // assistant column accepts them, a character at a time, and the item goes.
+  const suggestionsItem = page.getByTestId('side-work-suggestions')
+  await expect(suggestionsItem).toHaveText(/^\d+ suggestions?$/, { timeout: 15_000 })
+  await suggestionsItem.click()
+  const suggestionsPanel = page.getByTestId('suggestions-panel')
+  await expect(suggestionsPanel.getByTestId('suggestion-card')).toContainText('Mara Vell · ')
+  await acceptOnDeck(suggestionsPanel)
+  await expect
+    .poll(
+      async () =>
+        (await invoke<{ claims: MemoryClaim[] }>('memory:scene', { nodeId: first.id })).claims.find(
+          (claim) => claim.slot === 'eyes'
+        )?.state,
+      { timeout: 15_000 }
+    )
+    .toBe('live')
+  await suggestionsPanel.getByTestId('side-work-hide').click()
+  await expect(suggestionsItem).toHaveCount(0)
 
   // Nothing changed since: a second Read now sends nothing.
   const before = providerBodies.length
@@ -1616,7 +1665,10 @@ test('story memory v2: the evidence reader (P2a)', async () => {
       },
       { timeout: 15_000 }
     )
-    .toEqual(['brown', 'live'])
+    .toEqual(['brown', 'suggested'])
+  // The accepted grey went with its sentence; brown is a suggestion until accepted.
+  expect(await acceptSuggestions()).toBeGreaterThan(0)
+  expect((await eyesOf())?.state).toBe('live')
 
   // A Replace in project across 6 scenes nobody has read yet: more than 5 to read, so main asks
   // with the price and sends nothing (F-16.16, the backlog).
@@ -1828,7 +1880,16 @@ test('story memory v2: Here, True now, sheets, cards and Rebuild memory (P2a sli
   await rebuild.getByRole('button', { name: 'Rebuild', exact: true }).click()
   const summary = rebuild.getByTestId('rebuild-summary')
   await expect(summary).toBeVisible({ timeout: 90_000 })
-  await expect(summary).toContainText('Mara Vell: 1 new line')
+  // Plan Suggestions.md: the rebuild's suggestions on the deck, grouped by character; Harbour 1's
+  // brown eyes are a new one for Mara, and Accept all for her takes them.
+  const rebuildDeck = summary.getByTestId('rebuild-suggestions')
+  await expect(rebuildDeck.getByTestId('suggestion-card')).toBeVisible()
+  expect(
+    (await invoke<{ name: string; line: string }[]>('memory:suggestions', {})).map(
+      (each) => `${each.name} · ${each.line}`
+    )
+  ).toContain('Mara Vell · Eyes: brown')
+  await acceptOnDeck(rebuildDeck)
   expect(providerBodies.filter(isReader).length).toBeGreaterThan(readsBeforeRebuild)
   await rebuild.getByRole('button', { name: 'Close' }).click()
   await expect(rebuild).toHaveCount(0)
@@ -2226,6 +2287,8 @@ test('story memory v2: who knows what in the panel, the grid and sheets (P2b sli
   await expect
     .poll(async () => (await secretsNow()).map((each) => each.name))
     .toEqual(['the sold map'])
+  // Plan Suggestions.md: who knows what reads the knows lines the author accepted.
+  expect(await acceptSuggestions()).toBeGreaterThan(0)
 
   // Open it again, so the tree holds the scenes made above.
   await reopenProject('Knows Novel')
@@ -2385,6 +2448,8 @@ test('story memory v2: threads, the timeline and ages (P2b slice 5)', async () =
       ok: true
     })
   }
+  // Plan Suggestions.md: threads, ages and the Timeline read the lines the author accepted.
+  expect(await acceptSuggestions()).toBeGreaterThan(0)
   await reopenProject('Time Novel')
 
   // Book › Threads as of 1.3 (the open scene): resolved, with its two steps.
@@ -2641,6 +2706,8 @@ test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet 
   expect(await invoke('memory:readNow', { nodeId: first.id, requestId: 'e2e-p3-1' })).toMatchObject(
     { ok: true }
   )
+  // Plan Suggestions.md: Ms Scribe's instant cards read the lines the author accepted.
+  await acceptSuggestions()
   await reopenProject('Scribe Novel')
   await showSection('Manuscript')
   await page
@@ -2825,6 +2892,7 @@ test('story memory v2: the navigator routes and finds, instant cards answer (P3 
       ok: true
     })
   }
+  await acceptSuggestions()
   await reopenProject('Navigator Novel')
   await showSection('Manuscript')
   const tree = page.getByRole('tree', { name: 'Document tree' })
@@ -2889,7 +2957,8 @@ test('story memory v2: the navigator routes and finds, instant cards answer (P3 
   expect(providerBodies).toHaveLength(instantFrom)
 
   // The sentence edited (typed, so nothing reads it yet): the same question reads the latest
-  // change first (one reader request, Read now's path), then answers with the new value.
+  // change first (one reader request, Read now's path). Plan Suggestions.md: the new value is a
+  // suggestion, so the card says the book does not say yet; accepted, it answers with it.
   await caretToEnd(editor)
   for (const _ of 'grey.') await page.keyboard.press('Backspace')
   await page.keyboard.type('brown.')
@@ -2899,11 +2968,21 @@ test('story memory v2: the navigator routes and finds, instant cards answer (P3 
   const readFrom = providerBodies.length
   await send("Mara's eyes?")
   await expect(turns).toHaveCount(6)
-  await expect(turns.nth(5)).toContainText('Eyes: brown (1.1)', { timeout: 15_000 })
+  await expect(turns.nth(5)).toContainText('The book does not say yet', { timeout: 15_000 })
   const reads = providerBodies.slice(readFrom).map(kindOf)
   expect(reads[0]).toBe('read')
   expect(reads.filter((kind) => kind === 'read')).toHaveLength(1)
-  expect(reads.filter((kind) => kind !== 'read' && kind !== 'verify')).toEqual([])
+  // No accepted value, so Ms Scribe looks in the text (the fake answers that it does not say).
+  expect(reads.filter((kind) => kind !== 'read' && kind !== 'verify')).toEqual([
+    'navigate',
+    'answer'
+  ])
+  expect(await acceptSuggestions()).toBeGreaterThan(0)
+  const acceptedFrom = providerBodies.length
+  await send("Mara's eyes?")
+  await expect(turns).toHaveCount(8)
+  await expect(turns.nth(7)).toContainText('Eyes: brown (1.1)', { timeout: 15_000 })
+  expect(providerBodies).toHaveLength(acceptedFrom)
 
   // A "first" question with scene 1.2 open: two navigator steps (a search, then the evidence to
   // use), one agent.v9 request whose evidence holds the 1.1 paragraph found, one cite.v1 check.
@@ -2911,8 +2990,8 @@ test('story memory v2: the navigator routes and finds, instant cards answer (P3 
   await expect(editor).toContainText('Orrin waited by the door.')
   const askFrom = providerBodies.length
   await send(FIRST_QUESTION)
-  await expect(turns).toHaveCount(8)
-  const answered = turns.nth(7)
+  await expect(turns).toHaveCount(10)
+  const answered = turns.nth(9)
   await expect(answered).toContainText(`In 1.1, ${OVERHEARD}`, { timeout: 15_000 })
   const asked = providerBodies
     .slice(askFrom)
@@ -2983,6 +3062,7 @@ test('story memory v2: Ms Scribe in the chat (P3 slice 5)', async () => {
       { ok: true }
     )
   }
+  await acceptSuggestions()
   await reopenProject('Chat Novel')
   await showSection('Manuscript')
   const tree = page.getByRole('tree', { name: 'Document tree' })
@@ -3159,6 +3239,8 @@ test('story memory v2: contradictions are found in code and judged twice (P4 sli
       ok: true,
       read: true
     })
+    // Plan Suggestions.md: contradictions are found among the lines the author accepted.
+    await acceptSuggestions()
   }
   interface Side {
     kind: string
@@ -3273,6 +3355,7 @@ test('story memory v2: Check the book, Not a problem and note conflicts (P4 slic
     expect(
       await invoke('memory:readNow', { nodeId, requestId: `e2e-p4s3-${reads}` })
     ).toMatchObject({ ok: true, read: true })
+    await acceptSuggestions()
   }
   interface Side {
     kind: string
@@ -3447,6 +3530,7 @@ test('story memory v2: Needs a look and Check the book in the panel (P4 slice 4)
   expect(
     await invoke('memory:readNow', { nodeId: first.id, requestId: 'e2e-p4s4-1' })
   ).toMatchObject({ ok: true, read: true })
+  await acceptSuggestions()
   await invoke<TreeNode>('tree:create', {
     parentId: first.parentId,
     kind: 'document',
@@ -3463,6 +3547,7 @@ test('story memory v2: Needs a look and Check the book in the panel (P4 slice 4)
   expect(
     await invoke('memory:readNow', { nodeId: brown.id, requestId: 'e2e-p4s4-2' })
   ).toMatchObject({ ok: true, read: true })
+  await acceptSuggestions()
   await invoke('authorTodo:create', { text: 'Check the tide tables' })
   interface View {
     rule: string
@@ -3628,6 +3713,7 @@ test('story memory v2: contradiction underlines (P4 slice 5)', async () => {
   expect(
     await invoke('memory:readNow', { nodeId: first.id, requestId: 'e2e-p4s5-1' })
   ).toMatchObject({ ok: true, read: true })
+  await acceptSuggestions()
   const brown = await invoke<TreeNode>('tree:create', {
     parentId: first.parentId,
     kind: 'document',
@@ -3638,6 +3724,7 @@ test('story memory v2: contradiction underlines (P4 slice 5)', async () => {
   expect(
     await invoke('memory:readNow', { nodeId: brown.id, requestId: 'e2e-p4s5-2' })
   ).toMatchObject({ ok: true, read: true })
+  await acceptSuggestions()
   const findings = async (): Promise<{ rule: string }[]> =>
     (await invoke<{ open: { rule: string }[] }>('memory:findings', { nodeId: null })).open
   await expect
@@ -4212,9 +4299,12 @@ test('story memory: the switch-over of a v1 project in place, as the installed a
   const summary = rebuild.getByTestId('rebuild-summary')
   await expect(summary).toBeVisible({ timeout: 90_000 })
   await expect(summary).toContainText('Read 1 of 1 scenes.')
-  await expect(summary.getByRole('list', { name: 'New lines by sheet' })).toContainText(
-    /Mara: \d+ new lines?/
-  )
+  // Plan Suggestions.md: the rebuild's suggestions on the deck; Accept all for Mara.
+  const rebuildDeck = summary.getByTestId('rebuild-suggestions')
+  await expect(
+    rebuildDeck.getByTestId('review-accept-group').filter({ visible: true }).first()
+  ).toContainText(/^Accept all for Mara \(\d+\)/)
+  await acceptOnDeck(rebuildDeck)
   const sent = providerBodies.slice(bodiesAtLaunch)
   const reads = sent.filter(isReader)
   expect(reads.length).toBeGreaterThan(0)

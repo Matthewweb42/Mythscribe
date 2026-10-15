@@ -24,7 +24,10 @@ import {
 /**
  * The live run's pass bars (plan P2a §2.7, decided by Claude, unconfirmed; plan
  * `ReaderPrecision.md`, 2026-10-14: stored-fact precision is the author's bar, confirmed by her;
- * the checker's pass rate is reported with no bar, decided by Claude, unconfirmed).
+ * the checker's pass rate is reported with no bar, decided by Claude, unconfirmed). Since plan
+ * `Suggestions.md` (2026-10-14) every stored fact is a suggestion the author accepts or dismisses,
+ * so the bar measures how many suggestions are worth accepting: 85 % (decided by Claude,
+ * unconfirmed), the safety bars unchanged.
  */
 export const PLANTED_PASS_BARS = {
   /** Quotes really not in the text: refusals for an invented slot or a quote's length are apart. */
@@ -34,10 +37,11 @@ export const PLANTED_PASS_BARS = {
   /** Verified claims on a labelled sentence, with the label's record (2026-10-12 review). */
   supportPrecision: 0.9,
   /**
-   * The author's bar (2026-10-14): right stored facts over every stored fact, judged by the claim
-   * labels or, on unlabelled sentences, by `storedVerdicts`; a fact not judged yet counts wrong.
+   * Suggestions worth accepting (plan `Suggestions.md`; 95 % while facts were filed unseen, plan
+   * `ReaderPrecision.md`): right suggestions over every suggestion, judged by the claim labels or,
+   * on unlabelled sentences, by `storedVerdicts`; one not judged yet counts wrong.
    */
-  storedPrecision: 0.95
+  storedPrecision: 0.85
 } as const
 
 /**
@@ -179,9 +183,9 @@ export interface PlantedMeasures {
   costRefusals: { items: number; byReason: Record<string, number> }
   /** Items sent to the checker that it passed (an efficiency figure: reported, no bar). */
   verifierPass: Part
-  /** The author's bar: right stored facts over every stored fact (`scoreStored`). */
+  /** The bar: suggestions worth accepting over every suggestion (`scoreStored`). */
   stored: StoredScore
-  /** Every live fact as the bar judged it (the report's JSON, so it can be re-scored). */
+  /** Every suggestion as the bar judged it (the report's JSON, so it can be re-scored). */
   storedFacts: StoredFact[]
   /** Stored facts on a labelled sentence and slot, with the label's subject. */
   attribution: Part
@@ -194,13 +198,13 @@ export interface PlantedMeasures {
   supportPrecision: Part
   /** Stored facts on no labelled sentence, each as a line to read by hand. */
   unreviewed: string[]
-  /** Live facts stored. */
+  /** Facts stored (suggestions, and any line accepted since). */
   facts: number
   /** Claims from the scenes never read (the Idea scene, the cut scene, the inactive draft). */
   strays: number
   /** Those claims, each as a line to read (scene, record, slot, value, quote). */
   strayLines: string[]
-  /** Negatives the labels forbid, stored live. */
+  /** Negatives the labels forbid, suggested. */
   falseAlarms: string[]
   /**
    * Readings left cut off at the cap (a reply cut and not recovered by its re-read, so paragraphs
@@ -351,7 +355,7 @@ export function plantedFailures(measures: PlantedMeasures): string[] {
       failures.push(`${name} ${percentOf(part)} < ${min * 100} %`)
     }
   }
-  bar('stored-fact precision', measures.stored.precision, PLANTED_PASS_BARS.storedPrecision)
+  bar('suggestion precision', measures.stored.precision, PLANTED_PASS_BARS.storedPrecision)
   if (measures.stored.unjudged.length > 0) {
     failures.push(
       `${measures.stored.unjudged.length} stored facts not judged yet (counted wrong; judge them in storedVerdicts and re-score)`
@@ -363,7 +367,7 @@ export function plantedFailures(measures: PlantedMeasures): string[] {
   bar('support precision', measures.supportPrecision, PLANTED_PASS_BARS.supportPrecision)
   if (measures.strays > 0) failures.push(`${measures.strays} claims from never-read scenes`)
   if (measures.falseAlarms.length > 0) {
-    failures.push(`${measures.falseAlarms.length} negatives stored live`)
+    failures.push(`${measures.falseAlarms.length} negatives suggested`)
   }
   return failures
 }
@@ -376,7 +380,7 @@ export function plantedBarLines(measures: PlantedMeasures): string[] {
     .map(([reason, count]) => `${reason} ${count}`)
     .join(', ')
   return [
-    `- **Stored-fact precision: ${percentOf(stored.precision)}** (bar ${bars.storedPrecision * 100} %; ${stored.precision.right} right of every stored fact in the slots still read, ${stored.precision.of}; not judged yet, counted wrong: ${stored.unjudged.length}; with every judgment call turned: ${percentOf(stored.callsTurned)}; in slots no longer read, left out: ${stored.notRead})`,
+    `- **Suggestion precision: ${percentOf(stored.precision)}** (bar ${bars.storedPrecision * 100} %; ${stored.precision.right} worth accepting of every suggestion in the slots read, ${stored.precision.of}; not judged yet, counted wrong: ${stored.unjudged.length}; with every judgment call turned: ${percentOf(stored.callsTurned)}; in slots no longer read, left out: ${stored.notRead})`,
     `- Quotes found: ${percentOf(measures.quotesFound)} (bar ${bars.quotesFound * 100} %; of the quotes looked for, ${measures.quotesFound.of})`,
     `- Refused for slot or length (a cost, no bar): ${costs} of ${costRefusals.items} items proposed`,
     `- Verifier pass (efficiency, no bar): ${percentOf(measures.verifierPass)}`,
@@ -385,7 +389,7 @@ export function plantedBarLines(measures: PlantedMeasures): string[] {
     `- Support precision: ${percentOf(measures.supportPrecision)} (bar ${bars.supportPrecision * 100} %; verified claims on labelled sentences, the label's record)`,
     `- Stored on no labelled sentence (judged by the verdicts, or listed below to judge): ${measures.unreviewed.length} of ${measures.facts}`,
     `- Claims from never-read scenes: ${measures.strays} (bar 0)${measures.strayLines.length > 0 ? `: ${measures.strayLines.join('; ')}` : ''}`,
-    `- Negatives stored live (false alarms): ${falseAlarms.length} (bar 0)${falseAlarms.length > 0 ? `: ${falseAlarms.join('; ')}` : ''}`
+    `- Negatives suggested (false alarms): ${falseAlarms.length} (bar 0)${falseAlarms.length > 0 ? `: ${falseAlarms.join('; ')}` : ''}`
   ]
 }
 

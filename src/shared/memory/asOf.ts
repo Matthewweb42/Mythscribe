@@ -1,4 +1,4 @@
-import { setsState, type Claim } from './claims'
+import { isAccepted, setsState, type Claim } from './claims'
 import { ALL_SLOTS, slotGroup, type Slot } from './slots'
 
 /**
@@ -83,7 +83,8 @@ function placed(claims: readonly AsOfClaim[], reading: ReadingOrder): Placed[] {
   return claims
     .flatMap((claim) => {
       const order = reading.order.get(claim.nodeId)
-      if (order === undefined || claim.state === 'waiting' || claim.recordId === null) return []
+      // Only the author's accepted lines (`isAccepted`): a suggestion or a waiting line is no memory.
+      if (order === undefined || !isAccepted(claim) || claim.recordId === null) return []
       // P2b: knows lines and thread steps have their own sections (`whoKnows`, `threadsAsOf`);
       // they never set state, and never show in True now or From the book.
       const group = slotGroup(claim.slot)

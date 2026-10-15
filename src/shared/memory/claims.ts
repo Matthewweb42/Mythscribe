@@ -28,13 +28,26 @@ export const ClaimMode = z.enum(CLAIM_MODES)
 export type ClaimMode = z.infer<typeof ClaimMode>
 
 /**
- * `live`: shown and used. `stale`: its anchor changed; dimmed until a reading revives or drops
- * it. `waiting`: its subject is not settled yet (a new name the author has not answered, or a
- * pronoun or shared alias that fits more than one person).
+ * `suggested` (plan `Suggestions.md`, the author's decision of 2026-10-14): what a reading proved,
+ * waiting for the author's *Accept* or *Dismiss*; shown only as a suggestion, used by nothing.
+ * `live`: accepted by the author, shown and used. `stale`: an accepted line whose anchor changed;
+ * dimmed until a reading revives or drops it (a suggestion whose anchor changes is deleted
+ * instead: the next reading of its paragraph suggests it again if the text still says it).
+ * `waiting`: its subject is not settled yet (a new name the author has not answered, or a pronoun
+ * or shared alias that fits more than one person); once settled it is a suggestion.
  */
-export const CLAIM_STATES = ['live', 'stale', 'waiting'] as const
+export const CLAIM_STATES = ['live', 'stale', 'waiting', 'suggested'] as const
 export const ClaimState = z.enum(CLAIM_STATES)
 export type ClaimState = z.infer<typeof ClaimState>
+
+/**
+ * Whether a claim is the author's accepted memory (`live`, or `stale` while it is re-checked):
+ * the one rule every reader of claims uses (sheets, the panel's True now, ages, the Timeline, who
+ * knows what, threads, contradictions, Ms Scribe's instant cards and tools). A suggestion or a
+ * waiting claim is neither shown as memory nor used.
+ */
+export const isAccepted = (claim: { state: ClaimState }): boolean =>
+  claim.state === 'live' || claim.state === 'stale'
 
 /** Why a reading ran (`reading.purpose`). */
 export const READING_PURPOSES = [

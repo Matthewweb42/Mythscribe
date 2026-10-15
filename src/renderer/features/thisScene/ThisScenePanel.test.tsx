@@ -32,6 +32,7 @@ import {
   noteFindingFixture,
   sceneMemoryFixture,
   secretViewFixture,
+  suggestionViewFixture,
   threadsMemoryFixture,
   threadViewFixture,
   timelineFixture,
@@ -289,6 +290,15 @@ describe('the This scene panel’s rules (F-16.12)', () => {
         (group) => group.id
       )
     ).toEqual(['todos'])
+    // F-16.17 (plan Suggestions.md): the scene's suggestions right after the to-dos.
+    expect(
+      needsALookGroups({
+        todos: [todo('t1', 'Tide', 0)],
+        questions: [HESK],
+        notices: [],
+        suggestions: [suggestionViewFixture('s1')]
+      }).map((group) => group.id)
+    ).toEqual(['todos', 'suggestions', 'questions'])
     // Ticked to-dos sit apart from the open ones, and keep the group drawn.
     const [mine] = needsALookGroups({
       todos: [todo('t1', 'Tide', 0), todo('t2', 'Ferry', 1, true)],

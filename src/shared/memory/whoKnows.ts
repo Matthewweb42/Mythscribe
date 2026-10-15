@@ -1,5 +1,12 @@
 import type { ReadingOrder } from './asOf'
-import type { ClaimMode, ClaimState, ClaimVoice, TopicQuoteRole, TopicQuoteState } from './claims'
+import {
+  isAccepted,
+  type ClaimMode,
+  type ClaimState,
+  type ClaimVoice,
+  type TopicQuoteRole,
+  type TopicQuoteState
+} from './claims'
 import { knowsLine, parseHow, type KnowsHow } from './knows'
 import type { RecordOrigin } from './records'
 import type {
@@ -127,13 +134,13 @@ function placed<T extends { nodeId: string; para: number }>(
     .map(({ item, order }) => ({ item, order }))
 }
 
-/** A secret's lines: knows claims about it with a knower, not waiting. */
+/** A secret's lines: knows claims about it with a knower, accepted by the author (`isAccepted`). */
 const linesOf = (claims: readonly KnowsClaim[], secretId: string): KnowsClaim[] =>
   claims.filter(
     (claim) =>
       claim.objectId === secretId &&
       claim.recordId !== null &&
-      claim.state !== 'waiting' &&
+      isAccepted(claim) &&
       parseHow(claim.how) !== null
   )
 
