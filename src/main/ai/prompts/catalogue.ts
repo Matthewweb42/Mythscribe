@@ -111,6 +111,7 @@ import { READER_V4_PROMPT_VERSION } from './reader.v4'
 import { VERIFY_V3_PROMPT_VERSION } from './verify.v3'
 import { READER_V5_PROMPT_VERSION } from './reader.v5'
 import { VERIFY_V4_PROMPT_VERSION } from './verify.v4'
+import { READER_V6_PROMPT_VERSION } from './reader.v6'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -253,7 +254,9 @@ export const PROMPT_VERSIONS = [
   // F-16.17 (third live run of 2026-10-14, plan ReaderPrecision.md): the field "src" for "voice",
   // the open-ended slots' value rules; the checker's open-ended rules, sent on the strong tier.
   READER_V5_PROMPT_VERSION,
-  VERIFY_V4_PROMPT_VERSION
+  VERIFY_V4_PROMPT_VERSION,
+  // F-16.17 (the author's decision of 2026-10-14, plan ReaderNarrow.md): concrete facts only.
+  READER_V6_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -747,9 +750,10 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   [VERIFY_V3_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' },
   [READER_V4_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
   [READER_V5_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
-  // The fast batch; the open-ended slots' facts (history, traits, relation, kinship, role) go in
-  // batches of their own on the strong tier (`STRONG_CHECK_SLOTS`, the `verify.v4:strong` row).
-  [VERIFY_V4_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' }
+  // Every batch on the fast tier since plan ReaderNarrow.md (2026-10-14): the strong batch of
+  // the open-ended slots (reader.v5's reading) is retired with them.
+  [VERIFY_V4_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' },
+  [READER_V6_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' }
 }
 
 /**

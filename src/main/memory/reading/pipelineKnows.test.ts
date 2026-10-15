@@ -348,7 +348,7 @@ describe('runReading: who knows what and threads (F-16.22, F-16.23)', () => {
     expect(outcome).toMatchObject({ read: true, topicIds: [map, heir].sort() })
     if (outcome.read) expect(outcome.recordIds).toEqual(expect.arrayContaining([tomas, orrin, map]))
     expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
-      promptVersion: 'reader.v5',
+      promptVersion: 'reader.v6',
       verifyVersion: 'verify.v4'
     })
     expect(lastReading(db, one, activeDraftId(db))?.yields.rejections).toEqual({

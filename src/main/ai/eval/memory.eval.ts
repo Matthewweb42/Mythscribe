@@ -55,6 +55,7 @@ import {
 import {
   answerText,
   invariants,
+  labelRead,
   liveClaims,
   liveFacts,
   nameOf,
@@ -159,7 +160,7 @@ function adversarialRead(request: CompletionRequest, state: { cut: boolean }): F
     planted.push({
       p: twice.p,
       r: anyone,
-      s: 'traits',
+      s: 'detail:mark',
       v: twice.q,
       q: twice.q,
       voice: 'narration',
@@ -208,7 +209,9 @@ describe('the reading pipeline over the test book: the oracle replay (F-16.17)',
 
   it('stores every literal label literal and every verified one verified, as labelled', () => {
     const claims = liveFacts(book)
-    for (const wanted of TEST_BOOK_LABELS.claims.filter((claim) => claim.expect !== 'reject')) {
+    for (const wanted of TEST_BOOK_LABELS.claims.filter(
+      (claim) => claim.expect !== 'reject' && labelRead(claim)
+    )) {
       const stored = storedFor(book, claims, wanted)
       expect(stored, wanted.id).toBeDefined()
       expect(stored?.proof, wanted.id).toBe(wanted.expect)
@@ -222,7 +225,13 @@ describe('the reading pipeline over the test book: the oracle replay (F-16.17)',
       expect(storedFor(book, claims, wanted), wanted.id).toBeUndefined()
     }
     expect(negativesStored(book, claims)).toEqual([])
-    const labelled = TEST_BOOK_LABELS.claims.filter((claim) => claim.expect !== 'reject')
+    // The labels of the slots no longer read are refused (plan ReaderNarrow.md): never stored.
+    for (const wanted of TEST_BOOK_LABELS.claims.filter((claim) => !labelRead(claim))) {
+      expect(storedFor(book, claims, wanted), wanted.id).toBeUndefined()
+    }
+    const labelled = TEST_BOOK_LABELS.claims.filter(
+      (claim) => claim.expect !== 'reject' && labelRead(claim)
+    )
     expect(claims).toHaveLength(labelled.length)
     // The author's bar (plan ReaderPrecision.md): every stored fact right, none left unjudged.
     const { stored } = plantedMeasures(book)
@@ -235,7 +244,10 @@ describe('the reading pipeline over the test book: the oracle replay (F-16.17)',
     expect(invariants(book)).toEqual([])
     const s03 = lastReading(book.db, book.scenes.get('s03') ?? '', activeDraftId(book.db))
     expect(s03?.yields.items).toBeGreaterThan(0)
-    expect(s03?.yields.quotesFound).toBe(s03?.yields.items)
+    // Every quote found but those of the slots no longer read, refused before any is looked for.
+    const notRead = s03?.yields.rejections.notRead ?? 0
+    expect(notRead).toBeGreaterThan(0)
+    expect(s03?.yields.quotesFound).toBe((s03?.yields.items ?? 0) - notRead)
     expect(ai.requests.every((request) => request.reasoning === 'off')).toBe(true)
   })
 })
@@ -272,7 +284,11 @@ describe('the reading pipeline over the test book: the adversarial replay (F-16.
 
   it('lets no planted error reach a live narration claim', () => {
     const labelled = TEST_BOOK_LABELS.claims.filter(
-      (claim) => claim.expect !== 'reject' && claim.voice === 'narration' && claim.mode === 'now'
+      (claim) =>
+        claim.expect !== 'reject' &&
+        claim.voice === 'narration' &&
+        claim.mode === 'now' &&
+        labelRead(claim)
     )
     const strays = liveFacts(book).filter(
       (claim) =>
@@ -336,6 +352,7 @@ interface LivePlant {
   /** A kinship's or relation's other record. */
   object?: string
   refused:
+    | 'notRead'
     | 'ambiguous'
     | 'actor'
     | 'object'
@@ -352,6 +369,11 @@ interface LivePlant {
     | 'duplicate'
 }
 
+/*
+ * Since plan ReaderNarrow.md (2026-10-14) a plant in a slot no longer read (traits, history,
+ * relation, role, clothing, objects) is refused as `notRead` before any other gate: the earlier
+ * runs' plants there stay, each now refused for that.
+ */
 const LIVE_PLANTS: readonly LivePlant[] = [
   // The shared surname: the checker picked Mr. Harrow, and "Harrow's temper" was stored.
   {
@@ -361,7 +383,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'traits',
     value: 'short tempered',
     quote: 'Harrow’s temper was short that morning',
-    refused: 'subject'
+    refused: 'notRead'
   },
   // Both sisters walk: one of them is never the fact's subject.
   {
@@ -380,7 +402,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'objects',
     value: 'thread',
     quote: 'Johanna wanted thread',
-    refused: 'wish'
+    refused: 'notRead'
   },
   {
     scene: 'h07',
@@ -398,7 +420,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'traits',
     value: 'talked of everything except Thornmere',
     quote: 'talked of everything except Thornmere',
-    refused: 'subject'
+    refused: 'notRead'
   },
   {
     scene: 'h03',
@@ -497,7 +519,8 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     mode: 'dream',
     refused: 'absence'
   },
-  // Where Hobb died is his history, not where he is.
+  // Where Hobb died is his history, not where he is (and since plan ReaderNarrow.md "his chair by
+  // the lodge fire" is no place phrase of five words, refused for that first).
   {
     scene: 'h03',
     p: 3,
@@ -505,7 +528,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'location',
     value: 'in his chair by the lodge fire',
     quote: 'He died in the night, in his chair by the lodge fire',
-    refused: 'past'
+    refused: 'where'
   },
   // Attention is no object.
   {
@@ -515,9 +538,9 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'objects',
     value: 'attentions',
     quote: "Mr. Ashby's attentions to her sister",
-    refused: 'valueKind'
+    refused: 'notRead'
   },
-  // One claim, one slot: the relation (kept, `LIVE_KEPT`) proposed again as a trait.
+  // One claim, one slot: the relation proposed again as a trait (both no longer read).
   {
     scene: 's03',
     p: 5,
@@ -525,7 +548,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'traits',
     value: 'violent against him',
     quote: 'Amongst the most violent against him was Mrs. Harrow',
-    refused: 'duplicate'
+    refused: 'notRead'
   },
   // The most invented slot of the second run.
   {
@@ -561,7 +584,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     quote: 'he asked Miss Pell',
     voice: 'dialogue',
     speaker: 'harrow-mrs',
-    refused: 'actor'
+    refused: 'notRead'
   },
   // Wrong person: the sugar plum is Hobb's ("he"), not Johanna's.
   {
@@ -571,7 +594,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'history',
     value: 'When they were children he had kept a sugar plum in his coat',
     quote: 'When they were children he had kept a sugar plum in his coat',
-    refused: 'subject'
+    refused: 'notRead'
   },
   // Wrong kind: forty years at the gate is no age.
   {
@@ -620,7 +643,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     slot: 'relation',
     value: 'her sister and Mr. Ashby',
     quote: 'her sister and Mr. Ashby',
-    refused: 'object'
+    refused: 'notRead'
   },
   {
     scene: 's05',
@@ -630,7 +653,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     value: 'her sister and Mr. Ashby',
     quote: 'glancing at her sister and Mr. Ashby',
     object: 'johanna',
-    refused: 'object'
+    refused: 'notRead'
   },
   {
     scene: 's05',
@@ -642,7 +665,7 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     voice: 'dialogue',
     speaker: 'liesel',
     object: 'dunmore',
-    refused: 'object'
+    refused: 'notRead'
   },
   // The third run's invented slot, in reader.v5's field: "src" no longer shares its name.
   {
@@ -655,6 +678,114 @@ const LIVE_PLANTS: readonly LivePlant[] = [
     voice: 'dialogue',
     speaker: 'harrow-mrs',
     refused: 'slot'
+  },
+  // The second live run's trait in its other number ("trait", read as traits) and the relation
+  // kept beside it until plan ReaderNarrow.md: slots no longer read.
+  {
+    scene: 's03',
+    p: 3,
+    record: 'harrow-mrs',
+    slot: 'trait',
+    value: 'quite disconcerted',
+    quote: 'Mrs. Harrow was quite disconcerted',
+    refused: 'notRead'
+  },
+  {
+    scene: 's03',
+    p: 5,
+    record: 'harrow-mrs',
+    slot: 'relation',
+    value: 'violent against him',
+    quote: 'Amongst the most violent against him was Mrs. Harrow',
+    object: 'varrow',
+    refused: 'notRead'
+  },
+  // The fourth live run of 2026-10-14 (two readings, 02:37 and 02:47 UTC; plan ReaderNarrow.md):
+  // every wrong fact it stored in a slot still read, each refused in code whatever the checker says.
+  // "her dark eyes" as Mr. Varrow's: a she's possessive is no man's.
+  {
+    scene: 's04',
+    p: 4,
+    record: 'varrow',
+    slot: 'eyes',
+    value: 'dark',
+    quote: 'the beautiful expression of her dark eyes',
+    refused: 'subject'
+  },
+  // A clause is no place.
+  {
+    scene: 's03',
+    p: 6,
+    record: 'liesel',
+    slot: 'location',
+    value: 'near enough for her to overhear a conversation between him and Mr. Ashby',
+    quote:
+      'Mr. Varrow had been standing near enough for her to overhear a conversation between him and Mr. Ashby',
+    refused: 'where'
+  },
+  {
+    scene: 'h15',
+    p: 14,
+    record: 'anne',
+    slot: 'location',
+    value: "down to dinner on the Captain's arm",
+    quote: "she came down to dinner on the Captain's arm",
+    refused: 'where'
+  },
+  // A birthplace is no birth (born holds when).
+  {
+    scene: 'h15',
+    p: 10,
+    record: 'anne',
+    slot: 'born',
+    value: 'at Gullhaven',
+    quote: 'Miss Fenwick was born at Gullhaven',
+    voice: 'dialogue',
+    speaker: 'lottie',
+    refused: 'valueKind'
+  },
+  {
+    scene: 'h15',
+    p: 11,
+    record: 'anne',
+    slot: 'born',
+    value: 'in Elsdale',
+    quote: 'Miss Fenwick was born in Elsdale',
+    voice: 'dialogue',
+    speaker: 'bel',
+    refused: 'valueKind'
+  },
+  // A kinship whose quote states no relation for one person.
+  {
+    scene: 's03',
+    p: 4,
+    record: 'ashby',
+    slot: 'kinship',
+    value: 'his sisters are fine women',
+    quote: 'His sisters were fine women',
+    refused: 'value'
+  },
+  {
+    scene: 's01',
+    p: 24,
+    record: 'liesel',
+    slot: 'kinship',
+    value: 'daughter',
+    quote: 'my little Lise',
+    voice: 'dialogue',
+    speaker: 'harrow-mr',
+    refused: 'value'
+  },
+  {
+    scene: 's01',
+    p: 19,
+    record: 'harrow-mrs',
+    slot: 'kinship',
+    value: 'mother of four grown-up daughters',
+    quote: 'When a woman has four grown-up daughters',
+    voice: 'dialogue',
+    speaker: 'harrow-mrs',
+    refused: 'value'
   }
 ]
 
@@ -682,25 +813,6 @@ const LIVE_KEPT: readonly Omit<LivePlant, 'refused'>[] = [
     slot: 'birthplace',
     value: 'Gullhaven',
     quote: 'Miss Fenwick was born at Gullhaven'
-  },
-  // The second live run: a slot in its other number ("trait"), read as traits.
-  {
-    scene: 's03',
-    p: 3,
-    record: 'harrow-mrs',
-    slot: 'trait',
-    value: 'quite disconcerted',
-    quote: 'Mrs. Harrow was quite disconcerted'
-  },
-  // The first of one fact proposed in two slots: kept; the trait after it is the duplicate.
-  {
-    scene: 's03',
-    p: 5,
-    record: 'harrow-mrs',
-    slot: 'relation',
-    value: 'violent against him',
-    quote: 'Amongst the most violent against him was Mrs. Harrow',
-    object: 'varrow'
   }
 ]
 
@@ -738,18 +850,21 @@ function plantsFor(
  * Only the code gates stand between a plant and the memory.
  */
 function gullibleVerify(request: CompletionRequest): string {
-  const honest = JSON.parse(oracleVerify(request)) as { v: { i: number }[] }
+  const honest = JSON.parse(oracleVerify(request)) as { v: { i: number; ok?: boolean }[] }
   const plants = [...LIVE_PLANTS, ...LIVE_KEPT]
   const verdicts = sentChecks(request).map((check) => {
     // A plant's own fact only: an honest fact whose sentences hold a plant's quote (s04's dark
-    // eyes beside Mr. Ashby's attentions) is answered as the oracle answers it.
+    // eyes beside Mr. Ashby's attentions, Liesel's own dark eyes beside the plant giving them to
+    // Mr. Varrow) is answered as the oracle answers it, so what the oracle supports stays its.
+    const truth = honest.v.find((verdict) => verdict.i === check.i)
+    if (truth?.ok === true) return truth
     const plant = plants.find(
       (each) =>
         check.kind === 'claim' &&
         normalizeForMatch(check.text).includes(normalizeForMatch(each.quote)) &&
         normalizeForMatch(check.fact).includes(normalizeForMatch(each.value))
     )
-    if (plant === undefined) return honest.v.find((verdict) => verdict.i === check.i) ?? null
+    if (plant === undefined) return truth ?? null
     const said = /\((narration|dialogue|thought|rumour)(?: by \S+)?, (\w+)\)$/.exec(check.fact)
     const at = check.names.indexOf(nameOf.get(plant.record) ?? '')
     return {
@@ -795,6 +910,7 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
         ({ event, scene }) =>
           scene === plant.scene &&
           event.slot === plant.slot &&
+          event.recordId === book.records.get(plant.record) &&
           normalizeForMatch(event.quote) === normalizeForMatch(plant.quote)
       )
       // (h03's temper is also the oracle's own reject label, refused the same way.)
@@ -811,7 +927,6 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
         (claim) =>
           sceneOf(book, claim.nodeId) === plant.scene &&
           claim.recordId === book.records.get(plant.record) &&
-          // A duplicate's first proposal, in its own slot, is kept (`LIVE_KEPT`).
           (slot === null || claim.slot === slot) &&
           overlaps(claim.quote, plant.quote) &&
           valueKey(claim.value) === valueKey(plant.value)
@@ -835,35 +950,27 @@ describe('the live run’s failures of 2026-10-14, planted (F-16.17)', () => {
         `${kept.scene} ${kept.slot}`
       ).toBe(true)
     }
-    // A slot in its other number ("trait") was read as its slot (second live run).
-    expect(
-      live.some(
-        (claim) =>
-          claim.slot === 'traits' &&
-          claim.recordId === book.records.get('harrow-mrs') &&
-          claim.quote === 'Mrs. Harrow was quite disconcerted'
-      )
-    ).toBe(true)
     // The bare label was read as its slot.
     expect(
       live.some(
         (claim) => claim.slot === 'detail:birthplace' && claim.recordId === book.records.get('anne')
       )
     ).toBe(true)
-    // The honest labels are all stored as labelled beside the plants.
-    for (const wanted of TEST_BOOK_LABELS.claims.filter((claim) => claim.expect !== 'reject')) {
+    // The honest labels of the slots still read are all stored as labelled beside the plants.
+    for (const wanted of TEST_BOOK_LABELS.claims.filter(
+      (claim) => claim.expect !== 'reject' && labelRead(claim)
+    )) {
       expect(storedFor(book, live, wanted), wanted.id).toBeDefined()
     }
     expect(invariants(book)).toEqual([])
-    // The author's bar holds with every live failure planted: of the kept facts only the trait
-    // the verdicts judge a passing state (a judgment call) and the unjudged kept relation miss.
+    // The author's bar holds with every live failure planted, every stored fact right (plan
+    // ReaderNarrow.md: the trait judged a passing state is no longer read).
     const { stored } = plantedMeasures(book)
+    expect(stored.wrong).toEqual([])
+    expect(stored.unjudged).toEqual([])
     expect(stored.precision.right / stored.precision.of).toBeGreaterThanOrEqual(
       PLANTED_PASS_BARS.storedPrecision
     )
-    expect(stored.wrong).toEqual([
-      expect.stringMatching(/^s03 ¶3 Mrs\. Harrow traits “quite disconcerted”.*\(judgment call\)$/)
-    ])
   })
 })
 
@@ -891,6 +998,50 @@ describe('the third live run, re-scored (plan ReaderPrecision.md step 1)', () =>
       expect.stringMatching(/^h03 ¶3 Hobb age “forty years”.*: How long he kept the gate/)
     ])
     expect(score.unjudged).toHaveLength(1)
+  })
+})
+
+describe('the fourth live run, re-scored on the slots still read (plan ReaderNarrow.md step 3)', () => {
+  const fact = {
+    scene: 's03',
+    p: 4,
+    record: 'varrow',
+    slot: 'detail:wealth',
+    value: 'having ten thousand a year',
+    quote:
+      'the report, which was in general circulation within five minutes after his entrance, of his having ten thousand a year',
+    voice: 'rumour',
+    mode: 'now',
+    proof: 'verified'
+  }
+
+  it('leaves the slots no longer read out of the bar, and judges a verdict by its voice', () => {
+    const score = scoreStored([
+      fact,
+      // The same report stored as narration: the third run's verdict, wrong.
+      { ...fact, voice: 'narration' },
+      // Run 2's one "wrong" literal fact: right by its verdict, on a sentence no label covers.
+      {
+        ...fact,
+        scene: 'h16',
+        p: 1,
+        record: 'hobb',
+        slot: 'location',
+        value: 'at the lodge gate in the rain',
+        quote: 'Hobb stood at the lodge gate in the rain',
+        voice: 'narration',
+        proof: 'literal'
+      },
+      // A trait and a history: no longer read, left out.
+      { ...fact, slot: 'traits', value: 'proud', quote: 'never judged' },
+      { ...fact, slot: 'history', value: 'came', quote: 'never judged' }
+    ])
+    expect(score.precision).toEqual({ right: 2, of: 3 })
+    expect(score.notRead).toBe(2)
+    expect(score.unjudged).toEqual([])
+    expect(score.wrong).toEqual([
+      expect.stringMatching(/detail:wealth .*\(verified, narration, now\).*\(judgment call\)$/)
+    ])
   })
 })
 

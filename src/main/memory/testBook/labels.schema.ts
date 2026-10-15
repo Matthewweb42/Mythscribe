@@ -235,6 +235,11 @@ export const LabelStoredVerdict = z.object({
   value: z.string().min(1),
   /** The stored quote (a stored fact matches when the quotes overlap). */
   quote: z.string().min(1),
+  /**
+   * The stored voice, when the verdict turns on it (plan `ReaderNarrow.md`: a report stored as
+   * narration is wrong, the same fact stored as rumour right); any voice when left out.
+   */
+  voice: z.enum(CLAIM_VOICES).optional(),
   right: z.boolean(),
   /** A judgment call the author may turn the other way (listed in QUESTIONS.md). */
   call: z.boolean().default(false),

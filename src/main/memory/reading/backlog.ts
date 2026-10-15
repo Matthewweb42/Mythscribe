@@ -96,27 +96,23 @@ export function rebuildEstimate(
 }
 
 /**
- * What reading these scenes would cost now (`reader.v5`'s and `verify.v4`'s sizes, the third live
- * run of 2026-10-14): a window read as `reader.v5:window` and two check batches per piece of 400
- * prose tokens, a full read as `reader.v5:first` per page of 400 prose tokens and two check
- * batches per page: `verify.v4` on the fast model, `verify.v4:strong` (the open-ended slots) on
- * the strong one; at the hosted quote on Cloud, free on a local model.
+ * What reading these scenes would cost now (`reader.v6`'s sizes, plan `ReaderNarrow.md`,
+ * 2026-10-14): a window read as `reader.v6:window` and one check batch (`verify.v4`) per piece of
+ * 400 prose tokens, a full read as `reader.v6:first` per page of 400 prose tokens and a check batch
+ * per page; on the fast model, at the hosted quote on Cloud, free on a local model.
  */
 export function priceReads(
   scenes: readonly Pick<DueScene, 'read' | 'proseTokens'>[],
   context: RebuildContext
 ): { costUsd: number; priced: boolean } {
-  const first = plannedRow('reader.v5:first')
-  const window = plannedRow('reader.v5:window')
+  const first = plannedRow('reader.v6:first')
+  const window = plannedRow('reader.v6:window')
   const verify = plannedRow('verify.v4')
-  const verifyStrong = plannedRow('verify.v4:strong')
   const pageOverhead = first.typicalInTokens - READER_V3_PAGE_TOKENS
   let tokensIn = 0
   let tokensOut = 0
-  let checkedPages = 0
   for (const scene of scenes) {
     const pages = Math.max(1, Math.ceil(scene.proseTokens / READER_V3_PAGE_TOKENS))
-    checkedPages += pages
     if (scene.read === 'window') {
       tokensIn += pages * (window.typicalInTokens + verify.typicalInTokens)
       tokensOut += pages * (window.typicalOutTokens + verify.typicalOutTokens)
@@ -125,15 +121,9 @@ export function priceReads(
     tokensIn += scene.proseTokens + pages * (pageOverhead + verify.typicalInTokens)
     tokensOut += pages * (first.typicalOutTokens + verify.typicalOutTokens)
   }
-  const fast = estimateCost(
+  return estimateCost(
     { source: context.source, model: context.fastModel, pricing: context.pricing },
     tokensIn,
     tokensOut
   )
-  const strong = estimateCost(
-    { source: context.source, model: context.strongModel, pricing: context.pricing },
-    checkedPages * verifyStrong.typicalInTokens,
-    checkedPages * verifyStrong.typicalOutTokens
-  )
-  return { costUsd: fast.costUsd + strong.costUsd, priced: fast.priced && strong.priced }
 }

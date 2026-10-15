@@ -3,11 +3,13 @@ import {
   ALL_SLOTS,
   BASE_SLOTS,
   DETAIL_LABEL_NAMES,
+  NOT_READ_SLOTS,
   SlotSchema,
   parseSlot,
   readSlot,
   slotFitsKind,
   slotGroup,
+  slotIsRead,
   slotLabel
 } from './slots'
 
@@ -53,6 +55,17 @@ describe('the closed slot list (F-16.17, design §2.2)', () => {
     expect(slotLabel('location')).toBe('Last seen at')
     expect(slotLabel('detail:income')).toBe('Income')
     for (const slot of ALL_SLOTS) expect(slotLabel(slot)).not.toBe('')
+  })
+
+  it('reads only the concrete slots, keeping the rest on the closed list (plan ReaderNarrow.md)', () => {
+    const notRead = ALL_SLOTS.filter((slot) => !slotIsRead(slot))
+    expect(notRead).toEqual(['role', 'clothing', 'objects', 'traits', 'history', 'relation'])
+    expect([...NOT_READ_SLOTS].every((slot) => parseSlot(slot) === slot)).toBe(true)
+    for (const slot of ['eyes', 'born', 'species', 'kinship', 'hair', 'alive', 'age'] as const) {
+      expect(slotIsRead(slot), slot).toBe(true)
+    }
+    expect(slotIsRead('scars') && slotIsRead('injuries') && slotIsRead('location')).toBe(true)
+    expect(DETAIL_LABEL_NAMES.every((label) => slotIsRead(`detail:${label}`))).toBe(true)
   })
 })
 

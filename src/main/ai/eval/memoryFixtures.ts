@@ -1,4 +1,5 @@
 import { estimateTokens } from '@shared/ai'
+import { readSlot, slotIsRead } from '@shared/memory/slots'
 import { normalizeForMatch } from '@shared/critique'
 import { splitSentences } from '@shared/memory/sentences'
 import { outputCap, PAGE_TOKENS } from '@shared/memory/windows'
@@ -45,6 +46,7 @@ import {
 import { buildVerifyV3Prompt, VERIFY_V3_PROMPT_VERSION } from '../prompts/verify.v3'
 import { buildVerifyV4Prompt, VERIFY_V4_PROMPT_VERSION } from '../prompts/verify.v4'
 import { buildReaderV5Prompt, READER_V5_PROMPT_VERSION } from '../prompts/reader.v5'
+import { buildReaderV6Prompt, READER_V6_PROMPT_VERSION } from '../prompts/reader.v6'
 import {
   buildReaderV4Prompt,
   READER_V4_PROMPT_VERSION,
@@ -104,6 +106,12 @@ type TestBookLabel = (typeof TEST_BOOK_LABELS.claims)[number]
 
 const labelsOf = (sceneId: string, paras: ReadonlySet<number>): TestBookLabel[] =>
   TEST_BOOK_LABELS.claims.filter((claim) => claim.scene === sceneId && paras.has(claim.p))
+
+/** Whether the reader still reads a label's slot (`slotIsRead`; a relation label is `relation:<id>`). */
+const labelIsRead = (claim: TestBookLabel): boolean => {
+  const slot = readSlot(claim.slot.startsWith('relation:') ? 'relation' : claim.slot)
+  return slot !== null && slotIsRead(slot)
+}
 
 const toLabel = (claim: (typeof TEST_BOOK_LABELS.claims)[number]): ReaderEvalLabel => ({
   slot: claim.slot,
@@ -455,6 +463,11 @@ function readerV2Case(
     v4?: boolean
     /** `reader.v5` (the third live run of 2026-10-14): its rules, v4's cap. */
     v5?: boolean
+    /**
+     * `reader.v6` (plan ReaderNarrow.md, 2026-10-14): its rules, v4's cap; the labels of the slots
+     * no longer read (`NOT_READ_SLOTS`) are neither expected nor scored as rejects.
+     */
+    v6?: boolean
   } = {}
 ): EvalCase {
   const scene = testBookScene(id)
@@ -462,16 +475,19 @@ function readerV2Case(
   const paragraphs = paras.map((p) => ({ p, text: scene.paragraphs[p] ?? '' }))
   const full = options.window === undefined
   const proseTokens = paragraphs.reduce((sum, paragraph) => sum + estimateTokens(paragraph.text), 0)
-  const v5 = options.v5 === true
+  const v6 = options.v6 === true
+  const v5 = options.v5 === true || v6
   const v4 = options.v4 === true || v5
   const v3 = options.v3 === true || v4
-  const build = v5
-    ? buildReaderV5Prompt
-    : v4
-      ? buildReaderV4Prompt
-      : v3
-        ? buildReaderV3Prompt
-        : buildReaderV2Prompt
+  const build = v6
+    ? buildReaderV6Prompt
+    : v5
+      ? buildReaderV5Prompt
+      : v4
+        ? buildReaderV4Prompt
+        : v3
+          ? buildReaderV3Prompt
+          : buildReaderV2Prompt
   const built = build({
     roster: TEST_BOOK_ROSTER_V2,
     topics: topicsRoster(...listed),
@@ -512,15 +528,17 @@ function readerV2Case(
       p: label.p,
       quote: label.quote
     }))
-  const labels = labelsOf(id, sent)
+  const labels = labelsOf(id, sent).filter((claim) => !v6 || labelIsRead(claim))
   return {
-    version: v5
-      ? READER_V5_PROMPT_VERSION
-      : v4
-        ? READER_V4_PROMPT_VERSION
-        : v3
-          ? READER_V3_PROMPT_VERSION
-          : READER_V2_PROMPT_VERSION,
+    version: v6
+      ? READER_V6_PROMPT_VERSION
+      : v5
+        ? READER_V5_PROMPT_VERSION
+        : v4
+          ? READER_V4_PROMPT_VERSION
+          : v3
+            ? READER_V3_PROMPT_VERSION
+            : READER_V2_PROMPT_VERSION,
     name,
     note,
     messages: built.messages,
@@ -543,7 +561,7 @@ function readerV2Case(
  * The worst `reader.v2` input: full rosters, a 2,500-token page, every tail block at its cap; for
  * `reader.v3` the same at its 400-token page.
  */
-function worstReaderV2Case(v3 = false, v4 = false, v5 = false): EvalCase {
+function worstReaderV2Case(v3 = false, v4 = false, v5 = false, v6 = false): EvalCase {
   const source = TEST_BOOK.filter((scene) => scene.source === 'scene').flatMap(
     (scene) => scene.paragraphs
   )
@@ -595,13 +613,15 @@ function worstReaderV2Case(v3 = false, v4 = false, v5 = false): EvalCase {
     (_, i) =>
       `c${i + 1} r${i + 1} knows s${(i % 4) + 1} overheard from r${i + 2} ¶${i % 20}, re-checking`
   )
-  const build = v5
-    ? buildReaderV5Prompt
-    : v4
-      ? buildReaderV4Prompt
-      : v3
-        ? buildReaderV3Prompt
-        : buildReaderV2Prompt
+  const build = v6
+    ? buildReaderV6Prompt
+    : v5
+      ? buildReaderV5Prompt
+      : v4
+        ? buildReaderV4Prompt
+        : v3
+          ? buildReaderV3Prompt
+          : buildReaderV2Prompt
   const built = build({
     roster,
     topics,
@@ -620,13 +640,15 @@ function worstReaderV2Case(v3 = false, v4 = false, v5 = false): EvalCase {
         : outputCap({ purpose: 'full', proseTokens: tokens, cardDue: true })
   })
   return {
-    version: v5
-      ? READER_V5_PROMPT_VERSION
-      : v4
-        ? READER_V4_PROMPT_VERSION
-        : v3
-          ? READER_V3_PROMPT_VERSION
-          : READER_V2_PROMPT_VERSION,
+    version: v6
+      ? READER_V6_PROMPT_VERSION
+      : v5
+        ? READER_V5_PROMPT_VERSION
+        : v4
+          ? READER_V4_PROMPT_VERSION
+          : v3
+            ? READER_V3_PROMPT_VERSION
+            : READER_V2_PROMPT_VERSION,
     name: 'maxed',
     note: `the worst input: a ${pageTokens}-token page, the record roster at its ${READER_V2_RECORD_ROSTER_TOKENS} and the topics at ${READER_V2_TOPICS_TOKENS}, near ${READER_V2_NEAR_TOKENS}, topic lines ${READER_V2_TOPIC_LINES_TOKENS}, anchored ${READER_V2_ANCHORED_TOKENS}, the card due`,
     messages: built.messages,
@@ -1281,4 +1303,59 @@ export const MEMORY_V5_EVAL_CASES: readonly EvalCase[] = [
     false,
     true
   )
+]
+
+/**
+ * `reader.v6`'s cases (plan `ReaderNarrow.md`, the author's decision of 2026-10-14: concrete facts
+ * only): the scenes of the fourth live run's wrong facts in the slots still read (s04's "her dark
+ * eyes" stored as Mr. Varrow's, s03's location clause and "his sisters" as kinship, s01's kinship
+ * from "a woman" and "my little Lise", h15's birthplaces as `born` and "down to dinner on the
+ * Captain's arm"), a window and the worst input. The checker stays `verify.v4` (its cases above).
+ */
+export const MEMORY_V6_EVAL_CASES: readonly EvalCase[] = [
+  readerV2Case(
+    's04 eyes',
+    's04: “her dark eyes” (Liesel’s, never Mr. Varrow’s), Mr. Ashby’s attentions and her figure (no slot read)',
+    's04',
+    [],
+    { v6: true }
+  ),
+  readerV2Case(
+    's03 party',
+    's03 ¶3–6 (a window): his sisters (no kinship of his), his brother-in-law Mr. Lowther, the report of ten thousand a year (rumour), near enough to overhear (no location)',
+    's03',
+    [],
+    { window: [3, 4, 5, 6], v6: true }
+  ),
+  readerV2Case(
+    's01 daughters',
+    's01 ¶18–24 (a window): “When a woman has four grown-up daughters” (no one’s kinship), “my little Lise” (no relation word)',
+    's01',
+    [],
+    { window: [18, 19, 20, 21, 22, 23, 24], v6: true }
+  ),
+  readerV2Case(
+    'h15 portrait',
+    'h15: born in 1795 (a when), born at Gullhaven and in Elsdale (birthplaces, said), her fair hair, down to dinner on the Captain’s arm (no location)',
+    'h15',
+    ['secret-debts'],
+    { v6: true }
+  ),
+  readerV2Case(
+    'window',
+    'a window read (h05 ¶4–6): the topic lines of the engagement, and the knows line anchored there',
+    'h05',
+    ['secret-engagement', 'thread-lottie-match'],
+    {
+      window: [4, 5, 6],
+      near: [`${shortV2('lottie')} age “not yet sixteen”`],
+      topicLines: [
+        `s1 Lottie's engagement to Mr. Dunmore: ${shortV2('clara')} told 9.1 (from ${shortV2('bel')}); ${shortV2('bel')} tells 9.1`
+      ],
+      anchored: [`c1 ${shortV2('liesel')} knows s1 overheard from ${shortV2('lottie')} ¶5`],
+      card: `Lise overhears Lottie tell Bel of the engagement. · where Wexley · POV ${shortV2('liesel')}`,
+      v6: true
+    }
+  ),
+  worstReaderV2Case(true, true, true, true)
 ]

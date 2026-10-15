@@ -229,6 +229,26 @@ export function slotGroup(slot: Slot): SlotGroup {
 /** The slots whose claims name a second record (`claim.object_id`): kinship and relation targets. */
 export const OBJECT_SLOTS: readonly Slot[] = ['kinship', 'relation']
 
+/**
+ * The slots the reader no longer reads (F-16.17, the author's decision of 2026-10-14, plan
+ * `ReaderNarrow.md`): the open-ended ones (traits, history, relation, role) and clothing and
+ * objects, where nearly every wrong fact of four live runs sat. They stay on the closed list, so
+ * stored v1 data, the author's own notes and the switch-over keep working; the reader is not asked
+ * for them (`reader.v6`) and the pipeline refuses one it proposes anyway (`notRead`). Ms Scribe
+ * answers such questions by searching the text and quoting the passage (`agent.v9`, `cite.v1`).
+ */
+export const NOT_READ_SLOTS: ReadonlySet<Slot> = new Set<Slot>([
+  'traits',
+  'history',
+  'relation',
+  'role',
+  'clothing',
+  'objects'
+])
+
+/** Whether the reader still reads `slot` into facts (`NOT_READ_SLOTS` aside). */
+export const slotIsRead = (slot: Slot): boolean => !NOT_READ_SLOTS.has(slot)
+
 /** How a sheet and the panel name a base slot. */
 export const SLOT_LABEL: Readonly<Record<BaseSlot, string>> = {
   eyes: 'Eyes',

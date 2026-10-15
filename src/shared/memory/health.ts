@@ -21,6 +21,12 @@ export interface HealthReading {
   quotesFound: number
   verifySent: number
   verified: number
+  /**
+   * The refusals by reason: an item refused for a slot no longer read (`notRead`, plan
+   * `ReaderNarrow.md`) is left out of the items, since it was refused before its quote was looked
+   * for and says nothing of the model's quotes.
+   */
+  rejections?: Readonly<Record<string, number>>
 }
 
 export interface ModelHealth {
@@ -44,7 +50,7 @@ export function modelHealth(readings: readonly HealthReading[]): ModelHealth {
   const recent = readings.slice(0, HEALTH_WINDOW)
   const total = recent.reduce(
     (sum, reading) => ({
-      items: sum.items + reading.items,
+      items: sum.items + reading.items - (reading.rejections?.notRead ?? 0),
       quotesFound: sum.quotesFound + reading.quotesFound,
       verifySent: sum.verifySent + reading.verifySent,
       verified: sum.verified + reading.verified

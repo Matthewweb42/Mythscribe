@@ -1,4 +1,4 @@
-import { estimateTokens, type Tier } from '@shared/ai'
+import { estimateTokens } from '@shared/ai'
 import { anchorFor, sceneSentences } from '@shared/memory/anchor'
 import {
   CARD_GIST_MAX_WORDS,
@@ -42,9 +42,12 @@ import {
   diesInQuote,
   genderOfNames,
   groupHeadIn,
+  locationPhrase,
   locationStated,
   nameInSentence,
   possessedOnly,
+  possessiveOwner,
+  possessiveOwners,
   pronounOfOtherGender,
   pronounRivals,
   quotePointsAtSubject,
@@ -74,7 +77,14 @@ import {
   type VerifyVerdict
 } from '@shared/memory/readerAnswer'
 import { reconcile, type FreshClaim } from '@shared/memory/reconcile'
-import { OBJECT_SLOTS, readSlot, slotFitsKind, slotGroup, type Slot } from '@shared/memory/slots'
+import {
+  OBJECT_SLOTS,
+  readSlot,
+  slotFitsKind,
+  slotGroup,
+  slotIsRead,
+  type Slot
+} from '@shared/memory/slots'
 import { readerMayRead } from '@shared/memory/sources'
 import { spotPicked } from '@shared/memory/spot'
 import {
@@ -90,7 +100,7 @@ import { activeDraftId, currentDraftId } from '../../draft/draftStore'
 import { STEP_VALUE_MAX_WORDS } from '../../ai/prompts/reader.v2'
 import { readerV3PageTokens } from '../../ai/prompts/reader.v3'
 import { readerV4OutputCap } from '../../ai/prompts/reader.v4'
-import { READER_V5_PROMPT_VERSION, buildReaderV5Prompt } from '../../ai/prompts/reader.v5'
+import { READER_V6_PROMPT_VERSION, buildReaderV6Prompt } from '../../ai/prompts/reader.v6'
 import { VERIFY_UNNAMED_MARK, verifyV2Batches, type VerifyV2Item } from '../../ai/prompts/verify.v2'
 import { VERIFY_V4_PROMPT_VERSION, buildVerifyV4Prompt } from '../../ai/prompts/verify.v4'
 import { cancelInflight } from '../../ai/inflight'
@@ -315,12 +325,7 @@ async function send(
     messages: AiMessage[]
     maxTokens: number
     childId: string
-    promptVersion: typeof READER_V5_PROMPT_VERSION | typeof VERIFY_V4_PROMPT_VERSION
-    /**
-     * The tier asked for: fast, but the open-ended facts' checks (`STRONG_CHECK_SLOTS`) go strong
-     * (plan `ReaderPrecision.md`), through the request path's routing like any other request.
-     */
-    tier?: Tier
+    promptVersion: typeof READER_V6_PROMPT_VERSION | typeof VERIFY_V4_PROMPT_VERSION
   }
 ): Promise<AiRequestResult> {
   stopIfCancelled(input.signal)
@@ -328,7 +333,7 @@ async function send(
   try {
     const result = await runAiRequest(deps.ai, {
       feature: request.feature,
-      tier: request.tier ?? 'fast',
+      tier: 'fast',
       messages: request.messages,
       maxTokens: request.maxTokens,
       json: true,
@@ -390,6 +395,12 @@ interface Item {
   proof: 'literal' | null
   /** A literal claim picked for a fast spot check: its check's index. */
   spotCheck: number | null
+  /**
+   * The one person a he, she or possessive of its quote can mean (`pronounRivals`), when code
+   * settled it: the checker's pick must be them (fourth live run of 2026-10-14, plan
+   * `ReaderNarrow.md`: the checker gave "her dark eyes" to Mr. Varrow).
+   */
+  owner: string | null
   value: string
   /** The verify item for it, when one was sent. */
   check: number | null
@@ -453,20 +464,6 @@ function statingOf(
 }
 
 /** A verify item, with what it checks. */
-/**
- * The open-ended slots whose facts the checker reads on the strong tier (plan
- * `ReaderPrecision.md`, after the third live run of 2026-10-14: about one in ten facts the fast
- * checker passed there was wrong; decided by Claude, unconfirmed): who did what and what a value
- * means is judgment there, not a colour or a place. Every other check stays on the fast tier.
- */
-export const STRONG_CHECK_SLOTS: ReadonlySet<string> = new Set([
-  'history',
-  'traits',
-  'relation',
-  'kinship',
-  'role'
-])
-
 interface Check extends VerifyV2Item {
   piece: number
   /** The item, card field or present entry it checks. */
@@ -1238,7 +1235,7 @@ export async function runReading(
       const ask = async (
         parts: ReadPiece['paragraphs']
       ): Promise<{ answer: ReaderAnswer | null; cut: boolean }> => {
-        const prompt = buildReaderV5Prompt({
+        const prompt = buildReaderV6Prompt({
           ...base,
           paragraphs: parts.map((part) => ({ p: part.p, text: texts[part.p] ?? '' }))
         })
@@ -1250,7 +1247,7 @@ export async function runReading(
           messages: prompt.messages,
           maxTokens: prompt.maxTokens,
           childId: `${input.requestId}:r${requests}`,
-          promptVersion: READER_V5_PROMPT_VERSION
+          promptVersion: READER_V6_PROMPT_VERSION
         })
         return { answer: parseReaderAnswer(result.text), cut: result.finishReason === 'length' }
       }
@@ -1535,6 +1532,9 @@ export async function runReading(
         return refuse('slot', claim, who)
       }
       const slot: Slot = parsed
+      // The author's decision of 2026-10-14 (plan ReaderNarrow.md): only concrete facts are read;
+      // traits, history, relations, roles, clothing and objects are Ms Scribe's to find in the text.
+      if (line.kind === 'fact' && !slotIsRead(slot)) return refuse('notRead', claim, who)
       const location = locate(scene, texts[piece] ?? [], claim.p, claim.q)
       if (typeof location === 'string') return refuse(location, claim, who)
       yields.quotesFound += 1
@@ -1574,6 +1574,7 @@ export async function runReading(
         subject: { kind: 'none' },
         proof: null,
         spotCheck: null,
+        owner: null,
         value:
           line.kind === 'knows'
             ? line.how
@@ -1709,6 +1710,29 @@ export async function runReading(
           if (rivals.length === 1 && rivals[0] !== item.recordId) {
             return refuse('subject', claim, who)
           }
+          item.owner = rivals[0] ?? null
+        }
+        // The fourth live run's (2026-10-14, plan ReaderNarrow.md): a body or detail value's his
+        // or her is whose it is, whoever the quote names ("her dark eyes" is never Mr. Varrow's):
+        // it fits the subject's gender, and no two people in reach could be it.
+        const possessive = possessiveOwner(slot, item.value, claim.q)
+        if (possessive !== null && item.recordId !== null && !relative) {
+          const gender = genderOf(item.recordId)
+          if (gender !== null && gender !== possessive) return refuse('subject', claim, who)
+          const owners = possessiveOwners({
+            slot,
+            quote: claim.q,
+            sentences: quote,
+            before,
+            isCharacter,
+            genderOf,
+            pronoun: possessive
+          })
+          if (owners.length > 1) return refuse('ambiguous', claim, who)
+          if (owners.length === 1 && owners[0] !== item.recordId) {
+            return refuse('subject', claim, who)
+          }
+          item.owner = owners[0] ?? item.owner
         }
         const others = quote.flatMap((sentence) =>
           sentence.names
@@ -1736,9 +1760,11 @@ export async function runReading(
         if (relationValue({ slot, value: item.value, objectId })) {
           return refuse('object', claim, who)
         }
+        // The fourth live run's: a clause is no place ("near enough for her to overhear…").
         if (
           slot === 'location' &&
-          !locationStated({ value: item.value, quote: claim.q, names: calledBy, firstPerson })
+          (!locationPhrase(item.value) ||
+            !locationStated({ value: item.value, quote: claim.q, names: calledBy, firstPerson }))
         ) {
           return refuse('where', claim, who)
         }
@@ -2218,10 +2244,7 @@ export async function runReading(
     const verdicts = new Map<number, VerifyVerdict>()
     let batchNo = 0
     /** Sends one batch and keeps its verdicts; true when the reply was cut off at its cap. */
-    const runBatch = async (
-      batch: readonly (Check & { at: number })[],
-      tier: Tier
-    ): Promise<boolean> => {
+    const runBatch = async (batch: readonly (Check & { at: number })[]): Promise<boolean> => {
       batchNo += 1
       const prompt = buildVerifyV4Prompt({ items: batch })
       const result = await send(deps, input, spend, inFlight, {
@@ -2229,8 +2252,7 @@ export async function runReading(
         messages: prompt.messages,
         maxTokens: prompt.maxTokens,
         childId: `${input.requestId}:v${batchNo}`,
-        promptVersion: VERIFY_V4_PROMPT_VERSION,
-        tier
+        promptVersion: VERIFY_V4_PROMPT_VERSION
       })
       const answered = parseVerifyAnswer(result.text)
       for (const [i, entry] of batch.entries()) {
@@ -2239,29 +2261,22 @@ export async function runReading(
       }
       return result.finishReason === 'length'
     }
-    // Plan ReaderPrecision.md (third live run of 2026-10-14): the open-ended facts' checks go on
-    // the strong tier in batches of their own, everything else on the fast one.
-    const strongCheck = (check: Check): boolean => {
-      if (check.target.kind !== 'item') return false
-      const item = items[check.target.index]
-      return item?.kind === 'fact' && STRONG_CHECK_SLOTS.has(item.slot)
-    }
+    // Every check on the fast tier (plan ReaderNarrow.md, 2026-10-14: the strong batch of the
+    // open-ended slots is retired with them; kinship did not earn it, the fourth live run's strong
+    // checker passed "his sisters are fine women" and "daughter" from "my little Lise").
     for (let piece = 0; piece < pieces.length; piece += 1) {
       const own = checks
         .map((check, index) => ({ ...check, at: index }))
         .filter((entry) => entry.piece === piece)
-      for (const tier of ['fast', 'strong'] as const) {
-        const ofTier = own.filter((entry) => strongCheck(entry) === (tier === 'strong'))
-        for (const batch of verifyV2Batches(ofTier)) {
-          if (!(await runBatch(batch, tier))) continue
+      for (const batch of verifyV2Batches(own)) {
+        if (!(await runBatch(batch))) continue
+        yields.cut += 1
+        // The items a cut-off reply did not reach are asked once more.
+        const missing = batch.filter((entry) => !verdicts.has(entry.at))
+        for (const again of verifyV2Batches(missing)) {
+          if (!(await runBatch(again))) continue
           yields.cut += 1
-          // The items a cut-off reply did not reach are asked once more.
-          const missing = batch.filter((entry) => !verdicts.has(entry.at))
-          for (const again of verifyV2Batches(missing)) {
-            if (!(await runBatch(again, tier))) continue
-            yields.cut += 1
-            lost += 1
-          }
+          lost += 1
         }
       }
     }
@@ -2609,6 +2624,12 @@ export async function runReading(
           refuse('subject', item.claim, who)
           continue
         }
+        // The one person code found the pronoun can mean: the checker may not pick another
+        // (fourth live run of 2026-10-14: "her dark eyes" given to Mr. Varrow).
+        if (item.owner !== null && answered !== null && answered !== item.owner) {
+          refuse('subject', item.claim, who)
+          continue
+        }
         // Null with one candidate: none fits. With more, more than one does: it waits, and the
         // next full read drops it (P2a-D23). A knows line never waits (P2b).
         if (answered === null && (subject.candidates.length < 2 || item.kind === 'knows')) {
@@ -2736,7 +2757,7 @@ export async function runReading(
           purpose,
           pages: requests,
           paras: ranges([...readParas]),
-          promptVersion: READER_V5_PROMPT_VERSION,
+          promptVersion: READER_V6_PROMPT_VERSION,
           verifyVersion: spend.verifySent ? VERIFY_V4_PROMPT_VERSION : null,
           model: spend.model,
           tokensIn: spend.tokensIn,

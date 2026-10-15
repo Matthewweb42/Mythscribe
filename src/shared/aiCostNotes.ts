@@ -226,7 +226,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   reader: {
     trigger: 'background',
-    when: 'Story memory v2 (F-16.17; F-16.22, F-16.23): reader.v5 since the third live planted-error run of 2026-10-14 (plan ReaderPrecision.md: the voice field named "src", what each open-ended slot holds and who did it; rules +177 tokens, v4’s cap; figures about 4,730 / 400 for a window, 2,560 / 650 for a first-read page, `READING_V3_ROWS`), reader.v4 since the second live planted-error run of 2026-10-14 (the slot list first and alone, what each value must be, max_tokens min(1,000, 160 + 1.4 per prose token + 240 with the card): v3 clipped a 400-token page with its card to 720, so most pages were read again in halves), reader.v3 since the first run that day, reader.v2 from P2b, reader.v1 before; fast tier, reasoning off. The rest describes reader.v3, which v4 keeps but for its rules and cap; figures for v4: about 4,550 / 400 for a window, 2,380 / 650 for a first-read page (`READING_V3_ROWS`). Only when a finished sentence of a scene changed (a local gate decides, nothing is sent while typing): the changed paragraphs ±2 when the author leaves the scene or pauses (from P2a slice 3; Read now meanwhile), the whole scene in pages of 400 prose tokens (2,500 until reader.v3: 83 % of those replies were cut off at the 720-token cap) on a first read, after half of it changed, or after five window reads. One request per window piece or page, max_tokens min(720, 160 + 1.2 per prose token + 240 with the card), facts in a compact form (defaults left out); a reply cut off at its cap is read again once from the last paragraph it quoted, in two halves. The rules, the record roster and the topics roster (the secrets and threads found, a short label each, never dropped) are a stable prefix (provider caching), the record roster rebuilt only on a removal, rename, merge or split. reader.v2 also reads who learns or holds which secret (how, and from whom: the learner must be on the page or the point of view), thread steps (opens, advances, resolves) and new secrets and threads, and its tail carries, for the secrets the changed paragraphs touch, who is known to know them (never who does not). Once after the switch-over (F-16.31), Rebuild memory is asked once with its price; until it starts, nothing nobody asked for is read but a scene the author wrote in and then leaves or pauses in (one Needs a look notice offers the rebuild instead of the backlog), and its spend counts as asked (outside the Cloud monthly reading cap, inside the daily cap). Figures (reader.v3, decided by Claude, unconfirmed until the next live run): about 4,400 tokens in and 380 out for a window, 2,230 / 600 for a first-read page of 400 prose tokens (`READING_V3_ROWS`).',
+    when: 'Story memory v2 (F-16.17; F-16.22, F-16.23): reader.v6 since the author’s decision of 2026-10-14 (plan ReaderNarrow.md: concrete facts only; traits, history, relations, roles, clothing and objects are no longer read, Ms Scribe finds them in the text; rules 211 tokens fewer than v5, v4’s cap, shorter replies; figures about 4,520 / 250 for a window, 2,350 / 450 for a first-read page, `READING_V3_ROWS`), reader.v5 from the third live planted-error run of 2026-10-14 (plan ReaderPrecision.md: the voice field named "src", what each open-ended slot holds and who did it; rules +177 tokens, v4’s cap; figures about 4,730 / 400 for a window, 2,560 / 650 for a first-read page, `READING_V3_ROWS`), reader.v4 since the second live planted-error run of 2026-10-14 (the slot list first and alone, what each value must be, max_tokens min(1,000, 160 + 1.4 per prose token + 240 with the card): v3 clipped a 400-token page with its card to 720, so most pages were read again in halves), reader.v3 since the first run that day, reader.v2 from P2b, reader.v1 before; fast tier, reasoning off. The rest describes reader.v3, which v4 keeps but for its rules and cap; figures for v4: about 4,550 / 400 for a window, 2,380 / 650 for a first-read page (`READING_V3_ROWS`). Only when a finished sentence of a scene changed (a local gate decides, nothing is sent while typing): the changed paragraphs ±2 when the author leaves the scene or pauses (from P2a slice 3; Read now meanwhile), the whole scene in pages of 400 prose tokens (2,500 until reader.v3: 83 % of those replies were cut off at the 720-token cap) on a first read, after half of it changed, or after five window reads. One request per window piece or page, max_tokens min(720, 160 + 1.2 per prose token + 240 with the card), facts in a compact form (defaults left out); a reply cut off at its cap is read again once from the last paragraph it quoted, in two halves. The rules, the record roster and the topics roster (the secrets and threads found, a short label each, never dropped) are a stable prefix (provider caching), the record roster rebuilt only on a removal, rename, merge or split. reader.v2 also reads who learns or holds which secret (how, and from whom: the learner must be on the page or the point of view), thread steps (opens, advances, resolves) and new secrets and threads, and its tail carries, for the secrets the changed paragraphs touch, who is known to know them (never who does not). Once after the switch-over (F-16.31), Rebuild memory is asked once with its price; until it starts, nothing nobody asked for is read but a scene the author wrote in and then leaves or pauses in (one Needs a look notice offers the rebuild instead of the backlog), and its spend counts as asked (outside the Cloud monthly reading cap, inside the daily cap). Figures (reader.v3, decided by Claude, unconfirmed until the next live run): about 4,400 tokens in and 380 out for a window, 2,230 / 600 for a first-read page of 400 prose tokens (`READING_V3_ROWS`).',
     callsPerUse: 1,
     typicalOutTokens: 500,
     ideas:
@@ -234,7 +234,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   verify: {
     trigger: 'background',
-    when: 'Story memory v2 (F-16.17; F-16.22, F-16.23): verify.v4 in the reading since the third live planted-error run of 2026-10-14 (plan ReaderPrecision.md: who did it and what each open-ended slot holds, rules +150 tokens): per page the facts of the open-ended slots (history, traits, relation, kinship, role) go in batches of their own on the strong tier (DeepSeek V4 Pro on OpenRouter, about 950 tokens in and 75 out a page, `verify.v4:strong`), everything else on the fast tier (about 900 / 50, `verify.v4`); the spot checks and Not right stay on verify.v3. verify.v3 from the first run that day (verify.v2 from P2b, verify.v1 before; v3 refuses one person for several, a want for a thing, and a value of the wrong kind), fast tier, reasoning off. Batches per reading page (at most 13 facts each, so every verdict fits), only for the facts code could not prove (each with its sentences ±1, and for a she or he up to eight sentences back to those naming whoever it could mean), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 28 per fact, thread step or reveals check + 36 per knows item + 12 per card, on-page or same check); a batch cut off at its cap asks its unanswered items once more. From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). On request (F-16.18): Not right › Not about is one fast call per use, one fact with the picked record and every record named in the eight sentences before it, its sentences ±3 (about 400 tokens in, about 40 out); nothing is sent for Wrong value or a line whose sentence changed. verify.v2 adds knows items (the learner, how and from whom, with the people named around the line; 36 tokens a verdict), thread steps, a reveals item per new secret or thread (with its voice and mode, 28 out, so a rumoured secret makes none), and up to 3 same-as items each (the two revealing sentences, one an earlier page found included, about 80 in and 12 out), plus an on-page check for each learner not here before the reading. Figures (plan P2b §6): about 1,500 tokens in and 140 out per batch; with reader.v3’s pages of 400 about 1,000 / 120 (`READING_V3_ROWS`).',
+    when: 'Story memory v2 (F-16.17; F-16.22, F-16.23): verify.v4 in the reading since the third live planted-error run of 2026-10-14 (plan ReaderPrecision.md: who did it and what each open-ended slot holds, rules +150 tokens), every batch on the fast tier since reader.v6 (plan ReaderNarrow.md, 2026-10-14: about 900 / 50 a page, `verify.v4`); with reader.v5 the facts of the open-ended slots (history, traits, relation, kinship, role) went in batches of their own on the strong tier (about 950 / 75 a page, `verify.v4:strong`, retired with those slots); the spot checks and Not right stay on verify.v3. verify.v3 from the first run that day (verify.v2 from P2b, verify.v1 before; v3 refuses one person for several, a want for a thing, and a value of the wrong kind), fast tier, reasoning off. Batches per reading page (at most 13 facts each, so every verdict fits), only for the facts code could not prove (each with its sentences ±1, and for a she or he up to eight sentences back to those naming whoever it could mean), the card POV, year and flashback, and who is on the page; nothing when code proved everything. max_tokens min(400, 20 + 28 per fact, thread step or reveals check + 36 per knows item + 12 per card, on-page or same check); a batch cut off at its cap asks its unanswered items once more. From P2a slice 3 also the spot checks after Rebuild memory: 50 literal facts on the fast tier in batches of 10, 20 verified facts on the strong tier one per call (40 tokens out). On request (F-16.18): Not right › Not about is one fast call per use, one fact with the picked record and every record named in the eight sentences before it, its sentences ±3 (about 400 tokens in, about 40 out); nothing is sent for Wrong value or a line whose sentence changed. verify.v2 adds knows items (the learner, how and from whom, with the people named around the line; 36 tokens a verdict), thread steps, a reveals item per new secret or thread (with its voice and mode, 28 out, so a rumoured secret makes none), and up to 3 same-as items each (the two revealing sentences, one an earlier page found included, about 80 in and 12 out), plus an on-page check for each learner not here before the reading. Figures (plan P2b §6): about 1,500 tokens in and 140 out per batch; with reader.v3’s pages of 400 about 1,000 / 120 (`READING_V3_ROWS`).',
     callsPerUse: 1,
     typicalOutTokens: 120,
     ideas:
@@ -824,9 +824,52 @@ export const READING_V3_ROWS: readonly PlannedCostNote[] = [
     phase: 'P2b',
     tier: 'strong',
     trigger: 'background',
-    when: 'The strong batch per reading page: the facts of the open-ended slots (history, traits, relation, kinship, role; about half of what the reader proposes), on DeepSeek V4 Pro, so who did it and what a value means are judged by the stronger model.',
+    when: 'Retired with reader.v6 (plan ReaderNarrow.md, 2026-10-14): with reader.v5, the strong batch per reading page, the facts of the open-ended slots (history, traits, relation, kinship, role; about half of what the reader proposed), on DeepSeek V4 Pro.',
     typicalInTokens: 950,
     typicalOutTokens: 75,
+    callsPerUse: 1
+  },
+  // reader.v6 (the author's decision of 2026-10-14, plan ReaderNarrow.md): concrete facts only,
+  // rules 211 tokens fewer than v5's, and shorter replies (about a third of v5's facts were in the
+  // slots no longer read). Every checker batch on the fast tier (`verify.v4`). Decided by Claude,
+  // unconfirmed until the next live run.
+  {
+    id: 'reader.v6:first',
+    prompt: 'reader.v6',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'A page of a scene read whole: reader.v5:first’s input with the v6 rules (211 tokens fewer), a 400-token page, its concrete facts and the card out within v4’s cap.',
+    typicalInTokens: 2_350,
+    typicalOutTokens: 450,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v6:window',
+    prompt: 'reader.v6',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'A window read (pieces of at most 400 prose tokens): reader.v5:window’s input with the v6 rules, compact concrete facts out.',
+    typicalInTokens: 4_520,
+    typicalOutTokens: 250,
+    callsPerUse: 1
+  },
+  {
+    id: 'reader.v6:card',
+    prompt: 'reader.v6',
+    feature: 'reader',
+    existing: true,
+    phase: 'P2b',
+    tier: 'fast',
+    trigger: 'background',
+    when: 'An instant card that is out of date: one reader.v6 window read for its scene (about one card in five).',
+    typicalInTokens: 4_520,
+    typicalOutTokens: 250,
     callsPerUse: 1
   }
 ]

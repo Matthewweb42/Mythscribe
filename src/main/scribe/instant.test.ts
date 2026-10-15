@@ -229,6 +229,31 @@ describe('read-first by the prose that bears on the slot (P3-D4)', () => {
     expect(ask('eyes')).toEqual({ readFirst: [book.three] })
     expect(ask('eyes', 1)).toMatchObject({ card: { value: 'grey' } })
   })
+
+  it('never reads first for a slot the reader no longer reads; a stored line still answers (plan ReaderNarrow.md)', () => {
+    const role = (): ReturnType<typeof instantCard> =>
+      instantCard(book.db, { kind: 'slot', recordId: book.mara, slot: 'role' }, book.three)
+    saveDocument(book.db, book.three, doc('Mara was appointed harbourmaster that spring.'))
+    // "appointed" bears on a role, but reading the scene would store none: nothing stored, so
+    // Ms Scribe searches the text.
+    expect(role()).toEqual({ handover: 'none', keys: [] })
+    // A line stored before (v1 data, the switch-over) still makes the card.
+    void seedClaims(
+      book.db,
+      book.one,
+      [
+        {
+          recordId: book.mara,
+          slot: 'role',
+          value: 'captain',
+          quote: 'Mara watched the quay',
+          para: 0
+        }
+      ],
+      SCRIBE_NOW
+    )
+    expect(role()).toMatchObject({ card: { kind: 'slot', slot: 'role', value: 'captain' } })
+  })
 })
 
 describe('an age as of now (decision 5, P2b-D15)', () => {

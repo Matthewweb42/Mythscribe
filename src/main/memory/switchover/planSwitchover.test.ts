@@ -179,29 +179,25 @@ describe('planSwitchover: the dry run (F-16.15, plan P1 §6.1 step 2)', () => {
     expect(plan.rebuild.priced).toBe(true)
     expect(plan.rebuild.costUsd).toBeGreaterThan(0)
     // F-16.17, F-16.22: the reader and verify rows shipped (v2 since P2b, v3 since the live run
-    // of 2026-10-14, v4 since its second run, reader.v5 and verify.v4 since its third); the
-    // rebuild prices from the v5 sizes, a page checked in a fast and a strong batch.
+    // of 2026-10-14, v4 since its second run, reader.v5 and verify.v4 since its third, reader.v6
+    // since plan ReaderNarrow.md); the rebuild prices from the v6 sizes, a page checked in one
+    // fast batch (the strong batch of the open-ended slots is retired with them).
     const shipped = (id: string) => READING_V3_ROWS.find((note) => note.id === id)
     expect(PLANNED_COST_NOTES.some((note) => note.id.startsWith('reader.'))).toBe(false)
     expect(SHIPPED_PLAN_ROWS.some((note) => note.id === 'reader.v2:first')).toBe(true)
-    const reader = shipped('reader.v5:first')
+    const reader = shipped('reader.v6:first')
     const verify = shipped('verify.v4')
-    const verifyStrong = shipped('verify.v4:strong')
-    if (reader === undefined || verify === undefined || verifyStrong === undefined) {
-      throw new Error('shipped rows are missing')
-    }
-    expect(plannedRow('reader.v5:first')).toBe(reader)
-    expect(verifyStrong.tier).toBe('strong')
+    if (reader === undefined || verify === undefined) throw new Error('shipped rows are missing')
+    expect(plannedRow('reader.v6:first')).toBe(reader)
+    expect(verify.tier).toBe('fast')
     expect(REBUILD_PAGE_TOKENS).toBe(400)
     expect(() => plannedRow('nothing.v1')).toThrow('No planned cost row nothing.v1')
     const one = estimateRebuild([REBUILD_PAGE_TOKENS], { ...CONTEXT, source: 'local' })
     expect(one.costUsd).toBe(0)
-    expect(one.requests).toBe(3 + REBUILD_FAST_CHECKS + REBUILD_STRONG_CHECKS)
+    expect(one.requests).toBe(2 + REBUILD_FAST_CHECKS + REBUILD_STRONG_CHECKS)
     const two = estimateRebuild([REBUILD_PAGE_TOKENS + 1], { ...CONTEXT, source: 'local' })
-    expect(two.tokensOut - one.tokensOut).toBe(
-      reader.typicalOutTokens + verify.typicalOutTokens + verifyStrong.typicalOutTokens
-    )
-    // Cents per book (plan ReaderPrecision.md): 90 scenes of 800 prose tokens on the defaults.
+    expect(two.tokensOut - one.tokensOut).toBe(reader.typicalOutTokens + verify.typicalOutTokens)
+    // Cents per book (plans ReaderPrecision.md, ReaderNarrow.md): 90 scenes of 800 prose tokens on the defaults.
     const book = estimateRebuild(
       Array.from({ length: 90 }, () => 800),
       CONTEXT

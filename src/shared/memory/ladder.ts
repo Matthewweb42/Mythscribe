@@ -1,6 +1,6 @@
 import { normalizeForMatch, straightenQuotes } from '../critique'
 import type { ClaimVoice } from './claims'
-import type { LiteralName } from './literal'
+import { kinWords, type LiteralName } from './literal'
 import { nameSpans } from './nameQuestions'
 import type { QuoteMissReason } from './quote'
 import { ageYears } from './years'
@@ -78,7 +78,10 @@ export type LadderReject =
   | 'absence'
   /** A value not of its slot's kind: an age that is no age, a feeling as an object (`valueOfKind`). */
   | 'valueKind'
-  /** A location not stated as where the subject is or goes (`locationStated`; "the road"). */
+  /**
+   * A location not stated as where the subject is or goes (`locationStated`; "the road"), or a
+   * value that is no place phrase (`locationPhrase`; "near enough for her to overhear…").
+   */
   | 'where'
   /** A state of the subject's at their death, which is history, not now (`diesInQuote`). */
   | 'past'
@@ -96,6 +99,12 @@ export type LadderReject =
   | 'actor'
   /** A relation with no one to relate to, or no relation in its value (`relationValue`). */
   | 'object'
+  /**
+   * A fact in a slot the reader no longer reads (`NOT_READ_SLOTS`: traits, history, relation,
+   * role, clothing, objects; plan `ReaderNarrow.md`, the author's decision of 2026-10-14): a cost
+   * of the reply, reported, no bar.
+   */
+  | 'notRead'
 
 /** One sentence of the scene as the ladder reads it. */
 export interface LadderSentence {
@@ -354,10 +363,12 @@ const VALUE_FREE_SLOTS = new Set(['alive', 'kinship', 'knows', 'thread'])
 /**
  * Whether every content word of a fact's value stands in its quote, as a word or a word sharing
  * its first four letters or more ("proud" in "the proudest"), case and quotes aside; true for the
- * slots whose value is not the quote's words (`VALUE_FREE_SLOTS`). "the road" from "Johanna
- * walked quickly" and "at the table" from "Mr. Harrow said nothing more" fail.
+ * slots whose value is not the quote's words (`VALUE_FREE_SLOTS`), but for kinship the quote must
+ * hold a relation word (`kinshipStated`). "the road" from "Johanna walked quickly" and "at the
+ * table" from "Mr. Harrow said nothing more" fail.
  */
 export function valueStated(slot: string, value: string, quote: string): boolean {
+  if (slot === 'kinship') return kinshipStated(quote)
   if (VALUE_FREE_SLOTS.has(slot)) return true
   // An age may be given in digits for words ("22" from "two-and-twenty").
   if (slot === 'age') {
@@ -368,6 +379,22 @@ export function valueStated(slot: string, value: string, quote: string): boolean
   return wordsOf(value)
     .filter((word) => !VALUE_STOPWORDS.has(word))
     .every((word) => quoted.some((other) => sameWord(word, other)))
+}
+
+/** Words that state a marriage or a betrothal: kinship enough ("married", "is to marry"). */
+const MARRIAGE =
+  /(?<![\p{L}\p{N}])(?:marry|marries|married|wed|weds|wedded|widowed|engaged|betrothed)(?![\p{L}\p{N}])/iu
+
+/**
+ * Whether a kinship's quote states a relation (fourth live run of 2026-10-14, plan
+ * `ReaderNarrow.md`: "daughter" stored from "my little Lise", "mother of four grown-up daughters"
+ * from "When a woman has four grown-up daughters"): it holds a kin word for one person ("son",
+ * "cousin", "brother-in-law", "father" in "My father was a clergyman") or a word of marriage. Its
+ * value is the reader's relation word, so the quote must say there is one.
+ */
+export function kinshipStated(quote: string): boolean {
+  const text = straightenQuotes(quote)
+  return kinWords(text).length > 0 || MARRIAGE.test(text)
 }
 
 const SINGULAR_THIRD =
@@ -683,7 +710,61 @@ export function valueOfKind(slot: string, value: string): boolean {
     const head = words.find((word) => !VALUE_STOPWORDS.has(word))
     return head === undefined || !ABSTRACT_NOUNS.has(head)
   }
+  if (slot === 'born') return bornIsWhen(value)
   return true
+}
+
+/** Words that make a birth's value a when ("in the spring", "the year the river froze"). */
+const TIME_WORDS = new Set([
+  'year',
+  'years',
+  'month',
+  'day',
+  'night',
+  'morning',
+  'evening',
+  'spring',
+  'summer',
+  'autumn',
+  'winter',
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+  'christmas',
+  'easter',
+  'michaelmas',
+  'war',
+  'reign',
+  'ago',
+  'before',
+  'after',
+  'during',
+  'since',
+  'century',
+  'age'
+])
+
+/**
+ * Whether a birth's value says when (fourth live run of 2026-10-14: "at Gullhaven" and "in
+ * Elsdale" stored as `born`; plan `ReaderNarrow.md`): it holds a number, a year, a month, a season
+ * or another time word; a value with none of them and a capitalised word is a place, which is
+ * `detail:birthplace`, never `born`. A value with neither ("young") is left to the checker.
+ */
+export function bornIsWhen(value: string): boolean {
+  const words = tokensOf(value)
+  if (words.some((word) => /\d/.test(word) || TIME_WORDS.has(word) || ageYears(word) !== null)) {
+    return true
+  }
+  return !/(?<![\p{L}\p{N}])\p{Lu}/u.test(straightenQuotes(value))
 }
 
 /** Words that put someone at, in, into or towards a place ("called at Wexley", "came up the stairs"). */
@@ -787,6 +868,42 @@ export function locationStated(input: {
       const at = tokens.findIndex((token) => sameWord(first, token))
       return tokens.slice(Math.max(0, at - 3), at).some((token) => PLACE_CUES.has(token))
     })
+}
+
+/** The most words a location's value holds, a leading word that puts someone there aside. */
+export const LOCATION_VALUE_MAX_WORDS = 5
+
+/** Words that open a clause, never a place ("near enough for her to overhear…"). */
+const CLAUSE_WORDS = new Set([
+  'that',
+  'which',
+  'who',
+  'whom',
+  'whose',
+  'when',
+  'while',
+  'because',
+  'enough',
+  'if',
+  'until',
+  'till',
+  'though'
+])
+
+/**
+ * Whether a location's value is a place phrase (fourth live run of 2026-10-14, plan
+ * `ReaderNarrow.md`: "near enough for her to overhear a conversation between him and Mr. Ashby"
+ * and "down to dinner on the Captain's arm" stored as locations): at most
+ * `LOCATION_VALUE_MAX_WORDS` words once one leading word that puts someone there is left out
+ * ("at", "down", "into"…), and no word that opens a clause ("that", "when", "enough"…). "the morning
+ * room", "Callow Cross" and "at the head of the table" are places.
+ */
+export function locationPhrase(value: string): boolean {
+  const all = straightenQuotes(value).trim().split(/\s+/).filter(Boolean)
+  const lead = all.length > 1 && PLACE_CUES.has((all[0] ?? '').toLowerCase())
+  const rest = lead ? all.slice(1) : all
+  if (rest.length === 0 || rest.length > LOCATION_VALUE_MAX_WORDS) return false
+  return !tokensOf(rest.join(' ')).some((word) => CLAUSE_WORDS.has(word))
 }
 
 /** Slots that say how someone is now: at their death they are history ("died in his chair"). */
@@ -1001,11 +1118,17 @@ export function pronounRivals(input: {
   before: readonly LadderSentence[]
   isCharacter: (recordId: string) => boolean
   genderOf: (recordId: string) => Gender | null
+  /**
+   * The one pronoun to settle, when it is known (`possessiveOwner`: the her of "her dark eyes"),
+   * instead of every he, she and they in the quote.
+   */
+  pronoun?: Gender
 }): string[] {
   const text = straightenQuotes(input.quote)
-  const female = FEMALE_PRONOUN.test(text)
-  const male = MALE_PRONOUN.test(text)
-  const part = PART_SLOTS.has(input.slot) && PLURAL_OR_IT.test(text)
+  const female =
+    input.pronoun === undefined ? FEMALE_PRONOUN.test(text) : input.pronoun === 'female'
+  const male = input.pronoun === undefined ? MALE_PRONOUN.test(text) : input.pronoun === 'male'
+  const part = input.pronoun === undefined && PART_SLOTS.has(input.slot) && PLURAL_OR_IT.test(text)
   if (!female && !male && !part) return []
   const fits = (recordId: string): boolean => {
     if (!female && !male) return true
@@ -1033,6 +1156,46 @@ export function pronounRivals(input: {
 }
 
 /**
+ * Who a possessive his or her before a body or detail value can mean (`possessiveOwner`; fourth
+ * live run of 2026-10-14, plan `ReaderNarrow.md`): the characters of its gender (or of no known
+ * gender) named in its own clause up to the quote's end, where a he or she may point back to them
+ * ("Ada turned her grey eyes away": Ada; "his friend Mr. Varrow … of his having ten thousand a
+ * year": Mr. Varrow, not Mr. Lowther before the semicolon); when its clause names none, whoever
+ * `pronounRivals` finds in the quote's sentences and the nearest sentence before that names one
+ * ("the expression of her dark eyes" after "Mr. Varrow … allowed Liesel to be pretty": Liesel).
+ * More than one means the text does not settle whose it is.
+ */
+export function possessiveOwners(input: {
+  slot: string
+  quote: string
+  sentences: readonly LadderSentence[]
+  before: readonly LadderSentence[]
+  isCharacter: (recordId: string) => boolean
+  genderOf: (recordId: string) => Gender | null
+  pronoun: Gender
+}): string[] {
+  const fits = (recordId: string): boolean => {
+    const gender = input.genderOf(recordId)
+    return gender === null || gender === input.pronoun
+  }
+  const quote = straightenQuotes(input.quote).trim()
+  const owners = new Set<string>()
+  for (const sentence of input.sentences) {
+    const text = straightenQuotes(sentence.text)
+    const at = quote === '' ? -1 : text.indexOf(quote)
+    const start = at < 0 ? 0 : text.lastIndexOf(';', at) + 1
+    const end = at < 0 ? text.length : at + quote.length
+    for (const name of sentence.names) {
+      if (name.start < start || name.start >= end || name.ambiguous) continue
+      if (!input.isCharacter(name.recordId) || !fits(name.recordId)) continue
+      if (oblique(sentence.text, name.start, name.end)) continue
+      owners.add(name.recordId)
+    }
+  }
+  return owners.size > 0 ? [...owners] : pronounRivals(input)
+}
+
+/**
  * Whether a fact's quote points at its subject only with a he or she of the other gender (third
  * live run: Hobb's "he had kept a sugar plum in his coat" stored as Johanna's): the subject's
  * gender is known from a title, the quote does not name them, holds no description of one person
@@ -1049,6 +1212,48 @@ export function pronounOfOtherGender(input: {
   const female = FEMALE_PRONOUN.test(text)
   const male = MALE_PRONOUN.test(text)
   return input.gender === 'female' ? male && !female : female && !male
+}
+
+/**
+ * The slots whose value a possessive his or her gives an owner ("her dark eyes", "his scar", "his
+ * ten thousand a year"; fourth live run of 2026-10-14, plan `ReaderNarrow.md`): the body slots and
+ * every `detail:` label.
+ */
+export function ownedSlot(slot: string): boolean {
+  return (
+    slot === 'eyes' ||
+    slot === 'hair' ||
+    slot === 'scars' ||
+    slot === 'injuries' ||
+    slot.startsWith('detail:')
+  )
+}
+
+/** The words a possessive may stand back from its value ("her eyes were grey": three). */
+const OWNER_REACH = 3
+
+/**
+ * Whose a body or detail value is by the his or her before it (fourth live run of 2026-10-14:
+ * "the beautiful expression of her dark eyes" stored as Mr. Varrow's): the gender of a his or her
+ * standing at most `OWNER_REACH` words before the value's first own word ("her dark eyes", "her
+ * eyes were grey"), or null when none does, or when a name's or a person's possessive stands
+ * nearer ("Anne's fair hair", "his wife's eyes": theirs, settled by the name). Only for
+ * `ownedSlot`s.
+ */
+export function possessiveOwner(slot: string, value: string, quote: string): Gender | null {
+  if (!ownedSlot(slot)) return null
+  const first = wordsOf(value).find((word) => !VALUE_STOPWORDS.has(word))
+  if (first === undefined) return null
+  const tokens = tokensOf(quote)
+  const at = tokens.findIndex((token) => sameWord(first, token))
+  if (at < 0) return null
+  for (let i = at - 1; i >= Math.max(0, at - OWNER_REACH); i -= 1) {
+    const token = tokens[i] ?? ''
+    if (token === 'her') return 'female'
+    if (token === 'his') return 'male'
+    if (token === 's' || personWord(token).person) return null
+  }
+  return null
 }
 
 /** Nominative pronouns: someone doing the act ("he asked", "they walked", "I told"). */
@@ -1155,7 +1360,9 @@ function personWord(word: string): { person: boolean; plural: boolean } {
  * "second daughter" from "his second daughter" stored on Mr. Harrow, "father" from "The Captain's
  * father was a merchant" on the Captain): the value (a leading his, her or the left out) ends in a
  * person word and stands in the quote right after a possessive pointing at the subject, his, her,
- * their, my, or the subject's name with 's. "Lise's cousin" on Anne and "son of a clergyman" stay.
+ * their, my, or the subject's name with 's; or (fourth live run) every person word in the value is
+ * a plural ("his sisters are fine women"). "Lise's cousin" on Anne, "son of a clergyman" and
+ * "mother of four daughters" stay.
  */
 export function relativeValue(input: {
   slot: string
@@ -1164,6 +1371,12 @@ export function relativeValue(input: {
   names: readonly string[]
 }): boolean {
   if (input.slot !== 'kinship') return false
+  // Fourth live run (plan ReaderNarrow.md): "his sisters are fine women" on Mr. Ashby. One person
+  // is one son or one cousin; a value whose person words are all plural names the relatives.
+  const persons = tokensOf(input.value)
+    .map(personWord)
+    .filter((word) => word.person)
+  if (persons.length > 0 && persons.every((word) => word.plural)) return true
   const core = straightenQuotes(input.value)
     .trim()
     .replace(/^(?:his|her|their|my|our|your|the)\s+/i, '')

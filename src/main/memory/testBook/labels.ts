@@ -1723,12 +1723,16 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       kind: 'slot',
       expected: { instant: true, scene: 'h02', quoteHas: 'long white scar' }
     },
+    // Plan ReaderNarrow.md (2026-10-14): roles and histories are no longer read into the memory,
+    // so the Captain's work since the army is Ms Scribe's to find and quote (it was an instant
+    // card from a stored role line until then).
     {
-      id: 'slot-captain-role',
-      question: "What is the Captain's role?",
+      id: 'open-captain-work',
+      question: 'What did the Captain do after he left the army?',
       asOf: 'h14',
-      kind: 'slot',
-      expected: { instant: true, scene: 'h14', quoteHas: 'a farmer now' }
+      kind: 'open',
+      terms: ['army', 'farmer', 'left'],
+      expected: { scene: 'h14', quoteHas: 'a farmer now' }
     },
     {
       id: 'slot-lottie-age',
@@ -2217,6 +2221,7 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       value: 'ten thousand a year',
       quote:
         'the report, which was in general circulation within five minutes after his entrance, of his having ten thousand a year',
+      voice: 'narration',
       right: false,
       call: true,
       reason: 'A report in circulation, stored as narration: it should be a rumour.'
@@ -3056,6 +3061,173 @@ export const TEST_BOOK_LABELS: TestBookLabels = {
       quote: 'stood at the lodge gate in the rain and lifted his hat to the carriage',
       right: false,
       reason: 'One act, not a lasting quality.'
+    },
+    // Plan ReaderNarrow.md step 3 (2026-10-14): every fact the fourth live run (two readings,
+    // 2026-10-15T02:37 and 02:47 UTC) stored in a slot still read on a sentence no label or
+    // verdict judged, judged the same strict way. Its facts in the slots no longer read are left
+    // out of the bar and not judged here.
+    {
+      scene: 's01',
+      p: 19,
+      record: 'harrow-mrs',
+      slot: 'kinship',
+      value: 'mother of four grown-up daughters',
+      quote: 'When a woman has four grown-up daughters',
+      right: false,
+      call: true,
+      reason:
+        'Her own words, but of "a woman" in general: the quote does not say it of her (true in the book, said elsewhere).'
+    },
+    {
+      scene: 's01',
+      p: 24,
+      record: 'liesel',
+      slot: 'kinship',
+      value: 'daughter',
+      quote: 'my little Lise',
+      right: false,
+      call: true,
+      reason:
+        'No relation word in the quote: "my little Lise" says she is dear to Mr. Harrow, not that she is his daughter.'
+    },
+    {
+      scene: 'h01',
+      p: 0,
+      record: 'liesel',
+      slot: 'location',
+      value: 'the morning room',
+      quote: 'found Lise alone in the morning room',
+      right: true,
+      reason: 'Named, narration: where she is.'
+    },
+    {
+      scene: 'h13',
+      p: 0,
+      record: 'dunmore',
+      slot: 'kinship',
+      value: 'married man now',
+      quote: 'a married man now',
+      right: true,
+      reason:
+        'Mr. Dunmore, named in the sentence, narration: "married" is a kinship the slot holds.'
+    },
+    {
+      scene: 'h15',
+      p: 10,
+      record: 'anne',
+      slot: 'born',
+      value: 'at Gullhaven',
+      quote: 'Miss Fenwick was born at Gullhaven',
+      right: false,
+      reason: 'A birthplace in the born slot, which holds when (where is detail:birthplace).'
+    },
+    {
+      scene: 'h15',
+      p: 11,
+      record: 'anne',
+      slot: 'born',
+      value: 'in Elsdale',
+      quote: 'Miss Fenwick was born in Elsdale',
+      right: false,
+      reason: 'A birthplace in the born slot, which holds when (where is detail:birthplace).'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'ashby',
+      slot: 'kinship',
+      value: 'his sisters are fine women',
+      quote: 'His sisters were fine women',
+      right: false,
+      reason: 'His relatives and a remark on them, not what he is to anyone.'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'lowther-mr',
+      slot: 'kinship',
+      value: 'brother-in-law of Mr. Ashby',
+      quote: 'His brother-in-law, Mr. Lowther',
+      right: true,
+      reason:
+        '"His" is Mr. Ashby, the subject of the sentences before: Mr. Lowther is his brother-in-law.'
+    },
+    {
+      scene: 's03',
+      p: 6,
+      record: 'liesel',
+      slot: 'location',
+      value: 'near enough for her to overhear a conversation between him and Mr. Ashby',
+      quote:
+        'Mr. Varrow had been standing near enough for her to overhear a conversation between him and Mr. Ashby',
+      right: false,
+      reason: 'A clause, not a place, and it is Mr. Varrow who stands there.'
+    },
+    {
+      scene: 's03',
+      p: 4,
+      record: 'varrow',
+      slot: 'detail:wealth',
+      value: 'having ten thousand a year',
+      quote:
+        'the report, which was in general circulation within five minutes after his entrance, of his having ten thousand a year',
+      voice: 'rumour',
+      right: true,
+      reason: 'A report in circulation, stored as rumour.'
+    },
+    {
+      scene: 'h09',
+      p: 4,
+      record: 'ashby',
+      slot: 'kinship',
+      value: 'husband of Johanna',
+      quote: 'Johanna and Mr. Ashby had been married two years',
+      right: true,
+      reason: 'Named, narration: they had been married two years.'
+    },
+    {
+      scene: 'h09',
+      p: 4,
+      record: 'johanna',
+      slot: 'kinship',
+      value: 'wife of Mr. Ashby',
+      quote: 'Johanna and Mr. Ashby had been married two years',
+      right: true,
+      reason: 'Named, narration: they had been married two years.'
+    },
+    {
+      scene: 'h14',
+      p: 11,
+      record: 'lottie',
+      slot: 'alive',
+      value: 'alive',
+      quote: 'Lottie, who was nineteen and expecting her first child',
+      right: true,
+      call: true,
+      reason:
+        'Not said in a word, but she is plainly living (nineteen, expecting her first child); the same call as the Captain who "came to dine at Wexley".'
+    },
+    {
+      scene: 'h15',
+      p: 14,
+      record: 'anne',
+      slot: 'location',
+      value: "down to dinner on the Captain's arm",
+      quote: "she came down to dinner on the Captain's arm",
+      right: false,
+      call: true,
+      reason: 'How she came down, not a place: "dinner" is no location.'
+    },
+    {
+      scene: 'h16',
+      p: 1,
+      record: 'hobb',
+      slot: 'location',
+      value: 'at the lodge gate in the rain',
+      quote: 'Hobb stood at the lodge gate in the rain',
+      right: true,
+      reason:
+        'Named, narration, in a scene typed as a flashback: where he stood then (run 2’s one "wrong" literal fact, on a sentence no claim label covered).'
     }
   ]
 }

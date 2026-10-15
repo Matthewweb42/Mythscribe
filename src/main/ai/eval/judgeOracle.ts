@@ -17,7 +17,13 @@ import type { TestBookProject } from '../../memory/testBook/project'
 import { JUDGE_CONFIRM_RULES, JUDGE_SENTINEL } from '../prompts/judge.v1'
 import type { AiMessage } from '../providers/types'
 import { fakeChatServer, type ChatServer, type ChatServerReply } from './fakeChatServer'
-import { oracleRead, oracleVerify, overlaps, sceneOf } from './memoryOracle'
+import {
+  FINDABLE_CONTRADICTIONS,
+  oracleRead,
+  oracleVerify,
+  overlaps,
+  sceneOf
+} from './memoryOracle'
 
 /**
  * The contradiction judge's oracle (F-16.27, F-16.30; plan P4 §6.1), for the offline replays and
@@ -143,7 +149,7 @@ const labelNames = (recordId: string): string[] => {
 export function labelledItem(item: SentItem): LabelContradiction | null {
   const rules = questionRules(item.question)
   const asked = normName(item.question)
-  for (const label of TEST_BOOK_LABELS.contradictions) {
+  for (const label of FINDABLE_CONTRADICTIONS) {
     const other = label.b?.quote ?? label.note?.quote
     if (other === undefined) continue
     if (
@@ -251,7 +257,8 @@ export function judgeOracleServer(
     if (failAfter !== undefined && server.calls.length > failAfter.calls) {
       return { text: 'Rate limit exceeded', status: failAfter.status }
     }
-    const costUsd = typeof options.costUsd === 'function' ? options.costUsd(messages) : options.costUsd
+    const costUsd =
+      typeof options.costUsd === 'function' ? options.costUsd(messages) : options.costUsd
     const cost = costUsd === undefined ? {} : { costUsd }
     const judged = judgeOracleReply(messages, options.plant?.() ?? null, memory)
     if (judged !== null) {

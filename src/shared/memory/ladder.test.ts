@@ -3,6 +3,13 @@ import {
   absentValue,
   actsOnSubject,
   ageIsSpan,
+  bornIsWhen,
+  LOCATION_VALUE_MAX_WORDS,
+  locationPhrase,
+  ownedSlot,
+  possessiveOwner,
+  possessiveOwners,
+  kinshipStated,
   diesInQuote,
   genderOfNames,
   pronounOfOtherGender,
@@ -657,5 +664,195 @@ describe('the code gates of the third live run of 2026-10-14 (plan ReaderPrecisi
     expect(rel('brother-in-law')).toBe(false)
     expect(rel('friend')).toBe(false)
     expect(relationValue({ slot: 'kinship', value: 'sisters', objectId: null })).toBe(false)
+  })
+})
+
+describe('the code gates of the fourth live run of 2026-10-14 (plan ReaderNarrow.md)', () => {
+  it('finds whose a body or detail value is by the his or her before it', () => {
+    const dark = 'the beautiful expression of her dark eyes'
+    expect(possessiveOwner('eyes', 'dark', dark)).toBe('female')
+    expect(possessiveOwner('eyes', 'grey', 'her eyes were grey')).toBe('female')
+    expect(
+      possessiveOwner(
+        'detail:wealth',
+        'having ten thousand a year',
+        'of his having ten thousand a year'
+      )
+    ).toBe('male')
+    expect(possessiveOwner('scars', 'long white scar', 'he rubbed his long white scar')).toBe(
+      'male'
+    )
+    // A name's or a person's possessive is nearer: theirs, settled by the name.
+    expect(possessiveOwner('hair', 'fair', "Anne's fair hair was pinned up")).toBeNull()
+    expect(possessiveOwner('eyes', 'grey', "his wife's eyes were grey")).toBeNull()
+    // None before the value, or too far back.
+    expect(
+      possessiveOwner('eyes', 'a cold, clear grey', "Mr. Varrow's eyes were a cold, clear grey")
+    ).toBeNull()
+    expect(possessiveOwner('eyes', 'grey', 'her eyes, which were always grey')).toBeNull()
+    expect(
+      possessiveOwner(
+        'scars',
+        'a long white scar across his jaw',
+        'had a long white scar across his jaw'
+      )
+    ).toBeNull()
+    // Only the body slots and the details.
+    expect(possessiveOwner('location', 'dark room', 'her dark room')).toBeNull()
+    expect(possessiveOwner('kinship', 'cousin', 'her cousin')).toBeNull()
+    expect(['eyes', 'hair', 'scars', 'injuries', 'detail:build'].every(ownedSlot)).toBe(true)
+    expect(['age', 'location', 'kinship', 'born', 'alive'].some(ownedSlot)).toBe(false)
+  })
+
+  it('settles the one pronoun given, whatever else the quote holds', () => {
+    const genders: Record<string, 'female' | 'male' | null> = { varrow: 'male', lise: null }
+    const owners = (pronoun: 'female' | 'male'): string[] =>
+      pronounRivals({
+        slot: 'eyes',
+        quote: 'than he began to find it rendered intelligent by the expression of her dark eyes',
+        sentences: [
+          sentence(
+            2,
+            'But no sooner had he seen it than he began to find it rendered intelligent by the expression of her dark eyes.'
+          )
+        ],
+        before: [
+          named(
+            1,
+            'Mr. Varrow had at first scarcely allowed Liesel to be pretty.',
+            ['varrow', 'Mr. Varrow'],
+            ['lise', 'Liesel']
+          )
+        ],
+        isCharacter: () => true,
+        genderOf: (id) => genders[id] ?? null,
+        pronoun
+      })
+    // "her": Liesel only; Mr. Varrow is a man.
+    expect(owners('female')).toEqual(['lise'])
+    // "his" (were it his): both could be (Liesel's gender is unknown here).
+    expect(owners('male').sort()).toEqual(['lise', 'varrow'])
+  })
+
+  it('looks for a possessive’s owner in its own clause first, then before it', () => {
+    const genders: Record<string, 'female' | 'male' | null> = {
+      varrow: 'male',
+      lowther: 'male',
+      ada: 'female',
+      tomas: null
+    }
+    const owners = (quote: string, sentences: LadderSentence[], before: LadderSentence[] = []) =>
+      possessiveOwners({
+        slot: 'eyes',
+        quote,
+        sentences,
+        before,
+        isCharacter: () => true,
+        genderOf: (id) => genders[id] ?? null,
+        pronoun: quote.includes('her') ? 'female' : 'male'
+      })
+    const income =
+      'His brother-in-law, Mr. Lowther, merely looked the gentleman; but his friend Mr. Varrow drew every eye, and the report of his having ten thousand a year.'
+    expect(
+      owners('the report of his having ten thousand a year', [
+        named(0, income, ['lowther', 'Mr. Lowther'], ['varrow', 'Mr. Varrow'])
+      ])
+    ).toEqual(['varrow'])
+    // Ada is in reach before; Tomas, of no known gender, came in a sentence earlier: only Ada.
+    expect(
+      owners(
+        'Ada turned her grey eyes away',
+        [named(1, 'Ada turned her grey eyes away.', ['ada', 'Ada'])],
+        [named(0, 'Tomas came in.', ['tomas', 'Tomas'])]
+      )
+    ).toEqual(['ada'])
+    // Two in its clause: no owner settled.
+    expect(
+      owners('her eyes were grey', [
+        named(0, 'Tomas told Ada her eyes were grey.', ['tomas', 'Tomas'], ['ada', 'Ada'])
+      ]).sort()
+    ).toEqual(['ada', 'tomas'])
+    // None in its clause: the nearest sentence before that names one who fits.
+    expect(
+      owners(
+        'the expression of her dark eyes',
+        [sentence(1, 'He saw the expression of her dark eyes.')],
+        [named(0, 'Mr. Varrow watched Ada.', ['varrow', 'Mr. Varrow'], ['ada', 'Ada'])]
+      )
+    ).toEqual(['ada'])
+  })
+
+  it('takes a location only as a place phrase, never a clause', () => {
+    for (const place of [
+      'the morning room',
+      'Callow Cross',
+      'at the head of the table',
+      'the back stairs',
+      'Thornmere'
+    ]) {
+      expect(locationPhrase(place), place).toBe(true)
+    }
+    for (const clause of [
+      'near enough for her to overhear a conversation between him and Mr. Ashby',
+      "down to dinner on the Captain's arm",
+      'at the lodge gate in the rain',
+      'the room where she had slept'
+    ]) {
+      expect(locationPhrase(clause), clause).toBe(false)
+    }
+    expect(LOCATION_VALUE_MAX_WORDS).toBe(5)
+  })
+
+  it('takes a birth only as a when; a place is a birthplace', () => {
+    for (const when of [
+      'in 1795',
+      'in the spring',
+      'in March',
+      'the year the river froze',
+      'young'
+    ]) {
+      expect(bornIsWhen(when), when).toBe(true)
+      expect(valueOfKind('born', when), when).toBe(true)
+    }
+    for (const place of ['at Gullhaven', 'in Elsdale', 'Vellmouth']) {
+      expect(bornIsWhen(place), place).toBe(false)
+      expect(valueOfKind('born', place), place).toBe(false)
+    }
+    expect(valueOfKind('detail:birthplace', 'Elsdale')).toBe(true)
+  })
+
+  it('refuses a kinship whose people are all plural: the relatives, not what the subject is', () => {
+    const kin = (value: string, quote: string): boolean =>
+      relativeValue({ slot: 'kinship', value, quote, names: [] })
+    expect(kin('his sisters are fine women', 'His sisters were fine women')).toBe(true)
+    expect(kin('sisters', 'she and her sisters')).toBe(true)
+    expect(
+      kin('mother of four grown-up daughters', 'When a woman has four grown-up daughters')
+    ).toBe(false)
+    expect(kin('brother-in-law of Mr. Ashby', 'His brother-in-law, Mr. Lowther')).toBe(false)
+    expect(kin('husband of Johanna', 'Johanna and Mr. Ashby had been married two years')).toBe(
+      false
+    )
+    expect(kin('married', 'a married man now')).toBe(false)
+  })
+
+  it('takes a kinship only from a quote that states a relation', () => {
+    for (const quote of [
+      'Mr. Dunmore was the son of the late steward at Greyhallow',
+      'My father was a clergyman in Elsdale',
+      "Anne Fenwick was Lise's cousin",
+      'His brother-in-law, Mr. Lowther',
+      'Johanna and Mr. Ashby had been married two years',
+      'Lottie is to marry Mr. Dunmore'
+    ]) {
+      expect(kinshipStated(quote), quote).toBe(true)
+      expect(valueStated('kinship', 'whatever relation', quote), quote).toBe(true)
+    }
+    for (const quote of ['my little Lise', 'When a woman has four grown-up daughters']) {
+      expect(kinshipStated(quote), quote).toBe(false)
+      expect(valueStated('kinship', 'daughter', quote), quote).toBe(false)
+    }
+    // Alive stays free of the quote's words.
+    expect(valueStated('alive', 'dead', 'He died in the night')).toBe(true)
   })
 })

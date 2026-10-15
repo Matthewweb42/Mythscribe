@@ -4,7 +4,7 @@ import { gateSentences, readSetOf, unreadSentences } from '@shared/memory/gate'
 import { KNOWER_KINDS } from '@shared/memory/knows'
 import { pageTextBlocks } from '@shared/memory/pageMarks'
 import { queryTerms } from '@shared/searchTerms'
-import { slotGroup, type Slot } from '@shared/memory/slots'
+import { slotGroup, slotIsRead, type Slot } from '@shared/memory/slots'
 import { detailsAgree } from '@shared/memory/typedVsText'
 import type { SheetLineView } from '@shared/memory/views'
 import type { EvidenceKey, InstantCard } from '@shared/scribe'
@@ -221,7 +221,9 @@ export function instantCard(
   if (shape.kind === 'slot') {
     const record = frameRecord(frame, shape.recordId)
     if (record === null) return { handover: 'none', keys: [] }
-    if (checkUnread) {
+    // A slot the reader no longer reads (plan ReaderNarrow.md) gains nothing from a read first:
+    // only a stored v1 line answers it here, else Ms Scribe searches the text.
+    if (checkUnread && slotIsRead(shape.slot)) {
       const due = unreadNaming(db, frame, shape.recordId, bearsOnSlot(shape.slot), caretPara)
       if (due.length > 0) return { readFirst: due }
     }

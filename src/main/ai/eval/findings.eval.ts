@@ -80,6 +80,7 @@ import {
   type LiveRequestDeps
 } from './liveProvider'
 import {
+  FINDABLE_CONTRADICTIONS,
   invariants,
   oracleRead,
   oracleVerify,
@@ -425,7 +426,7 @@ const findingText = (view: FindingView): string =>
 
 /** The labelled contradictions a finding is, if any. */
 const labelsOf = (book: TestBookProject, finding: Finding): LabelContradiction[] =>
-  TEST_BOOK_LABELS.contradictions.filter((label) => labelMatches(book, label, [finding]).length > 0)
+  FINDABLE_CONTRADICTIONS.filter((label) => labelMatches(book, label, [finding]).length > 0)
 
 /** Every mark the editor would draw in the book's scenes, by scene (the default "in the text"). */
 const bookUnderlines = (book: TestBookProject): ReturnType<typeof underlinesOf> =>
@@ -445,7 +446,7 @@ export function scoreFindings(session: FindingsSession, check: CheckOutcome | nu
   const labelled = new Set<string>()
   const labels: Share = { right: 0, of: 0 }
   const proPlanted: Share = { right: 0, of: 0 }
-  for (const label of TEST_BOOK_LABELS.contradictions) {
+  for (const label of FINDABLE_CONTRADICTIONS) {
     const found = labelMatches(book, label, findings)
     for (const each of found) labelled.add(each.id)
     if (label.hidden === true) {
@@ -766,7 +767,7 @@ describe('the contradiction candidates over the test book (F-16.27)', () => {
   })
 
   it('makes every labelled contradiction a candidate: C1–C6 in the background, C7 on a check', () => {
-    const missed = TEST_BOOK_LABELS.contradictions.flatMap((each) => {
+    const missed = FINDABLE_CONTRADICTIONS.flatMap((each) => {
       const among = each.rule === 'C7' ? check : background
       return labelMatches(book, each, among).length === 1 ? [] : [labelText(each)]
     })
@@ -776,7 +777,7 @@ describe('the contradiction candidates over the test book (F-16.27)', () => {
   })
 
   it('hides the flashback one, and only it', () => {
-    for (const each of TEST_BOOK_LABELS.contradictions) {
+    for (const each of FINDABLE_CONTRADICTIONS) {
       const [found] = labelMatches(book, each, each.rule === 'C7' ? check : background)
       expect([found?.hidden, found?.held], labelText(each)).toEqual([each.hidden === true, false])
     }
@@ -795,7 +796,7 @@ describe('the contradiction candidates over the test book (F-16.27)', () => {
     const first = recomputeFindings(book.db, NOW)
     const rows = findingRows(book.db, activeDraftId(book.db))
     expect(rows.map((row) => row.key).sort()).toEqual(background.map((each) => each.key).sort())
-    for (const each of TEST_BOOK_LABELS.contradictions) {
+    for (const each of FINDABLE_CONTRADICTIONS) {
       const [found] = labelMatches(book, each, each.rule === 'C7' ? check : background)
       const row = rows.find((candidate) => candidate.key === found?.key)
       if (each.rule === 'C7') expect(row, labelText(each)).toBeUndefined()
@@ -945,7 +946,7 @@ describe('contradictions over the test book: the oracle replay (F-16.27, F-16.28
 
   it('ends every labelled contradiction open and confirmed by the stronger check (C7 after the check)', () => {
     expect(first).toMatchObject({ held: null, stopped: false, error: null })
-    for (const label of TEST_BOOK_LABELS.contradictions) {
+    for (const label of FINDABLE_CONTRADICTIONS) {
       if (label.hidden === true) continue
       const finding = findingFor(session.book, label)
       expect(
@@ -955,9 +956,7 @@ describe('contradictions over the test book: the oracle replay (F-16.27, F-16.28
     }
     // Only the labelled pairs are open, and the report lists each, confirmed.
     const open = draftFindings(session.book).filter((each) => each.state === 'open')
-    expect(open).toHaveLength(
-      TEST_BOOK_LABELS.contradictions.filter((each) => each.hidden !== true).length
-    )
+    expect(open).toHaveLength(FINDABLE_CONTRADICTIONS.filter((each) => each.hidden !== true).length)
     expect(first.report?.found.every((view) => view.confirmed)).toBe(true)
     expect(first.report?.found.map((view) => view.id).sort()).toEqual(
       open.map((each) => each.id).sort()
@@ -996,7 +995,10 @@ describe('contradictions over the test book: the oracle replay (F-16.27, F-16.28
     })
     expect(report.failures).toEqual([])
     expect(report.score.planted.right).toBe(report.score.planted.of)
-    expect(report.score.recall.C7).toEqual({ right: 1, of: 1 })
+    // The book's one planted C7 is two histories (the Captain's two fathers), no longer read (plan
+    // ReaderNarrow.md): C7 has no planted pair to recall; it still pairs detail: claims.
+    expect(FINDABLE_CONTRADICTIONS.filter((each) => each.rule === 'C7')).toEqual([])
+    expect(report.score.recall.C7).toEqual({ right: 0, of: 0 })
     expect(report.score.orders.right).toBe(report.score.orders.of)
     expect(report.score.labels.right).toBe(report.score.labels.of)
     expect(report.score.underlines.precision.right).toBe(report.score.underlines.precision.of)
@@ -1115,7 +1117,7 @@ describe('contradictions over the test book: the oracle replay (F-16.27, F-16.28
   })
 
   it('hides the flashback pair, lists it with Not a flashback?, and judges it once the switch says Not a flashback', async () => {
-    const label = TEST_BOOK_LABELS.contradictions.find((each) => each.hidden === true) ?? fail()
+    const label = FINDABLE_CONTRADICTIONS.find((each) => each.hidden === true) ?? fail()
     const h16 = session.book.scenes.get('h16') ?? fail()
     const finding = findingFor(session.book, label)
     expect(finding.state).toBe('hidden')
@@ -1364,7 +1366,7 @@ describe('contradictions over the test book: the adversarial judges (F-16.27, F-
       plant.current = null
       await judgeInBackground(session)
       await checkTheBook(session)
-      for (const label of TEST_BOOK_LABELS.contradictions) {
+      for (const label of FINDABLE_CONTRADICTIONS) {
         if (label.hidden !== true)
           expect(findingFor(session.book, label).state, labelText(label)).toBe('open')
       }
@@ -1391,7 +1393,7 @@ describe('contradictions over the test book: the adversarial judges (F-16.27, F-
       await checkTheBook(session)
       // The cut replies were never kept: the next run asked again.
       expect(server.calls.length).toBeGreaterThan(calls)
-      for (const label of TEST_BOOK_LABELS.contradictions) {
+      for (const label of FINDABLE_CONTRADICTIONS) {
         if (label.hidden !== true)
           expect(findingFor(session.book, label).state, labelText(label)).toBe('open')
       }
@@ -1407,7 +1409,7 @@ describe('contradictions over the test book: the adversarial judges (F-16.27, F-
       const checked = await checkTheBook(session)
       const report = checked.report ?? fail()
       expect(statesOf(session.book)).not.toContain('open')
-      const planted = TEST_BOOK_LABELS.contradictions.filter((each) => each.hidden !== true)
+      const planted = FINDABLE_CONTRADICTIONS.filter((each) => each.hidden !== true)
       for (const label of planted) {
         expect(findingFor(session.book, label), labelText(label)).toMatchObject({
           state: 'fine',

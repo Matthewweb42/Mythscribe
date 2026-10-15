@@ -67,7 +67,7 @@ function record(name: string, aliases: string[] = [], categoryId = 'character'):
 const SCENE = [
   'The ridge was cold.',
   "Mara's eyes were grey. She walked to the quay.",
-  'Tomas wore a blue coat.'
+  'Tomas sat by the nets.'
 ]
 
 beforeEach(() => {
@@ -148,7 +148,7 @@ function verifyReply(
 const PLAN: PlannedClaim[] = [
   { p: 1, r: 'Mara Vell', s: 'eyes', v: 'grey', q: "Mara's eyes were grey" },
   { p: 1, r: 'Mara Vell', s: 'location', v: 'the quay', q: 'She walked to the quay' },
-  { p: 2, r: 'Tomas', s: 'clothing', v: 'a blue coat', q: 'Tomas wore a blue coat' }
+  { p: 2, r: 'Tomas', s: 'location', v: 'by the nets', q: 'Tomas sat by the nets' }
 ]
 
 const CARD = {
@@ -216,7 +216,7 @@ describe('runReading (F-16.17)', () => {
     expect(claims.map((c) => [c.recordId, c.slot, c.value, c.proof, c.state])).toEqual([
       [mara, 'eyes', 'grey', 'literal', 'live'],
       [mara, 'location', 'the quay', 'verified', 'live'],
-      [tomas, 'clothing', 'a blue coat', 'literal', 'live']
+      [tomas, 'location', 'by the nets', 'literal', 'live']
     ])
     // The pronoun went to the checker with Mara as its one candidate and its sentence ±1.
     const checks = sentChecks(nth(ai.requests, 1))
@@ -237,7 +237,7 @@ describe('runReading (F-16.17)', () => {
     expect(reading).toMatchObject({
       purpose: 'first',
       pages: 1,
-      promptVersion: 'reader.v5',
+      promptVersion: 'reader.v6',
       verifyVersion: 'verify.v4',
       model: 'gpt-5.4-mini',
       tokensIn: 2_000,
@@ -266,7 +266,7 @@ describe('runReading (F-16.17)', () => {
     await read(ai)
     const sent = ai.requests.length
     expect(await read(ai)).toEqual({ read: false, reason: 'upToDate' })
-    saveDocument(db, one, doc(SCENE[0] ?? '', SCENE[1] ?? '', 'Tomas  wore a blue coat .'))
+    saveDocument(db, one, doc(SCENE[0] ?? '', SCENE[1] ?? '', 'Tomas  sat by the nets .'))
     expect(await read(ai)).toEqual({ read: false, reason: 'cosmetic' })
     // The caret's paragraph without closing punctuation is not finished (the idle trigger).
     saveDocument(db, one, doc(...SCENE, 'Then Tomas turned'))
@@ -298,7 +298,7 @@ describe('runReading (F-16.17)', () => {
     expect(reader.messages.at(-1)?.content.endsWith('Card: no')).toBe(true)
     // The fact anchored in ¶2 is listed with its short id; Tomas has no fixed or lasting value.
     const tail = reader.messages.at(-1)?.content ?? ''
-    expect(tail).toMatch(/c\d+ r\d+ clothing “a blue coat” ¶2/)
+    expect(tail).toMatch(/c\d+ r\d+ location “by the nets” ¶2/)
     expect(tail).not.toContain('Known about the records named here:')
     expect(reader.maxTokens).toBeLessThan(720)
     expect(getSceneRead(db, one, activeDraftId(db))?.partials).toBe(1)
@@ -354,7 +354,7 @@ describe('runReading (F-16.17)', () => {
       if (calls === 1) {
         const whole = readerReply(request, PLAN)
         // Cut inside the third claim (¶2).
-        return { text: whole.slice(0, whole.indexOf('Tomas wore') + 4), finishReason: 'length' }
+        return { text: whole.slice(0, whole.indexOf('Tomas sat') + 4), finishReason: 'length' }
       }
       return { text: readerReply(request, PLAN) }
     })
@@ -365,7 +365,7 @@ describe('runReading (F-16.17)', () => {
     expect([...sentParagraphs(nth(readers, 1)).keys()]).toEqual([1])
     expect([...sentParagraphs(nth(readers, 2)).keys()]).toEqual([2])
     expect(outcome).toMatchObject({ read: true, cut: true })
-    expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes', 'location', 'clothing'])
+    expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes', 'location', 'location'])
     // The re-read recovered the cut reply: one reply cut, no cut-off left in the reading.
     expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
       finishReason: null,
@@ -406,10 +406,10 @@ describe('runReading (F-16.17)', () => {
       { p: 2, r: 'Mara Vell', s: 'location', v: 'the quay', q: 'She walked to the quay' },
       { p: 1, r: 'Mara Vell', s: 'eyes', v: 'grey', q: "Mara's eyes were grey" },
       { p: 1, r: 'Mara Vell', s: 'eyes', v: 'grey', q: 'grey' },
-      { p: 2, r: 'Tomas', s: 'mood', v: 'the secret', q: 'Tomas wore a blue coat' },
+      { p: 2, r: 'Tomas', s: 'mood', v: 'the secret', q: 'Tomas sat by the nets' },
       { p: 1, r: 'Nobody', s: 'eyes', v: 'grey', q: "Mara's eyes were grey" },
-      { p: 0, r: 'Mara Vell', s: 'traits', v: 'cold', q: 'The ridge was cold' },
-      { p: 2, r: 'Tomas', s: 'traits', v: 'blue coat', q: 'Tomas wore a blue coat' }
+      { p: 0, r: 'Mara Vell', s: 'location', v: 'the ridge', q: 'The ridge was cold' },
+      { p: 2, r: 'Tomas', s: 'hair', v: 'nets', q: 'Tomas sat by the nets' }
     ]
     // Mara's eyes twice in ¶1: a quote that is not once in the window.
     saveDocument(
@@ -473,7 +473,7 @@ describe('runReading (F-16.17)', () => {
         '“My father was a clergyman,” said Mara.',
         'Tomas was not there. Tomas had four grown-up daughters.',
         'He died in the night, in his chair by the fire.',
-        'Amongst the most violent against him was Tomas.',
+        'Tomas was the harbourmaster.',
         "Tomas's attentions to Mara were plain."
       )
     )
@@ -513,18 +513,28 @@ describe('runReading (F-16.17)', () => {
       {
         p: 4,
         r: 'Tomas',
-        s: 'relation',
-        v: 'violent against him',
-        q: 'Amongst the most violent against him was Tomas',
-        o: 'Mara Vell'
+        s: 'detail:occupation',
+        v: 'the harbourmaster',
+        q: 'Tomas was the harbourmaster'
       },
+      // One claim, one slot: the same value on the same quote in another slot.
       {
         p: 4,
         r: 'Tomas',
-        s: 'trait',
-        v: 'violent against him',
-        q: 'Amongst the most violent against him was Tomas'
+        s: 'detail:rank',
+        v: 'the harbourmaster',
+        q: 'Tomas was the harbourmaster'
       },
+      // Slots no longer read (plan ReaderNarrow.md), in any spelling: refused before any gate.
+      {
+        p: 5,
+        r: 'Tomas',
+        s: 'relation',
+        v: 'attentions to Mara',
+        q: "Tomas's attentions to Mara",
+        o: 'Mara Vell'
+      },
+      { p: 5, r: 'Tomas', s: 'trait', v: 'attentions', q: "Tomas's attentions to Mara" },
       { p: 5, r: 'Tomas', s: 'objects', v: 'attentions', q: "Tomas's attentions to Mara" }
     ]
     const ai = fakeAi((request) => {
@@ -536,25 +546,35 @@ describe('runReading (F-16.17)', () => {
       { ai: ai.deps },
       { nodeId: one, caretPara: null, requestId: 'r-3', observe: (event) => events.push(event) }
     )
-    // The refusals are told as the ladder meets them; the relation once the checker answered.
+    // The refusals are told as the ladder meets them; the occupation once the checker answered.
     expect(events.map((event) => [event.p, event.slot, event.outcome])).toEqual([
       [0, 'location', 'where'],
       [1, 'detail:occupation', 'possessed'],
       [2, 'location', 'absence'],
       [2, 'age', 'valueKind'],
       [3, 'location', 'past'],
-      [4, 'trait', 'duplicate'],
-      [5, 'objects', 'valueKind'],
-      [4, 'relation', 'verified']
+      [4, 'detail:rank', 'duplicate'],
+      [5, 'relation', 'notRead'],
+      [5, 'trait', 'notRead'],
+      [5, 'objects', 'notRead'],
+      [4, 'detail:occupation', 'verified']
     ])
-    // Only the relation reached the checker; the "trait" was read as traits, one claim one slot.
+    // Only the occupation reached the checker.
     expect(claimsNow().map((claim) => [claim.slot, claim.value])).toEqual([
-      ['relation', 'violent against him']
+      ['detail:occupation', 'the harbourmaster']
     ])
     expect(lastReading(db, one, activeDraftId(db))?.yields).toMatchObject({
       verifySent: 1,
       verified: 1,
-      rejections: { where: 1, possessed: 1, absence: 1, valueKind: 2, past: 1, duplicate: 1 }
+      rejections: {
+        where: 1,
+        possessed: 1,
+        absence: 1,
+        valueKind: 1,
+        past: 1,
+        duplicate: 1,
+        notRead: 3
+      }
     })
   })
 
@@ -565,7 +585,7 @@ describe('runReading (F-16.17)', () => {
       }
       return {
         text: readerReply(request, [
-          { p: 2, r: 'Tomas', s: 'traits', v: 'blue coat', q: 'Tomas wore a blue coat' }
+          { p: 2, r: 'Tomas', s: 'detail:home', v: 'the nets', q: 'Tomas sat by the nets' }
         ])
       }
     })
@@ -581,7 +601,7 @@ describe('runReading (F-16.17)', () => {
       }
       return {
         text: readerReply(request, [
-          { p: 2, r: 'Tomas', s: 'traits', v: 'blue coat', q: 'Tomas wore a blue coat' }
+          { p: 2, r: 'Tomas', s: 'detail:home', v: 'the nets', q: 'Tomas sat by the nets' }
         ])
       }
     })
@@ -628,7 +648,7 @@ describe('runReading (F-16.17)', () => {
       one,
       doc(
         'Mara met Tomas at the Quay. He asked Lise for a dance.',
-        'Ada was sorry. When they were children he had kept a plum in his coat for them.',
+        'Ada was sorry. When they were children he had a scar on his hand.',
         'Old Tomas had kept the gate at the Quay for forty years.',
         "Tomas watched his second daughter. Mara's father was a merchant.",
         'Lise came in. She and her sisters walked on.'
@@ -639,7 +659,7 @@ describe('runReading (F-16.17)', () => {
     scanNamesFor(db, one, NOW)
     const events: ReadingItemEvent[] = []
     const plan: PlannedClaim[] = [
-      // Someone else did it: Lise was only asked.
+      // A history: no longer read (plan ReaderNarrow.md), whoever did it.
       {
         p: 0,
         r: 'Lise',
@@ -647,13 +667,13 @@ describe('runReading (F-16.17)', () => {
         v: 'asked Lise for a dance',
         q: 'He asked Lise for a dance'
       },
-      // A he for a woman: the plum is the old man's.
+      // A he for a woman: the scar is the old man's.
       {
         p: 1,
         r: 'Ada Grey',
-        s: 'history',
-        v: 'he had kept a plum in his coat',
-        q: 'When they were children he had kept a plum in his coat for them'
+        s: 'scars',
+        v: 'a scar on his hand',
+        q: 'When they were children he had a scar on his hand'
       },
       // A span of time is no age.
       {
@@ -674,7 +694,7 @@ describe('runReading (F-16.17)', () => {
       },
       // A place is no one's location.
       { p: 2, r: 'the Quay', s: 'location', v: 'the Quay', q: 'kept the gate at the Quay' },
-      // A relation with nobody to relate to, and one that is only people.
+      // Relations: no longer read.
       { p: 4, r: 'Lise', s: 'relation', v: 'sisters', q: 'She and her sisters walked on' },
       {
         p: 4,
@@ -695,24 +715,108 @@ describe('runReading (F-16.17)', () => {
       { nodeId: one, caretPara: null, requestId: 'r-4', observe: (event) => events.push(event) }
     )
     expect(events.map((event) => [event.p, event.slot, event.outcome])).toEqual([
-      [0, 'history', 'actor'],
-      [1, 'history', 'subject'],
+      [0, 'history', 'notRead'],
+      [1, 'scars', 'subject'],
       [2, 'age', 'valueKind'],
       [3, 'kinship', 'possessed'],
       [3, 'kinship', 'possessed'],
       [2, 'location', 'kind'],
-      [4, 'relation', 'object'],
-      [4, 'relation', 'object']
+      [4, 'relation', 'notRead'],
+      [4, 'relation', 'notRead']
     ])
     expect(ai.requests.filter((request) => requestKind(request) === 'verify')).toEqual([])
     expect(claimsNow()).toEqual([])
+  })
+
+  it('refuses the fourth live run’s wrong facts in code, the checker’s pick of another owner included (plan ReaderNarrow.md)', async () => {
+    saveDocument(
+      db,
+      one,
+      doc(
+        'Mr. Hale had at first scarcely allowed Ada to be pretty.',
+        'But soon he found her face rendered intelligent by the expression of her dark eyes.',
+        'Hale had been standing near enough for Ada to overhear him.',
+        '“Miss Grey was born at Gullhaven,” said Tomas.',
+        'Tomas came in. His sisters were fine women.',
+        'Ada turned her grey eyes away.'
+      )
+    )
+    record('Mr. Hale', ['Hale'])
+    record('Ada Grey', ['Ada', 'Miss Grey'])
+    scanNamesFor(db, one, NOW)
+    const events: ReadingItemEvent[] = []
+    const dark = 'the expression of her dark eyes'
+    const plan: PlannedClaim[] = [
+      // "her dark eyes" as the man's: refused before any check.
+      { p: 1, r: 'Mr. Hale', s: 'eyes', v: 'dark', q: dark },
+      // As hers, but the checker gives them to him: refused after it.
+      { p: 1, r: 'Ada Grey', s: 'eyes', v: 'dark', q: dark },
+      // A clause is no place.
+      {
+        p: 2,
+        r: 'Ada Grey',
+        s: 'location',
+        v: 'near enough for Ada to overhear him',
+        q: 'Hale had been standing near enough for Ada to overhear him'
+      },
+      // A birthplace is no birth.
+      {
+        p: 3,
+        r: 'Ada Grey',
+        s: 'born',
+        v: 'at Gullhaven',
+        q: 'Miss Grey was born at Gullhaven',
+        voice: 'dialogue',
+        sp: 'Tomas'
+      },
+      // His sisters are his relatives, not what he is: no relation word for one person.
+      {
+        p: 4,
+        r: 'Tomas',
+        s: 'kinship',
+        v: 'his sisters are fine women',
+        q: 'His sisters were fine women'
+      },
+      // Her own eyes, as hers: kept.
+      { p: 5, r: 'Ada Grey', s: 'eyes', v: 'grey', q: 'Ada turned her grey eyes away' }
+    ]
+    const ai = fakeAi((request) => {
+      if (requestKind(request) === 'verify') {
+        // A gullible checker that gives the dark eyes to Mr. Hale.
+        return {
+          text: verifyReply(request, (check) =>
+            check.text.includes('dark eyes')
+              ? { r: check.who[check.names.indexOf('Mr. Hale')] ?? null }
+              : null
+          )
+        }
+      }
+      return { text: readerReply(request, plan) }
+    })
+    await runReading(
+      db,
+      { ai: ai.deps },
+      { nodeId: one, caretPara: null, requestId: 'r-6', observe: (event) => events.push(event) }
+    )
+    expect(events.map((event) => [event.p, event.slot, event.outcome])).toEqual([
+      [1, 'eyes', 'subject'],
+      [2, 'location', 'where'],
+      [3, 'born', 'valueKind'],
+      [4, 'kinship', 'value'],
+      [1, 'eyes', 'subject'],
+      [5, 'eyes', 'verified']
+    ])
+    expect(claimsNow().map((claim) => [claim.slot, claim.value, claim.state])).toEqual([
+      ['eyes', 'grey', 'live']
+    ])
+    expect(invariants()).toEqual([])
   })
 
   it('pins first person to the speaker of a line of dialogue, and to the typed POV only when the text’s POV agrees', async () => {
     saveDocument(
       db,
       one,
-      doc('"I was born in Elsmere," said Tomas.', 'I was born in the north, I told myself.')
+      doc('"I was born in 1790," said Tomas.', 'I was born in the spring, I told myself.')
     )
     scanNamesFor(db, one, NOW)
     setSceneDetails(
@@ -742,12 +846,12 @@ describe('runReading (F-16.17)', () => {
             p: 0,
             r: 'Tomas',
             s: 'born',
-            v: 'in Elsmere',
-            q: 'I was born in Elsmere',
+            v: 'in 1790',
+            q: 'I was born in 1790',
             voice: 'dialogue',
             sp: 'Tomas'
           },
-          { p: 1, r: 'Mara Vell', s: 'born', v: 'in the north', q: 'I was born in the north' }
+          { p: 1, r: 'Mara Vell', s: 'born', v: 'in the spring', q: 'I was born in the spring' }
         ])
       }
     })
@@ -775,7 +879,7 @@ describe('runReading (F-16.17)', () => {
               c: [
                 {
                   p: 3,
-                  s: 'role',
+                  s: 'detail:occupation',
                   v: 'a smuggler',
                   q: 'Hesk was a smuggler from the marsh',
                   voice: 'narration',
@@ -830,13 +934,20 @@ describe('runReading (F-16.17)', () => {
               n: 'Hesk',
               p: 3,
               q: 'Hesk was a smuggler',
-              c: [{ p: 3, s: 'role', v: 'a smuggler', q: 'Hesk was a smuggler from the marsh' }]
+              c: [
+                {
+                  p: 3,
+                  s: 'detail:occupation',
+                  v: 'a smuggler',
+                  q: 'Hesk was a smuggler from the marsh'
+                }
+              ]
             },
             {
               n: 'Ry',
               p: 4,
               q: 'Ry was a boatman',
-              c: [{ p: 4, s: 'role', v: 'a boatman', q: 'Ry was a boatman' }]
+              c: [{ p: 4, s: 'detail:occupation', v: 'a boatman', q: 'Ry was a boatman' }]
             }
           ]
         })
@@ -885,13 +996,27 @@ describe('runReading (F-16.17)', () => {
               n: 'Hesk',
               p: 3,
               q: 'Hesk was a smuggler',
-              c: [{ p: 3, s: 'role', v: 'a smuggler', q: 'Hesk was a smuggler from the marsh' }]
+              c: [
+                {
+                  p: 3,
+                  s: 'detail:occupation',
+                  v: 'a smuggler',
+                  q: 'Hesk was a smuggler from the marsh'
+                }
+              ]
             },
             {
               n: 'Varn',
               p: 3,
               q: 'Hesk was a smuggler',
-              c: [{ p: 3, s: 'role', v: 'a smuggler', q: 'Hesk was a smuggler from the marsh' }]
+              c: [
+                {
+                  p: 3,
+                  s: 'detail:occupation',
+                  v: 'a smuggler',
+                  q: 'Hesk was a smuggler from the marsh'
+                }
+              ]
             }
           ]
         })
@@ -911,12 +1036,12 @@ describe('runReading (F-16.17)', () => {
         key: dismissedKey({
           kind: 'notRight',
           recordId: tomas,
-          slot: 'clothing',
-          value: 'a blue coat',
-          stating: [gateText('Tomas wore a blue coat.', shared.index)]
+          slot: 'location',
+          value: 'by the nets',
+          stating: [gateText('Tomas sat by the nets.', shared.index)]
         }),
-        label: 'Tomas: a blue coat',
-        quote: 'Tomas wore a blue coat'
+        label: 'Tomas: by the nets',
+        quote: 'Tomas sat by the nets'
       },
       NOW
     )
@@ -988,7 +1113,7 @@ describe('runReading: what changes under it, and what it cannot read (F-16.17, r
     expect(claimsNow().map((claim) => [claim.slot, claim.value, claim.state])).toEqual([
       ['eyes', 'grey', 'stale'],
       ['location', 'the quay', 'stale'],
-      ['clothing', 'a blue coat', 'live']
+      ['location', 'by the nets', 'live']
     ])
     expect(invariants()).toEqual([])
   })
@@ -1076,7 +1201,7 @@ describe('runReading: what changes under it, and what it cannot read (F-16.17, r
     expect(readers).toHaveLength(3)
     expect([...sentParagraphs(nth(readers, 1)).keys()]).toEqual([0, 1])
     expect([...sentParagraphs(nth(readers, 2)).keys()]).toEqual([2])
-    expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes', 'location', 'clothing'])
+    expect(claimsNow().map((claim) => claim.slot)).toEqual(['eyes', 'location', 'location'])
   })
 
   it('locates a card field and who is on the page from page 2 in page 2’s own text', async () => {
@@ -1120,18 +1245,18 @@ describe('runReading: what changes under it, and what it cannot read (F-16.17, r
 })
 
 describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', () => {
-  // Open-ended slots only, so the three go in one batch (on the strong tier since the third live
-  // run of 2026-10-14).
-  const TRAITS: PlannedClaim[] = [
-    { p: 1, r: 'Mara Vell', s: 'history', v: 'walked to the quay', q: 'She walked to the quay' },
-    { p: 1, r: 'Mara Vell', s: 'traits', v: 'grey eyes', q: "Mara's eyes were grey" },
-    { p: 2, r: 'Tomas', s: 'traits', v: 'a blue coat', q: 'Tomas wore a blue coat' }
+  // Three facts code cannot prove, in one batch on the fast tier (every batch since plan
+  // ReaderNarrow.md retired the strong one).
+  const UNPROVED: PlannedClaim[] = [
+    { p: 1, r: 'Mara Vell', s: 'detail:home', v: 'the quay', q: 'She walked to the quay' },
+    { p: 1, r: 'Mara Vell', s: 'detail:mark', v: 'grey eyes', q: "Mara's eyes were grey" },
+    { p: 2, r: 'Tomas', s: 'detail:home', v: 'the nets', q: 'Tomas sat by the nets' }
   ]
 
   it('asks again for the verdicts a cut-off reply left out', async () => {
     let calls = 0
     const ai = fakeAi((request): FakeAnswer => {
-      if (requestKind(request) !== 'verify') return { text: readerReply(request, TRAITS) }
+      if (requestKind(request) !== 'verify') return { text: readerReply(request, UNPROVED) }
       calls += 1
       if (calls === 1) {
         const whole = verifyReply(request)
@@ -1143,11 +1268,11 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
     const checks = ai.requests.filter((request) => requestKind(request) === 'verify')
     expect(checks).toHaveLength(2)
     expect(sentChecks(nth(checks, 1))).toHaveLength(2)
-    expect(checks.every((request) => request.tier === 'strong')).toBe(true)
+    expect(checks.every((request) => request.tier === 'fast')).toBe(true)
     expect(claimsNow().map((claim) => [claim.slot, claim.state])).toEqual([
-      ['traits', 'live'],
-      ['history', 'live'],
-      ['traits', 'live']
+      ['detail:mark', 'live'],
+      ['detail:home', 'live'],
+      ['detail:home', 'live']
     ])
     // Every verdict came on the second ask: a recovered cut, no cut-off of the reading.
     expect(lastReading(db, one, activeDraftId(db))).toMatchObject({
@@ -1158,7 +1283,7 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
 
   it('never counts a fact the checker did not answer against it, and reads its paragraph again', async () => {
     const ai = fakeAi((request): FakeAnswer => {
-      if (requestKind(request) !== 'verify') return { text: readerReply(request, TRAITS) }
+      if (requestKind(request) !== 'verify') return { text: readerReply(request, UNPROVED) }
       const whole = verifyReply(request)
       // Every reply stops after its first verdict.
       return { text: whole.slice(0, whole.indexOf('},{"i":2') + 1), finishReason: 'length' }
@@ -1184,12 +1309,12 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
     const dashing: PlannedClaim = {
       p: 2,
       r: 'Tomas',
-      s: 'traits',
-      v: 'blue coat',
-      q: 'Tomas wore a blue coat'
+      s: 'detail:home',
+      v: 'the nets',
+      q: 'Tomas sat by the nets'
     }
     await read(standard([dashing]))
-    expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([['blue coat', 'live']])
+    expect(claimsNow().map((claim) => [claim.value, claim.state])).toEqual([['the nets', 'live']])
     // An edit two paragraphs up (its anchor holds): the window read proposes another value on the
     // same quote and says to drop c1.
     saveDocument(
@@ -1202,9 +1327,9 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
         return { text: verifyReply(request, () => ({ ok: false })) }
       }
       const tail = request.messages.at(-1)?.content ?? ''
-      const short = /(c\d+) r\d+ traits “blue coat”/.exec(tail)?.[1]
+      const short = /(c\d+) r\d+ detail:home “the nets”/.exec(tail)?.[1]
       return {
-        text: readerReply(request, [{ ...dashing, v: 'coat' }], {
+        text: readerReply(request, [{ ...dashing, v: 'nets' }], {
           drop: short === undefined ? [] : [short]
         })
       }
@@ -1212,13 +1337,13 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
     await runReading(db, { ai: ai.deps }, { nodeId: one, caretPara: null, requestId: 'r-5' })
     expect(
       claimsNow()
-        .filter((claim) => claim.slot === 'traits')
+        .filter((claim) => claim.slot === 'detail:home')
         .map((claim) => [claim.value, claim.state])
-    ).toEqual([['blue coat', 'live']])
+    ).toEqual([['the nets', 'live']])
   })
 
   it('pins first person to a speaker only in what the checker confirms is their line', async () => {
-    saveDocument(db, one, doc('Tomas sat down.', '“I was born in Elsmere,” he said.'))
+    saveDocument(db, one, doc('Tomas sat down.', '“I was born in 1790,” he said.'))
     scanNamesFor(db, one, NOW)
     const ai = fakeAi((request): FakeAnswer => {
       // The checker reads the line as narration: first person then points to nobody.
@@ -1229,8 +1354,8 @@ describe('runReading: the checker’s verdicts (F-16.17, review 2026-10-12)', ()
             p: 1,
             r: 'Tomas',
             s: 'born',
-            v: 'in Elsmere',
-            q: 'I was born in Elsmere',
+            v: 'in 1790',
+            q: 'I was born in 1790',
             voice: 'dialogue',
             sp: 'Tomas'
           }
@@ -1331,7 +1456,7 @@ describe('runReading: who a pronoun may mean (F-16.17, review 2026-10-12)', () =
     saveDocument(
       db,
       one,
-      doc('Tomas could never make his wife understand him. She had a quick temper.')
+      doc('Tomas could never make his wife understand him. She had a long scar.')
     )
     scanNamesFor(db, one, NOW)
     const ai = fakeAi((request): FakeAnswer => {
@@ -1345,7 +1470,7 @@ describe('runReading: who a pronoun may mean (F-16.17, review 2026-10-12)', () =
       }
       return {
         text: readerReply(request, [
-          { p: 0, r: 'Lise', s: 'traits', v: 'a quick temper', q: 'She had a quick temper' }
+          { p: 0, r: 'Lise', s: 'scars', v: 'a long scar', q: 'She had a long scar' }
         ])
       }
     })
@@ -1354,19 +1479,19 @@ describe('runReading: who a pronoun may mean (F-16.17, review 2026-10-12)', () =
     expect(check?.names).toEqual(['Tomas', 'Lise'])
     expect(check?.unnamed).toHaveLength(1)
     expect(claimsNow().map((claim) => [claim.recordId, claim.slot, claim.state])).toEqual([
-      [lise, 'traits', 'live']
+      [lise, 'scars', 'live']
     ])
     expect(invariants()).toEqual([])
   })
 })
 
 describe('runReading: new names (F-16.17, review 2026-10-12)', () => {
-  /** A new name's item: the name, where it stands, and one role fact on the same quote. */
+  /** A new name's item: the name, where it stands, and one occupation fact on the same quote. */
   const nameItem = (n: string, p: number, q: string, fact: string): Record<string, unknown> => ({
     n,
     p,
     q,
-    c: [{ p, s: 'role', v: fact, q }]
+    c: [{ p, s: 'detail:occupation', v: fact, q }]
   })
   const named = (n: string, p: number, q: string, fact: string): string =>
     JSON.stringify({ n: [nameItem(n, p, q, fact)] })
@@ -1493,7 +1618,7 @@ describe('runReading: slice 3 purposes and spot checks (F-16.16, F-16.17)', () =
       claimsNow()
         .map((claim) => claim.slot)
         .sort()
-    ).toEqual(['clothing', 'eyes', 'location'])
+    ).toEqual(['eyes', 'location', 'location'])
     // A rebuild that finds only the eyes: the rest goes (P2a-D25).
     const rebuilt = await runReading(
       db,
@@ -1516,6 +1641,6 @@ describe('runReading: slice 3 purposes and spot checks (F-16.16, F-16.17)', () =
       claimsNow()
         .map((claim) => claim.slot)
         .sort()
-    ).toEqual(['clothing', 'eyes', 'location'])
+    ).toEqual(['eyes', 'location', 'location'])
   })
 })

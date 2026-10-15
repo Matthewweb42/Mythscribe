@@ -10,6 +10,7 @@ import { normalizeForMatch } from '@shared/critique'
 import { checkMemoryInvariants, type InvariantInput } from '@shared/memory/invariants'
 import { parseHow, type KnowsHow } from '@shared/memory/knows'
 import { normName } from '@shared/memory/names'
+import { readSlot, slotIsRead } from '@shared/memory/slots'
 import { containsValue } from '@shared/memory/reconcile'
 import {
   TOPIC_LABEL_SHORT_WORDS,
@@ -93,6 +94,35 @@ export function overlaps(a: string, b: string): boolean {
   const y = normalizeForMatch(b)
   return x.includes(y) || y.includes(x)
 }
+
+/**
+ * Whether the reader still reads a claim label's slot (plan `ReaderNarrow.md`, 2026-10-14: traits,
+ * history, relations, roles, clothing and objects are refused as `notRead`, whatever is proposed).
+ */
+export function labelRead(claim: { slot: string }): boolean {
+  const slot = readSlot(slotOf(claim))
+  return slot !== null && slotIsRead(slot)
+}
+
+/**
+ * The labelled contradictions the memory can still find: none of whose sides is a claim label in a
+ * slot no longer read (plan `ReaderNarrow.md`: the Captain's two fathers are histories, so C7's
+ * planted pair is Ms Scribe's to find in the text now, never a stored pair).
+ */
+export const FINDABLE_CONTRADICTIONS: typeof TEST_BOOK_LABELS.contradictions =
+  TEST_BOOK_LABELS.contradictions.filter((finding) =>
+    [finding.a, finding.b].every(
+      (side) =>
+        side === undefined ||
+        !TEST_BOOK_LABELS.claims.some(
+          (claim) =>
+            claim.scene === side.scene &&
+            claim.record === finding.record &&
+            overlaps(claim.quote, side.quote) &&
+            !labelRead(claim)
+        )
+    )
+  )
 
 /** Whether a checker item's text holds a labelled quote (its first 40 characters, normalised). */
 const textHolds = (text: string, quote: string): boolean =>

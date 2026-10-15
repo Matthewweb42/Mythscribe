@@ -93,7 +93,13 @@ describe('the test book (F-16.3)', () => {
     }
     // One verdict per stored fact: no two judge the same record, slot, value and sentence.
     const keys = LABELS.storedVerdicts.map((verdict) =>
-      [verdict.scene, verdict.record, verdict.slot, normalizeForMatch(verdict.value)].join('|')
+      [
+        verdict.scene,
+        verdict.record,
+        verdict.slot,
+        normalizeForMatch(verdict.value),
+        verdict.voice ?? ''
+      ].join('|')
     )
     expect(new Set(keys).size).toBe(keys.length)
   })

@@ -76,7 +76,8 @@ import {
   MEMORY_V2_EVAL_CASES,
   MEMORY_V3_EVAL_CASES,
   MEMORY_V4_EVAL_CASES,
-  MEMORY_V5_EVAL_CASES
+  MEMORY_V5_EVAL_CASES,
+  MEMORY_V6_EVAL_CASES
 } from './memoryFixtures'
 import { citeEvalCases } from './citeFixtures'
 import { navigatorEvalCases } from './navigatorFixtures'
@@ -6794,5 +6795,7 @@ export const EVAL_CASES: EvalCase[] = [
   ...MEMORY_V4_EVAL_CASES,
   // F-16.17 (the third live run of 2026-10-14): reader.v5 ("src", the open-ended value rules) and
   // verify.v4 (the open-ended rules, sent on the strong tier).
-  ...MEMORY_V5_EVAL_CASES
+  ...MEMORY_V5_EVAL_CASES,
+  // F-16.17 (plan ReaderNarrow.md, 2026-10-14): reader.v6, concrete facts only.
+  ...MEMORY_V6_EVAL_CASES
 ]

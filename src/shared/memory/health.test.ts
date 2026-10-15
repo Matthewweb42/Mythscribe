@@ -30,6 +30,19 @@ describe('modelHealth (F-16.17, P2a-D16)', () => {
     expect(modelHealth(rejects)).toMatchObject({ paused: true, reason: 'verified', verified: 0.75 })
   })
 
+  it('leaves the items refused for a slot no longer read out of the quotes (plan ReaderNarrow.md)', () => {
+    // 6 proposed, 2 of them traits refused before their quotes were looked for: 4 of 4 found.
+    const narrowed = Array.from({ length: 10 }, () => ({
+      ...good,
+      items: 6,
+      rejections: { notRead: 2 }
+    }))
+    expect(modelHealth(narrowed)).toMatchObject({ paused: false, quotes: 1, items: 40 })
+    // A quote really missing still counts against it.
+    const missing = narrowed.map((each) => ({ ...each, quotesFound: 3 }))
+    expect(modelHealth(missing)).toMatchObject({ paused: true, reason: 'quotes', quotes: 0.75 })
+  })
+
   it('reads only the newest 20 readings', () => {
     const recent = Array.from({ length: 20 }, () => good)
     const old = Array.from({ length: 20 }, () => ({ ...good, quotesFound: 0 }))
