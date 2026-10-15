@@ -42,10 +42,17 @@ export function findScroller(start: Element): HTMLElement | null {
   return null
 }
 
-/** Scrolls the editor's scroller so the caret sits at its vertical middle (F-6.7). */
-export function centreCaret(view: EditorView, target: ScrollTarget | null = findScroller(view.dom)): void {
+/**
+ * Scrolls the editor's scroller so the caret sits at its vertical middle (F-6.7); `at` puts
+ * another position there instead (the start of a passage a source opens at).
+ */
+export function centreCaret(
+  view: EditorView,
+  target: ScrollTarget | null = findScroller(view.dom),
+  at: number = view.state.selection.head
+): void {
   if (!target) return
-  const caret = view.coordsAtPos(view.state.selection.head)
+  const caret = view.coordsAtPos(at)
   const delta = centerDelta(caret.top, target.getBoundingClientRect())
   if (delta !== 0) target.scrollTop += delta
 }

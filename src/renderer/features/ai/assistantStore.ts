@@ -919,7 +919,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       useTreeStore.getState().select(ref.nodeId)
       return
     }
-    await openPassage(ref.nodeId, (doc) => locateText(doc, quote))
+    // The passage goes to the middle of the view (Ms Scribe's sources, 2026-10-15).
+    await openPassage(ref.nodeId, (doc) => locateText(doc, quote), { centre: true })
   },
 
   async pickEdit(messageId, choice) {

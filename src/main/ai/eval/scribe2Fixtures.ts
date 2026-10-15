@@ -2,16 +2,20 @@ import { SCRIBE_WHOLE_BOOK_TOKENS, scribeAccess } from '@shared/scribe2'
 import type { AssistantMode } from '@shared/aiSettings'
 import { buildScribeContext, type ScribePage, type ScribeScene } from '../../scribe2/context'
 import { fitScribePrompt } from '../../scribe2/run'
-import { scribeRules } from '../prompts/scribe.v1'
+import { buildScribePrompt, scribeRules, SCRIBE_PROMPT_VERSION } from '../prompts/scribe.v1'
+import { buildScribePromptV2, scribeRulesV2 } from '../prompts/scribe.v2'
 import type { AgentTranscriptStep } from '../prompts/agent.v1'
 import type { EvalCase } from './fixtures'
 import { estimateTokens } from '@shared/ai'
 
 /**
- * `scribe.v1` cases (notes redesign phase 1, story memory v1): Ms Scribe's first step with the
- * notes and the whole fixture book in view (a lookup or an answer), a note edit in Write, a
- * Brainstorm answer, and the most one step can carry under the whole-book line.
+ * `scribe.v1` and `scribe.v2` cases (notes redesign phase 1, story memory v1), the same four for
+ * each: Ms Scribe's first step with the notes and the whole fixture book in view (a lookup or an
+ * answer), a note edit in Write, a Brainstorm answer, and the most one step can carry under the
+ * whole-book line. v2 asks for sources with quotes and refs written as chapters.
  */
+
+type ScribeVersion = 'scribe.v1' | 'scribe.v2'
 
 const PASSAGE = [
   'The ferry landing smelled of tar. Mara waited with the ledger under her coat.',
@@ -62,6 +66,7 @@ const PAGES: ScribePage[] = [
 ]
 
 function scribeCase(
+  version: ScribeVersion,
   name: string,
   note: string,
   mode: AssistantMode,
@@ -70,9 +75,10 @@ function scribeCase(
   expected: 'tool' | 'answer',
   steps: AgentTranscriptStep[] = []
 ): EvalCase {
+  const v1 = version === SCRIBE_PROMPT_VERSION
   const access = scribeAccess(mode, message)
   const context = buildScribeContext({
-    rulesTokens: estimateTokens(scribeRules(mode, access)),
+    rulesTokens: estimateTokens((v1 ? scribeRules : scribeRulesV2)(mode, access)),
     pages: PAGES,
     scenes: book,
     currentId: book[0]?.nodeId ?? null,
@@ -82,15 +88,10 @@ function scribeCase(
     searchHits: [],
     names: ['Mara', 'Tomas', 'Outline']
   })
-  const built = fitScribePrompt({
-    mode,
-    access,
-    context,
-    history: [],
-    message,
-    steps,
-    final: false
-  })
+  const built = fitScribePrompt(
+    { mode, access, context, history: [], message, steps, final: false },
+    v1 ? buildScribePrompt : buildScribePromptV2
+  )
   return {
     version: built.version,
     name,
@@ -108,9 +109,10 @@ function nearLine(): ScribeScene[] {
   return scenes(count, perScene)
 }
 
-export function scribe2EvalCases(): EvalCase[] {
+function versionCases(version: ScribeVersion): EvalCase[] {
   return [
     scribeCase(
+      version,
       'question',
       'Write, the whole six-scene fixture book and three pages in view: where Mara last saw Rook',
       'write',
@@ -119,6 +121,7 @@ export function scribe2EvalCases(): EvalCase[] {
       'answer'
     ),
     scribeCase(
+      version,
       'noteEdit',
       'Write: "put that in Mara’s page" after one open_note, so the next step is edit_note',
       'write',
@@ -134,6 +137,7 @@ export function scribe2EvalCases(): EvalCase[] {
       ]
     ),
     scribeCase(
+      version,
       'brainstorm',
       'Brainstorm: two next beats from the outline and the flow so far, no write tools',
       'brainstorm',
@@ -142,6 +146,7 @@ export function scribe2EvalCases(): EvalCase[] {
       'answer'
     ),
     scribeCase(
+      version,
       'maxed',
       'Write, a book just under the 60,000-token whole-book line: the most one first step carries',
       'write',
@@ -150,4 +155,8 @@ export function scribe2EvalCases(): EvalCase[] {
       'answer'
     )
   ]
+}
+
+export function scribe2EvalCases(): EvalCase[] {
+  return [...versionCases('scribe.v1'), ...versionCases('scribe.v2')]
 }

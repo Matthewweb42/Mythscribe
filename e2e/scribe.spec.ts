@@ -9,17 +9,23 @@ import {
   type ElectronApplication,
   type Page
 } from '@playwright/test'
-import type { IpcResult, ProjectInfo } from '../src/shared/ipc/contract'
+import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
 import type { NotebookPage, NotebookVersion } from '../src/shared/notebook'
+import { clickIntoEditor } from './support'
 
 /**
  * Notes redesign phase 1, slice 2: Ms Scribe in a story memory v1 project (what the installed app
  * runs), against a fake OpenAI-compatible provider on loopback. A note page is made through
- * `notebook:create`; in Write, a message the router sends to chat reaches `scribe.v1` with the
+ * `notebook:create`; in Write, a message the router sends to chat reaches `scribe.v2` with the
  * page and the book in view; the fake answers with an `edit_note` call and then the answer; the
  * page is changed in the notebook, the chat logs the edit with its highlight, and its Undo puts
  * the page back (`notebook:restoreVersion`). In Brainstorm a question is answered with no write
  * tool offered and nothing edited.
+ *
+ * Then (2026-10-15, `scribe.v2`) a source with a quote: the scene is renamed "Tash" inside a
+ * chapter renamed "Blades of Alandor"; her answer names the scene by ref, which reads as the
+ * chapter; the source carries one real and one made-up quote, main keeps the real one, and the
+ * chip opens the scene with that passage selected and at the middle of the view.
  */
 
 let app: ElectronApplication
@@ -29,12 +35,21 @@ let tmp: string
 const OWN_KEY = 'sk-live-scribe-4321'
 /** `route.v2`'s opening; the fake router sends every message to the chat. */
 const ROUTE_SENTINEL = "You are the router inside a novel-writing app's assistant."
-/** `scribe.v1`'s opening (`SCRIBE_SENTINEL`). */
+/** `scribe.v1`'s and `scribe.v2`'s opening (`SCRIBE_SENTINEL`). */
 const SCRIBE_SENTINEL = 'You are Ms Scribe, the writing partner inside the author’s novel app.'
 const WRITE_MESSAGE = 'Put that Mara fears the sea in her page.'
 const WRITE_ANSWER = 'I added it to her page (p1).'
 const BRAINSTORM_MESSAGE = 'What could happen next at the quay?'
 const BRAINSTORM_ANSWER = 'Two options: a storm closes the quay, or a stranger asks for Mara.'
+const SEA_QUESTION = 'Where does Tash first see the sea?'
+/** The paragraph of Tash's scene her source quotes, far enough down to need a scroll. */
+const SEA_AT = 14
+const SEA_QUOTE = 'Below the ridge the sea lay flat as hammered tin'
+const sceneParagraph = (i: number): string =>
+  i === SEA_AT
+    ? `${SEA_QUOTE}, and Tash stopped walking for the first time that day.`
+    : `Paragraph ${i}. The wind came off the ridge in long cold pulls, and Tash kept her head ` +
+      'down and counted the cairns as she passed them, one for every mile the road had taken.'
 
 /** Every chat request the fake provider saw. */
 const bodies: { messages: { role: string; content: string }[] }[] = []
@@ -56,6 +71,18 @@ function scribeAnswer(messages: { role: string; content: string }[]): string {
     })
   }
   if (asked === WRITE_MESSAGE) return JSON.stringify({ answer: WRITE_ANSWER, sources: ['p1'] })
+  if (asked === SEA_QUESTION) {
+    // Her ref for the scene, from the book she was sent.
+    const ref =
+      /### (n\d+) Blades of Alandor › Tash\n/.exec(messages[0]?.content ?? '')?.[1] ?? 'n0'
+    return JSON.stringify({
+      answer: `She first sees it in ${ref}.`,
+      sources: [
+        { ref, quote: SEA_QUOTE },
+        { ref, quote: 'Tash swam out past the breakers at dawn' }
+      ]
+    })
+  }
   return JSON.stringify({ answer: BRAINSTORM_ANSWER, sources: [] })
 }
 
@@ -250,4 +277,83 @@ test('Ms Scribe edits a note in Write with Undo, and Brainstorm edits nothing (n
   expect((await invoke<NotebookVersion[]>('notebook:versions', { id: mara.id })).length).toBe(
     versionsBefore
   )
+})
+
+test('a source opens the scene at the passage she quotes, and her answer names the chapter', async () => {
+  // Continues in the same project, Ms Scribe's panel open. Scene 1 becomes "Tash" in a chapter
+  // called "Blades of Alandor" (renamed in main; the tree in the window keeps its old labels).
+  const scene = (await invoke<TreeNode[]>('tree:list', undefined)).find(
+    (n) => n.kind === 'document' && n.hierarchyLevel === 'scene'
+  )
+  if (!scene?.parentId) throw new Error('no scene in a chapter')
+  const label = scene.title
+  await invoke('tree:rename', { id: scene.parentId, title: 'Blades of Alandor' })
+  await invoke('tree:rename', { id: scene.id, title: 'Tash' })
+
+  // Thirty paragraphs typed into it, more than one screen.
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  await bookTree.getByRole('treeitem', { name: label, exact: true }).click()
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await clickIntoEditor(editor)
+  for (let i = 1; i <= 30; i += 1) {
+    await page.keyboard.insertText(sceneParagraph(i))
+    if (i < 30) await page.keyboard.press('Enter')
+  }
+  await expect
+    .poll(
+      async () =>
+        JSON.stringify(
+          (await invoke<{ content: unknown }>('document:get', { id: scene.id })).content
+        ),
+      { timeout: 15_000 }
+    )
+    .toContain('Paragraph 30.')
+  // The caret is at the end, the view scrolled to the bottom: the source must scroll back up.
+
+  const assistant = page.getByTestId('assistant-panel')
+  const messageBox = assistant.getByRole('textbox', { name: 'Message' })
+  const turns = assistant.locator('[data-testid="chat-turn"]')
+  const before = await turns.count()
+  await messageBox.fill(SEA_QUESTION)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(before + 2)
+  const answer = turns.nth(before + 1)
+  // The ref reads as the scene's chapter, not its point-of-view title.
+  await expect(answer).toContainText('She first sees it in the chapter Blades of Alandor.', {
+    timeout: 15_000
+  })
+  const system =
+    bodies.filter((b) => b.messages[0]?.content.startsWith(SCRIBE_SENTINEL) === true).at(-1)
+      ?.messages[0]?.content ?? ''
+  // The book map names the scene's chapter.
+  const map = system.split('# Book map\n')[1]?.split('\n\n')[0] ?? ''
+  expect(map).toMatch(/^n\d+ Blades of Alandor › Tash\b/m)
+  expect(system).toContain('"quote":"<5 to 15 words copied exactly')
+
+  // One source, kept with the quote the scene holds; the made-up one dropped.
+  const source = answer.getByTestId('scribe-source-scene')
+  await expect(source).toHaveText(['Blades of Alandor › Tash'])
+  await expect(source).toHaveAttribute('title', `Open Blades of Alandor › Tash at “${SEA_QUOTE}”`)
+  await expect(answer.getByTestId('scribe-source-passage')).toHaveCount(0)
+
+  await source.click()
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+    .toBe(SEA_QUOTE)
+  // The passage sits at the middle of the editor's scroller.
+  await expect
+    .poll(() =>
+      editor.evaluate((root) => {
+        let scroller: HTMLElement | null = root.parentElement
+        while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+          scroller = scroller.parentElement
+        }
+        const range = window.getSelection()?.getRangeAt(0)
+        if (!scroller || !range) return null
+        const box = scroller.getBoundingClientRect()
+        const middle = box.top + box.height / 2
+        return Math.abs(range.getBoundingClientRect().top - middle) < box.height / 6
+      })
+    )
+    .toBe(true)
 })

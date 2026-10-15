@@ -559,30 +559,39 @@ function Turn({
 /**
  * The scenes and note pages a Ms Scribe answer used (notes redesign phase 1, story memory v1),
  * under it: a scene opens in the editor, a note page in the notes area, a story-bible sheet on its
- * page; a Library upload is named only (it opens in the Library).
+ * page; a Library upload is named only (it opens in the Library). A scene reads `Chapter › Scene`.
+ * A source with the passages she relied on (`scribe.v2`, checked by main) opens at the first,
+ * selected at the middle of the view; each further passage has a small numbered link of its own.
  */
 function ScribeSourceList({ sources }: { sources: ScribeSources }): React.JSX.Element | null {
   const openScene = useAssistantStore((s) => s.openScene)
   if (sources.scenes.length === 0 && sources.pages.length === 0) return null
-  const openPage = (page: ScribeSources['pages'][number]): void => {
-    if (page.kind === 'note') openNotebookPage(page.id)
+  const openPage = (page: ScribeSources['pages'][number], quote: string | null): void => {
+    if (page.kind === 'note') openNotebookPage(page.id, quote)
     else if (page.kind === 'sheet') useEntityStore.getState().select(page.id)
   }
+  const sceneAt = (scene: ScribeSources['scenes'][number], quote: string | null): void =>
+    void openScene({ nodeId: scene.nodeId, title: scene.title }, quote)
   return (
     <div data-testid="scribe-sources" className="flex flex-col gap-1">
       <p className="m-0 text-xs font-medium text-fg-muted">Sources</p>
       <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
         {sources.scenes.map((scene) => (
-          <li key={scene.nodeId}>
+          <li key={scene.nodeId} className="flex items-center gap-0.5">
             <button
               type="button"
               data-testid="scribe-source-scene"
-              title={`Open ${scene.title}`}
-              onClick={() => void openScene({ nodeId: scene.nodeId, title: scene.title }, null)}
+              title={sourceTitle(scene.title, scene.quotes[0])}
+              onClick={() => sceneAt(scene, scene.quotes[0] ?? null)}
               className={CHIP_BUTTON}
             >
               {scene.title}
             </button>
+            <MorePassages
+              title={scene.title}
+              quotes={scene.quotes}
+              open={(quote) => sceneAt(scene, quote)}
+            />
           </li>
         ))}
         {sources.pages.map((page) =>
@@ -591,21 +600,63 @@ function ScribeSourceList({ sources }: { sources: ScribeSources }): React.JSX.El
               {page.title}
             </li>
           ) : (
-            <li key={page.id}>
+            <li key={page.id} className="flex items-center gap-0.5">
               <button
                 type="button"
                 data-testid="scribe-source-page"
-                title={`Open ${page.title}`}
-                onClick={() => openPage(page)}
+                title={sourceTitle(page.title, page.kind === 'note' ? page.quotes[0] : undefined)}
+                onClick={() => openPage(page, page.quotes[0] ?? null)}
                 className={CHIP_BUTTON}
               >
                 {page.title}
               </button>
+              {page.kind === 'note' ? (
+                <MorePassages
+                  title={page.title}
+                  quotes={page.quotes}
+                  open={(quote) => openPage(page, quote)}
+                />
+              ) : null}
             </li>
           )
         )}
       </ul>
     </div>
+  )
+}
+
+/** A source's tooltip: where it opens, and the passage when it opens at one. */
+function sourceTitle(title: string, quote: string | undefined): string {
+  return quote === undefined ? `Open ${title}` : `Open ${title} at “${quote}”`
+}
+
+/** The source's passages after its first, one small numbered link each. */
+function MorePassages({
+  title,
+  quotes,
+  open
+}: {
+  title: string
+  quotes: readonly string[]
+  open: (quote: string) => void
+}): React.JSX.Element | null {
+  if (quotes.length < 2) return null
+  return (
+    <>
+      {quotes.slice(1).map((quote, index) => (
+        <button
+          key={quote}
+          type="button"
+          data-testid="scribe-source-passage"
+          aria-label={`Open ${title} at passage ${index + 2}`}
+          title={`“${quote}”`}
+          onClick={() => open(quote)}
+          className="rounded-full px-1.5 py-0.5 text-[11px] text-fg-muted hover:bg-surface-raised hover:text-fg"
+        >
+          {index + 2}
+        </button>
+      ))}
+    </>
   )
 }
 

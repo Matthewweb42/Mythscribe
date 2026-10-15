@@ -114,6 +114,7 @@ import { VERIFY_V4_PROMPT_VERSION } from './verify.v4'
 import { READER_V6_PROMPT_VERSION } from './reader.v6'
 import { READER_V7_PROMPT_VERSION } from './reader.v7'
 import { SCRIBE_PROMPT_VERSION } from './scribe.v1'
+import { SCRIBE_V2_PROMPT_VERSION } from './scribe.v2'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -263,7 +264,8 @@ export const PROMPT_VERSIONS = [
   // traits and history read again.
   READER_V7_PROMPT_VERSION,
   // Notes redesign phase 1 (story memory v1): Ms Scribe with the notes and the book in view.
-  SCRIBE_PROMPT_VERSION
+  SCRIBE_PROMPT_VERSION,
+  SCRIBE_V2_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -762,7 +764,14 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   [VERIFY_V4_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' },
   [READER_V6_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
   [READER_V7_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
-  [SCRIBE_PROMPT_VERSION]: { feature: 'scribe', tier: 'strong', output: 'json', since: 'Notes P1' }
+  [SCRIBE_PROMPT_VERSION]: { feature: 'scribe', tier: 'strong', output: 'json', since: 'Notes P1' },
+  // Sources with the exact words she relied on, refs written as chapters (2026-10-15).
+  [SCRIBE_V2_PROMPT_VERSION]: {
+    feature: 'scribe',
+    tier: 'strong',
+    output: 'json',
+    since: 'Notes P1'
+  }
 }
 
 /**

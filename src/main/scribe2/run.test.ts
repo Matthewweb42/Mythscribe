@@ -1,18 +1,20 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { priceFor } from '@shared/ai'
 import type { AgentStep } from '@shared/agent'
 import { defaultAiSettings, type AssistantMode } from '@shared/aiSettings'
 import { notebookDocFromText } from '@shared/notebook'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { node } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
 import { createNotebookItem, getNotebookPage } from '../notebook/notebookStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { setAiSettings } from '../project/settingsStore'
 import { createSeededProject } from '../project/testProject'
-import type { TreeDb } from '../tree/treeStore'
+import { createNode, getNode, listNodes, renameNode, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
 import { defaultAiUsageState, dayOf } from '../ai/dailyCap'
 import { loadAgentProject } from '../ai/agentTools'
@@ -147,7 +149,7 @@ describe('runScribe2 (notes redesign phase 1)', () => {
     ])
     expect(result.answer).not.toContain('(p1)')
     expect(result.answer).toContain('Mara')
-    expect(result.sources.pages).toEqual([{ id: mara.id, title: 'Mara', kind: 'note' }])
+    expect(result.sources.pages).toEqual([{ id: mara.id, title: 'Mara', kind: 'note', quotes: [] }])
     expect(result.sources.scenes.map((s) => s.nodeId)).toEqual([scenes[0]])
     expect(ledger.map((row) => row.feature)).toEqual(['scribe', 'scribe'])
     expect(ledger.every((row) => row.tier === 'strong')).toBe(true)
@@ -202,14 +204,122 @@ describe('Ms Scribe’s sources and refs', () => {
     const run = {
       project: material.project,
       pages: material.pages,
+      scenes: material.scenes,
       used: new Set([page.id, scenes[1]!])
     }
     const ref0 = material.project.refOf.get(scenes[0]!) ?? ''
     const sources = answerSources(run, `It happens in ${ref0} and n9999.`, ['p1', 'nonsense', 3])
     expect(sources.scenes.map((s) => s.nodeId)).toEqual([scenes[0], scenes[1]])
-    expect(sources.pages).toEqual([{ id: page.id, title: 'Rook', kind: 'note' }])
-    expect(readableAnswer(run, `See ${ref0} and p1, not n9999.`)).toMatch(
-      /^See .+ and Rook, not n9999\.$/
+    expect(sources.scenes.every((s) => s.quotes.length === 0)).toBe(true)
+    expect(sources.pages).toEqual([{ id: page.id, title: 'Rook', kind: 'note', quotes: [] }])
+    expect(readableAnswer(run, `See ${ref0} and p1, not n9999.`)).toBe(
+      'See Chapter 1 and Rook, not n9999.'
+    )
+  })
+
+  it('keeps each quote the scene or page holds, as it stands there, and drops the rest', async () => {
+    createNotebookItem(db, {
+      parentId: null,
+      kind: 'page',
+      title: 'Mara',
+      content: notebookDocFromText('Eyes: grey. Fears the sea since the flood.')
+    })
+    const material = await loadScribeSources(db, session.folder, null)
+    const run = { ...material, used: new Set<string>() }
+    const ref0 = material.project.refOf.get(scenes[0]!) ?? ''
+    const ref1 = material.project.refOf.get(scenes[1]!) ?? ''
+    const sources = answerSources(run, 'She is alone.', [
+      { ref: ref0, quote: 'mara climbed the ridge' },
+      { ref: ref0, quote: 'She flew over the ridge' },
+      { ref: ref0, quote: '“The sea was grey.”' },
+      { ref: ref1, quote: 'Not in this scene at all.' },
+      { ref: 'p1', quote: 'fears the sea since the flood' },
+      { quote: 'no ref' }
+    ])
+    expect(sources.scenes).toEqual([
+      {
+        nodeId: scenes[0],
+        title: material.project.titleOf(scenes[0]!),
+        quotes: ['Mara climbed the ridge', 'The sea was grey.']
+      },
+      // The source stays without its spot.
+      { nodeId: scenes[1], title: material.project.titleOf(scenes[1]!), quotes: [] }
+    ])
+    expect(sources.pages.map((p) => p.quotes)).toEqual([['Fears the sea since the flood']])
+  })
+
+  it('writes scene refs as their chapters, several in one chapter as one mention', async () => {
+    const tash = getNode(db, scenes[0]!)!
+    const chapter = tash.parentId!
+    renameNode(db, chapter, 'Blades of Alandor')
+    renameNode(db, tash.id, 'Tash')
+    const sibling = createNode(db, 'novel', {
+      parentId: chapter,
+      kind: 'document',
+      hierarchyLevel: 'scene',
+      title: 'Rynna'
+    })
+    const material = await loadScribeSources(db, session.folder, null)
+    const run = { project: material.project, pages: material.pages }
+    const refOf = (id: string): string => material.project.refOf.get(id) ?? ''
+    const other = material.project.rows.find(
+      (row) =>
+        row.kind === 'document' &&
+        row.parentId !== chapter &&
+        getNode(db, row.parentId!)?.sectionType === null
+    )!
+    const otherChapter = getNode(db, other.parentId!)!.title
+    const [t, s, o] = [refOf(tash.id), refOf(sibling.id), refOf(other.id)]
+    expect(material.project.titleOf(tash.id)).toBe('Blades of Alandor › Tash')
+    expect(readableAnswer(run, `Mara first sees the sea in ${t}.`)).toBe(
+      'Mara first sees the sea in the chapter Blades of Alandor.'
+    )
+    // A sentence that starts with a ref starts with a capital.
+    expect(readableAnswer(run, `${t} is where she lies. ${t} ends it.`)).toBe(
+      'The chapter Blades of Alandor is where she lies. The chapter Blades of Alandor ends it.'
+    )
+    // One chapter cited twice reads once; brackets stay.
+    expect(readableAnswer(run, `She lies (${t}, ${s}).`)).toBe(
+      'She lies (the chapter Blades of Alandor).'
+    )
+    expect(readableAnswer(run, `From ${t} and ${s}, she lies.`)).toBe(
+      'From the chapter Blades of Alandor, she lies.'
+    )
+    // Two chapters: one mention each, a folder called "Chapter 2" as itself.
+    expect(readableAnswer(run, `See ${t}, ${o} and ${s}.`)).toBe(
+      `See the chapter Blades of Alandor and ${otherChapter}.`
+    )
+    // Her v1 habit, the full title then the ref, reads once; a bare scene title is a name, kept.
+    expect(readableAnswer(run, `In Blades of Alandor › Tash (${t}), she lies.`)).toBe(
+      'In the chapter Blades of Alandor, she lies.'
+    )
+    expect(readableAnswer(run, `Rynna argues with Tash (${t}).`)).toBe(
+      'Rynna argues with Tash (the chapter Blades of Alandor).'
+    )
+  })
+
+  it('names a scene outside any chapter by its own title', async () => {
+    const tash = getNode(db, scenes[0]!)!
+    const manuscript = listNodes(db).find((row) => row.sectionType === 'manuscript')!
+    db.update(node)
+      .set({ parentId: manuscript.id, title: 'Prologue' })
+      .where(eq(node.id, tash.id))
+      .run()
+    const material = await loadScribeSources(db, session.folder, null)
+    const run = { project: material.project, pages: material.pages }
+    const ref = material.project.refOf.get(tash.id) ?? ''
+    expect(readableAnswer(run, `It starts in ${ref}.`)).toBe('It starts in Prologue.')
+    expect(
+      answerSources({ ...run, scenes: material.scenes, used: new Set() }, ref, []).scenes
+    ).toEqual([{ nodeId: tash.id, title: 'Prologue', quotes: [] }])
+  })
+
+  it('reads a page ref after its own title once', async () => {
+    createNotebookItem(db, { parentId: null, kind: 'page', title: 'Mara', content: null })
+    const material = await loadScribeSources(db, session.folder, null)
+    const run = { project: material.project, pages: material.pages }
+    expect(readableAnswer(run, 'Mara (p1) fears the sea; see her page (p1).')).toBe(
+      'Mara fears the sea; see her page (Mara).'
     )
   })
 

@@ -5,6 +5,7 @@ import {
   TYPEWRITER_DEAD_ZONE_PX,
   Typewriter,
   centerDelta,
+  centreCaret,
   findScroller,
   type ScrollTarget
 } from './typewriter'
@@ -88,5 +89,13 @@ describe('Typewriter extension', () => {
     })
     editor.commands.insertContentAt(editor.state.doc.content.size - 1, ' Nobody came.')
     expect(scroller.scrollTop).toBe(1000)
+  })
+
+  it('centres another position than the caret when asked (a source’s passage)', () => {
+    const coords = vi.spyOn(editor.view, 'coordsAtPos')
+    editor.commands.setTextSelection(3)
+    centreCaret(editor.view, scroller, 8)
+    expect(coords).toHaveBeenLastCalledWith(8)
+    expect(scroller.scrollTop).toBe(1100)
   })
 })

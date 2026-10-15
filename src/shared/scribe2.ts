@@ -43,6 +43,12 @@ export const SCRIBE_NOTE_TEXT_MAX = 12_000
 export const SCRIBE_DIFF_CHARS = 2_000
 /** Sources kept per answer. */
 export const SCRIBE_SOURCES_MAX = 12
+/** Passages one source keeps (`scribe.v2`: the exact words she relied on, checked by main). */
+export const SCRIBE_SOURCE_QUOTES_MAX = 3
+/** The longest quote a source keeps; a longer one is not kept. */
+export const SCRIBE_QUOTE_MAX = 400
+/** The shortest quote a source keeps (once normalized), so a stray word never stands for a spot. */
+export const SCRIBE_QUOTE_MIN = 8
 
 /** The tools `scribe.v1` names. */
 export const SCRIBE_READ_TOOLS = ['search_book', 'open_scene', 'list_notes', 'open_note'] as const
@@ -96,11 +102,28 @@ export const SCRIBE_PAGE_KINDS = ['note', 'sheet', 'library'] as const
 export const ScribePageKind = z.enum(SCRIBE_PAGE_KINDS)
 export type ScribePageKind = z.infer<typeof ScribePageKind>
 
-/** The scenes and pages an answer used, under it, each opening where it is. */
+/**
+ * The passages a source rests on (`scribe.v2`), each found in the scene or page by main and kept
+ * as it stands there once normalized (`normalizeForMatch`), so the renderer's `locateText` finds
+ * it; a source she gave no quote for, or none that was found, has none. Older answers have none.
+ */
+const SourceQuotes = z
+  .array(z.string().max(SCRIBE_QUOTE_MAX))
+  .max(SCRIBE_SOURCE_QUOTES_MAX)
+  .default([])
+
+/**
+ * The scenes and pages an answer used, under it, each opening where it is (at its first quote).
+ * A scene's `title` is `Chapter › Scene`, or the scene's own title outside a chapter.
+ */
 export const ScribeSources = z.object({
-  scenes: z.array(z.object({ nodeId: z.string(), title: z.string() })).max(SCRIBE_SOURCES_MAX),
+  scenes: z
+    .array(z.object({ nodeId: z.string(), title: z.string(), quotes: SourceQuotes }))
+    .max(SCRIBE_SOURCES_MAX),
   pages: z
-    .array(z.object({ id: z.string(), title: z.string(), kind: ScribePageKind }))
+    .array(
+      z.object({ id: z.string(), title: z.string(), kind: ScribePageKind, quotes: SourceQuotes })
+    )
     .max(SCRIBE_SOURCES_MAX)
 })
 export type ScribeSources = z.infer<typeof ScribeSources>

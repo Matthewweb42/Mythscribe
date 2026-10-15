@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import type { TiptapEditorHTMLElement } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import {
@@ -18,7 +19,7 @@ import { NotebookPageView } from './NotebookPageView'
 import { resetNotebookPageStore, useNotebookPageStore } from './notebookPageStore'
 import { NEW_PAGE_TITLE, resetNotebookStore, unseenAiEdit, useNotebookStore } from './notebookStore'
 import { NotesTab } from './NotesTab'
-import { openNotebookPage, resetOpenNotebookPage } from './openPage'
+import { openNotebookPage, resetOpenNotebookPage, useOpenNotebookPageStore } from './openPage'
 
 /**
  * Notes redesign phase 1, slice 1: the notebook store over a fake main that keeps the items and
@@ -373,6 +374,21 @@ describe('Ms Scribe’s edit on a page', () => {
     await waitFor(() =>
       expect(text(useNotebookPageStore.getState().docs.Mara?.content)).toBe('Eyes: grey.')
     )
+  })
+
+  it('opens at the passage a source quotes, selected, and takes the quote once', async () => {
+    const store = useNotebookStore.getState
+    await store().load()
+    render(<NotebookPageView id="Mara" />)
+    act(() => openNotebookPage('Mara', 'grey.'))
+    await waitFor(() => {
+      const box: TiptapEditorHTMLElement = screen.getByRole('textbox', { name: 'Note page' })
+      const selection = box.editor?.state.selection
+      expect(selection && box.editor?.state.doc.textBetween(selection.from, selection.to)).toBe(
+        'grey.'
+      )
+    })
+    expect(useOpenNotebookPageStore.getState().quote).toBeNull()
   })
 
   it('shows the bar once when the page opens after the edit, not again on the next open', async () => {

@@ -783,8 +783,15 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
           costUsd: 0.0009,
           steps: [{ tool: 'search_book', label: 'Searching “crossing”…' }],
           sources: {
-            scenes: [{ nodeId: 'sc-1', title: 'Chapter 1 › Scene 1' }],
-            pages: [{ id: 'pg-river', title: 'The river', kind: 'note' }]
+            scenes: [
+              {
+                nodeId: 'sc-1',
+                title: 'Chapter 1 › Scene 1',
+                quotes: ['She crossed at dawn', 'The river was high']
+              },
+              { nodeId: 'sc-2', title: 'Chapter 1 › Scene 2', quotes: [] }
+            ],
+            pages: [{ id: 'pg-river', title: 'The river', kind: 'note', quotes: ['Wide and slow'] }]
           }
         })
       )
@@ -794,17 +801,34 @@ describe('AssistantPanel Query mode (F-5.7)', () => {
     expect(within(turn).getByTestId('chat-turn-cost')).toHaveTextContent(
       'gpt-fake · $0.0009 · 900 in · 60 out'
     )
-    const scene = within(turn).getByTestId('scribe-source-scene')
+    const [scene, plain] = within(turn).getAllByTestId('scribe-source-scene')
     expect(scene).toHaveTextContent('Chapter 1 › Scene 1')
-    await userEvent.click(scene)
+    // A source opens at the first passage she relied on; each further one has its own link.
+    expect(scene).toHaveAttribute('title', 'Open Chapter 1 › Scene 1 at “She crossed at dawn”')
+    await userEvent.click(scene!)
     expect(openScene).toHaveBeenCalledExactlyOnceWith(
       { nodeId: 'sc-1', title: 'Chapter 1 › Scene 1' },
+      'She crossed at dawn'
+    )
+    await userEvent.click(
+      within(turn).getByRole('button', { name: 'Open Chapter 1 › Scene 1 at passage 2' })
+    )
+    expect(openScene).toHaveBeenLastCalledWith(
+      { nodeId: 'sc-1', title: 'Chapter 1 › Scene 1' },
+      'The river was high'
+    )
+    expect(within(turn).getAllByTestId('scribe-source-passage')).toHaveLength(1)
+    // A source with no passage opens the scene as it is.
+    await userEvent.click(plain!)
+    expect(openScene).toHaveBeenLastCalledWith(
+      { nodeId: 'sc-2', title: 'Chapter 1 › Scene 2' },
       null
     )
     const page = within(turn).getByTestId('scribe-source-page')
     expect(page).toHaveTextContent('The river')
     await userEvent.click(page)
     expect(useOpenNotebookPageStore.getState().openNotebookPageId).toBe('pg-river')
+    expect(useOpenNotebookPageStore.getState().quote).toBe('Wide and slow')
   })
 
   it('says so when the scenes do not answer, and flags an answer no citation survived', async () => {

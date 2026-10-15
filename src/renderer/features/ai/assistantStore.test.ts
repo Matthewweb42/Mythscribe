@@ -941,14 +941,16 @@ describe('useAssistantStore Ms Scribe changes (notes redesign phase 1)', () => {
           { edit: PROSE, violation: null, applied: false }
         ],
         sources: {
-          scenes: [{ nodeId: 'sc-1', title: 'Scene 1' }],
-          pages: [{ id: 'pg-mara', title: 'Mara', kind: 'note' }]
+          scenes: [{ nodeId: 'sc-1', title: 'Scene 1', quotes: [] }],
+          pages: [{ id: 'pg-mara', title: 'Mara', kind: 'note', quotes: [] }]
         }
       })
     )
     await settle()
     const turn = active().messages.at(-1)
-    expect(turn?.sources?.pages).toEqual([{ id: 'pg-mara', title: 'Mara', kind: 'note' }])
+    expect(turn?.sources?.pages).toEqual([
+      { id: 'pg-mara', title: 'Mara', kind: 'note', quotes: [] }
+    ])
     expect(turn?.agent?.changes.map((c) => c.status)).toEqual(['applied', 'applied', 'pending'])
     expect(settles).toEqual([])
     const [edited, created] = turn?.agent?.changes ?? []
@@ -985,8 +987,8 @@ describe("useAssistantStore send, a question about the book (the router's query 
   })
 
   const SOURCES = {
-    scenes: [{ nodeId: 'sc-1', title: 'Chapter 1 › Scene 1' }],
-    pages: [{ id: 'pg-storm', title: 'Storms', kind: 'note' as const }]
+    scenes: [{ nodeId: 'sc-1', title: 'Chapter 1 › Scene 1', quotes: [] }],
+    pages: [{ id: 'pg-storm', title: 'Storms', kind: 'note' as const, quotes: [] }]
   }
   const lookupOk = (requestId: string, over: Partial<ScribeOk> = {}): AiScribeResult =>
     scribeOk(requestId, 'She waits for the storm in Chapter 1 › Scene 1.', {

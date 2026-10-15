@@ -1,10 +1,12 @@
 import type { Node as PmNode } from '@tiptap/pm/model'
+import type { EditorView } from '@tiptap/pm/view'
 import { aliasKey } from '@shared/aliases'
 import { nameWords, type MentionRange } from '@shared/mentions'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { editorFor, OPEN_SCENE_TIMEOUT_MS } from './activeEditorStore'
 import { locateText, type TextRange } from './locateText'
+import { centreCaret } from './typewriter'
 
 /** The toast when a passage another feature points at is no longer in the document (F-5.7, F-4.12). */
 export const PASSAGE_GONE_MESSAGE = 'That passage is no longer in the scene'
@@ -19,7 +21,8 @@ export { OPEN_SCENE_TIMEOUT_MS }
  */
 export async function openPassage(
   nodeId: string,
-  locate: (doc: PmNode) => TextRange | null
+  locate: (doc: PmNode) => TextRange | null,
+  options?: { centre?: boolean }
 ): Promise<void> {
   useTreeStore.getState().select(nodeId)
   const editor = await editorFor(nodeId)
@@ -30,6 +33,21 @@ export async function openPassage(
     return
   }
   editor.chain().focus().setTextSelection(range).scrollIntoView().run()
+  if (options?.centre === true) centreOnceLaidOut(editor.view, range.from)
+}
+
+/**
+ * Puts `pos` at the middle of the view once the editor has painted (Ms Scribe's sources,
+ * 2026-10-15): a scene just opened restores its own scroll first, and its layout settles over
+ * the next frames, so the passage is centred two frames on, as focus mode centres its caret.
+ */
+export function centreOnceLaidOut(view: EditorView, pos: number): void {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (view.isDestroyed || pos > view.state.doc.content.size) return
+      centreCaret(view, undefined, pos)
+    })
+  })
 }
 
 /**

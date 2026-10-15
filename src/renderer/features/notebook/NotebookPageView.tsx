@@ -7,12 +7,18 @@ import { NOTEBOOK_TITLE_MAX } from '@shared/notebook'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { useCanWrite } from '@renderer/features/account/appAccessStore'
 import { buildExtensions, EDITOR_CORE_OPTIONS } from '@renderer/features/editor/extensions'
+import { locateText } from '@renderer/features/editor/locateText'
+import { centreOnceLaidOut } from '@renderer/features/editor/openPassage'
 import { useViewStore } from '@renderer/features/shell/viewStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { changedLines } from './notebookChanges'
 import { useNotebookPageStore } from './notebookPageStore'
 import { useNotebookStore } from './notebookStore'
+import { takeNotebookQuote, useOpenNotebookPageStore } from './openPage'
+
+/** The toast when a source's passage is no longer on the page it opens. */
+export const PAGE_PASSAGE_GONE_MESSAGE = 'That passage is no longer on the page'
 
 /** Note pages are not the manuscript, so a scene break on one is fixed rather than following the format. */
 const PAGE_SCENE_BREAK = '* * *'
@@ -239,6 +245,23 @@ function PageInstance({
   useEffect(() => {
     if (!editor.isDestroyed && editor.isEditable !== editable) editor.setEditable(editable, false)
   }, [editor, editable])
+  // A source under Ms Scribe's answer opens the page at the passage she relied on (2026-10-15):
+  // selected and put at the middle of the view once the page is loaded.
+  const quoteAsked = useOpenNotebookPageStore((s) =>
+    s.openNotebookPageId === id && s.quote !== null ? s.requested : 0
+  )
+  useEffect(() => {
+    if (!ready || quoteAsked === 0 || editor.isDestroyed) return
+    const quote = takeNotebookQuote(id)
+    if (quote === null) return
+    const range = locateText(editor.state.doc, quote)
+    if (range === null) {
+      toast.error(PAGE_PASSAGE_GONE_MESSAGE)
+      return
+    }
+    editor.chain().focus().setTextSelection(range).scrollIntoView().run()
+    centreOnceLaidOut(editor.view, range.from)
+  }, [editor, id, ready, quoteAsked])
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">

@@ -601,17 +601,20 @@ function chatAgentReply(messages: { role: string; content: string }[]): string {
 }
 
 /**
- * Notes redesign phase 1: the opening of `scribe.v1` (`SCRIBE_SENTINEL`). Since phase 1 a v1
- * chat message the router sends to chat (or a question) is Ms Scribe's, with the notes and the
- * whole book in view; the fake answers her protocol through `scribeV1Reply`.
+ * Notes redesign phase 1: the opening of `scribe.v1` and `scribe.v2` (`SCRIBE_SENTINEL`). Since
+ * phase 1 a v1 chat message the router sends to chat (or a question) is Ms Scribe's, with the
+ * notes and the whole book in view; the fake answers her protocol through `scribeV1Reply`.
  */
 const SCRIBE_V1_SENTINEL = 'You are Ms Scribe, the writing partner inside the author’s novel app.'
 /** What the fake Ms Scribe answers a question with, Scene 1 named by its ref. */
 const scribeAnswer = (ref: string): string =>
   `She waits out the storm on the ridge (${ref}), then crosses at dawn.`
-/** The same answer as the chat shows it: the ref reads as the scene's title. */
+/**
+ * The same answer as the chat shows it: the ref reads as the scene's chapter (`scribe.v2`,
+ * 2026-10-15), a folder called "Chapter 1" as itself.
+ */
 const SCRIBE_ANSWER_SHOWN =
-  'She waits out the storm on the ridge (Chapter 1 › Scene 1), then crosses at dawn.'
+  'She waits out the storm on the ridge (Chapter 1), then crosses at dawn.'
 /**
  * One step of the fake Ms Scribe: the sheet question answered from Wren's sheet (a page of her
  * notes), the edit message by opening Scene 1 and then suggesting one replacement of the first
