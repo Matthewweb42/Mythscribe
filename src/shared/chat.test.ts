@@ -51,7 +51,8 @@ describe('chat model (F-5.4)', () => {
               card: null,
               scribe: null,
               costParts: null,
-              contradictions: null
+              contradictions: null,
+              sources: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',
@@ -112,7 +113,8 @@ describe('chat model (F-5.4)', () => {
       card: null,
       scribe: null,
       costParts: null,
-      contradictions: null
+      contradictions: null,
+      sources: null
     })
     const conversation = (id: string, messages: Record<string, unknown>[]): unknown => ({
       id,
@@ -339,7 +341,8 @@ describe('chat model (F-5.4)', () => {
               card: null,
               scribe: null,
               costParts: null,
-              contradictions: null
+              contradictions: null,
+              sources: null
               // no `usage` field at all, as a turn written before F-5.9 has.
             }
           ],
@@ -380,7 +383,8 @@ describe('chat model (F-5.4)', () => {
               card: null,
               scribe: null,
               costParts: null,
-              contradictions: null
+              contradictions: null,
+              sources: null
             }
           ],
           created: '2026-09-15T10:00:00.000Z',
@@ -413,25 +417,25 @@ describe('chat model (F-5.4)', () => {
   })
 })
 
-describe('chat modes (decided by the author 2026-10-07)', () => {
-  it('gives Plan the read-only tools and Ask and Auto the edit tools', () => {
-    expect(agentAccessFor('plan')).toBe('read')
-    expect(agentAccessFor('ask')).toBe('write')
-    expect(agentAccessFor('auto')).toBe('write')
+describe('chat modes (the author, 2026-10-07; Brainstorm, Write, Vibe since 2026-10-15)', () => {
+  it('gives Brainstorm the read-only tools and Write and Vibe the edit tools', () => {
+    expect(agentAccessFor('brainstorm')).toBe('read')
+    expect(agentAccessFor('write')).toBe('write')
+    expect(agentAccessFor('vibe')).toBe('write')
   })
 
-  it('applies edits itself only in Auto', () => {
-    expect(appliesEditsItself('auto')).toBe(true)
-    expect(appliesEditsItself('ask')).toBe(false)
-    expect(appliesEditsItself('plan')).toBe(false)
+  it('applies edits itself only in Vibe (in Auto’s place)', () => {
+    expect(appliesEditsItself('vibe')).toBe(true)
+    expect(appliesEditsItself('write')).toBe(false)
+    expect(appliesEditsItself('brainstorm')).toBe(false)
   })
 
-  it('never routes a Plan turn to a feature that edits, and keeps every pick in Ask and Auto', () => {
+  it('never routes a Brainstorm turn to a feature that edits, and keeps every pick in Write and Vibe', () => {
     expect(PLAN_ROUTE_ACTIONS).toEqual(['chat', 'query', 'whatNext', 'betaReader'])
     for (const action of ROUTE_ACTIONS) {
-      expect(routeActionFor('ask', action)).toBe(action)
-      expect(routeActionFor('auto', action)).toBe(action)
-      expect(routeActionFor('plan', action)).toBe(
+      expect(routeActionFor('write', action)).toBe(action)
+      expect(routeActionFor('vibe', action)).toBe(action)
+      expect(routeActionFor('brainstorm', action)).toBe(
         PLAN_ROUTE_ACTIONS.includes(action) ? action : 'chat'
       )
     }
@@ -443,8 +447,10 @@ describe('chat modes (decided by the author 2026-10-07)', () => {
       'synopsis',
       'notes'
     ] as const) {
-      expect(routeActionFor('plan', action)).toBe('chat')
-      expect(routeActionFor('plan', action, 'v2')).toBe(action === 'continuity' ? action : 'chat')
+      expect(routeActionFor('brainstorm', action)).toBe('chat')
+      expect(routeActionFor('brainstorm', action, 'v2')).toBe(
+        action === 'continuity' ? action : 'chat'
+      )
     }
   })
 

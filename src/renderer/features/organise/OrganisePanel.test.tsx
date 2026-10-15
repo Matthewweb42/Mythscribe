@@ -86,7 +86,7 @@ async function open(mode: AssistantMode): Promise<void> {
 
 describe('OrganisePanel (F-9.10, one decision at a time)', () => {
   it('shows one change at a time in its group, with the reason, the cost, and what could not be used', async () => {
-    await open('ask')
+    await open('write')
     const dialog = await screen.findByTestId('organise-panel')
     expect(within(dialog).getByText('You asked: Tidy up.')).toBeTruthy()
     expect(within(dialog).getByText('Tidied the binder.')).toBeTruthy()
@@ -118,7 +118,7 @@ describe('OrganisePanel (F-9.10, one decision at a time)', () => {
   })
 
   it('edits a merge before accepting it: another keeper', async () => {
-    await open('ask')
+    await open('write')
     const dialog = await screen.findByTestId('organise-panel')
     await userEvent.keyboard('e')
     const form = within(dialog).getByTestId('organise-edit')
@@ -129,7 +129,7 @@ describe('OrganisePanel (F-9.10, one decision at a time)', () => {
   })
 
   it('describes only in Plan mode', async () => {
-    await open('plan')
+    await open('brainstorm')
     const dialog = await screen.findByTestId('organise-panel')
     expect(within(dialog).getByText(/Plan mode: this only describes/)).toBeTruthy()
     expect(within(dialog).queryByTestId('review-accept')).toBeNull()
@@ -140,7 +140,7 @@ describe('OrganisePanel (F-9.10, one decision at a time)', () => {
   })
 
   it('hides without ending the run, and Escape closes it', async () => {
-    await open('ask')
+    await open('write')
     const panel = await screen.findByTestId('organise-panel')
     await userEvent.click(within(panel).getByTestId('side-work-hide'))
     expect(screen.queryByTestId('organise-panel')).toBeNull()
@@ -178,12 +178,14 @@ describe('OrganisePanel (F-9.10, one decision at a time)', () => {
           return { duplicates: [], unusedTags: [], emptySheets: [], notNames: [] } as Output<C>
         }
         if (channel === 'proposal:settle') return null as Output<C>
-      if (channel === 'tree:rename') return null as Output<C>
+        if (channel === 'tree:rename') return null as Output<C>
         throw new Error(`unexpected ${channel}`)
       },
       on: () => () => {}
     })
-    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1, chatMode: 'ask' } })
+    useAiSettingsStore.setState({
+      settings: { ...defaultAiSettings(), dial: 1, chatMode: 'write' }
+    })
     render(
       <>
         <textarea aria-label="Manuscript" />

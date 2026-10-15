@@ -132,8 +132,8 @@ describe('runPlanLinks (F-11.1d)', () => {
     expect(metaOf(scenes[2]).fulfilledBy).toBeUndefined()
   })
 
-  it('applies the links at once at Auto and remembers them as AI-made', async () => {
-    setAiSettings(db, { ...defaultAiSettings(), dial: 1, chatMode: 'auto' })
+  it('applies the links at once in Vibe (Auto before 2026-10-15) and remembers them as AI-made', async () => {
+    setAiSettings(db, { ...defaultAiSettings(), dial: 1, chatMode: 'vibe' })
     setProjectStructure(db, { template: 'saveTheCat' })
     // The seeded book's other empty scenes get text, so the first beat is P2.
     for (const id of scenes.slice(3)) saveDocument(db, id, doc('Written.'))

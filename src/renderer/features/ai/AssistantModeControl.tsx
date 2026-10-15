@@ -14,8 +14,8 @@ const MODE_RADIO =
   'rounded px-2 py-px text-[11px] leading-4 text-fg-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 disabled:hover:text-fg-muted aria-checked:bg-bg aria-checked:text-fg aria-checked:shadow-sm'
 
 /**
- * The chat mode switch under the assistant's message box (decided by the author 2026-10-07):
- * Auto · Ask · Plan as an ARIA radiogroup named "Mode" (roving tabindex; arrow keys, Home, and
+ * The chat mode switch under the assistant's message box (the author, 2026-10-07; Brainstorm ·
+ * Write · Vibe since 2026-10-15) as an ARIA radiogroup named "Mode" (roving tabindex; arrow keys, Home, and
  * End move and select), each option's meaning in its tooltip. One setting per project, written
  * through the AI settings store (`chatMode`), so every conversation tab shares it. Disabled
  * while Use AI is off (the note above the box says where to turn it on); nothing renders until
@@ -31,7 +31,14 @@ export function AssistantModeControl(): React.JSX.Element | null {
   const off = settings.dial === 0
 
   const select = (mode: AssistantMode): void => {
-    if (mode !== current) update({ chatMode: mode })
+    if (mode !== current) {
+      // Notes redesign phase 1: Vibe turns ghost text on as it is picked (leaving Vibe keeps it).
+      update(
+        mode === 'vibe'
+          ? { chatMode: mode, ghostText: { ...settings.ghostText, enabled: true } }
+          : { chatMode: mode }
+      )
+    }
     radios.current.get(mode)?.focus()
   }
 

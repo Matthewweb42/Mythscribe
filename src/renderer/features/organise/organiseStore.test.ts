@@ -163,14 +163,14 @@ beforeEach(() => {
     loaded: true
   })
   useEntityStore.setState({ byId: { weave }, ids: ['weave'], loaded: true })
-  setMode('ask')
+  setMode('write')
 })
 
 describe('useOrganiseStore (F-9.10)', () => {
   it('asks for a plan and, in Ask, waits for the author with every change undecided', async () => {
     await useOrganiseStore.getState().start({ instruction: 'Tidy the tags.', scope: ['tags'] })
     const state = useOrganiseStore.getState()
-    expect(state).toMatchObject({ open: true, phase: 'ready', mode: 'ask', costUsd: 0.004 })
+    expect(state).toMatchObject({ open: true, phase: 'ready', mode: 'write', costUsd: 0.004 })
     expect(calls[0]?.[0]).toBe('organise:plan')
     expect(calls[0]?.[1]).toMatchObject({ instruction: 'Tidy the tags.', scope: ['tags'] })
     expect(statuses()).toEqual({ c1: 'pending', c2: 'pending', c3: 'pending' })
@@ -236,7 +236,7 @@ describe('useOrganiseStore (F-9.10)', () => {
   })
 
   it('in Auto applies what can be undone at once; a merge still asks; Undo the whole reorganisation', async () => {
-    setMode('auto')
+    setMode('vibe')
     await useOrganiseStore.getState().start({ instruction: '', scope: [] })
     expect(statuses()).toEqual({ c1: 'applied', c2: 'pending', c3: 'applied' })
     await useOrganiseStore.getState().undoAll()
@@ -253,7 +253,7 @@ describe('useOrganiseStore (F-9.10)', () => {
   })
 
   it('in Auto logs the run in Changes, whose Undo is the plan screen’s (F-9.15)', async () => {
-    setMode('auto')
+    setMode('vibe')
     const logged: ChangeEntry[] = []
     install({
       'changes:record': (input) => {
@@ -320,7 +320,7 @@ describe('useOrganiseStore (F-9.10)', () => {
   })
 
   it('in Plan only describes', async () => {
-    setMode('plan')
+    setMode('brainstorm')
     await useOrganiseStore.getState().start({ instruction: '', scope: [] })
     useOrganiseStore.getState().decide(['c1', 'c2', 'c3'], 'accepted')
     await useOrganiseStore.getState().applyAccepted()

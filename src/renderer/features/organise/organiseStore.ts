@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { DEFAULT_ASSISTANT_MODE, type AssistantMode } from '@shared/aiSettings'
+import { appliesEditsItself } from '@shared/chat'
 import type { AiUsage } from '@shared/ai'
 import {
   candidatesKey,
@@ -286,7 +287,7 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
         model: result.model,
         cached: result.cached
       })
-      if (mode === 'auto') {
+      if (appliesEditsItself(mode)) {
         // Auto: what can be undone lands now; merges, deletions, and new categories still ask.
         await applyIds(
           result.plan.changes
@@ -321,7 +322,7 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
     },
 
     decide(ids, decision) {
-      if (get().mode === 'plan') return
+      if (get().mode === 'brainstorm') return
       set((s) => ({
         views: Object.fromEntries(
           Object.entries(s.views).map(([id, view]) => [
@@ -345,7 +346,7 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
 
     async applyAccepted() {
       const { phase, mode, busy, order, views } = get()
-      if (phase !== 'ready' || mode === 'plan' || busy) return
+      if (phase !== 'ready' || mode === 'brainstorm' || busy) return
       await applyIds(
         order.filter((id) => views[id]?.status === 'pending' && views[id].decision === 'accepted')
       )
@@ -369,7 +370,7 @@ export const useOrganiseStore = create<OrganiseState>((set, get) => {
 
     async finish() {
       const { phase, mode, busy } = get()
-      if (phase !== 'ready' || mode === 'plan' || busy) return
+      if (phase !== 'ready' || mode === 'brainstorm' || busy) return
       await get().applyAccepted()
       const views = Object.values(get().views)
       if (views.some((view) => view.status === 'failed')) return

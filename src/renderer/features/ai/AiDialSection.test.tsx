@@ -116,16 +116,16 @@ describe('AiDialSection (F-14.4, F-5.21)', () => {
   })
 
   it('turns AI on and off and writes it once after the debounce, leaving the chat mode alone', async () => {
-    await open({ ...defaultAiSettings(), chatMode: 'plan' })
+    await open({ ...defaultAiSettings(), chatMode: 'brainstorm' })
     await userEvent.click(useAi())
     expect(useAi()).toBeChecked()
     expect(useAi()).toHaveAccessibleDescription(/mode picked under the chat box/)
     await waitFor(() => expect(sets()).toHaveLength(1))
-    expect(sets()[0]).toEqual({ ...defaultAiSettings(), dial: 1, chatMode: 'plan' })
+    expect(sets()[0]).toEqual({ ...defaultAiSettings(), dial: 1, chatMode: 'brainstorm' })
     await userEvent.click(useAi())
     expect(useAi()).not.toBeChecked()
     await waitFor(() => expect(sets()).toHaveLength(2))
-    expect(sets()[1]).toMatchObject({ dial: 0, chatMode: 'plan' })
+    expect(sets()[1]).toMatchObject({ dial: 0, chatMode: 'brainstorm' })
   })
 
   it('disables every toggle while AI is off and enables them all once it is on', async () => {

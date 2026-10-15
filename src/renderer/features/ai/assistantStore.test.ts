@@ -12,6 +12,7 @@ import { defaultAiSettings } from '@shared/aiSettings'
 import type { RouteAction } from '@shared/assistantRoute'
 import type {
   AiAgentResult,
+  AiScribeResult,
   AiWhatNextResult,
   Channel,
   EventName,
@@ -19,7 +20,6 @@ import type {
   Input,
   Output
 } from '@shared/ipc/contract'
-import { QUERY_NOT_FOUND } from '@shared/query'
 import { RECAP_SCENE_QUESTION, WHAT_NEXT_QUESTION } from '@shared/quickActions'
 import { WHAT_NEXT_CHAR_BUDGET } from '@shared/whatNext'
 import {
@@ -66,6 +66,12 @@ interface PendingQuery {
   resolve: (result: AiAgentResult) => void
   reject: (err: Error) => void
 }
+/** Notes redesign phase 1: a v1 chat turn's request to Ms Scribe, answered when the test says so. */
+interface PendingScribe {
+  input: Input<'ai:scribe'>
+  resolve: (result: AiScribeResult) => void
+  reject: (err: Error) => void
+}
 interface PendingWhatNext {
   input: Input<'ai:whatNext'>
   resolve: (result: AiWhatNextResult) => void
@@ -78,6 +84,10 @@ const DRAFTED = 'Rain followed her up the ridge.'
 let sets: PendingSet[]
 let whatNexts: PendingWhatNext[]
 let queries: PendingQuery[]
+let scribes: PendingScribe[]
+/** The note versions and pages Undo asked main to restore and delete (notes redesign phase 1). */
+let restoredVersions: string[]
+let deletedPages: string[]
 let settles: Input<'proposal:settle'>[]
 /** The request ids `ai:cancel` was asked to stop. */
 let cancels: string[]
@@ -118,6 +128,23 @@ function deferredClient(stored: Conversations): IpcClient {
             reject
           })
         })
+      }
+      if (channel === 'ai:scribe') {
+        return new Promise<Output<C>>((resolve, reject) => {
+          scribes.push({
+            input: input as Input<'ai:scribe'>,
+            resolve: (result) => resolve(result as Output<C>),
+            reject
+          })
+        })
+      }
+      if (channel === 'notebook:restoreVersion') {
+        restoredVersions.push((input as Input<'notebook:restoreVersion'>).versionId)
+        return null as Output<C>
+      }
+      if (channel === 'notebook:delete') {
+        deletedPages.push((input as Input<'notebook:delete'>).id)
+        return null as Output<C>
       }
       if (channel === 'ai:whatNext') {
         return new Promise<Output<C>>((resolve, reject) => {
@@ -274,7 +301,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       card: null,
       scribe: null,
       costParts: null,
-      contradictions: null
+      contradictions: null,
+      sources: null
     },
     {
       id: 'm-2',
@@ -294,7 +322,8 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
       card: null,
       scribe: null,
       costParts: null,
-      contradictions: null
+      contradictions: null,
+      sources: null
     }
   ],
   created: '2026-09-15T10:00:00.000Z',
@@ -325,8 +354,30 @@ const ok = (requestId: string, answer: string, over: Partial<AgentOk> = {}): AiA
   ...over
 })
 
+type ScribeOk = Extract<AiScribeResult, { ok: true }>
+
+/** Ms Scribe's answer (notes redesign phase 1) with no lookups, changes, or sources. */
+const scribeOk = (
+  requestId: string,
+  answer: string,
+  over: Partial<ScribeOk> = {}
+): AiScribeResult => ({
+  ok: true,
+  answer,
+  steps: [],
+  changes: [],
+  sources: { scenes: [], pages: [] },
+  usage: { inputTokens: 200, outputTokens: 40 },
+  costUsd: 0.0003,
+  cached: false,
+  model: 'gpt-fake',
+  proposalId: `prop-${requestId}`,
+  requestId,
+  ...over
+})
+
 /** Puts the project's AI on, in chat mode `chatMode` (2026-10-07). */
-const inMode = (chatMode: 'auto' | 'ask' | 'plan'): void => {
+const inMode = (chatMode: 'vibe' | 'write' | 'brainstorm'): void => {
   useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1, chatMode } })
 }
 
@@ -343,11 +394,11 @@ async function settle(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0)
 }
 
-/** Sends `text` in the loaded state and hands back the agent request main received. */
-async function sendAndCapture(text: string): Promise<PendingQuery> {
+/** Sends `text` in the loaded state and hands back the request Ms Scribe received (a v1 project). */
+async function sendAndCapture(text: string): Promise<PendingScribe> {
   const sending = store().send(text)
   await settle()
-  const request = queries[queries.length - 1]
+  const request = scribes[scribes.length - 1]
   if (!request) throw new Error('nothing was sent')
   return Object.assign(request, { done: sending })
 }
@@ -356,6 +407,9 @@ beforeEach(() => {
   vi.useFakeTimers()
   sets = []
   queries = []
+  scribes = []
+  restoredVersions = []
+  deletedPages = []
   whatNexts = []
   settles = []
   cancels = []
@@ -541,8 +595,8 @@ describe('useAssistantStore tabs (F-5.4)', () => {
   })
 })
 
-describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 2026-10-07)', () => {
-  it('appends the turn and an empty answer, asks the agent in Ask with its edit tools and the recent history, then fills the answer with its cost', async () => {
+describe('useAssistantStore send (F-5.4; the router, then Ms Scribe in v1 since the notes redesign)', () => {
+  it('appends the turn and an empty answer, asks Ms Scribe in Write with the recent history, then fills the answer with its cost', async () => {
     await store().load()
     const request = await sendAndCapture('  What does Mara want?  ')
     expect(request.input).toEqual({
@@ -552,8 +606,9 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
         { role: 'user', content: 'Why the ridge?' },
         { role: 'assistant', content: 'Because Mara wants the view.' }
       ],
-      access: 'write',
+      mode: 'write',
       focus: { beforeCaret: '', selection: '' },
+      wholeBook: false,
       requestId: expect.any(String) as string
     })
     expect(active().messages).toHaveLength(4)
@@ -566,7 +621,7 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
     })
     expect(store().pending['c-1']).toBe(request.input.requestId)
 
-    request.resolve(ok(request.input.requestId, 'The view.', { cached: true }))
+    request.resolve(scribeOk(request.input.requestId, 'The view.', { cached: true }))
     await settle()
     expect(store().pending).toEqual({})
     const answer = active().messages[3]
@@ -606,7 +661,8 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
       card: null,
       scribe: null,
       costParts: null,
-      contradictions: null
+      contradictions: null,
+      sources: null
     }))
     setIpcClient(
       deferredClient({
@@ -627,7 +683,7 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
       })
     )
     resetAssistantStore()
-    queries = []
+    scribes = []
     await store().load()
     const long = 'A question that runs well past the forty-character title cap'
     const first = await sendAndCapture(long)
@@ -652,13 +708,13 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
   it('ignores a blank message and a second send while one is in flight', async () => {
     await store().load()
     await store().send('   ')
-    expect(queries).toHaveLength(0)
+    expect(scribes).toHaveLength(0)
     const sending = store().send('one')
     await settle()
     await store().send('two')
-    expect(queries).toHaveLength(1)
+    expect(scribes).toHaveLength(1)
     expect(active().messages).toHaveLength(4)
-    queries[0]?.resolve(ok(queries[0].input.requestId, 'answer'))
+    scribes[0]?.resolve(scribeOk(scribes[0].input.requestId, 'answer'))
     await sending
   })
 
@@ -696,8 +752,8 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
     const sending = store().send('hello')
     await settle()
     store().closeConversation(second)
-    const request = queries[0]
-    request?.resolve(ok(request.input.requestId, 'late'))
+    const request = scribes[0]
+    request?.resolve(scribeOk(request.input.requestId, 'late'))
     await sending
     expect(store().conversations?.items.map((c) => c.id)).toEqual(['c-1'])
     expect(settles).toEqual([
@@ -708,7 +764,7 @@ describe('useAssistantStore send (F-5.4; the router, then the chat agent, since 
 })
 
 describe('useAssistantStore stop (F-5.10)', () => {
-  const cancelled = (requestId: string): AiAgentResult => ({
+  const cancelled = (requestId: string): AiScribeResult => ({
     ok: false,
     code: 'CANCELLED',
     message: 'The request was stopped.',
@@ -720,9 +776,9 @@ describe('useAssistantStore stop (F-5.10)', () => {
     await store().load()
     const request = await sendAndCapture('hello')
     expect(useAiActivityStore.getState().inflight).toEqual({
-      [request.input.requestId]: { feature: 'agent', startedAt: expect.any(Number) as number }
+      [request.input.requestId]: { feature: 'scribe', startedAt: expect.any(Number) as number }
     })
-    request.resolve(ok(request.input.requestId, 'answer'))
+    request.resolve(scribeOk(request.input.requestId, 'answer'))
     await settle()
     expect(useAiActivityStore.getState().inflight).toEqual({})
   })
@@ -746,7 +802,7 @@ describe('useAssistantStore stop (F-5.10)', () => {
     const again = await sendAndCapture('What next?')
     expect(again.input.requestId).not.toBe(request.input.requestId)
     expect(active().messages).toHaveLength(5)
-    again.resolve(ok(again.input.requestId, 'She climbs.'))
+    again.resolve(scribeOk(again.input.requestId, 'She climbs.'))
     await settle()
     expect(active().messages[4]?.content).toBe('She climbs.')
   })
@@ -757,7 +813,7 @@ describe('useAssistantStore stop (F-5.10)', () => {
     expect(cancels).toEqual([])
     const request = await sendAndCapture('hello')
     store().stop()
-    request.resolve(ok(request.input.requestId, 'late'))
+    request.resolve(scribeOk(request.input.requestId, 'late'))
     await settle()
     expect(active().messages).toHaveLength(3)
     expect(settles).toEqual([
@@ -783,103 +839,167 @@ describe('useAssistantStore stop (F-5.10)', () => {
     const sending = store().send('hello')
     await settle()
     store().closeConversation(second)
-    expect(cancels).toEqual([queries[0]?.input.requestId])
-    queries[0]?.resolve(cancelled(queries[0].input.requestId))
+    expect(cancels).toEqual([scribes[0]?.input.requestId])
+    scribes[0]?.resolve(cancelled(scribes[0].input.requestId))
     await sending
     expect(toasts()).toEqual([])
   })
 })
 
-describe('useAssistantStore chat modes (decided by the author 2026-10-07)', () => {
-  it('Ask and Auto give the agent its edit tools; Plan gives it the read-only tools', async () => {
+describe('useAssistantStore chat modes (Brainstorm, Write, Vibe since 2026-10-15)', () => {
+  it('sends Ms Scribe the mode, and the turn records read access in Brainstorm only', async () => {
     await store().load()
     for (const [mode, access] of [
-      ['ask', 'write'],
-      ['auto', 'write'],
-      ['plan', 'read']
+      ['write', 'write'],
+      ['vibe', 'write'],
+      ['brainstorm', 'read']
     ] as const) {
       inMode(mode)
       const request = await sendAndCapture(`In ${mode}?`)
-      expect(request.input.access).toBe(access)
+      expect(request.input.mode).toBe(mode)
       expect(active().messages.at(-1)).toMatchObject({ mode: 'plan', action: 'chat' })
-      request.resolve(ok(request.input.requestId, 'Yes.'))
+      request.resolve(scribeOk(request.input.requestId, 'Yes.'))
       await settle()
+      expect(active().messages.at(-1)?.agent?.access).toBe(access)
     }
   })
 
-  it('in Plan a router pick that would edit runs as the read-only chat instead', async () => {
-    inMode('plan')
+  it('in Brainstorm a router pick that would edit runs as the chat instead', async () => {
+    inMode('brainstorm')
     await store().load()
     for (const pick of ['rewrite', 'proofread', 'critique', 'continuity', 'synopsis'] as const) {
       routeAction = pick
       const request = await sendAndCapture(`Do ${pick}`)
-      expect(request.input.access).toBe('read')
+      expect(request.input.mode).toBe('brainstorm')
       expect(active().messages.at(-1)).toMatchObject({ action: 'chat', mode: 'plan' })
-      request.resolve(ok(request.input.requestId, 'Here is what I think.'))
+      request.resolve(scribeOk(request.input.requestId, 'Here is what I think.'))
       await settle()
     }
-    expect(queries).toHaveLength(5)
+    expect(scribes).toHaveLength(5)
     expect(toasts()).toEqual([])
   })
 
   it('reads the mode when a message is sent, for every conversation tab alike', async () => {
-    inMode('plan')
+    inMode('brainstorm')
     await store().load()
     store().newConversation()
     const first = await sendAndCapture('One')
-    expect(first.input.access).toBe('read')
-    first.resolve(ok(first.input.requestId, 'A.'))
+    expect(first.input.mode).toBe('brainstorm')
+    first.resolve(scribeOk(first.input.requestId, 'A.'))
     await settle()
     store().select('c-1')
-    inMode('ask')
+    inMode('write')
     const second = await sendAndCapture('Two')
-    expect(second.input.access).toBe('write')
+    expect(second.input.mode).toBe('write')
+  })
+
+  it('sends Whole book while it is on', async () => {
+    inMode('write')
+    await store().load()
+    store().setWholeBook(true)
+    const request = await sendAndCapture('Is the book consistent?')
+    expect(request.input.wholeBook).toBe(true)
   })
 })
 
-describe("useAssistantStore send, a cited lookup (F-5.7; the router's query pick, on the read-only agent)", () => {
+describe('useAssistantStore Ms Scribe changes (notes redesign phase 1)', () => {
+  const NOTE_EDIT = {
+    kind: 'notebook',
+    pageId: 'pg-mara',
+    title: 'Mara',
+    created: false,
+    versionId: 'v-1',
+    section: null,
+    before: 'Eyes: grey',
+    after: 'Eyes: grey\nFears the sea'
+  } as const
+  const NOTE_CREATED = {
+    ...NOTE_EDIT,
+    pageId: 'pg-new',
+    title: 'Powers',
+    created: true,
+    versionId: null
+  }
+  const PROSE = {
+    kind: 'text',
+    nodeId: 'sc-1',
+    title: 'Scene 1',
+    find: 'Mara climbed the ridge alone.',
+    replace: 'Mara climbed the ridge with her fear.',
+    brief: ''
+  } as const
+
+  it('lands note edits applied with sources, keeps prose waiting even in Vibe, and Undo restores the note', async () => {
+    inMode('vibe')
+    await store().load()
+    const request = await sendAndCapture('Put that she fears the sea in Mara’s page.')
+    request.resolve(
+      scribeOk(request.input.requestId, 'Added it to Mara.', {
+        changes: [
+          { edit: NOTE_EDIT, violation: null, applied: true },
+          { edit: NOTE_CREATED, violation: null, applied: true },
+          { edit: PROSE, violation: null, applied: false }
+        ],
+        sources: {
+          scenes: [{ nodeId: 'sc-1', title: 'Scene 1' }],
+          pages: [{ id: 'pg-mara', title: 'Mara', kind: 'note' }]
+        }
+      })
+    )
+    await settle()
+    const turn = active().messages.at(-1)
+    expect(turn?.sources?.pages).toEqual([{ id: 'pg-mara', title: 'Mara', kind: 'note' }])
+    expect(turn?.agent?.changes.map((c) => c.status)).toEqual(['applied', 'applied', 'pending'])
+    expect(settles).toEqual([])
+    const [edited, created] = turn?.agent?.changes ?? []
+    await store().undoChange(turn?.id ?? '', edited?.id ?? '')
+    await store().undoChange(turn?.id ?? '', created?.id ?? '')
+    expect(restoredVersions).toEqual(['v-1'])
+    expect(deletedPages).toEqual(['pg-new'])
+    expect(
+      active()
+        .messages.at(-1)
+        ?.agent?.changes.map((c) => c.status)
+    ).toEqual(['undone', 'undone', 'pending'])
+  })
+
+  it('settles the proposal at once when every change is a note edit', async () => {
+    inMode('write')
+    await store().load()
+    const request = await sendAndCapture('Save that.')
+    request.resolve(
+      scribeOk(request.input.requestId, 'Saved.', {
+        changes: [{ edit: NOTE_EDIT, violation: null, applied: true }]
+      })
+    )
+    await settle()
+    expect(settles).toEqual([
+      { id: `prop-${request.input.requestId}`, status: 'accepted', note: null }
+    ])
+  })
+})
+
+describe("useAssistantStore send, a question about the book (the router's query pick, Ms Scribe in v1)", () => {
   beforeEach(() => {
     routeAction = 'query'
   })
 
-  const CITATION = {
-    nodeId: 'sc-1',
-    title: 'Chapter 1 › Scene 1',
-    scene: 1,
-    quote: 'Rain followed.'
+  const SOURCES = {
+    scenes: [{ nodeId: 'sc-1', title: 'Chapter 1 › Scene 1' }],
+    pages: [{ id: 'pg-storm', title: 'Storms', kind: 'note' as const }]
   }
+  const lookupOk = (requestId: string, over: Partial<ScribeOk> = {}): AiScribeResult =>
+    scribeOk(requestId, 'She waits for the storm in Chapter 1 › Scene 1.', {
+      steps: [{ tool: 'search_book', label: 'Searching “storm”…' }],
+      sources: SOURCES,
+      usage: { inputTokens: 900, outputTokens: 60 },
+      costUsd: 0.0009,
+      ...over
+    })
 
-  const QUERY = { found: true, uncited: false, citations: [CITATION], sheets: [], also: [] }
-  const queryOk = (requestId: string, over: Partial<AgentOk> = {}): AiAgentResult => ({
-    ok: true,
-    answer: 'She waits for the storm [1].',
-    query: QUERY,
-    steps: [{ tool: 'search', label: 'Searching “storm”…' }],
-    changes: [],
-    organise: null,
-    scribe: null,
-    dropped: 1,
-    usage: { inputTokens: 900, outputTokens: 60 },
-    costUsd: 0.0009,
-    cached: false,
-    model: 'gpt-fake',
-    proposalId: `prop-${requestId}`,
-    requestId,
-    ...over
-  })
-
-  /** Sends `text`, which the router answers with a lookup, and hands back the agent request. */
-  async function askAndCapture(text: string): Promise<PendingQuery> {
-    const asking = store().send(text)
-    await settle()
-    const request = queries[queries.length - 1]
-    if (!request) throw new Error('nothing was asked')
-    return Object.assign(request, { done: asking })
-  }
-
-  it('asks ai:agent read-only with the open scene and the recent history, shows its lookups live, and fills the turn with the answer, its cost, and its citations', async () => {
+  it('asks Ms Scribe with the open scene and the recent history, shows her lookups live, and fills the turn with the answer, its cost, and its sources', async () => {
     await store().load()
-    const request = await askAndCapture('  Where does the storm break?  ')
+    const request = await sendAndCapture('  Where does the storm break?  ')
     expect(request.input).toEqual({
       nodeId: null,
       message: 'Where does the storm break?',
@@ -887,20 +1007,21 @@ describe("useAssistantStore send, a cited lookup (F-5.7; the router's query pick
         { role: 'user', content: 'Why the ridge?' },
         { role: 'assistant', content: 'Because Mara wants the view.' }
       ],
-      access: 'read',
+      mode: 'write',
       focus: { beforeCaret: '', selection: '' },
+      wholeBook: false,
       requestId: expect.any(String) as string
     })
     expect(useAiActivityStore.getState().inflight).toEqual({
-      [request.input.requestId]: { feature: 'agent', startedAt: expect.any(Number) as number }
+      [request.input.requestId]: { feature: 'scribe', startedAt: expect.any(Number) as number }
     })
     expect(active().messages[3]).toMatchObject({ role: 'assistant', content: '', mode: 'query' })
-    const step = { tool: 'search', label: 'Searching “storm”…' } as const
+    const step = { tool: 'search_book', label: 'Searching “storm”…' } as const
     stepListener?.({ requestId: request.input.requestId, step })
     stepListener?.({ requestId: 'someone-else', step })
     expect(store().agentSteps).toEqual({ [request.input.requestId]: [step] })
 
-    request.resolve(queryOk(request.input.requestId, { cached: true }))
+    request.resolve(lookupOk(request.input.requestId, { cached: true }))
     await settle()
     expect(useAiActivityStore.getState().inflight).toEqual({})
     expect(store().pending).toEqual({})
@@ -908,46 +1029,43 @@ describe("useAssistantStore send, a cited lookup (F-5.7; the router's query pick
     expect(answer).toMatchObject({
       role: 'assistant',
       mode: 'query',
-      content: 'She waits for the storm [1].',
+      content: 'She waits for the storm in Chapter 1 › Scene 1.',
       model: 'gpt-fake',
       costUsd: 0.0009,
       usage: { inputTokens: 900, outputTokens: 60 },
       proposalId: `prop-${request.input.requestId}`,
-      query: QUERY,
-      agent: { access: 'read', steps: [step], changes: [] }
+      sources: SOURCES,
+      agent: { access: 'write', steps: [step], changes: [] }
     })
     expect(store().agentSteps).toEqual({})
     expect(store().cached[answer?.id ?? '']).toBe(true)
     expect(settles).toEqual([])
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
-    expect(sets[0]?.value.items[0]?.messages[3]).toMatchObject({ query: { found: true } })
+    expect(sets[0]?.value.items[0]?.messages[3]).toMatchObject({ sources: SOURCES })
   })
 
-  it('sends the active scene and carries a not-found answer with no citations', async () => {
+  it('sends the active scene and its selection', async () => {
     const editor = new Editor({
-      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' })
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' }),
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'The boat rocked.' }] }]
+      }
     })
+    editor.commands.setTextSelection({ from: 5, to: 9 })
     useActiveEditorStore.getState().set('sc-1', editor)
     await store().load()
-    const request = await askAndCapture('Who owns the boat?')
+    const request = await sendAndCapture('Who owns the boat?')
     expect(request.input.nodeId).toBe('sc-1')
-    request.resolve(
-      queryOk(request.input.requestId, {
-        answer: `${QUERY_NOT_FOUND} The scenes never name an owner.`,
-        query: { ...QUERY, found: false, citations: [] }
-      })
-    )
+    expect(request.input.focus).toEqual({ beforeCaret: 'The ', selection: 'boat' })
+    request.resolve(lookupOk(request.input.requestId))
     await settle()
-    expect(active().messages[3]).toMatchObject({
-      content: `${QUERY_NOT_FOUND} The scenes never name an owner.`,
-      query: { found: false, uncited: false, citations: [], also: [] }
-    })
     editor.destroy()
   })
 
   it('an expected failure drops the unanswered turn and toasts, and a stop is silent', async () => {
     await store().load()
-    const request = await askAndCapture('Where is Mara?')
+    const request = await sendAndCapture('Where is Mara?')
     request.resolve({
       ok: false,
       code: 'NO_KEY',
@@ -960,7 +1078,7 @@ describe("useAssistantStore send, a cited lookup (F-5.7; the router's query pick
     expect(store().pending).toEqual({})
     expect(toasts()).toEqual(['No API key is saved. Add one in Settings.'])
 
-    const again = await askAndCapture('Where is Mara?')
+    const again = await sendAndCapture('Where is Mara?')
     store().stop()
     expect(cancels).toEqual([again.input.requestId])
     again.resolve({
@@ -984,8 +1102,8 @@ describe("useAssistantStore send, a cited lookup (F-5.7; the router's query pick
     const asking = store().send('Where is Mara?')
     await settle()
     store().closeConversation(second)
-    const request = queries[0]
-    request?.resolve(queryOk(request.input.requestId))
+    const request = scribes[0]
+    request?.resolve(lookupOk(request.input.requestId))
     await asking
     expect(settles).toEqual([
       { id: `prop-${request?.input.requestId}`, status: 'rejected', note: null }
@@ -1026,9 +1144,9 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
   /** A turn the router sends to chat, so the agent runs with write access and answers with edits. */
   async function answerWithEdits(auto: boolean): Promise<string> {
     useTreeStore.setState(buildIndex(treeFixture))
-    inMode(auto ? 'auto' : 'ask')
+    inMode(auto ? 'vibe' : 'write')
     await store().load()
-    const asking = store().send('Rename the first scene.')
+    const asking = store().send('Rename the first scene.', { agent: 'write' })
     await settle()
     const request = queries[0]
     if (!request) throw new Error('nothing was asked')
@@ -1069,9 +1187,9 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
     if (!mara) throw new Error('fixture lost Mara')
     useEntityStore.getState().merge(mara)
     useTreeStore.setState(buildIndex(treeFixture))
-    inMode('auto')
+    inMode('vibe')
     await store().load()
-    const asking = store().send('Make Mara 28.')
+    const asking = store().send('Make Mara 28.', { agent: 'write' })
     await settle()
     const request = queries[0]
     if (!request) throw new Error('nothing was asked')
@@ -1132,8 +1250,8 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
   it('undoes the last turn when asked (it asks, as a deletion) and opens the Library at once in Ask (F-5.25, agent.v8)', async () => {
     const firstId = await answerWithEdits(true)
     expect(renames).toEqual([{ id: 'sc-1', title: 'The ridge' }])
-    inMode('ask')
-    const asking = store().send('Undo that, and open the Library.')
+    inMode('write')
+    const asking = store().send('Undo that, and open the Library.', { agent: 'write' })
     await settle()
     const request = queries[1]
     if (!request) throw new Error('nothing was asked')
@@ -1199,9 +1317,9 @@ describe('useAssistantStore agent edits (F-5.22)', () => {
 
     async function answerWithInsert(auto: boolean): Promise<string> {
       useTreeStore.setState(buildIndex(treeFixture))
-      inMode(auto ? 'auto' : 'ask')
+      inMode(auto ? 'vibe' : 'write')
       await store().load()
-      const asking = store().send('Add the rain.')
+      const asking = store().send('Add the rain.', { agent: 'write' })
       await settle()
       const request = queries[0]
       if (!request) throw new Error('nothing was asked')
@@ -1461,7 +1579,7 @@ describe('useAssistantStore quick actions (F-5.17)', () => {
 
   it('recap asks a read-only agent turn about the scene, or the selection, whatever the chat mode', async () => {
     useActiveEditorStore.getState().set('sc-1', editor)
-    inMode('auto')
+    inMode('vibe')
     await store().load()
     const asking = store().recap()
     await settle()
@@ -1504,7 +1622,7 @@ describe('useAssistantStore quick actions (F-5.17)', () => {
       content: 'Here is the next beat.'
     })
 
-    inMode('plan')
+    inMode('brainstorm')
     await store().writeDirection(DIRECTIONS[0]!)
     expect(queries).toHaveLength(1)
     expect(toasts()).toEqual([PLAN_NO_EDITS_MESSAGE])
@@ -1524,12 +1642,12 @@ describe('useAssistantStore sheet lines (F-16.26, decision 3 as the author chang
 
   /** A turn whose answer offers `edits`, in chat mode `mode`. */
   async function answerWith(
-    mode: 'auto' | 'ask' | 'plan',
+    mode: 'vibe' | 'write' | 'brainstorm',
     edits: ReturnType<typeof line>[]
   ): Promise<string> {
     inMode(mode)
     await store().load()
-    const asking = store().send('Add to Mara’s sheet that she hates the sea.')
+    const asking = store().send('Add to Mara’s sheet that she hates the sea.', { agent: 'write' })
     await settle()
     const request = queries[0]
     if (!request) throw new Error('nothing was asked')
@@ -1547,7 +1665,7 @@ describe('useAssistantStore sheet lines (F-16.26, decision 3 as the author chang
     (active().messages.at(-1)?.agent?.changes ?? []).map((change) => change.status)
 
   it('in Auto a pinned line lands at once, and its Undo takes it back', async () => {
-    const messageId = await answerWith('auto', [line('pinned')])
+    const messageId = await answerWith('vibe', [line('pinned')])
     expect(statuses()).toEqual(['applied'])
     expect(addedLines).toEqual([
       { id: 'r-mara', page: 'pinned', text: 'Hates the sea', turn: 'r-turn' }
@@ -1561,7 +1679,7 @@ describe('useAssistantStore sheet lines (F-16.26, decision 3 as the author chang
   })
 
   it('in Ask the line waits; Apply is the one click', async () => {
-    const messageId = await answerWith('ask', [line('ideas')])
+    const messageId = await answerWith('write', [line('ideas')])
     expect(statuses()).toEqual(['pending'])
     expect(addedLines).toEqual([])
     const change = active().messages.at(-1)?.agent?.changes[0]
@@ -1571,7 +1689,7 @@ describe('useAssistantStore sheet lines (F-16.26, decision 3 as the author chang
   })
 
   it('a line Ms Scribe could not place waits for Idea or Canon, in Auto too, and never in Apply all', async () => {
-    const messageId = await answerWith('auto', [line(null)])
+    const messageId = await answerWith('vibe', [line(null)])
     expect(statuses()).toEqual(['pending'])
     await store().applyAll(messageId)
     await store().applyChange(messageId, active().messages.at(-1)?.agent?.changes[0]?.id ?? '')
@@ -1584,7 +1702,7 @@ describe('useAssistantStore sheet lines (F-16.26, decision 3 as the author chang
   })
 
   it('Plan never writes a line: the choice says why', async () => {
-    const messageId = await answerWith('plan', [line(null)])
+    const messageId = await answerWith('brainstorm', [line(null)])
     const change = active().messages.at(-1)?.agent?.changes[0]
     await store().pickSheetPlace(messageId, change?.id ?? '', 'pinned')
     expect(addedLines).toEqual([])
@@ -1592,9 +1710,9 @@ describe('useAssistantStore sheet lines (F-16.26, decision 3 as the author chang
   })
 
   it('keeps the Ms Scribe parts of the answer on the turn', async () => {
-    inMode('ask')
+    inMode('write')
     await store().load()
-    const asking = store().send('What did Orrin hear?')
+    const asking = store().send('What did Orrin hear?', { agent: 'write' })
     await settle()
     const request = queries[0]
     if (!request) throw new Error('nothing was asked')

@@ -173,7 +173,7 @@ describe('CreateProjectWizard', () => {
     expect(explainer).not.toHaveTextContent('summarizes the scene')
   })
 
-  it('explains the background work and recommends Use AI on (chat in Ask) on step 4, with off one click away (F-5.18, 2026-10-07)', async () => {
+  it('explains the background work and recommends Use AI on (chat in Write) on step 4, with off one click away (F-5.18, 2026-10-07)', async () => {
     const { onCreate } = setup()
     await goToDialStep('My Book')
     expect(screen.getByRole('dialog')).toHaveTextContent('Step 4 of 5')
@@ -181,7 +181,7 @@ describe('CreateProjectWizard', () => {
     expect(screen.getAllByRole('radio')).toHaveLength(2)
     expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('summarizes the scene')
     expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('flags contradictions')
-    expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('It starts in Ask')
+    expect(screen.getByTestId('wizard-dial-explainer')).toHaveTextContent('It starts in Write')
     const on = screen.getByRole('radio', { name: /^on/i })
     expect(on).toBeChecked()
     expect(on.closest('label')).toHaveTextContent('Recommended')

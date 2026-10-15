@@ -62,7 +62,8 @@ const turn = (
   card: null,
   scribe: null,
   costParts: null,
-  contradictions: null
+  contradictions: null,
+  sources: null
 })
 
 const STORED: Conversation = {
@@ -88,7 +89,7 @@ function Turn(): React.JSX.Element {
   return <AgentChanges messageId="m-2" changes={changes} />
 }
 
-async function show(chatMode: 'auto' | 'ask' | 'plan'): Promise<void> {
+async function show(chatMode: 'vibe' | 'write' | 'brainstorm'): Promise<void> {
   useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1, chatMode } })
   await act(() => useAssistantStore.getState().load())
   render(<Turn />)
@@ -151,7 +152,7 @@ afterEach(() => {
 
 describe('SheetLineCard (F-16.26)', () => {
   it('asks the question; Idea lands the line in Ideas with its confirmation and Undo', async () => {
-    await show('ask')
+    await show('write')
     expect(screen.getByText(SHEET_LINE_QUESTION)).toBeTruthy()
     expect(screen.getByTestId('sheet-line-text').textContent).toBe(
       'For Mara’s sheet: “Hates the sea”'
@@ -163,21 +164,21 @@ describe('SheetLineCard (F-16.26)', () => {
   })
 
   it('Canon pins it, in Auto too', async () => {
-    await show('auto')
+    await show('vibe')
     await userEvent.click(screen.getByRole('button', { name: 'Canon' }))
     expect(added.map((line) => line.page)).toEqual(['pinned'])
     expect(await screen.findByText('Pinned on Mara’s sheet: “Hates the sea”')).toBeTruthy()
   })
 
   it('Skip leaves the sheet alone', async () => {
-    await show('ask')
+    await show('write')
     await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
     expect(added).toEqual([])
     expect(await screen.findByText('Skipped: Mara’s sheet: an idea or canon?')).toBeTruthy()
   })
 
   it('in Plan the choices are off and say why', async () => {
-    await show('plan')
+    await show('brainstorm')
     expect(screen.getByRole('button', { name: 'Idea' })).toHaveProperty('disabled', true)
     expect(screen.getByRole('button', { name: 'Canon' })).toHaveProperty('disabled', true)
     expect(screen.getByTestId('sheet-line-plan').textContent).toBe(PLAN_NO_EDITS_MESSAGE)

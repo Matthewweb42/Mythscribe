@@ -8,6 +8,7 @@ import { EDIT_ASK_QUESTION } from '@shared/editRequest'
 import type {
   AiChatResult,
   AiAgentResult,
+  AiScribeResult,
   AiNavigateResult,
   AiRouteResult,
   Channel,
@@ -174,6 +175,23 @@ function client(): IpcClient {
           }
           return result as Output<C>
         }
+        case 'ai:scribe': {
+          const { requestId } = input as Input<'ai:scribe'>
+          const result: AiScribeResult = {
+            ok: true,
+            answer: 'Because she wants the view.',
+            steps: [],
+            changes: [],
+            sources: { scenes: [], pages: [] },
+            usage,
+            costUsd: 0.001,
+            cached: false,
+            model: 'gpt-strong',
+            proposalId: 'p-scribe',
+            requestId
+          }
+          return result as Output<C>
+        }
         // The scene features stay in flight: these tests only look at what started.
         case 'ai:critique':
         case 'ai:rewrite':
@@ -322,12 +340,13 @@ describe('Auto conversations (F-5.19 router, 2026-10-06)', () => {
     expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
   })
 
-  it('chat runs the agent with write access on the same turn pair (F-5.22)', async () => {
+  it('chat runs Ms Scribe in the chat mode on the same turn pair (notes redesign phase 1)', async () => {
     await useAssistantStore.getState().send('Why is Mara on the ridge?')
     expect(sent('ai:chat')).toHaveLength(0)
-    expect(sent('ai:agent')).toEqual([
+    expect(sent('ai:agent')).toHaveLength(0)
+    expect(sent('ai:scribe')).toEqual([
       expect.objectContaining({
-        access: 'write',
+        mode: 'write',
         nodeId: 'sc-1',
         message: 'Why is Mara on the ridge?'
       })
@@ -337,7 +356,8 @@ describe('Auto conversations (F-5.19 router, 2026-10-06)', () => {
       action: 'chat',
       mode: 'plan',
       content: 'Because she wants the view.',
-      proposalId: 'p-agent',
+      proposalId: 'p-scribe',
+      sources: { scenes: [], pages: [] },
       agent: { access: 'write', steps: [], changes: [] }
     })
   })
@@ -351,7 +371,7 @@ describe('Auto conversations (F-5.19 router, 2026-10-06)', () => {
       requestId: 'r'
     }
     await useAssistantStore.getState().send('Hello')
-    expect(sent('ai:agent')).toHaveLength(1)
+    expect(sent('ai:scribe')).toHaveLength(1)
     expect(turns()[1]).toMatchObject({ action: 'chat', content: 'Because she wants the view.' })
     expect(useDialogStore.getState().toasts).toEqual([])
   })
@@ -372,13 +392,13 @@ describe('Auto conversations (F-5.19 router, 2026-10-06)', () => {
     ])
   })
 
-  it('a question about the book goes to the agent, read-only', async () => {
+  it('a question about the book goes to Ms Scribe too, labelled a question', async () => {
     route = routed('query')
     await useAssistantStore.getState().send('Where does Mara sleep?')
-    expect(sent('ai:agent')).toEqual([
-      expect.objectContaining({ access: 'read', nodeId: 'sc-1', message: 'Where does Mara sleep?' })
+    expect(sent('ai:scribe')).toEqual([
+      expect.objectContaining({ mode: 'write', nodeId: 'sc-1', message: 'Where does Mara sleep?' })
     ])
-    expect(turns()[1]).toMatchObject({ action: 'query', mode: 'query', proposalId: 'p-query' })
+    expect(turns()[1]).toMatchObject({ action: 'query', mode: 'query', proposalId: 'p-scribe' })
   })
 
   it('rewrite rewrites the selection with the instruction as its note', async () => {
@@ -523,16 +543,16 @@ describe('edit requests (F-5.26)', () => {
     })
   })
 
-  it('in Plan an edit request is answered by the read-only chat, and a pick is refused', async () => {
-    useAiSettingsStore.setState({ settings: settings({ chatMode: 'plan' }) })
+  it('in Brainstorm an edit request is answered by the chat, and a pick is refused', async () => {
+    useAiSettingsStore.setState({ settings: settings({ chatMode: 'brainstorm' }) })
     route = editRoute({ pass: 'ask', target: 'scene', chapter: null })
     await useAssistantStore.getState().send('Make this scene better')
-    expect(sent('ai:agent')).toEqual([expect.objectContaining({ access: 'read' })])
+    expect(sent('ai:scribe')).toEqual([expect.objectContaining({ mode: 'brainstorm' })])
     expect(turns()[1]?.edit).toBeNull()
 
     useAiSettingsStore.setState({ settings: settings() })
     await useAssistantStore.getState().send('Make this scene better')
-    useAiSettingsStore.setState({ settings: settings({ chatMode: 'plan' }) })
+    useAiSettingsStore.setState({ settings: settings({ chatMode: 'brainstorm' }) })
     await useAssistantStore.getState().pickEdit(turns()[3]?.id ?? '', 'line')
     expect(sent('editPass:start')).toHaveLength(0)
     expect(useDialogStore.getState().toasts.map((t) => t.message)).toContain(PLAN_NO_EDITS_MESSAGE)
@@ -647,7 +667,7 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
     navigate = routedV2('critique')
     await useAssistantStore.getState().send("Give me editor's notes")
     await expect.poll(() => useCritiqueStore.getState().session?.nodeId).toBe('sc-1')
-    useAiSettingsStore.setState({ settings: settings({ chatMode: 'plan' }) })
+    useAiSettingsStore.setState({ settings: settings({ chatMode: 'brainstorm' }) })
     navigate = routedV2('editPass', { pass: 'line', target: 'scene', chapter: null })
     await useAssistantStore.getState().send('Tighten the prose')
     expect(sent('editPass:start')).toHaveLength(0)
@@ -718,7 +738,7 @@ describe('story memory v2: Ms Scribe’s navigator in place of the router (F-16.
   })
 
   it('answers a consistency check locally in Plan too: nothing is sent to the agent (P4-D23)', async () => {
-    useAiSettingsStore.setState({ settings: settings({ chatMode: 'plan' }) })
+    useAiSettingsStore.setState({ settings: settings({ chatMode: 'brainstorm' }) })
     navigate = routedV2('continuity')
     await useAssistantStore.getState().send('Check this scene for consistency')
     expect(sent('memory:findings')).toEqual([{ nodeId: 'sc-1' }])

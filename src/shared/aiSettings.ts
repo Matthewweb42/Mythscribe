@@ -27,37 +27,51 @@ export const USE_AI_MEANING = {
 } as const
 
 /**
- * The assistant chat's mode (decided by the author 2026-10-07; replaces the F-5.21 switch's Ask
- * and Auto and the chat's Query, Author, and Plan modes): one setting per project, picked under
- * the chat box. Auto: the chat agent (F-5.22) looks things up, answers with sources, and makes
- * its own edits, each logged with Undo (deletions still ask). Ask: the same agent, every edit
- * waiting for Apply. Plan: the agent with read-only tools, to discuss and brainstorm; it never
- * proposes or makes an edit. The mode governs the chat only: edit passes always return tracked
- * changes and background indexing runs whenever AI is on.
+ * The assistant chat's mode (notes redesign phase 1, the author's decision of 2026-10-15; replaces
+ * Auto / Ask / Plan of 2026-10-07): one setting per project, picked under the chat box.
+ * Brainstorm: Ms Scribe reads the book and the notes to plan with you and changes nothing, until
+ * you say "save that", when she writes it into a note page. Write: she also edits and creates note
+ * pages (each edit with Undo) and suggests prose changes for you to accept. Vibe: Write with ghost
+ * text on and bolder prose suggestions. Prose is never changed without the author's accept. The
+ * mode governs the chat only: edit passes always return tracked changes and background indexing
+ * runs whenever AI is on. A stored Plan reads as Brainstorm, Ask and Auto as Write (`AssistantMode`).
  */
-export const ASSISTANT_MODES = ['auto', 'ask', 'plan'] as const
-export const AssistantMode = z.enum(ASSISTANT_MODES)
-export type AssistantMode = z.infer<typeof AssistantMode>
-/** New projects start the chat in Ask (decided by the author 2026-10-07). */
-export const DEFAULT_ASSISTANT_MODE: AssistantMode = 'ask'
+export const ASSISTANT_MODES = ['brainstorm', 'write', 'vibe'] as const
+export type AssistantMode = (typeof ASSISTANT_MODES)[number]
+
+/** The 2026-10-07 modes a stored row may still hold, and the mode each reads as now. */
+const LEGACY_ASSISTANT_MODES: Readonly<Record<string, AssistantMode>> = {
+  plan: 'brainstorm',
+  ask: 'write',
+  auto: 'write'
+}
+
+/** A stored mode as this build reads it: Plan is Brainstorm, Ask and Auto are Write. */
+export function migrateAssistantMode(value: unknown): unknown {
+  return typeof value === 'string' ? (LEGACY_ASSISTANT_MODES[value] ?? value) : value
+}
+
+export const AssistantMode = z.preprocess(migrateAssistantMode, z.enum(ASSISTANT_MODES))
+/** New projects start the chat in Write (2026-10-15, as Ask before it). */
+export const DEFAULT_ASSISTANT_MODE: AssistantMode = 'write'
 
 export const ASSISTANT_MODE_LABEL: Record<AssistantMode, string> = {
-  auto: 'Auto',
-  ask: 'Ask',
-  plan: 'Plan'
+  brainstorm: 'Brainstorm',
+  write: 'Write',
+  vibe: 'Vibe'
 }
 
 /** One-line meaning per mode: the tooltip of each option under the chat box, and the docs page. */
 export const ASSISTANT_MODE_MEANING: Record<AssistantMode, string> = {
-  auto:
-    'The assistant looks things up, answers with sources, and makes its edits itself, each ' +
-    'with Undo; deletions still ask.',
-  ask:
-    'The assistant looks things up and answers with sources; every edit it wants to make ' +
-    'waits for your Apply.',
-  plan:
-    'The assistant reads the whole project to discuss and brainstorm with you; it never ' +
-    'proposes or makes edits.'
+  brainstorm:
+    'The assistant reads your book and notes to plan with you and changes nothing, until you ' +
+    'say “save that”, when it writes it into your notes.',
+  write:
+    'The assistant answers with sources, edits and creates note pages (each with Undo), and ' +
+    'suggests prose changes for you to accept.',
+  vibe:
+    'Write, with ghost text on and bolder prose suggestions; prose still changes only when you ' +
+    'accept.'
 }
 
 /**
@@ -69,26 +83,22 @@ export const AI_SWITCH_POSITIONS = ['off', 'ask', 'auto'] as const
 export const AiSwitch = z.enum(AI_SWITCH_POSITIONS)
 export type AiSwitch = z.infer<typeof AiSwitch>
 
-/** The settings fields one wizard position writes. */
+/** The settings fields one wizard position writes (both on positions start the chat in Write). */
 export function aiSwitchPatch(position: AiSwitch): Pick<AiSettings, 'dial' | 'chatMode'> {
-  return {
-    dial: position === 'off' ? 0 : 1,
-    chatMode: position === 'auto' ? 'auto' : DEFAULT_ASSISTANT_MODE
-  }
+  return { dial: position === 'off' ? 0 : 1, chatMode: DEFAULT_ASSISTANT_MODE }
 }
 
 /**
- * The chat mode a stored row stands at. A row from before 2026-10-07 has no `chatMode` and never
- * gains autonomy silently (decided by the author): the F-5.21 switch at Auto (on, with `auto`
- * true) becomes Auto, anything else Ask.
+ * The chat mode a stored row stands at. A row from before 2026-10-07 has no `chatMode`; the
+ * F-5.21 switch at Auto read as Auto then, which reads as Write since 2026-10-15, as does anything
+ * else.
  */
 export function storedAssistantMode(row: {
   dial: AiDial
   auto?: boolean | undefined
   chatMode?: AssistantMode | undefined
 }): AssistantMode {
-  if (row.chatMode !== undefined) return row.chatMode
-  return row.dial !== 0 && row.auto === true ? 'auto' : DEFAULT_ASSISTANT_MODE
+  return row.chatMode ?? DEFAULT_ASSISTANT_MODE
 }
 
 /** The label for a stored level, as gate messages name it. */
@@ -796,6 +806,21 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'instant card).',
     minDial: 1
   },
+  scribe: {
+    label: 'Assistant with your notes and book',
+    sends:
+      'For every chat message: your message and the recent turns of the conversation; every ' +
+      'note page (title and text; past about 30,000 tokens, the list of pages and the pages ' +
+      'that match), your story-bible sheets and the text of your Library uploads; a map of the ' +
+      'book (each scene’s title, chapter, synopsis and notes, or its stored summary where it has ' +
+      'no synopsis); the book itself, whole when everything fits in about 60,000 tokens (or when ' +
+      'you ask for the whole book), else the scenes that name what you ask about, that the ' +
+      'search finds, and those around the open scene; the open scene in full with its notes and ' +
+      'the selected passage. Then, one lookup at a time (at most 6 per message), what the ' +
+      'assistant asks to read: search results, a scene, a note page. When it suggests a prose ' +
+      'change, the voice check runs on this machine.',
+    minDial: 1
+  },
   judge: {
     label: 'Contradiction check',
     sends:
@@ -846,7 +871,18 @@ export const AI_FEATURES_BY_LEVEL: readonly AiFeatureId[] = [...AI_FEATURE_IDS].
 export const MEMORY_ONLY_FEATURES: Readonly<Record<StoryMemoryVersion, readonly AiFeatureId[]>> = {
   // F-16.25 (P3-D17): in v2 the navigator routes and Ms Scribe answers, so the router (`route`)
   // and Story Intelligence (`query`) are v1's.
-  v1: ['tags', 'summary', 'continuity', 'organise', 'todo', 'sheetSync', 'route', 'query'],
+  // Notes redesign phase 1: Ms Scribe's v1 chat (`scribe`) is v1's.
+  v1: [
+    'tags',
+    'summary',
+    'continuity',
+    'organise',
+    'todo',
+    'sheetSync',
+    'route',
+    'query',
+    'scribe'
+  ],
   v2: ['reader', 'verify', 'cite', 'navigator', 'judge']
 }
 

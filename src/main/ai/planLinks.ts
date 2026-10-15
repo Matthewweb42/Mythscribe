@@ -14,6 +14,7 @@ import {
   type PlanLinksRunResult,
   type PlanRef
 } from '@shared/planLinks'
+import { appliesEditsItself } from '@shared/chat'
 import { parseStoredSceneMeta, type SceneMeta } from '@shared/sceneMeta'
 import { STRUCTURE_TEMPLATES, type StructureTemplateId } from '@shared/structure'
 import type { NodeRow } from '../db/schema'
@@ -303,7 +304,7 @@ export async function runPlanLinks(
   // Re-read: the request took a moment, and the author may have linked or written meanwhile.
   const now = planBoard(db)
   const fresh = links.filter((link) => stillValid(now, link))
-  const auto = settings.chatMode === 'auto'
+  const auto = appliesEditsItself(settings.chatMode)
   const changed = new Set<string>()
   let next: PlanLinkState
   if (auto) {

@@ -42,6 +42,7 @@ export const DEFAULT_ROUTING_TABLE: Partial<Record<AiFeatureId, Tier>> = {
   notesSuggest: 'fast',
   voiceNotes: 'fast',
   agent: 'strong',
+  scribe: 'strong',
   todo: 'fast',
   sheetSync: 'fast'
 }

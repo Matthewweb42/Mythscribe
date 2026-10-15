@@ -168,9 +168,9 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     }
     expect(setAiSettings(db, next)).toEqual(next)
     expect(getAiSettings(db)).toEqual(next)
-    setAiSettings(db, { ...next, chatMode: 'plan' })
+    setAiSettings(db, { ...next, chatMode: 'brainstorm' })
     expect(rows(AI_SETTINGS_KEY)).toHaveLength(1)
-    expect(getAiSettings(db).chatMode).toBe('plan')
+    expect(getAiSettings(db).chatMode).toBe('brainstorm')
   })
 
   it('falls back when the stored value is not JSON', () => {
@@ -213,7 +213,7 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     )
     const read = getAiSettings(db)
     expect(read.features).not.toHaveProperty('oracle')
-    setAiSettings(db, { ...read, chatMode: 'plan' })
+    setAiSettings(db, { ...read, chatMode: 'brainstorm' })
     const stored = JSON.parse(rows(AI_SETTINGS_KEY)[0]?.value ?? '{}') as {
       features: Record<string, unknown>
     }
@@ -221,7 +221,7 @@ describe('getAiSettings / setAiSettings (F-14.4)', () => {
     expect(stored.features.chat).toBe(false)
     // Only booleans are carried over.
     expect(stored.features).not.toHaveProperty('oddValue')
-    expect(getAiSettings(db).chatMode).toBe('plan')
+    expect(getAiSettings(db).chatMode).toBe('brainstorm')
   })
 
   it('fills toggles missing from an older row with on instead of resetting the dial (F-14.10)', () => {
@@ -326,7 +326,8 @@ describe('getConversations / setConversations (F-5.4)', () => {
         card: null,
         scribe: null,
         costParts: null,
-        contradictions: null
+        contradictions: null,
+        sources: null
       }
     ],
     created: '2026-09-15T10:00:00.000Z',

@@ -99,24 +99,24 @@
                 <td>AI features on. The assistant works in the mode picked under the chat box.</td>
               </tr>
               <tr>
-                <th scope="row">Auto</th>
+                <th scope="row">Brainstorm</th>
                 <td>
-                  The assistant looks things up, answers with sources, and makes its edits itself,
-                  each with Undo; deletions still ask.
+                  The assistant reads your book and notes to plan with you and changes nothing,
+                  until you say “save that”, when it writes it into your notes.
                 </td>
               </tr>
               <tr>
-                <th scope="row">Ask</th>
+                <th scope="row">Write</th>
                 <td>
-                  The assistant looks things up and answers with sources; every edit it wants to
-                  make waits for your Apply.
+                  The assistant answers with sources, edits and creates note pages (each with
+                  Undo), and suggests prose changes for you to accept.
                 </td>
               </tr>
               <tr>
-                <th scope="row">Plan</th>
+                <th scope="row">Vibe</th>
                 <td>
-                  The assistant reads the whole project to discuss and brainstorm with you; it never
-                  proposes or makes edits.
+                  Write, with ghost text on and bolder prose suggestions; prose still changes only
+                  when you accept.
                 </td>
               </tr>
             </tbody>
@@ -506,6 +506,22 @@
                   sentence between them. Sent after a reading or a note save (at most 10 pairs),
                   once after Rebuild memory (at most 60 pairs) and on Check the book, which also
                   sends up to 20 pairs with three sentences either side to the strong model.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Assistant with your notes and book</th>
+                <td>
+                  For every chat message: your message and the recent turns of the conversation;
+                  every note page (title and text; past about 30,000 tokens, the list of pages and
+                  the pages that match), your story-bible sheets and the text of your Library
+                  uploads; a map of the book (each scene’s title, chapter, synopsis and notes, or
+                  its stored summary where it has no synopsis); the book itself, whole when
+                  everything fits in about 60,000 tokens (or when you ask for the whole book),
+                  else the scenes that name what you ask about, that the search finds, and those
+                  around the open scene; the open scene in full with its notes and the selected
+                  passage. Then, one lookup at a time (at most 6 per message), what the assistant
+                  asks to read: search results, a scene, a note page. When it suggests a prose
+                  change, the voice check runs on this machine.
                 </td>
               </tr>
             </tbody>

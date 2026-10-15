@@ -52,6 +52,7 @@ import type {
   AiAgentResult,
   AiNavigateResult,
   AiRouteResult,
+  AiScribeResult,
   AiWhatNextResult,
   Input
 } from '@shared/ipc/contract'
@@ -80,7 +81,7 @@ import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
-import { applyAgentEdit, openEditor } from './agentApply'
+import { applyAgentEdit, openEditor, undoNotebookEdit } from './agentApply'
 import { AgentEditError, removeInsertedProse } from '@renderer/features/editor/agentEditing'
 import {
   acceptLanding,
@@ -126,8 +127,9 @@ export const AGENT_NOTICE = 'Placed in the editor. Tab accepts, Escape dismisses
 export const NO_EDITOR_MESSAGE = 'Open a scene to place text'
 /** The toast when What should come next? has no open scene to read (F-5.17). */
 export const NO_SCENE_MESSAGE = 'Open a scene first'
-/** Why Write this does nothing in Plan, which never edits (2026-10-07). */
-export const PLAN_NO_EDITS_MESSAGE = 'Plan never changes the book. Switch to Ask or Auto to write.'
+/** Why Write this does nothing in Brainstorm (Plan before 2026-10-15), which never edits. */
+export const PLAN_NO_EDITS_MESSAGE =
+  'Brainstorm never changes the book. Switch to Write or Vibe to write.'
 /** What a routed rewrite turn says once the rewrite started (F-5.19). */
 export const REWRITE_STARTED_MESSAGE = 'The rewrite is above the chat.'
 /** The selected passage Ask AI attaches to the composer is cut to this many characters. */
@@ -199,6 +201,13 @@ interface AssistantState {
   /** The unsent message in the composer: it outlives the composer while side work shows (2026-10-10). */
   composerText: string
   setComposerText: (text: string) => void
+  /**
+   * Notes redesign phase 1 (story memory v1): "Whole book" under the chat box: Ms Scribe gets the
+   * whole book with every message whatever its size (else only when it fits). Off by default; for
+   * the session, not persisted.
+   */
+  wholeBook: boolean
+  setWholeBook: (on: boolean) => void
   /** Cancels any pending write, drops the step subscription, and empties the store. */
   clear: () => void
   /** Opens a fresh conversation as the active tab; a no-op at the conversation cap. */
@@ -405,7 +414,8 @@ const turn = (role: ChatMessage['role'], content: string, mode: ChatMode | null)
   card: null,
   scribe: null,
   costParts: null,
-  contradictions: null
+  contradictions: null,
+  sources: null
 })
 
 /** Records one lookup of an agent turn on its way, under the request it belongs to. */
@@ -602,6 +612,10 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   setComposerText(text) {
     set({ composerText: text })
   },
+  wholeBook: false,
+  setWholeBook(on) {
+    set({ wholeBook: on })
+  },
   detach() {
     set({ attachment: null })
   },
@@ -640,7 +654,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       agentAnswer: {},
       drafts: {},
       attachment: null,
-      composerText: ''
+      composerText: '',
+      wholeBook: false
     })
   },
 
@@ -878,8 +893,11 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
 
   async undoChange(messageId, changeId) {
     const found = findChange(messageId, changeId)
-    const undo = undoers.get(changeId)
-    if (found?.change.status !== 'applied' || undo === undefined) return
+    if (found?.change.status !== 'applied') return
+    // Notes redesign phase 1: a note edit's Undo is stored with it, so it outlives the session.
+    const edit = found.change.edit
+    const undo = edit.kind === 'notebook' ? () => undoNotebookEdit(edit) : undoers.get(changeId)
+    if (undo === undefined) return
     if (get().changing[changeId]) return
     setChanging(changeId, true)
     try {
@@ -1316,6 +1334,13 @@ async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
     }
     return
   }
+  if ((action === 'chat' || action === 'query') && currentStoryMemory() === 'v1') {
+    // Notes redesign phase 1: in a v1 project the chat and a question are Ms Scribe's, with the
+    // notes and the book in view; she edits notes and suggests prose as the mode allows.
+    patchLastTurn(id, { action, mode: action === 'query' ? 'query' : 'plan' })
+    await runScribeTurn(id, nextRequest(id), mode, { nodeId, message: text, history })
+    return
+  }
   switch (action) {
     case 'chat': {
       // F-5.22: the chat is the agent, which may look things up and, in Ask and Auto, edit the book.
@@ -1462,6 +1487,83 @@ interface AgentAsk {
   history: Input<'ai:agent'>['history']
   /** F-16.25 (v2): the navigator's evidence; null or left out, Step 0's (and always in v1). */
   navigation?: Navigation | null
+}
+
+/**
+ * One Ms Scribe turn in a story memory v1 project (notes redesign phase 1) on the turn pair
+ * already in conversation `id`, in chat mode `mode`: main sends the notes and the book (whole when
+ * it fits, or when Whole book is on), her lookups show on the pending turn and her answer streams;
+ * the answer lands with its sources and her changes: note edits already applied (each logged with
+ * its Undo) and prose suggestions waiting for Apply, never applied on their own in any mode.
+ */
+async function runScribeTurn(
+  id: string,
+  requestId: string,
+  mode: AssistantMode,
+  ask: Omit<AgentAsk, 'navigation'>
+): Promise<void> {
+  let result: AiScribeResult
+  try {
+    // Main reads the saved book: the words typed just before asking go first.
+    await useDocumentStore.getState().flush()
+    if (useAssistantStore.getState().pending[id] !== requestId) return // stopped while saving
+    result = await useAiActivityStore.getState().track(
+      'scribe',
+      requestId,
+      ipc().invoke('ai:scribe', {
+        ...ask,
+        mode,
+        focus: focusOf(),
+        wholeBook: useAssistantStore.getState().wholeBook,
+        requestId
+      })
+    )
+  } catch (err) {
+    dropSteps(requestId)
+    settleFailure(id, requestId, describeError(err))
+    return
+  }
+  dropSteps(requestId)
+  if (useAssistantStore.getState().pending[id] !== requestId) {
+    if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
+    return
+  }
+  if (!result.ok) {
+    settleFailure(
+      id,
+      requestId,
+      result.code === 'CANCELLED' ? null : `${result.message} ${result.nextStep}`.trim()
+    )
+    return
+  }
+  const changes: AgentChange[] = result.changes.map((change) => ({
+    id: nextId('e'),
+    edit: change.edit,
+    status: change.applied ? 'applied' : 'pending',
+    violation: change.violation,
+    error: null,
+    proposalId: null,
+    notice: null
+  }))
+  const messageId =
+    useAssistantStore
+      .getState()
+      .conversations?.items.find((c) => c.id === id)
+      ?.messages.at(-1)?.id ?? null
+  finishTurn(
+    id,
+    {
+      content: result.answer,
+      model: result.model,
+      costUsd: result.costUsd,
+      usage: result.usage,
+      proposalId: result.proposalId,
+      sources: result.sources,
+      agent: { access: agentAccessFor(mode), steps: result.steps, changes }
+    },
+    result.cached
+  )
+  if (messageId !== null) settleChanges(messageId)
 }
 
 /**

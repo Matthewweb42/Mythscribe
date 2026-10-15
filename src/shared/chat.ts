@@ -7,6 +7,7 @@ import { EditTurn } from './editRequest'
 import { FindingView } from './memory/findings'
 import { QueryTurn } from './query'
 import { InstantCard, ScribeTurn } from './scribe'
+import { ScribeSources } from './scribe2'
 import type { StoryMemoryVersion } from './storyMemory'
 import { toTagName } from './tags'
 import { WhatNextDirection } from './whatNext'
@@ -45,17 +46,22 @@ export const ConversationMode = z.enum(CONVERSATION_MODES)
 export type ConversationMode = z.infer<typeof ConversationMode>
 
 /**
- * What the chat agent (F-5.22) may do in a chat mode (decided by the author 2026-10-07): Plan
- * gets the read-only tools, so it researches the whole project but never proposes an edit; Ask
- * and Auto may propose edits.
+ * What the chat agent (F-5.22) may do in a chat mode: Brainstorm (Plan before 2026-10-15) gets
+ * the read-only tools, so it researches the whole project but never proposes an edit; Write and
+ * Vibe may propose edits.
  */
 export function agentAccessFor(mode: AssistantMode): AgentAccess {
-  return mode === 'plan' ? 'read' : 'write'
+  return mode === 'brainstorm' ? 'read' : 'write'
 }
 
-/** Whether the chat applies the agent's edits itself (each with Undo; deletions still ask): only Auto. */
+/**
+ * Whether the older surfaces that followed Auto (the v1 agent's recap and Write this, Organise,
+ * plan links, story memory v2's chat) apply their edits themselves: in Vibe, which took Auto's
+ * place on 2026-10-15 (decided by Claude, unconfirmed). Ms Scribe's v1 chat never applies prose
+ * itself in any mode; her note edits are hers and land with Undo.
+ */
 export function appliesEditsItself(mode: AssistantMode): boolean {
-  return mode === 'auto'
+  return mode === 'vibe'
 }
 
 /**
@@ -82,7 +88,7 @@ export function routeActionFor(
   action: RouteAction,
   storyMemory: StoryMemoryVersion = 'v1'
 ): RouteAction {
-  if (mode !== 'plan' || PLAN_ROUTE_ACTIONS.includes(action)) return action
+  if (mode !== 'brainstorm' || PLAN_ROUTE_ACTIONS.includes(action)) return action
   return storyMemory === 'v2' && action === 'continuity' ? action : 'chat'
 }
 
@@ -205,7 +211,12 @@ export const ChatMessage = z.object({
    * P4-D23 (story memory v2): a consistency check answered locally from the open scene's
    * findings, no request; null for every other turn and for rows written before it.
    */
-  contradictions: ContradictionsTurn.nullable().catch(null).default(null)
+  contradictions: ContradictionsTurn.nullable().catch(null).default(null),
+  /**
+   * Notes redesign phase 1 (story memory v1): the scenes and note pages Ms Scribe's answer used,
+   * listed under it; null for every other turn and for rows written before it.
+   */
+  sources: ScribeSources.nullable().catch(null).default(null)
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
 
