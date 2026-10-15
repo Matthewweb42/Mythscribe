@@ -27,7 +27,8 @@ import {
 } from '../agent'
 import { AiModelChoice, AiRouting } from '../aiRouting'
 import { ClearCounts, ClearSelection } from '../bibleClear'
-import { AiSettings, AiSource, AiSwitch } from '../aiSettings'
+import { AiSettings, AiSource, AiSwitch, AssistantMode } from '../aiSettings'
+import { ScribeSources } from '../scribe2'
 import { ExportProgress } from '../bookExport'
 import {
   CHAT_HISTORY_TURNS,
@@ -659,6 +660,38 @@ export const AiAgentResult = z.discriminatedUnion('ok', [
   })
 ])
 export type AiAgentResult = z.infer<typeof AiAgentResult>
+
+/**
+ * What `ai:scribe` answers (notes redesign phase 1, story memory v1): Ms Scribe's answer with
+ * its sources, her lookups, and her changes: note edits already applied in the notebook
+ * (`applied`, Undo through `notebook:restoreVersion` or `notebook:delete`) and prose suggestions
+ * waiting for the author; or an expected AI failure as data.
+ */
+export const AiScribeResult = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    answer: z.string(),
+    steps: z.array(AgentStep),
+    changes: z.array(
+      z.object({ edit: AgentEdit, violation: z.string().nullable(), applied: z.boolean() })
+    ),
+    sources: ScribeSources,
+    usage: AiUsage,
+    costUsd: z.number(),
+    cached: z.boolean(),
+    model: z.string(),
+    proposalId: z.string(),
+    requestId: z.string()
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string(),
+    requestId: z.string()
+  })
+])
+export type AiScribeResult = z.infer<typeof AiScribeResult>
 
 /**
  * What `ai:rewrite` answers (F-14.10): the rewritten passage (streamed first through
@@ -2731,6 +2764,28 @@ export const contract = {
       navigation: Navigation.nullable().default(null)
     }),
     output: AiAgentResult
+  },
+  /**
+   * Notes redesign phase 1 (story memory v1 only): Ms Scribe answers one chat message with every
+   * note page, the book map and the book (whole when it fits, or when `wholeBook`; else the
+   * scenes picked for it) in view, in the chat mode `mode` (Brainstorm writes nothing unless the
+   * message asks her to save; Write and Vibe edit notes and suggest prose). Lookups stream as
+   * `ai:agentStep`, the answer as `ai:agentDelta`; each note write pushes `notebook:changed`.
+   * One `scribe` proposal holds the answer and the changes. Expected AI failures come back as data.
+   */
+  'ai:scribe': {
+    input: z.object({
+      nodeId: z.string().nullable(),
+      message: z.string().trim().min(1).max(CHAT_MESSAGE_MAX),
+      history: z
+        .array(z.object({ role: ChatRole, content: z.string().max(CHAT_MESSAGE_MAX) }))
+        .max(CHAT_HISTORY_TURNS),
+      mode: AssistantMode,
+      focus: AgentFocus,
+      wholeBook: z.boolean().default(false),
+      requestId: z.string()
+    }),
+    output: AiScribeResult
   },
   /**
    * 2026-10-07: the prose behind one of the agent's write intents, drafted in the author's voice

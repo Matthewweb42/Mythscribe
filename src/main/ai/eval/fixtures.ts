@@ -85,6 +85,7 @@ import { navigatorEvalCases } from './navigatorFixtures'
 import { judgeEvalCases } from './judgeFixtures'
 import type { JudgeVerdict } from '@shared/memory/findings'
 import { scribeEvalCases } from './scribeFixtures'
+import { scribe2EvalCases } from './scribe2Fixtures'
 import { CARD_GIST_MAX_WORDS, CARD_LINE_MAX_WORDS } from '@shared/memory/claims'
 import type { PromptCard } from '@shared/memory/cardText'
 import {
@@ -6801,5 +6802,7 @@ export const EVAL_CASES: EvalCase[] = [
   ...MEMORY_V6_EVAL_CASES,
   // F-16.17 (plan Suggestions.md, 2026-10-14): reader.v7, every fact a suggestion, traits and
   // history read again.
-  ...MEMORY_V7_EVAL_CASES
+  ...MEMORY_V7_EVAL_CASES,
+  // Notes redesign phase 1 (story memory v1): Ms Scribe with the notes and the book in view.
+  ...scribe2EvalCases()
 ]

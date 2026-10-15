@@ -242,7 +242,8 @@ export function runAgentTool(
       return cards(project, args.ids, args.name)
     case 'find_passages':
       return findPassages(project, str(args.query))
-    // F-16.25: the navigator's tools (P3) are no agent version's: no list names them.
+    // F-16.25: the navigator's tools (P3) are no agent version's: no list names them; nor are
+    // Ms Scribe's v1 tools (notes redesign phase 1, `src/main/scribe2/tools.ts`).
     case 'read':
     case 'state':
     case 'knows':
@@ -250,6 +251,13 @@ export function runAgentTool(
     case 'ideas':
     case 'todos':
     case 'check':
+    case 'search_book':
+    case 'open_scene':
+    case 'list_notes':
+    case 'open_note':
+    case 'edit_note':
+    case 'create_note':
+    case 'propose_prose_edit':
       return {
         step: { tool: 'outline', label: 'Looking around…' },
         result: `There is no tool "${tool.data}". Use one of the tools listed.`

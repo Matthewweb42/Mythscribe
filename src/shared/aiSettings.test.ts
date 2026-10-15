@@ -38,7 +38,7 @@ describe('defaultAiSettings (F-14.4)', () => {
   it('installs at Off with every feature toggle on', () => {
     const defaults = defaultAiSettings()
     expect(defaults.dial).toBe(0)
-    expect(defaults.chatMode).toBe('ask')
+    expect(defaults.chatMode).toBe('write')
     for (const id of AI_FEATURE_IDS) expect(defaults.features[id]).toBe(true)
     expect(Object.keys(defaults.features).sort()).toEqual([...AI_FEATURE_IDS].sort())
   })
@@ -548,45 +548,52 @@ describe('the toggle list per story memory (F-16.17, P2a-D24)', () => {
   })
 })
 
-describe('Use AI and the chat modes (decided by the author 2026-10-07)', () => {
+describe('Use AI and the chat modes (Brainstorm, Write, Vibe since 2026-10-15)', () => {
   it('has Use AI on and off and the three chat modes, each with its meaning', () => {
     expect(USE_AI_MEANING.off).toBe('No AI at all. Nothing leaves this machine.')
     expect(USE_AI_MEANING.on.length).toBeGreaterThan(0)
-    expect(ASSISTANT_MODES.map((m) => ASSISTANT_MODE_LABEL[m])).toEqual(['Auto', 'Ask', 'Plan'])
+    expect(ASSISTANT_MODES.map((m) => ASSISTANT_MODE_LABEL[m])).toEqual([
+      'Brainstorm',
+      'Write',
+      'Vibe'
+    ])
     for (const m of ASSISTANT_MODES) expect(ASSISTANT_MODE_MEANING[m].length).toBeGreaterThan(0)
     expect(AI_DIAL_LABEL).toEqual({ 0: 'Off', 1: 'On' })
   })
 
-  it('writes the wizard positions: off is AI off, ask and auto are AI on in that mode', () => {
-    expect(aiSwitchPatch('off')).toEqual({ dial: 0, chatMode: 'ask' })
-    expect(aiSwitchPatch('ask')).toEqual({ dial: 1, chatMode: 'ask' })
-    expect(aiSwitchPatch('auto')).toEqual({ dial: 1, chatMode: 'auto' })
+  it('writes the wizard positions: off is AI off, ask and auto are AI on, both in Write', () => {
+    expect(aiSwitchPatch('off')).toEqual({ dial: 0, chatMode: 'write' })
+    expect(aiSwitchPatch('ask')).toEqual({ dial: 1, chatMode: 'write' })
+    expect(aiSwitchPatch('auto')).toEqual({ dial: 1, chatMode: 'write' })
   })
 
-  it('migrates a stored F-5.21 switch without raising autonomy: Off stays off, Auto is Auto, anything else Ask', () => {
+  it('reads a stored F-5.21 switch as Write whatever it was, and Off stays off', () => {
     const { chatMode: _drop, ...base } = defaultAiSettings()
-    for (const [dial, auto, expectedDial, expected] of [
-      [0, undefined, 0, 'ask'],
-      [0, false, 0, 'ask'],
-      [0, true, 0, 'ask'],
-      [1, undefined, 1, 'ask'],
-      [1, false, 1, 'ask'],
-      [1, true, 1, 'auto'],
-      [2, undefined, 1, 'ask'],
-      [3, undefined, 1, 'ask']
+    for (const [dial, auto, expectedDial] of [
+      [0, undefined, 0],
+      [0, true, 0],
+      [1, false, 1],
+      [1, true, 1],
+      [2, undefined, 1],
+      [3, undefined, 1]
     ] as const) {
       const parsed = AiSettings.parse({ ...base, dial, auto })
       expect(parsed.dial).toBe(expectedDial)
-      expect(parsed.chatMode).toBe(expected)
+      expect(parsed.chatMode).toBe('write')
       expect('auto' in parsed).toBe(false)
     }
   })
 
-  it('keeps a stored chat mode and never writes the old Auto bit', () => {
+  it('keeps a stored chat mode, reads the 2026-10-07 modes in code, and never writes the old Auto bit', () => {
     for (const chatMode of ASSISTANT_MODES) {
       const parsed = AiSettings.parse({ ...defaultAiSettings(), dial: 1, auto: false, chatMode })
       expect(parsed.chatMode).toBe(chatMode)
     }
+    expect(AiSettings.parse({ ...defaultAiSettings(), chatMode: 'plan' }).chatMode).toBe(
+      'brainstorm'
+    )
+    expect(AiSettings.parse({ ...defaultAiSettings(), chatMode: 'ask' }).chatMode).toBe('write')
+    expect(AiSettings.parse({ ...defaultAiSettings(), chatMode: 'auto' }).chatMode).toBe('write')
     expect(AiSettings.safeParse({ ...defaultAiSettings(), chatMode: 'query' }).success).toBe(false)
   })
 })

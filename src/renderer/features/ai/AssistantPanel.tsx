@@ -28,8 +28,10 @@ import {
 } from '@shared/query'
 import { nameAssistant } from '@shared/assistantName'
 import { docToText } from '@shared/docText'
+import type { ScribeSources } from '@shared/scribe2'
 import type { WhatNextDirection } from '@shared/whatNext'
 import { useActiveEditorStore } from '@renderer/features/editor/activeEditorStore'
+import { openNotebookPage } from '@renderer/features/notebook/openPage'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
 import { useSceneMetaStore } from '@renderer/features/editor/sceneMetaStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
@@ -418,10 +420,10 @@ function MessageLog(): React.JSX.Element {
     >
       {messages.length === 0 ? (
         <p className="m-auto max-w-64 text-center text-xs leading-relaxed text-fg-subtle">
-          Ask about your story or ask for a change. {assistantName} looks things up in your project,
-          then answers or edits: in Auto it makes its edits itself, in Ask every change waits for
-          your Apply, and in Plan it only talks. Editor&apos;s notes, a proofread, or a rewrite of
-          the selection work too.
+          Ask about your story or ask for a change. {assistantName} reads your notes and your book,
+          then answers with sources: in Brainstorm it only talks (say “save that” to keep it in your
+          notes), in Write it edits your notes and suggests changes to the book, and Vibe suggests
+          bolder ones. Editor&apos;s notes, a proofread, or a rewrite of the selection work too.
         </p>
       ) : null}
       {messages.map((message, index) => (
@@ -527,6 +529,7 @@ function Turn({
       ) : (
         <p className="m-0 break-words whitespace-pre-wrap">{message.content}</p>
       )}
+      {!mine && message.sources !== null ? <ScribeSourceList sources={message.sources} /> : null}
       {!mine && message.agent !== null ? (
         <>
           <AgentSteps steps={message.agent.steps} live={false} />
@@ -554,6 +557,59 @@ function Turn({
 }
 
 /**
+ * The scenes and note pages a Ms Scribe answer used (notes redesign phase 1, story memory v1),
+ * under it: a scene opens in the editor, a note page in the notes area, a story-bible sheet on its
+ * page; a Library upload is named only (it opens in the Library).
+ */
+function ScribeSourceList({ sources }: { sources: ScribeSources }): React.JSX.Element | null {
+  const openScene = useAssistantStore((s) => s.openScene)
+  if (sources.scenes.length === 0 && sources.pages.length === 0) return null
+  const openPage = (page: ScribeSources['pages'][number]): void => {
+    if (page.kind === 'note') openNotebookPage(page.id)
+    else if (page.kind === 'sheet') useEntityStore.getState().select(page.id)
+  }
+  return (
+    <div data-testid="scribe-sources" className="flex flex-col gap-1">
+      <p className="m-0 text-xs font-medium text-fg-muted">Sources</p>
+      <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
+        {sources.scenes.map((scene) => (
+          <li key={scene.nodeId}>
+            <button
+              type="button"
+              data-testid="scribe-source-scene"
+              title={`Open ${scene.title}`}
+              onClick={() => void openScene({ nodeId: scene.nodeId, title: scene.title }, null)}
+              className={CHIP_BUTTON}
+            >
+              {scene.title}
+            </button>
+          </li>
+        ))}
+        {sources.pages.map((page) =>
+          page.kind === 'library' ? (
+            <li key={page.id} className="rounded-full px-2 py-0.5 text-xs text-fg-subtle">
+              {page.title}
+            </li>
+          ) : (
+            <li key={page.id}>
+              <button
+                type="button"
+                data-testid="scribe-source-page"
+                title={`Open ${page.title}`}
+                onClick={() => openPage(page)}
+                className={CHIP_BUTTON}
+              >
+                {page.title}
+              </button>
+            </li>
+          )
+        )}
+      </ul>
+    </div>
+  )
+}
+
+/**
  * The directions of a What should come next? turn (F-5.17), one card each with `Write this`,
  * which sends the direction to the chat agent with its edit tools, so the text comes back as an
  * insert edit (with the voice profile and the fidelity check that path carries): waiting for
@@ -574,7 +630,7 @@ function Directions({
   let reason: string | null = null
   if (settings === null || !isFeatureAllowed(settings, 'agent')) {
     reason = `${needsSwitchText('Write this')}, with ${nameAssistant(AI_DATA_SHARING.agent.label, assistantName)} on (Settings, AI tab)`
-  } else if (settings.chatMode === 'plan') {
+  } else if (settings.chatMode === 'brainstorm') {
     reason = PLAN_NO_EDITS_MESSAGE
   } else if (!hasEditor) {
     reason = NO_SCENE_MESSAGE
@@ -787,9 +843,12 @@ function Composer(): React.JSX.Element {
     if (attachment !== null) messageBox.current?.focus()
   }, [attachment])
 
-  // Every message is answered by the chat agent unless the router picks another feature.
+  // Every message is answered by the chat agent unless the router picks another feature; in a v1
+  // project by Ms Scribe with the notes and the book in view (notes redesign phase 1).
+  const memory = useStoryMemory()
+  const answerer: AiFeatureId = memory === 'v1' ? 'scribe' : 'agent'
   const chatAllowed =
-    settings !== null && isFeatureAllowed(settings, 'chat') && isFeatureAllowed(settings, 'agent')
+    settings !== null && isFeatureAllowed(settings, 'chat') && isFeatureAllowed(settings, answerer)
   const mode = settings?.chatMode ?? DEFAULT_ASSISTANT_MODE
   const canSend = conversation !== null && chatAllowed && !pending && draft.trim() !== ''
 
@@ -805,7 +864,7 @@ function Composer(): React.JSX.Element {
         {nameAssistant(
           settings.dial === 0
             ? AI_OFF_MESSAGE
-            : `${isFeatureAllowed(settings, 'chat') ? AI_DATA_SHARING.agent.label : AI_DATA_SHARING.chat.label} is turned off for this project (Settings, AI tab).`,
+            : `${isFeatureAllowed(settings, 'chat') ? AI_DATA_SHARING[answerer].label : AI_DATA_SHARING.chat.label} is turned off for this project (Settings, AI tab).`,
           assistantName
         )}
       </p>
@@ -891,8 +950,31 @@ function Composer(): React.JSX.Element {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <AssistantModeControl />
+        {memory === 'v1' ? <WholeBookToggle /> : null}
       </div>
     </div>
+  )
+}
+
+/**
+ * "Whole book" under the chat box (notes redesign phase 1, story memory v1): on, every message
+ * sends Ms Scribe the whole book whatever its size; off, the book goes whole only when it fits
+ * and otherwise the scenes picked for the message. For the session only.
+ */
+function WholeBookToggle(): React.JSX.Element {
+  const on = useAssistantStore((s) => s.wholeBook)
+  const setWholeBook = useAssistantStore((s) => s.setWholeBook)
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      data-testid="assistant-whole-book"
+      title="Send the whole book with every message, however long (costs more); off, it goes whole only when it fits"
+      onClick={() => setWholeBook(!on)}
+      className="rounded px-2 py-px text-[11px] leading-4 text-fg-muted hover:text-fg aria-pressed:bg-surface-raised aria-pressed:text-fg"
+    >
+      Whole book
+    </button>
   )
 }
 

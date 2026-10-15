@@ -355,7 +355,10 @@ export const AI_FEATURE_IDS = [
   'navigator',
   // F-16.27 (story memory v2): the contradiction judge, which rules on each pair of passages code
   // found that may not fit, twice (the second time with the passages swapped).
-  'judge'
+  'judge',
+  // Notes redesign phase 1 (2026-10-15): Ms Scribe in a story memory v1 project, answering with
+  // every note page, the book map and the book (whole when it fits) in view, and editing notes.
+  'scribe'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -473,7 +476,11 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   navigator: 150,
   // F-16.27: min(300, 20 + 26 per pair) for a batch of at most 10 pairs (`judgeMaxTokens`); the
   // stronger check's one pair asks 90 (*Check the book*, F-16.30).
-  judge: 300
+  judge: 300,
+  // Notes redesign phase 1: one step as JSON: a tool call (an edit_note may carry a whole page,
+  // `SCRIBE_STEP_MAX_TOKENS` 3,000), or the answer with its sources; the cap is twice that for the
+  // one retry of a reply that was cut off (the agent's pattern).
+  scribe: 6_000
 }
 
 /**
@@ -573,7 +580,12 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // passages (the quote's sentence ±1, cut to 450 characters) with their places, voices and modes;
   // a batch over 2,500 tokens of pairs is split. The stronger check's one pair at ±3 sentences
   // stays under 1,000.
-  judge: 3_000
+  judge: 3_000,
+  // Notes redesign phase 1: the rules, every note page (≤ 30,000 tokens, else the list and the
+  // pages that match), the book map, the book (whole under 60,000 tokens in all; else the picked
+  // scenes ≤ 24,000; "whole book" forces it up to 80,000), the moment, the history and the tool
+  // results so far (the oldest are dropped first when a step would go over).
+  scribe: 140_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

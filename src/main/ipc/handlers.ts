@@ -58,6 +58,7 @@ import type {
   AiDraftBriefResult,
   AiGhostTextResult,
   AiAgentResult,
+  AiScribeResult,
   AiQueryResult,
   AiRecommendTagsResult,
   AiRewriteResult,
@@ -544,6 +545,7 @@ import {
 } from '../memory/recordStore'
 import { runNavigate } from '../scribe/navigate'
 import { runScribe } from '../scribe/runScribe'
+import { runScribe2 } from '../scribe2/run'
 import { searchMisses } from '../scribe/searchMissStore'
 import { addSheetLine, removeSheetLine } from '../scribe/sheetLines'
 import { getSceneDetails, setSceneDetails } from '../memory/sceneDetailStore'
@@ -4373,6 +4375,73 @@ export function registerHandlers({
           organise,
           scribe,
           dropped,
+          usage,
+          costUsd,
+          cached,
+          model,
+          proposalId: proposal.id,
+          requestId
+        }
+      } catch (err) {
+        if (err instanceof AiProviderError)
+          return { ...aiFailure(err.code, err.message), requestId }
+        throw err
+      }
+    }
+  )
+
+  // Notes redesign phase 1: Ms Scribe's chat in a story memory v1 project. Her lookups go out as
+  // `ai:agentStep` and her answer streams as `ai:agentDelta` (the chat's agent events); each note
+  // she writes lands in the notebook at once and pushes `notebook:changed`. One proposal holds the
+  // answer and the changes; the renderer settles it with the prose suggestions' fate.
+  register(
+    'ai:scribe',
+    async ({
+      nodeId,
+      message,
+      history,
+      mode,
+      focus,
+      wholeBook,
+      requestId
+    }): Promise<AiScribeResult> => {
+      try {
+        const session = manager.require()
+        const db = session.connection.orm
+        const deps = requestDeps(db)
+        const result = await runScribe2(
+          db,
+          deps,
+          session.folder,
+          { nodeId, message, history, mode, focus, wholeBook, requestId },
+          (step) => emit(windows(), 'ai:agentStep', { requestId, step }),
+          {
+            answer: (delta) => emit(windows(), 'ai:agentDelta', { requestId, delta, reset: false }),
+            reset: () => emit(windows(), 'ai:agentDelta', { requestId, delta: '', reset: true }),
+            note: (stepId, note) => devtools.annotate(stepId, note)
+          },
+          (ids) => emit(windows(), 'notebook:changed', { ids })
+        )
+        const { answer, steps, changes, sources, usage, costUsd, cached, model } = result
+        const proposal = createProposal(db, {
+          feature: 'scribe',
+          nodeId,
+          promptVersion: result.promptVersion,
+          model,
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          costUsd,
+          cached,
+          content: JSON.stringify({ answer, edits: changes.map((change) => change.edit) }),
+          flagged: changes.some((change) => change.violation !== null),
+          violation: changes.find((change) => change.violation !== null)?.violation ?? null
+        })
+        return {
+          ok: true,
+          answer,
+          steps,
+          changes,
+          sources,
           usage,
           costUsd,
           cached,

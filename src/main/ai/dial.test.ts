@@ -7,7 +7,7 @@ import { AiDisabledError, AiProviderError } from './providers/types'
 const at = (dial: 0 | 1, auto = false): AiSettings => ({
   ...defaultAiSettings(),
   dial,
-  chatMode: auto ? 'auto' : 'ask'
+  chatMode: auto ? 'vibe' : 'write'
 })
 
 describe('assertFeatureAllowed (F-14.4, F-5.21)', () => {

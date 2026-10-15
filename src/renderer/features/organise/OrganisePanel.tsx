@@ -72,9 +72,9 @@ function Panel(): React.JSX.Element {
           .map((s) => ORGANISE_SCOPE_LABEL[s])
           .join(', ')
   const lead =
-    mode === 'plan'
+    mode === 'brainstorm'
       ? 'Plan mode: this only describes the changes. Switch the chat to Ask or Auto to apply them.'
-      : mode === 'auto'
+      : mode === 'vibe'
         ? 'Auto: what can be undone is applied, each with Undo. Merges, deletions, and new categories wait for you. Scene text is never rewritten.'
         : 'One change at a time: A accepts, S skips, E edits. Nothing changes until you apply. Scene text is never rewritten.'
 
@@ -190,7 +190,7 @@ function Plan(): React.JSX.Element {
             id,
             group: groupOf(view.change.action),
             decision: view.decision,
-            settled: mode === 'plan' || view.status !== 'pending'
+            settled: mode === 'brainstorm' || view.status !== 'pending'
           }
         ]
       }),
@@ -208,7 +208,7 @@ function Plan(): React.JSX.Element {
       disabled={busy}
       className="min-w-20 shrink-0 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-60"
     >
-      {pending === 0 || mode === 'plan' ? 'Done' : 'Close'}
+      {pending === 0 || mode === 'brainstorm' ? 'Done' : 'Close'}
     </button>
   )
 
@@ -252,17 +252,17 @@ function Plan(): React.JSX.Element {
           groups={GROUPS}
           renderCard={(id) => <ChangeCard id={id} />}
           onDecide={decide}
-          onEdit={mode === 'plan' ? undefined : setEditing}
+          onEdit={mode === 'brainstorm' ? undefined : setEditing}
           canEdit={(id) => {
             const kind = useOrganiseStore.getState().views[id]?.change.action.kind
             return kind !== undefined && EDITABLE.has(kind)
           }}
           apply={
-            mode === 'plan'
+            mode === 'brainstorm'
               ? undefined
               : { label: (n) => `Apply ${n} accepted`, onApply: () => void applyAccepted() }
           }
-          onFinish={mode === 'plan' ? undefined : () => void finish()}
+          onFinish={mode === 'brainstorm' ? undefined : () => void finish()}
           busy={busy}
           compact
           autoFocus={autoFocus}
@@ -349,7 +349,7 @@ function ChangeCard({ id }: { id: string }): React.JSX.Element | null {
             </button>
           ) : null}
         </p>
-      ) : mode === 'auto' && needsAsk(change.action) ? (
+      ) : mode === 'vibe' && needsAsk(change.action) ? (
         <p className="m-0 text-xs text-fg-muted">Asks first: nothing undoes this one.</p>
       ) : null}
       {view.error !== null ? (

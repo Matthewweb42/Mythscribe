@@ -1367,7 +1367,7 @@ describe('aiSettings:get / aiSettings:set (F-14.4)', () => {
       directory: tmp,
       aiSwitch: 'auto'
     })
-    expect(await invoke('aiSettings:get', undefined)).toMatchObject({ dial: 1, chatMode: 'auto' })
+    expect(await invoke('aiSettings:get', undefined)).toMatchObject({ dial: 1, chatMode: 'write' })
     await invoke('project:create', { name: 'Plain', format: 'novel', directory: tmp })
     expect(await invoke('aiSettings:get', undefined)).toEqual(defaultAiSettings())
   })
@@ -3350,7 +3350,7 @@ describe('ai:agent (F-5.22)', () => {
     const scene = manuscriptDocuments(manager.require().connection.orm)[0]
     if (!scene) throw new Error('skeleton not seeded')
     await invoke('document:save', { id: scene.id, content: body(LEDGER) })
-    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1, chatMode: 'auto' })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1, chatMode: 'vibe' })
     await invoke('ai:setKey', { key: KEY })
     const said = (value: unknown): CompletionResult => ({
       text: JSON.stringify(value),

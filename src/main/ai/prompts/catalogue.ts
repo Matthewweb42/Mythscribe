@@ -113,6 +113,7 @@ import { READER_V5_PROMPT_VERSION } from './reader.v5'
 import { VERIFY_V4_PROMPT_VERSION } from './verify.v4'
 import { READER_V6_PROMPT_VERSION } from './reader.v6'
 import { READER_V7_PROMPT_VERSION } from './reader.v7'
+import { SCRIBE_PROMPT_VERSION } from './scribe.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -260,7 +261,9 @@ export const PROMPT_VERSIONS = [
   READER_V6_PROMPT_VERSION,
   // F-16.17 (the author's decision of 2026-10-14, plan Suggestions.md): every fact a suggestion,
   // traits and history read again.
-  READER_V7_PROMPT_VERSION
+  READER_V7_PROMPT_VERSION,
+  // Notes redesign phase 1 (story memory v1): Ms Scribe with the notes and the book in view.
+  SCRIBE_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -758,7 +761,8 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   // the open-ended slots (reader.v5's reading) is retired with them.
   [VERIFY_V4_PROMPT_VERSION]: { feature: 'verify', tier: 'fast', output: 'json', since: 'F-16.17' },
   [READER_V6_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
-  [READER_V7_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' }
+  [READER_V7_PROMPT_VERSION]: { feature: 'reader', tier: 'fast', output: 'json', since: 'F-16.17' },
+  [SCRIBE_PROMPT_VERSION]: { feature: 'scribe', tier: 'strong', output: 'json', since: 'Notes P1' }
 }
 
 /**

@@ -54,7 +54,7 @@ export function EditRequestCard({
       <div role="group" aria-label="Kinds of edit" className="flex flex-wrap gap-1.5">
         {edit.choices.map((choice) => {
           const reason =
-            settings?.chatMode === 'plan'
+            settings?.chatMode === 'brainstorm'
               ? PLAN_NO_EDITS_MESSAGE
               : busy
                 ? CONVERSATION_BUSY_MESSAGE

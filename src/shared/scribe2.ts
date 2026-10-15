@@ -1,0 +1,106 @@
+import { z } from 'zod'
+import type { AssistantMode } from './aiSettings'
+
+/**
+ * Ms Scribe in a story memory v1 project (notes redesign phase 1, 2026-10-15,
+ * `docs/research/notes-redesign-2026-10-15/plan.md` "How Ms Scribe gets the right context"): she
+ * answers with every note page, the book map and the book (whole when it fits) in view, looks
+ * further with tools, edits and creates note pages directly (each with Undo), and suggests prose
+ * changes the author accepts. Named `scribe2` in code beside story memory v2's `scribe`.
+ */
+
+/** Under this many estimated tokens for the whole request, the whole book goes along. */
+export const SCRIBE_WHOLE_BOOK_TOKENS = 60_000
+/** The book's share when it does not fit whole: the scenes picked for the question. */
+export const SCRIBE_PICK_BOOK_TOKENS = 24_000
+/** The most of the book "Whole book" sends; scenes past it are listed as left out. */
+export const SCRIBE_FORCED_BOOK_TOKENS = 80_000
+/** Every note page goes along up to this; past it, the list and the pages that match. */
+export const SCRIBE_NOTES_TOKENS = 30_000
+/** A scene's notes in the book map are cut to this many characters (the moment has them whole). */
+export const SCRIBE_MAP_NOTES_CHARS = 600
+/** A scene's synopsis or summary in the book map is cut to this many characters. */
+export const SCRIBE_MAP_SYNOPSIS_CHARS = 600
+/** The open scene's notes in the moment are cut to this many characters. */
+export const SCRIBE_MOMENT_NOTES_CHARS = 4_000
+/** Characters one `open_scene` or `open_note` call returns; she reads on with `from`. */
+export const SCRIBE_READ_CHARS = 12_000
+/** Passages one `search_book` call names. */
+export const SCRIBE_SEARCH_RESULTS = 8
+/** Tool calls per message before she must answer. */
+export const SCRIBE_MAX_STEPS = 6
+/** What one message may spend across its steps; past it she must answer at once. */
+export const SCRIBE_COST_CAP_USD = 0.5
+/** The `max_tokens` one step asks for (an `edit_note` may carry a page). */
+export const SCRIBE_STEP_MAX_TOKENS = 3_000
+/** The one retry of a reply cut off or unreadable asks for this (`outputBudget('scribe')`). */
+export const SCRIBE_RETRY_MAX_TOKENS = 6_000
+/** Note writes and prose suggestions one message may make; past it a write tool refuses. */
+export const SCRIBE_MAX_WRITES = 8
+/** The longest text one note write may carry. */
+export const SCRIBE_NOTE_TEXT_MAX = 12_000
+/** How much of a page before and after an edit the chat keeps, for its highlight. */
+export const SCRIBE_DIFF_CHARS = 2_000
+/** Sources kept per answer. */
+export const SCRIBE_SOURCES_MAX = 12
+
+/** The tools `scribe.v1` names. */
+export const SCRIBE_READ_TOOLS = ['search_book', 'open_scene', 'list_notes', 'open_note'] as const
+export const SCRIBE_NOTE_TOOLS = ['edit_note', 'create_note'] as const
+export const SCRIBE_PROSE_TOOLS = ['propose_prose_edit'] as const
+export const SCRIBE_TOOLS = [
+  ...SCRIBE_READ_TOOLS,
+  ...SCRIBE_NOTE_TOOLS,
+  ...SCRIBE_PROSE_TOOLS
+] as const
+export type ScribeTool = (typeof SCRIBE_TOOLS)[number]
+
+/** What a message may write: note pages, prose suggestions. */
+export interface ScribeAccess {
+  notes: boolean
+  prose: boolean
+}
+
+/**
+ * "Save that", "put it in Mara's page", "add this to the timeline", "write that down", "note
+ * that": the author asking Brainstorm to keep what was said.
+ */
+const SAVE_REQUEST = new RegExp(
+  [
+    String.raw`\b(save|keep|jot|store)\b[^.?!\n]{0,30}\b(that|this|it|these|those|them|down)\b`,
+    String.raw`\bput (that|this|it|these|those|them)\b`,
+    String.raw`\b(add|write|file) (that|this|it|these|those|them)\b[^.?!\n]{0,30}\b(to|in|into|down)\b`,
+    String.raw`\bnote (that|this|it) down\b`,
+    String.raw`\bupdate (my|the) notes?\b`
+  ].join('|'),
+  'i'
+)
+
+/** Whether a Brainstorm message asks her to keep something in the notes. */
+export function wantsSave(message: string): boolean {
+  return SAVE_REQUEST.test(message)
+}
+
+/**
+ * What a message may write in `mode` (the author's decision of 2026-10-15): Brainstorm writes
+ * nothing unless the message asks her to save, and then only note pages; Write and Vibe edit
+ * notes and suggest prose.
+ */
+export function scribeAccess(mode: AssistantMode, message: string): ScribeAccess {
+  if (mode === 'brainstorm') return { notes: wantsSave(message), prose: false }
+  return { notes: true, prose: true }
+}
+
+/** A page source's kind: a note page, a story-bible sheet, a Library upload (until phase 4). */
+export const SCRIBE_PAGE_KINDS = ['note', 'sheet', 'library'] as const
+export const ScribePageKind = z.enum(SCRIBE_PAGE_KINDS)
+export type ScribePageKind = z.infer<typeof ScribePageKind>
+
+/** The scenes and pages an answer used, under it, each opening where it is. */
+export const ScribeSources = z.object({
+  scenes: z.array(z.object({ nodeId: z.string(), title: z.string() })).max(SCRIBE_SOURCES_MAX),
+  pages: z
+    .array(z.object({ id: z.string(), title: z.string(), kind: ScribePageKind }))
+    .max(SCRIBE_SOURCES_MAX)
+})
+export type ScribeSources = z.infer<typeof ScribeSources>

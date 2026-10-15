@@ -23,6 +23,7 @@ import {
   type ClearGroup,
   type ClearOption
 } from '@shared/bibleClear'
+import { openNotebookPage } from '@renderer/features/notebook/openPage'
 import { AiWaitText } from './AiWaitText'
 import { AI_WAIT_PHRASES } from './aiWaitPhrases'
 import { canUndoChange, useAssistantStore } from './assistantStore'
@@ -317,6 +318,33 @@ function ClearCard({
   )
 }
 
+/**
+ * A note page Ms Scribe edited or created (notes redesign phase 1): the changed lines
+ * highlighted (what went struck through, what came in colour) and a link that opens the page in
+ * the notes area. Her edit is already in the notes; its Undo sits on the log line.
+ */
+function NotebookChange({
+  edit
+}: {
+  edit: Extract<AgentEdit, { kind: 'notebook' }>
+}): React.JSX.Element {
+  return (
+    <div className="mt-0.5 flex flex-col gap-0.5">
+      {edit.before !== edit.after ? (
+        <FixDiff quote={edit.before} fix={edit.after} testId="agent-change-diff" />
+      ) : null}
+      <button
+        type="button"
+        data-testid="agent-change-open-note"
+        onClick={() => openNotebookPage(edit.pageId)}
+        className="self-start text-xs text-fg-muted underline-offset-2 hover:text-fg hover:underline"
+      >
+        Open {edit.title}
+      </button>
+    </div>
+  )
+}
+
 /** The line an applied, skipped, undone, or failed edit leaves in the chat. */
 function logLine(change: AgentChange): string {
   const { edit } = change
@@ -392,15 +420,17 @@ export function AgentChanges({
               {change.status === 'applied' ? (
                 <Check size={12} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
               ) : null}
-              <span className="min-w-0 flex-1 break-words">
+              <div className="min-w-0 flex-1 break-words">
                 {logLine(change)}
                 {change.notice !== null ? (
                   <span data-testid="agent-change-notice" className="block text-fg-muted">
                     {change.notice}
                   </span>
                 ) : null}
-              </span>
-              {change.status === 'applied' && canUndoChange(change.id) ? (
+                {change.edit.kind === 'notebook' ? <NotebookChange edit={change.edit} /> : null}
+              </div>
+              {change.status === 'applied' &&
+              (change.edit.kind === 'notebook' || canUndoChange(change.id)) ? (
                 <button
                   type="button"
                   data-testid="agent-change-undo"

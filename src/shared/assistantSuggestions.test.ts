@@ -26,7 +26,7 @@ const EVERYTHING: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([
 
 function context(patch: Partial<SuggestionContext> = {}): SuggestionContext {
   return {
-    mode: 'auto',
+    mode: 'vibe',
     allowed: EVERYTHING,
     sceneLength: 5_000,
     selection: false,
@@ -90,9 +90,9 @@ describe('assistantSuggestions', () => {
     expect(list).toContain('What happened in this scene?')
   })
 
-  it('fits each mode: Plan offers only what changes nothing; Ask and Auto may write (2026-10-07)', () => {
+  it('fits each mode: Brainstorm offers only what changes nothing; Write and Vibe may write', () => {
     const writing = new Set<AiFeatureId>([...EVERYTHING, 'agent'])
-    const plan = assistantSuggestions(context({ mode: 'plan', allowed: writing }), 0)
+    const plan = assistantSuggestions(context({ mode: 'brainstorm', allowed: writing }), 0)
     expect(plan).toEqual([
       'What happens next here?',
       'Who are the main characters so far?',
@@ -102,7 +102,7 @@ describe('assistantSuggestions', () => {
       'What is still unresolved in the story?',
       'Talk me through where the story goes'
     ])
-    for (const mode of ['ask', 'auto'] as const) {
+    for (const mode of ['write', 'vibe'] as const) {
       const list = assistantSuggestions(context({ mode, allowed: writing }), 0)
       expect(list).toContain('Proofread this scene')
       expect(list).toContain('Continue the scene')

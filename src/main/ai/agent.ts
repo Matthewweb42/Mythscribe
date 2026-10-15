@@ -1,4 +1,4 @@
-import { estimateTokens, inputBudget } from '@shared/ai'
+import { estimateTokens, inputBudget, type AiFeatureId, type Tier } from '@shared/ai'
 import {
   AGENT_ANSWER_MAX,
   AGENT_COST_CAP_USD,
@@ -35,7 +35,8 @@ import {
   resolveAgentEdit,
   runAgentTool,
   sheetByName,
-  type AgentProject
+  type AgentProject,
+  type ToolOutcome
 } from './agentTools'
 import { checkChatFidelity } from './chat'
 import { headTruncate } from './context/chatContext'
@@ -47,8 +48,9 @@ import { renderAgentFocus, type AgentTranscriptStep } from './prompts/agent.v1'
 import type { BuildAgentPromptV2Input } from './prompts/agent.v2'
 import type { BuildAgentPromptV3Input } from './prompts/agent.v3'
 import { buildAgentPromptV8, type BuiltAgentPromptV8 } from './prompts/agent.v8'
+import type { PromptVersion } from './prompts/catalogue'
 import type { ChatTurn } from './prompts/chat.v1'
-import { AiCancelledError, type CompletionUsage } from './providers/types'
+import { AiCancelledError, type AiMessage, type CompletionUsage } from './providers/types'
 import { runAiStream, sha256, type AiRequestDeps, type AiRequestResult } from './request'
 
 export interface AgentInput {
@@ -127,6 +129,8 @@ export type AgentReply =
       edits: unknown[]
       /** F-9.10 (agent.v4): the raw organise request, or undefined. */
       organise?: unknown
+      /** Notes redesign (scribe.v1): the refs of the scenes and pages the answer used, raw. */
+      sources: unknown[]
     }
 
 /**
@@ -171,7 +175,14 @@ export function parseAgentReply(text: string): AgentReply {
   try {
     json = JSON.parse(unfence(text))
   } catch {
-    return { kind: 'answer', answer: text.trim(), found: true, citations: [], edits: [] }
+    return {
+      kind: 'answer',
+      answer: text.trim(),
+      found: true,
+      citations: [],
+      edits: [],
+      sources: []
+    }
   }
   const reply = asRecord(json)
   if (typeof reply.tool === 'string') {
@@ -183,7 +194,8 @@ export function parseAgentReply(text: string): AgentReply {
     found: reply.found !== false,
     citations: Array.isArray(reply.citations) ? reply.citations : [],
     edits: Array.isArray(reply.edits) ? reply.edits : [],
-    organise: reply.organise
+    organise: reply.organise,
+    sources: Array.isArray(reply.sources) ? reply.sources : []
   }
 }
 
@@ -329,7 +341,120 @@ export async function runAgent(
         selection: input.focus.selection.trim()
       })
 
-  const outer = input.requestId === undefined ? null : registerInflight(input.requestId)
+  const base: BuildAgentPromptV3Input = {
+    access: input.access,
+    voice: null,
+    map,
+    focus,
+    history: input.history,
+    message: input.message,
+    steps: [],
+    final: false
+  }
+  const run = await runAgentLoop(
+    deps,
+    {
+      feature: 'agent',
+      tier: 'strong',
+      ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
+      maxSteps: AGENT_MAX_STEPS,
+      costCapUsd: AGENT_COST_CAP_USD,
+      outOfSteps: AGENT_OUT_OF_STEPS,
+      build: (steps, { final, retry }) =>
+        fitAgentPrompt(retry ? { ...base, steps, final, retry: true } : { ...base, steps, final }),
+      runTool: (tool, args) => runAgentTool(project, active?.id ?? null, tool, args, AGENT_TOOLS_V6)
+    },
+    onStep,
+    hooks
+  )
+  const { steps, usage, costUsd, cached, model, promptVersion } = run
+  if (run.outcome.kind === 'cutOff') {
+    return {
+      answer: run.outcome.message,
+      query: null,
+      changes: [],
+      organise: null,
+      dropped: 0,
+      steps,
+      usage,
+      costUsd,
+      cached: false,
+      model,
+      promptVersion
+    }
+  }
+  return {
+    ...finishAnswer(project, input.access, run.outcome.reply, profile),
+    steps,
+    usage,
+    costUsd,
+    cached,
+    model,
+    promptVersion
+  }
+}
+
+/** One step's prompt as the loop sends it: a catalogued version, its messages and its cap. */
+export interface AgentLoopPrompt {
+  version: PromptVersion
+  messages: AiMessage[]
+  maxTokens: number
+}
+
+/**
+ * What one tool-using run is (F-5.22's loop, shared since the notes redesign of 2026-10-15 with
+ * Ms Scribe's v1 chat, `src/main/scribe2/run.ts`): the feature and tier every step goes out on,
+ * the caps, how a step's prompt is built from the transcript so far, and how a tool call runs.
+ * `runTool` never throws for the model's mistakes; it answers a result that says what went wrong.
+ */
+export interface AgentLoopSpec<P extends AgentLoopPrompt> {
+  feature: AiFeatureId
+  tier: Tier
+  requestId?: string
+  maxSteps: number
+  costCapUsd: number
+  /** The answer when the model still calls a tool after the last allowed step. */
+  outOfSteps: string
+  build: (steps: AgentTranscriptStep[], flags: { final: boolean; retry: boolean }) => P
+  runTool: (tool: unknown, args: Record<string, unknown>) => ToolOutcome
+}
+
+/** The model's answer as the loop settles it (raw, for the caller to finish). */
+export type AgentAnswerReply = Extract<AgentReply, { kind: 'answer' }>
+
+/** How a run ended: the model's answer, or a reply that stayed broken after its retry. */
+export type AgentLoopOutcome =
+  { kind: 'answer'; reply: AgentAnswerReply } | { kind: 'cutOff'; message: string }
+
+export interface AgentLoopResult {
+  outcome: AgentLoopOutcome
+  steps: AgentStep[]
+  /** Summed over every step. */
+  usage: CompletionUsage
+  costUsd: number
+  /** True only when every step came from the cache. */
+  cached: boolean
+  model: string
+  promptVersion: string
+}
+
+/**
+ * The research loop of the chat agent (F-5.22), for any feature that speaks its JSON protocol:
+ * each step is one JSON request through `runAiStream` (a ledger row each) whose reply's `answer`
+ * streams to `hooks.answer`; a tool call runs (`spec.runTool`), shows through `onStep`, and goes
+ * back to the model as `Result of <tool>:`; after `maxSteps` lookups or `costCapUsd` spent the
+ * model is told to answer at once. A reply cut off or unreadable is asked once more with `retry`
+ * (`hooks.reset` voids what streamed); if that fails too the run ends `cutOff` with the step's
+ * request id. Cancel (F-5.10): the run registers `requestId` itself, and an abort of it stops the
+ * step in flight (each step registers `agentStepRequestId`) and the loop before the next.
+ */
+export async function runAgentLoop<P extends AgentLoopPrompt>(
+  deps: AiRequestDeps,
+  spec: AgentLoopSpec<P>,
+  onStep: (step: AgentStep) => void,
+  hooks: AgentHooks = {}
+): Promise<AgentLoopResult> {
+  const outer = spec.requestId === undefined ? null : registerInflight(spec.requestId)
   let current: string | null = null
   const stopStep = (): void => {
     if (current !== null) cancelInflight(current)
@@ -344,10 +469,7 @@ export async function runAgent(
   let model = ''
   let promptVersion = ''
   /** Sends one step (or its retry), streaming the answer text, and adds it to the run's totals. */
-  const send = async (
-    prompt: BuiltAgentPromptV8,
-    requestId: string | null
-  ): Promise<AiRequestResult> => {
+  const send = async (prompt: P, requestId: string | null): Promise<AiRequestResult> => {
     if (outer?.signal.aborted === true) throw new AiCancelledError('The request was stopped.')
     current = requestId
     const answer = new AnswerStream()
@@ -355,8 +477,8 @@ export async function runAgent(
     const reply = await runAiStream(
       deps,
       {
-        feature: 'agent',
-        tier: 'strong',
+        feature: spec.feature,
+        tier: spec.tier,
         messages: prompt.messages,
         maxTokens: prompt.maxTokens,
         json: true,
@@ -383,58 +505,39 @@ export async function runAgent(
     }
     return reply
   }
+  const done = (outcome: AgentLoopOutcome, allCached: boolean): AgentLoopResult => ({
+    outcome,
+    steps,
+    usage,
+    costUsd,
+    cached: allCached,
+    model,
+    promptVersion
+  })
 
   try {
     for (let n = 0; ; n++) {
-      const final = n >= AGENT_MAX_STEPS || costUsd >= AGENT_COST_CAP_USD
-      const base: BuildAgentPromptV3Input = {
-        access: input.access,
-        voice: null,
-        map,
-        focus,
-        history: input.history,
-        message: input.message,
-        steps: transcript,
-        final
-      }
-      const stepId = input.requestId === undefined ? null : agentStepRequestId(input.requestId, n)
-      const first = await send(fitAgentPrompt(base), stepId)
+      const final = n >= spec.maxSteps || costUsd >= spec.costCapUsd
+      const stepId = spec.requestId === undefined ? null : agentStepRequestId(spec.requestId, n)
+      const first = await send(spec.build(transcript, { final, retry: false }), stepId)
       let reply = first
       let parsed = readAgentReply(first.text, first.finishReason ?? null)
       if (parsed.kind === 'broken') {
         // 2026-10-07: asked once more, briefly and with room, before anything is shown.
         if (stepId !== null) hooks.note?.(stepId, brokenNote(parsed.reason, first, true))
-        const retryId =
-          input.requestId === undefined ? null : agentRetryRequestId(input.requestId, n)
-        reply = await send(fitAgentPrompt({ ...base, retry: true }), retryId)
+        const retryId = spec.requestId === undefined ? null : agentRetryRequestId(spec.requestId, n)
+        reply = await send(spec.build(transcript, { final, retry: true }), retryId)
         parsed = readAgentReply(reply.text, reply.finishReason ?? null)
         if (parsed.kind === 'broken') {
           if (retryId !== null) hooks.note?.(retryId, brokenNote(parsed.reason, reply, false))
           const id = retryId ?? stepId
-          return {
-            answer:
-              id === null ? AGENT_CUT_OFF_MESSAGE : `${AGENT_CUT_OFF_MESSAGE} (Request ${id})`,
-            query: null,
-            changes: [],
-            organise: null,
-            dropped: 0,
-            steps,
-            usage,
-            costUsd,
-            cached: false,
-            model,
-            promptVersion
-          }
+          const message =
+            id === null ? AGENT_CUT_OFF_MESSAGE : `${AGENT_CUT_OFF_MESSAGE} (Request ${id})`
+          return done({ kind: 'cutOff', message }, false)
         }
       }
       if (parsed.kind === 'tool' && !final) {
-        const outcome = runAgentTool(
-          project,
-          active?.id ?? null,
-          parsed.tool,
-          parsed.args,
-          AGENT_TOOLS_V6
-        )
+        const outcome = spec.runTool(parsed.tool, parsed.args)
         steps.push(outcome.step)
         onStep(outcome.step)
         const name = typeof parsed.tool === 'string' ? parsed.tool : 'tool'
@@ -444,23 +547,22 @@ export async function runAgent(
         })
         continue
       }
-      const settled =
+      const settled: AgentAnswerReply =
         parsed.kind === 'tool'
-          ? { answer: AGENT_OUT_OF_STEPS, found: true, citations: [], edits: [] }
+          ? {
+              kind: 'answer',
+              answer: spec.outOfSteps,
+              found: true,
+              citations: [],
+              edits: [],
+              sources: []
+            }
           : parsed
-      return {
-        ...finishAnswer(project, input.access, settled, profile),
-        steps,
-        usage,
-        costUsd,
-        cached,
-        model,
-        promptVersion
-      }
+      return done({ kind: 'answer', reply: settled }, cached)
     }
   } finally {
     outer?.signal.removeEventListener('abort', stopStep)
-    if (input.requestId !== undefined) releaseInflight(input.requestId)
+    if (spec.requestId !== undefined) releaseInflight(spec.requestId)
   }
 }
 

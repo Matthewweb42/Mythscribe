@@ -60,9 +60,9 @@ interface Entry {
 }
 
 /** Every mode: a prompt that changes nothing in the book. */
-const ANY: readonly AssistantMode[] = ['auto', 'ask', 'plan']
-/** Auto and Ask: a prompt whose answer proposes or makes an edit, which Plan never does. */
-const EDITS: readonly AssistantMode[] = ['auto', 'ask']
+const ANY: readonly AssistantMode[] = ['brainstorm', 'write', 'vibe']
+/** Write and Vibe: a prompt whose answer proposes or makes an edit, which Brainstorm never does. */
+const EDITS: readonly AssistantMode[] = ['write', 'vibe']
 
 /** Features reached through the router (`route`). */
 const ROUTED: ReadonlySet<AiFeatureId> = new Set<AiFeatureId>([

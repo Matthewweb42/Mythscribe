@@ -4,6 +4,7 @@ import { ENTITY_NAME_MAX, EntityFieldId, EntityKind } from './entities'
 import { FactStatus } from './facts'
 import { RecordPage } from './memory/records'
 import { SHEET_LINE_MAX, SheetLineTurn } from './scribe'
+import { SCRIBE_DIFF_CHARS, SCRIBE_TOOLS } from './scribe2'
 import { TAG_NAME_MAX } from './tags'
 import { SCENE_SYNOPSIS_MAX } from './sceneMeta'
 
@@ -135,7 +136,9 @@ export const AGENT_TOOLS = [
   'timeline',
   'ideas',
   'todos',
-  'check'
+  'check',
+  // Notes redesign phase 1: Ms Scribe's v1 tools (`SCRIBE_TOOLS`, scribe.v1).
+  ...SCRIBE_TOOLS
 ] as const
 export const AgentTool = z.enum(AGENT_TOOLS)
 export type AgentTool = z.infer<typeof AgentTool>
@@ -353,6 +356,23 @@ export const AgentEdit = z.discriminatedUnion('kind', [
     place: RecordPage.nullable(),
     text: z.string().trim().min(1).max(SHEET_LINE_MAX),
     turn: SheetLineTurn
+  }),
+  /**
+   * Notes redesign phase 1 (scribe.v1): a note page Ms Scribe edited (`created` false; `versionId`
+   * the page as it was, which Undo restores through `notebook:restoreVersion`) or created
+   * (`created` true; Undo deletes it). Applied in main as she writes, so it reaches the chat
+   * already applied. `before` and `after` are the page's plain text around the change (cut to
+   * `SCRIBE_DIFF_CHARS`), for its highlight.
+   */
+  z.object({
+    kind: z.literal('notebook'),
+    pageId: z.string(),
+    title: z.string(),
+    created: z.boolean(),
+    versionId: z.string().nullable(),
+    section: z.string().nullable(),
+    before: z.string().max(SCRIBE_DIFF_CHARS),
+    after: z.string().max(SCRIBE_DIFF_CHARS)
   })
 ])
 export type AgentEdit = z.infer<typeof AgentEdit>
@@ -569,6 +589,12 @@ export function describeEdit(edit: AgentEdit): string {
         : edit.place === 'ideas'
           ? `Add to ${edit.name}’s Ideas: “${shownLine(edit.text)}”`
           : `Pin on ${edit.name}’s sheet: “${shownLine(edit.text)}”`
+    case 'notebook':
+      return edit.created
+        ? `Created the note “${edit.title}”`
+        : edit.section === null
+          ? `Edited the note “${edit.title}”`
+          : `Edited “${edit.section}” in the note “${edit.title}”`
   }
 }
 

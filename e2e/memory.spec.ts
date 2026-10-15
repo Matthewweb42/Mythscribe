@@ -2727,7 +2727,7 @@ test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet 
     providerBodies.filter((body) => body.messages[0]?.content.startsWith(SCRIBE_SENTINEL) === true)
   const citeBodies = (): typeof providerBodies =>
     providerBodies.filter((body) => body.messages[0]?.content.startsWith(CITE_SENTINEL) === true)
-  const send = async (mode: 'Auto' | 'Ask' | 'Plan', message: string): Promise<void> => {
+  const send = async (mode: 'Vibe' | 'Write' | 'Brainstorm', message: string): Promise<void> => {
     await assistant.getByRole('radio', { name: mode, exact: true }).click()
     await messageBox.fill(message)
     await messageBox.press('Enter')
@@ -2738,7 +2738,7 @@ test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet 
   // one cite.v1 request checks it (P3 slice 3).
   const before = scribeBodies().length
   const citesBefore = citeBodies().length
-  await send('Ask', 'What did Orrin hear?')
+  await send('Write', 'What did Orrin hear?')
   await expect(turns).toHaveCount(2)
   await expect(turns.nth(1)).toContainText('Orrin overheard Tomas.', { timeout: 15_000 })
   expect(scribeBodies()).toHaveLength(before + 1)
@@ -2787,7 +2787,7 @@ test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet 
 
   // Auto, an explicit sheet write: the line lands on Mara's Pinned with the chat's mark, the
   // turn says so with Undo, and Undo takes it out.
-  await send('Auto', "Add to Mara's sheet that she hates the sea.")
+  await send('Vibe', "Add to Mara's sheet that she hates the sea.")
   await expect(turns).toHaveCount(4)
   const pinned = turns.nth(3).getByTestId('agent-change')
   await expect(pinned).toHaveAttribute('data-status', 'applied', { timeout: 15_000 })
@@ -2800,7 +2800,7 @@ test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet 
   await expect.poll(() => pageLines(mara, 'pinned')).toEqual([])
 
   // Ask, a save Ms Scribe cannot place: "Is this an idea or canon?"; Idea files it in Ideas.
-  await send('Ask', 'Save this for Mara: a scar from the fire.')
+  await send('Write', 'Save this for Mara: a scar from the fire.')
   await expect(turns).toHaveCount(6)
   const question = turns.nth(5).getByTestId('agent-change')
   await expect(question).toContainText('Is this an idea or canon?', { timeout: 15_000 })
@@ -2814,7 +2814,7 @@ test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet 
   // Plan: the same request goes out without the edit list, nothing is written, and the turn says
   // Plan writes nothing (the pin the reply still carried was dropped).
   const planBefore = scribeBodies().length
-  await send('Plan', "Add to Mara's sheet that she hates the sea.")
+  await send('Brainstorm', "Add to Mara's sheet that she hates the sea.")
   await expect(turns).toHaveCount(8)
   await expect(turns.nth(7)).toContainText('I would add that to Mara', { timeout: 15_000 })
   await expect(turns.nth(7)).toContainText('Plan mode writes nothing; switch to Ask or Auto')
@@ -2829,7 +2829,7 @@ test('story memory v2: Ms Scribe v9 answers, checks its quotes and writes sheet 
   // the turn reads Not found with where Ms Scribe looked. Two answer calls, one check each.
   const answersBefore = scribeBodies().length
   const checksBefore = citeBodies().length
-  await send('Ask', 'Who sold the map?')
+  await send('Write', 'Who sold the map?')
   await expect(turns).toHaveCount(10)
   await expect(turns.nth(9)).toContainText(
     'Not found in the manuscript (I looked in the open scene 1.1',
@@ -2904,7 +2904,7 @@ test('story memory v2: the navigator routes and finds, instant cards answer (P3 
   if ((await scribeButton.getAttribute('aria-pressed')) !== 'true') await scribeButton.click()
   const assistant = page.getByTestId('assistant-panel')
   await expect(assistant).toBeVisible()
-  await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
+  await assistant.getByRole('radio', { name: 'Write', exact: true }).click()
   const messageBox = assistant.getByRole('textbox', { name: 'Message' })
   const turns = assistant.locator('[data-testid="chat-turn"]')
   const send = async (message: string): Promise<void> => {
@@ -3075,7 +3075,7 @@ test('story memory v2: Ms Scribe in the chat (P3 slice 5)', async () => {
   if ((await scribeButton.getAttribute('aria-pressed')) !== 'true') await scribeButton.click()
   const assistant = page.getByTestId('assistant-panel')
   await expect(assistant).toBeVisible()
-  await assistant.getByRole('radio', { name: 'Ask', exact: true }).click()
+  await assistant.getByRole('radio', { name: 'Write', exact: true }).click()
   const messageBox = assistant.getByRole('textbox', { name: 'Message' })
   const turns = assistant.locator('[data-testid="chat-turn"]')
   const send = async (message: string): Promise<void> => {

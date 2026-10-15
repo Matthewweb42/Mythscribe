@@ -405,7 +405,26 @@ export async function applyAgentEdit(
       throw new AgentEditError('Undo the last turn from the chat')
     case 'sheetLine':
       return applySheetLine(edit, onNotice)
+    case 'notebook':
+      // Ms Scribe's note edits land in main as she writes them; the chat only undoes them.
+      throw new AgentEditError('This note edit is already in your notes')
   }
+}
+
+/**
+ * The Undo of one of Ms Scribe's note edits (notes redesign phase 1): an edited page goes back to
+ * the version kept before her write (`notebook:restoreVersion`); a page she created is deleted.
+ * Both are stored with the turn, so the Undo still works after a restart.
+ */
+export async function undoNotebookEdit(
+  edit: Extract<AgentEdit, { kind: 'notebook' }>
+): Promise<void> {
+  if (edit.created) {
+    await ipc().invoke('notebook:delete', { id: edit.pageId })
+    return
+  }
+  if (edit.versionId === null) throw new AgentEditError('That edit kept no earlier version')
+  await ipc().invoke('notebook:restoreVersion', { versionId: edit.versionId })
 }
 
 /** What a sheet line whose place the author has not picked says when it is applied. */

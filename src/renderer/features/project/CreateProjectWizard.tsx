@@ -368,8 +368,9 @@ export function CreateProjectWizard({
               <p data-testid="wizard-dial-explainer" className="mt-4 mb-0 text-sm text-fg-muted">
                 You write; with AI on, it works behind you. {BACKGROUND_WORK[memory]}{' '}
                 {assistantName} opens beside the editor for questions and one-click actions. It
-                starts in {ASSISTANT_MODE_LABEL[DEFAULT_ASSISTANT_MODE]}: every change it wants to
-                make asks you first. Switch to Auto or Plan under the chat box.
+                starts in {ASSISTANT_MODE_LABEL[DEFAULT_ASSISTANT_MODE]}: it edits your notes, each
+                with Undo, and suggests changes to the book for you to accept. Switch to Brainstorm
+                or Vibe under the chat box.
               </p>
               <fieldset ref={fieldsetRef} className="mt-3 m-0 flex flex-col gap-2 border-0 p-0">
                 <legend className="mb-2 p-0 text-sm font-medium">{USE_AI_LABEL}</legend>

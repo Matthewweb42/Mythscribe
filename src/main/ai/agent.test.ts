@@ -618,7 +618,8 @@ describe('parseAgentReply', () => {
       answer: 'Yes.',
       found: false,
       citations: [],
-      edits: []
+      edits: [],
+      sources: []
     })
     expect(parseAgentReply('Just words.')).toMatchObject({ kind: 'answer', answer: 'Just words.' })
   })
