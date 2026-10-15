@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CONTEXT_FILE_MAX_BYTES } from './contextLibrary'
 import { docToText } from './docText'
 import { TiptapNode, type TiptapNodeT } from './tiptap'
 
@@ -67,7 +68,40 @@ export function notebookDocFromText(text: string): TiptapNodeT {
   return {
     type: 'doc',
     content: lines.map((line) =>
-      line.length === 0 ? { type: 'paragraph' } : { type: 'paragraph', content: [{ type: 'text', text: line }] }
+      line.length === 0
+        ? { type: 'paragraph' }
+        : { type: 'paragraph', content: [{ type: 'text', text: line }] }
     )
   }
+}
+
+/** The most folders deep a dropped folder keeps (deeper files land in the last folder kept). */
+export const NOTEBOOK_IMPORT_DEPTH_MAX = 8
+
+/**
+ * One file for `notebook:import`, carried as bytes (a drop on the Notes tree). `folders` is the
+ * path of folders it was dropped in, outermost first (a dropped folder `World` holding
+ * `Magic/runes.md` gives `['World', 'Magic']`); empty for a file dropped on its own.
+ */
+export const NotebookImportFile = z.object({
+  name: z.string().min(1),
+  folders: z.array(z.string().min(1)).max(NOTEBOOK_IMPORT_DEPTH_MAX).default([]),
+  data: z
+    .instanceof(Uint8Array)
+    .refine((data) => data.byteLength <= CONTEXT_FILE_MAX_BYTES, 'The file is too large')
+})
+export type NotebookImportFile = z.infer<typeof NotebookImportFile>
+
+/** What an import made (folders and pages, in the order made) and the files it left out, with why. */
+export const NotebookImportResult = z.object({
+  items: z.array(NotebookItem),
+  skipped: z.array(z.object({ name: z.string(), reason: z.string() }))
+})
+export type NotebookImportResult = z.infer<typeof NotebookImportResult>
+
+/** A page's title from its file name: the name without its extension, cut to the title limit. */
+export function notebookTitleFromFileName(name: string): string {
+  const dot = name.lastIndexOf('.')
+  const base = (dot > 0 ? name.slice(0, dot) : name).trim()
+  return (base === '' ? 'Untitled' : base).slice(0, NOTEBOOK_TITLE_MAX)
 }

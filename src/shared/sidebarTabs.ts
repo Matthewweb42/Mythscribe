@@ -23,7 +23,9 @@ export const SIDEBAR_TOOL_IDS = [
   // F-9.13: what the AI added to the story bible on its own, with Undo.
   'changes',
   // F-16.8 (story memory v2 only): the author's uploaded and written research.
-  'research'
+  'research',
+  // Notes redesign phase 1 (2026-10-15): the author's note pages in folders (the notebook).
+  'notes'
 ] as const
 export type SidebarToolId = (typeof SIDEBAR_TOOL_IDS)[number]
 

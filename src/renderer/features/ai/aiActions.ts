@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import type { Editor } from '@tiptap/core'
 import { useEditorState } from '@tiptap/react'
 import type { AiFeatureId, Tier } from '@shared/ai'
+import type { ArchivableFeature } from '@shared/archivedFeatures'
 import {
   AI_DATA_SHARING,
   needsSwitchText,
@@ -28,6 +29,7 @@ import { useSceneSuggestStore } from '@renderer/features/editor/sceneSuggestStor
 import { useSummaryStore } from '@renderer/features/editor/summaryStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { isManuscriptDocument, useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { archivedNow } from '@renderer/features/shell/archived'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useContinuityStore } from './continuityStore'
 
@@ -217,6 +219,12 @@ function sceneActionBusy(id: SceneActionId, nodeId: string | null): string | nul
   }
 }
 
+/** The actions an archived feature (Settings › Archived features) turns off. */
+const ARCHIVED_ACTIONS: Partial<Record<AiActionId, ArchivableFeature>> = {
+  critique: 'editorsNotes',
+  proofread: 'proofread'
+}
+
 /**
  * Why action `id` cannot run on `open`, or null when it can: the dial, then the toggle, then the
  * scene, then the length, then what keeps it busy (`featureActionReason`). `conversationBusy`
@@ -228,6 +236,11 @@ export function aiActionReason(
   open: OpenScene,
   conversationBusy: boolean
 ): string | null {
+  // 2026-10-15: Editor's notes and Proofread are archived unless switched back on.
+  const archived = ARCHIVED_ACTIONS[id]
+  if (archived !== undefined && archivedNow(archived)) {
+    return `${AI_ACTIONS[id].label} is archived. Switch it back on in Settings › Archived features.`
+  }
   const { feature, minLength } = AI_ACTIONS[id]
   const busy =
     id === 'whatNext' || id === 'recap'

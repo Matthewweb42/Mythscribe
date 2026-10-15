@@ -52,6 +52,8 @@ import { describeError } from '@renderer/lib/errors'
 import { AiDialSection } from './AiDialSection'
 import { AssistantNameField } from './AssistantNameField'
 import { AuthorRulesSection } from './AuthorRulesSection'
+import { useIsArchived } from '@renderer/features/shell/archived'
+import { Unarchived } from '@renderer/features/shell/Unarchived'
 import { ProvenanceSection } from './ProvenanceSection'
 import { VoiceSection } from './VoiceSection'
 import { WritingPresetsSection } from './WritingPresetsSection'
@@ -233,11 +235,16 @@ export function AiSettingsTab({
         </div>
       )}
 
-      <WritingPresetsSection />
+      {/* 2026-10-15: archived features are hidden (Settings › Archived features). */}
+      <Unarchived feature="writingPresets">
+        <WritingPresetsSection />
+      </Unarchived>
 
-      <VoiceSection />
+      <Unarchived feature="voiceProfile">
+        <VoiceSection />
+      </Unarchived>
 
-      <AuthorRulesSection />
+      <ArchivableAuthorRules />
 
       <ProvenanceSection />
 
@@ -1143,4 +1150,11 @@ function UsageHistory(): React.JSX.Element {
       )}
     </div>
   )
+}
+
+/** The author rules and banned phrases, each left out while archived (2026-10-15). */
+function ArchivableAuthorRules(): React.JSX.Element {
+  const rules = !useIsArchived('authorRules')
+  const bannedPhrases = !useIsArchived('bannedPhrases')
+  return <AuthorRulesSection rules={rules} bannedPhrases={bannedPhrases} />
 }

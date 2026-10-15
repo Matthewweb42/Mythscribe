@@ -5,6 +5,7 @@ import type { MatterTemplateId } from '@shared/matterTemplates'
 import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { useRecordStore } from '@renderer/features/records/recordStore'
+import { useNotebookStore } from '@renderer/features/notebook/notebookStore'
 import { ipc } from '@renderer/lib/ipc'
 import {
   resolveCreateTarget,
@@ -395,6 +396,8 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       useRecordStore.getState().select(null)
       // F-14.15: and the Edits workspace or a report, the same way.
       useEditPassViewStore.getState().close()
+      // Notes redesign phase 1: and an open note page, the same way.
+      useNotebookStore.getState().close()
     }
     set({ selectedId: id })
   },

@@ -2931,7 +2931,8 @@ test('story memory v2: the navigator routes and finds, instant cards answer (P3 
                 : 'other'
 
   // F-5.26 kept: a vague request is one navigator request whose first step picks an edit pass
-  // that asks first: "What should I focus on?" with the five quick picks; Tighten prose runs one
+  // that asks first: "What should I focus on?" with the quick picks (four since 2026-10-15:
+  // Editor's notes is archived by default, Settings › Archived features); Tighten prose runs one
   // edit-pass request (route.v2 is never asked).
   const improveFrom = providerBodies.length
   await send(IMPROVE_MESSAGE)
@@ -2940,7 +2941,7 @@ test('story memory v2: the navigator routes and finds, instant cards answer (P3 
   await expect(improve.getByTestId('chat-turn-action')).toHaveText('Edit pass')
   await expect(improve).toContainText('What should I focus on?')
   const choices = improve.getByTestId('edit-choice')
-  await expect(choices).toHaveCount(5)
+  await expect(choices).toHaveCount(4)
   await expect(choices.first()).toContainText('Tighten prose')
   expect(providerBodies.slice(improveFrom).map(kindOf)).toEqual(['navigate'])
   await choices.first().click()

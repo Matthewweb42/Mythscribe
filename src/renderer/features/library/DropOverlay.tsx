@@ -10,6 +10,10 @@ import { useLibraryStore } from './libraryStore'
 const carriesFiles = (event: DragEvent): boolean =>
   event.dataTransfer?.types.includes('Files') === true
 
+/** Whether the drag is over the Notes section, which takes its own file drops (`NotesTab`). */
+const overNotes = (event: DragEvent): boolean =>
+  event.target instanceof Element && event.target.closest('[data-notebook-drop]') !== null
+
 /**
  * Files dragged onto the window anywhere go to the context library (F-9.8): an overlay says so
  * while the drag is over the window, and a drop adds every file and offers to sort them. Listens
@@ -33,6 +37,8 @@ export function DropOverlay(): React.JSX.Element | null {
       if (!carriesFiles(event)) return
       event.preventDefault()
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+      // Over the Notes section its own drop hint shows instead of the overlay.
+      setOver(!overNotes(event))
     }
     const onLeave = (event: DragEvent): void => {
       if (!carriesFiles(event)) return
@@ -41,6 +47,12 @@ export function DropOverlay(): React.JSX.Element | null {
     }
     const onDrop = (event: DragEvent): void => {
       if (!carriesFiles(event)) return
+      depth = 0
+      // Notes redesign phase 1: a drop on the Notes section makes note pages there instead.
+      if (overNotes(event)) {
+        setOver(false)
+        return
+      }
       event.preventDefault()
       event.stopPropagation()
       depth = 0

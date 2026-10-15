@@ -37,6 +37,8 @@ import { resetSheetSyncStore } from '@renderer/features/entities/sheetSyncStore'
 import { resetAssistantStore, useAssistantStore } from '@renderer/features/ai/assistantStore'
 import { useDocumentStore } from '@renderer/features/editor/documentStore'
 import { useNotesStore } from '@renderer/features/editor/notesStore'
+import { resetNotebookPageStore } from '@renderer/features/notebook/notebookPageStore'
+import { resetNotebookStore } from '@renderer/features/notebook/notebookStore'
 import {
   resetEditorSettingsStore,
   useEditorSettingsStore
@@ -184,6 +186,11 @@ afterEach(() => {
   // F-10.3: nor a goals refresh after a save.
   resetGoalsStore()
   resetAiSettingsStore()
+  // Since 2026-10-15 the loaded editor settings decide which features are archived elsewhere.
+  resetEditorSettingsStore()
+  // Notes redesign phase 1: the notebook's subscription and open page.
+  resetNotebookStore()
+  resetNotebookPageStore()
   resetAuthorRulesStore()
   resetStoryBibleSettingsStore()
   resetSheetSyncStore()
@@ -261,6 +268,7 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'structure:get') return { template: null }
     if (channel === 'timeline:get') return { events: [] }
     if (channel === 'library:list') return []
+    if (channel === 'notebook:list') return []
     if (channel === 'compileState:get') return defaultCompileProjectState()
     if (channel === 'compileFormat:list') return []
     return null
@@ -408,6 +416,7 @@ describe('App', () => {
         .map((o) => o.getAttribute('aria-label') ?? o.textContent ?? '')
     expect(names()).toEqual([
       'Manuscript',
+      'Notes',
       'Characters',
       'Places',
       'Index',

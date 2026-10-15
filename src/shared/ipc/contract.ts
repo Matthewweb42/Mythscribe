@@ -172,6 +172,8 @@ import { RELATION_LABEL_MAX, RelationType } from '../relations'
 import { THREAD_NOTE_MAX, ThreadEvent, ThreadView } from '../threads'
 import { TodoCheckResult, TodoSuggestResult, TodoView } from '../todo'
 import {
+  NotebookImportFile,
+  NotebookImportResult,
   NotebookItem,
   NotebookKind,
   NotebookPage,
@@ -1302,6 +1304,20 @@ export const contract = {
   'notebook:versions': { input: z.object({ id: z.string() }), output: z.array(NotebookVersion) },
   /** Puts a page back as a version had it (Undo of Ms Scribe's edit). Pushes `notebook:changed`. */
   'notebook:restoreVersion': { input: z.object({ versionId: z.string() }), output: NotebookPage },
+  /**
+   * Imports files as note pages under `parentId` (null: the top level), one page each: Word
+   * (headings kept), Markdown, text and PDF (its text layer). `files` are dropped files as bytes,
+   * each with the folders it was dropped in, which are made as folders; omitted, main asks with
+   * the open dialog (null when cancelled). Images and other types are skipped with a reason.
+   * Pushes `notebook:changed`.
+   */
+  'notebook:import': {
+    input: z.object({
+      parentId: z.string().nullable(),
+      files: z.array(NotebookImportFile).min(1).optional()
+    }),
+    output: NotebookImportResult.nullable()
+  },
   /**
    * Crash recovery (F-8.3): writes the editor's latest unsaved state of one record to the
    * project's recovery journal (`recovery/<kind>-<id>.json`, atomic replace), overwriting any

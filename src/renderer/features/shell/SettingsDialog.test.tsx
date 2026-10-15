@@ -93,6 +93,7 @@ describe('SettingsDialog (F-7.5)', () => {
       'Editor',
       'AI',
       'Story bible',
+      'Archived features',
       'Backups',
       'Appearance',
       'Account',

@@ -284,6 +284,7 @@ import {
   restoreNotebookVersion,
   updateNotebookItem
 } from '../notebook/notebookStore'
+import { importNotebookFiles, type NotebookImportSource } from '../notebook/notebookImport'
 import {
   runTodoPass,
   suggestTodo,
@@ -2792,6 +2793,30 @@ export function registerHandlers({
     const page = restoreNotebookVersion(notebookDb(), versionId)
     notebookMoved([page.id])
     return page
+  })
+  // Dropped files come as bytes with their folders; Import files… picks paths in the open dialog.
+  register('notebook:import', async ({ parentId, files }) => {
+    manager.require()
+    let sources: NotebookImportSource[]
+    if (files === undefined) {
+      const chosen = await dialogs.chooseContextFiles()
+      if (chosen === null) return null
+      sources = chosen.map((file) => ({
+        name: path.basename(file),
+        folders: [],
+        size: fs.statSync(file).size,
+        read: () => fs.readFileSync(file)
+      }))
+    } else {
+      sources = files.map((file) => ({
+        name: file.name,
+        folders: file.folders,
+        read: () => Buffer.from(file.data)
+      }))
+    }
+    const result = await importNotebookFiles(notebookDb(), parentId, sources)
+    if (result.items.length > 0) notebookMoved(result.items.map((item) => item.id))
+    return result
   })
 
   register('todo:list', () => {

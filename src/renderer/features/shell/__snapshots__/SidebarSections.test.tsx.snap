@@ -10,6 +10,13 @@ exports[`buildSections (F-9.11) > F-16.22: lists Secrets after the categories on
     true,
   ],
   [
+    "notes",
+    "Notes",
+    "manuscript",
+    0,
+    true,
+  ],
+  [
     "character",
     "Characters",
     "bible",
@@ -148,6 +155,13 @@ exports[`buildSections (F-9.11) > F-16.22: lists Secrets after the categories on
     true,
   ],
   [
+    "notes",
+    "Notes",
+    "manuscript",
+    0,
+    true,
+  ],
+  [
     "character",
     "Characters",
     "bible",
@@ -281,6 +295,13 @@ exports[`buildSections (F-9.11) > pins the v1 list: story memory v2 never change
   [
     "manuscript",
     "Manuscript",
+    "manuscript",
+    0,
+    true,
+  ],
+  [
+    "notes",
+    "Notes",
     "manuscript",
     0,
     true,

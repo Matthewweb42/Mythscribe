@@ -1,0 +1,114 @@
+import { useState } from 'react'
+import { FilePlus, FolderPlus, Upload } from 'lucide-react'
+import { useCanWrite } from '@renderer/features/account/appAccessStore'
+import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { describeError } from '@renderer/lib/errors'
+import { takeDropped } from './droppedEntries'
+import { NotebookTree } from './NotebookTree'
+import { useNotebookStore } from './notebookStore'
+
+const BUTTON =
+  'flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent'
+
+const carriesFiles = (event: React.DragEvent): boolean => event.dataTransfer.types.includes('Files')
+
+const failed = (err: unknown): void => {
+  toast.error(describeError(err))
+}
+
+/**
+ * The Notes section of the sidebar (notes redesign phase 1, slice 1): New page, New folder and
+ * Import files… above the notebook's tree. Files and folders dropped on the section become pages
+ * (a folder keeps its folders), in the folder under the pointer, or beside the page under it, or
+ * at the top level.
+ */
+export function NotesTab(): React.JSX.Element {
+  const busy = useNotebookStore((s) => s.busy)
+  const writable = useCanWrite()
+  const [dropping, setDropping] = useState(false)
+
+  const onDrop = (event: React.DragEvent<HTMLDivElement>): void => {
+    if (!carriesFiles(event)) return
+    event.preventDefault()
+    setDropping(false)
+    const read = takeDropped(event.dataTransfer)
+    const row =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>('[data-notebook-id]')?.dataset.notebookId
+        : undefined
+    const store = useNotebookStore.getState()
+    const item = row === undefined ? undefined : store.byId[row]
+    const parentId = item === undefined ? null : item.kind === 'folder' ? item.id : item.parentId
+    if (!writable) return
+    read()
+      .then((files) => (files.length === 0 ? undefined : store.importFiles(files, parentId)))
+      .catch(failed)
+  }
+
+  return (
+    <div
+      data-notebook-drop="true"
+      data-dropping={dropping ? 'true' : undefined}
+      onDragOver={(event) => {
+        if (!carriesFiles(event)) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+        setDropping(true)
+      }}
+      onDragLeave={(event) => {
+        if (
+          !(event.relatedTarget instanceof Node) ||
+          !event.currentTarget.contains(event.relatedTarget)
+        ) {
+          setDropping(false)
+        }
+      }}
+      onDrop={onDrop}
+      className={`flex min-h-0 flex-1 flex-col ${dropping ? 'ring-2 ring-accent ring-inset' : ''}`}
+    >
+      <div
+        role="toolbar"
+        aria-label="Notes"
+        className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-line px-1.5 py-1 text-xs"
+      >
+        <button
+          type="button"
+          disabled={!writable}
+          onClick={() => {
+            useNotebookStore.getState().create('page').catch(failed)
+          }}
+          className={BUTTON}
+        >
+          <FilePlus size={12} aria-hidden="true" />
+          New page
+        </button>
+        <button
+          type="button"
+          disabled={!writable}
+          onClick={() => {
+            useNotebookStore.getState().create('folder').catch(failed)
+          }}
+          className={BUTTON}
+        >
+          <FolderPlus size={12} aria-hidden="true" />
+          New folder
+        </button>
+        <button
+          type="button"
+          disabled={!writable || busy}
+          title="Word, Markdown, text and PDF files, one page each"
+          onClick={() => {
+            useNotebookStore.getState().importFiles().catch(failed)
+          }}
+          className={BUTTON}
+        >
+          <Upload size={12} aria-hidden="true" />
+          Import files…
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <NotebookTree />
+      </div>
+    </div>
+  )
+}

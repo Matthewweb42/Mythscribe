@@ -76,6 +76,7 @@ import {
 } from '@renderer/features/editor/openPassage'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { registerPendingSave } from '@renderer/features/project/pendingSaves'
+import { archivedNow } from '@renderer/features/shell/archived'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -1408,7 +1409,9 @@ async function runEditRequest(
   // Editor's notes read one scene, so a chapter is not offered them.
   const choices =
     choice === null
-      ? EDIT_ASK_CHOICES.filter((c) => c !== 'critique' || target.kind !== 'chapter')
+      ? EDIT_ASK_CHOICES.filter(
+          (c) => c !== 'critique' || (target.kind !== 'chapter' && !archivedNow('editorsNotes'))
+        )
       : [choice]
   const turnEdit: EditTurn = { target, choices, instruction, picked: null, passId: null }
   if (choice === null) {

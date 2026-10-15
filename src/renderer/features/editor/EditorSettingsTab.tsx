@@ -19,7 +19,7 @@ import { COLUMN, editorStyle } from './column'
 import { useDictionaryStore } from './dictionaryStore'
 import { useEditorSettings, useEditorSettingsStore } from './settingsStore'
 
-type NumberKey = Exclude<keyof EditorSettings, 'sceneBreak' | 'typewriter'>
+type NumberKey = Exclude<keyof EditorSettings, 'sceneBreak' | 'typewriter' | 'unarchived'>
 
 interface NumberControl {
   key: NumberKey

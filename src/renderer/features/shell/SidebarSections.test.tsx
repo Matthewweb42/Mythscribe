@@ -195,13 +195,15 @@ describe('buildSections (F-9.11)', () => {
     todo: 0,
     sheets: {},
     research: 0,
-    records: {}
+    records: {},
+    notes: 0
   }
   const used = (built: SidebarSection[]): string[] => built.filter((s) => s.used).map((s) => s.id)
 
   it('always uses Manuscript, Characters, Places, the Index, and To do; the rest once they hold something', () => {
     expect(used(buildSections(BUILTIN_CATEGORIES, counts, 'v1'))).toEqual([
       'manuscript',
+      'notes',
       'character',
       'setting',
       'tags',
@@ -219,12 +221,14 @@ describe('buildSections (F-9.11)', () => {
         todo: 3,
         sheets: { magic: 2, world: 1 },
         research: 0,
-        records: {}
+        records: {},
+        notes: 0
       },
       'v1'
     )
     expect(used(busy)).toEqual([
       'manuscript',
+      'notes',
       'character',
       'setting',
       'world',
@@ -256,6 +260,7 @@ describe('buildSections (F-9.11)', () => {
     expect(bible.slice(-3)).toEqual(['Ships', 'c-gone', 'Index'])
     expect(used(built)).toEqual([
       'manuscript',
+      'notes',
       'character',
       'setting',
       'c-ships',
@@ -337,6 +342,7 @@ describe('buildSections (F-9.11)', () => {
     expect(isValidElement(page) ? page.type : null).toBe(ResearchTab)
     expect(used(v2)).toEqual([
       'manuscript',
+      'notes',
       'character',
       'setting',
       'thread',

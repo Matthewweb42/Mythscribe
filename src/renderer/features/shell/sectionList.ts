@@ -8,6 +8,7 @@ import {
   Library,
   ListTodo,
   ListTree,
+  NotebookPen,
   NotebookText,
   Tag,
   type LucideIcon
@@ -28,6 +29,8 @@ import { useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { EntityTab } from '@renderer/features/entities/EntityTab'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
 import { LibraryTab } from '@renderer/features/library/LibraryTab'
+import { NotesTab } from '@renderer/features/notebook/NotesTab'
+import { useNotebookStore } from '@renderer/features/notebook/notebookStore'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { ManuscriptTab } from '@renderer/features/manuscript/ManuscriptTab'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -93,6 +96,8 @@ export interface SectionCounts {
   research: number
   /** F-16.6: records per category id (story memory v2; empty in v1, which has none). */
   records: Readonly<Record<string, number>>
+  /** Notes redesign phase 1: the note pages in the notebook. */
+  notes: number
 }
 
 interface ToolDef {
@@ -110,6 +115,19 @@ const MANUSCRIPT: ToolDef = {
   icon: BookOpen,
   render: (format) => createElement(ManuscriptTab, { format }),
   count: (c) => c.documents,
+  used: () => true
+}
+
+/**
+ * Notes redesign phase 1 (2026-10-15): the notebook, right after the Manuscript in both story
+ * memories; always used.
+ */
+const NOTES: ToolDef = {
+  id: 'notes',
+  label: 'Notes',
+  icon: NotebookPen,
+  render: () => createElement(NotesTab),
+  count: (c) => c.notes,
   used: () => true
 }
 
@@ -262,6 +280,7 @@ function buildV2Sections(
   )
   return [
     toolSection(MANUSCRIPT, counts, 'manuscript'),
+    toolSection(NOTES, counts, 'manuscript'),
     ...withStrays(categories, named).map((category) =>
       recordSection(category, counts.records[category.id] ?? 0)
     ),
@@ -310,6 +329,7 @@ export function buildSections(
   const threads = all.find((category) => category.id === THREAD_KIND)
   return [
     toolSection(MANUSCRIPT, counts, 'manuscript'),
+    toolSection(NOTES, counts, 'manuscript'),
     ...all
       .filter((category) => category !== threads)
       .map((category) => categorySection(category, counts.sheets[category.id] ?? 0, 'bible')),
@@ -354,6 +374,11 @@ export function useSidebarSections(): SidebarSection[] {
   const library = useLibraryStore((s) => s.files.length)
   const changes = useChangesStore((s) => s.entries.length)
   const todo = useTodoStore((s) => s.items.length)
+  const notes = useNotebookStore((s) => {
+    let pages = 0
+    for (const item of Object.values(s.byId)) if (item.kind === 'page') pages += 1
+    return pages
+  })
   const sheets = useEntityStore(
     useShallow((s) => {
       const counts: Record<string, number> = {}
@@ -376,7 +401,7 @@ export function useSidebarSections(): SidebarSection[] {
   )
   return buildSections(
     categories,
-    { documents, tags, timeline, edits, library, changes, todo, sheets, research, records },
+    { documents, tags, timeline, edits, library, changes, todo, sheets, research, records, notes },
     memory
   )
 }

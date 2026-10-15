@@ -59,6 +59,9 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.useRealTimers()
+  // Loaded settings left here reach the next file in the worker: since 2026-10-15 they decide
+  // which features are archived (`shell/archived.ts`).
+  resetEditorSettingsStore()
 })
 
 describe('useEditorSettingsStore', () => {

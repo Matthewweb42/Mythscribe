@@ -100,6 +100,9 @@ import { SideWorkBar } from '@renderer/features/sideWork/SideWorkStatus'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { DropOverlay } from '@renderer/features/library/DropOverlay'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
+import { NotebookPageView } from '@renderer/features/notebook/NotebookPageView'
+import { useNotebookPageStore } from '@renderer/features/notebook/notebookPageStore'
+import { useNotebookStore } from '@renderer/features/notebook/notebookStore'
 import { currentStoryMemory, useStoryMemory } from '@renderer/features/project/storyMemory'
 import { usePageStore } from '@renderer/features/research/pageStore'
 import { ResearchPage } from '@renderer/features/research/ResearchPage'
@@ -342,6 +345,9 @@ export function App(): React.JSX.Element {
       useCategoryStore.getState().clear()
       // F-9.8: the Library and any upload under review belong to the project that closed.
       useLibraryStore.getState().clear()
+      // Notes redesign phase 1: the notebook and its open page belong to the project that closed.
+      useNotebookStore.getState().clear()
+      useNotebookPageStore.getState().clear()
       // F-16.8: and so do the Research meta and the open pages.
       useResearchStore.getState().clear()
       usePageStore.getState().clear()
@@ -439,6 +445,12 @@ export function App(): React.JSX.Element {
       .catch((err: unknown) => toast.error(describeError(err)))
     // F-9.8: the Library tab's files.
     useLibraryStore
+      .getState()
+      .load()
+      .catch((err: unknown) => toast.error(describeError(err)))
+    // Notes redesign phase 1: the notebook's tree; main says when Ms Scribe or an import wrote it.
+    useNotebookStore.getState().subscribe(projectId)
+    useNotebookStore
       .getState()
       .load()
       .catch((err: unknown) => toast.error(describeError(err)))
@@ -1232,7 +1244,10 @@ function useMainNodeId(): string | null {
   const recordId = useRecordStore((s) => s.selectedId)
   // F-14.15: the Edits workspace or a report takes the pane like an entity page does.
   const editView = useEditPassViewStore((s) => s.view)
+  // Notes redesign phase 1: a note page takes the pane like a sheet does.
+  const notePage = useNotebookStore((s) => s.openId)
   return useTreeStore((s) =>
+    notePage === null &&
     entityId === null &&
     recordId === null &&
     editView === null &&
@@ -1295,6 +1310,15 @@ function PaneContent({
   const focus = useFocusStore((s) => s.active)
   const folderView = useOutlineViewStore((s) => s.folderView)
   const section = useTreeStore((s) => (node === undefined ? undefined : s.sectionOf[node.id]))
+  // Notes redesign phase 1: an open note page takes the pane; picking a document closes it.
+  const notePage = useNotebookStore((s) => s.openId)
+  if (notePage !== null) {
+    return (
+      <WithSideWorkBar>
+        <NotebookPageView key={notePage} id={notePage} />
+      </WithSideWorkBar>
+    )
+  }
   if (entityId !== null) {
     return (
       <WithSideWorkBar>

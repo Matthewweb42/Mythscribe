@@ -2,6 +2,7 @@ import { createElement, type ReactNode } from 'react'
 import {
   Activity,
   Archive,
+  ArchiveRestore,
   BookMarked,
   Download,
   Monitor,
@@ -22,12 +23,14 @@ import { EditorSettingsTab } from '@renderer/features/editor/EditorSettingsTab'
 import { StoryBibleSettingsTab } from '@renderer/features/entities/StoryBibleSettingsTab'
 import { UpdatesSettingsTab } from '@renderer/features/updates/UpdatesSettingsTab'
 import { AppearanceSettingsTab } from './AppearanceSettingsTab'
+import { ArchivedFeaturesTab } from './ArchivedFeaturesTab'
 
 /** The ids of the Settings dialog tabs (F-7.5). Not persisted: the dialog opens on the first. */
 export type SettingsDialogTabId =
   | 'editor'
   | 'ai'
   | 'storyBible'
+  | 'archived'
   | 'backups'
   | 'appearance'
   | 'account'
@@ -84,6 +87,14 @@ export const SETTINGS_DIALOG_TABS: SettingsDialogTabs = [
     icon: BookMarked,
     scope: 'project',
     render: () => createElement(StoryBibleSettingsTab)
+  },
+  {
+    // Notes redesign (2026-10-15): the features put away while the notes and Ms Scribe change.
+    id: 'archived',
+    label: 'Archived features',
+    icon: ArchiveRestore,
+    scope: 'project',
+    render: () => createElement(ArchivedFeaturesTab)
   },
   {
     id: 'backups',

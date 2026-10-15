@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ArchivableFeature } from './archivedFeatures'
 import type { NovelFormat } from './ipc/contract'
 
 /** Settings-table key under which a project's editor formatting (F-3.6) is stored as JSON. */
@@ -19,7 +20,13 @@ export const EditorSettings = z.object({
   maxWidth: z.number().min(500).max(1000),
   sceneBreak: z.string().trim().min(1).max(20),
   /** F-3.9: keep the caret at the middle of the screen while typing; defaulted so stored rows without it still parse. */
-  typewriter: z.boolean().default(false)
+  typewriter: z.boolean().default(false),
+  /**
+   * Settings › Archived features (notes redesign, 2026-10-15): the archived features the author
+   * switched back on in this project. Absent (a row stored before the setting) means none: every
+   * archivable feature stays hidden. See `isArchived`.
+   */
+  unarchived: z.array(ArchivableFeature).optional()
 })
 export type EditorSettings = z.infer<typeof EditorSettings>
 /** What a caller may send: `typewriter` is optional on the way in and always present on the way out. */
