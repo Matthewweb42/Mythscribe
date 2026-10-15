@@ -1802,6 +1802,8 @@ test('create, close, reopen a project on disk', async () => {
   const sectionList = page.getByRole('listbox', { name: 'Sections' })
   await expect(sectionOptions()).toHaveText([
     /^Manuscript\d*$/,
+    // Notes redesign phase 1: the notebook, always shown.
+    /^Notes\d*$/,
     /^Characters\d*$/,
     /^Places\d*$/,
     /^Index\d*$/,
