@@ -167,3 +167,24 @@ describe('templateIdOf', () => {
     expect(templateIdOf('new-generic-document')).toBeNull()
   })
 })
+
+describe('Update notes from … (notes redesign phase 3)', () => {
+  const last = (nodeId: string, notesUpdate: boolean) =>
+    treeContextMenuItems(index, nodeId, 'novel', false, undefined, notesUpdate).at(-1)
+
+  it('ends a scene’s, a chapter’s and the manuscript’s menu while the edit flow can run', () => {
+    expect(last('sc-1', true)).toEqual({ id: 'update-notes', label: 'Update notes from this scene' })
+    expect(last('ch-1', true)).toEqual({ id: 'update-notes', label: 'Update notes from this chapter' })
+    expect(last('manuscript', true)).toEqual({
+      id: 'update-notes',
+      label: 'Update notes from the whole book'
+    })
+  })
+
+  it('is not offered outside the manuscript, or while the edit flow cannot run', () => {
+    expect(ids('title-page')).not.toContain('update-notes')
+    expect(last('title-page', true)?.id).not.toBe('update-notes')
+    expect(last('front', true)?.id).not.toBe('update-notes')
+    expect(last('sc-1', false)?.id).not.toBe('update-notes')
+  })
+})

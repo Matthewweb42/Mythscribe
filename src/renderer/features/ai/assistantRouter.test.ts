@@ -588,6 +588,36 @@ describe('edit requests (F-5.26)', () => {
     expect(useDialogStore.getState().toasts.map((t) => t.message)).toContain(PLAN_NO_EDITS_MESSAGE)
   })
 
+  it('in Brainstorm a request to update the notes opens the flow pre-filled; nothing is sent (notes phase 3)', async () => {
+    useAiSettingsStore.setState({ settings: settings({ chatMode: 'brainstorm' }) })
+    await useAssistantStore.getState().send('Update my notes from this chapter')
+    expect(sent('ai:route')).toHaveLength(0)
+    expect(sent('ai:scribe')).toHaveLength(0)
+    expect(sent('editFlow:start')).toHaveLength(0)
+    expect(useEditFlowStore.getState()).toMatchObject({
+      open: true,
+      categories: ['updateNotes'],
+      scope: 'chapter',
+      chapterId: 'ch-1',
+      depth: 'quick'
+    })
+    expect(turns()[1]).toMatchObject({
+      action: 'editPass',
+      content: editFlowOpenedText('updateNotes', 'Chapter 1')
+    })
+
+    useEditFlowStore.getState().close()
+    await useAssistantStore.getState().send('Can you update the notes from the whole book?')
+    expect(useEditFlowStore.getState()).toMatchObject({ open: true, scope: 'book', depth: 'deep' })
+
+    // In Write Ms Scribe edits the pages herself, as before.
+    useEditFlowStore.getState().close()
+    useAiSettingsStore.setState({ settings: settings() })
+    await useAssistantStore.getState().send('Update my notes from this chapter')
+    expect(useEditFlowStore.getState().open).toBe(false)
+    expect(sent('ai:route')).toHaveLength(1)
+  })
+
   it('Editor’s notes from the quick picks opens the critique on the scene', async () => {
     route = editRoute({ pass: 'ask', target: 'scene', chapter: null })
     await useAssistantStore.getState().send('Make this better')

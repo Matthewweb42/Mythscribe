@@ -139,6 +139,7 @@ function FlowSetup(): React.JSX.Element {
   const depth = useEditFlowStore((s) => s.depth)
   const scope = useEditFlowStore((s) => s.scope)
   const chapterId = useEditFlowStore((s) => s.chapterId)
+  const sceneId = useEditFlowStore((s) => s.sceneId)
   const starting = useEditFlowStore((s) => s.starting)
   const runs = useEditFlowStore((s) => s.runs)
   const open = useOpenScene()
@@ -147,8 +148,8 @@ function FlowSetup(): React.JSX.Element {
   const { nodeId, scene } = open
   // One spec per choice, so the price is asked once for it.
   const spec = useMemo(
-    () => specFor({ categories, depth, scope, chapterId }, { nodeId, scene }),
-    [categories, depth, scope, chapterId, nodeId, scene]
+    () => specFor({ categories, depth, scope, chapterId, sceneId }, { nodeId, scene }),
+    [categories, depth, scope, chapterId, sceneId, nodeId, scene]
   )
   const { plan, error } = useQuote(spec)
   const { model, source } = useFeatureModel('editFlow', EDIT_FLOW_TIER[depth])
@@ -300,7 +301,9 @@ function CategoryGroup({
 
 function runLine(run: EditFlowRun): string {
   const what = run.spec.categories.map((category) => EDIT_FLOW_LABEL[category]).join(', ')
-  return `${what} · ${run.scopeTitle} · ${EDIT_FLOW_DEPTH_LABEL[run.spec.depth]}`
+  const line = `${what} · ${run.scopeTitle} · ${EDIT_FLOW_DEPTH_LABEL[run.spec.depth]}`
+  // Phase 3: an update started by leaving a chapter, kept apart from the author's own runs.
+  return run.automatic ? `${line} · automatic` : line
 }
 
 function KeptRuns({ runs }: { runs: EditFlowRun[] }): React.JSX.Element {

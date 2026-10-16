@@ -1,3 +1,4 @@
+import type { EditFlowScopeKind } from '@shared/editFlow'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { HIERARCHY_LEVELS, levelLabel } from '@shared/labels'
 import { MatterTemplateId, matterTemplatesFor } from '@shared/matterTemplates'
@@ -18,6 +19,9 @@ export interface MenuItem {
 /** The id of the `Include in compile` checkbox item (F-12.4). */
 export const INCLUDE_ITEM_ID = 'include-compile'
 
+/** The id of the `Update notes from …` item (notes redesign phase 3). */
+export const UPDATE_NOTES_ITEM_ID = 'update-notes'
+
 /** Prefix of the template items' ids (F-2.6): `template:<MatterTemplateId>`. */
 const TEMPLATE_ITEM_PREFIX = 'template:'
 
@@ -36,14 +40,17 @@ export function templateIdOf(itemId: string): MatterTemplateId | null {
  * Documents and folders (never sections) also offer Rename, Duplicate, and Delete (F-2.3), and
  * those in the manuscript `Set word target…`, plus `Clear word target` when `hasTarget` (F-10.3),
  * and, once the compile state is known (`included` given), the `Include in compile` checkbox
- * (F-12.4).
+ * (F-12.4). With `notesUpdate` (notes redesign phase 3: a v1 project with the edit flow allowed),
+ * a manuscript scene, chapter or the manuscript itself ends with `Update notes from this scene`,
+ * `… this chapter` or `… the whole book`.
  */
 export function treeContextMenuItems(
   index: TreeIndex,
   nodeId: string,
   format: NovelFormat,
   hasTarget = false,
-  included?: boolean
+  included?: boolean,
+  notesUpdate = false
 ): MenuItem[] {
   const items: MenuItem[] = []
   if (index.sectionOf[nodeId] === 'manuscript') {
@@ -75,5 +82,28 @@ export function treeContextMenuItems(
     if (included !== undefined)
       items.push({ id: INCLUDE_ITEM_ID, label: 'Include in compile', checked: included })
   }
+  const scope = notesUpdate ? notesUpdateScopeOf(index, nodeId) : null
+  if (scope !== null) {
+    items.push({ id: UPDATE_NOTES_ITEM_ID, label: `Update notes from ${NOTES_SCOPE_WORDS[scope]}` })
+  }
   return items
+}
+
+const NOTES_SCOPE_WORDS: Record<EditFlowScopeKind, string> = {
+  scene: 'this scene',
+  chapter: 'this chapter',
+  book: 'the whole book'
+}
+
+/**
+ * The scope the step's `Update notes from …` takes on a tree row (phase 3): the manuscript itself
+ * is the whole book, a folder in it a chapter, a document a scene; null outside the manuscript.
+ */
+export function notesUpdateScopeOf(index: TreeIndex, nodeId: string): EditFlowScopeKind | null {
+  if (index.sectionOf[nodeId] !== 'manuscript') return null
+  const row = index.byId[nodeId]
+  if (row === undefined) return null
+  if (row.sectionType === 'manuscript') return 'book'
+  if (row.sectionType !== null) return null
+  return row.kind === 'folder' ? 'chapter' : 'scene'
 }

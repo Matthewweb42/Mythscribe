@@ -832,7 +832,9 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       '(this scene, this chapter or the whole book) with their titles, a chapter at a time on ' +
       'Quick, up to about 60,000 tokens at a time on Deep, once for each stage you picked, once ' +
       'for the focused checks together and once for Update notes; on Deep for a scene or a ' +
-      'chapter, the rest of the book as well, as much as fits with them in about 60,000 tokens.',
+      'chapter, the rest of the book as well, as much as fits with them in about 60,000 tokens. ' +
+      'Also, when you turn on updating your notes after a chapter, the same for Update notes on ' +
+      'that chapter each time you leave it after writing in it (at most the daily cap).',
     minDial: 1
   },
   judge: {

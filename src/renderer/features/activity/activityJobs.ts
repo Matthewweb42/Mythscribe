@@ -1,3 +1,4 @@
+import { notesUpdatedPages, type EditFlowRun } from '@shared/editFlow'
 import { EDIT_PASS_LABEL, type EditPassSummary } from '@shared/editPass'
 import type { IndexQueueStatus } from '@shared/jobs'
 import { CONVERSION_SECONDS_PER_SCENE } from '@shared/knowledge'
@@ -27,6 +28,7 @@ export type ActivityKind =
   | 'conversion'
   | 'rebuild'
   | 'checkBook'
+  | 'notesUpdate'
 
 /** One long job running now. */
 export interface ActivityJob {
@@ -74,6 +76,11 @@ export interface ActivitySnapshot {
     check: CheckProgress | null
     checkOpen: boolean
   }
+  /**
+   * Notes redesign phase 3: the edit flow's kept runs (the automatic notes updates among them),
+   * and the run whose results show in the right column (null: none, or the panel is closed).
+   */
+  editFlow: { runs: EditFlowRun[]; shownId: string | null }
 }
 
 /** A finished or failed job's notification (the drop from the top centre). */
@@ -99,7 +106,8 @@ const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? '' 
 /** Every long job running now, in a fixed order (the hover lists them so). */
 export function readJobs(snap: ActivitySnapshot): ActivityJob[] {
   const jobs: ActivityJob[] = []
-  const { organise, upload, editPasses, todo, continuity, conversion, queue, memory } = snap
+  const { organise, upload, editPasses, todo, continuity, conversion, queue, memory, editFlow } =
+    snap
   if (organise.phase === 'running' && organise.requestId !== null) {
     jobs.push({
       key: `organise:${organise.requestId}`,
@@ -172,6 +180,17 @@ export function readJobs(snap: ActivitySnapshot): ActivityJob[] {
       ref: null
     })
   }
+  // Phase 3: an automatic notes update after a chapter (the author's own runs show in the panel).
+  for (const run of editFlow.runs) {
+    if (!run.automatic || run.status !== 'running') continue
+    jobs.push({
+      key: `notesUpdate:${run.id}`,
+      kind: 'notesUpdate',
+      name: `Notes update · ${run.scopeTitle}`,
+      steps: { done: run.done, total: run.total },
+      ref: run.id
+    })
+  }
   return jobs
 }
 
@@ -190,7 +209,8 @@ export const CRAWL_MS: Record<ActivityKind, number> = {
   continuity: 15_000,
   conversion: CONVERSION_SECONDS_PER_SCENE * 1000,
   rebuild: 20_000,
-  checkBook: 5_000
+  checkBook: 5_000,
+  notesUpdate: 15_000
 }
 
 /** The estimated share of a step done after `elapsedMs`: creeps toward `CRAWL_CAP`, never past. */
@@ -422,6 +442,32 @@ export function outcomeOf(job: ActivityJob, snap: ActivitySnapshot): ActivityNot
         canRetry: false
       }
     }
+    case 'notesUpdate': {
+      // Phase 3: one line with the pages changed, none when nothing changed, the cause on a
+      // failure (never retried: the next leave of a changed chapter runs again).
+      const run = snap.editFlow.runs.find((each) => each.id === job.ref)
+      if (run === undefined) return null
+      const pages = notesUpdatedPages(run)
+      if (run.status === 'failed') {
+        return {
+          ...base,
+          status: 'failed',
+          title: `Notes update from ${run.scopeTitle} failed`,
+          detail: run.error,
+          canOpen: pages > 0,
+          canRetry: false
+        }
+      }
+      if (run.status !== 'done' || pages === 0) return null
+      return {
+        ...base,
+        status: 'done',
+        title: `Notes updated from ${run.scopeTitle}: ${plural(pages, 'page')}`,
+        detail: null,
+        canOpen: true,
+        canRetry: false
+      }
+    }
   }
 }
 
@@ -462,5 +508,9 @@ export function noteStale(note: ActivityNote, snap: ActivitySnapshot): boolean {
       return snap.memory.dialogOpen || snap.memory.rebuild?.finishedAt === null
     case 'checkBook':
       return snap.memory.checkOpen || snap.memory.check?.finishedAt === null
+    case 'notesUpdate': {
+      const run = snap.editFlow.runs.find((each) => each.id === note.ref)
+      return run === undefined || run.status === 'running' || snap.editFlow.shownId === note.ref
+    }
   }
 }

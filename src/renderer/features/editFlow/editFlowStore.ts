@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import {
+  notesUpdateDepth,
   orderedCategories,
   type EditFlowCategory,
   type EditFlowDepth,
@@ -7,18 +8,20 @@ import {
   type EditFlowIssue,
   type EditFlowRun,
   type EditFlowScopeKind,
-  type EditFlowSpec
+  type EditFlowSpec,
+  type NotesAutoSettings
 } from '@shared/editFlow'
-import { openSceneNow, type OpenScene } from '@renderer/features/ai/aiActions'
+import { openAssistant, openSceneNow, type OpenScene } from '@renderer/features/ai/aiActions'
 import { undoNotebookEdit } from '@renderer/features/ai/agentApply'
 import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { locateText } from '@renderer/features/editor/locateText'
 import { openPassage } from '@renderer/features/editor/openPassage'
-import { useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { isManuscriptDocument, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { flushPendingSaves } from '@renderer/features/project/pendingSaves'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
+import { chapterOf } from './chapterTriggers'
 
 /**
  * The edit flow's renderer owner (notes redesign phase 2): whether its panel shows in the right
@@ -39,6 +42,8 @@ export interface EditFlowPrefill {
   scope?: EditFlowScopeKind
   /** The chapter a request named ("edit chapter 3"), in place of the open scene's. */
   chapterId?: string | null
+  /** The scene the step was asked on (the tree's menu), in place of the open one. */
+  sceneId?: string | null
   depth?: EditFlowDepth
 }
 
@@ -50,6 +55,8 @@ interface EditFlowState {
   scope: EditFlowScopeKind
   /** A chapter the chat named, used while the scope is This chapter; null: the open scene's. */
   chapterId: string | null
+  /** A scene the step named (phase 3), used while the scope is This scene; null: the open one. */
+  sceneId: string | null
   /** The kept runs, newest first. */
   runs: EditFlowRun[]
   loaded: boolean
@@ -57,6 +64,8 @@ interface EditFlowState {
   shownId: string | null
   detail: EditFlowDetail | null
   starting: boolean
+  /** Phase 3: the automatic notes update's switch and cap; null until read. */
+  auto: NotesAutoSettings | null
 
   load: () => Promise<void>
   clear: () => void
@@ -76,6 +85,10 @@ interface EditFlowState {
   jump: (issue: EditFlowIssue) => Promise<void>
   /** Undoes one of Update notes' edits of the shown run. */
   undoNote: (index: number) => Promise<void>
+  /** Reads the automatic notes update's settings (Settings › AI). */
+  loadAuto: () => Promise<void>
+  /** Writes them; what main stored shows. */
+  setAuto: (value: NotesAutoSettings) => Promise<void>
 }
 
 let unsubscribe: (() => void) | null = null
@@ -87,7 +100,8 @@ let generation = 0
  * it sits in, not a section root), or the whole book.
  */
 export function specFor(
-  state: Pick<EditFlowState, 'categories' | 'depth' | 'scope' | 'chapterId'>,
+  state: Pick<EditFlowState, 'categories' | 'depth' | 'scope' | 'chapterId'> &
+    Partial<Pick<EditFlowState, 'sceneId'>>,
   open: Pick<OpenScene, 'nodeId' | 'scene'>
 ): EditFlowSpec | string {
   if (state.categories.length === 0) return EDIT_FLOW_PICK_ONE
@@ -97,6 +111,9 @@ export function specFor(
   }
   if (state.scope === 'chapter' && state.chapterId !== null) {
     return { categories, depth: state.depth, scope: { kind: 'chapter', nodeId: state.chapterId } }
+  }
+  if (state.scope === 'scene' && state.sceneId != null) {
+    return { categories, depth: state.depth, scope: { kind: 'scene', nodeId: state.sceneId } }
   }
   if (!open.scene || open.nodeId === null) return EDIT_FLOW_NO_SCENE
   if (state.scope === 'scene') {
@@ -144,11 +161,13 @@ export const useEditFlowStore = create<EditFlowState>((set, get) => ({
   depth: 'quick',
   scope: 'scene',
   chapterId: null,
+  sceneId: null,
   runs: [],
   loaded: false,
   shownId: null,
   detail: null,
   starting: false,
+  auto: null,
 
   async load() {
     unsubscribe ??= ipc().on('editFlow:changed', onChanged)
@@ -160,7 +179,15 @@ export const useEditFlowStore = create<EditFlowState>((set, get) => ({
 
   clear() {
     generation++
-    set({ open: false, runs: [], loaded: false, shownId: null, detail: null, starting: false })
+    set({
+      open: false,
+      runs: [],
+      loaded: false,
+      shownId: null,
+      detail: null,
+      starting: false,
+      auto: null
+    })
   },
 
   openFlow(prefill) {
@@ -173,6 +200,7 @@ export const useEditFlowStore = create<EditFlowState>((set, get) => ({
         : {}),
       ...(prefill?.scope ? { scope: prefill.scope } : {}),
       chapterId: prefill?.chapterId ?? null,
+      sceneId: prefill?.sceneId ?? null,
       ...(prefill?.depth ? { depth: prefill.depth } : {})
     })
   },
@@ -195,7 +223,7 @@ export const useEditFlowStore = create<EditFlowState>((set, get) => ({
   },
 
   setScope(scope) {
-    set({ scope, chapterId: null })
+    set({ scope, chapterId: null, sceneId: null })
   },
 
   async start(spec) {
@@ -209,12 +237,16 @@ export const useEditFlowStore = create<EditFlowState>((set, get) => ({
         toast.error(`${result.message} ${result.nextStep}`.trim())
         return false
       }
-      // A run of the same scope replaced the one before it.
+      // A run of the same scope replaced the one before it (an automatic one is kept apart).
       const key = JSON.stringify(spec.scope)
       set({
         runs: [
           result.run,
-          ...get().runs.filter((run) => JSON.stringify(run.spec.scope) !== key)
+          ...get().runs.filter(
+            (run) =>
+              run.id !== result.run.id &&
+              (run.automatic || JSON.stringify(run.spec.scope) !== key)
+          )
         ]
       })
       await get().show(result.run.id)
@@ -272,8 +304,76 @@ export const useEditFlowStore = create<EditFlowState>((set, get) => ({
     } catch (err) {
       toast.error(describeError(err))
     }
+  },
+
+  async loadAuto() {
+    const mine = generation
+    const auto = await ipc().invoke('editFlow:autoSettings', undefined)
+    if (mine === generation) set({ auto })
+  },
+
+  async setAuto(value) {
+    const mine = generation
+    try {
+      const auto = await ipc().invoke('editFlow:setAutoSettings', value)
+      if (mine === generation) set({ auto })
+    } catch (err) {
+      toast.error(describeError(err))
+    }
   }
 }))
+
+/** The scene a step from outside the editor means: the tree's selected scene, else the open one. */
+function sceneNow(): string | null {
+  const tree = useTreeStore.getState()
+  if (tree.selectedId !== null && isManuscriptDocument(tree, tree.selectedId)) return tree.selectedId
+  const open = openSceneNow()
+  return open.scene ? open.nodeId : null
+}
+
+/**
+ * Notes redesign phase 3, the step: opens the edit flow in the right column pre-filled with
+ * Update notes on `scope` (`nodeId` the scene or the chapter; null for the book), Quick, or Deep
+ * for the whole book. The author sees the price and presses Run, as for any run.
+ */
+export function openNotesUpdate(scope: EditFlowScopeKind, nodeId: string | null): void {
+  useEditFlowStore.getState().openFlow({
+    categories: ['updateNotes'],
+    scope,
+    chapterId: scope === 'chapter' ? nodeId : null,
+    sceneId: scope === 'scene' ? nodeId : null,
+    depth: notesUpdateDepth(scope)
+  })
+  openAssistant()
+}
+
+/** What a notes update is asked on: a scope and its scene or chapter (null for the book). */
+export interface NotesUpdateTarget {
+  scope: EditFlowScopeKind
+  nodeId: string | null
+}
+
+/**
+ * What a notes update asked from outside the tree means (phase 3): `here` (the Notes tab's button,
+ * a chat request naming no scope) is the open scene's chapter, the scene itself when it is in no
+ * chapter, or the whole book when no scene is open; a named scene or chapter is the open scene's,
+ * or why there is none.
+ */
+export function notesUpdateTarget(ask: EditFlowScopeKind | 'here'): NotesUpdateTarget | string {
+  if (ask === 'book') return { scope: 'book', nodeId: null }
+  const scene = sceneNow()
+  if (scene === null) return ask === 'here' ? { scope: 'book', nodeId: null } : EDIT_FLOW_NO_SCENE
+  if (ask === 'scene') return { scope: 'scene', nodeId: scene }
+  const chapter = chapterOf(scene)
+  if (chapter !== null) return { scope: 'chapter', nodeId: chapter }
+  return ask === 'here' ? { scope: 'scene', nodeId: scene } : EDIT_FLOW_NO_CHAPTER
+}
+
+/** The step from the Notes tab: Update notes on the open scene's chapter (`notesUpdateTarget`). */
+export function openNotesUpdateHere(): void {
+  const target = notesUpdateTarget('here')
+  if (typeof target !== 'string') openNotesUpdate(target.scope, target.nodeId)
+}
 
 /** Empties the store and drops the subscription. For tests only. */
 export function resetEditFlowStore(): void {
@@ -286,10 +386,12 @@ export function resetEditFlowStore(): void {
     depth: 'quick',
     scope: 'scene',
     chapterId: null,
+    sceneId: null,
     runs: [],
     loaded: false,
     shownId: null,
     detail: null,
-    starting: false
+    starting: false,
+    auto: null
   })
 }

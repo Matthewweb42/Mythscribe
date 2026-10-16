@@ -157,7 +157,14 @@ import {
   EditPassSummary,
   EditPassType
 } from '../editPass'
-import { EditFlowDetail, EditFlowPlanResult, EditFlowRun, EditFlowSpec } from '../editFlow'
+import {
+  EditFlowChapterLeftResult,
+  EditFlowDetail,
+  EditFlowPlanResult,
+  EditFlowRun,
+  EditFlowSpec,
+  NotesAutoSettings
+} from '../editFlow'
 import { EntityExchangeFormat, EntityImportItem, EntityImportPlan } from '../entityExchange'
 import { Background, FocusSettings } from '../focus'
 import { GoalsPatch, GoalsStatus } from '../goals'
@@ -2822,6 +2829,19 @@ export const contract = {
   'editFlow:noteUndone': {
     input: z.object({ id: z.string(), index: z.number().int().nonnegative() }),
     output: EditFlowRun
+  },
+  /**
+   * Notes redesign phase 3: the automatic notes update after a chapter. `editFlow:autoSettings`
+   * and `editFlow:setAutoSettings` read and write the project's switch (off by default) and daily
+   * cap. `editFlow:chapterLeft` says the author left a chapter after writing in it; main decides
+   * whether that starts an automatic Update notes run (`editFlow:changed` follows it, `automatic`
+   * set) and answers with the run's id or why none started.
+   */
+  'editFlow:autoSettings': { input: z.undefined(), output: NotesAutoSettings },
+  'editFlow:setAutoSettings': { input: NotesAutoSettings, output: NotesAutoSettings },
+  'editFlow:chapterLeft': {
+    input: z.object({ chapterId: z.string() }),
+    output: EditFlowChapterLeftResult
   },
   /**
    * 2026-10-07: the prose behind one of the agent's write intents, drafted in the author's voice

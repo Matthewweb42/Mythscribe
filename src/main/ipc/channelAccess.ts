@@ -269,6 +269,11 @@ export const CHANNEL_ACCESS: Record<Channel, ChannelAccess> = {
   'editFlow:list': 'read',
   'editFlow:get': 'read',
   'editFlow:noteUndone': 'write',
+  // Notes redesign phase 3: the automatic update's settings are a view preference like the AI
+  // settings; leaving a chapter may run a model (refused by the request path after the trial).
+  'editFlow:autoSettings': 'read',
+  'editFlow:setAutoSettings': 'read',
+  'editFlow:chapterLeft': 'ai',
   'ai:agentDraft': 'ai',
   'ai:query': 'ai',
   'ai:rewrite': 'ai',
@@ -722,6 +727,9 @@ export const CHANNEL_MEMORY: Record<Channel, ChannelMemory> = {
   'editFlow:list': 'any',
   'editFlow:get': 'any',
   'editFlow:noteUndone': 'v1',
+  'editFlow:autoSettings': 'v1',
+  'editFlow:setAutoSettings': 'v1',
+  'editFlow:chapterLeft': 'v1',
   'ai:agentDraft': 'any',
   'ai:query': 'v1',
   'ai:rewrite': 'any',

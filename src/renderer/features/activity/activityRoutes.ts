@@ -1,5 +1,6 @@
 import { openAssistant } from '@renderer/features/ai/aiActions'
 import { useContinuityStore } from '@renderer/features/ai/continuityStore'
+import { useEditFlowStore } from '@renderer/features/editFlow/editFlowStore'
 import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { useConversionStore } from '@renderer/features/knowledge/conversionStore'
@@ -54,6 +55,16 @@ export async function openNote(note: ActivityNote): Promise<void> {
       // F-16.30: the check's report.
       useMemoryStore.getState().setCheckOpen('report')
       return
+    case 'notesUpdate': {
+      // Notes redesign phase 3: the automatic update's results in the edit flow panel, each note
+      // edit with its Undo.
+      if (note.ref === null) return
+      const flow = useEditFlowStore.getState()
+      flow.openFlow()
+      openAssistant()
+      await flow.show(note.ref)
+      return
+    }
   }
 }
 
@@ -84,6 +95,7 @@ export async function retryNote(note: ActivityNote): Promise<void> {
       return
     case 'rebuild':
     case 'checkBook':
+    case 'notesUpdate':
       return
   }
 }

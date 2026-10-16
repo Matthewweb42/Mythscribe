@@ -6,11 +6,15 @@ import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
+import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import {
   EDIT_FLOW_NO_CHAPTER,
   EDIT_FLOW_NO_SCENE,
   EDIT_FLOW_PICK_ONE,
+  notesUpdateTarget,
+  openNotesUpdate,
+  openNotesUpdateHere,
   resetEditFlowStore,
   specFor,
   useEditFlowStore
@@ -21,6 +25,7 @@ function flowRun(over: Partial<EditFlowRun> = {}): EditFlowRun {
     id: 'run-1',
     spec: { categories: ['copy'], depth: 'quick', scope: { kind: 'scene', nodeId: 'sc-1' } },
     scopeTitle: 'Chapter 1 › Scene 1',
+    automatic: false,
     status: 'running',
     done: 0,
     total: 1,
@@ -84,6 +89,10 @@ function client(): IpcClient {
           return null as Output<C>
         case 'editPass:changes':
           return [] as Output<C>
+        case 'editFlow:autoSettings':
+          return { on: false, dailyCap: 10 } as Output<C>
+        case 'editFlow:setAutoSettings':
+          return input as Output<C>
         default:
           throw new Error(`unexpected ${channel}`)
       }
@@ -105,6 +114,7 @@ beforeEach(() => {
   resetEditFlowStore()
   resetEditPassStore()
   resetPendingSaves()
+  resetLayoutStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
   setIpcClient(client())
@@ -113,6 +123,7 @@ beforeEach(() => {
 afterEach(() => {
   resetEditFlowStore()
   resetEditPassStore()
+  resetLayoutStore()
   useTreeStore.getState().clear()
 })
 
@@ -226,5 +237,70 @@ describe('useEditFlowStore', () => {
     expect(sent('notebook:restoreVersion')).toEqual([{ versionId: 'v-1' }])
     expect(sent('editFlow:noteUndone')).toEqual([{ id: 'run-2', index: 0 }])
     expect(useEditFlowStore.getState().detail?.run.noteEdits[0]?.undone).toBe(true)
+  })
+})
+
+describe('notes updates (notes redesign phase 3)', () => {
+  it('the step opens the flow pre-filled: Update notes, its scope, Quick (Deep for the book)', () => {
+    openNotesUpdate('chapter', 'ch-2')
+    expect(useEditFlowStore.getState()).toMatchObject({
+      open: true,
+      shownId: null,
+      categories: ['updateNotes'],
+      scope: 'chapter',
+      chapterId: 'ch-2',
+      sceneId: null,
+      depth: 'quick'
+    })
+    // The right column opens to show it.
+    expect(useLayoutStore.getState().layout.assistant.open).toBe(true)
+    const open = { nodeId: 'sc-1', scene: true }
+    expect(specFor(useEditFlowStore.getState(), open)).toEqual({
+      categories: ['updateNotes'],
+      depth: 'quick',
+      scope: { kind: 'chapter', nodeId: 'ch-2' }
+    })
+    // A scene from the tree's menu, not the one open.
+    openNotesUpdate('scene', 'sc-4')
+    expect(specFor(useEditFlowStore.getState(), open)).toMatchObject({
+      scope: { kind: 'scene', nodeId: 'sc-4' }
+    })
+    useEditFlowStore.getState().setScope('scene')
+    expect(useEditFlowStore.getState().sceneId).toBeNull()
+    openNotesUpdate('book', null)
+    expect(useEditFlowStore.getState()).toMatchObject({ scope: 'book', depth: 'deep' })
+  })
+
+  it('the Notes button and a chat request take the open scene’s chapter, else the book', () => {
+    expect(notesUpdateTarget('here')).toEqual({ scope: 'book', nodeId: null })
+    expect(notesUpdateTarget('chapter')).toBe(EDIT_FLOW_NO_SCENE)
+    useTreeStore.setState({ selectedId: 'sc-2' })
+    expect(notesUpdateTarget('here')).toEqual({ scope: 'chapter', nodeId: 'ch-2' })
+    expect(notesUpdateTarget('scene')).toEqual({ scope: 'scene', nodeId: 'sc-2' })
+    expect(notesUpdateTarget('book')).toEqual({ scope: 'book', nodeId: null })
+    openNotesUpdateHere()
+    expect(useEditFlowStore.getState()).toMatchObject({
+      categories: ['updateNotes'],
+      scope: 'chapter',
+      chapterId: 'ch-2'
+    })
+  })
+
+  it('a run of the author’s keeps the automatic run of the same scope', async () => {
+    await useEditFlowStore.getState().load()
+    const spec = flowRun().spec
+    useEditFlowStore.setState({
+      runs: [flowRun({ id: 'run-auto', automatic: true }), flowRun()]
+    })
+    await useEditFlowStore.getState().start(spec)
+    expect(useEditFlowStore.getState().runs.map((run) => run.id)).toEqual(['run-2', 'run-auto'])
+  })
+
+  it('reads and writes the automatic update’s switch and cap', async () => {
+    await useEditFlowStore.getState().loadAuto()
+    expect(useEditFlowStore.getState().auto).toEqual({ on: false, dailyCap: 10 })
+    await useEditFlowStore.getState().setAuto({ on: true, dailyCap: 4 })
+    expect(sent('editFlow:setAutoSettings')).toEqual([{ on: true, dailyCap: 4 }])
+    expect(useEditFlowStore.getState().auto).toEqual({ on: true, dailyCap: 4 })
   })
 })

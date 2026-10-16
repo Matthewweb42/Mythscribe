@@ -31,7 +31,9 @@ const FlowColumn = z.object({
   spec: EditFlowSpec,
   scopeTitle: z.string(),
   done: z.number().int().nonnegative(),
-  total: z.number().int().nonnegative()
+  total: z.number().int().nonnegative(),
+  /** Phase 3: an automatic notes update; absent on a run kept before it (manual). */
+  automatic: z.boolean().default(false)
 })
 type FlowColumn = z.infer<typeof FlowColumn>
 
@@ -62,18 +64,26 @@ export interface CreateFlowRunInput {
   nodeIds: readonly string[]
   /** The requests the run will send. */
   total: number
+  /** An automatic notes update (phase 3), kept apart from the author's own runs. */
+  automatic?: boolean
   now?: string
 }
 
 /**
  * Inserts a running flow run. The finished runs of the same scope go first (the latest per scope
- * is kept), then the oldest passes beyond the edit passes' cap.
+ * is kept; an automatic run's scope is its own, so it never replaces the author's run and hers
+ * never replaces it), then the oldest passes beyond the edit passes' cap.
  */
 export function createFlowRun(db: TreeDb, input: CreateFlowRunInput): EditPassRow {
-  const key = scopeKey(input.spec.scope)
+  const automatic = input.automatic ?? false
+  const key = scopeKey(input.spec.scope, automatic)
   for (const row of flowRows(db)) {
     const flow = readFlow(row)
-    if (flow !== null && row.status !== 'running' && scopeKey(flow.spec.scope) === key) {
+    if (
+      flow !== null &&
+      row.status !== 'running' &&
+      scopeKey(flow.spec.scope, flow.automatic) === key
+    ) {
       db.delete(editPass).where(eq(editPass.id, row.id)).run()
     }
   }
@@ -82,7 +92,8 @@ export function createFlowRun(db: TreeDb, input: CreateFlowRunInput): EditPassRo
     spec: input.spec,
     scopeTitle: input.scopeTitle,
     done: 0,
-    total: input.total
+    total: input.total,
+    automatic
   }
   db.insert(editPass)
     .values({
@@ -182,6 +193,7 @@ export function flowRunOf(db: TreeDb, row: EditPassRow): EditFlowRun {
     id: row.id,
     spec: flow.spec,
     scopeTitle: flow.scopeTitle,
+    automatic: flow.automatic,
     status: row.status,
     done: flow.done,
     total: flow.total,

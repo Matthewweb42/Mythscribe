@@ -273,6 +273,8 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
     if (channel === 'timeline:get') return { events: [] }
     if (channel === 'library:list') return []
     if (channel === 'notebook:list') return []
+    // Notes redesign phase 3: a v1 project reads the edit flow's runs as it opens.
+    if (channel === 'editFlow:list') return []
     if (channel === 'compileState:get') return defaultCompileProjectState()
     if (channel === 'compileFormat:list') return []
     return null

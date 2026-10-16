@@ -3,6 +3,14 @@ import { z } from 'zod'
 import { SHEET_SYNC_DUE_KEY, SHEET_SYNC_DUE_MAX } from '@shared/sheetSync'
 import { isStoryBibleArchived } from '@shared/archivedFeatures'
 import {
+  NOTES_AUTO_KEY,
+  NOTES_AUTO_STATE_KEY,
+  NotesAutoSettings,
+  NotesAutoState,
+  defaultNotesAutoSettings,
+  defaultNotesAutoState
+} from '@shared/editFlow'
+import {
   AI_SETTINGS_KEY,
   AiSettings,
   defaultAiSettings,
@@ -881,5 +889,55 @@ export function setSheetSyncDue(db: TreeDb, ids: readonly string[]): string[] {
     .values({ key: SHEET_SYNC_DUE_KEY, value: serialized })
     .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
     .run()
+  return stored
+}
+
+/** Reads one JSON settings row through `schema`; `fallback()` for a missing or unreadable row. */
+function readRow<T>(db: TreeDb, key: string, schema: z.ZodType<T>, fallback: () => T): T {
+  const row = db.select().from(settings).where(eq(settings.key, key)).get()
+  if (!row) return fallback()
+  let json: unknown
+  try {
+    json = JSON.parse(row.value)
+  } catch {
+    return fallback()
+  }
+  const parsed = schema.safeParse(json)
+  return parsed.success ? parsed.data : fallback()
+}
+
+function writeRow(db: TreeDb, key: string, value: unknown): void {
+  const serialized = JSON.stringify(value)
+  db.insert(settings)
+    .values({ key, value: serialized })
+    .onConflictDoUpdate({ target: settings.key, set: { value: serialized } })
+    .run()
+}
+
+/**
+ * Notes redesign phase 3: the automatic notes update's switch and daily cap, per project. A
+ * missing or unreadable row reads as off with the default cap (it never turns spending on).
+ */
+export function getNotesAutoSettings(db: TreeDb): NotesAutoSettings {
+  return readRow(db, NOTES_AUTO_KEY, NotesAutoSettings, defaultNotesAutoSettings)
+}
+
+export function setNotesAutoSettings(db: TreeDb, value: NotesAutoSettings): NotesAutoSettings {
+  const stored = NotesAutoSettings.parse(value)
+  writeRow(db, NOTES_AUTO_KEY, stored)
+  return stored
+}
+
+/**
+ * Notes redesign phase 3: today's count of automatic updates and each chapter's text hash at its
+ * last one. An unreadable row reads as none (at worst one more update runs).
+ */
+export function getNotesAutoState(db: TreeDb): NotesAutoState {
+  return readRow(db, NOTES_AUTO_STATE_KEY, NotesAutoState, defaultNotesAutoState)
+}
+
+export function setNotesAutoState(db: TreeDb, value: NotesAutoState): NotesAutoState {
+  const stored = NotesAutoState.parse(value)
+  writeRow(db, NOTES_AUTO_STATE_KEY, stored)
   return stored
 }

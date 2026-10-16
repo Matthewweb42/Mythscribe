@@ -7,11 +7,13 @@ import {
   expect,
   test,
   type ElectronApplication,
+  type Locator,
   type Page
 } from '@playwright/test'
 import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
+import type { EditFlowChapterLeftResult } from '../src/shared/editFlow'
 import type { NotebookPage } from '../src/shared/notebook'
-import { clickIntoEditor } from './support'
+import { caretToEnd, clickIntoEditor } from './support'
 
 /**
  * Notes redesign phase 2: the edit flow in a story memory v1 project, against a fake
@@ -19,7 +21,10 @@ import { clickIntoEditor } from './support'
  * in the right column opens the flow; a Quick copyedit of the scene is priced, then run; the
  * issue list shows two fixes and one issue without a fix; the issue opens its passage selected;
  * one fix is accepted and the other rejected inline in the text. Then an Update notes run edits
- * the page, shown with its Undo, which puts the page back.
+ * the page, shown with its Undo, which puts the page back. Phase 3: the tree's Update notes from
+ * this chapter pre-fills the flow; with Settings › AI's automatic update on, leaving Chapter 1
+ * after writing in it updates Mara's page once, the activity line opens the run, Undo restores it,
+ * and leaving again without writing sends nothing.
  */
 
 let app: ElectronApplication
@@ -294,4 +299,118 @@ test('a Quick copyedit lists issues and fixes inline; Update notes edits a page 
   await flow.getByTestId('edit-flow-back').click()
   await expect(flow.getByTestId('edit-flow-kept-run')).toHaveCount(1)
   await expect(flow.getByTestId('edit-flow-kept-run')).toContainText('Update notes')
+})
+
+test('notes phase 3: the step pre-fills the flow; leaving a chapter after writing updates the notes once', async () => {
+  // The project of the test above: Chapter 1 with its scene written, Mara's page "Eyes: grey.".
+  const nodes = await invoke<TreeNode[]>('tree:list', undefined)
+  const scene = nodes.find((n) => n.kind === 'document' && n.hierarchyLevel === 'scene')
+  const chapter = nodes.find((n) => n.id === scene?.parentId)
+  const part = nodes.find((n) => n.hierarchyLevel === 'part')
+  if (!scene || !chapter || !part) throw new Error('no starter scene')
+  const mara = (await invoke<{ id: string; title: string }[]>('notebook:list', undefined)).find(
+    (p) => p.title === 'Mara'
+  )
+  if (!mara) throw new Error('no Mara page')
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  const menu = page.getByRole('menu')
+  const renameBox = page.getByRole('textbox', { name: 'Rename' })
+  const assistant = page.getByTestId('assistant-panel')
+  const flow = assistant.getByTestId('edit-flow-panel')
+
+  // The step: the chapter's menu opens the flow pre-filled with Update notes on it, priced, not run.
+  const before = flowBodies().length
+  // The row itself, not the middle of its open subtree.
+  const rowOf = (item: Locator): Locator => item.locator(':scope > div')
+  await rowOf(bookTree.getByRole('treeitem', { name: chapter.title, exact: true })).click({
+    button: 'right'
+  })
+  await menu.getByRole('menuitem', { name: 'Update notes from this chapter' }).click()
+  await expect(flow).toBeVisible()
+  await expect(flow.getByLabel(/^Update notes/)).toBeChecked()
+  await expect(flow.getByLabel(/^Copyediting/)).not.toBeChecked()
+  await expect(flow.getByRole('radio', { name: 'This chapter' })).toBeChecked()
+  await expect(flow.getByRole('radio', { name: 'Quick' })).toBeChecked()
+  await expect(flow.getByTestId('edit-flow-price')).toContainText(chapter.title)
+  expect(flowBodies()).toHaveLength(before)
+
+  // A second chapter with a scene, made through the tree's menu while the switch is still off.
+  await rowOf(bookTree.getByRole('treeitem', { name: part.title, exact: true })).click({
+    button: 'right'
+  })
+  await menu.getByRole('menuitem', { name: 'New Chapter' }).click()
+  await renameBox.fill('Chapter 2')
+  await renameBox.press('Enter')
+  const chapter2 = bookTree.getByRole('treeitem', { name: 'Chapter 2', exact: true })
+  await rowOf(chapter2).click({ button: 'right' })
+  await menu.getByRole('menuitem', { name: 'New Scene' }).click()
+  await renameBox.fill('Harbour')
+  await renameBox.press('Enter')
+  const harbour = chapter2.getByRole('treeitem', { name: 'Harbour', exact: true })
+  await expect(harbour).toBeVisible()
+
+  // Settings › AI: the automatic update, off by default, with its price per chapter.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('tab', { name: 'AI' }).click()
+  const autoSwitch = settings.getByRole('switch', {
+    name: 'Update my notes after I finish a chapter'
+  })
+  await expect(autoSwitch).not.toBeChecked()
+  await expect(settings.getByTestId('notes-auto-price')).toContainText('a chapter on')
+  await autoSwitch.check()
+  await expect(autoSwitch).toBeChecked()
+  await settings.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settings).toHaveCount(0)
+
+  // Write in Chapter 1's scene, then open the scene of Chapter 2: the notes are updated once.
+  await bookTree.getByRole('treeitem', { name: scene.title, exact: true }).click()
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  await caretToEnd(editor)
+  await page.keyboard.press('Enter')
+  await page.keyboard.insertText('Rook followed her to the quay.')
+  await expect
+    .poll(
+      async () =>
+        JSON.stringify((await invoke<{ content: unknown }>('document:get', { id: scene.id })).content),
+      { timeout: 15_000 }
+    )
+    .toContain('Rook followed her to the quay.')
+  const beforeLeave = flowBodies().length
+  await harbour.click()
+  await expect.poll(() => flowBodies().length, { timeout: 15_000 }).toBe(beforeLeave + 1)
+  const sent = flowBodies().at(-1)?.messages ?? []
+  expect(sent[1]?.content).toContain('Update her notes')
+  expect(sent[1]?.content).toContain('Rook followed her to the quay.')
+  await expect
+    .poll(async () => (await invoke<NotebookPage>('notebook:get', { id: mara.id })).plain)
+    .toBe(`Eyes: grey.\n${NOTE_LINE}`)
+
+  // The activity line says what changed and opens the run's results, each note edit with Undo.
+  const drop = page.locator('[data-testid="activity-drop"][data-kind="notesUpdate"]')
+  await expect(drop).toContainText(`Notes updated from ${chapter.title}: 1 page`, {
+    timeout: 15_000
+  })
+  await drop.getByRole('button', { name: 'Open' }).click()
+  await expect(flow.getByTestId('edit-flow-run-status')).toHaveAttribute('data-status', 'done')
+  await expect(flow.getByTestId('edit-flow-run-status')).toContainText('automatic')
+  const noteEdit = flow.getByTestId('edit-flow-note-edit')
+  await expect(noteEdit).toHaveAttribute('data-status', 'applied')
+  await noteEdit.getByTestId('edit-flow-note-undo').click()
+  await expect(noteEdit).toHaveAttribute('data-status', 'undone')
+  await expect
+    .poll(async () => (await invoke<NotebookPage>('notebook:get', { id: mara.id })).plain)
+    .toBe('Eyes: grey.')
+
+  // Leaving again without writing sends nothing more; main would refuse the same text anyway.
+  const afterRun = flowBodies().length
+  await bookTree.getByRole('treeitem', { name: scene.title, exact: true }).click()
+  await expect(editor).toContainText('Rook followed her to the quay.')
+  await harbour.click()
+  await page.waitForTimeout(1_500)
+  expect(flowBodies()).toHaveLength(afterRun)
+  expect(
+    await invoke<EditFlowChapterLeftResult>('editFlow:chapterLeft', { chapterId: chapter.id })
+  ).toEqual({ started: false, reason: 'unchanged' })
+  expect(flowBodies()).toHaveLength(afterRun)
 })

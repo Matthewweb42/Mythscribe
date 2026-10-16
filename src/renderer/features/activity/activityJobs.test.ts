@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { EditFlowNoteEdit, EditFlowRun } from '@shared/editFlow'
 import type { EditPassSummary } from '@shared/editPass'
 import { IDLE_INDEX_QUEUE } from '@shared/jobs'
 import type { CheckProgress, RebuildProgress } from '@shared/memory/views'
@@ -60,6 +61,7 @@ function snapshot(over: Partial<ActivitySnapshot> = {}): ActivitySnapshot {
     conversion: { rereading: false },
     queue: IDLE_INDEX_QUEUE,
     memory: { rebuild: null, dialogOpen: false, check: null, checkOpen: false },
+    editFlow: { runs: [], shownId: null },
     ...over
   }
 }
@@ -517,5 +519,109 @@ describe('Check the book as a job (F-16.30)', () => {
     expect(noteStale(note, snapshot({ memory: memory(finished) }))).toBe(false)
     expect(noteStale(note, snapshot({ memory: memory(finished, true) }))).toBe(true)
     expect(noteStale(note, snapshot({ memory: memory(progress()) }))).toBe(true)
+  })
+})
+
+describe('the automatic notes update (notes redesign phase 3)', () => {
+  const flowRun = (over: Partial<EditFlowRun> = {}): EditFlowRun => ({
+    id: 'run-a',
+    spec: { categories: ['updateNotes'], depth: 'quick', scope: { kind: 'chapter', nodeId: 'ch-1' } },
+    scopeTitle: 'Chapter 1',
+    automatic: true,
+    status: 'running',
+    done: 0,
+    total: 1,
+    model: 'deepseek-v4-flash',
+    tokensIn: 0,
+    tokensOut: 0,
+    costUsd: 0,
+    counts: { pending: 0, accepted: 0, rejected: 0, stale: 0 },
+    dropped: 0,
+    error: null,
+    overview: null,
+    noteEdits: [],
+    createdAt: '2026-10-15T10:00:00.000Z',
+    finishedAt: null,
+    ...over
+  })
+  const noteEdit = (pageId: string): EditFlowNoteEdit => ({
+    edit: {
+      kind: 'notebook',
+      pageId,
+      title: pageId,
+      created: false,
+      versionId: 'v1',
+      section: null,
+      before: 'a',
+      after: 'a b'
+    },
+    undone: false
+  })
+  const flow = (run: EditFlowRun, shownId: string | null = null): Partial<ActivitySnapshot> => ({
+    editFlow: { runs: [run], shownId }
+  })
+
+  it('runs as a job while an automatic run goes; the author’s own runs are not jobs', () => {
+    expect(readJobs(snapshot(flow(flowRun())))).toEqual([
+      {
+        key: 'notesUpdate:run-a',
+        kind: 'notesUpdate',
+        name: 'Notes update · Chapter 1',
+        steps: { done: 0, total: 1 },
+        ref: 'run-a'
+      }
+    ])
+    expect(readJobs(snapshot(flow(flowRun({ automatic: false }))))).toEqual([])
+    expect(readJobs(snapshot(flow(flowRun({ status: 'done' }))))).toEqual([])
+  })
+
+  it('says how many pages changed, nothing when none did, and the cause on a failure', () => {
+    const job = readJobs(snapshot(flow(flowRun())))[0]!
+    const done = flowRun({
+      status: 'done',
+      noteEdits: [noteEdit('p1'), noteEdit('p2'), noteEdit('p1')]
+    })
+    expect(outcomeOf(job, snapshot(flow(done)))).toMatchObject({
+      kind: 'notesUpdate',
+      status: 'done',
+      title: 'Notes updated from Chapter 1: 2 pages',
+      canOpen: true,
+      canRetry: false
+    })
+    expect(
+      outcomeOf(job, snapshot(flow(flowRun({ status: 'done', noteEdits: [noteEdit('p1')] }))))
+    ).toMatchObject({ title: 'Notes updated from Chapter 1: 1 page' })
+    expect(outcomeOf(job, snapshot(flow(flowRun({ status: 'done' }))))).toBeNull()
+    expect(outcomeOf(job, snapshot(flow(flowRun({ status: 'cancelled' }))))).toBeNull()
+    expect(
+      outcomeOf(
+        job,
+        snapshot(flow(flowRun({ status: 'failed', error: 'No API key. Add one in Settings.' })))
+      )
+    ).toMatchObject({
+      status: 'failed',
+      title: 'Notes update from Chapter 1 failed',
+      detail: 'No API key. Add one in Settings.',
+      canOpen: false,
+      canRetry: false
+    })
+  })
+
+  it('drops its line once the run shows in the panel, or is gone', () => {
+    const line: ActivityNote = {
+      id: 'n',
+      kind: 'notesUpdate',
+      status: 'done',
+      title: 'Notes updated from Chapter 1: 1 page',
+      detail: null,
+      ref: 'run-a',
+      canOpen: true,
+      canRetry: false,
+      parked: false
+    }
+    const done = flowRun({ status: 'done', noteEdits: [noteEdit('p1')] })
+    expect(noteStale(line, snapshot(flow(done)))).toBe(false)
+    expect(noteStale(line, snapshot(flow(done, 'run-a')))).toBe(true)
+    expect(noteStale(line, snapshot())).toBe(true)
   })
 })

@@ -202,6 +202,18 @@ function fakeClient(initial: AiStatus, usage: AiUsageSummary): Fake {
               cutRate: 0,
               contradictions: { pairs: 0, agreed: 0, underlines: { counted: 0, right: 0 } }
             } as Output<C>
+          // Notes redesign phase 3: the automatic notes update, off by default, and its price.
+          case 'editFlow:autoSettings':
+            return { on: false, dailyCap: 10 } as Output<C>
+          case 'editFlow:plan':
+            return {
+              scopeTitle: 'the whole book',
+              scenes: 0,
+              words: 0,
+              requests: 0,
+              tokensIn: 0,
+              tokensOut: 0
+            } as Output<C>
           // F-16.31: a project made v2 another way has no switch-over record.
           case 'switchover:record':
             return null as Output<C>
@@ -301,12 +313,18 @@ describe('AiSettingsTab (F-5.1)', () => {
     await open()
     expect(fake.calls).toEqual([
       { channel: 'aiSettings:get', input: undefined },
+      // Notes redesign phase 3: the automatic notes update's switch, then its price per chapter.
+      { channel: 'editFlow:autoSettings', input: undefined },
       { channel: 'voice:profile', input: {} },
       { channel: 'voice:listExemplars', input: undefined },
       { channel: 'voice:notes', input: undefined },
       { channel: 'ai:getStatus', input: undefined },
       { channel: 'ai:usageSummary', input: undefined },
       { channel: 'ai:getModelChoice', input: undefined },
+      {
+        channel: 'editFlow:plan',
+        input: { categories: ['updateNotes'], depth: 'quick', scope: { kind: 'book', nodeId: null } }
+      },
       // Last because its store flushes pending saves before asking (F-14.6).
       { channel: 'provenance:report', input: undefined }
     ])

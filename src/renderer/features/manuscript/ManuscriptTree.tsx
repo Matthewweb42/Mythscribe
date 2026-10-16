@@ -1,9 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import type { NovelFormat, TreeNode } from '@shared/ipc/contract'
+import { isFeatureAllowed } from '@shared/aiSettings'
 import { goalTargetError, parseGoalTarget } from '@shared/goals'
 import { HierarchyLevel, isBookSection, sectionLabel } from '@shared/labels'
+import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { useCompileWindowStore } from '@renderer/features/compile/compileWindowStore'
+import { openNotesUpdate } from '@renderer/features/editFlow/editFlowStore'
 import { formatCompactWords } from '@renderer/features/editor/wordFormat'
 import { GoalBar } from '@renderer/features/goals/GoalBar'
 import { useGoalsStore } from '@renderer/features/goals/goalsStore'
@@ -15,7 +18,13 @@ import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { describeError } from '@renderer/lib/errors'
 import { ContextMenu } from './ContextMenu'
 import { LevelIcon } from './LevelIcon'
-import { INCLUDE_ITEM_ID, templateIdOf, treeContextMenuItems } from './contextMenuItems'
+import {
+  INCLUDE_ITEM_ID,
+  UPDATE_NOTES_ITEM_ID,
+  notesUpdateScopeOf,
+  templateIdOf,
+  treeContextMenuItems
+} from './contextMenuItems'
 import { resolveDropTarget, resolveGenericTarget, type DropZone } from './placement'
 import { useLabelFilterView } from '@renderer/features/labels/labelFilter'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
@@ -373,6 +382,12 @@ async function runMenuItem(itemId: string, nodeId: string): Promise<void> {
   if (itemId === 'duplicate') return duplicate(nodeId)
   if (itemId === 'delete') return confirmRemove(nodeId)
   if (itemId === 'set-target') return promptNodeTarget(nodeId)
+  if (itemId === UPDATE_NOTES_ITEM_ID) {
+    // Notes redesign phase 3: the edit flow opens pre-filled with Update notes on this row.
+    const scope = notesUpdateScopeOf(useTreeStore.getState(), nodeId)
+    if (scope !== null) openNotesUpdate(scope, scope === 'book' ? null : nodeId)
+    return
+  }
   if (itemId === INCLUDE_ITEM_ID) {
     // F-12.4: the same tick as the compile window's Contents list; the menu shows it unticked
     // only for the node itself, a folder above it being the compile window's to show.
@@ -462,6 +477,10 @@ export function ManuscriptTree({
   )
   // F-16.7: story memory v2 filters by the author's labels (each tree its own), v1 by a tag.
   const memory = useStoryMemory()
+  // Notes redesign phase 3: `Update notes from …` while the edit flow can run (v1, Use AI on).
+  const notesUpdate = useAiSettingsStore(
+    (s) => memory === 'v1' && s.settings !== null && isFeatureAllowed(s.settings, 'editFlow')
+  )
   const labelView = useLabelFilterView(research ? 'research' : 'manuscript', index)
   const filter = useMemo<TreeFilter | null>(() => {
     if (memory === 'v2') {
@@ -513,10 +532,11 @@ export function ManuscriptTree({
             // F-16.8: Research is never compiled, so its rows offer no tick.
             compileStateLoaded && index.sectionOf[menu.id] !== 'research'
               ? !excluded.includes(menu.id)
-              : undefined
+              : undefined,
+            notesUpdate
           )
         : [],
-    [index, menu, format, nodeTargets, compileStateLoaded, excluded]
+    [index, menu, format, nodeTargets, compileStateLoaded, excluded, notesUpdate]
   )
 
   const setOver = (over: DragOver | null): void => {

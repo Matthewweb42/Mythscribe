@@ -121,6 +121,10 @@ import { startReaderTriggers, stopReaderTriggers } from '@renderer/features/memo
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { EditPassReport } from '@renderer/features/editPass/EditPassReport'
 import { useEditFlowStore } from '@renderer/features/editFlow/editFlowStore'
+import {
+  startChapterTriggers,
+  stopChapterTriggers
+} from '@renderer/features/editFlow/chapterTriggers'
 import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
 import { EditPassWorkspace } from '@renderer/features/editPass/EditPassWorkspace'
@@ -341,6 +345,8 @@ export function App(): React.JSX.Element {
       useEditPassStore.getState().clear()
       // Notes redesign phase 2: the edit flow's panel and runs (loaded when the panel opens).
       useEditFlowStore.getState().clear()
+      // Phase 3: closing is never leaving a chapter; its triggers go with the project.
+      stopChapterTriggers()
       // F-7.1: a shell dialog left open over the closing project must not reappear over the next one.
       useShellDialogStore.getState().close()
       // F-12.2: a draft under review belongs to the project it would be written into.
@@ -493,6 +499,14 @@ export function App(): React.JSX.Element {
       useMemoryStore.getState().loadFindings().catch(failed)
       useMemoryStore.getState().loadLooseEnds().catch(failed)
       useMemoryStore.getState().loadCheckReport().catch(failed)
+    } else {
+      // Notes redesign phase 3 (v1): leaving a chapter after writing in it may update the notes;
+      // the edit flow's runs are read now so an automatic update's line reaches the activity.
+      startChapterTriggers()
+      useEditFlowStore
+        .getState()
+        .load()
+        .catch((err: unknown) => toast.error(describeError(err)))
     }
     useEditorSettingsStore
       .getState()

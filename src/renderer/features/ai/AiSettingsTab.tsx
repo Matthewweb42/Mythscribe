@@ -44,6 +44,7 @@ import {
 import { CLOUD_AI_AVAILABLE, type PricingResult } from '@shared/cloudApi'
 import { bundledPricing, hostedModel, hostedModelFor, multiplierLabel } from '@shared/hostedPricing'
 import { useAccountStore } from '@renderer/features/account/accountStore'
+import { NotesAutoSection } from '@renderer/features/editFlow/NotesAutoSection'
 import { MemorySettings } from '@renderer/features/memory/MemorySettings'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { SwitchoverSettings } from '@renderer/features/switchover/SwitchoverSettings'
@@ -217,6 +218,8 @@ export function AiSettingsTab({
       {/* F-16.16, F-16.19 (story memory v2): the reading's settings; v2 has no summaries. */}
       {/* F-16.31 (part A): a v1 project is offered the switch to the new story memory here. */}
       {memory === 'v2' ? <MemorySettings /> : <SwitchoverSettings />}
+      {/* Notes redesign phase 3 (v1): the automatic notes update after a chapter. */}
+      <NotesAutoSection />
       {memory === 'v2' ? null : (
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs text-fg-muted">

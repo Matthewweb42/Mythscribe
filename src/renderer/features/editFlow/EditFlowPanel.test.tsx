@@ -27,6 +27,7 @@ function run(over: Partial<EditFlowRun> = {}): EditFlowRun {
     id: 'run-1',
     spec: { categories: ['copy', 'continuity'], depth: 'quick', scope: { kind: 'book', nodeId: null } },
     scopeTitle: 'the whole book',
+    automatic: false,
     status: 'done',
     done: 2,
     total: 2,

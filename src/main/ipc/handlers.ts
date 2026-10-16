@@ -114,6 +114,7 @@ import { runCritique } from '../ai/critique'
 import { runProofread } from '../ai/proofread'
 import { createEditPassRunner, sceneTextOf } from '../ai/editPass'
 import { createEditFlowRunner } from '../editFlow/run'
+import { createAutoNotes } from '../editFlow/autoNotes'
 import { sceneTitles } from '../ai/context/queryContext'
 import { flowDetail, flowRunOf, listFlowRuns, markNoteEditUndone, readFlow, requireFlowRow } from '../editFlow/flowStore'
 import {
@@ -388,7 +389,9 @@ import {
   setProjectSession,
   setProjectStructure,
   setReferencePins,
-  setWritingPresets
+  setWritingPresets,
+  getNotesAutoSettings,
+  setNotesAutoSettings
 } from '../project/settingsStore'
 import { setProjectTimeline } from '../project/timelineStore'
 import { addNotName, addWord, removeWord } from '@shared/dictionary'
@@ -4064,6 +4067,25 @@ export function registerHandlers({
     emit(windows(), 'editFlow:changed', run)
     return run
   })
+
+  /**
+   * Notes redesign phase 3: the automatic notes update after a chapter. Main decides whether a
+   * leave starts a run (the switch, Use AI, the daily cap, a run going, the chapter's text since
+   * its last update); a skip goes to the log only.
+   */
+  const autoNotes = createAutoNotes({
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    runner: editFlows,
+    log: (line) => console.warn(line)
+  })
+
+  register('editFlow:autoSettings', () => getNotesAutoSettings(manager.require().connection.orm))
+
+  register('editFlow:setAutoSettings', (value) =>
+    setNotesAutoSettings(manager.require().connection.orm, value)
+  )
+
+  register('editFlow:chapterLeft', ({ chapterId }) => autoNotes.chapterLeft(chapterId))
 
   register('editPass:presets', () => getPresets(manager.require().connection.orm))
 

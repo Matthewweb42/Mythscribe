@@ -116,8 +116,17 @@ import {
   contradictionsTurnOf
 } from '@renderer/features/memory/needsALook/findingView'
 import { currentStoryMemory } from '@renderer/features/project/storyMemory'
-import { useEditFlowStore } from '@renderer/features/editFlow/editFlowStore'
-import { EDIT_FLOW_LABEL, flowCategoryForPass, type EditFlowCategory } from '@shared/editFlow'
+import {
+  notesUpdateTarget,
+  openNotesUpdate,
+  useEditFlowStore
+} from '@renderer/features/editFlow/editFlowStore'
+import {
+  EDIT_FLOW_LABEL,
+  flowCategoryForPass,
+  notesUpdateAsk,
+  type EditFlowCategory
+} from '@shared/editFlow'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 
 /** The title of a conversation nobody has written in yet. */
@@ -1093,6 +1102,14 @@ async function routeTurn(
     await navigateTurn(id, requestId, text, history, mode)
     return
   }
+  // Notes redesign phase 3: in Brainstorm a request to update the notes from a scope opens the
+  // edit flow pre-filled, priced before Run; nothing is sent. In Write and Vibe Ms Scribe edits
+  // the pages herself, as she does for any notes request.
+  if (mode === 'brainstorm' && notesUpdateAsk(text) !== null) {
+    patchLastTurn(id, { action: 'editPass' })
+    finishTurn(id, { content: openNotesUpdateFromChat(text) }, false)
+    return
+  }
   const open = openSceneNow()
   const { editor } = open
   const preview =
@@ -1414,6 +1431,22 @@ async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
 /** What the chat says when a request opened the edit flow (notes redesign phase 2). */
 export function editFlowOpenedText(category: EditFlowCategory, title: string): string {
   return `I opened the edit flow with ${EDIT_FLOW_LABEL[category]} on “${title}”. Check the price on the right and press Run.`
+}
+
+/**
+ * A Brainstorm request to update the notes (phase 3): the flow opened pre-filled on its scope (the
+ * open scene's chapter when it names none), and what the turn says; or why it could not open.
+ */
+function openNotesUpdateFromChat(text: string): string {
+  const ask = notesUpdateAsk(text)
+  const target = ask === null ? EDIT_NO_SCENE_MESSAGE : notesUpdateTarget(ask)
+  if (typeof target === 'string') return target
+  openNotesUpdate(target.scope, target.nodeId)
+  const title =
+    target.nodeId === null
+      ? 'the whole book'
+      : (useTreeStore.getState().byId[target.nodeId]?.title ?? 'Untitled')
+  return editFlowOpenedText('updateNotes', title)
 }
 
 /**

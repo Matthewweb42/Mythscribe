@@ -311,8 +311,11 @@ export interface EditFlowRunnerDeps {
 export interface EditFlowRunner {
   /** What a run of `spec` would send, for its price; nothing is sent. */
   plan: (spec: EditFlowSpec) => Promise<EditFlowPlanResult>
-  /** Starts a run; gated like every AI feature, one run at a time. */
-  start: (spec: EditFlowSpec) => Promise<EditFlowRun>
+  /**
+   * Starts a run; gated like every AI feature, one run at a time. `automatic` marks a notes update
+   * started by leaving a chapter (phase 3), kept apart from the author's own runs.
+   */
+  start: (spec: EditFlowSpec, options?: { automatic?: boolean }) => Promise<EditFlowRun>
   /** Stops the running run; what came back stays. */
   cancel: (runId: string) => void
   /** The running run's id, or null. */
@@ -524,7 +527,7 @@ export function createEditFlowRunner(deps: EditFlowRunnerDeps): EditFlowRunner {
       const { db, folder } = requireProject()
       return countFlow(await prepareFlow(db, folder, spec))
     },
-    async start(spec) {
+    async start(spec, options) {
       const { db, folder } = requireProject()
       refuseWhileRunning()
       assertFeatureAllowed(getAiSettings(db), 'editFlow')
@@ -536,6 +539,7 @@ export function createEditFlowRunner(deps: EditFlowRunnerDeps): EditFlowRunner {
         scopeTitle: prep.scopeTitle,
         nodeIds: prep.scenes.map((scene) => scene.nodeId),
         total: prep.requests.length,
+        automatic: options?.automatic ?? false,
         now: now()
       })
       const controller = new AbortController()
@@ -554,10 +558,13 @@ export function createEditFlowRunner(deps: EditFlowRunnerDeps): EditFlowRunner {
         },
         { once: true }
       )
+      // Every window hears of the run as it starts (an automatic one is not started by a window).
+      const started = flowRunOf(db, row)
+      deps.onChange(started)
       state.loop = run(state, prep).finally(() => {
         if (active === state) active = null
       })
-      return flowRunOf(db, row)
+      return started
     },
     cancel(runId) {
       if (active?.runId === runId) active.controller.abort()

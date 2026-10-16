@@ -146,9 +146,14 @@ export const EditFlowSpec = z.object({
 })
 export type EditFlowSpec = z.infer<typeof EditFlowSpec>
 
-/** The key the kept results are per: the latest run of each scope stays (phase 2 plan). */
-export function scopeKey(scope: EditFlowScope): string {
-  return scope.kind === 'book' ? 'book' : `${scope.kind}:${scope.nodeId ?? ''}`
+/**
+ * The key the kept results are per: the latest run of each scope stays (phase 2 plan). An
+ * automatic notes update (phase 3) is kept under its own key, so it never replaces the run the
+ * author started herself on the same scope.
+ */
+export function scopeKey(scope: EditFlowScope, automatic = false): string {
+  const key = scope.kind === 'book' ? 'book' : `${scope.kind}:${scope.nodeId ?? ''}`
+  return automatic ? `auto:${key}` : key
 }
 
 /** The categories in the order the panel shows them (stages, checks, Update notes). */
@@ -218,6 +223,8 @@ export const EditFlowRun = z.object({
   id: z.string(),
   spec: EditFlowSpec,
   scopeTitle: z.string(),
+  /** Started by leaving a chapter after writing in it (phase 3), not by the author's Run. */
+  automatic: z.boolean(),
   status: EditPassStatus,
   /** Requests answered so far, of all the run sends. */
   done: z.number().int().nonnegative(),
@@ -262,3 +269,101 @@ export const EditFlowDetail = z.object({
   titles: z.record(z.string(), z.string())
 })
 export type EditFlowDetail = z.infer<typeof EditFlowDetail>
+
+/** The note pages a run's Update notes edited or made, each counted once. */
+export function notesUpdatedPages(run: Pick<EditFlowRun, 'noteEdits'>): number {
+  return new Set(
+    run.noteEdits.flatMap((entry) => (entry.edit.kind === 'notebook' ? [entry.edit.pageId] : []))
+  ).size
+}
+
+/*
+ * Notes redesign phase 3 (`docs/research/notes-redesign-2026-10-15/phase3.md`): notes updates.
+ * The step ("Update notes from this scene / chapter / the whole book") and the chat open the
+ * flow pre-filled; the automatic update runs Update notes Quick on a chapter the author leaves
+ * after writing in it, when she turned it on (off by default), at most `dailyCap` runs a day.
+ */
+
+/** The settings key of the automatic update's switch and cap (per project: the book decides). */
+export const NOTES_AUTO_KEY = 'notesAutoUpdate'
+/** The settings key of today's count and each chapter's text hash at its last automatic update. */
+export const NOTES_AUTO_STATE_KEY = 'notesAutoUpdate.state'
+export const NOTES_AUTO_CAP_MIN = 1
+export const NOTES_AUTO_CAP_MAX = 50
+export const NOTES_AUTO_CAP_DEFAULT = 10
+
+export const NotesAutoSettings = z.object({
+  on: z.boolean(),
+  /** Automatic runs started a day, reset at local midnight. */
+  dailyCap: z.number().int().min(NOTES_AUTO_CAP_MIN).max(NOTES_AUTO_CAP_MAX)
+})
+export type NotesAutoSettings = z.infer<typeof NotesAutoSettings>
+
+export function defaultNotesAutoSettings(): NotesAutoSettings {
+  return { on: false, dailyCap: NOTES_AUTO_CAP_DEFAULT }
+}
+
+/** What main keeps for the automatic update: the day's count and each chapter's last hash. */
+export const NotesAutoState = z.object({
+  /** The local day (`YYYY-MM-DD`) `count` is for. */
+  day: z.string(),
+  count: z.number().int().nonnegative(),
+  /** Chapter id → the hash of its text when its last automatic update started. */
+  hashes: z.record(z.string(), z.string())
+})
+export type NotesAutoState = z.infer<typeof NotesAutoState>
+
+export function defaultNotesAutoState(): NotesAutoState {
+  return { day: '', count: 0, hashes: {} }
+}
+
+/** Why leaving a chapter started no automatic update (main logs it; the author sees nothing). */
+export const NOTES_AUTO_SKIPS = [
+  'off',
+  'aiOff',
+  'busy',
+  'notChapter',
+  'unchanged',
+  'cap',
+  'noText'
+] as const
+export const NotesAutoSkip = z.enum(NOTES_AUTO_SKIPS)
+export type NotesAutoSkip = z.infer<typeof NotesAutoSkip>
+
+/** What `editFlow:chapterLeft` answers: the run it started, or why none. */
+export const EditFlowChapterLeftResult = z.discriminatedUnion('started', [
+  z.object({ started: z.literal(true), runId: z.string() }),
+  z.object({ started: z.literal(false), reason: NotesAutoSkip })
+])
+export type EditFlowChapterLeftResult = z.infer<typeof EditFlowChapterLeftResult>
+
+/** The spec of an automatic update of chapter `chapterId`: Update notes, Quick. */
+export function autoNotesSpec(chapterId: string): EditFlowSpec {
+  return {
+    categories: ['updateNotes'],
+    depth: 'quick',
+    scope: { kind: 'chapter', nodeId: chapterId }
+  }
+}
+
+/** The depth the step and the chat pre-fill for a scope: Deep for the whole book, else Quick. */
+export function notesUpdateDepth(scope: EditFlowScopeKind): EditFlowDepth {
+  return scope === 'book' ? 'deep' : 'quick'
+}
+
+/**
+ * A chat request to update the notes from a scope (phase 3; asked in Brainstorm it opens the flow
+ * pre-filled): the scope it names, `here` when it names none ("update my notes"), or null when the
+ * message is anything else. Matched whole, so "update my notes on Mara with …" stays a chat turn.
+ */
+export function notesUpdateAsk(message: string): EditFlowScopeKind | 'here' | null {
+  const match =
+    /^(?:(?:please|ok(?:ay)?|now),?\s+)?(?:(?:can|could|would) you\s+|let'?s\s+|go ahead and\s+)?(?:please\s+)?(?:update|refresh)\s+(?:all\s+)?(?:of\s+)?(?:my|the|our)?\s*notes(?:\s+(?:from|with|for|using|based on|to match)\s+(?:this|the|my|our)?\s*(?:whole\s+|entire\s+|current\s+)?(scene|chapter|book|manuscript|novel))?(?:,?\s+please)?\s*[.!?]*$/iu.exec(
+      message.trim()
+    )
+  if (match === null) return null
+  const scope = match[1]?.toLowerCase()
+  if (scope === undefined) return 'here'
+  if (scope === 'scene' || scope === 'chapter') return scope
+  return 'book'
+}
