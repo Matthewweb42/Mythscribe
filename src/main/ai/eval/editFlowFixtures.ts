@@ -213,14 +213,14 @@ function timelineCase(
   }
 }
 
-function timelineCases(): EvalCase[] {
+export function timelineCases(): EvalCase[] {
   const [one, two] = SHORT
   if (one === undefined || two === undefined) return []
   const mill = bookScene(4, 2, MILL)
   const told = bookScene(5, 2, ROOK)
   return [
     timelineCase(
-      'updateNotesStoryOrder',
+      'timelineOrder',
       'Chapter 2: Rook meets Mara and gives her the key; the events go between Ch 1 and Ch 3 on the Story timeline',
       TIMELINE,
       [mill],
@@ -228,7 +228,7 @@ function timelineCases(): EvalCase[] {
       { first: 'rook', then: 'leaves the valley' }
     ),
     timelineCase(
-      'updateNotesFlashback',
+      'timelineFlashback',
       'Chapter 2 tells of the ledger burned the winter the river froze: that event goes before Ch 1 on the Story timeline',
       TIMELINE,
       [told],
@@ -236,7 +236,7 @@ function timelineCases(): EvalCase[] {
       { first: 'burn', then: 'confronts' }
     ),
     timelineCase(
-      'updateNotesTimelineMade',
+      'timelineMade',
       'No Story timeline page yet: Chapter 1’s events make it, the burned ledger (years before) first',
       null,
       [one, two],
@@ -302,7 +302,6 @@ export function editFlowEvalCases(): EvalCase[] {
       messages: notes.messages,
       maxTokens: notes.maxTokens,
       scoring: { kind: 'editNotes' }
-    },
-    ...timelineCases()
+    }
   ]
 }

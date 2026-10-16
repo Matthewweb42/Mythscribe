@@ -86,7 +86,7 @@ import { judgeEvalCases } from './judgeFixtures'
 import type { JudgeVerdict } from '@shared/memory/findings'
 import { scribeEvalCases } from './scribeFixtures'
 import { scribe2EvalCases } from './scribe2Fixtures'
-import { editFlowEvalCases } from './editFlowFixtures'
+import { editFlowEvalCases, timelineCases } from './editFlowFixtures'
 import { notesSortEvalCases } from './notesSortFixtures'
 import type { EditFlowCategory, EditFlowFamily } from '@shared/editFlow'
 import { CARD_GIST_MAX_WORDS, CARD_LINE_MAX_WORDS } from '@shared/memory/claims'
@@ -6866,4 +6866,6 @@ export const EVAL_CASES: EvalCase[] = [
   }),
   // Notes structure part B (2026-10-16): Sort with Ms Scribe.
   ...notesSortEvalCases(),
+  // Notes binder (2026-10-16): Update notes keeps the Story timeline (editNotes.v2).
+  ...timelineCases()
 ]

@@ -841,7 +841,7 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     feature: 'editFlow',
     tier: 'fast',
     output: 'json',
-    since: 'Notes binder'
+    since: 'Notes BD'
   },
   // Sort with Ms Scribe: a document's part into pages in folders, its text copied (2026-10-16).
   [NOTES_SORT_PROMPT_VERSION]: {
