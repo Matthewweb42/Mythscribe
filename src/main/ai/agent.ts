@@ -26,7 +26,7 @@ import {
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import { STORY_MAP_TOKEN_BUDGET } from '@shared/storyTime'
 import { getSummary } from '../document/summaryStore'
-import { getAiSettings } from '../project/settingsStore'
+import { getAiSettings, storyBibleArchivedIn } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { buildVoiceProfile, documentText, type VoiceProfile } from '../voice/profile'
 import {
@@ -317,7 +317,12 @@ export async function runAgent(
 ): Promise<AgentResult> {
   assertFeatureAllowed(getAiSettings(db), 'agent')
   // F-16.25: a story memory v2 project's chat is Ms Scribe (`runScribe`); this run is v1's.
-  const project = loadAgentProject(db, input.nodeId, 'v1')
+  const loaded = loadAgentProject(db, input.nodeId, 'v1')
+  // Notes redesign (fresh start): with the old story bible archived, no sheet or tag is read or
+  // written by the chat.
+  const project: AgentProject = storyBibleArchivedIn(db, 'v1')
+    ? { ...loaded, entities: [], bibleOff: true }
+    : loaded
   // F-5.23: the story map, with now at the open scene (or the latest written one).
   const map = buildStoryMap(db, project.time, {
     maxTokens: STORY_MAP_TOKEN_BUDGET,

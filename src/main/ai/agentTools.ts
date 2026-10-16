@@ -100,6 +100,12 @@ export interface AgentProject {
    * the v2 records, passage index and to-dos (`agentToolsV2.ts`).
    */
   memory: StoryMemoryVersion
+  /**
+   * Notes redesign (fresh start): the v1 chat run of a project whose old story bible is archived
+   * (`runAgent` sets it). Its sheets are not loaded and the tag and sheet tools and edits are
+   * refused (`AGENT_BIBLE_OFF`), as in v2.
+   */
+  bibleOff?: boolean
   /** F-16.4 (v2): the records, read once per run. */
   records?: StoryRecordSummary[]
 }
@@ -180,6 +186,10 @@ const isDocument = (row: NodeRow | undefined): row is NodeRow =>
 const levelOf = (row: NodeRow): string =>
   row.sectionType !== null ? 'section' : (row.hierarchyLevel ?? row.kind)
 
+/** Why a tag or sheet tool or edit is refused while the old story bible is archived (fresh start). */
+export const AGENT_BIBLE_OFF =
+  'not available: the old story bible (tags and sheets) is switched off; use find_passages, cards or read_scene'
+
 const cap = (text: string): string => headTruncate(text, AGENT_RESULT_CHARS)
 
 const str = (value: unknown): string => (typeof value === 'string' ? value : '')
@@ -211,6 +221,9 @@ export function runAgentTool(
   if (project.memory === 'v2') {
     const v2 = runAgentToolV2(project, tool.data, args)
     if (v2 !== null) return v2
+  }
+  if (project.bibleOff === true && AGENT_V2_REFUSED_TOOLS.includes(tool.data)) {
+    return { step: { tool: tool.data, label: 'Looking around…' }, result: AGENT_BIBLE_OFF }
   }
   switch (tool.data) {
     case 'search':
@@ -970,6 +983,7 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
   const kind = str(edit.edit)
   // F-16.4: a v2 project has no tags, sheets, statuses, To do items or summaries to edit.
   if (project.memory === 'v2' && refusesV2Edit(edit)) return { error: AGENT_V2_REFUSED }
+  if (project.bibleOff === true && refusesV2Edit(edit)) return { error: AGENT_BIBLE_OFF }
   const nameOf = (row: NodeRow): string => project.titleOf(row.id) || row.title
   const documentArg = (): NodeRow | string => {
     const row = nodeByRef(project, edit.id)

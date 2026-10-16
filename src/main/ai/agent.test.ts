@@ -20,7 +20,12 @@ import { setSceneMeta } from '../document/sceneMetaStore'
 import { createEntity } from '../entity/entityStore'
 import { addAuthorStatement, applySceneFacts } from '../entity/factStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
-import { setAiSettings, setAuthorRules } from '../project/settingsStore'
+import {
+  getEditorSettings,
+  setAiSettings,
+  setAuthorRules,
+  setEditorSettings
+} from '../project/settingsStore'
 import { createSeededProject } from '../project/testProject'
 import { createTag } from '../tag/tagStore'
 import { createNode, listNodes, type TreeDb } from '../tree/treeStore'
@@ -39,6 +44,7 @@ import {
   type AgentInput
 } from './agent'
 import {
+  AGENT_BIBLE_OFF,
   AGENT_TODO_ITEMS,
   SHEETS_ARE_PLANS,
   statusMark,
@@ -251,6 +257,7 @@ describe('runAgent (F-5.22)', () => {
   })
 
   it('keeps a cited sheet the project has, so an answer from the author’s notes is not uncited', async () => {
+    setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: ['storyBible'] })
     createEntity(db, { kind: 'character', name: 'Wren', fields: { appearance: 'Grey eyes.' } })
     replies({
       answer: 'Wren has grey eyes [1].',
@@ -264,6 +271,24 @@ describe('runAgent (F-5.22)', () => {
       sheets: [{ name: 'Wren', kind: 'character' }]
     })
     expect(result.dropped).toBe(1)
+  })
+
+  it('reads and writes no sheet or tag while the old story bible is archived (notes fresh start)', async () => {
+    createEntity(db, { kind: 'character', name: 'Wren', fields: { appearance: 'Grey eyes.' } })
+    replies(
+      { tool: 'read_sheet', args: { name: 'Wren' } },
+      { tool: 'tags', args: {} },
+      {
+        answer: 'Wren has grey eyes [1].',
+        found: true,
+        citations: [{ sheet: 'Wren' }]
+      }
+    )
+    const result = await run()
+    expect(request(1).messages.at(-1)?.content).toContain(AGENT_BIBLE_OFF)
+    expect(request(2).messages.at(-1)?.content).toContain(AGENT_BIBLE_OFF)
+    expect(JSON.stringify(request(0).messages)).not.toContain('Grey eyes')
+    expect(result.query).toMatchObject({ sheets: [] })
   })
 
   it('tells the model when a tool or an id names nothing, and keeps going', async () => {
@@ -929,6 +954,16 @@ describe('the agent tools (F-5.22)', () => {
 })
 
 describe('resolveAgentEdit (F-5.22)', () => {
+  it('refuses tag and sheet edits in a run with the old story bible archived (notes fresh start)', () => {
+    const project = { ...loadAgentProject(db, null, 'v1'), entities: [], bibleOff: true }
+    expect(resolveAgentEdit(project, { edit: 'tag', id: ref(scenes[0]), tag: 'Wren' })).toEqual({
+      error: AGENT_BIBLE_OFF
+    })
+    expect(resolveAgentEdit(project, { edit: 'delete', sheet: 'Wren' })).toEqual({
+      error: AGENT_BIBLE_OFF
+    })
+  })
+
   it('resolves structure, sheet, tag, and delete edits and refuses what it cannot place', () => {
     createEntity(db, { kind: 'character', name: 'Mara Vell', fields: { age: '34' } })
     const project = loadAgentProject(db, null, 'v1')
