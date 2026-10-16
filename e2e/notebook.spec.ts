@@ -327,25 +327,33 @@ test('fresh start: a project’s Library file opens in Notes › Docs, with no C
   await expect(notePage.locator('h1')).toHaveText('Powers')
   await expect(notePage).toContainText('Shadow walking costs a memory.')
 
-  // The sections: two tabs, Manuscript and Notes, with Outline, Timeline and Edits under Notes;
-  // no story-bible category or Library anywhere.
+  // The sections: three tabs, Manuscript, Notes and Edits, with Outline and Timeline as large
+  // folders at the top of Notes; no story-bible category or Library anywhere.
   await expect(page.getByRole('button', { name: /^Section: / })).toHaveCount(0)
   await expect(page.getByRole('tablist', { name: 'Sections' }).getByRole('tab')).toHaveText([
     'Manuscript',
-    'Notes'
+    'Notes',
+    'Edits'
   ])
   const views = page.getByRole('group', { name: 'Views' })
-  await expect(views.getByRole('button')).toHaveText(['Outline', 'Timeline', 'Edits'])
+  await expect(views.getByRole('button')).toHaveText(['Outline', 'Timeline'])
   await expect(page.getByRole('tab', { name: 'Characters', exact: true })).toHaveCount(0)
   await expect(page.getByRole('tab', { name: 'Library', exact: true })).toHaveCount(0)
 
-  // Edits opens under Notes with a back row; the Notes tab stays selected.
-  await views.getByRole('button', { name: 'Edits', exact: true }).click()
+  // Timeline opens under Notes with a back row; the Notes tab stays selected.
+  await views.getByRole('button', { name: 'Timeline', exact: true }).click()
   const notesTab = page.getByRole('tab', { name: 'Notes', exact: true })
   await expect(notesTab).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('region', { name: 'Edits section', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Timeline section', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Back to Notes' }).click()
   await expect(page.getByRole('tree', { name: 'Notes' })).toBeVisible()
+  // Edits is a tab of its own.
+  await page.getByRole('tab', { name: 'Edits', exact: true }).click()
+  await expect(page.getByRole('tab', { name: 'Edits', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  await page.getByRole('tab', { name: 'Notes', exact: true }).click()
 })
 
 test('structure B: a dropped file split at headings, another sorted with Ms Scribe and undone', async () => {

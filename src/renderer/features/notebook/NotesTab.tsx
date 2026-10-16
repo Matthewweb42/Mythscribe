@@ -31,7 +31,7 @@ const failed = (err: unknown): void => {
   toast.error(describeError(err))
 }
 
-/** A sidebar section shown under Notes (the fresh start: Outline, Timeline, Edits). */
+/** A sidebar section shown under Notes (the fresh start: Outline, Timeline). */
 export interface NotesView {
   id: string
   label: string
@@ -39,7 +39,7 @@ export interface NotesView {
 }
 
 interface NotesTabProps {
-  /** The views listed above the tree; each opens in the Notes panel. None outside the fresh start. */
+  /** The large folders at the top of the tree; each opens in the Notes panel. None outside the fresh start. */
   views?: readonly NotesView[]
 }
 
@@ -49,9 +49,9 @@ interface NotesTabProps {
  * folders dropped on the section become pages (a folder keeps its folders), in the folder under
  * the pointer, or beside the page under it, or at the top level. Notes redesign phase 3: Update notes… opens the edit flow pre-filled with
  * Update notes on the open scene's chapter (the book when no scene is open), while the edit flow
- * can run (v1, Use AI on). Structure A (2026-10-16): in the fresh start the views that live under
- * Notes (Outline, Timeline, Edits) are rows above the tree; a row opens its section, which the
- * sidebar shows under the Notes tab with a back row. Structure B (2026-10-16): a drop or a pick
+ * can run (v1, Use AI on). Structure A (2026-10-16, the author's layout): in the fresh start Outline
+ * and Timeline sit at the top of the tree as two large folders; one opens its section, which the
+ * sidebar shows under the Notes tab with a back row (Edits is a tab of its own). Structure B (2026-10-16): a drop or a pick
  * asks first how the files come in (`NotesImportDialog`).
  */
 export function NotesTab({ views = [] }: NotesTabProps): React.JSX.Element {
@@ -171,23 +171,23 @@ export function NotesTab({ views = [] }: NotesTabProps): React.JSX.Element {
           </button>
         ) : null}
       </div>
-      {views.length > 0 ? (
-        <div role="group" aria-label="Views" className="shrink-0 border-b border-line py-1">
-          {views.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => useLayoutStore.getState().setSidebarTab(id)}
-              className="flex w-full items-center gap-2 px-3 py-1 text-left text-sm hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
-            >
-              <Icon size={15} aria-hidden="true" className="shrink-0 text-fg-muted" />
-              <span className="min-w-0 flex-1 truncate">{label}</span>
-              <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-fg-muted" />
-            </button>
-          ))}
-        </div>
-      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {views.length > 0 ? (
+          <div role="group" aria-label="Views" className="border-b border-line py-1">
+            {views.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => useLayoutStore.getState().setSidebarTab(id)}
+                className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left text-[15px] font-medium hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
+              >
+                <Icon size={18} aria-hidden="true" className="shrink-0 text-accent" />
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                <ChevronRight size={15} aria-hidden="true" className="shrink-0 text-fg-muted" />
+              </button>
+            ))}
+          </div>
+        ) : null}
         <NotebookTree />
       </div>
       {templateMenu !== null ? (

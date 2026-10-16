@@ -340,7 +340,7 @@ describe('buildSections (F-9.11)', () => {
   }
   const used = (built: SidebarSection[]): string[] => built.filter((s) => s.used).map((s) => s.id)
 
-  it('lists Manuscript, Notes, Outline, Timeline and Edits while the old story bible is archived (fresh start)', () => {
+  it('lists Manuscript, Notes and Edits as tabs, Outline and Timeline under Notes, while the old story bible is archived (fresh start)', () => {
     const busy = {
       ...counts,
       documents: 4,
@@ -356,12 +356,12 @@ describe('buildSections (F-9.11)', () => {
     expect(built.map((s) => [s.id, s.used, s.under])).toEqual([
       ['manuscript', true, undefined],
       ['notes', true, undefined],
+      ['edits', true, undefined],
       ['outline', true, 'notes'],
-      ['timeline', true, 'notes'],
-      ['edits', true, 'notes']
+      ['timeline', true, 'notes']
     ])
-    // Structure A: the views under Notes are always listed (each shows its own empty state), as
-    // rows above the Notes tree.
+    // The author's layout (2026-10-16): Outline and Timeline are always listed (each shows its own
+    // empty state), as the two large folders at the top of the Notes tree; Edits is a tab.
     const empty = buildSections(ALL_BUILTIN_CATEGORIES, counts, 'v1', { storyBibleArchived: true })
     expect(empty.map((s) => s.used)).toEqual([true, true, true, true, true])
     const notes = empty.find((s) => s.id === 'notes')?.render('novel')
@@ -369,8 +369,7 @@ describe('buildSections (F-9.11)', () => {
     expect(isValidElement(notes) ? notes.props : null).toEqual({
       views: [
         { id: 'outline', label: 'Outline', icon: ListTree },
-        { id: 'timeline', label: 'Timeline', icon: CalendarRange },
-        { id: 'edits', label: 'Edits', icon: FilePenLine }
+        { id: 'timeline', label: 'Timeline', icon: CalendarRange }
       ]
     })
     // Switched back on, the list is v1's as it was; v2 never archives it.

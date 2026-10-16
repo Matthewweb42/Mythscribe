@@ -353,14 +353,15 @@ export function buildSections(
  * Notes redesign, fresh start (the author 2026-10-15): with the old story bible archived, a v1
  * project lists Manuscript, Notes, Outline, Timeline and Edits. The categories, the Index,
  * Threads, Library, To do and Changes are hidden; a stored section among them opens on Manuscript.
- * Two tabs (structure A, 2026-10-16): Manuscript and Notes; Outline, Timeline and Edits live under
- * Notes, always listed as rows above its tree (an empty one shows its own empty state), their ids
- * unchanged so a stored or requested `edits` opens Notes with Edits.
+ * Tabs (the author, 2026-10-16): Manuscript, Notes and Edits; Outline and Timeline live under
+ * Notes as its two large folders at the top of the tree (always listed; an empty one shows its own
+ * empty state), their ids unchanged so a stored or requested `timeline` opens Notes with it.
  */
-const FRESH_START_TOOLS: readonly SidebarToolId[] = ['outline', 'timeline', 'edits']
+const FRESH_START_UNDER_NOTES: readonly SidebarToolId[] = ['outline', 'timeline']
 
 function buildFreshStartSections(counts: SectionCounts): SidebarSection[] {
-  const views = TOOLS.filter((tool) => FRESH_START_TOOLS.includes(tool.id)).map(
+  const edits = TOOLS.find((tool) => tool.id === 'edits')
+  const views = TOOLS.filter((tool) => FRESH_START_UNDER_NOTES.includes(tool.id)).map(
     (tool): SidebarSection => ({
       ...toolSection(tool, counts, 'tools'),
       used: true,
@@ -374,6 +375,7 @@ function buildFreshStartSections(counts: SectionCounts): SidebarSection[] {
       ...toolSection(NOTES, counts, 'manuscript'),
       render: () => createElement(NotesTab, { views: rows })
     },
+    ...(edits === undefined ? [] : [{ ...toolSection(edits, counts, 'tools'), used: true }]),
     ...views
   ]
 }

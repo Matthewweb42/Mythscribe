@@ -394,20 +394,20 @@ describe('App', () => {
     const banner = screen.getByRole('banner')
     await waitFor(() => expect(within(banner).queryByRole('button', { name: 'Tags' })).toBeNull())
     expect(within(banner).queryByRole('button', { name: 'References' })).toBeNull()
-    // Structure A: two tabs, Manuscript and Notes; Outline, Timeline and Edits under Notes.
+    // Three tabs, Manuscript, Notes and Edits; Outline and Timeline under Notes.
     const tabs = within(aside).getByRole('tablist', { name: 'Sections' })
     expect(
       within(tabs)
         .getAllByRole('tab')
         .map((t) => t.textContent)
-    ).toEqual(['Manuscript', 'Notes'])
+    ).toEqual(['Manuscript', 'Notes', 'Edits'])
     expect(within(aside).queryByRole('button', { name: /^Section: / })).toBeNull()
     await userEvent.click(within(tabs).getByRole('tab', { name: 'Notes' }))
     expect(
       within(within(aside).getByRole('group', { name: 'Views' }))
         .getAllByRole('button')
         .map((b) => b.textContent)
-    ).toEqual(['Outline', 'Timeline', 'Edits'])
+    ).toEqual(['Outline', 'Timeline'])
     await userEvent.click(within(tabs).getByRole('tab', { name: 'Manuscript' }))
     // The menu bar: no Character, Setting or World-building note under Insert.
     const bar = screen.getByRole('menubar', { name: 'Application menu' })
