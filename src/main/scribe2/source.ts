@@ -1,18 +1,18 @@
 import { categoryOf } from '@shared/categories'
 import type { Entity } from '@shared/ipc/contract'
 import type { NotebookItem } from '@shared/notebook'
-import { inTemplates } from '@shared/notebookTemplates'
+import { inTemplates, templateSections, templatedFolders } from '@shared/notebookTemplates'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import { getSummary } from '../document/summaryStore'
 import { listCategories } from '../entity/categoryStore'
 import { listContextFiles, getContextFileRow, readContextText } from '../library/libraryStore'
-import { listNotebook, listNotebookPages } from '../notebook/notebookStore'
+import { getNotebookPage, listNotebook, listNotebookPages } from '../notebook/notebookStore'
 import { storyBibleArchivedIn } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { documentText } from '../voice/profile'
 import { loadAgentProject, type AgentProject } from '../ai/agentTools'
 import { notesText } from '../ai/context/scenePanel'
-import type { ScribePage, ScribeScene } from './context'
+import type { ScribeFolderTemplate, ScribePage, ScribeScene } from './context'
 
 /**
  * What Ms Scribe's v1 context is made of, read from the open project (notes redesign phase 1):
@@ -26,6 +26,8 @@ export interface ScribeMaterial {
   pages: ScribePage[]
   scenes: ScribeScene[]
   names: string[]
+  /** The folders whose new pages follow a template, with its headings (notes fixes, 2026-10-15). */
+  folderTemplates: ScribeFolderTemplate[]
 }
 
 /** "Characters › Minor" for an item in nested folders; '' at the top. */
@@ -41,6 +43,23 @@ export function folderPath(items: readonly NotebookItem[], parentId: string | nu
     at = item.parentId
   }
   return path.join(' › ')
+}
+
+/**
+ * The Notes folders with a template of their own (`templatedFolders`), each with its path and the
+ * template's headings: a built-in's, or the sections of the author's template page.
+ */
+export function folderTemplatesOf(
+  db: TreeDb,
+  items: readonly NotebookItem[]
+): ScribeFolderTemplate[] {
+  return templatedFolders(items).map(({ folder, template }) => ({
+    folder: folderPath(items, folder.id),
+    sections:
+      template.kind === 'builtIn'
+        ? [...template.template.headings]
+        : templateSections(getNotebookPage(db, template.pageId).content)
+  }))
 }
 
 /** A story-bible sheet as a page: its kind, other names, fields and page. */
@@ -142,5 +161,5 @@ export async function loadScribeSources(
     ...pages.filter((page) => page.kind !== 'library').map((page) => page.title),
     ...(bible ? project.entities.flatMap((entity) => entity.aliases) : [])
   ]
-  return { project, pages, scenes, names }
+  return { project, pages, scenes, names, folderTemplates: folderTemplatesOf(db, items) }
 }

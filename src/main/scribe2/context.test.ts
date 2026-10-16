@@ -4,12 +4,15 @@ import {
   SCRIBE_FORCED_BOOK_TOKENS,
   SCRIBE_NOTES_TOKENS,
   SCRIBE_PICK_BOOK_TOKENS,
+  SCRIBE_TEMPLATE_FOLDERS_MAX,
+  SCRIBE_TEMPLATE_SECTIONS_MAX,
   SCRIBE_WHOLE_BOOK_TOKENS
 } from '@shared/scribe2'
 import {
   buildBookMap,
   buildNotesBlock,
   buildScribeContext,
+  folderTemplatesBlock,
   nameCount,
   namesFound,
   namesIn,
@@ -63,6 +66,7 @@ const input = (over: Partial<ScribeContextInput> = {}): ScribeContextInput => ({
   wholeBook: false,
   searchHits: [],
   names: ['Mara', 'Rook'],
+  folderTemplates: [],
   ...over
 })
 
@@ -219,5 +223,43 @@ describe('page names (notes redesign, 2026-10-15)', () => {
       ]).map((page) => page.title)
     ).toEqual(['Tash — powers', 'Mara', 'Rook'])
     expect(pagesNamedIn(pages, [{ text: 'rook waits', caseless: false }])).toEqual([])
+  })
+})
+
+describe('folder templates in the notes block (notes fixes, 2026-10-15)', () => {
+  const characters = { folder: 'Characters', sections: ['Role', 'Appearance', 'Wants'] }
+
+  it('ends the notes block with each templated folder and its headings, once', () => {
+    const context = buildScribeContext(
+      input({ folderTemplates: [characters, { folder: 'Places › Cities', sections: ['Where'] }] })
+    )
+    expect(
+      context.notes.endsWith(
+        'Folder templates:\nCharacters → template: Role, Appearance, Wants\nPlaces › Cities → template: Where'
+      )
+    ).toBe(true)
+    expect(context.notes.match(/Folder templates:/g)).toHaveLength(1)
+    // With no pages yet the folders' templates still go along.
+    expect(buildScribeContext(input({ pages: [], folderTemplates: [characters] })).notes).toBe(
+      'There are no note pages yet.\n\nFolder templates:\nCharacters → template: Role, Appearance, Wants'
+    )
+  })
+
+  it('says nothing without a template, skips one with no headings, and caps long lists', () => {
+    expect(buildScribeContext(input()).notes).not.toContain('Folder templates')
+    expect(folderTemplatesBlock([{ folder: 'World', sections: [] }])).toBe('')
+    const many = Array.from({ length: SCRIBE_TEMPLATE_SECTIONS_MAX + 2 }, (_, i) => `S${i}`)
+    const block = folderTemplatesBlock([
+      { folder: 'Mine', sections: many },
+      ...Array.from({ length: SCRIBE_TEMPLATE_FOLDERS_MAX + 3 }, (_, i) => ({
+        folder: `F${i}`,
+        sections: ['Role']
+      }))
+    ])
+    const lines = block.split('\n')
+    expect(lines).toHaveLength(SCRIBE_TEMPLATE_FOLDERS_MAX + 1)
+    expect(lines[1]).toBe(
+      `Mine → template: ${many.slice(0, SCRIBE_TEMPLATE_SECTIONS_MAX).join(', ')}, …`
+    )
   })
 })

@@ -17,6 +17,10 @@ export const SCRIBE_PICK_BOOK_TOKENS = 24_000
 export const SCRIBE_FORCED_BOOK_TOKENS = 80_000
 /** Every note page goes along up to this; past it, the list and the pages that match. */
 export const SCRIBE_NOTES_TOKENS = 30_000
+/** Folders with a template the notes block lists (notes fixes, 2026-10-15); the rest are left out. */
+export const SCRIBE_TEMPLATE_FOLDERS_MAX = 20
+/** Headings one listed template names; an author's longer template is cut with "…". */
+export const SCRIBE_TEMPLATE_SECTIONS_MAX = 20
 /** A scene's notes in the book map are cut to this many characters (the moment has them whole). */
 export const SCRIBE_MAP_NOTES_CHARS = 600
 /** A scene's synopsis or summary in the book map is cut to this many characters. */

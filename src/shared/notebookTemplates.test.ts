@@ -13,6 +13,7 @@ import {
   templateDoc,
   templateForFolder,
   templateSections,
+  templatedFolders,
   type TemplateTreeItem
 } from './notebookTemplates'
 import { TiptapNode, type TiptapNodeT } from './tiptap'
@@ -122,6 +123,26 @@ describe('the author’s templates', () => {
     expect(templateForFolder(items, 'World')).toBeNull()
     expect(templateForFolder(items, 'Templates')).toBeNull()
     expect(templateForFolder(items, null)).toBeNull()
+  })
+
+  it('lists each templated folder once where its template starts, in the tree’s order (notes fixes)', () => {
+    const tree = [
+      ...items,
+      item('Places', 'folder', null, 3),
+      item('Cities', 'folder', 'Places', 0),
+      item('Villains', 'folder', 'Characters', 2)
+    ]
+    expect(
+      templatedFolders(tree).map(({ folder, template }) => [
+        folder.id,
+        template.kind === 'mine' ? template.pageId : template.template.id
+      ])
+    ).toEqual([
+      ['Characters', 'Character'],
+      // Characters › Villains takes the author’s Villain template; Minor only inherits.
+      ['Villains', 'Villain'],
+      ['Places', 'place']
+    ])
   })
 })
 

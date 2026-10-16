@@ -1,10 +1,17 @@
 import { SCRIBE_WHOLE_BOOK_TOKENS, scribeAccess, type ScribeAccess } from '@shared/scribe2'
 import type { AssistantMode } from '@shared/aiSettings'
-import { buildScribeContext, type ScribePage, type ScribeScene } from '../../scribe2/context'
+import {
+  buildScribeContext,
+  type ScribeFolderTemplate,
+  type ScribePage,
+  type ScribeScene
+} from '../../scribe2/context'
 import { fitScribePrompt } from '../../scribe2/run'
 import { buildScribePrompt, scribeRules, type BuildScribePromptInput } from '../prompts/scribe.v1'
 import { buildScribePromptV2, scribeRulesV2 } from '../prompts/scribe.v2'
 import { buildScribePromptV3, scribeModeLineV3, SCRIBE_V3_RULES } from '../prompts/scribe.v3'
+import { buildScribePromptV4, SCRIBE_V4_RULES } from '../prompts/scribe.v4'
+import { notebookTemplate } from '@shared/notebookTemplates'
 import type { AgentLoopPrompt } from '../agent'
 import type { AgentTranscriptStep } from '../prompts/agent.v1'
 import type { EvalCase } from './fixtures'
@@ -17,21 +24,25 @@ import { estimateTokens } from '@shared/ai'
  * whole-book line. v2 asks for sources with quotes and refs written as chapters. v3 (2026-10-15)
  * says the mode in the moment and adds two: "make this scene better" after reading the scene, in
  * Vibe (her next step proposes a prose change unasked) and in Write (she answers, no proposal).
+ * v4 (notes fixes, 2026-10-15) has v3's cases with the folders' templates at the end of the notes
+ * block, and one more: a new page for a character in Characters (her next step is create_note).
  */
 
-type ScribeVersion = 'scribe.v1' | 'scribe.v2' | 'scribe.v3'
+type ScribeVersion = 'scribe.v1' | 'scribe.v2' | 'scribe.v3' | 'scribe.v4'
 
 /** Each version's rules as one message in `mode` carries them, for the whole-book estimate. */
 const RULES: Record<ScribeVersion, (mode: AssistantMode, access: ScribeAccess) => string> = {
   'scribe.v1': scribeRules,
   'scribe.v2': scribeRulesV2,
-  'scribe.v3': (mode, access) => `${SCRIBE_V3_RULES}\n${scribeModeLineV3(mode, access)}`
+  'scribe.v3': (mode, access) => `${SCRIBE_V3_RULES}\n${scribeModeLineV3(mode, access)}`,
+  'scribe.v4': (mode, access) => `${SCRIBE_V4_RULES}\n${scribeModeLineV3(mode, access)}`
 }
 
 const BUILD: Record<ScribeVersion, (input: BuildScribePromptInput) => AgentLoopPrompt> = {
   'scribe.v1': buildScribePrompt,
   'scribe.v2': buildScribePromptV2,
-  'scribe.v3': buildScribePromptV3
+  'scribe.v3': buildScribePromptV3,
+  'scribe.v4': buildScribePromptV4
 }
 
 const PASSAGE = [
@@ -82,6 +93,12 @@ const PAGES: ScribePage[] = [
   }
 ]
 
+/** v4's notes block ends with the fixture's templated folders: the built-in Character and Place. */
+const TEMPLATES: ScribeFolderTemplate[] = [
+  { folder: 'Characters', sections: [...notebookTemplate('character').headings] },
+  { folder: 'Places', sections: [...notebookTemplate('place').headings] }
+]
+
 function scribeCase(
   version: ScribeVersion,
   name: string,
@@ -102,7 +119,8 @@ function scribeCase(
     question: message,
     wholeBook: false,
     searchHits: [],
-    names: ['Mara', 'Tomas', 'Outline']
+    names: ['Mara', 'Tomas', 'Outline'],
+    folderTemplates: version === 'scribe.v4' ? TEMPLATES : []
   })
   const built = fitScribePrompt(
     { mode, access, context, history: [], message, steps, final: false },
@@ -173,8 +191,8 @@ function versionCases(version: ScribeVersion): EvalCase[] {
   ]
 }
 
-/** v3's two mode cases: the same ask after reading the open scene, in Vibe and in Write. */
-function modeCases(): EvalCase[] {
+/** v3's two mode cases (v4's too): the same ask after reading the open scene, in Vibe and in Write. */
+function modeCases(version: 'scribe.v3' | 'scribe.v4'): EvalCase[] {
   const book = scenes(6, 400)
   const first = book[0]
   if (first === undefined) return []
@@ -187,7 +205,7 @@ function modeCases(): EvalCase[] {
   const message = 'What can I do to make this scene better?'
   return [
     scribeCase(
-      'scribe.v3',
+      version,
       'vibeProposes',
       'Vibe: "make this scene better" after reading it, so the next step is propose_prose_edit, unasked (at most three)',
       'vibe',
@@ -197,7 +215,7 @@ function modeCases(): EvalCase[] {
       opened
     ),
     scribeCase(
-      'scribe.v3',
+      version,
       'writeAnswers',
       'Write: the same ask after reading the scene, answered with options in text and no unasked propose_prose_edit',
       'write',
@@ -209,11 +227,27 @@ function modeCases(): EvalCase[] {
   ]
 }
 
+/** v4's own case: a new character page in Characters, so the next step is create_note on its headings. */
+function templateCase(): EvalCase {
+  return scribeCase(
+    'scribe.v4',
+    'templatePage',
+    'Write: "make Rook a page in Characters" with the Character template listed, so the next step is create_note under its headings, the unknown ones left empty',
+    'write',
+    'Make Rook a page in Characters: he watches from the mill and wants the ledger.',
+    scenes(6, 400),
+    'tool'
+  )
+}
+
 export function scribe2EvalCases(): EvalCase[] {
   return [
     ...versionCases('scribe.v1'),
     ...versionCases('scribe.v2'),
     ...versionCases('scribe.v3'),
-    ...modeCases()
+    ...modeCases('scribe.v3'),
+    ...versionCases('scribe.v4'),
+    ...modeCases('scribe.v4'),
+    templateCase()
   ]
 }

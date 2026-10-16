@@ -308,6 +308,46 @@ export function templateForFolder(
   return null
 }
 
+/** Whether two folder templates are the same one (a subfolder inheriting its folder's). */
+function sameTemplate(a: FolderTemplate | null, b: FolderTemplate | null): boolean {
+  if (a === null || b === null) return a === b
+  if (a.kind === 'mine') return b.kind === 'mine' && a.pageId === b.pageId
+  return b.kind === 'builtIn' && a.template.id === b.template.id
+}
+
+/**
+ * The folders whose new pages follow a template, in the tree's order, each with its template
+ * (`templateForFolder`); a subfolder that only inherits its folder's template is left out, so each
+ * template is named once where it starts (notes fixes, 2026-10-15: Ms Scribe's notes block lists
+ * them before she writes). None inside a Templates folder.
+ */
+export function templatedFolders<T extends TemplateTreeItem>(
+  items: readonly T[]
+): { folder: T; template: FolderTemplate }[] {
+  const ids = new Set(items.map((item) => item.id))
+  const children = new Map<string | null, T[]>()
+  for (const item of items) {
+    const parent = item.parentId !== null && ids.has(item.parentId) ? item.parentId : null
+    const list = children.get(parent) ?? []
+    list.push(item)
+    children.set(parent, list)
+  }
+  for (const list of children.values()) list.sort((a, b) => a.position - b.position)
+  const found: { folder: T; template: FolderTemplate }[] = []
+  const walk = (parent: string | null, inherited: FolderTemplate | null): void => {
+    for (const item of children.get(parent) ?? []) {
+      if (item.kind !== 'folder' || isTemplatesFolder(item.title)) continue
+      const template = templateForFolder(items, item.id)
+      if (template !== null && !sameTemplate(template, inherited)) {
+        found.push({ folder: item, template })
+      }
+      walk(item.id, template)
+    }
+  }
+  walk(null, null)
+  return found
+}
+
 const blockText = (block: TiptapNodeT): string => docToText({ type: 'doc', content: [block] })
 
 /** A short label line of a template ("Age:"), which a filled page writes as "Age: 34". */

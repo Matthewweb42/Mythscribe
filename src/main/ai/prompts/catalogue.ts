@@ -116,6 +116,7 @@ import { READER_V7_PROMPT_VERSION } from './reader.v7'
 import { SCRIBE_PROMPT_VERSION } from './scribe.v1'
 import { SCRIBE_V2_PROMPT_VERSION } from './scribe.v2'
 import { SCRIBE_V3_PROMPT_VERSION } from './scribe.v3'
+import { SCRIBE_V4_PROMPT_VERSION } from './scribe.v4'
 import { EDIT_FLOW_PROMPT_VERSION } from './editFlow.v1'
 import { EDIT_NOTES_PROMPT_VERSION } from './editNotes.v1'
 
@@ -273,7 +274,9 @@ export const PROMPT_VERSIONS = [
   SCRIBE_V3_PROMPT_VERSION,
   // Notes redesign phase 2: the edit flow's stages and checks, and its Update notes.
   EDIT_FLOW_PROMPT_VERSION,
-  EDIT_NOTES_PROMPT_VERSION
+  EDIT_NOTES_PROMPT_VERSION,
+  // Notes fixes (2026-10-15, fixes-1.md §2): the folders' templates known before she writes.
+  SCRIBE_V4_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -782,6 +785,13 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   },
   // Every tool in the rules, the mode in the moment; Vibe proposes prose changes unasked (2026-10-15).
   [SCRIBE_V3_PROMPT_VERSION]: {
+    feature: 'scribe',
+    tier: 'strong',
+    output: 'json',
+    since: 'Notes P1'
+  },
+  // The notes block lists the folders' templates; one rule line has her write under them (2026-10-15).
+  [SCRIBE_V4_PROMPT_VERSION]: {
     feature: 'scribe',
     tier: 'strong',
     output: 'json',

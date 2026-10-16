@@ -6,6 +6,8 @@ import {
   SCRIBE_MOMENT_NOTES_CHARS,
   SCRIBE_NOTES_TOKENS,
   SCRIBE_PICK_BOOK_TOKENS,
+  SCRIBE_TEMPLATE_FOLDERS_MAX,
+  SCRIBE_TEMPLATE_SECTIONS_MAX,
   SCRIBE_WHOLE_BOOK_TOKENS,
   type ScribePageKind
 } from '@shared/scribe2'
@@ -30,6 +32,16 @@ export interface ScribePage {
   /** The folder path of a note page ("Characters › Minor"); '' at the top or for a sheet. */
   folder: string
   text: string
+}
+
+/**
+ * A Notes folder whose new pages follow a template (notes fixes, 2026-10-15), as the notes block
+ * names it: the folder's path and the template's headings.
+ */
+export interface ScribeFolderTemplate {
+  /** "Characters", "Characters › Minor". */
+  folder: string
+  sections: string[]
 }
 
 /** One manuscript scene in reading order. */
@@ -63,6 +75,8 @@ export interface ScribeContextInput {
   searchHits: string[]
   /** Names to look for in the question and the open scene (page titles, sheet names and aliases). */
   names: string[]
+  /** The folders with a template, listed once at the end of the notes block. */
+  folderTemplates: readonly ScribeFolderTemplate[]
 }
 
 export interface ScribeContext {
@@ -255,6 +269,24 @@ export function buildNotesBlock(
   }
 }
 
+/**
+ * The folders with a template and their headings, once, for the end of the notes block (notes
+ * fixes, 2026-10-15: she knows a folder's shape before she writes a page in it); '' for none.
+ * Stable while the templates and folder names are.
+ */
+export function folderTemplatesBlock(templates: readonly ScribeFolderTemplate[]): string {
+  const listed = templates
+    .filter((entry) => entry.sections.length > 0)
+    .slice(0, SCRIBE_TEMPLATE_FOLDERS_MAX)
+  if (listed.length === 0) return ''
+  const lines = listed.map((entry) => {
+    const sections = entry.sections.slice(0, SCRIBE_TEMPLATE_SECTIONS_MAX).join(', ')
+    const more = entry.sections.length > SCRIBE_TEMPLATE_SECTIONS_MAX ? ', …' : ''
+    return `${entry.folder} → template: ${sections}${more}`
+  })
+  return `Folder templates:\n${lines.join('\n')}`
+}
+
 /** One line per scene in reading order: title, synopsis (or the stored summary), notes. */
 export function buildBookMap(scenes: readonly ScribeScene[]): string {
   if (scenes.length === 0) return 'The book has no scenes yet.'
@@ -365,7 +397,12 @@ export function buildScribeContext(input: ScribeContextInput): ScribeContext {
       .filter((page) => wantedNames.has(page.title.trim().toLowerCase()))
       .map((page) => page.id)
   )
-  const notes = buildNotesBlock(input.pages, wantedPages)
+  const pagesBlock = buildNotesBlock(input.pages, wantedPages)
+  const templates = folderTemplatesBlock(input.folderTemplates)
+  const notes = {
+    text: templates === '' ? pagesBlock.text : `${pagesBlock.text}\n\n${templates}`,
+    sent: pagesBlock.sent
+  }
   const map = buildBookMap(input.scenes)
   const wholeBook = input.scenes.map(sceneBlock).join('\n\n')
   const wholeMoment = momentBlock(current, true, input.selection)

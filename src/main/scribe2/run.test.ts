@@ -23,6 +23,7 @@ import { loadAgentProject } from '../ai/agentTools'
 import { resetInflight } from '../ai/inflight'
 import { SCRIBE_SENTINEL } from '../ai/prompts/scribe.v1'
 import { SCRIBE_V3_MODE_RULES } from '../ai/prompts/scribe.v3'
+import { SCRIBE_V4_TEMPLATE_RULE } from '../ai/prompts/scribe.v4'
 import type { CompletionRequest, CompletionResult, Provider } from '../ai/providers/types'
 import type { AiRequestDeps } from '../ai/request'
 import type { UsageEntry } from '../ai/usageStore'
@@ -170,7 +171,34 @@ describe('runScribe2 (notes redesign phase 1)', () => {
     expect(request(1).messages.at(-1)?.content).toContain('Brainstorm changes nothing')
     expect(result.changes).toEqual([])
     expect(changed).toEqual([])
-    expect(result.promptVersion).toBe('scribe.v3')
+    expect(result.promptVersion).toBe('scribe.v4')
+  })
+
+  it('knows the folders’ templates before she writes: the notes block lists them once (notes fixes)', async () => {
+    const characters = createNotebookItem(db, {
+      parentId: null,
+      kind: 'folder',
+      title: 'Characters',
+      content: null
+    })
+    createNotebookItem(db, {
+      parentId: characters.id,
+      kind: 'folder',
+      title: 'Minor',
+      content: null
+    })
+    createNotebookItem(db, { parentId: null, kind: 'folder', title: 'World', content: null })
+    replies({ answer: 'Noted.', sources: [] })
+    await ask('Who is Rook?', 'write')
+    const system = request(0).messages[0]?.content ?? ''
+    const notes = system.slice(system.indexOf('# Notes'), system.indexOf('# Book map'))
+    expect(notes).toContain(
+      'Folder templates:\nCharacters → template: Role, Appearance, Wants, Fears, Voice and speech, Powers, Relationships, Arc, First appears'
+    )
+    // Minor only inherits Characters’ template, and World has none.
+    expect(notes).not.toContain('Minor')
+    expect(notes).not.toContain('World')
+    expect(system).toContain(SCRIBE_V4_TEMPLATE_RULE)
   })
 
   it('Brainstorm asked to save writes the page and may not suggest prose', async () => {
