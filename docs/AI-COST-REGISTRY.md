@@ -24,7 +24,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `query` | Story Intelligence | on request | query.v4 | strong | 1587 / 11711 | 300 / 600 | $0.000876 · $0.00517 | $0.00109 | $0.00847 | 1 | $0.000876 |
 | `critique` | Editor's notes | on request | critique.v4 | strong | 1272 / 7023 | 900 / 1500 | $0.00123 · $0.00401 | $0.00154 | $0.0167 | 1 | $0.00123 |
 | `embeddings` | Search indexing | background | — | — | 0 / 8000 | 0 / 150 | $0 · $0.000755 | $0 | $0 | 0 | $0 |
-| `rewrite` | Rewrite in my voice | on request | rewrite.v5 | strong | 876 / 2676 | 250 / 1500 | $0.000551 · $0.00227 | $0.000689 | $0.00594 | 1 | $0.000551 |
+| `rewrite` | Rewrite in my voice | on request | rewrite.v6 | strong | 1003 / 2868 | 250 / 1500 | $0.000602 · $0.00235 | $0.000753 | $0.00626 | 1 | $0.000602 |
 | `brief` | Scene brief drafts | on request | brief.v1 | fast | 2959 / 5410 | 120 / 200 | $0.000291 · $0.000529 | $0.000364 | $0.00276 | 1 | $0.000291 |
 | `betaReader` | Beta reader | on request | betaReader.v2 | strong | 710 / 10981 | 700 / 1200 | $0.000845 · $0.00536 | $0.00106 | $0.0123 | 1 | $0.000845 |
 | `importStructure` | Import structure detection | on request | importStructure.v2 | fast | 2189 / 3814 | 150 / 400 | $0.000226 · $0.000420 | $0.000283 | $0.00232 | 40 | $0.00906 |
@@ -48,7 +48,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `cite` | Ms Scribe’s quote check | every chat message | cite.v1 | fast | 432 / 2435 | 60 / 200 | $0.0000502 · $0.000258 | $0.0000628 | $0.000594 | 1 | $0.0000502 |
 | `navigator` | Ms Scribe’s search | every chat message | navigator.v1 | fast | 1184 / 5585 | 150 / 150 | $0.000135 · $0.000536 | $0.000169 | $0.00156 | 2 | $0.000270 |
 | `judge` | Contradiction check | background | judge.v1 | fast | 775 / 2683 | 120 / 300 | $0.0000924 · $0.000299 | $0.000115 | $0.00112 | 2 | $0.000185 |
-| `scribe` | Assistant with your notes and book | every chat message | scribe.v3 | strong | 4032 / 52583 | 400 / 6000 | $0.00194 · $0.0259 | $0.00242 | $0.0161 | 2 | $0.00387 |
+| `scribe` | Assistant with your notes and book | every chat message | scribe.v4 | strong | 3898 / 52683 | 400 / 6000 | $0.00188 · $0.0259 | $0.00235 | $0.0157 | 2 | $0.00376 |
 | `editFlow` | Edit flow | on request | editNotes.v1 | fast | 608 / 608 | 1500 / 8000 | $0.000328 · $0.00151 | $0.000410 | $0.00721 | 4 | $0.00131 |
 
 ## When each runs, and ideas to make it cheaper
@@ -95,7 +95,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `rewrite` — Rewrite in my voice
 
-- **When:** Rewrite a selection (bubble, chat, or agent edit).
+- **When:** Rewrite a selection (bubble, chat, or agent edit). In the chat’s Vibe mode (story memory v1, notes fixes 2026-10-15) the first draft sends rewrite.v6: rewrite.v4 with one bolder line (about 50 tokens) at the end of the user turn, so the cached system turn is the same; regenerates send rewriteRegen.v4 as before.
 - **Ideas:** Strong tier since 2026-10-10 (author: voice matters more than cost here); on an OpenAI key that is about 3x the fast tier, on the OpenRouter defaults about the same. Answer length tracks the selection: set max_tokens from the selection size. rewrite.v4 adds the scene mood and theme (about 25 input tokens, from the stored reading, no extra call). Story memory v2 (F-16.14) sends rewrite.v5: the Story notes block (400-token budget) in the bible’s slot and no separate steer; about 100 tokens less than v4 (fixtures: 841 vs 936 typical, 2,659 vs 2,802 worst).
 
 ### `brief` — Scene brief drafts
@@ -215,7 +215,7 @@ git history of this file is the log of each feature's cost over time (author req
 
 ### `scribe` — Assistant with your notes and book
 
-- **When:** Notes redesign phase 1 (story memory v1): scribe.v3 since 2026-10-15 (scribe.v2: each source with the exact words she relied on, checked locally so the source opens there, refs written as chapters; v3: every tool in the rules and the mode said in the moment, so switching mode keeps the provider cache, and in Vibe she proposes up to 3 prose changes unasked, each a tracked change; rules about 200 tokens longer than scribe.v2 in Brainstorm, 15 in Write, 80 in Vibe), strong tier (DeepSeek V4 Pro), JSON, on every chat message the router sends to the chat. One system prefix in cache order: the rules, every note page (≤ 30,000 tokens; story-bible sheets and Library uploads as pages until phase 4), the book map (each scene’s synopsis and notes), the book whole when everything is under 60,000 tokens (else the scenes picked for the question, ≤ 24,000; "Whole book" forces it up to 80,000), then the moment (the open scene, its notes, the selection), the recent turns and the message. Then up to 6 tool steps (search, open a scene or a page, edit or create a note page, suggest a prose change), each a request with the same prefix (cached by the provider after the first). max_tokens 3,000 a step, 6,000 for the one retry. Figures for the author’s book (about 47,000 tokens of book and notes): about 2¢ for a fresh first step and about 0.2¢ cached on V4 Pro; a typical answer is one or two steps.
+- **When:** Notes redesign phase 1 (story memory v1): scribe.v4 since the notes fixes of 2026-10-15 (v3 plus one rule line: a new page in a folder the notes block lists under Folder templates is written under its headings; the block itself names each templated folder once with its headings, about 15 tokens a folder, in the cached prefix), scribe.v3 before (scribe.v2: each source with the exact words she relied on, checked locally so the source opens there, refs written as chapters; v3: every tool in the rules and the mode said in the moment, so switching mode keeps the provider cache, and in Vibe she proposes up to 3 prose changes unasked, each a tracked change; rules about 200 tokens longer than scribe.v2 in Brainstorm, 15 in Write, 80 in Vibe), strong tier (DeepSeek V4 Pro), JSON, on every chat message the router sends to the chat. One system prefix in cache order: the rules, every note page (≤ 30,000 tokens; story-bible sheets and Library uploads as pages until phase 4), the book map (each scene’s synopsis and notes), the book whole when everything is under 60,000 tokens (else the scenes picked for the question, ≤ 24,000; "Whole book" forces it up to 80,000), then the moment (the open scene, its notes, the selection), the recent turns and the message. Then up to 6 tool steps (search, open a scene or a page, edit or create a note page, suggest a prose change), each a request with the same prefix (cached by the provider after the first). max_tokens 3,000 a step, 6,000 for the one retry. Figures for the author’s book (about 47,000 tokens of book and notes): about 2¢ for a fresh first step and about 0.2¢ cached on V4 Pro; a typical answer is one or two steps.
 - **Ideas:** Send the picked scenes only once the book passes the whole-book line (already); move the moment after the history if the provider’s cache shows misses; answer a lookup the map already answers without a tool step; batch note edits into one tool call.
 
 ### `editFlow` — Edit flow
