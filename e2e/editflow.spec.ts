@@ -24,7 +24,9 @@ import { caretToEnd, clickIntoEditor } from './support'
  * the page, shown with its Undo, which puts the page back. Phase 3: the tree's Update notes from
  * this chapter pre-fills the flow; with Settings › AI's automatic update on, leaving Chapter 1
  * after writing in it updates Mara's page once, the activity line opens the run, Undo restores it,
- * and leaving again without writing sends nothing.
+ * and leaving again without writing sends nothing. The notes binder (2026-10-16): Update notes
+ * (`editNotes.v2`) writes its events into the Story timeline page in the Timeline section, made
+ * once, and Undo removes it.
  */
 
 let app: ElectronApplication
@@ -46,12 +48,19 @@ const NOTE_LINE = 'Climbs the ridge alone (Chapter 1).'
 const bodies: { messages: { role: string; content: string }[] }[] = []
 let provider: http.Server
 
+/** The notes binder: the events the fake's Update notes answers for the Story timeline, if any. */
+let timelineEvents: { line: string; after: string }[] | null = null
+const TIMELINE_LINE = 'Ch 1 · Mara climbs the ridge alone.'
+
 /** The fake editor: issues for the copyedit, one appended line for Update notes. */
 function flowAnswer(messages: { role: string; content: string }[]): string {
   const user = messages[1]?.content ?? ''
   const ref = /### (n\d+) /.exec(user)?.[1] ?? 'n0'
   if (user.includes('Update her notes')) {
-    return JSON.stringify({ notes: [{ page: 'p1', add: NOTE_LINE }] })
+    return JSON.stringify({
+      notes: [{ page: 'p1', add: NOTE_LINE }],
+      ...(timelineEvents === null ? {} : { timeline: timelineEvents })
+    })
   }
   return JSON.stringify({
     issues: [
@@ -233,7 +242,8 @@ test('a Quick copyedit lists issues and fixes inline; Update notes edits a page 
   })
   expect(flowBodies()).toHaveLength(1)
   const sent = flowBodies()[0]?.messages ?? []
-  expect(sent[0]?.content).toContain('# Notes\n## p1 Mara (note)\nEyes: grey.')
+  // The notes binder: a page made at the top sits in Documents.
+  expect(sent[0]?.content).toContain('# Notes\n## p1 Mara (note, in Documents)\nEyes: grey.')
   expect(sent[0]?.content).toContain('# Book map\n')
   expect(sent[1]?.content).toContain('Copyediting:')
   expect(sent[1]?.content).toContain('She teh sea below and stopped walking.')
@@ -414,3 +424,62 @@ test('notes phase 3: the step pre-fills the flow; leaving a chapter after writin
   ).toEqual({ started: false, reason: 'unchanged' })
   expect(flowBodies()).toHaveLength(afterRun)
 })
+
+test('the notes binder: Update notes writes the Story timeline in the Timeline section, and Undo removes it', async () => {
+  // The project of the tests above: Chapter 1 written, the automatic update on (nothing written since).
+  // Chapter 1 (the tree's order is not the book's: Harbour, in Chapter 2, has no text).
+  const nodes = await invoke<TreeNode[]>('tree:list', undefined)
+  const chapter = nodes.find((n) => n.kind === 'folder' && n.title === 'Chapter 1')
+  if (!chapter) throw new Error('no Chapter 1')
+  timelineEvents = [{ line: TIMELINE_LINE, after: '' }]
+  // A new page, so the request is not the automatic run's (an identical request is answered from
+  // the local cache, not sent).
+  await invoke<NotebookPage>('notebook:create', {
+    parentId: null,
+    kind: 'page',
+    title: 'Rook',
+    content: {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'A smuggler.' }] }]
+    }
+  })
+  const bookTree = page.getByRole('tree', { name: 'Document tree' })
+  const flow = page.getByTestId('assistant-panel').getByTestId('edit-flow-panel')
+  await bookTree
+    .getByRole('treeitem', { name: chapter.title, exact: true })
+    .locator(':scope > div')
+    .click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Update notes from this chapter' }).click()
+  await expect(flow.getByLabel(/^Update notes/)).toBeChecked()
+  const before = flowBodies().length
+  await flow.getByTestId('edit-flow-run').click()
+  await expect(flow.getByTestId('edit-flow-run-status')).toHaveAttribute('data-status', 'done', {
+    timeout: 15_000
+  })
+  expect(flowBodies()).toHaveLength(before + 1)
+  expect(flowBodies().at(-1)?.messages[1]?.content).toContain('Story timeline')
+
+  // The page is made once, in the Timeline section, with the event on it.
+  const items = await invoke<(NotebookPage & { role?: string | null })[]>('notebook:list', undefined)
+  const made = items.filter((item) => item.title === 'Story timeline')
+  expect(made).toHaveLength(1)
+  expect(made[0]?.parentId).toBe(items.find((item) => item.role === 'timeline')?.id)
+  expect((await invoke<NotebookPage>('notebook:get', { id: made[0]?.id ?? '' })).plain).toBe(
+    TIMELINE_LINE
+  )
+  const edit = flow.getByTestId('edit-flow-note-edit').filter({ hasText: 'Story timeline' })
+  await expect(edit).toContainText('Made the page “Story timeline”')
+
+  // Undo removes the page it made, as for every note edit.
+  await edit.getByTestId('edit-flow-note-undo').click()
+  await expect(edit).toHaveAttribute('data-status', 'undone')
+  await expect
+    .poll(async () =>
+      (await invoke<NotebookPage[]>('notebook:list', undefined)).some(
+        (item) => item.title === 'Story timeline'
+      )
+    )
+    .toBe(false)
+  timelineEvents = null
+})
+

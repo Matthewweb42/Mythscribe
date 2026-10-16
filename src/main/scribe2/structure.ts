@@ -1,5 +1,5 @@
 import { describeEdit, type AgentEdit, type AgentStep } from '@shared/agent'
-import { NOTEBOOK_TITLE_MAX, type NotebookItem } from '@shared/notebook'
+import { NOTEBOOK_SECTION_TITLE, NOTEBOOK_TITLE_MAX, type NotebookItem } from '@shared/notebook'
 import { SCRIBE_MAX_STRUCTURE } from '@shared/scribe2'
 import { AppError } from '../ipc/errors'
 import {
@@ -29,8 +29,20 @@ const str = (value: unknown): string => (typeof value === 'string' ? value : '')
 const flat = (text: string): string => text.replace(/\s+/g, ' ').trim()
 const key = (text: string): string => flat(text).toLowerCase()
 
-/** Names that mean the top of Notes. */
+/** Names that mean the top of Notes: Documents, since the notes binder (2026-10-16). */
 const TOP = new Set(['', 'top', 'notes', '/', 'root', 'the top'])
+
+/** The Documents section's root in a listing (where the top's things go); null before it exists. */
+function documentsRoot(items: readonly NotebookItem[]): NotebookItem | null {
+  return items.find((item) => item.role === 'documents' && item.parentId === null) ?? null
+}
+
+/** A section root's refusal for a tool, or null for an ordinary item. */
+function sectionRefusal(item: NotebookItem, change: string): string | null {
+  return item.role == null
+    ? null
+    : `${NOTEBOOK_SECTION_TITLE[item.role]} is one of the Notes sections; it cannot be ${change}`
+}
 
 /** How much one change counts toward the cap: one, or each item it moves. */
 export function structureWeight(edit: AgentEdit): number {
@@ -88,17 +100,27 @@ const childFolder = (
   )
 
 /**
- * The folder a name or path names: null for the top, undefined for none. A path walks down from
- * the top; one name is a top-level folder first, else the shallowest folder of that name.
+ * Where a path starts: the top when its first part names a top-level folder (a section, "Outline ›
+ * Beats"), else Documents ("Characters › Minor" is "Documents › Characters › Minor").
+ */
+function pathStart(items: readonly NotebookItem[], first: string): NotebookItem | null {
+  return childFolder(items, null, first) !== undefined ? null : documentsRoot(items)
+}
+
+/**
+ * The folder a name or path names: Documents for the top (null before the sections exist),
+ * undefined for none. A path walks down from the top, or from Documents when its first part is
+ * not a section (`pathStart`); one name is a section first, else the shallowest folder of that
+ * name.
  */
 export function findFolder(
   items: readonly NotebookItem[],
   name: string
 ): NotebookItem | null | undefined {
-  if (TOP.has(key(name))) return null
+  if (TOP.has(key(name))) return documentsRoot(items)
   const parts = segments(name)
   if (parts.length > 1) {
-    let at: NotebookItem | null = null
+    let at: NotebookItem | null = pathStart(items, parts[0] ?? '')
     for (const part of parts) {
       const next = childFolder(items, at?.id ?? null, part)
       if (next === undefined) return undefined
@@ -115,7 +137,8 @@ export function findFolder(
 /**
  * The folder a name or path names, made when missing (each missing part of a path, under the
  * deepest part found); `onMade` hears each new folder with the listing from before it was made.
- * Null for the top. Shared by Ms Scribe's tools and Sort with Ms Scribe (notes structure B).
+ * Documents for the top (`findFolder`); a path that is not under a section is made in Documents.
+ * Shared by Ms Scribe's tools and Sort with Ms Scribe (notes structure B).
  */
 export function ensureFolderPath(
   db: TreeDb,
@@ -126,7 +149,7 @@ export function ensureFolderPath(
   const found = findFolder(items, name)
   if (found !== undefined) return found
   const parts = segments(name).map((part) => part.slice(0, NOTEBOOK_TITLE_MAX))
-  let at: NotebookItem | null = null
+  let at: NotebookItem | null = pathStart(items, parts[0] ?? '')
   for (const part of parts) {
     const existing = childFolder(items, at?.id ?? null, part)
     if (existing !== undefined) {
@@ -146,7 +169,7 @@ export function ensureFolderPath(
  * `notebookFolder` change of the run. Null for the top.
  */
 export function ensureFolder(run: ScribeRun, name: string): NotebookItem | null {
-  return ensureFolderPath(run.db, name, (made, items) => {
+  return ensureFolderPath(run.db, name, (made) => {
     run.notebookChanged([made.id])
     done(
       run,
@@ -154,7 +177,8 @@ export function ensureFolder(run: ScribeRun, name: string): NotebookItem | null 
         kind: 'notebookFolder',
         folderId: made.id,
         title: made.title,
-        parent: folderPath(items, made.parentId)
+        // Read after the make: a first make can bring the sections with it.
+        parent: folderPath(listNotebook(run.db), made.parentId)
       },
       true
     )
@@ -227,7 +251,7 @@ function createFolder(run: ScribeRun, args: Record<string, unknown>): ToolOutcom
   const parentName = flat(str(args.parent))
   const items = listNotebook(run.db)
   // A parent that does not exist yet is made too (decided by Claude).
-  const parentFound = TOP.has(key(parentName)) ? null : findFolder(items, parentName)
+  const parentFound = findFolder(items, parentName)
   if (parentFound !== undefined && childFolder(items, parentFound?.id ?? null, title)) {
     return { step, result: `${title} already exists there.` }
   }
@@ -265,6 +289,8 @@ function moveNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome {
   for (const id of ids) {
     const item = itemArg(run, items, id)
     if (typeof item === 'string') return { step, result: `Nothing moved: ${item}.` }
+    const fixed = sectionRefusal(item, 'moved')
+    if (fixed !== null) return { step, result: `Nothing moved: ${fixed}.` }
     if (!moving.some((each) => each.id === item.id)) moving.push(item)
   }
   const toName = flat(str(args.to))
@@ -325,6 +351,8 @@ function renameNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome 
   if (title === '') return { step, result: 'rename_note needs the new "title".' }
   const item = itemArg(run, listNotebook(run.db), args.id)
   if (typeof item === 'string') return { step, result: `Not renamed: ${item}.` }
+  const fixed = sectionRefusal(item, 'renamed')
+  if (fixed !== null) return { step, result: `Not renamed: ${fixed}.` }
   if (item.title === title) return { step, result: 'Nothing changed.' }
   const refused = capLeft(run, 1)
   if (refused !== null) return { step, result: refused }
@@ -354,6 +382,8 @@ function deleteNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome 
   const items = listNotebook(run.db)
   const item = itemArg(run, items, args.id)
   if (typeof item === 'string') return { step, result: `Not asked: ${item}.` }
+  const fixed = sectionRefusal(item, 'deleted')
+  if (fixed !== null) return { step, result: `Not asked: ${fixed}.` }
   if (
     run.changes.some(
       (c) => c.proposal.edit.kind === 'notebookDelete' && c.proposal.edit.id === item.id

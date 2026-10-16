@@ -285,6 +285,7 @@ function toItem(page: NotebookItem): NotebookItem {
     kind: page.kind,
     title: page.title,
     position: page.position,
-    modified: page.modified
+    modified: page.modified,
+    role: page.role ?? null
   }
 }

@@ -5,6 +5,8 @@ import {
   EDIT_FLOW_NOTE_WRITES_MAX,
   EDIT_FLOW_OVERVIEW_MAX,
   EDIT_FLOW_PROBLEM_MAX,
+  EDIT_FLOW_TIMELINE_EVENTS_MAX,
+  EDIT_FLOW_TIMELINE_LINE_MAX,
   type EditFlowCategory,
   type EditFlowFamily
 } from '@shared/editFlow'
@@ -183,7 +185,11 @@ export function parseFlowIssues(
   return { overview, issues, dropped }
 }
 
-const NoteAnswer = z.object({ notes: z.array(z.unknown()) })
+const NoteAnswer = z.object({
+  notes: z.array(z.unknown()),
+  timeline: z.array(z.unknown()).nullish()
+})
+const TimelineItem = z.object({ line: z.string().nullish(), after: z.string().nullish() })
 const NoteItem = z.object({
   page: z.string().nullish(),
   add: z.string().nullish(),
@@ -197,11 +203,43 @@ export type ParsedNoteWrite =
   | { kind: 'append'; page: string; text: string }
   | { kind: 'create'; title: string; folder: string; text: string }
 
-/** The model's `{ notes: [...] }`, at most `EDIT_FLOW_NOTE_WRITES_MAX` writes; blanks dropped. */
-export function parseFlowNotes(answer: string): { writes: ParsedNoteWrite[]; dropped: number } {
+/**
+ * One event for the Story timeline page (`editNotes.v2`): its line, and the line it follows
+ * (`''` to open the page; null when the model named none, which puts it at the end).
+ */
+export interface ParsedTimelineEvent {
+  line: string
+  after: string | null
+}
+
+const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
+
+/**
+ * The model's `{ notes: [...], timeline: [...] }`: at most `EDIT_FLOW_NOTE_WRITES_MAX` writes and
+ * `EDIT_FLOW_TIMELINE_EVENTS_MAX` events (each one line, cut to `EDIT_FLOW_TIMELINE_LINE_MAX`);
+ * blanks dropped. `timeline` is `editNotes.v2`'s; a v1 answer has none.
+ */
+export function parseFlowNotes(answer: string): {
+  writes: ParsedNoteWrite[]
+  events: ParsedTimelineEvent[]
+  dropped: number
+} {
   const data = parseJson(answer, NoteAnswer)
   const writes: ParsedNoteWrite[] = []
+  const events: ParsedTimelineEvent[] = []
   let dropped = 0
+  for (const entry of data.timeline ?? []) {
+    const parsed = TimelineItem.safeParse(entry)
+    const line = parsed.success
+      ? oneLine(parsed.data.line ?? '').slice(0, EDIT_FLOW_TIMELINE_LINE_MAX)
+      : ''
+    if (!parsed.success || line === '' || events.length >= EDIT_FLOW_TIMELINE_EVENTS_MAX) {
+      dropped += 1
+      continue
+    }
+    const after = parsed.data.after
+    events.push({ line, after: after === undefined || after === null ? null : oneLine(after) })
+  }
   for (const entry of data.notes) {
     const parsed = NoteItem.safeParse(entry)
     const item = parsed.success ? parsed.data : null
@@ -219,5 +257,5 @@ export function parseFlowNotes(answer: string): { writes: ParsedNoteWrite[]; dro
       dropped += 1
     }
   }
-  return { writes, dropped }
+  return { writes, events, dropped }
 }

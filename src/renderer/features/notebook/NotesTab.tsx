@@ -1,20 +1,11 @@
 import { useState } from 'react'
-import {
-  ChevronRight,
-  FilePlus,
-  FolderPlus,
-  LayoutTemplate,
-  RefreshCw,
-  Upload,
-  type LucideIcon
-} from 'lucide-react'
+import { FilePlus, FolderPlus, LayoutTemplate, RefreshCw, Upload } from 'lucide-react'
 import { isFeatureAllowed } from '@shared/aiSettings'
 import { useCanWrite } from '@renderer/features/account/appAccessStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { openNotesUpdateHere } from '@renderer/features/editFlow/editFlowStore'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
-import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { describeError } from '@renderer/lib/errors'
 import { takeDropped } from './droppedEntries'
 import { NotebookTemplateMenu } from './NotebookTemplateMenu'
@@ -31,30 +22,18 @@ const failed = (err: unknown): void => {
   toast.error(describeError(err))
 }
 
-/** A sidebar section shown under Notes (the fresh start: Outline, Timeline). */
-export interface NotesView {
-  id: string
-  label: string
-  icon: LucideIcon
-}
-
-interface NotesTabProps {
-  /** The large folders at the top of the tree; each opens in the Notes panel. None outside the fresh start. */
-  views?: readonly NotesView[]
-}
-
 /**
  * The Notes section of the sidebar (notes redesign phase 1, slice 1): New page, New folder, New
  * from template (note templates, phase 6) and Import files… above the notebook's tree. Files and
  * folders dropped on the section become pages (a folder keeps its folders), in the folder under
  * the pointer, or beside the page under it, or at the top level. Notes redesign phase 3: Update notes… opens the edit flow pre-filled with
  * Update notes on the open scene's chapter (the book when no scene is open), while the edit flow
- * can run (v1, Use AI on). Structure A (2026-10-16, the author's layout): in the fresh start Outline
- * and Timeline sit at the top of the tree as two large folders; one opens its section, which the
- * sidebar shows under the Notes tab with a back row (Edits is a tab of its own). Structure B (2026-10-16): a drop or a pick
- * asks first how the files come in (`NotesImportDialog`).
+ * can run (v1, Use AI on). Structure B (2026-10-16): a drop or a pick asks first how the files
+ * come in (`NotesImportDialog`). The notes binder (2026-10-16): the tree's top level is the three
+ * sections, Outline, Timeline and Documents; New page, New folder and New from template go into the
+ * selected folder, else Documents, and a drop on no row goes into Documents.
  */
-export function NotesTab({ views = [] }: NotesTabProps): React.JSX.Element {
+export function NotesTab(): React.JSX.Element {
   const busy = useNotebookStore((s) => s.busy)
   const writable = useCanWrite()
   const [dropping, setDropping] = useState(false)
@@ -172,22 +151,6 @@ export function NotesTab({ views = [] }: NotesTabProps): React.JSX.Element {
         ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {views.length > 0 ? (
-          <div role="group" aria-label="Views" className="border-b border-line py-1">
-            {views.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => useLayoutStore.getState().setSidebarTab(id)}
-                className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left text-[15px] font-medium hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
-              >
-                <Icon size={18} aria-hidden="true" className="shrink-0 text-accent" />
-                <span className="min-w-0 flex-1 truncate">{label}</span>
-                <ChevronRight size={15} aria-hidden="true" className="shrink-0 text-fg-muted" />
-              </button>
-            ))}
-          </div>
-        ) : null}
         <NotebookTree />
       </div>
       {templateMenu !== null ? (

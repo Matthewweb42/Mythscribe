@@ -41,8 +41,9 @@ afterEach(() => {
 })
 
 describe('the archive rule', () => {
-  it('archives all eight by default and switches one back on or off', () => {
-    expect(ARCHIVABLE_FEATURES).toHaveLength(8)
+  it('archives all nine by default (the old Outline and Timeline views among them) and switches one back on or off', () => {
+    expect(ARCHIVABLE_FEATURES).toHaveLength(9)
+    expect(ARCHIVABLE_FEATURES).toContain('oldViews')
     for (const feature of ARCHIVABLE_FEATURES) expect(isArchived(feature, undefined)).toBe(true)
     const on = withArchived(undefined, 'proofread', false)
     expect(on).toEqual(['proofread'])
@@ -68,7 +69,7 @@ describe('the archive rule', () => {
 })
 
 describe('ArchivedFeaturesTab', () => {
-  it('lists the eight switches on, and switching one off brings its entry point back', async () => {
+  it('lists the nine switches on, and switching one off brings its entry point back', async () => {
     useEditorSettingsStore.setState({ settings: defaultEditorSettings('novel') })
     render(
       <>
@@ -79,7 +80,10 @@ describe('ArchivedFeaturesTab', () => {
       </>
     )
     const switches = screen.getAllByRole('switch')
-    expect(switches).toHaveLength(8)
+    expect(switches).toHaveLength(9)
+    expect(
+      screen.getByRole('switch', { name: 'Archive Old Outline and Timeline views' })
+    ).toBeChecked()
     for (const each of switches) expect(each).toBeChecked()
     expect(archivedNow('proofread')).toBe(true)
     expect(screen.queryByRole('button', { name: 'Proofread the scene' })).not.toBeInTheDocument()

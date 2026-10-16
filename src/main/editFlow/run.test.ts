@@ -12,8 +12,11 @@ import { listChanges, listPassRows, pendingChangesFor } from '../editPass/editPa
 import {
   createNotebookItem,
   getNotebookPage,
+  listNotebook,
   listNotebookPages,
-  listNotebookVersions
+  listNotebookVersions,
+  restoreNotebookVersion,
+  updateNotebookItem
 } from '../notebook/notebookStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { setAiSettings } from '../project/settingsStore'
@@ -280,6 +283,71 @@ describe('an edit-flow run (editFlow:start)', () => {
     expect(markNoteEditUndone(openDb(), run.id, 0)).toBe(true)
     expect(markNoteEditUndone(openDb(), run.id, 0)).toBe(false)
     expect(listFlowRuns(openDb())[0]?.noteEdits[0]?.undone).toBe(true)
+  })
+
+  it('Update notes (editNotes.v2) makes the Story timeline page in Timeline once, then inserts events in story order with Undo', async () => {
+    replies({
+      notes: [],
+      timeline: [
+        { line: 'Ch 1 · Mara climbs the ridge alone.', after: '' },
+        { line: 'Ch 1 · Mara sees the sea.', after: 'Ch 1 · Mara climbs the ridge alone.' }
+      ]
+    })
+    const first = await runner.start(sceneSpec({ categories: ['updateNotes'] }))
+    await runner.idle()
+    expect(request(0).messages[1]?.content).toContain('Story timeline')
+    const timelineRoot = listNotebook(openDb()).find((item) => item.role === 'timeline')
+    const pages = listNotebook(openDb()).filter((item) => item.title === 'Story timeline')
+    expect(pages).toHaveLength(1)
+    expect(pages[0]?.parentId).toBe(timelineRoot?.id)
+    const pageId = pages[0]?.id ?? ''
+    expect(getNotebookPage(openDb(), pageId).plain).toBe(
+      'Ch 1 · Mara climbs the ridge alone.\nCh 1 · Mara sees the sea.'
+    )
+    expect(listFlowRuns(openDb()).find((r) => r.id === first.id)?.noteEdits).toMatchObject([
+      { edit: { kind: 'notebook', pageId, created: true }, undone: false }
+    ])
+
+    // The author adds her own line; a flashback's event goes where it happened, hers stay.
+    updateNotebookItem(openDb(), {
+      id: pageId,
+      content: notebookDocFromText(
+        'Ch 1 · Mara climbs the ridge alone.\nCh 1 · Mara sees the sea.\nMy note: the storm comes later.'
+      )
+    })
+    replies({
+      notes: [],
+      timeline: [
+        { line: 'Ch 2 · Years before, Rook burns the first ledger.', after: '' },
+        { line: 'Ch 1 · Mara sees the sea.', after: '' }
+      ]
+    })
+    const second = await runner.start(sceneSpec({ categories: ['updateNotes'] }))
+    await runner.idle()
+    // The page goes whole into the notes the request carries.
+    expect(request(1).messages[0]?.content).toContain('Story timeline')
+    expect(getNotebookPage(openDb(), pageId).plain).toBe(
+      [
+        'Ch 2 · Years before, Rook burns the first ledger.',
+        'Ch 1 · Mara climbs the ridge alone.',
+        'Ch 1 · Mara sees the sea.',
+        'My note: the storm comes later.'
+      ].join('\n')
+    )
+    expect(listNotebook(openDb()).filter((item) => item.title === 'Story timeline')).toHaveLength(1)
+    const kept = listFlowRuns(openDb()).find((r) => r.id === second.id)?.noteEdits[0]?.edit
+    if (kept?.kind !== 'notebook' || kept.versionId === null) throw new Error('no version kept')
+    expect(kept.created).toBe(false)
+    restoreNotebookVersion(openDb(), kept.versionId)
+    expect(getNotebookPage(openDb(), pageId).plain).toContain('My note: the storm comes later.')
+    expect(getNotebookPage(openDb(), pageId).plain).not.toContain('Rook')
+  })
+
+  it('Update notes makes no Story timeline page when there is no event', async () => {
+    replies({ notes: [], timeline: [] })
+    await runner.start(sceneSpec({ categories: ['updateNotes'] }))
+    await runner.idle()
+    expect(listNotebook(openDb()).some((item) => item.title === 'Story timeline')).toBe(false)
   })
 
   it('a stopped run keeps what came back; one run at a time', async () => {

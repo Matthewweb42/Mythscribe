@@ -1,0 +1,1 @@
+ALTER TABLE `notebook_item` ADD `role` text;

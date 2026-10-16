@@ -12,6 +12,7 @@ import {
   getNotebookPage,
   listNotebook,
   moveNotebookItem,
+  notebookSectionId,
   updateNotebookItem
 } from '../notebook/notebookStore'
 import { loadScribeSources } from './source'
@@ -78,22 +79,36 @@ const folder = (title: string, parentId: string | null = null): string =>
 
 const edits = (r: ScribeRun): AgentEdit[] => r.changes.map((change) => change.proposal.edit)
 
+/** The notes binder: the Documents section, where the top's things go. */
+const documents = (): string => notebookSectionId(db, 'documents')
+
+/** The items that are not section roots. */
+const ordinary = (): ReturnType<typeof listNotebook> =>
+  listNotebook(db).filter((item) => item.role == null)
+
 describe('Ms Scribe’s Notes structure tools (scribe.v5)', () => {
   it('create_folder makes a folder, its missing parent too, and refuses a duplicate', async () => {
     const r = await run()
+    // The notes binder: a path that is not under a section is made in Documents.
     expect(runScribeTool(r, 'create_folder', { title: 'Minor', parent: 'Characters' }).result).toBe(
-      'Made the folder Characters › Minor.'
+      'Made the folder Documents › Characters › Minor.'
     )
     const items = listNotebook(db)
     const characters = items.find((item) => item.title === 'Characters')
+    expect(characters?.parentId).toBe(documents())
     expect(items.find((item) => item.title === 'Minor')?.parentId).toBe(characters?.id)
     expect(edits(r)).toEqual([
-      { kind: 'notebookFolder', folderId: characters?.id, title: 'Characters', parent: '' },
+      {
+        kind: 'notebookFolder',
+        folderId: characters?.id,
+        title: 'Characters',
+        parent: 'Documents'
+      },
       {
         kind: 'notebookFolder',
         folderId: items.find((item) => item.title === 'Minor')?.id,
         title: 'Minor',
-        parent: 'Characters'
+        parent: 'Documents › Characters'
       }
     ])
     expect(r.changes.every((change) => change.applied)).toBe(true)
@@ -115,9 +130,17 @@ describe('Ms Scribe’s Notes structure tools (scribe.v5)', () => {
 
     const save = await run({ notes: true, prose: false, structure: false })
     expect(runScribeTool(save, 'create_note', { title: 'Rook', folder: 'Places' }).result).toBe(
-      'Created p2 Rook (no such folder; made at the top).'
+      'Created p2 Rook (no such folder; made in Documents).'
     )
     expect(listNotebook(db).some((item) => item.title === 'Places')).toBe(false)
+    expect(listNotebook(db).find((item) => item.title === 'Rook')?.parentId).toBe(documents())
+    // A section's name finds its root: a page made in Outline.
+    expect(runScribeTool(r, 'create_note', { title: 'Beats', folder: 'Outline' }).result).toBe(
+      'Created p2 Beats in Outline.'
+    )
+    expect(listNotebook(db).find((item) => item.title === 'Beats')?.parentId).toBe(
+      notebookSectionId(db, 'outline')
+    )
   })
 
   it('move_note moves several pages into a folder in one call, made when missing, keeping where each was', async () => {
@@ -133,14 +156,17 @@ describe('Ms Scribe’s Notes structure tools (scribe.v5)', () => {
     expect(move).toEqual({
       kind: 'notebookMove',
       items: [
-        { id: tash, title: 'Tash', folder: false, fromParentId: null, fromPosition: 0 },
-        { id: mara, title: 'Mara', folder: false, fromParentId: null, fromPosition: 1 }
+        { id: tash, title: 'Tash', folder: false, fromParentId: documents(), fromPosition: 0 },
+        { id: mara, title: 'Mara', folder: false, fromParentId: documents(), fromPosition: 1 }
       ],
       parentId: characters?.id,
       parentTitle: 'Characters'
     })
     // Her pages know their new folder.
-    expect(r.pages.map((p) => p.folder)).toEqual(['Characters', 'Characters'])
+    expect(r.pages.map((p) => p.folder)).toEqual([
+      'Documents › Characters',
+      'Documents › Characters'
+    ])
     // The Undo's data puts each back where it was.
     if (move?.kind !== 'notebookMove') throw new Error('no move')
     for (const item of [...move.items].reverse()) {
@@ -152,7 +178,7 @@ describe('Ms Scribe’s Notes structure tools (scribe.v5)', () => {
     }
     expect(
       listNotebook(db)
-        .filter((item) => item.parentId === null && item.kind === 'page')
+        .filter((item) => item.parentId === documents() && item.kind === 'page')
         .map((item) => item.title)
     ).toEqual(['Tash', 'Mara'])
     expect(runScribeTool(r, 'move_note', { ids: ['Tash'], to: 'top' }).result).toBe(
@@ -172,7 +198,26 @@ describe('Ms Scribe’s Notes structure tools (scribe.v5)', () => {
       'Nothing moved: no page or folder is “Nobody”'
     )
     expect(r.changes).toEqual([])
-    expect(listNotebook(db).find((item) => item.title === 'Tash')?.parentId).toBeNull()
+    expect(listNotebook(db).find((item) => item.title === 'Tash')?.parentId).toBe(documents())
+  })
+
+  it('never moves, renames or deletes a section (the notes binder)', async () => {
+    page('Tash')
+    const r = await run()
+    expect(runScribeTool(r, 'move_note', { ids: ['Outline'], to: 'Documents' }).result).toBe(
+      'Nothing moved: Outline is one of the Notes sections; it cannot be moved.'
+    )
+    expect(runScribeTool(r, 'rename_note', { id: 'Timeline', title: 'Events' }).result).toBe(
+      'Not renamed: Timeline is one of the Notes sections; it cannot be renamed.'
+    )
+    expect(runScribeTool(r, 'delete_note', { id: 'Documents' }).result).toBe(
+      'Not asked: Documents is one of the Notes sections; it cannot be deleted.'
+    )
+    expect(r.changes).toEqual([])
+    // "Put it in Outline" finds the section.
+    expect(runScribeTool(r, 'move_note', { ids: ['Tash'], to: 'Outline' }).result).toBe(
+      'Moved Tash into Outline.'
+    )
   })
 
   it('rename_note renames a page or folder at once with the old title for its Undo', async () => {
@@ -207,7 +252,7 @@ describe('Ms Scribe’s Notes structure tools (scribe.v5)', () => {
         applied: false
       }
     ])
-    expect(listNotebook(db)).toHaveLength(3)
+    expect(ordinary()).toHaveLength(3)
   })
 
   it('list_notes names the folders by path, Templates left out', async () => {
@@ -217,20 +262,27 @@ describe('Ms Scribe’s Notes structure tools (scribe.v5)', () => {
     folder('Old', templates)
     const r = await run()
     expect(runScribeTool(r, 'list_notes', {}).result).toBe(
-      'There are no note pages yet.\nFolders: Characters, Characters › Minor'
+      'There are no note pages yet.\nFolders: Documents, Documents › Characters, Documents › Characters › Minor, Outline, Timeline'
     )
   })
 
-  it('finds a folder by path, by name (shallowest first) and the top', () => {
+  it('finds a folder by path, by name (shallowest first), a section by its name, and the top as Documents', () => {
     const characters = folder('Characters')
     const minor = folder('Minor', characters)
     const top = folder('Minor')
+    const plans = folder('Chapter plans', notebookSectionId(db, 'outline'))
     const items = listNotebook(db)
     expect(findFolder(items, 'Characters › Minor')?.id).toBe(minor)
+    expect(findFolder(items, 'Documents › Characters › Minor')?.id).toBe(minor)
     expect(findFolder(items, 'characters/minor')?.id).toBe(minor)
     expect(findFolder(items, 'minor')?.id).toBe(top)
-    expect(findFolder(items, 'top')).toBeNull()
+    expect(findFolder(items, 'Outline')?.id).toBe(notebookSectionId(db, 'outline'))
+    expect(findFolder(items, 'timeline')?.id).toBe(notebookSectionId(db, 'timeline'))
+    expect(findFolder(items, 'Outline › Chapter plans')?.id).toBe(plans)
+    expect(findFolder(items, 'top')?.id).toBe(documents())
     expect(findFolder(items, 'Places')).toBeUndefined()
+    // Before the sections exist the top is null, as it was.
+    expect(findFolder([], 'top')).toBeNull()
   })
 })
 
@@ -358,7 +410,7 @@ describe('structure tools by mode and cap (scribe.v5)', () => {
       }
       expect(r.changes).toEqual([])
     }
-    expect(listNotebook(db)).toHaveLength(1)
+    expect(ordinary()).toHaveLength(1)
   })
 
   it('caps structure changes at 40 a message, each item moved counted, apart from the 8 writes', async () => {

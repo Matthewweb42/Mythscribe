@@ -3,6 +3,7 @@ import { buildBookMap, buildNotesBlock, type ScribePage, type ScribeScene } from
 import { sliceScenes, type FlowScene, type FlowSliceItem } from '../../editFlow/plan'
 import { buildEditFlowPrompt } from '../prompts/editFlow.v1'
 import { buildEditNotesPrompt } from '../prompts/editNotes.v1'
+import { buildEditNotesV2Prompt } from '../prompts/editNotes.v2'
 import type { EvalCase } from './fixtures'
 
 /**
@@ -10,7 +11,10 @@ import type { EvalCase } from './fixtures'
  * with a style guide page, a Quick line edit and proofread of a chapter, the focused checks
  * together against the notes, a Deep developmental edit of a whole fixture book (on strong), and
  * Update notes on a chapter. Each is scored live by the feature's own parser: every issue must
- * quote its scene and every fix pass the tracked-change rule; nothing dropped.
+ * quote its scene and every fix pass the tracked-change rule; nothing dropped. `editNotes.v2` (the
+ * notes binder, 2026-10-16) adds three Update notes cases on the Story timeline page: an event
+ * inserted in story order before a later chapter's line, a flashback's event placed before the
+ * first chapter's, and the page made from a chapter's events when there is none yet.
  */
 
 const MARA = [
@@ -154,6 +158,94 @@ function deepCase(): EvalCase {
   )
 }
 
+/** The notes as the binder files them (Documents › …), with the Story timeline page or without. */
+function binderPages(timeline: string[] | null): ScribePage[] {
+  const pages: ScribePage[] = PAGES.filter((page) => page.title !== 'Timeline').map((page) => ({
+    ...page,
+    folder: page.folder === '' ? 'Documents' : `Documents › ${page.folder}`
+  }))
+  if (timeline !== null) {
+    pages.push({
+      ref: `p${pages.length + 1}`,
+      id: 'pg-story-timeline',
+      kind: 'note',
+      title: 'Story timeline',
+      folder: 'Timeline',
+      text: timeline.join('\n')
+    })
+  }
+  return pages
+}
+
+const TIMELINE = [
+  'Ch 1 · Mara confronts Tomas over the ledger at the ferry landing.',
+  'Ch 3 · Mara leaves the valley with the ledger.'
+]
+
+const MILL = [
+  'Rook found Mara at the mill the morning after the argument and spoke to her for the first time.',
+  'He gave her the iron key to the sluice house and told her to keep it from Tomas.'
+].join('\n\n')
+
+/** An `editNotes.v2` case on one chapter, scored on where its events land on the page. */
+function timelineCase(
+  name: string,
+  note: string,
+  page: string[] | null,
+  scenes: ScribeScene[],
+  label: string,
+  order: { first: string; then: string }
+): EvalCase {
+  const built = buildEditNotesV2Prompt({
+    notes: buildNotesBlock(binderPages(page), new Set()).text,
+    map: buildBookMap(scenes),
+    reference: null,
+    slice: { index: 0, count: 1, label },
+    items: scenes.map(item)
+  })
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'editNotes', timeline: { page: page ?? [], ...order } }
+  }
+}
+
+function timelineCases(): EvalCase[] {
+  const [one, two] = SHORT
+  if (one === undefined || two === undefined) return []
+  const mill = bookScene(4, 2, MILL)
+  const told = bookScene(5, 2, ROOK)
+  return [
+    timelineCase(
+      'updateNotesStoryOrder',
+      'Chapter 2: Rook meets Mara and gives her the key; the events go between Ch 1 and Ch 3 on the Story timeline',
+      TIMELINE,
+      [mill],
+      'Chapter 2',
+      { first: 'rook', then: 'leaves the valley' }
+    ),
+    timelineCase(
+      'updateNotesFlashback',
+      'Chapter 2 tells of the ledger burned the winter the river froze: that event goes before Ch 1 on the Story timeline',
+      TIMELINE,
+      [told],
+      'Chapter 2',
+      { first: 'burn', then: 'confronts' }
+    ),
+    timelineCase(
+      'updateNotesTimelineMade',
+      'No Story timeline page yet: Chapter 1’s events make it, the burned ledger (years before) first',
+      null,
+      [one, two],
+      'Chapter 1',
+      { first: 'burn', then: 'tomas' }
+    )
+  ]
+}
+
 export function editFlowEvalCases(): EvalCase[] {
   const [one, two] = SHORT
   if (one === undefined || two === undefined) return []
@@ -210,6 +302,7 @@ export function editFlowEvalCases(): EvalCase[] {
       messages: notes.messages,
       maxTokens: notes.maxTokens,
       scoring: { kind: 'editNotes' }
-    }
+    },
+    ...timelineCases()
   ]
 }

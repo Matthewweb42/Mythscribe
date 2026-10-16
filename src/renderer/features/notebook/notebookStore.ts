@@ -9,6 +9,7 @@ import type {
 } from '@shared/notebook'
 import {
   NOTEBOOK_STARTER_FOLDERS,
+  NOTEBOOK_STARTER_OUTLINE_FOLDERS,
   STYLE_GUIDE_TITLE,
   TEMPLATES_FOLDER_TITLE,
   isTemplatesFolder,
@@ -30,6 +31,7 @@ import {
   buildNotebookIndex,
   isWithin,
   notebookTargetFolder,
+  sectionRootId,
   type NotebookIndex
 } from './notebookIndex'
 
@@ -111,11 +113,12 @@ interface NotebookState extends NotebookIndex {
     choice: NotebookTemplateChoice,
     parentId?: string | null
   ) => Promise<NotebookItem>
-  /** Copies a page into the top-level Templates folder, making that folder the first time. */
+  /** Copies a page into the Templates folder in Documents, making that folder the first time. */
   saveAsTemplate: (id: string) => Promise<void>
   /**
    * The starter set for an empty Notes: the folders of `NOTEBOOK_STARTER_FOLDERS` and a Style
-   * guide page, each made only when the top level has none of that name.
+   * guide page in Documents, and `NOTEBOOK_STARTER_OUTLINE_FOLDERS` in Outline, each made only
+   * when that section has none of that name.
    */
   startWithFolders: () => Promise<void>
   rename: (id: string, title: string) => Promise<void>
@@ -141,7 +144,7 @@ interface NotebookState extends NotebookIndex {
   splitPage: (id: string) => Promise<void>
   /**
    * Notes redesign (fresh start): files picked on disk (the new-project wizard's) become pages in
-   * a new top-level folder `folder`. Toasts what was skipped; opens nothing.
+   * a new folder `folder` in Documents. Toasts what was skipped; opens nothing.
    */
   importPathsInto: (paths: string[], folder: string) => Promise<void>
   /** Reads the page's versions: a newest one by Ms Scribe the author has not seen raises the bar. */
@@ -357,14 +360,16 @@ export const useNotebookStore = create<NotebookState>((set, get) => {
 
     async saveAsTemplate(id) {
       const source = await pageNow(id)
-      const top = get().childrenOf[NOTEBOOK_ROOT] ?? []
+      // The notes binder: the Templates folder lives in Documents (null: main puts it there).
+      const documents = sectionRootId(get(), 'documents')
+      const top = get().childrenOf[documents ?? NOTEBOOK_ROOT] ?? []
       let folder = top.find((each) => {
         const item = get().byId[each]
         return item?.kind === 'folder' && isTemplatesFolder(item.title)
       })
       folder ??= (
         await ipc().invoke('notebook:create', {
-          parentId: null,
+          parentId: documents,
           kind: 'folder',
           title: TEMPLATES_FOLDER_TITLE
         })
@@ -380,22 +385,34 @@ export const useNotebookStore = create<NotebookState>((set, get) => {
     },
 
     async startWithFolders() {
-      const titles = new Set(
-        (get().childrenOf[NOTEBOOK_ROOT] ?? []).map(
-          (id) => `${get().byId[id]?.kind}:${get().byId[id]?.title.trim().toLowerCase()}`
+      const held = (parent: string | null): Set<string> =>
+        new Set(
+          (get().childrenOf[parent ?? NOTEBOOK_ROOT] ?? []).map(
+            (id) => `${get().byId[id]?.kind}:${get().byId[id]?.title.trim().toLowerCase()}`
+          )
         )
-      )
+      // The notes binder: the folders and the Style guide in Documents, Chapter plans in Outline.
+      const documents = sectionRootId(get(), 'documents')
+      const outline = sectionRootId(get(), 'outline')
+      const titles = held(documents)
       for (const title of NOTEBOOK_STARTER_FOLDERS) {
         if (titles.has(`folder:${title.toLowerCase()}`)) continue
-        await ipc().invoke('notebook:create', { parentId: null, kind: 'folder', title })
+        await ipc().invoke('notebook:create', { parentId: documents, kind: 'folder', title })
       }
       if (!titles.has(`page:${STYLE_GUIDE_TITLE.toLowerCase()}`)) {
         await ipc().invoke('notebook:create', {
-          parentId: null,
+          parentId: documents,
           kind: 'page',
           title: STYLE_GUIDE_TITLE,
           content: templateDoc(notebookTemplate('styleGuide'))
         })
+      }
+      if (outline !== null) {
+        const planned = held(outline)
+        for (const title of NOTEBOOK_STARTER_OUTLINE_FOLDERS) {
+          if (planned.has(`folder:${title.toLowerCase()}`)) continue
+          await ipc().invoke('notebook:create', { parentId: outline, kind: 'folder', title })
+        }
       }
       await get().load()
     },
@@ -495,7 +512,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => {
     async importPathsInto(paths, folder) {
       if (paths.length === 0) return
       const made = await ipc().invoke('notebook:create', {
-        parentId: null,
+        parentId: sectionRootId(get(), 'documents'),
         kind: 'folder',
         title: folder
       })

@@ -24,6 +24,10 @@ import { caretToEnd, showOldStoryBible } from './support'
  * headings picked, comes in as a folder of pages; another dropped with Sort with Ms Scribe picked
  * is priced, then sorted against the fake provider on loopback into two pages in two folders, and
  * the activity line's Undo removes them (the file stays as its own page).
+ *
+ * The notes binder (2026-10-16): the tree opens on Outline, Timeline and Documents, drawn as
+ * section rows that fold, with no Rename or Delete; a page is made in Outline from its plus; an
+ * older project's Docs folder opens under Documents; the old Outline and Timeline views are gone.
  */
 
 let app: ElectronApplication
@@ -202,20 +206,42 @@ test('notes: a folder and a page, typed text kept across a reopen, delete and Un
   await wizard.getByRole('button', { name: 'Create' }).click()
   await expect(page.getByTestId('project-name')).toHaveText(NAME)
 
-  // The Notes section, empty.
+  // The Notes section: the three sections of the binder, Documents empty (the starter offered).
   await showNotes()
   const toolbar = page.getByRole('toolbar', { name: 'Notes' })
   await expect(page.getByText('No notes yet.')).toBeVisible()
+  const tree = page.getByRole('tree', { name: 'Notes' })
+  await expect
+    .poll(() =>
+      tree
+        .locator('[role="treeitem"][aria-level="1"]')
+        .evaluateAll((rows) => rows.map((row) => row.getAttribute('aria-label')))
+    )
+    .toEqual(['Outline', 'Timeline', 'Documents'])
+  // A section row folds on a click, as the Manuscript's do; the click also selects it.
+  const documents = tree.getByRole('treeitem', { name: 'Documents', exact: true })
+  const documentsRow = documents.locator(':scope > div')
+  await expect(documentsRow).toHaveAttribute('data-section', 'documents')
+  await documentsRow.click()
+  await expect(documents).toHaveAttribute('aria-expanded', 'false')
+  await documentsRow.click()
+  await expect(documents).toHaveAttribute('aria-expanded', 'true')
+  // Its menu makes things; it is never renamed or deleted.
+  await documentsRow.click({ button: 'right' })
+  await expect(page.getByRole('menuitem', { name: 'New page', exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Rename' })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: 'Delete' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
 
-  // A folder, then a page inside it (the new folder is selected), each named in the tree.
+  // A folder in Documents (selected), then a page inside it, each named in the tree.
   await toolbar.getByRole('button', { name: 'New folder' }).click()
   await nameIt('People')
   await toolbar.getByRole('button', { name: 'New page' }).click()
   await nameIt('Mara')
-  const tree = page.getByRole('tree', { name: 'Notes' })
   const mara = tree.getByRole('treeitem', { name: 'Mara' })
-  await expect(mara).toHaveAttribute('aria-level', '2')
-  await expect(tree.getByRole('treeitem', { name: 'People' })).toHaveAttribute('aria-level', '1')
+  await expect(mara).toHaveAttribute('aria-level', '3')
+  await expect(tree.getByRole('treeitem', { name: 'People' })).toHaveAttribute('aria-level', '2')
+  await expect(page.getByText('No notes yet.')).toHaveCount(0)
 
   // The page is open in the main pane, its title in the header; type on it.
   const notePage = page.getByTestId('notebook-page')
@@ -269,6 +295,20 @@ test('notes: a folder and a page, typed text kept across a reopen, delete and Un
   await expect(menu.getByRole('menuitem', { name: 'Rook', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(menu).toHaveCount(0)
+
+  // The notes binder: a page made in Outline from the section's small plus.
+  await tree.getByRole('button', { name: 'New in Outline' }).click()
+  await page.getByRole('menuitem', { name: 'New page', exact: true }).click()
+  await nameIt('Act one beats')
+  const beats = tree.getByRole('treeitem', { name: 'Act one beats' })
+  await expect(beats).toHaveAttribute('aria-level', '2')
+  const items = await invoke<NotebookItem[]>('notebook:list', undefined)
+  expect(items.find((item) => item.title === 'Act one beats')?.parentId).toBe(
+    items.find((item) => item.role === 'outline')?.id
+  )
+  expect(items.find((item) => item.title === 'People')?.parentId).toBe(
+    items.find((item) => item.role === 'documents')?.id
+  )
 })
 
 test('fresh start: a project’s Library file opens in Notes › Docs, with no Characters section', async () => {
@@ -319,34 +359,36 @@ test('fresh start: a project’s Library file opens in Notes › Docs, with no C
 
   await showNotes()
   const tree = page.getByRole('tree', { name: 'Notes' })
-  await expect(tree.getByRole('treeitem', { name: 'Docs' })).toHaveAttribute('aria-level', '1')
+  // The notes binder: the older project's Docs folder opens under Documents.
+  await expect(tree.getByRole('treeitem', { name: 'Docs' })).toHaveAttribute('aria-level', '2')
   const powers = tree.getByRole('treeitem', { name: 'Powers' })
-  await expect(powers).toHaveAttribute('aria-level', '2')
+  await expect(powers).toHaveAttribute('aria-level', '3')
+  const listed = await invoke<NotebookItem[]>('notebook:list', undefined)
+  expect(listed.find((item) => item.title === 'Docs')?.parentId).toBe(
+    listed.find((item) => item.role === 'documents')?.id
+  )
   await powers.getByText('Powers', { exact: true }).click()
   const notePage = page.getByRole('textbox', { name: 'Note page' })
   await expect(notePage.locator('h1')).toHaveText('Powers')
   await expect(notePage).toContainText('Shadow walking costs a memory.')
 
-  // The sections: three tabs, Manuscript, Notes and Edits, with Outline and Timeline as large
-  // folders at the top of Notes; no story-bible category or Library anywhere.
+  // The sections: three tabs, Manuscript, Notes and Edits; Outline and Timeline are sections of
+  // the Notes tree, the old views archived (no Views rows, no tabs); no story-bible category or
+  // Library anywhere.
   await expect(page.getByRole('button', { name: /^Section: / })).toHaveCount(0)
   await expect(page.getByRole('tablist', { name: 'Sections' }).getByRole('tab')).toHaveText([
     'Manuscript',
     'Notes',
     'Edits'
   ])
-  const views = page.getByRole('group', { name: 'Views' })
-  await expect(views.getByRole('button')).toHaveText(['Outline', 'Timeline'])
+  await expect(page.getByRole('group', { name: 'Views' })).toHaveCount(0)
+  await expect(tree.getByRole('treeitem', { name: 'Timeline', exact: true })).toHaveAttribute(
+    'aria-level',
+    '1'
+  )
+  await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveCount(0)
   await expect(page.getByRole('tab', { name: 'Characters', exact: true })).toHaveCount(0)
   await expect(page.getByRole('tab', { name: 'Library', exact: true })).toHaveCount(0)
-
-  // Timeline opens under Notes with a back row; the Notes tab stays selected.
-  await views.getByRole('button', { name: 'Timeline', exact: true }).click()
-  const notesTab = page.getByRole('tab', { name: 'Notes', exact: true })
-  await expect(notesTab).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('region', { name: 'Timeline section', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Back to Notes' }).click()
-  await expect(page.getByRole('tree', { name: 'Notes' })).toBeVisible()
   // Edits is a tab of its own.
   await page.getByRole('tab', { name: 'Edits', exact: true }).click()
   await expect(page.getByRole('tab', { name: 'Edits', exact: true })).toHaveAttribute(
@@ -391,16 +433,17 @@ test('structure B: a dropped file split at headings, another sorted with Ms Scri
   await choice.getByRole('radio', { name: /Split at headings/ }).check()
   await choice.getByRole('button', { name: 'Add' }).click()
   await expect(choice).toHaveCount(0)
+  // Dropped on no row, it comes into Documents (the notes binder).
   const fenlands = tree.getByRole('treeitem', { name: 'Fenlands' })
-  await expect(fenlands.first()).toHaveAttribute('aria-level', '1')
+  await expect(fenlands.first()).toHaveAttribute('aria-level', '2')
   for (const title of ['Mara', 'Rook']) {
     await expect(tree.getByRole('treeitem', { name: title, exact: true })).toHaveAttribute(
       'aria-level',
-      '2'
+      '3'
     )
   }
   // The text before the first heading is a page named after the file, inside the folder.
-  await expect(tree.locator('[aria-level="2"][aria-label="Fenlands"]')).toHaveCount(1)
+  await expect(tree.locator('[aria-level="3"][aria-label="Fenlands"]')).toHaveCount(1)
   expect(await storedText('Mara')).toBe('Ferry keeper.\nVoice\nClipped.')
 
   // Sort with Ms Scribe: priced first, then two pages in two folders; the file stays a page.
@@ -417,11 +460,11 @@ test('structure B: a dropped file split at headings, another sorted with Ms Scri
   ] as const) {
     await expect(tree.getByRole('treeitem', { name: folder, exact: true })).toHaveAttribute(
       'aria-level',
-      '1'
+      '2'
     )
     await expect(tree.getByRole('treeitem', { name: title, exact: true })).toHaveAttribute(
       'aria-level',
-      '2'
+      '3'
     )
   }
   expect(await storedText('Saltmarket')).toBe('Saltmarket bars its doors at the second bell.')

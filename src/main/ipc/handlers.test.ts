@@ -10882,7 +10882,14 @@ describe('old story bible archived (notes redesign, fresh start)', () => {
     await invoke('project:close', undefined)
     await invoke('project:open', { path: created?.path ?? '' })
     await settle()
-    expect(await invoke('notebook:list', undefined)).toEqual([])
+    // The notes binder: the open makes the three sections, and nothing else.
+    expect(
+      (await invoke('notebook:list', undefined)).map((item) => [item.title, item.role])
+    ).toEqual([
+      ['Outline', 'outline'],
+      ['Timeline', 'timeline'],
+      ['Documents', 'documents']
+    ])
     // A file the Library gets later (the story bible switched on meanwhile) comes on a later open.
     await invoke('library:add', { paths: [file('Late.md', 'Added after.')] })
     await invoke('project:close', undefined)
@@ -10910,6 +10917,10 @@ describe('old story bible archived (notes redesign, fresh start)', () => {
     await vi.waitFor(async () => expect((await docs()).pages).toEqual(['Places', 'Powers']))
     expect((await docs()).folders).toBe(1)
     const items = await invoke('notebook:list', undefined)
+    // The notes binder: Notes › Documents › Docs.
+    expect(items.find((item) => item.title === 'Docs')?.parentId).toBe(
+      items.find((item) => item.role === 'documents')?.id
+    )
     const powers = items.find((item) => item.title === 'Powers')
     const page = await invoke('notebook:get', { id: powers?.id ?? '' })
     expect(page.content?.content?.[0]).toMatchObject({
@@ -10938,7 +10949,9 @@ describe('old story bible archived (notes redesign, fresh start)', () => {
     await invoke('project:close', undefined)
     await invoke('project:open', { path: created?.path ?? '' })
     await settle()
-    expect(await invoke('notebook:list', undefined)).toEqual([])
+    expect((await invoke('notebook:list', undefined)).filter((item) => item.role == null)).toEqual(
+      []
+    )
   })
 
   it('stores the summary but no tags or facts, and asks no consistency check', async () => {

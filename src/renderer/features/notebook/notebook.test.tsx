@@ -11,6 +11,7 @@ import {
 } from '@shared/notebook'
 import {
   NOTEBOOK_STARTER_FOLDERS,
+  NOTEBOOK_STARTER_OUTLINE_FOLDERS,
   NOTEBOOK_TEMPLATE_IDS,
   NOTEBOOK_TEMPLATES,
   notebookTemplate,
@@ -71,13 +72,14 @@ function row(
 }
 
 const live = (): Row[] => rows.filter((r) => !r.deleted)
-const itemOf = ({ id, parentId, kind, title, position, modified }: Row): NotebookItem => ({
+const itemOf = ({ id, parentId, kind, title, position, modified, role }: Row): NotebookItem => ({
   id,
   parentId,
   kind,
   title,
   position,
-  modified
+  modified,
+  ...(role === undefined ? {} : { role })
 })
 const pageOf = (r: Row): NotebookPage => ({
   ...itemOf(r),
@@ -599,5 +601,114 @@ describe('note templates (phase 6)', () => {
     const made = created().length
     await store().startWithFolders()
     expect(created()).toHaveLength(made)
+  })
+})
+
+describe('the notes binder (2026-10-16)', () => {
+  /** A section root as main makes it. */
+  const root = (id: string, role: NonNullable<NotebookItem['role']>, position: number): Row => ({
+    ...row(id, 'folder', null, position),
+    role
+  })
+  const created = (): Input<'notebook:create'>[] =>
+    sent('notebook:create') as Input<'notebook:create'>[]
+
+  beforeEach(() => {
+    rows = [
+      root('Outline', 'outline', 0),
+      root('Timeline', 'timeline', 1),
+      root('Documents', 'documents', 2),
+      row('People', 'folder', 'Documents', 0),
+      row('Mara', 'page', 'People', 0, 'Eyes: grey.')
+    ]
+  })
+
+  const sectionRow = (tree: HTMLElement, name: string): HTMLElement => {
+    const found = within(tree)
+      .getAllByRole('treeitem')
+      .find((each) => each.getAttribute('aria-label') === name)
+    const div = found?.querySelector<HTMLElement>(':scope > div')
+    if (!div) throw new Error(`no row ${name}`)
+    return div
+  }
+
+  it('draws the three sections as section rows that fold on a click', async () => {
+    await useNotebookStore.getState().load()
+    render(<NotesTab />)
+    const tree = screen.getByRole('tree', { name: 'Notes' })
+    const top = within(tree)
+      .getAllByRole('treeitem')
+      .filter((each) => each.getAttribute('aria-level') === '1')
+    expect(top.map((each) => each.getAttribute('aria-label'))).toEqual([
+      'Outline',
+      'Timeline',
+      'Documents'
+    ])
+    const documents = sectionRow(tree, 'Documents')
+    expect(documents).toHaveAttribute('data-section', 'documents')
+    expect(documents.className).toContain('uppercase')
+    expect(documents).toHaveAttribute('draggable', 'false')
+    expect(within(tree).getByText('People')).toBeInTheDocument()
+    fireEvent.click(documents)
+    expect(within(tree).queryByText('People')).not.toBeInTheDocument()
+    fireEvent.click(documents)
+    expect(within(tree).getByText('People')).toBeInTheDocument()
+  })
+
+  it('a section’s plus and menu make things inside it, with no Rename, Move or Delete', async () => {
+    await useNotebookStore.getState().load()
+    render(<NotesTab />)
+    const tree = screen.getByRole('tree', { name: 'Notes' })
+    fireEvent.click(within(tree).getByRole('button', { name: 'New in Outline' }))
+    expect(screen.getAllByRole('menuitem').map((each) => each.textContent)).toEqual([
+      'New page',
+      'New from template ›',
+      'New folder'
+    ])
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New page' }))
+    await waitFor(() => expect(created()).toHaveLength(1))
+    expect(created()[0]).toEqual({ parentId: 'Outline', kind: 'page', title: NEW_PAGE_TITLE })
+
+    fireEvent.contextMenu(sectionRow(tree, 'Timeline'))
+    expect(screen.queryByRole('menuitem', { name: 'Rename' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New folder' }))
+    await waitFor(() => expect(created()).toHaveLength(2))
+    expect(created()[1]).toMatchObject({ parentId: 'Timeline', kind: 'folder' })
+  })
+
+  it('the toolbar makes a page in Documents when nothing is selected', async () => {
+    await useNotebookStore.getState().load()
+    render(<NotesTab />)
+    fireEvent.click(screen.getByRole('button', { name: 'New page' }))
+    await waitFor(() => expect(created()).toHaveLength(1))
+    expect(created()[0]).toEqual({ parentId: 'Documents', kind: 'page', title: NEW_PAGE_TITLE })
+  })
+
+  it('offers the starter set while Documents is empty: folders in Documents, Chapter plans in Outline', async () => {
+    rows = rows.filter((each) => each.role !== undefined)
+    const store = useNotebookStore.getState
+    await store().load()
+    render(<NotesTab />)
+    fireEvent.click(screen.getByRole('button', { name: 'Start with folders' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Start with folders' })).not.toBeInTheDocument()
+    )
+    const made = created().map((each) => [each.parentId, each.title])
+    expect(made).toEqual([
+      ...NOTEBOOK_STARTER_FOLDERS.map((title) => ['Documents', title]),
+      ['Documents', 'Style guide'],
+      ...NOTEBOOK_STARTER_OUTLINE_FOLDERS.map((title) => ['Outline', title])
+    ])
+    await store().startWithFolders()
+    expect(created()).toHaveLength(made.length)
+  })
+
+  it('Save as template keeps the Templates folder in Documents', async () => {
+    const store = useNotebookStore.getState
+    await store().load()
+    await store().saveAsTemplate('Mara')
+    const folder = live().find((each) => each.title === 'Templates')
+    expect(folder?.parentId).toBe('Documents')
   })
 })

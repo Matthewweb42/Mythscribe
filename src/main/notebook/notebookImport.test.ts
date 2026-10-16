@@ -18,6 +18,7 @@ import {
   deleteNotebookItem,
   getNotebookPage,
   listNotebook,
+  notebookSectionId,
   restoreNotebookItem
 } from './notebookStore'
 
@@ -88,15 +89,16 @@ describe('notebookPageFromFile', () => {
 })
 
 describe('importNotebookFiles', () => {
-  it('makes one page per file, titled by its name, at the top level', async () => {
+  it('makes one page per file, titled by its name, in Documents with no folder given', async () => {
     const result = await importNotebookFiles(db, null, [
       source('Mara.md', '# Mara\n\nGrey eyes.'),
       source('Places.txt', 'The quay.')
     ])
     expect(result.skipped).toEqual([])
+    const documents = notebookSectionId(db, 'documents')
     expect(result.items.map((i) => [i.kind, i.title, i.parentId])).toEqual([
-      ['page', 'Mara', null],
-      ['page', 'Places', null]
+      ['page', 'Mara', documents],
+      ['page', 'Places', documents]
     ])
     expect(getNotebookPage(db, result.items[0]?.id ?? '').plain).toContain('Grey eyes.')
   })

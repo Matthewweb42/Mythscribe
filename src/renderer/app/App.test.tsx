@@ -403,11 +403,9 @@ describe('App', () => {
     ).toEqual(['Manuscript', 'Notes', 'Edits'])
     expect(within(aside).queryByRole('button', { name: /^Section: / })).toBeNull()
     await userEvent.click(within(tabs).getByRole('tab', { name: 'Notes' }))
-    expect(
-      within(within(aside).getByRole('group', { name: 'Views' }))
-        .getAllByRole('button')
-        .map((b) => b.textContent)
-    ).toEqual(['Outline', 'Timeline'])
+    // The notes binder: the old Outline and Timeline views are archived; no Views rows.
+    expect(within(aside).queryByRole('group', { name: 'Views' })).toBeNull()
+    expect(within(aside).getByRole('toolbar', { name: 'Notes' })).toBeInTheDocument()
     await userEvent.click(within(tabs).getByRole('tab', { name: 'Manuscript' }))
     // The menu bar: no Character, Setting or World-building note under Insert.
     const bar = screen.getByRole('menubar', { name: 'Application menu' })

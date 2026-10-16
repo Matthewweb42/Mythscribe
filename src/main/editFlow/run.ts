@@ -14,6 +14,7 @@ import {
   type EditFlowSpec
 } from '@shared/editFlow'
 import type { AgentEdit } from '@shared/agent'
+import { STORY_TIMELINE_TITLE } from '@shared/notebook'
 import { STYLE_GUIDE_TITLE } from '@shared/notebookTemplates'
 import { getAiSettings } from '../project/settingsStore'
 import { projectSpellingWords } from '../spellcheck/projectWords'
@@ -26,7 +27,10 @@ import { assertFeatureAllowed } from '../ai/dial'
 import { paragraphsOf, requestWithRetry } from '../ai/editPass'
 import { cancelInflight } from '../ai/inflight'
 import { buildEditFlowPrompt, type EDIT_FLOW_PROMPT_VERSION } from '../ai/prompts/editFlow.v1'
-import { buildEditNotesPrompt, type EDIT_NOTES_PROMPT_VERSION } from '../ai/prompts/editNotes.v1'
+import {
+  buildEditNotesV2Prompt,
+  type EDIT_NOTES_V2_PROMPT_VERSION
+} from '../ai/prompts/editNotes.v2'
 import { createProposal, settleProposal } from '../ai/proposalStore'
 import { AiCancelledError, AiProviderError, type AiMessage } from '../ai/providers/types'
 import { sha256, type AiRequestDeps } from '../ai/request'
@@ -44,6 +48,7 @@ import {
   type IssueInput
 } from './flowStore'
 import { parseFlowIssues, parseFlowNotes } from './parse'
+import { applyStoryTimeline } from './storyTimeline'
 import {
   flowFamilies,
   planRequests,
@@ -179,8 +184,16 @@ export async function prepareFlow(
   const requests = planRequests(slices, flowFamilies(spec.categories))
   // The pages the scope names go whole first when the notes are past their budget.
   const text = scenes.map((scene) => scene.text).join('\n')
+  // The Story timeline page (the notes binder, `editNotes.v2`) too: Update notes places events by it.
+  const timelineTitle = STORY_TIMELINE_TITLE.toLowerCase()
   const wanted = new Set(
-    material.pages.filter((page) => namesIn(text, page.title, false)).map((page) => page.id)
+    material.pages
+      .filter(
+        (page) =>
+          namesIn(text, page.title, false) ||
+          (page.kind === 'note' && page.title.trim().toLowerCase() === timelineTitle)
+      )
+      .map((page) => page.id)
   )
   const reference =
     spec.depth === 'deep' && spec.scope.kind !== 'book'
@@ -212,7 +225,11 @@ export async function prepareFlow(
 export function flowMessages(
   prep: PreparedFlow,
   request: FlowRequest
-): { version: typeof EDIT_FLOW_PROMPT_VERSION | typeof EDIT_NOTES_PROMPT_VERSION; messages: AiMessage[]; maxTokens: number } {
+): {
+  version: typeof EDIT_FLOW_PROMPT_VERSION | typeof EDIT_NOTES_V2_PROMPT_VERSION
+  messages: AiMessage[]
+  maxTokens: number
+} {
   const slice = prep.slices[request.slice]
   const base = {
     notes: prep.notes,
@@ -225,7 +242,7 @@ export function flowMessages(
     },
     items: slice?.items ?? []
   }
-  if (request.family === 'notes') return buildEditNotesPrompt(base)
+  if (request.family === 'notes') return buildEditNotesV2Prompt(base)
   return buildEditFlowPrompt({
     ...base,
     family: request.family,
@@ -430,8 +447,14 @@ export function createEditFlowRunner(deps: EditFlowRunnerDeps): EditFlowRunner {
         }
         if (request.family === 'notes') {
           const parsed = parseFlowNotes(answer.text)
-          const edits = applyNoteWrites(notesRun, parsed.writes)
-          dropped += parsed.dropped + (parsed.writes.length - edits.length)
+          const written = applyNoteWrites(notesRun, parsed.writes)
+          dropped += parsed.dropped + (parsed.writes.length - written.length)
+          // The notes binder: the events go into the Story timeline page, in story order.
+          const timeline = applyStoryTimeline(notesRun, parsed.events)
+          const edits =
+            timeline?.kind === 'notebook'
+              ? [...written, { edit: timeline, undone: false }]
+              : written
           const proposal = createProposal(db, {
             ...proposalInput,
             content: JSON.stringify(edits.map((entry) => entry.edit)),

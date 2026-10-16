@@ -176,6 +176,12 @@ export const EDIT_FLOW_OVERVIEW_MAX = 2_400
 export const EDIT_FLOW_PROBLEM_MAX = 400
 /** Note writes one Update notes request may make. */
 export const EDIT_FLOW_NOTE_WRITES_MAX = 8
+/**
+ * Events one Update notes request may add to the Story timeline page (the notes binder,
+ * `editNotes.v2`), and the longest event line kept.
+ */
+export const EDIT_FLOW_TIMELINE_EVENTS_MAX = 12
+export const EDIT_FLOW_TIMELINE_LINE_MAX = 240
 /** The quoted passage of an issue (inside one paragraph; `scribe2/quotes.ts` checks it). */
 export const EDIT_FLOW_QUOTE_MAX = 400
 /** The `max_tokens` one request asks for (an overview plus up to 40 issues with fixes). */

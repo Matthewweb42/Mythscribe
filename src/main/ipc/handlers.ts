@@ -283,6 +283,7 @@ import { listTodo, reopenTodo, settleTodo, syncLocalTodo } from '../knowledge/to
 import {
   createNotebookItem,
   deleteNotebookItem,
+  ensureNotebookSections,
   getNotebookPage,
   listNotebook,
   listNotebookVersions,
@@ -6238,6 +6239,15 @@ export function registerHandlers({
         pruneMemoryIndex(manager.require().connection.orm)
       } catch (err) {
         console.warn('Could not update the story memory index', err)
+      }
+    }
+    // The notes binder (2026-10-16): Outline, Timeline and Documents at the top of Notes, an
+    // older project's notes moved into Documents; before the window reads the notebook.
+    if (info) {
+      try {
+        ensureNotebookSections(manager.require().connection.orm)
+      } catch (err) {
+        console.warn('Could not make the Notes sections', err)
       }
     }
     // F-3.11, F-3.14: the spellchecker accepts the open project's words and story names and no

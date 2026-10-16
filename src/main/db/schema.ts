@@ -30,7 +30,7 @@ import { CATEGORY_ICONS, CATEGORY_ORIGINS } from '../../shared/categories'
 import { ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
 import { FACT_ORIGINS, FACT_STATUSES } from '../../shared/facts'
 import { CHANGE_KINDS, CHANGE_STATUSES } from '../../shared/changes'
-import { NOTEBOOK_AUTHORS, NOTEBOOK_KINDS } from '../../shared/notebook'
+import { NOTEBOOK_AUTHORS, NOTEBOOK_KINDS, NOTEBOOK_ROLES } from '../../shared/notebook'
 import { PROPOSAL_STATUSES } from '../../shared/proposal'
 import { HIERARCHY_LEVELS, NODE_KINDS, SECTION_TYPES } from '../../shared/labels'
 import { SNAPSHOT_KINDS, SNAPSHOT_SCOPES } from '../../shared/snapshots'
@@ -1580,7 +1580,9 @@ export const notebookItem = sqliteTable(
     position: real('position').notNull(),
     deleted: text('deleted'),
     created: text('created').notNull(),
-    modified: text('modified').notNull()
+    modified: text('modified').notNull(),
+    /** The notes binder (migration `0043_notebook_sections`): a section root's role, else null. */
+    role: text('role', { enum: NOTEBOOK_ROLES })
   },
   (t) => [index('notebook_item_parent_idx').on(t.parentId, t.position)]
 )

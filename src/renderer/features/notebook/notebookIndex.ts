@@ -1,10 +1,12 @@
-import type { NotebookItem } from '@shared/notebook'
+import type { NotebookItem, NotebookRole } from '@shared/notebook'
 
 /**
  * The notebook tree's pure helpers (notes redesign phase 1, slice 1): the index the Notes tree
  * draws from, the rows on screen, where a drag lands (the manuscript tree's before / into /
  * after zones, F-2.4), and where a new page goes. Positions are reals, so a drop between two rows
- * takes the midpoint and moves nothing else.
+ * takes the midpoint and moves nothing else. The notes binder (2026-10-16): the three section
+ * roots (Outline, Timeline, Documents) are the top level; they never move, take drops only inside,
+ * and a new page with nothing selected goes into Documents.
  */
 
 /** The `childrenOf` key of the top level. */
@@ -36,6 +38,19 @@ export function buildNotebookIndex(items: readonly NotebookItem[]): NotebookInde
   return { byId, childrenOf }
 }
 
+/** Whether an item is one of the three section roots. */
+export function isSectionRoot(item: NotebookItem | undefined): boolean {
+  return item?.role != null
+}
+
+/** The id of a section's root, or null before the sections are loaded. */
+export function sectionRootId(index: NotebookIndex, role: NotebookRole): string | null {
+  for (const id of index.childrenOf[NOTEBOOK_ROOT] ?? []) {
+    if (index.byId[id]?.role === role) return id
+  }
+  return null
+}
+
 /** Where a drop lands relative to the row under the pointer. */
 export type NotebookDropZone = 'before' | 'into' | 'after'
 
@@ -43,7 +58,13 @@ export type NotebookDropZone = 'before' | 'into' | 'after'
  * The zone of a row the pointer is in, as the manuscript tree splits it (F-2.4): a page's top
  * half is before and its bottom half after; a folder splits before / into / after at 25 % / 75 %.
  */
-export function notebookDropZone(kind: NotebookItem['kind'], ratio: number): NotebookDropZone {
+export function notebookDropZone(
+  kind: NotebookItem['kind'],
+  ratio: number,
+  root = false
+): NotebookDropZone {
+  // A section root, like the manuscript's sections, only takes things inside it.
+  if (root) return 'into'
   if (kind === 'page') return ratio < 0.5 ? 'before' : 'after'
   if (ratio < 0.25) return 'before'
   if (ratio >= 0.75) return 'after'
@@ -72,7 +93,8 @@ export function positionBetween(before: number | undefined, after: number | unde
 
 /**
  * Where dropping `dragId` on `overId`'s `zone` puts it, or null when it cannot go there (on
- * itself, or into a folder inside itself). Into a folder appends it last there.
+ * itself, into a folder inside itself, beside a section root, or a section root at all). Into a
+ * folder appends it last there.
  */
 export function notebookDropTarget(
   index: NotebookIndex,
@@ -81,7 +103,9 @@ export function notebookDropTarget(
   zone: NotebookDropZone
 ): { parentId: string | null; position: number } | null {
   const over = index.byId[overId]
-  if (over === undefined || index.byId[dragId] === undefined || dragId === overId) return null
+  const dragged = index.byId[dragId]
+  if (over === undefined || dragged === undefined || dragId === overId) return null
+  if (isSectionRoot(dragged) || (isSectionRoot(over) && zone !== 'into')) return null
   const parentId = zone === 'into' ? over.id : over.parentId
   if (zone === 'into' && over.kind !== 'folder') return null
   if (parentId !== null && isWithin(index, parentId, dragId)) return null
@@ -96,14 +120,19 @@ export function notebookDropTarget(
     : { parentId, position: positionBetween(pos(overId), pos(siblings[at + 1])) }
 }
 
-/** The folder a new page or folder goes into: the selected folder, the selected page's folder, or the top. */
+/**
+ * The folder a new page or folder goes into: the selected folder, the selected page's folder, or
+ * Documents (the top before the sections are loaded; main puts it in Documents then).
+ */
 export function notebookTargetFolder(
   index: NotebookIndex,
   selectedId: string | null
 ): string | null {
   const selected = selectedId === null ? undefined : index.byId[selectedId]
-  if (selected === undefined) return null
-  return selected.kind === 'folder' ? selected.id : selected.parentId
+  if (selected === undefined) return sectionRootId(index, 'documents')
+  return selected.kind === 'folder'
+    ? selected.id
+    : (selected.parentId ?? sectionRootId(index, 'documents'))
 }
 
 export interface NotebookRow {

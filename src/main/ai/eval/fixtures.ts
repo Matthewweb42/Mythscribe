@@ -887,8 +887,12 @@ export interface EvalCase {
         checks: EditFlowCategory[]
         items: { nodeId: string; ref: string; text: string }[]
       }
-    /** Update notes in the edit flow: the answer must parse to its writes, nothing dropped. */
-    | { kind: 'editNotes' }
+    /**
+     * Update notes in the edit flow: the answer must parse to its writes, nothing dropped. With
+     * `timeline` (`editNotes.v2`), its events put on the Story timeline page `page` (lines, empty
+     * for a page not made yet) must hold a line naming `first` before one naming `then`.
+     */
+    | { kind: 'editNotes'; timeline?: { page: string[]; first: string; then: string } }
     /**
      * Sort with Ms Scribe (notes structure B): the answer must parse to pages, none dropped (every
      * line copied from `part`), and each title in `expected` must be among them.

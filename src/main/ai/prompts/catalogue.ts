@@ -121,6 +121,7 @@ import { SCRIBE_V4_PROMPT_VERSION } from './scribe.v4'
 import { SCRIBE_V5_PROMPT_VERSION } from './scribe.v5'
 import { EDIT_FLOW_PROMPT_VERSION } from './editFlow.v1'
 import { EDIT_NOTES_PROMPT_VERSION } from './editNotes.v1'
+import { EDIT_NOTES_V2_PROMPT_VERSION } from './editNotes.v2'
 import { NOTES_SORT_PROMPT_VERSION } from './notesSort.v1'
 
 /**
@@ -285,7 +286,9 @@ export const PROMPT_VERSIONS = [
   // Notes fixes (2026-10-15, fixes-1.md §3): Rewrite in Vibe, bolder within the passage.
   REWRITE_PROMPT_V6_VERSION,
   // Notes structure part B (2026-10-16, structure.md §B): Sort with Ms Scribe.
-  NOTES_SORT_PROMPT_VERSION
+  NOTES_SORT_PROMPT_VERSION,
+  // The notes binder (2026-10-16, binder.md §4): Update notes keeps the Story timeline.
+  EDIT_NOTES_V2_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -832,6 +835,13 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'Notes P2'
+  },
+  // The notes binder: Update notes also keeps the Story timeline page, events in story order (2026-10-16).
+  [EDIT_NOTES_V2_PROMPT_VERSION]: {
+    feature: 'editFlow',
+    tier: 'fast',
+    output: 'json',
+    since: 'Notes binder'
   },
   // Sort with Ms Scribe: a document's part into pages in folders, its text copied (2026-10-16).
   [NOTES_SORT_PROMPT_VERSION]: {

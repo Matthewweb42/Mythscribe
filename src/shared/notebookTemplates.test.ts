@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { docToText } from './docText'
 import { notebookDocFromText } from './notebook'
 import {
+  NOTEBOOK_STARTER_FOLDERS,
   NOTEBOOK_TEMPLATE_IDS,
   NOTEBOOK_TEMPLATES,
   STYLE_GUIDE_TITLE,
@@ -199,5 +200,30 @@ describe('layoutOnTemplate', () => {
   it('is null for a template with no sections', () => {
     expect(layoutOnTemplate(notebookDocFromText('Just a page'), 'Text')).toBeNull()
     expect(layoutOnTemplate(null, 'Text')).toBeNull()
+  })
+})
+
+describe('the notes binder’s sections and templates (2026-10-16)', () => {
+  it('a section follows no template itself; a folder inside one takes its own', () => {
+    const items: TemplateTreeItem[] = [
+      { ...item('outline', 'folder', null, 0, 'Outline'), role: 'outline' },
+      { ...item('timeline', 'folder', null, 1, 'Timeline'), role: 'timeline' },
+      { ...item('documents', 'folder', null, 2, 'Documents'), role: 'documents' },
+      item('plans', 'folder', 'outline', 0, 'Chapter plans'),
+      item('beats', 'folder', 'outline', 1, 'Beats'),
+      item('characters', 'folder', 'documents', 0, 'Characters')
+    ]
+    expect(templateForFolder(items, 'outline')).toBeNull()
+    expect(templateForFolder(items, 'timeline')).toBeNull()
+    expect(templateForFolder(items, 'beats')).toBeNull()
+    expect(templateForFolder(items, 'plans')).toMatchObject({
+      kind: 'builtIn',
+      template: { id: 'chapterPlan' }
+    })
+    expect(templateForFolder(items, 'characters')).toMatchObject({
+      kind: 'builtIn',
+      template: { id: 'character' }
+    })
+    expect(NOTEBOOK_STARTER_FOLDERS).not.toContain('Timeline')
   })
 })

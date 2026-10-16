@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(43)
+    expect(result.version).toBe(44)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -2012,6 +2012,37 @@ describe('the edit flow (0042, notes redesign phase 2) leaves every older row an
     )
     const { edit_pass: _p, edit_change: _c, ...restAfter } = rowsAfter
     const { edit_pass: _pb, edit_change: _cb, ...restBefore } = rowsBefore
+    expect(JSON.stringify(restAfter)).toBe(JSON.stringify(restBefore))
+  })
+})
+
+describe('the notes binder (0043) adds the section role to notebook_item, every older row kept', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, loadMigrations().slice(0, 43))
+    fillEveryTable(db)
+  })
+  afterEach(() => db.close())
+
+  it('adds a nullable role column; older rows read as ordinary items', () => {
+    const tables = tableNamesOf(db).filter((table) => table !== 'schema_migrations')
+    const rowsBefore = dumpOf(db, tables)
+
+    expect(migrate(db, loadMigrations().slice(0, 44)).applied).toEqual(['0043_notebook_sections'])
+
+    expect(tableNamesOf(db).filter((table) => table !== 'schema_migrations')).toEqual(tables)
+    const columns = (
+      db.prepare('PRAGMA table_info(notebook_item)').all() as { name: string; notnull: number }[]
+    ).map((column) => [column.name, column.notnull])
+    expect(columns.at(-1)).toEqual(['role', 0])
+    const rowsAfter = dumpOf(db, tables)
+    expect(rowsAfter.notebook_item).toEqual(
+      (rowsBefore.notebook_item ?? []).map((row) => ({ ...(row as object), role: null }))
+    )
+    const { notebook_item: _a, ...restAfter } = rowsAfter
+    const { notebook_item: _b, ...restBefore } = rowsBefore
     expect(JSON.stringify(restAfter)).toBe(JSON.stringify(restBefore))
   })
 })

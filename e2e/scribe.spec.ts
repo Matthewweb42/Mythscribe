@@ -36,7 +36,7 @@ import { clickIntoEditor } from './support'
  *
  * Then (2026-10-16, `scribe.v5`, notes structure part C) in Write: "put Tash in a Characters
  * folder" makes the folder and moves the page at once (two lines, each with Undo, and Undo all,
- * which puts Tash back at the top and removes the folder); a delete shows the card and removes
+ * which puts Tash back in Documents and removes the folder); a delete shows the card and removes
  * nothing until Delete, after which the page is gone.
  */
 
@@ -281,7 +281,8 @@ test('Ms Scribe edits a note in Write with Undo, and Brainstorm edits nothing (n
   await expect(turns.nth(1)).toContainText('I added it to her page (Mara).', { timeout: 15_000 })
   expect(scribeBodies()).toHaveLength(2)
   const system = scribeBodies()[0]?.messages[0]?.content ?? ''
-  expect(system).toContain('## p1 Mara (note)\nEyes: grey.')
+  // The notes binder: a page made at the top sits in Documents.
+  expect(system).toContain('## p1 Mara (note, in Documents)\nEyes: grey.')
   expect(system).toContain('edit_note {')
   expect(system).toContain('# Book map')
   expect(scribeBodies()[1]?.messages.at(-1)?.content).toBe('Result of edit_note:\nEdited p1 Mara.')
@@ -489,7 +490,7 @@ test('Rewrite in Vibe sends the bolder version, its line last in the user turn (
 })
 
 test('in Write she makes a folder and moves a page at once with Undo, and a delete waits for Delete (scribe.v5)', async () => {
-  // Continues in the same project, Ms Scribe's panel open. Two loose pages at the top of Notes.
+  // Continues in the same project, Ms Scribe's panel open. Two loose pages in Notes › Documents.
   const tash = await invoke<NotebookPage>('notebook:create', {
     parentId: null,
     kind: 'page',
@@ -532,13 +533,15 @@ test('in Write she makes a folder and moves a page at once with Undo, and a dele
   const characters = (await notebook()).find((item) => item.title === 'Characters')
   expect(characters?.kind).toBe('folder')
   expect((await notebook()).find((item) => item.id === tash.id)?.parentId).toBe(characters?.id)
-  // Undo all: Tash goes back to the top and the folder goes.
+  // The notes binder: the folder was made in Documents, where Tash was.
+  expect(characters?.parentId).toBe(tash.parentId)
+  // Undo all: Tash goes back to where it was (Documents) and the folder goes.
   await moved.getByTestId('agent-undo-all').click()
   await expect(lines.nth(0)).toHaveAttribute('data-status', 'undone')
   await expect(lines.nth(1)).toHaveAttribute('data-status', 'undone')
   await expect
     .poll(async () => (await notebook()).find((item) => item.id === tash.id)?.parentId)
-    .toBeNull()
+    .toBe(tash.parentId)
   await expect
     .poll(async () => (await notebook()).some((item) => item.title === 'Characters'))
     .toBe(false)

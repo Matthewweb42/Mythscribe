@@ -13,6 +13,25 @@ export const NOTEBOOK_KINDS = ['folder', 'page'] as const
 export const NotebookKind = z.enum(NOTEBOOK_KINDS)
 export type NotebookKind = z.infer<typeof NotebookKind>
 
+/**
+ * The notes binder (2026-10-16, `docs/research/notes-redesign-2026-10-15/binder.md`): the three
+ * fixed sections at the top of Notes, each a top-level folder with its role. Nothing else sits at
+ * the top level; an item made or moved there goes into Documents.
+ */
+export const NOTEBOOK_ROLES = ['outline', 'timeline', 'documents'] as const
+export const NotebookRole = z.enum(NOTEBOOK_ROLES)
+export type NotebookRole = z.infer<typeof NotebookRole>
+
+/** The sections' titles, in their order at the top of Notes. */
+export const NOTEBOOK_SECTION_TITLE: Record<NotebookRole, string> = {
+  outline: 'Outline',
+  timeline: 'Timeline',
+  documents: 'Documents'
+}
+
+/** The page the edit flow's Update notes keeps in the Timeline section (`editNotes.v2`). */
+export const STORY_TIMELINE_TITLE = 'Story timeline'
+
 /** Who wrote a page version: the author, Ms Scribe, or an import. */
 export const NOTEBOOK_AUTHORS = ['me', 'ai', 'import'] as const
 export const NotebookAuthor = z.enum(NOTEBOOK_AUTHORS)
@@ -28,7 +47,9 @@ export const NotebookItem = z.object({
   kind: NotebookKind,
   title: z.string(),
   position: z.number(),
-  modified: z.string()
+  modified: z.string(),
+  /** One of the three section roots (the notes binder); null or absent for every other item. */
+  role: NotebookRole.nullable().optional()
 })
 export type NotebookItem = z.infer<typeof NotebookItem>
 

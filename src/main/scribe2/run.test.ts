@@ -141,7 +141,7 @@ describe('runScribe2 (notes redesign phase 1)', () => {
     const result = await ask('Put that Mara fears the sea in her page.')
     expect(request(0).messages[0]?.content.startsWith(SCRIBE_SENTINEL)).toBe(true)
     // Every note page and the whole book go along (the book is far under the line).
-    expect(request(0).messages[0]?.content).toContain('## p1 Mara (note)\nEyes: grey')
+    expect(request(0).messages[0]?.content).toContain('## p1 Mara (note, in Documents)\nEyes: grey')
     expect(request(0).messages[0]?.content).toContain('# The book\n')
     expect(request(0).messages[0]?.content).toContain('Rook waited at the quay.')
     expect(request(0).maxTokens).toBe(3_000)
@@ -193,7 +193,7 @@ describe('runScribe2 (notes redesign phase 1)', () => {
     const system = request(0).messages[0]?.content ?? ''
     const notes = system.slice(system.indexOf('# Notes'), system.indexOf('# Book map'))
     expect(notes).toContain(
-      'Folder templates:\nCharacters → template: Role, Appearance, Wants, Fears, Voice and speech, Powers, Relationships, Arc, First appears'
+      'Folder templates:\nDocuments › Characters → template: Role, Appearance, Wants, Fears, Voice and speech, Powers, Relationships, Arc, First appears'
     )
     // Minor only inherits Characters’ template, and World has none.
     expect(notes).not.toContain('Minor')

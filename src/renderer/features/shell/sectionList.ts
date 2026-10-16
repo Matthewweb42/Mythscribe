@@ -77,10 +77,15 @@ export interface SidebarSection {
   count: number | null
   used: boolean
   /**
-   * The section whose tab it opens under, when the sidebar shows tabs (the fresh start: Outline,
-   * Timeline and Edits under Notes); undefined for a section of its own.
+   * The section whose tab it opens under, when the sidebar shows tabs; undefined for a section of
+   * its own. (Structure A's Outline and Timeline under Notes; none since the notes binder.)
    */
   under?: string
+  /**
+   * Other stored section ids this section opens for (the notes binder, 2026-10-16: Notes opens for
+   * `outline` and `timeline` while the old views are archived).
+   */
+  aliases?: readonly string[]
   /** The section's panel content; the panel is a column flex box, so it may fill and scroll. */
   render: (format: NovelFormat) => ReactNode
 }
@@ -329,10 +334,12 @@ export function buildSections(
   categories: readonly StoryCategory[],
   counts: SectionCounts,
   memory: StoryMemoryVersion,
-  options: { storyBibleArchived?: boolean } = {}
+  options: { storyBibleArchived?: boolean; oldViewsArchived?: boolean } = {}
 ): SidebarSection[] {
   if (memory === 'v2') return buildV2Sections(categories, counts)
-  if (options.storyBibleArchived === true) return buildFreshStartSections(counts)
+  if (options.storyBibleArchived === true) {
+    return buildFreshStartSections(counts, options.oldViewsArchived !== false)
+  }
   const all = withStrays(categories, counts.sheets)
   const threads = all.find((category) => category.id === THREAD_KIND)
   return [
@@ -351,29 +358,31 @@ export function buildSections(
 
 /**
  * Notes redesign, fresh start (the author 2026-10-15): with the old story bible archived, a v1
- * project lists Manuscript, Notes, Outline, Timeline and Edits. The categories, the Index,
- * Threads, Library, To do and Changes are hidden; a stored section among them opens on Manuscript.
- * Tabs (the author, 2026-10-16): Manuscript, Notes and Edits; Outline and Timeline live under
- * Notes as its two large folders at the top of the tree (always listed; an empty one shows its own
- * empty state), their ids unchanged so a stored or requested `timeline` opens Notes with it.
+ * project lists Manuscript, Notes and Edits as tabs (the author, 2026-10-16). The categories, the
+ * Index, Threads, Library, To do and Changes are hidden; a stored section among them opens on
+ * Manuscript. The notes binder (2026-10-16): Outline and Timeline are sections inside the Notes
+ * tree now; the old Outline and Timeline views are archived (`oldViews`), and a stored or
+ * requested `outline` or `timeline` opens Notes. Switched back on, they come back as tabs after
+ * Edits (decided by Claude, unconfirmed).
  */
-const FRESH_START_UNDER_NOTES: readonly SidebarToolId[] = ['outline', 'timeline']
+const OLD_VIEWS: readonly SidebarToolId[] = ['outline', 'timeline']
 
-function buildFreshStartSections(counts: SectionCounts): SidebarSection[] {
+function buildFreshStartSections(
+  counts: SectionCounts,
+  oldViewsArchived: boolean
+): SidebarSection[] {
   const edits = TOOLS.find((tool) => tool.id === 'edits')
-  const views = TOOLS.filter((tool) => FRESH_START_UNDER_NOTES.includes(tool.id)).map(
-    (tool): SidebarSection => ({
-      ...toolSection(tool, counts, 'tools'),
-      used: true,
-      under: NOTES.id
-    })
-  )
-  const rows = views.map(({ id, label, icon }) => ({ id, label, icon }))
+  const views = oldViewsArchived
+    ? []
+    : TOOLS.filter((tool) => OLD_VIEWS.includes(tool.id)).map((tool): SidebarSection => ({
+        ...toolSection(tool, counts, 'tools'),
+        used: true
+      }))
   return [
     toolSection(MANUSCRIPT, counts, 'manuscript'),
     {
       ...toolSection(NOTES, counts, 'manuscript'),
-      render: () => createElement(NotesTab, { views: rows })
+      ...(oldViewsArchived ? { aliases: OLD_VIEWS } : {})
     },
     ...(edits === undefined ? [] : [{ ...toolSection(edits, counts, 'tools'), used: true }]),
     ...views
@@ -439,10 +448,11 @@ export function useSidebarSections(): SidebarSection[] {
     })
   )
   const storyBibleArchived = useIsArchived('storyBible')
+  const oldViewsArchived = useIsArchived('oldViews')
   return buildSections(
     categories,
     { documents, tags, timeline, edits, library, changes, todo, sheets, research, records, notes },
     memory,
-    { storyBibleArchived }
+    { storyBibleArchived, oldViewsArchived }
   )
 }

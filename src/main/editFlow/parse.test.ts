@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeForMatch } from '@shared/critique'
 import { AiFallbackError } from '../ai/providers/types'
+import { EDIT_FLOW_TIMELINE_EVENTS_MAX } from '@shared/editFlow'
 import { parseFlowIssues, parseFlowNotes, type ParseIssuesInput } from './parse'
 import type { FlowSliceItem } from './plan'
 
@@ -178,3 +179,33 @@ describe('parseFlowNotes (Update notes)', () => {
     expect(parsed.dropped).toBe(6)
   })
 })
+
+describe('parseFlowNotes timeline events (editNotes.v2, the notes binder)', () => {
+  it('reads each event as one line with the line it follows, drops blanks and stops at the cap', () => {
+    const parsed = parseFlowNotes(
+      answer({
+        notes: [],
+        timeline: [
+          { line: 'Ch 2 ·  Rook meets\nMara.', after: 'Ch 1 · Mara reaches the quay.' },
+          { line: 'Ch 0 · The river freezes.', after: '' },
+          { line: 'Ch 4 · The mill burns.' },
+          { line: '   ', after: '' },
+          'nonsense',
+          ...Array.from({ length: EDIT_FLOW_TIMELINE_EVENTS_MAX }, (_, i) => ({
+            line: `Ch 9 · Event ${i}`,
+            after: null
+          }))
+        ]
+      })
+    )
+    expect(parsed.events.slice(0, 3)).toEqual([
+      { line: 'Ch 2 · Rook meets Mara.', after: 'Ch 1 · Mara reaches the quay.' },
+      { line: 'Ch 0 · The river freezes.', after: '' },
+      { line: 'Ch 4 · The mill burns.', after: null }
+    ])
+    expect(parsed.events).toHaveLength(EDIT_FLOW_TIMELINE_EVENTS_MAX)
+    expect(parsed.dropped).toBe(2 + 3)
+    expect(parseFlowNotes(answer({ notes: [] })).events).toEqual([])
+  })
+})
+

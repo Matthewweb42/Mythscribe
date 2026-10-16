@@ -315,6 +315,29 @@ describe('SidebarSections with the old story bible archived (fresh start)', () =
     expect(current()).toBe('notes')
   })
 
+  it('opens a section for an id it lists in its aliases (the notes binder: old views archived)', () => {
+    archived()
+    useLayoutStore.getState().setSidebarTab('timeline')
+    render(
+      <SidebarSections
+        format="novel"
+        sections={[
+          section({ id: 'manuscript', label: 'Manuscript', group: 'manuscript' }),
+          section({
+            id: 'notes',
+            label: 'Notes',
+            group: 'manuscript',
+            icon: NotebookPen,
+            aliases: ['outline', 'timeline']
+          })
+        ]}
+      />
+    )
+    expect(tab('Notes')).toHaveAttribute('aria-selected', 'true')
+    expect(panel()).toHaveTextContent('Notes here')
+    expect(within(panel()).queryByRole('button', { name: 'Back to Notes' })).not.toBeInTheDocument()
+  })
+
   it('opens an id with no section in the fresh start on the first tab', () => {
     archived()
     useLayoutStore.getState().setSidebarTab('character')
@@ -340,7 +363,7 @@ describe('buildSections (F-9.11)', () => {
   }
   const used = (built: SidebarSection[]): string[] => built.filter((s) => s.used).map((s) => s.id)
 
-  it('lists Manuscript, Notes and Edits as tabs, Outline and Timeline under Notes, while the old story bible is archived (fresh start)', () => {
+  it('lists Manuscript, Notes and Edits as tabs while the old story bible is archived (fresh start); the old views come back after Edits', () => {
     const busy = {
       ...counts,
       documents: 4,
@@ -353,25 +376,29 @@ describe('buildSections (F-9.11)', () => {
       sheets: { character: 2, thread: 1 }
     }
     const built = buildSections(ALL_BUILTIN_CATEGORIES, busy, 'v1', { storyBibleArchived: true })
-    expect(built.map((s) => [s.id, s.used, s.under])).toEqual([
-      ['manuscript', true, undefined],
-      ['notes', true, undefined],
-      ['edits', true, undefined],
-      ['outline', true, 'notes'],
-      ['timeline', true, 'notes']
+    // The notes binder (2026-10-16): the old Outline and Timeline views archived by default; their
+    // stored ids open Notes.
+    expect(built.map((s) => [s.id, s.used, s.under, s.aliases])).toEqual([
+      ['manuscript', true, undefined, undefined],
+      ['notes', true, undefined, ['outline', 'timeline']],
+      ['edits', true, undefined, undefined]
     ])
-    // The author's layout (2026-10-16): Outline and Timeline are always listed (each shows its own
-    // empty state), as the two large folders at the top of the Notes tree; Edits is a tab.
     const empty = buildSections(ALL_BUILTIN_CATEGORIES, counts, 'v1', { storyBibleArchived: true })
-    expect(empty.map((s) => s.used)).toEqual([true, true, true, true, true])
+    expect(empty.map((s) => s.used)).toEqual([true, true, true])
     const notes = empty.find((s) => s.id === 'notes')?.render('novel')
     expect(isValidElement(notes) ? notes.type : null).toBe(NotesTab)
-    expect(isValidElement(notes) ? notes.props : null).toEqual({
-      views: [
-        { id: 'outline', label: 'Outline', icon: ListTree },
-        { id: 'timeline', label: 'Timeline', icon: CalendarRange }
-      ]
+    // Switched back on, they are tabs after Edits, always listed.
+    const views = buildSections(ALL_BUILTIN_CATEGORIES, counts, 'v1', {
+      storyBibleArchived: true,
+      oldViewsArchived: false
     })
+    expect(views.map((s) => [s.id, s.used, s.under, s.aliases, s.icon])).toEqual([
+      ['manuscript', true, undefined, undefined, BookOpen],
+      ['notes', true, undefined, undefined, NotebookPen],
+      ['edits', true, undefined, undefined, FilePenLine],
+      ['outline', true, undefined, undefined, ListTree],
+      ['timeline', true, undefined, undefined, CalendarRange]
+    ])
     // Switched back on, the list is v1's as it was; v2 never archives it.
     const ids = (built: SidebarSection[]): string[] => built.map((s) => s.id)
     expect(

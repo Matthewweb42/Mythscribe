@@ -4,11 +4,13 @@ import { changedLines } from './notebookChanges'
 import {
   NOTEBOOK_ROOT,
   buildNotebookIndex,
+  isSectionRoot,
   notebookDropTarget,
   notebookDropZone,
   notebookRows,
   notebookTargetFolder,
-  positionBetween
+  positionBetween,
+  sectionRootId
 } from './notebookIndex'
 
 const item = (
@@ -135,5 +137,43 @@ describe('changedLines', () => {
           .join('')
       )
     ).toEqual(['One.', 'Three.'])
+  })
+})
+
+describe('the notes binder’s sections in the tree helpers (2026-10-16)', () => {
+  const root = (
+    id: string,
+    role: NonNullable<NotebookItem['role']>,
+    position: number
+  ): NotebookItem => ({
+    ...item(id, 'folder', null, position),
+    role
+  })
+  const index = buildNotebookIndex([
+    root('outline', 'outline', 0),
+    root('timeline', 'timeline', 1),
+    root('documents', 'documents', 2),
+    item('people', 'folder', 'documents', 0),
+    item('mara', 'page', 'people', 0)
+  ])
+
+  it('finds a section’s root, and puts a new page in Documents when nothing is selected', () => {
+    expect(sectionRootId(index, 'timeline')).toBe('timeline')
+    expect(isSectionRoot(index.byId.outline)).toBe(true)
+    expect(isSectionRoot(index.byId.people)).toBe(false)
+    expect(notebookTargetFolder(index, null)).toBe('documents')
+    expect(notebookTargetFolder(index, 'outline')).toBe('outline')
+    expect(notebookTargetFolder(buildNotebookIndex([]), null)).toBeNull()
+  })
+
+  it('a section only takes drops inside it, and never moves', () => {
+    expect(notebookDropZone('folder', 0.1, true)).toBe('into')
+    expect(notebookDropTarget(index, 'mara', 'timeline', 'into')).toEqual({
+      parentId: 'timeline',
+      position: 0
+    })
+    expect(notebookDropTarget(index, 'mara', 'timeline', 'before')).toBeNull()
+    expect(notebookDropTarget(index, 'outline', 'documents', 'into')).toBeNull()
+    expect(notebookDropTarget(index, 'outline', 'people', 'before')).toBeNull()
   })
 })

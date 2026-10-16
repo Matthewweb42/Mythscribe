@@ -14,7 +14,8 @@ export const ARCHIVABLE_FEATURES = [
   'bannedPhrases',
   'editorsNotes',
   'proofread',
-  'storyBible'
+  'storyBible',
+  'oldViews'
 ] as const
 export const ArchivableFeature = z.enum(ARCHIVABLE_FEATURES)
 export type ArchivableFeature = z.infer<typeof ArchivableFeature>
@@ -27,7 +28,8 @@ export const ARCHIVABLE_FEATURE_LABEL: Record<ArchivableFeature, string> = {
   bannedPhrases: 'Banned phrases',
   editorsNotes: "Editor's notes",
   proofread: 'Proofread',
-  storyBible: 'Old story bible'
+  storyBible: 'Old story bible',
+  oldViews: 'Old Outline and Timeline views'
 }
 
 /**

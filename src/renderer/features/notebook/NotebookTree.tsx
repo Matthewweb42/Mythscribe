@@ -1,7 +1,18 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen } from 'lucide-react'
+import {
+  CalendarRange,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Files,
+  Folder,
+  FolderOpen,
+  ListTree,
+  Plus,
+  type LucideIcon
+} from 'lucide-react'
 import { isFeatureAllowed } from '@shared/aiSettings'
-import { NOTEBOOK_TITLE_MAX } from '@shared/notebook'
+import { NOTEBOOK_TITLE_MAX, type NotebookRole } from '@shared/notebook'
 import { inTemplates } from '@shared/notebookTemplates'
 import { useCanWrite } from '@renderer/features/account/appAccessStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
@@ -16,9 +27,11 @@ import { useNotesSortStore } from './notesSortStore'
 import { NotebookTemplateMenu } from './NotebookTemplateMenu'
 import {
   NOTEBOOK_ROOT,
+  isSectionRoot,
   notebookDropTarget,
   notebookDropZone,
   notebookRows,
+  sectionRootId,
   type NotebookDropZone
 } from './notebookIndex'
 
@@ -44,22 +57,27 @@ const failed = (err: unknown): void => {
  * A row's menu: a folder makes a page (blank or from a template) or a folder inside it; a page
  * outside the Templates folder can be saved as a template (note templates, phase 6), split at its
  * headings, or sorted with the assistant while the feature can run (notes structure B, `sortAs`
- * its label, null when it cannot).
+ * its label, null when it cannot). A section root (the notes binder) only makes things: it is
+ * never renamed, moved or deleted.
  */
-function menuItems(
+function notebookMenuItems(
   kind: 'folder' | 'page',
   template = false,
-  sortAs: string | null = null
+  sortAs: string | null = null,
+  root = false
 ): MenuItem[] {
   const page = kind === 'page' && !template
-  return [
-    ...(kind === 'folder'
+  const making =
+    kind === 'folder'
       ? [
-          { id: 'new-page', label: 'New page here' },
+          { id: 'new-page', label: root ? 'New page' : 'New page here' },
           { id: 'new-from-template', label: 'New from template ›' },
-          { id: 'new-folder', label: 'New folder here' }
+          { id: 'new-folder', label: root ? 'New folder' : 'New folder here' }
         ]
-      : []),
+      : []
+  if (root) return making
+  return [
+    ...making,
     { id: 'rename', label: 'Rename' },
     ...(page ? [{ id: 'save-template', label: 'Save as template' }] : []),
     ...(page ? [{ id: 'split-headings', label: 'Split at headings' }] : []),
@@ -71,11 +89,26 @@ function menuItems(
 const START_BUTTON =
   'rounded-md border border-line px-2 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40'
 
-function zoneOf(kind: 'folder' | 'page', event: React.DragEvent<HTMLElement>): NotebookDropZone {
+function zoneOf(
+  kind: 'folder' | 'page',
+  root: boolean,
+  event: React.DragEvent<HTMLElement>
+): NotebookDropZone {
   const rect = event.currentTarget.getBoundingClientRect()
   const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
-  return notebookDropZone(kind, ratio)
+  return notebookDropZone(kind, ratio, root)
 }
+
+/** The section rows' icons (as the sidebar's old Outline and Timeline sections had them). */
+const SECTION_ICON: Record<NotebookRole, LucideIcon> = {
+  outline: ListTree,
+  timeline: CalendarRange,
+  documents: Files
+}
+
+/** The small plus on a section row (the Manuscript's create buttons, F-2.2). */
+const PLUS_BUTTON =
+  'flex items-center rounded px-1 py-0.5 text-fg-subtle hover:bg-surface-raised hover:text-fg focus-visible:text-fg disabled:opacity-40 disabled:hover:bg-transparent'
 
 /**
  * The Notes tree (notes redesign phase 1, slice 1): the notebook's folders and pages, drawn like
@@ -85,7 +118,11 @@ function zoneOf(kind: 'folder' | 'page', event: React.DragEvent<HTMLElement>): N
  * page (blank or from a template) or folder inside a folder, saves a page as a template, and
  * splits a page at its headings or sorts it with the assistant (notes structure B). An
  * empty Notes offers the starter folders or a blank page (note templates, phase 6). Rows drag
- * onto a folder to go inside it, or onto a row's top or bottom edge to go beside it.
+ * onto a folder to go inside it, or onto a row's top or bottom edge to go beside it. The notes
+ * binder (2026-10-16): the top level is the three sections, Outline, Timeline and Documents, drawn
+ * as the Manuscript tree's section rows (small caps, a click folds them), each with a small plus
+ * for a new page, folder or page from a template inside it; they never move, rename or delete.
+ * While Documents is empty the starter set stays offered below the tree.
  */
 export function NotebookTree(): React.JSX.Element | null {
   const loaded = useNotebookStore((s) => s.loaded)
@@ -125,8 +162,9 @@ export function NotebookTree(): React.JSX.Element | null {
     const id = menu.id
     setMenu(null)
     const store = useNotebookStore.getState()
-    if (itemId === 'rename') store.startRename(id)
-    else if (itemId === 'delete') store.remove(id).catch(failed)
+    if (itemId === 'rename') {
+      if (!isSectionRoot(byId[id])) store.startRename(id)
+    } else if (itemId === 'delete') store.remove(id).catch(failed)
     else if (itemId === 'new-page') store.create('page', id).catch(failed)
     else if (itemId === 'new-folder') store.create('folder', id).catch(failed)
     else if (itemId === 'new-from-template') setTemplateMenu(menu)
@@ -166,6 +204,7 @@ export function NotebookTree(): React.JSX.Element | null {
         store.select(item.id)
         break
       case 'F2':
+        if (isSectionRoot(item)) return
         store.startRename(item.id)
         break
       default:
@@ -176,48 +215,59 @@ export function NotebookTree(): React.JSX.Element | null {
   }
 
   if (!loaded) return null
-  if (rows.length === 0) {
-    return (
-      <div className="flex flex-col gap-2 p-3 text-sm text-fg-muted">
-        <p className="m-0">
-          No notes yet. Start with a few folders, a blank page, or drop files here.
-        </p>
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            disabled={!writable}
-            title="Characters, Places, World, Plot and Timeline folders, and a Style guide page"
-            onClick={() => {
-              useNotebookStore.getState().startWithFolders().catch(failed)
-            }}
-            className={START_BUTTON}
-          >
-            Start with folders
-          </button>
-          <button
-            type="button"
-            disabled={!writable}
-            onClick={() => {
-              useNotebookStore.getState().create('page').catch(failed)
-            }}
-            className={START_BUTTON}
-          >
-            Start blank
-          </button>
-        </div>
+  const documentsId = sectionRootId(index, 'documents')
+  // The starter set: offered while Documents is empty (or, before the sections, Notes is).
+  const empty =
+    documentsId === null ? rows.length === 0 : (childrenOf[documentsId] ?? []).length === 0
+  const starter = empty ? (
+    <div className="flex flex-col gap-2 p-3 text-sm text-fg-muted">
+      <p className="m-0">
+        No notes yet. Start with a few folders, a blank page, or drop files here.
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          disabled={!writable}
+          title="Characters, Places, World and Plot folders and a Style guide page in Documents, and a Chapter plans folder in Outline"
+          onClick={() => {
+            useNotebookStore.getState().startWithFolders().catch(failed)
+          }}
+          className={START_BUTTON}
+        >
+          Start with folders
+        </button>
+        <button
+          type="button"
+          disabled={!writable}
+          onClick={() => {
+            useNotebookStore.getState().create('page', documentsId).catch(failed)
+          }}
+          className={START_BUTTON}
+        >
+          Start blank
+        </button>
       </div>
-    )
-  }
+    </div>
+  ) : null
+  if (rows.length === 0) return starter
 
   const renderRow = (id: string, depth: number): React.JSX.Element | null => {
     const item = byId[id]
     if (item === undefined) return null
     const folder = item.kind === 'folder'
+    const root = item.role != null
     const expanded = folder && collapsed[id] !== true
     const children = childrenOf[id] ?? []
     const zone = over?.id === id ? over.zone : null
     const renaming = renamingId === id
-    const Icon = folder ? (expanded ? FolderOpen : Folder) : FileText
+    const Icon =
+      item.role != null
+        ? SECTION_ICON[item.role]
+        : folder
+          ? expanded
+            ? FolderOpen
+            : Folder
+          : FileText
     return (
       <li
         key={id}
@@ -236,14 +286,21 @@ export function NotebookTree(): React.JSX.Element | null {
         className="m-0 list-none p-0 outline-none"
       >
         <div
-          onClick={() => useNotebookStore.getState().select(id)}
-          onDoubleClick={() => useNotebookStore.getState().startRename(id)}
+          onClick={() => {
+            const store = useNotebookStore.getState()
+            store.select(id)
+            // A section row folds open and shut on a click, as the Manuscript's do.
+            if (root) store.toggle(id)
+          }}
+          onDoubleClick={() => {
+            if (!root) useNotebookStore.getState().startRename(id)
+          }}
           onContextMenu={(event) => {
             event.preventDefault()
             event.stopPropagation()
             setMenu({ id, x: event.clientX, y: event.clientY })
           }}
-          draggable={!renaming}
+          draggable={!renaming && !root}
           onDragStart={(event) => {
             event.dataTransfer.effectAllowed = 'move'
             event.dataTransfer.setData(NOTEBOOK_DRAG_TYPE, id)
@@ -251,7 +308,7 @@ export function NotebookTree(): React.JSX.Element | null {
           }}
           onDragOver={(event) => {
             if (dragId === null) return
-            const where = zoneOf(item.kind, event)
+            const where = zoneOf(item.kind, root, event)
             if (notebookDropTarget(index, dragId, id, where) === null) {
               setOver(null)
               return
@@ -265,7 +322,7 @@ export function NotebookTree(): React.JSX.Element | null {
             if (dragId === null) return
             event.preventDefault()
             event.stopPropagation()
-            const target = notebookDropTarget(index, dragId, id, zoneOf(item.kind, event))
+            const target = notebookDropTarget(index, dragId, id, zoneOf(item.kind, root, event))
             const moving = dragId
             setDragId(null)
             setOver(null)
@@ -278,9 +335,12 @@ export function NotebookTree(): React.JSX.Element | null {
           }}
           data-drop={zone ?? undefined}
           style={{ paddingLeft: depth * 12 + 8 }}
+          data-section={item.role ?? undefined}
           className={`relative flex h-7 cursor-default items-center gap-1 rounded-md pr-2 text-sm select-none ${
             selectedId === id ? 'bg-accent/15 text-fg' : 'hover:bg-surface-raised'
-          } ${zone === 'into' ? 'ring-2 ring-accent ring-inset' : ''}`}
+          } ${root ? 'font-medium tracking-wide uppercase text-xs text-fg-muted' : ''} ${
+            zone === 'into' ? 'ring-2 ring-accent ring-inset' : ''
+          }`}
         >
           {folder ? (
             <button
@@ -310,6 +370,25 @@ export function NotebookTree(): React.JSX.Element | null {
           ) : (
             <span className="min-w-0 flex-1 truncate">{item.title}</span>
           )}
+          {root ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={`New in ${item.title}`}
+              title={`New page, folder or page from a template in ${item.title}`}
+              aria-haspopup="menu"
+              disabled={!writable}
+              onClick={(event) => {
+                event.stopPropagation()
+                const rect = event.currentTarget.getBoundingClientRect()
+                setMenu({ id, x: rect.left, y: rect.bottom })
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              className={PLUS_BUTTON}
+            >
+              <Plus size={10} aria-hidden="true" strokeWidth={3} />
+            </button>
+          ) : null}
           {zone === 'before' || zone === 'after' ? (
             <span
               aria-hidden="true"
@@ -348,14 +427,16 @@ export function NotebookTree(): React.JSX.Element | null {
       >
         {(childrenOf[NOTEBOOK_ROOT] ?? []).map((id) => renderRow(id, 1))}
       </ul>
+      {starter}
       {menu !== null && menuItem !== undefined ? (
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={menuItems(
+          items={notebookMenuItems(
             menuItem.kind,
             inTemplates(Object.values(byId), menuItem.parentId),
-            canSort ? `Sort with ${assistantName}…` : null
+            canSort ? `Sort with ${assistantName}…` : null,
+            isSectionRoot(menuItem)
           )}
           onSelect={onMenuSelect}
           onClose={closeMenu}

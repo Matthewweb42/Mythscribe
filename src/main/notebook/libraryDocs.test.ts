@@ -38,20 +38,25 @@ describe('copyLibraryDocsOnce', () => {
     await add('Notes.txt', 'Mara fears the sea.')
     await add('map.png', Buffer.from([0x89, 0x50, 0x4e, 0x47]))
     const ids = await copyLibraryDocsOnce(db, session.folder, () => true)
-    const items = listNotebook(db)
-    expect(items.map((item) => [item.kind, item.title])).toEqual([
+    // The notes binder: the Docs folder goes in Documents.
+    const all = listNotebook(db)
+    const documents = all.find((item) => item.role === 'documents')
+    const docs = all.find((item) => item.title === 'Docs')
+    expect(docs?.parentId).toBe(documents?.id)
+    const items = [docs, ...all.filter((item) => item.parentId === docs?.id)]
+    expect(items.map((item) => [item?.kind, item?.title])).toEqual([
       ['folder', 'Docs'],
       ['page', 'Notes'],
       ['page', 'Powers']
     ])
-    expect(ids).toEqual(items.map((item) => item.id))
+    expect(ids).toEqual(items.map((item) => item?.id))
     const powers = getNotebookPage(db, items[2]?.id ?? '')
     expect(powers.content?.content?.[0]).toMatchObject({ type: 'heading' })
     expect(powers.plain).toBe('Powers\nShadow walking costs a memory.')
     expect(libraryDocsCopied(db)).toBe(true)
     // Never twice.
     expect(await copyLibraryDocsOnce(db, session.folder, () => true)).toEqual([])
-    expect(listNotebook(db)).toHaveLength(3)
+    expect(listNotebook(db)).toHaveLength(6)
   })
 
   it('leaves a project with no files alone, making no folder and recording nothing', async () => {

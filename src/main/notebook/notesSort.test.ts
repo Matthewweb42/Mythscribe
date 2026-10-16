@@ -146,8 +146,10 @@ describe('what a sort sends', () => {
     const templates = createNotebookItem(db, { parentId: null, kind: 'folder', title: 'Templates' })
     createNotebookItem(db, { parentId: templates.id, kind: 'page', title: 'Villain' })
     createNotebookItem(db, { parentId: null, kind: 'page', title: 'Ideas' })
+    // The notes binder: the sections are folders she may name; the rest sits in Documents.
     expect(notesListing(listNotebook(db))).toBe(
-      'Folders: Characters\nPages: Ideas; Characters › Mara'
+      'Folders: Outline; Timeline; Documents; Documents › Characters\n' +
+        'Pages: Documents › Characters › Mara; Documents › Ideas'
     )
     expect(notesListing([])).toBe('')
   })
@@ -257,13 +259,15 @@ describe('a sort (runNotesSort)', () => {
     const request = complete.mock.calls[0]?.[0]
     expect(request?.messages[0]?.content.startsWith(NOTES_SORT_SENTINEL)).toBe(true)
     expect(request?.messages[0]?.content).toContain(
-      'Folders: Characters\nPages: Fenlands; Characters › Mara'
+      'Folders: Outline; Timeline; Documents; Documents › Characters\n' +
+        'Pages: Documents › Characters › Mara; Documents › Fenlands'
     )
     expect(request?.messages[1]?.content.startsWith('# Document: Fenlands\n# Fenlands')).toBe(true)
     expect(ledger.map((entry) => entry.feature)).toEqual(['notesSort'])
 
+    // A folder she names that is not a section is made in Documents.
     const magic = byTitle('Magic')
-    expect(magic).toMatchObject({ kind: 'folder', parentId: null })
+    expect(magic).toMatchObject({ kind: 'folder', parentId: byTitle('Documents')?.id })
     expect(listNotebook(db).filter((item) => item.title === 'Magic')).toHaveLength(1)
     expect(byTitle('Rook')?.parentId).toBe(chars.id)
     expect(byTitle('Blood rites')).toBeUndefined()

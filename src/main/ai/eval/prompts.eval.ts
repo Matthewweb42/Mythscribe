@@ -11,8 +11,10 @@ import {
 import { settleRoute } from '@shared/assistantRoute'
 import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote, normalizeForMatch } from '@shared/critique'
+import { docToText } from '@shared/docText'
 import type { EditPassType } from '@shared/editPass'
 import { parseFlowIssues, parseFlowNotes } from '../../editFlow/parse'
+import { insertTimelineEvents } from '../../editFlow/storyTimeline'
 import { parseSortAnswer } from '../../notebook/notesSort'
 import { parseFilingAnswer, quoteParagraph } from '@shared/filing'
 import { locateQuote } from '@shared/memory/quote'
@@ -573,12 +575,32 @@ function scoreNotesSort(
 }
 
 /** Update notes scores through its own parser: the writes must parse, none dropped. */
-function scoreEditNotes(answer: string): LiveResult['verdict'] {
+function scoreEditNotes(
+  scoring: Extract<EvalCase['scoring'], { kind: 'editNotes' }>,
+  answer: string
+): LiveResult['verdict'] {
   try {
     const parsed = parseFlowNotes(answer)
-    return parsed.dropped === 0
+    if (parsed.dropped > 0) {
+      return { kind: 'json', ok: false, problem: `${parsed.dropped} writes dropped` }
+    }
+    const want = scoring.timeline
+    if (want === undefined) return { kind: 'json', ok: true, problem: null }
+    // editNotes.v2: the events on the page as the feature inserts them, in story order.
+    const { blocks } = insertTimelineEvents(
+      want.page.map((line) => ({ type: 'paragraph', content: [{ type: 'text', text: line }] })),
+      parsed.events
+    )
+    const lines = blocks.map((block) => docToText({ type: 'doc', content: [block] }).toLowerCase())
+    const first = lines.findIndex((line) => line.includes(want.first.toLowerCase()))
+    const then = lines.findIndex((line) => line.includes(want.then.toLowerCase()))
+    return first >= 0 && then >= 0 && first < then
       ? { kind: 'json', ok: true, problem: null }
-      : { kind: 'json', ok: false, problem: `${parsed.dropped} writes dropped` }
+      : {
+          kind: 'json',
+          ok: false,
+          problem: `the timeline does not put “${want.first}” before “${want.then}”`
+        }
   } catch {
     return { kind: 'json', ok: false, problem: 'not the notes JSON asked for' }
   }
@@ -1580,7 +1602,7 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
       continue
     }
     if (c.scoring.kind === 'editNotes') {
-      results.push({ ...base, answer: reply.text, verdict: scoreEditNotes(reply.text) })
+      results.push({ ...base, answer: reply.text, verdict: scoreEditNotes(c.scoring, reply.text) })
       continue
     }
     if (c.scoring.kind === 'notesSort') {

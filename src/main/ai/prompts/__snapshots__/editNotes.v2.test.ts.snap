@@ -1,0 +1,35 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`editNotes.v2 prompt (the notes binder: Update notes keeps the Story timeline) > asks for note writes and timeline events in story order, under the flow’s shared prefix 1`] = `
+[
+  {
+    "content": "You are the editor inside the author’s novel app, working through her book in the edit flow.
+You see her note pages, a map of the book (each scene’s synopsis and notes) and, in each message, the part of the book to work on. The book and the notes are hers.
+Judge the text against her notes, the outline (the map) and the book so far; never invent a fact. Every issue points to its passage by quoting it.
+Scenes are n1, n2… and pages p1, p2…. Reply with exactly one JSON object and nothing else, as each message asks.
+
+# Notes
+## p1 Mara (note, Documents › Characters)
+Eyes: grey.
+
+## p2 Story timeline (note, Timeline)
+Ch 1 · Mara reaches the quay.
+
+# Book map
+n3 Chapter 1 › Mara",
+    "role": "system",
+  },
+  {
+    "content": "# Task
+Update her notes from the text below: characters, places, objects, events and dates the text states that her pages do not hold yet, or now state differently.
+Add to the page each belongs on (a character’s page); make a new page only for a character, place or thing that has none. Write in her notes’ style: short lines of what the text states. Never repeat what a page already says, never guess, never copy prose.
+Events that matter for continuity go in "timeline", for her page Story timeline: one line each with its chapter, like "Ch 3 · Mara learns the bell’s secret", in story order (when it happens in the story, not where it is told: a flashback’s event goes where it happened). "after" is the line it follows, copied from that page or from an event you add before it; "" puts it first. Skip events the page already has.
+At most 8 writes and 12 events. Reply {"notes":[{"page":"p2","add":"lines to add at the end"},{"title":"New page","folder":"Characters","text":"the page"}],"timeline":[{"line":"Ch 2 · what happens","after":"Ch 1 · the line it follows"}]}; nothing new is fine: {"notes":[],"timeline":[]}.
+
+# Text: Chapter 2
+### n3 Chapter 2 › Mara
+Years before, the winter the river froze, Rook burned the first ledger.",
+    "role": "user",
+  },
+]
+`;

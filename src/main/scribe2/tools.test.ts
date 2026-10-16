@@ -79,7 +79,10 @@ describe('Ms Scribe’s v1 tools (notes redesign phase 1)', () => {
       content: notebookDocFromText('Eyes: grey')
     })
     const r = await run()
-    expect(runScribeTool(r, 'list_notes', {}).result).toBe('p1 Mara (note, 2 words)')
+    // The notes binder: made at the top, the page sits in Documents; the sections are listed.
+    expect(runScribeTool(r, 'list_notes', {}).result).toBe(
+      'p1 Mara (note, Documents, 2 words)\nFolders: Documents, Outline, Timeline'
+    )
     expect(runScribeTool(r, 'open_note', { id: 'p1' }).result).toBe('p1 Mara:\nEyes: grey')
     expect(runScribeTool(r, 'open_note', { id: 'mara' }).step.label).toBe('Reading Mara…')
     const opened = runScribeTool(r, 'open_scene', { id: sceneRef(r) })
@@ -191,7 +194,7 @@ describe('Ms Scribe’s v1 tools (notes redesign phase 1)', () => {
     const r = await run()
     expect(r.pages).toEqual([])
     expect(runScribeTool(r, 'list_notes', {}).result).toBe(
-      'There are no note pages yet.\nFolders: Ships\nTemplates (page shapes, not story notes; open_note by title): Ship'
+      'There are no note pages yet.\nFolders: Documents, Documents › Ships, Outline, Timeline\nTemplates (page shapes, not story notes; open_note by title): Ship'
     )
     expect(runScribeTool(r, 'open_note', { id: 'ship' }).result).toBe(
       'Template Ship (a page shape, not story notes):\nCaptain:\nCrew:'

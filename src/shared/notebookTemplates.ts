@@ -175,14 +175,15 @@ export const NOTEBOOK_TEMPLATES: readonly NotebookTemplate[] = [
   }
 ]
 
-/** The starter set's top-level folders (with a Style guide page beside them). */
-export const NOTEBOOK_STARTER_FOLDERS = [
-  'Characters',
-  'Places',
-  'World',
-  'Plot',
-  'Timeline'
-] as const
+/**
+ * The starter set's folders in Documents (with a Style guide page beside them). The notes binder
+ * (2026-10-16): no Timeline folder, since the Timeline section is there; a Chapter plans folder
+ * goes in Outline (`NOTEBOOK_STARTER_OUTLINE_FOLDERS`).
+ */
+export const NOTEBOOK_STARTER_FOLDERS = ['Characters', 'Places', 'World', 'Plot'] as const
+
+/** The starter set's folders in the Outline section. */
+export const NOTEBOOK_STARTER_OUTLINE_FOLDERS = ['Chapter plans'] as const
 
 export function notebookTemplate(id: NotebookTemplateId): NotebookTemplate {
   const found = NOTEBOOK_TEMPLATES.find((template) => template.id === id)
@@ -225,6 +226,8 @@ export interface TemplateTreeItem {
   kind: NotebookKind
   title: string
   position: number
+  /** A section root of the notes binder (Outline, Timeline, Documents); null or absent otherwise. */
+  role?: string | null
 }
 
 /** Whether an item under `parentId` sits inside a Templates folder (at any depth). */
@@ -280,7 +283,9 @@ export type FolderTemplate =
  * The template Ms Scribe lays a new page in `folderId` out on: from the folder outwards, the first
  * folder whose title names one of the author's templates (the folder's title, that title without
  * a final "s", or the built-in's name: Characters → a "Character" page in Templates) or a built-in
- * (`builtInTemplateForFolder`). None inside a Templates folder, nor at the top level.
+ * (`builtInTemplateForFolder`). None inside a Templates folder, nor at the top level. The notes
+ * binder's sections (Outline, Timeline, Documents) follow none themselves (decided by Claude,
+ * unconfirmed): the walk stops at them, so a folder inside one still takes its own.
  */
 export function templateForFolder(
   items: readonly TemplateTreeItem[],
@@ -293,7 +298,7 @@ export function templateForFolder(
   for (let at: string | null = folderId; at !== null && !seen.has(at);) {
     seen.add(at)
     const folder = byId.get(at)
-    if (folder === undefined) break
+    if (folder === undefined || folder.role != null) break
     const builtIn = builtInTemplateForFolder(folder.title)
     const names = new Set(
       [folder.title, folder.title.replace(/s\s*$/i, ''), builtIn?.name ?? '']

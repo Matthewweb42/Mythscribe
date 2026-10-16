@@ -37,7 +37,7 @@ import { nodeByRef, type AgentProject, type ToolOutcome } from '../ai/agentTools
 import { headTruncate } from '../ai/context/chatContext'
 import type { ScribePage, ScribeScene } from './context'
 import { folderPath } from './source'
-import { ensureFolder, STRUCTURE_TOOLS } from './structure'
+import { ensureFolder, findFolder, STRUCTURE_TOOLS } from './structure'
 
 /**
  * Ms Scribe's tools in a story memory v1 project (notes redesign phase 1, `scribe.v1`). The read
@@ -323,7 +323,8 @@ function writesLeft(run: ScribeRun): boolean {
   return writes.length < SCRIBE_MAX_WRITES
 }
 
-function notebookEdit(
+/** A note edit as the chat and the edit flow show it (with its Undo's version and diff window). */
+export function notebookEdit(
   pageId: string,
   title: string,
   created: boolean,
@@ -411,12 +412,8 @@ function createNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome 
   const text = str(args.text).slice(0, SCRIBE_NOTE_TEXT_MAX)
   const folderName = flat(str(args.folder)).toLowerCase()
   let items = listNotebook(run.db)
-  let folder =
-    folderName === ''
-      ? undefined
-      : items.find(
-          (item) => item.kind === 'folder' && item.title.trim().toLowerCase() === folderName
-        )
+  // A section's name finds its root ("Outline"); no folder means Documents (the notes binder).
+  let folder = folderName === '' ? undefined : (findFolder(items, folderName) ?? undefined)
   try {
     // scribe.v5: with the structure tools, a folder that does not exist yet is made (once).
     if (folder === undefined && folderName !== '' && run.access.structure === true) {
@@ -450,7 +447,7 @@ function createNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome 
       id: page.id,
       kind: 'note',
       title: page.title,
-      folder: folder?.title ?? '',
+      folder: folderPath(listNotebook(run.db), page.parentId),
       text: page.plain
     })
     run.changes.push({
@@ -464,7 +461,7 @@ function createNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome 
       folder === undefined
         ? folderName === ''
           ? ''
-          : ' (no such folder; made at the top)'
+          : ' (no such folder; made in Documents)'
         : ` in ${folder.title}`
     return {
       step,
