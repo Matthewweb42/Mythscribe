@@ -49,6 +49,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `navigator` | Ms Scribe’s search | every chat message | navigator.v1 | fast | 1184 / 5585 | 150 / 150 | $0.000135 · $0.000536 | $0.000169 | $0.00156 | 2 | $0.000270 |
 | `judge` | Contradiction check | background | judge.v1 | fast | 775 / 2683 | 120 / 300 | $0.0000924 · $0.000299 | $0.000115 | $0.00112 | 2 | $0.000185 |
 | `scribe` | Assistant with your notes and book | every chat message | scribe.v2 | strong | 3766 / 52568 | 400 / 6000 | $0.00183 · $0.0259 | $0.00229 | $0.0154 | 2 | $0.00366 |
+| `editFlow` | Edit flow | on request | editNotes.v1 | fast | 608 / 608 | 1500 / 8000 | $0.000328 · $0.00151 | $0.000410 | $0.00721 | 4 | $0.00131 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -216,6 +217,11 @@ git history of this file is the log of each feature's cost over time (author req
 
 - **When:** Notes redesign phase 1 (story memory v1): scribe.v2 since 2026-10-15 (each source with the exact words she relied on, checked locally so the source opens there; refs written as chapters; rules about 105 tokens longer than scribe.v1), strong tier (DeepSeek V4 Pro), JSON, on every chat message the router sends to the chat. One system prefix in cache order: the rules, every note page (≤ 30,000 tokens; story-bible sheets and Library uploads as pages until phase 4), the book map (each scene’s synopsis and notes), the book whole when everything is under 60,000 tokens (else the scenes picked for the question, ≤ 24,000; "Whole book" forces it up to 80,000), then the moment (the open scene, its notes, the selection), the recent turns and the message. Then up to 6 tool steps (search, open a scene or a page, edit or create a note page, suggest a prose change), each a request with the same prefix (cached by the provider after the first). max_tokens 3,000 a step, 6,000 for the one retry. Figures for the author’s book (about 47,000 tokens of book and notes): about 2¢ for a fresh first step and about 0.2¢ cached on V4 Pro; a typical answer is one or two steps.
 - **Ideas:** Send the picked scenes only once the book passes the whole-book line (already); move the moment after the history if the provider’s cache shows misses; answer a lookup the map already answers without a tool step; batch note edits into one tool call.
+
+### `editFlow` — Edit flow
+
+- **When:** Notes redesign phase 2: the edit flow, run from the Edit button in the right column (or opened pre-filled by the chat) and priced before Run. editFlow.v1 for the stages and the focused checks, editNotes.v1 for Update notes; JSON. One system prefix shared by every request of a run (cached by the provider after the first): the rules, every note page (≤ 30,000 tokens), the book map; then one slice of the scope’s text and the family’s task. Quick: fast tier (DeepSeek V4 Flash), a chapter a slice (≤ 16,000 tokens). Deep: strong tier (DeepSeek V4 Pro), slices of ≤ 60,000 tokens (the author’s whole book in one); a Deep run of a scene or a chapter also carries the rest of the book in the prefix (with the slice ≤ 60,000). Requests = slices × (one per stage picked, one for the checks together, one for Update notes). max_tokens 8,000. Figures for the author’s book (about 23k words of prose, 12k of notes): a Quick copyedit of a chapter about 0.2¢; a Deep developmental edit of the whole book about 2–3¢ fresh.
+- **Ideas:** Batch the stages of one slice into one request when the ledger shows the outputs are small; skip a slice whose text and notes did not change since the last run of the same scope; send the book map only to the families that use it (continuity, plot holes, developmental).
 
 ## Planned: story memory (F-16)
 

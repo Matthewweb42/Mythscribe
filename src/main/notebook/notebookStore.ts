@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm'
 import {
   NOTEBOOK_VERSIONS_KEPT,
   notebookPlain,
@@ -145,7 +145,7 @@ function keepVersion(db: TreeDb, row: NotebookItemRow, author: NotebookAuthor): 
     .select({ id: notebookVersion.id })
     .from(notebookVersion)
     .where(eq(notebookVersion.pageId, row.id))
-    .orderBy(desc(notebookVersion.created), desc(notebookVersion.id))
+    .orderBy(desc(notebookVersion.created), desc(sql`rowid`))
     .limit(NOTEBOOK_VERSIONS_KEPT)
     .all()
     .map((v) => v.id)
@@ -182,7 +182,7 @@ export function updateNotebookItem(
         .select({ id: notebookVersion.id })
         .from(notebookVersion)
         .where(eq(notebookVersion.pageId, row.id))
-        .orderBy(desc(notebookVersion.created), desc(notebookVersion.id))
+        .orderBy(desc(notebookVersion.created), desc(sql`rowid`))
         .get()?.id ?? null
   }
   const patch: Partial<NotebookItemRow> = { modified: now() }
@@ -272,7 +272,7 @@ export function listNotebookVersions(db: TreeDb, pageId: string): NotebookVersio
     .select()
     .from(notebookVersion)
     .where(eq(notebookVersion.pageId, pageId))
-    .orderBy(desc(notebookVersion.created), desc(notebookVersion.id))
+    .orderBy(desc(notebookVersion.created), desc(sql`rowid`))
     .all()
     .map((row) => ({
       id: row.id,
