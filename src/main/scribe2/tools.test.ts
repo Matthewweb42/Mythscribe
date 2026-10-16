@@ -4,6 +4,7 @@ import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { notebookDocFromText } from '@shared/notebook'
+import { SCRIBE_MAX_WRITES, SCRIBE_VIBE_PROSE_MAX } from '@shared/scribe2'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { node } from '../db/schema'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
@@ -47,7 +48,10 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
-async function run(access = { notes: true, prose: true }): Promise<ScribeRun> {
+async function run(
+  access = { notes: true, prose: true },
+  proseMax = SCRIBE_MAX_WRITES
+): Promise<ScribeRun> {
   const material = await loadScribeSources(db, session.folder, scene)
   return {
     db,
@@ -55,6 +59,7 @@ async function run(access = { notes: true, prose: true }): Promise<ScribeRun> {
     pages: material.pages,
     scenes: material.scenes,
     access,
+    proseMax,
     profile: null,
     changes: [],
     used: new Set(),
@@ -168,6 +173,32 @@ describe('Ms Scribe’s v1 tools (notes redesign phase 1)', () => {
     expect(listNodes(db).find((row) => row.id === scene)?.content).toBe(
       doc('Mara climbed the ridge alone.')
     )
+  })
+})
+
+describe('Vibe’s prose suggestions (scribe.v3, 2026-10-15)', () => {
+  it('keeps at most three a message in Vibe, note edits not counted', async () => {
+    db.update(node)
+      .set({ content: doc('One. Two. Three. Four. Five.') })
+      .where(eq(node.id, scene))
+      .run()
+    createNotebookItem(db, { parentId: null, kind: 'page', title: 'Mara' })
+    const r = await run({ notes: true, prose: true }, SCRIBE_VIBE_PROSE_MAX)
+    expect(runScribeTool(r, 'edit_note', { id: 'p1', text: 'Grey eyes.' }).result).toContain(
+      'Edited'
+    )
+    for (const find of ['One.', 'Two.', 'Three.']) {
+      const out = runScribeTool(r, 'propose_prose_edit', { id: sceneRef(r), find, replace: 'Yes.' })
+      expect(out.result).toBe('Offered to the author.')
+    }
+    const fourth = runScribeTool(r, 'propose_prose_edit', {
+      id: sceneRef(r),
+      find: 'Four.',
+      replace: 'Yes.'
+    })
+    expect(fourth.result).toBe('No more prose suggestions in this message (at most 3); answer now.')
+    expect(r.changes.filter((change) => !change.applied)).toHaveLength(3)
+    expect(r.changes).toHaveLength(4)
   })
 })
 

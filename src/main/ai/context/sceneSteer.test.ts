@@ -8,6 +8,7 @@ import { addDocumentTag } from '../../tag/documentTagStore'
 import { createTag } from '../../tag/tagStore'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
 import { buildSceneSteer } from './sceneSteer'
+import { getEditorSettings, setEditorSettings } from '../../project/settingsStore'
 
 let tmp: string
 let session: ProjectSession
@@ -19,6 +20,8 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-steer-'))
   session = createProject(projectFolderFor(tmp, 'Steer'), 'Steer', 'novel')
   db = session.connection.orm
+  // The old story bible switched back on (archived by default since the notes redesign).
+  setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: ['storyBible'] })
   const rows = listNodes(db)
   scene = rows.find((r) => r.hierarchyLevel === 'scene')?.id ?? ''
   manuscriptRoot = rows.find((r) => r.sectionType === 'manuscript' && r.parentId === null)?.id ?? ''
@@ -63,5 +66,16 @@ describe('buildSceneSteer (F-14.13)', () => {
         'Write in this tone, keep to what the content tags allow, and keep these threads and themes in view.'
       ].join('\n')
     )
+  })
+
+  it('is null while the old story bible is archived (notes redesign, 2026-10-15)', () => {
+    addDocumentTag(
+      db,
+      scene,
+      createTag(db, { name: 'tense', category: 'tone', color: '#112233' }).id
+    )
+    expect(buildSceneSteer(db, scene)).not.toBeNull()
+    setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: [] })
+    expect(buildSceneSteer(db, scene)).toBeNull()
   })
 })

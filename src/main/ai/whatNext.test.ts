@@ -19,7 +19,7 @@ import { saveDocument } from '../document/documentStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
-import { setAiSettings } from '../project/settingsStore'
+import { getEditorSettings, setAiSettings, setEditorSettings } from '../project/settingsStore'
 import { addDocumentTag } from '../tag/documentTagStore'
 import { createTag } from '../tag/tagStore'
 import { listNodes, type TreeDb } from '../tree/treeStore'
@@ -108,6 +108,8 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-whatnext-'))
   session = createProject(projectFolderFor(tmp, 'What next'), 'What next', 'novel')
   db = session.connection.orm
+  // The old story bible switched back on (archived by default since the notes redesign).
+  setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: ['storyBible'] })
   scene = manuscriptDocuments(db)[0]?.id ?? ''
   folder = listNodes(db).find((r) => r.kind === 'folder' && r.sectionType === null)?.id ?? ''
   if (!scene || !folder) throw new Error('skeleton not seeded')

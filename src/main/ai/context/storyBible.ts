@@ -10,6 +10,7 @@ import {
   type StoryBibleCategory,
   type StoryBibleEntity,
   type StoryBibleFacts,
+  type StoryBibleNote,
   type StoryBibleScene
 } from '@shared/storyBible'
 import type { NodeRow } from '../../db/schema'
@@ -17,10 +18,14 @@ import { summariesFor } from '../../document/summaryStore'
 import { listCategories } from '../../entity/categoryStore'
 import { listEntities } from '../../entity/entityStore'
 import { factsForEntities } from '../../entity/factStore'
+import { listNotebookPages } from '../../notebook/notebookStore'
+import { storyBibleArchivedIn } from '../../project/settingsStore'
+import { pagesNamedIn } from '../../scribe2/context'
 import { listDocumentTags } from '../../tag/documentTagStore'
 import { listTags } from '../../tag/tagStore'
 import { listNodes, type TreeDb } from '../../tree/treeStore'
-import { manuscriptDocuments } from '../../voice/profile'
+import { documentText, manuscriptDocuments } from '../../voice/profile'
+import { notesText } from './scenePanel'
 
 export interface StoryBibleInput {
   /** The document the request is about, or null when none is open (chat outside the manuscript). */
@@ -48,12 +53,34 @@ export interface StoryBibleInput {
  * entity gathers none and renders exactly as it did.
  */
 export function buildStoryBible(db: TreeDb, input: StoryBibleInput): string | null {
-  const bank = listTags(db).flatMap((tag) =>
-    isStoryCategory(tag.category) ? [{ category: tag.category, name: tag.name }] : []
-  )
+  // Notes redesign (2026-10-15): while the old story bible is archived its tags and sheets are
+  // hidden data, so the block carries the scene's place, its neighbours and the note pages the
+  // scene names instead (`buildStoryBible` is only called for story memory v1).
+  const bible = !storyBibleArchivedIn(db, 'v1')
+  const bank = bible
+    ? listTags(db).flatMap((tag) =>
+        isStoryCategory(tag.category) ? [{ category: tag.category, name: tag.name }] : []
+      )
+    : []
   const facts: StoryBibleFacts = { bank, scene: null, previous: null, next: null }
-  if (input.nodeId !== null) Object.assign(facts, scenePart(db, input.nodeId))
+  if (input.nodeId !== null) Object.assign(facts, scenePart(db, input.nodeId, bible))
   return renderStoryBible(facts, input.maxTokens, input.heading)
+}
+
+/**
+ * The note pages a manuscript scene names (notes redesign, 2026-10-15): a page whose title, or a
+ * capitalised word of it of four letters or more, stands in the scene's text (as written) or in
+ * its synopsis or scene notes (caseless, the author's typing), most often named first
+ * (`pagesNamedIn`, Ms Scribe's matching). Titles only, no AI.
+ */
+export function namedNotePages(db: TreeDb, row: NodeRow): StoryBibleNote[] {
+  const pages = listNotebookPages(db)
+  if (pages.length === 0) return []
+  return pagesNamedIn(pages, [
+    { text: documentText(row), caseless: false },
+    { text: parseStoredSceneMeta(row.sceneMeta).synopsis, caseless: true },
+    { text: notesText(row.notes, row.id), caseless: true }
+  ]).map((page) => ({ title: page.title, text: page.plain }))
 }
 
 function isStoryCategory(category: string): category is StoryBibleCategory {
@@ -63,8 +90,9 @@ function isStoryCategory(category: string): category is StoryBibleCategory {
 /** The scene, previous, and next facts for a manuscript document; all null for any other node. */
 function scenePart(
   db: TreeDb,
-  nodeId: string
-): Pick<StoryBibleFacts, 'scene' | 'previous' | 'next' | 'entities'> {
+  nodeId: string,
+  bible: boolean
+): Pick<StoryBibleFacts, 'scene' | 'previous' | 'next' | 'entities' | 'notes'> {
   const none = { scene: null, previous: null, next: null }
   const documents = manuscriptDocuments(db)
   const at = documents.findIndex((row) => row.id === nodeId)
@@ -80,7 +108,7 @@ function scenePart(
   }
 
   const siblings = documents.filter((row) => row.parentId === current.parentId)
-  const tags = listDocumentTags(db, nodeId)
+  const tags = bible ? listDocumentTags(db, nodeId) : []
   const scene: StoryBibleScene = {
     title: current.title,
     ancestors,
@@ -112,7 +140,8 @@ function scenePart(
       documents.map((row) => row.id),
       undefined,
       nodeId
-    )
+    ),
+    ...(bible ? {} : { notes: namedNotePages(db, current) })
   }
 }
 

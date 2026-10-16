@@ -370,6 +370,7 @@ export function createEditFlowRunner(deps: EditFlowRunnerDeps): EditFlowRunner {
       pages: prep.material.pages,
       scenes: prep.material.scenes,
       access: { notes: true, prose: false },
+      proseMax: 0,
       profile: null,
       changes: [],
       used: new Set(),

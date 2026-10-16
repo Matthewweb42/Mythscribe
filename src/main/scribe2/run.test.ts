@@ -17,11 +17,12 @@ import { createEntity } from '../entity/entityStore'
 import { addContextFiles } from '../library/libraryStore'
 import { createSeededProject } from '../project/testProject'
 import { createNode, getNode, listNodes, renameNode, type TreeDb } from '../tree/treeStore'
-import { manuscriptDocuments } from '../voice/profile'
+import { documentText, manuscriptDocuments } from '../voice/profile'
 import { defaultAiUsageState, dayOf } from '../ai/dailyCap'
 import { loadAgentProject } from '../ai/agentTools'
 import { resetInflight } from '../ai/inflight'
 import { SCRIBE_SENTINEL } from '../ai/prompts/scribe.v1'
+import { SCRIBE_V3_MODE_RULES } from '../ai/prompts/scribe.v3'
 import type { CompletionRequest, CompletionResult, Provider } from '../ai/providers/types'
 import type { AiRequestDeps } from '../ai/request'
 import type { UsageEntry } from '../ai/usageStore'
@@ -157,30 +158,65 @@ describe('runScribe2 (notes redesign phase 1)', () => {
     expect(ledger.every((row) => row.tier === 'strong')).toBe(true)
   })
 
-  it('Brainstorm changes nothing: no write tools are offered, and a write the model tries is refused', async () => {
+  it('Brainstorm changes nothing: its mode line says so, and a write the model tries is refused', async () => {
     createNotebookItem(db, { parentId: null, kind: 'page', title: 'Mara', content: null })
     replies(
       { tool: 'edit_note', args: { id: 'p1', text: 'x' } },
       { answer: 'Two options: a storm, or a stranger.', sources: [] }
     )
     const result = await ask('What could happen next?', 'brainstorm')
-    expect(request(0).messages[0]?.content).not.toContain('edit_note {')
-    expect(request(0).messages[0]?.content).toContain('Mode Brainstorm')
+    // scribe.v3: the mode is said last in the moment, after the cached prefix.
+    expect(request(0).messages[0]?.content.endsWith(SCRIBE_V3_MODE_RULES.brainstorm)).toBe(true)
+    expect(request(1).messages.at(-1)?.content).toContain('Brainstorm changes nothing')
     expect(result.changes).toEqual([])
     expect(changed).toEqual([])
+    expect(result.promptVersion).toBe('scribe.v3')
   })
 
-  it('Brainstorm asked to save gets the note tools and writes the page', async () => {
+  it('Brainstorm asked to save writes the page and may not suggest prose', async () => {
     replies(
+      { tool: 'propose_prose_edit', args: { id: 'n1', find: 'Mara', replace: 'She' } },
       { tool: 'create_note', args: { title: 'Ideas', text: 'A storm at the quay.' } },
       { answer: 'Saved it in Ideas.', sources: [] }
     )
     const result = await ask('Save that to my notes.', 'brainstorm')
-    expect(request(0).messages[0]?.content).toContain('create_note {')
-    expect(request(0).messages[0]?.content).not.toContain('propose_prose_edit {')
+    expect(request(0).messages[0]?.content.endsWith(SCRIBE_V3_MODE_RULES.save)).toBe(true)
+    expect(request(1).messages.at(-1)?.content).toContain('No prose changes in this mode')
     expect(result.changes).toMatchObject([
       { applied: true, edit: { kind: 'notebook', created: true } }
     ])
+  })
+
+  it('Vibe proposes prose changes unasked, three at most, none applied, and switching mode keeps the cached prefix', async () => {
+    const ref0 = loadAgentProject(db, null, 'v1').refOf.get(scenes[0]!) ?? ''
+    const propose = (find: string, replace: string): unknown => ({
+      tool: 'propose_prose_edit',
+      args: { id: ref0, find, replace }
+    })
+    replies(
+      propose('Mara climbed the ridge alone.', 'Mara climbed, and the ridge climbed with her.'),
+      propose('The sea was grey.', 'The sea lay flat as hammered tin.'),
+      propose('climbed', 'clawed'),
+      propose('ridge', 'scarp'),
+      { answer: `Three changes in ${ref0}: a stronger opening, a sharper sea.`, sources: [ref0] }
+    )
+    const result = await ask('What can I do to make this scene better?', 'vibe')
+    const system = request(0).messages[0]?.content ?? ''
+    expect(system.endsWith(SCRIBE_V3_MODE_RULES.vibe)).toBe(true)
+    expect(request(4).messages.at(-1)?.content).toContain('No more prose suggestions')
+    expect(result.changes).toHaveLength(3)
+    expect(result.changes.every((change) => !change.applied && change.edit.kind === 'text')).toBe(
+      true
+    )
+    expect(documentText(manuscriptDocuments(db)[0]!)).toBe(
+      'Mara climbed the ridge alone.\nThe sea was grey.'
+    )
+    // Switching mode leaves the cached prefix (rules, notes, map, book) as it was.
+    replies({ answer: 'Two options.', sources: [] })
+    await ask('What can I do to make this scene better?', 'write')
+    const write = request(5).messages[0]?.content ?? ''
+    expect(write.endsWith(SCRIBE_V3_MODE_RULES.write)).toBe(true)
+    expect(write.slice(0, write.indexOf('# Now'))).toBe(system.slice(0, system.indexOf('# Now')))
   })
 
   it('refuses when the feature is off', async () => {

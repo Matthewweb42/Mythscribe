@@ -8,6 +8,7 @@ import {
   SCRIBE_SOURCE_QUOTES_MAX,
   SCRIBE_SOURCES_MAX,
   scribeAccess,
+  scribeProseMax,
   type ScribeSources
 } from '@shared/scribe2'
 import { getAiSettings } from '../project/settingsStore'
@@ -28,7 +29,7 @@ import { assertFeatureAllowed } from '../ai/dial'
 import type { AgentTranscriptStep } from '../ai/prompts/agent.v1'
 import type { ChatTurn } from '../ai/prompts/chat.v1'
 import type { BuildScribePromptInput } from '../ai/prompts/scribe.v1'
-import { buildScribePromptV2, scribeRulesV2 } from '../ai/prompts/scribe.v2'
+import { buildScribePromptV3, scribeModeLineV3, SCRIBE_V3_RULES } from '../ai/prompts/scribe.v3'
 import type { CompletionUsage } from '../ai/providers/types'
 import type { AiRequestDeps } from '../ai/request'
 import { buildScribeContext } from './context'
@@ -70,7 +71,7 @@ const PICK_SEARCH_RESULTS = 20
  */
 export function fitScribePrompt(
   input: BuildScribePromptInput,
-  build: (input: BuildScribePromptInput) => AgentLoopPrompt = buildScribePromptV2
+  build: (input: BuildScribePromptInput) => AgentLoopPrompt = buildScribePromptV3
 ): AgentLoopPrompt {
   const budget = inputBudget('scribe')
   const estimate = (built: AgentLoopPrompt): number =>
@@ -300,8 +301,10 @@ export function readableAnswer(run: Pick<ScribeRun, 'project' | 'pages'>, answer
  * Ms Scribe's turn in a story memory v1 project (notes redesign phase 1). The gate first
  * (`scribe`); then the context (`buildScribeContext`: every note page, the book map, the book whole
  * when it fits or the picked scenes, the moment), and the chat agent's research loop
- * (`runAgentLoop`, strong tier) with her tools. Note writes land in the notebook as she makes them
- * (`notebookChanged` tells the windows); prose suggestions come back for the author's accept.
+ * (`runAgentLoop`, strong tier) with her tools, on `scribe.v3` (the mode said in the moment).
+ * Note writes land in the notebook as she makes them (`notebookChanged` tells the windows); prose
+ * suggestions come back for the author's accept, at most `scribeProseMax(mode)` of them (three in
+ * Vibe, where she proposes them unasked).
  */
 export async function runScribe2(
   db: TreeDb,
@@ -319,7 +322,7 @@ export async function runScribe2(
   const pov = active ? parseStoredSceneMeta(active.sceneMeta).pov.trim() : ''
   const profile = access.prose ? buildVoiceProfile(db, { pov: pov || undefined }) : null
   const context = buildScribeContext({
-    rulesTokens: estimateTokens(scribeRulesV2(input.mode, access)),
+    rulesTokens: estimateTokens(`${SCRIBE_V3_RULES}\n${scribeModeLineV3(input.mode, access)}`),
     pages: material.pages,
     scenes: material.scenes,
     currentId: input.nodeId,
@@ -337,6 +340,7 @@ export async function runScribe2(
     pages: material.pages,
     scenes: material.scenes,
     access,
+    proseMax: scribeProseMax(input.mode),
     profile,
     changes: [],
     used: new Set(),

@@ -88,15 +88,111 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/**
+ * How many times `name` stands as a word in `text` (`caseless` for the author's typing); a name
+ * under three characters never counts.
+ */
+export function nameCount(text: string, name: string, caseless: boolean): number {
+  const trimmed = name.trim()
+  if (trimmed.length < 3) return 0
+  const pattern = new RegExp(
+    `(^|[^\\p{L}\\p{N}])${escapeRegExp(trimmed)}(?=$|[^\\p{L}\\p{N}])`,
+    caseless ? 'giu' : 'gu'
+  )
+  return [...text.matchAll(pattern)].length
+}
+
 /** Whether `name` stands as a word in `text` (`caseless` for the author's typing). */
 export function namesIn(text: string, name: string, caseless: boolean): boolean {
-  const trimmed = name.trim()
-  if (trimmed.length < 3) return false
-  const pattern = new RegExp(
-    `(^|[^\\p{L}\\p{N}])${escapeRegExp(trimmed)}($|[^\\p{L}\\p{N}])`,
-    caseless ? 'iu' : 'u'
-  )
-  return pattern.test(text)
+  return nameCount(text, name, caseless) > 0
+}
+
+/** The shortest word of a page title that counts as a name on its own ("Tash" in "Tash — powers"). */
+export const PAGE_NAME_WORD_MIN = 4
+
+/** Capitalised words of four letters or more a title may hold that are not names. */
+const NOT_NAMES = new Set([
+  'about',
+  'after',
+  'also',
+  'before',
+  'from',
+  'have',
+  'into',
+  'more',
+  'only',
+  'over',
+  'some',
+  'than',
+  'that',
+  'their',
+  'them',
+  'then',
+  'there',
+  'they',
+  'this',
+  'what',
+  'when',
+  'where',
+  'which',
+  'will',
+  'with',
+  'your'
+])
+
+/**
+ * The names a note page answers to (notes redesign, 2026-10-15): its title, and each capitalised
+ * word of the title of `PAGE_NAME_WORD_MIN` letters or more ("Tash" in "Tash — powers"), each once.
+ */
+export function pageNames(title: string): string[] {
+  const whole = title.trim()
+  const words = whole
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(
+      (word) =>
+        word.length >= PAGE_NAME_WORD_MIN &&
+        /^\p{Lu}/u.test(word) &&
+        !NOT_NAMES.has(word.toLowerCase())
+    )
+  const names: string[] = []
+  const seen = new Set<string>()
+  for (const name of [whole, ...words]) {
+    const key = name.toLowerCase()
+    if (name === '' || seen.has(key)) continue
+    seen.add(key)
+    names.push(name)
+  }
+  return names
+}
+
+/** One text a page may be named in, read caselessly when it is the author's typing. */
+export interface NamingText {
+  text: string
+  caseless: boolean
+}
+
+/**
+ * The pages `texts` name (`pageNames`, matched as Ms Scribe matches names), most often named
+ * first, ties in the order given; a page named nowhere is left out.
+ */
+export function pagesNamedIn<P extends { title: string }>(
+  pages: readonly P[],
+  texts: readonly NamingText[]
+): P[] {
+  return pages
+    .map((page, index) => ({
+      page,
+      index,
+      count: pageNames(page.title).reduce(
+        (sum, name) =>
+          sum +
+          texts.reduce((each, { text, caseless }) => each + nameCount(text, name, caseless), 0),
+        0
+      )
+    }))
+    .filter((entry) => entry.count > 0)
+    .sort((a, b) => b.count - a.count || a.index - b.index)
+    .map((entry) => entry.page)
 }
 
 /** The names of `names` that stand in `text`, each once. */

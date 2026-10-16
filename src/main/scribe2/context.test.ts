@@ -10,7 +10,11 @@ import {
   buildBookMap,
   buildNotesBlock,
   buildScribeContext,
+  nameCount,
   namesFound,
+  namesIn,
+  pageNames,
+  pagesNamedIn,
   pickScenes,
   type ScribeContextInput,
   type ScribePage,
@@ -180,5 +184,40 @@ describe('Ms Scribe’s v1 context (notes redesign phase 1)', () => {
         'n2 Chapter 1 › Scene 2 | summary (AI): Rook waits at the quay.'
     )
     expect(buildBookMap([])).toBe('The book has no scenes yet.')
+  })
+})
+
+describe('page names (notes redesign, 2026-10-15)', () => {
+  it('counts a name each time it stands as a word, side by side too', () => {
+    expect(nameCount('Tash, Tash and Tasha. TASH', 'Tash', false)).toBe(2)
+    expect(nameCount('Tash, Tash and Tasha. TASH', 'Tash', true)).toBe(3)
+    expect(nameCount('Tash Tash', 'Tash', false)).toBe(2)
+    expect(nameCount('Al and Al', 'Al', false)).toBe(0)
+    expect(namesIn('Rook waited.', 'Rook', false)).toBe(true)
+    expect(namesIn('Rooks waited.', 'Rook', false)).toBe(false)
+  })
+
+  it('answers a page to its title and its capitalised words of four letters or more', () => {
+    expect(pageNames('Tash — powers')).toEqual(['Tash — powers', 'Tash'])
+    expect(pageNames("Mara's Ship")).toEqual(["Mara's Ship", 'Mara', 'Ship'])
+    expect(pageNames('What the river knows')).toEqual(['What the river knows'])
+    expect(pageNames('Rook')).toEqual(['Rook'])
+    expect(pageNames('Al & Bo')).toEqual(['Al & Bo'])
+  })
+
+  it('ranks the pages a text names by how often, ties in order, the rest left out', () => {
+    const pages = [
+      { title: 'Mara' },
+      { title: 'Tash — powers' },
+      { title: 'Outline' },
+      { title: 'Rook' }
+    ]
+    expect(
+      pagesNamedIn(pages, [
+        { text: 'Mara saw Tash. Tash ran.', caseless: false },
+        { text: 'rook waits', caseless: true }
+      ]).map((page) => page.title)
+    ).toEqual(['Tash — powers', 'Mara', 'Rook'])
+    expect(pagesNamedIn(pages, [{ text: 'rook waits', caseless: false }])).toEqual([])
   })
 })

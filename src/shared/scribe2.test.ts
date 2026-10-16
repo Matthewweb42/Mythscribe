@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { AiSettings, AssistantMode, defaultAiSettings, migrateAssistantMode } from './aiSettings'
-import { scribeAccess, wantsSave } from './scribe2'
+import {
+  SCRIBE_MAX_WRITES,
+  SCRIBE_VIBE_PROSE_MAX,
+  scribeAccess,
+  scribeProseMax,
+  wantsSave
+} from './scribe2'
 
 describe('chat modes Brainstorm, Write, Vibe (notes redesign phase 1)', () => {
   it('reads a stored Plan as Brainstorm, Ask and Auto as Write, and keeps the new modes', () => {
@@ -48,5 +54,14 @@ describe('chat modes Brainstorm, Write, Vibe (notes redesign phase 1)', () => {
     ]) {
       expect(wantsSave(no), no).toBe(false)
     }
+  })
+})
+
+describe('prose suggestions per message (scribe.v3, 2026-10-15)', () => {
+  it('caps Vibe at three and leaves Write and Brainstorm at the write cap', () => {
+    expect(SCRIBE_VIBE_PROSE_MAX).toBe(3)
+    expect(scribeProseMax('vibe')).toBe(3)
+    expect(scribeProseMax('write')).toBe(SCRIBE_MAX_WRITES)
+    expect(scribeProseMax('brainstorm')).toBe(SCRIBE_MAX_WRITES)
   })
 })

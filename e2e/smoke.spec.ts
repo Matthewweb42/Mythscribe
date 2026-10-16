@@ -4773,16 +4773,18 @@ test('create, close, reopen a project on disk', async () => {
   await expect(turns.nth(1).getByTestId('chat-turn-cost')).toContainText('gpt-5.4 ·')
   // F-5.9: the cost line carries the tokens the turn spent, not the model and the cost alone.
   await expect(turns.nth(1).getByTestId('chat-turn-cost')).toContainText(' in · ')
-  // The router's request, then Ms Scribe's search and her answer, with no write tools.
+  // The router's request, then Ms Scribe's search and her answer, in Brainstorm.
   expect(openAiChatBodies).toHaveLength(chatRequestsBefore + 3)
   expect(openAiChatBodies.at(-3)?.messages[0]?.content.startsWith(ROUTE_SENTINEL)).toBe(true)
   expect(openAiChatBodies.at(-2)?.messages[0]?.content.startsWith(SCRIBE_V1_SENTINEL)).toBe(true)
   expect(openAiChatBodies.at(-2)?.messages.at(-1)?.content).toBe('Why is Mara on the ridge?')
   // The whole book goes along (it is far under the line), Scene 1's text with it.
   expect(openAiChatBodies.at(-2)?.messages[0]?.content).toContain('\n# The book\n')
+  // scribe.v3: every tool is in the cached rules; the moment says Brainstorm changes nothing.
   for (const body of openAiChatBodies.slice(-2)) {
-    expect(body.messages[0]?.content).not.toContain('edit_note {')
-    expect(body.messages[0]?.content).not.toContain('propose_prose_edit {')
+    expect(body.messages[0]?.content.split('\n# Now\n')[1]).toContain(
+      'Mode Brainstorm: think and plan with her; you change nothing'
+    )
   }
   await expect(assistant.getByRole('tab', { name: 'Why is Mara on the ridge?' })).toHaveAttribute(
     'aria-selected',

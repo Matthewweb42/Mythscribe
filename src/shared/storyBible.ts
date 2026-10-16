@@ -102,6 +102,23 @@ export interface StoryBibleEntity {
   observed: StoryBibleEntry[]
 }
 
+/**
+ * The most of one note page's text the block carries (notes redesign, 2026-10-15); a page cut
+ * shorter still to fit the budget gives its first lines.
+ */
+export const STORY_BIBLE_NOTE_CHARS = 600
+/** A note page whose text cannot keep this many characters within the budget is left out. */
+export const STORY_BIBLE_NOTE_MIN_CHARS = 40
+
+/**
+ * A note page the scene names (notes redesign, 2026-10-15): while the old story bible is
+ * archived (Settings › Archived features), the pages in its place in the block.
+ */
+export interface StoryBibleNote {
+  title: string
+  text: string
+}
+
 export interface StoryBibleFacts {
   /** Every bank tag in a story category, in `tag:list` order. */
   bank: { category: StoryBibleCategory; name: string }[]
@@ -114,6 +131,11 @@ export interface StoryBibleFacts {
    * a project without entities, which renders exactly as before.
    */
   entities?: StoryBibleEntity[]
+  /**
+   * The note pages the scene names, most named first (notes redesign, 2026-10-15), sent while the
+   * old story bible is archived; absent or empty renders exactly as before.
+   */
+  notes?: StoryBibleNote[]
 }
 
 /** A cut category line keeps at least this many names before "… and N more". */
@@ -133,6 +155,10 @@ const MIN_NAMES_WHEN_CUT = 1
  * are admitted after the bank and ahead of the neighbours' summaries (the author's own word
  * about who is in the scene), their observed facts last of all, so facts are dropped before
  * sheets (`renderStoryBibleEntities`).
+ *
+ * Notes redesign (2026-10-15): the note pages the scene names (sent while the old story bible is
+ * archived, when there is no bank, tag or sheet) follow the entity lines, admitted after the
+ * sheets and ahead of the neighbours' summaries, each cut to fit (`noteLine`).
  */
 export function renderStoryBible(
   facts: StoryBibleFacts,
@@ -140,7 +166,14 @@ export function renderStoryBible(
   heading: string = STORY_BIBLE_HEADING
 ): string | null {
   const hasTags = facts.scene !== null && facts.scene.tags.length > 0
-  if (facts.bank.length === 0 && facts.previous === null && facts.next === null && !hasTags) {
+  const notes = facts.notes ?? []
+  if (
+    facts.bank.length === 0 &&
+    facts.previous === null &&
+    facts.next === null &&
+    !hasTags &&
+    notes.length === 0
+  ) {
     return null
   }
 
@@ -185,6 +218,15 @@ export function renderStoryBible(
   const entityLines = entityAdmission(facts.entities ?? [])
   used += entityLines.admitSheets(maxTokens - used)
 
+  // The author's note pages, like her sheets, ahead of the neighbours' summaries.
+  const noteLines: string[] = []
+  for (const note of notes) {
+    const line = noteLine(note, maxTokens - used)
+    if (line === null) continue
+    noteLines.push(line)
+    used += estimateTokens(`${line}\n`)
+  }
+
   const summaries: string[] = []
   for (const { label, summary } of withSummary) {
     admit(`${label} scene summary: ${summary}`, summaries)
@@ -192,9 +234,33 @@ export function renderStoryBible(
 
   entityLines.admitObserved(maxTokens - used)
 
-  return [heading, ...categories, sceneLine, ...entityLines.lines(), ...neighbours, ...summaries]
+  return [
+    heading,
+    ...categories,
+    sceneLine,
+    ...entityLines.lines(),
+    ...noteLines,
+    ...neighbours,
+    ...summaries
+  ]
     .filter((line): line is string => line !== null)
     .join('\n')
+}
+
+/**
+ * A note page's line within `room` estimated tokens: its title and its text on one line, cut to
+ * `STORY_BIBLE_NOTE_CHARS` and then to the room left (its first lines); null when the room cannot
+ * keep `STORY_BIBLE_NOTE_MIN_CHARS` of it, or the page has no text.
+ */
+function noteLine(note: StoryBibleNote, room: number): string | null {
+  const prefix = `Note “${note.title.replace(/\s+/gu, ' ').trim()}”: `
+  if (note.text.trim() === '') return null
+  // Four characters to the estimated token, less the line's break and the cut's "…".
+  for (let max = Math.min(STORY_BIBLE_NOTE_CHARS, room * 4 - prefix.length - 2); ; max -= 8) {
+    if (max < STORY_BIBLE_NOTE_MIN_CHARS) return null
+    const line = `${prefix}${cutValue(note.text, max)}`
+    if (estimateTokens(`${line}\n`) <= room) return line
+  }
 }
 
 /** A value on one line and within `valueMax` characters: a sheet field can run to pages. */

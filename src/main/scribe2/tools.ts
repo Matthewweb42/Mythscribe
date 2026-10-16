@@ -43,6 +43,8 @@ export interface ScribeRun {
   pages: ScribePage[]
   scenes: ScribeScene[]
   access: ScribeAccess
+  /** Prose suggestions this message may make (`scribeProseMax`: three in Vibe). */
+  proseMax: number
   profile: VoiceProfile | null
   /** Note edits applied (already in the notebook) and prose suggestions offered, in order. */
   changes: { proposal: AgentProposal; applied: boolean }[]
@@ -354,6 +356,13 @@ function createNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome 
 function proposeProse(run: ScribeRun, args: Record<string, unknown>): ToolOutcome {
   const step: AgentStep = { tool: 'propose_prose_edit', label: 'Suggesting a change…' }
   if (!writesLeft(run)) return { step, result: 'No more suggestions in this message.' }
+  const offeredSoFar = run.changes.filter((change) => change.proposal.edit.kind !== 'notebook')
+  if (offeredSoFar.length >= run.proseMax) {
+    return {
+      step,
+      result: `No more prose suggestions in this message (at most ${run.proseMax}); answer now.`
+    }
+  }
   const replace = str(args.replace)
   const offered = offerEdit(
     run.project,

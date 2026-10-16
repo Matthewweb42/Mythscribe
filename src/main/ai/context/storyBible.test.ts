@@ -3,10 +3,21 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { emptySceneMeta } from '@shared/sceneMeta'
-import { STORY_BIBLE_HEADING, STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
+import { estimateTokens } from '@shared/ai'
+import { notebookDocFromText } from '@shared/notebook'
+import {
+  STORY_BIBLE_GHOST_TOKEN_BUDGET,
+  STORY_BIBLE_HEADING,
+  STORY_BIBLE_NOTE_CHARS,
+  STORY_BIBLE_TOKEN_BUDGET
+} from '@shared/storyBible'
+import type { TiptapNodeT } from '@shared/tiptap'
+import { saveDocument } from '../../document/documentStore'
+import { saveNotes } from '../../document/notesStore'
 import { setSceneMeta } from '../../document/sceneMetaStore'
 import { upsertSummary } from '../../document/summaryStore'
 import { createEntity, updateEntity } from '../../entity/entityStore'
+import { createNotebookItem } from '../../notebook/notebookStore'
 import { listFactsForEntity, applySceneFacts, setFactHidden } from '../../entity/factStore'
 import { projectFolderFor, type ProjectSession } from '../../project/projectStore'
 import { createSeededProject } from '../../project/testProject'
@@ -14,6 +25,7 @@ import { addDocumentTag } from '../../tag/documentTagStore'
 import { createTag } from '../../tag/tagStore'
 import { createNode, listNodes, renameNode, type TreeDb } from '../../tree/treeStore'
 import { buildStoryBible } from './storyBible'
+import { getEditorSettings, setEditorSettings } from '../../project/settingsStore'
 
 let tmp: string
 let session: ProjectSession
@@ -28,10 +40,17 @@ let frontRoot: string
 
 const budget = { maxTokens: STORY_BIBLE_TOKEN_BUDGET }
 
+const paragraphDoc = (text: string): TiptapNodeT => ({
+  type: 'doc',
+  content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+})
+
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-bible-'))
   session = createSeededProject(projectFolderFor(tmp, 'Bible'), 'Bible', 'novel')
   db = session.connection.orm
+  // The old story bible switched back on (archived by default since the notes redesign).
+  setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: ['storyBible'] })
   const rows = listNodes(db)
   part = rows.find((r) => r.hierarchyLevel === 'part')?.id ?? ''
   const chapters = rows.filter((r) => r.hierarchyLevel === 'chapter' && r.parentId === part)
@@ -232,6 +251,87 @@ describe('buildStoryBible with entities (F-5.16)', () => {
     )
     expect(buildStoryBible(db, { nodeId: scene, ...budget })).toContain(
       'Tash (character): Notes: Tash is forty-one. She limps. Seen in the manuscript: Age: forty.\n'
+    )
+  })
+})
+
+describe('buildStoryBible while the old story bible is archived (notes redesign, 2026-10-15)', () => {
+  const page = (title: string, text: string): void => {
+    createNotebookItem(db, {
+      parentId: null,
+      kind: 'page',
+      title,
+      content: notebookDocFromText(text)
+    })
+  }
+
+  beforeEach(() => {
+    setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: [] })
+    saveDocument(db, scene, paragraphDoc('What a climb. Tash looked back at Mara. Tash waved.'))
+  })
+
+  it('leaves out the bank, the tags and the sheets, and carries the pages the scene names, most named first', () => {
+    const mara = createEntity(db, {
+      kind: 'character',
+      name: 'Mara',
+      fields: { appearance: 'Grey eyes' }
+    }).entity
+    addDocumentTag(db, scene, mara.tagId ?? '')
+    createTag(db, { name: 'ridge', category: 'setting', color: '#112233' })
+    page('Mara', 'Fears the sea.')
+    page('Tash — powers', 'Hears stone.')
+    page('What the river knows', 'Nothing yet.')
+    page('Outline', 'Act 1: the ledger.')
+
+    expect(buildStoryBible(db, { nodeId: scene, ...budget })).toBe(
+      `${STORY_BIBLE_HEADING}\n` +
+        'This scene: "Scene 1", in "Chapter 1", in "Part 1", scene 1 of 1.\n' +
+        'Note “Tash — powers”: Hears stone.\n' +
+        'Note “Mara”: Fears the sea.\n' +
+        'Next scene: "Scene 1".'
+    )
+    // No scene open: no bank either, so nothing at all.
+    expect(buildStoryBible(db, { nodeId: null, ...budget })).toBeNull()
+  })
+
+  it('finds a page named in the synopsis or the scene notes, in any case', () => {
+    page('Rook', 'A smuggler.')
+    page('Timeline', 'Day 1: the ferry.')
+    page('Elm', 'The old tree.')
+    setSceneMeta(db, scene, { ...emptySceneMeta(), synopsis: 'rook waits at the mill.' })
+    saveNotes(db, scene, paragraphDoc('Check the timeline.'))
+    const bible = buildStoryBible(db, { nodeId: scene, ...budget }) ?? ''
+    expect(bible).toContain('Note “Rook”: A smuggler.')
+    expect(bible).toContain('Note “Timeline”: Day 1: the ferry.')
+    expect(bible).not.toContain('Elm')
+  })
+
+  it('cuts the pages to fit the budget, and the ghost budget to their first lines', () => {
+    const long = Array.from({ length: 80 }, (_, i) => `Line ${i} about Tash.`).join('\n')
+    page('Tash', long)
+    page('Mara', long)
+    const full = buildStoryBible(db, { nodeId: scene, ...budget }) ?? ''
+    expect(estimateTokens(full)).toBeLessThanOrEqual(STORY_BIBLE_TOKEN_BUDGET)
+    expect(full).toContain('Note “Tash”: Line 0 about Tash. Line 1 about Tash.')
+    expect(full).toContain('Note “Mara”: Line 0 about Tash.')
+    const tashLine = full.split('\n').find((line) => line.startsWith('Note “Tash”')) ?? ''
+    expect(tashLine.endsWith('…')).toBe(true)
+    expect(tashLine.length).toBeLessThanOrEqual('Note “Tash”: '.length + STORY_BIBLE_NOTE_CHARS + 1)
+
+    const ghost =
+      buildStoryBible(db, { nodeId: scene, maxTokens: STORY_BIBLE_GHOST_TOKEN_BUDGET }) ?? ''
+    expect(estimateTokens(ghost)).toBeLessThanOrEqual(STORY_BIBLE_GHOST_TOKEN_BUDGET)
+    expect(ghost).toContain('Note “Tash”: Line 0 about Tash.')
+    expect(ghost).toContain('This scene: "Scene 1"')
+  })
+
+  it('carries no page and renders as before with the old story bible switched back on', () => {
+    page('Tash', 'Hears stone.')
+    setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: ['storyBible'] })
+    expect(buildStoryBible(db, { nodeId: scene, ...budget })).toBe(
+      `${STORY_BIBLE_HEADING}\n` +
+        'This scene: "Scene 1", in "Chapter 1", in "Part 1", scene 1 of 1.\n' +
+        'Next scene: "Scene 1".'
     )
   })
 })

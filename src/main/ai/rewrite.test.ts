@@ -10,7 +10,12 @@ import { saveDocument } from '../document/documentStore'
 import { upsertSummary } from '../document/summaryStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
-import { setAiSettings, setAuthorRules } from '../project/settingsStore'
+import {
+  getEditorSettings,
+  setAiSettings,
+  setAuthorRules,
+  setEditorSettings
+} from '../project/settingsStore'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { addDocumentTag } from '../tag/documentTagStore'
 import { createTag } from '../tag/tagStore'
@@ -138,6 +143,8 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-rewrite-'))
   session = createProject(projectFolderFor(tmp, 'Rewrite'), 'Rewrite', 'novel')
   db = session.connection.orm
+  // The old story bible switched back on (archived by default since the notes redesign).
+  setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: ['storyBible'] })
   const rows = listNodes(db)
   scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')?.id ?? ''
   folder = rows.find((r) => r.kind === 'folder' && r.sectionType === null)?.id ?? ''

@@ -1,21 +1,38 @@
-import { SCRIBE_WHOLE_BOOK_TOKENS, scribeAccess } from '@shared/scribe2'
+import { SCRIBE_WHOLE_BOOK_TOKENS, scribeAccess, type ScribeAccess } from '@shared/scribe2'
 import type { AssistantMode } from '@shared/aiSettings'
 import { buildScribeContext, type ScribePage, type ScribeScene } from '../../scribe2/context'
 import { fitScribePrompt } from '../../scribe2/run'
-import { buildScribePrompt, scribeRules, SCRIBE_PROMPT_VERSION } from '../prompts/scribe.v1'
+import { buildScribePrompt, scribeRules, type BuildScribePromptInput } from '../prompts/scribe.v1'
 import { buildScribePromptV2, scribeRulesV2 } from '../prompts/scribe.v2'
+import { buildScribePromptV3, scribeModeLineV3, SCRIBE_V3_RULES } from '../prompts/scribe.v3'
+import type { AgentLoopPrompt } from '../agent'
 import type { AgentTranscriptStep } from '../prompts/agent.v1'
 import type { EvalCase } from './fixtures'
 import { estimateTokens } from '@shared/ai'
 
 /**
- * `scribe.v1` and `scribe.v2` cases (notes redesign phase 1, story memory v1), the same four for
- * each: Ms Scribe's first step with the notes and the whole fixture book in view (a lookup or an
- * answer), a note edit in Write, a Brainstorm answer, and the most one step can carry under the
- * whole-book line. v2 asks for sources with quotes and refs written as chapters.
+ * `scribe.v1`, `scribe.v2` and `scribe.v3` cases (notes redesign, story memory v1), the same four
+ * for each: Ms Scribe's first step with the notes and the whole fixture book in view (a lookup or
+ * an answer), a note edit in Write, a Brainstorm answer, and the most one step can carry under the
+ * whole-book line. v2 asks for sources with quotes and refs written as chapters. v3 (2026-10-15)
+ * says the mode in the moment and adds two: "make this scene better" after reading the scene, in
+ * Vibe (her next step proposes a prose change unasked) and in Write (she answers, no proposal).
  */
 
-type ScribeVersion = 'scribe.v1' | 'scribe.v2'
+type ScribeVersion = 'scribe.v1' | 'scribe.v2' | 'scribe.v3'
+
+/** Each version's rules as one message in `mode` carries them, for the whole-book estimate. */
+const RULES: Record<ScribeVersion, (mode: AssistantMode, access: ScribeAccess) => string> = {
+  'scribe.v1': scribeRules,
+  'scribe.v2': scribeRulesV2,
+  'scribe.v3': (mode, access) => `${SCRIBE_V3_RULES}\n${scribeModeLineV3(mode, access)}`
+}
+
+const BUILD: Record<ScribeVersion, (input: BuildScribePromptInput) => AgentLoopPrompt> = {
+  'scribe.v1': buildScribePrompt,
+  'scribe.v2': buildScribePromptV2,
+  'scribe.v3': buildScribePromptV3
+}
 
 const PASSAGE = [
   'The ferry landing smelled of tar. Mara waited with the ledger under her coat.',
@@ -75,10 +92,9 @@ function scribeCase(
   expected: 'tool' | 'answer',
   steps: AgentTranscriptStep[] = []
 ): EvalCase {
-  const v1 = version === SCRIBE_PROMPT_VERSION
   const access = scribeAccess(mode, message)
   const context = buildScribeContext({
-    rulesTokens: estimateTokens((v1 ? scribeRules : scribeRulesV2)(mode, access)),
+    rulesTokens: estimateTokens(RULES[version](mode, access)),
     pages: PAGES,
     scenes: book,
     currentId: book[0]?.nodeId ?? null,
@@ -90,7 +106,7 @@ function scribeCase(
   })
   const built = fitScribePrompt(
     { mode, access, context, history: [], message, steps, final: false },
-    v1 ? buildScribePrompt : buildScribePromptV2
+    BUILD[version]
   )
   return {
     version: built.version,
@@ -157,6 +173,47 @@ function versionCases(version: ScribeVersion): EvalCase[] {
   ]
 }
 
+/** v3's two mode cases: the same ask after reading the open scene, in Vibe and in Write. */
+function modeCases(): EvalCase[] {
+  const book = scenes(6, 400)
+  const first = book[0]
+  if (first === undefined) return []
+  const opened: AgentTranscriptStep[] = [
+    {
+      call: `{"tool":"open_scene","args":{"id":"${first.ref}"}}`,
+      result: `Result of open_scene:\n${first.ref} ${first.title}, characters 0–${first.text.length} of ${first.text.length}:\n${first.text}`
+    }
+  ]
+  const message = 'What can I do to make this scene better?'
+  return [
+    scribeCase(
+      'scribe.v3',
+      'vibeProposes',
+      'Vibe: "make this scene better" after reading it, so the next step is propose_prose_edit, unasked (at most three)',
+      'vibe',
+      message,
+      book,
+      'tool',
+      opened
+    ),
+    scribeCase(
+      'scribe.v3',
+      'writeAnswers',
+      'Write: the same ask after reading the scene, answered with options in text and no unasked propose_prose_edit',
+      'write',
+      message,
+      book,
+      'answer',
+      opened
+    )
+  ]
+}
+
 export function scribe2EvalCases(): EvalCase[] {
-  return [...versionCases('scribe.v1'), ...versionCases('scribe.v2')]
+  return [
+    ...versionCases('scribe.v1'),
+    ...versionCases('scribe.v2'),
+    ...versionCases('scribe.v3'),
+    ...modeCases()
+  ]
 }

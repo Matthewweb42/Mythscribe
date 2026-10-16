@@ -18,7 +18,13 @@ import { saveDocument } from '../document/documentStore'
 import { saveNotes } from '../document/notesStore'
 import { setSceneMeta } from '../document/sceneMetaStore'
 import { AppError } from '../ipc/errors'
-import { setAiSettings, setAuthorRules, setWritingPresets } from '../project/settingsStore'
+import {
+  getEditorSettings,
+  setAiSettings,
+  setAuthorRules,
+  setEditorSettings,
+  setWritingPresets
+} from '../project/settingsStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
 import { createSeededProject } from '../project/testProject'
 import { addDocumentTag } from '../tag/documentTagStore'
@@ -115,6 +121,8 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-ghost-'))
   session = createSeededProject(projectFolderFor(tmp, 'Ghost'), 'Ghost', 'novel')
   db = session.connection.orm
+  // The old story bible switched back on (archived by default since the notes redesign).
+  setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: ['storyBible'] })
   scene = listNodes(db).find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')?.id ?? ''
   if (!scene) throw new Error('skeleton not seeded')
   setAiSettings(db, { ...defaultAiSettings(), dial: 1 })

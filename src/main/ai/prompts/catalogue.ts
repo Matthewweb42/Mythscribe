@@ -115,6 +115,7 @@ import { READER_V6_PROMPT_VERSION } from './reader.v6'
 import { READER_V7_PROMPT_VERSION } from './reader.v7'
 import { SCRIBE_PROMPT_VERSION } from './scribe.v1'
 import { SCRIBE_V2_PROMPT_VERSION } from './scribe.v2'
+import { SCRIBE_V3_PROMPT_VERSION } from './scribe.v3'
 import { EDIT_FLOW_PROMPT_VERSION } from './editFlow.v1'
 import { EDIT_NOTES_PROMPT_VERSION } from './editNotes.v1'
 
@@ -268,6 +269,8 @@ export const PROMPT_VERSIONS = [
   // Notes redesign phase 1 (story memory v1): Ms Scribe with the notes and the book in view.
   SCRIBE_PROMPT_VERSION,
   SCRIBE_V2_PROMPT_VERSION,
+  // Notes redesign (2026-10-15, vibe.md): the mode in the moment, Vibe's bolder suggestions.
+  SCRIBE_V3_PROMPT_VERSION,
   // Notes redesign phase 2: the edit flow's stages and checks, and its Update notes.
   EDIT_FLOW_PROMPT_VERSION,
   EDIT_NOTES_PROMPT_VERSION
@@ -772,6 +775,13 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   [SCRIBE_PROMPT_VERSION]: { feature: 'scribe', tier: 'strong', output: 'json', since: 'Notes P1' },
   // Sources with the exact words she relied on, refs written as chapters (2026-10-15).
   [SCRIBE_V2_PROMPT_VERSION]: {
+    feature: 'scribe',
+    tier: 'strong',
+    output: 'json',
+    since: 'Notes P1'
+  },
+  // Every tool in the rules, the mode in the moment; Vibe proposes prose changes unasked (2026-10-15).
+  [SCRIBE_V3_PROMPT_VERSION]: {
     feature: 'scribe',
     tier: 'strong',
     output: 'json',

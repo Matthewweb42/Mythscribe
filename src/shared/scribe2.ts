@@ -37,6 +37,17 @@ export const SCRIBE_STEP_MAX_TOKENS = 3_000
 export const SCRIBE_RETRY_MAX_TOKENS = 6_000
 /** Note writes and prose suggestions one message may make; past it a write tool refuses. */
 export const SCRIBE_MAX_WRITES = 8
+/**
+ * Prose suggestions one Vibe answer may make (`scribe.v3`, 2026-10-15, decided by Claude): she
+ * proposes changes unasked there, so past this a further `propose_prose_edit` is refused.
+ */
+export const SCRIBE_VIBE_PROSE_MAX = 3
+
+/** The prose suggestions one message in `mode` may make: three in Vibe, else the write cap. */
+export function scribeProseMax(mode: AssistantMode): number {
+  return mode === 'vibe' ? SCRIBE_VIBE_PROSE_MAX : SCRIBE_MAX_WRITES
+}
+
 /** The longest text one note write may carry. */
 export const SCRIBE_NOTE_TEXT_MAX = 12_000
 /** How much of a page before and after an edit the chat keeps, for its highlight. */

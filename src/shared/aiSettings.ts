@@ -68,9 +68,10 @@ export const ASSISTANT_MODE_MEANING: Record<AssistantMode, string> = {
     'say “save that”, when it writes it into your notes.',
   write:
     'The assistant answers with sources, edits and creates note pages (each with Undo), and ' +
-    'suggests prose changes for you to accept.',
+    'suggests prose changes for you to accept when you ask for them.',
   vibe:
-    'Write, with ghost text on and bolder prose suggestions; prose still changes only when you ' +
+    'Write, with ghost text on, and the assistant proposes bolder prose changes on its own (up ' +
+    'to three an answer, whole paragraphs and cuts included); prose still changes only when you ' +
     'accept.'
 }
 
@@ -352,12 +353,15 @@ export interface AiDataSharing {
  */
 /**
  * What the story bible block (F-14.9, `renderStoryBible`) carries, phrased once for every
- * feature whose prompt includes it, so the panel and the block can never drift apart.
+ * feature whose prompt includes it, so the panel and the block can never drift apart. While the
+ * old story bible is archived (notes redesign, 2026-10-15) the block sends the note pages the
+ * scene names in place of the tags and sheets.
  */
 export const STORY_BIBLE_SENDS =
   "the story bible (your tag names by category, the scene's tags, the sheets of the " +
   'story-bible entries linked to those tags with what the manuscript states about them, and ' +
-  'the titles, metadata, and summaries of the scenes either side of it)'
+  'the titles, metadata, and summaries of the scenes either side of it; while the old story ' +
+  'bible is switched off, the note pages the scene names instead of the tags and sheets)'
 
 /**
  * F-5.23: the story map, as the data-sharing panel names it: the manuscript's chapter and scene

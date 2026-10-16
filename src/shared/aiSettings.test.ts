@@ -275,7 +275,9 @@ describe('AI_DATA_SHARING', () => {
         'learned style notes, and up to 3 exemplar passages), your author rules and banned phrases, and the story ' +
         "bible (your tag names by category, the scene's tags, the sheets of the story-bible " +
         'entries linked to those tags with what the manuscript states about them, and the ' +
-        'titles, metadata, and summaries of the scenes either side of it). An answer that ' +
+        'titles, metadata, and summaries of the scenes either side of it; while the old story ' +
+        'bible is switched off, the note pages the scene names instead of the tags and sheets). ' +
+        'An answer that ' +
         'breaks the voice profile or ' +
         'uses a banned phrase is sent back once, with the same context plus the rule it broke, ' +
         'for a second try.'
