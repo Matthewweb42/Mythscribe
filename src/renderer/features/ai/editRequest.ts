@@ -43,6 +43,26 @@ function chapters(): { id: string; title: string }[] {
 }
 
 /**
+ * The chapter a routed edit names (by title or number) or, with none named, the open scene's
+ * chapter; or why there is none. The edit flow's pre-fill reads it too.
+ */
+export function editChapterId(
+  edit: Pick<RouteEdit, 'chapter'>,
+  open: OpenScene
+): { id: string } | { reason: string } {
+  const tree = useTreeStore.getState()
+  if (edit.chapter !== null) {
+    const id = findChapter(edit.chapter, chapters())
+    return id === null ? { reason: `No chapter called “${edit.chapter}” in the manuscript.` } : { id }
+  }
+  if (!open.scene || open.nodeId === null) return { reason: EDIT_NO_SCENE_MESSAGE }
+  const parent = tree.byId[open.nodeId]?.parentId ?? null
+  return parent === null || tree.rootIds.includes(parent)
+    ? { reason: EDIT_NO_CHAPTER_MESSAGE }
+    : { id: parent }
+}
+
+/**
  * What a routed edit covers, or why there is nothing to work on: a named chapter (by title or
  * number) or the open scene's chapter; the selected passage when it is long enough to edit and
  * fits one request (a longer one is the whole scene); otherwise the open scene.
@@ -52,16 +72,9 @@ export function resolveEditTarget(edit: RouteEdit, open: OpenScene): EditTarget 
   const title = (id: string): string =>
     (tree.byId[id]?.title ?? 'Untitled').slice(0, EDIT_TARGET_TITLE_MAX)
   if (edit.target === 'chapter') {
-    let chapterId: string | null
-    if (edit.chapter !== null) {
-      chapterId = findChapter(edit.chapter, chapters())
-      if (chapterId === null) return `No chapter called “${edit.chapter}” in the manuscript.`
-    } else {
-      if (!open.scene || open.nodeId === null) return EDIT_NO_SCENE_MESSAGE
-      const parent = tree.byId[open.nodeId]?.parentId ?? null
-      chapterId = parent === null || tree.rootIds.includes(parent) ? null : parent
-      if (chapterId === null) return EDIT_NO_CHAPTER_MESSAGE
-    }
+    const chapter = editChapterId(edit, open)
+    if ('reason' in chapter) return chapter.reason
+    const chapterId = chapter.id
     const nodeIds = descendantDocuments(tree, chapterId)
     if (nodeIds.length === 0) return EDIT_EMPTY_CHAPTER_MESSAGE
     return { kind: 'chapter', nodeIds, title: title(chapterId), excerpt: null }
@@ -125,8 +138,11 @@ export function quoteChoice(
 
 /** What a started choice says on its turn. */
 export function startedText(choice: EditChoice, target: EditTarget): string {
-  const pass = choicePass(choice, null)
-  const label = pass === null ? "Editor's notes" : EDIT_PASS_LABEL[pass.type]
+  // A custom choice reads as a custom pass whatever its instruction (choicePass needs one).
+  const label =
+    choice === 'critique'
+      ? "Editor's notes"
+      : EDIT_PASS_LABEL[choice === 'dialogue' ? 'custom' : choice]
   return `${label} started on ${targetPhrase(target)}. The changes come back as tracked changes in the editor to accept or reject.`
 }
 

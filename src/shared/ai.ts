@@ -358,7 +358,10 @@ export const AI_FEATURE_IDS = [
   'judge',
   // Notes redesign phase 1 (2026-10-15): Ms Scribe in a story memory v1 project, answering with
   // every note page, the book map and the book (whole when it fits) in view, and editing notes.
-  'scribe'
+  'scribe',
+  // Notes redesign phase 2 (2026-10-15): the edit flow, stages and checks over a scene, a chapter
+  // or the whole book with the notes and the book map in view; Quick on fast, Deep on strong.
+  'editFlow'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -480,7 +483,10 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // Notes redesign phase 1: one step as JSON: a tool call (an edit_note may carry a whole page,
   // `SCRIBE_STEP_MAX_TOKENS` 3,000), or the answer with its sources; the cap is twice that for the
   // one retry of a reply that was cut off (the agent's pattern).
-  scribe: 6_000
+  scribe: 6_000,
+  // Notes redesign phase 2: one request's issues as JSON (up to 40, each with its quote, the
+  // problem and a fix), plus Developmental editing's overview (`EDIT_FLOW_MAX_TOKENS`).
+  editFlow: 8_000
 }
 
 /**
@@ -585,7 +591,12 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // pages that match), the book map, the book (whole under 60,000 tokens in all; else the picked
   // scenes ≤ 24,000; "whole book" forces it up to 80,000), the moment, the history and the tool
   // results so far (the oldest are dropped first when a step would go over).
-  scribe: 140_000
+  scribe: 140_000,
+  // Notes redesign phase 2: the rules, every note page (≤ 30,000 tokens, else the list and the
+  // pages the scope names), the book map, on Deep for a scene or a chapter the rest of the book
+  // (with the slice ≤ 60,000), then one slice of the scope's text (≤ 16,000 tokens Quick, ≤ 60,000
+  // Deep) and the family's task. Ms Scribe's cap, for the same notes and map.
+  editFlow: 140_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */

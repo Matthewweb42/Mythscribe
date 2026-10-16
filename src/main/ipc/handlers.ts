@@ -112,7 +112,10 @@ import {
 import { listOpenFindings } from '../ai/continuityFindingStore'
 import { runCritique } from '../ai/critique'
 import { runProofread } from '../ai/proofread'
-import { createEditPassRunner } from '../ai/editPass'
+import { createEditPassRunner, sceneTextOf } from '../ai/editPass'
+import { createEditFlowRunner } from '../editFlow/run'
+import { sceneTitles } from '../ai/context/queryContext'
+import { flowDetail, flowRunOf, listFlowRuns, markNoteEditUndone, readFlow, requireFlowRow } from '../editFlow/flowStore'
 import {
   deletePass,
   getPresets,
@@ -3909,7 +3912,10 @@ export function registerHandlers({
 
   register('editPass:list', () => {
     const db = manager.require().connection.orm
-    return listPassRows(db).map((row) => passSummary(db, row.id))
+    // The edit flow's runs are edit-pass rows too; they list in the flow's panel, not here.
+    return listPassRows(db)
+      .filter((row) => row.flow === null)
+      .map((row) => passSummary(db, row.id))
   })
 
   register('editPass:get', ({ id }) => {
@@ -3945,9 +3951,65 @@ export function registerHandlers({
       )
     }
     for (const passId of new Set(moved.map((change) => change.passId))) {
-      emit(windows(), 'editPass:changed', passSummary(db, passId))
+      const row = requirePass(db, passId)
+      if (readFlow(row) === null) emit(windows(), 'editPass:changed', passSummary(db, passId))
+      else emit(windows(), 'editFlow:changed', flowRunOf(db, row))
     }
     return moved
+  })
+
+  /**
+   * Notes redesign phase 2: the edit flow. One runner for the session, like the edit passes'; it
+   * reads the open project through the manager at every request and is cleared when the project
+   * changes. Every move of a run reaches every window as `editFlow:changed`; Update notes' writes
+   * push `notebook:changed`.
+   */
+  const editFlows = createEditFlowRunner({
+    db: () => (manager.current() === null ? null : manager.require().connection.orm),
+    folder: () => (manager.current() === null ? null : manager.require().folder),
+    requestDeps: (db) => requestDeps(db),
+    onChange: (run) => emit(windows(), 'editFlow:changed', run),
+    notebookChanged: (ids) => emit(windows(), 'notebook:changed', { ids })
+  })
+
+  register('editFlow:plan', (spec) => editFlows.plan(spec))
+
+  register('editFlow:start', async (spec) => {
+    try {
+      return { ok: true as const, run: await editFlows.start(spec) }
+    } catch (err) {
+      if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
+      throw err
+    }
+  })
+
+  register('editFlow:cancel', ({ id }) => {
+    editFlows.cancel(id)
+    return null
+  })
+
+  register('editFlow:list', () => listFlowRuns(manager.require().connection.orm))
+
+  register('editFlow:get', ({ id }) => {
+    const db = manager.require().connection.orm
+    const titleOf = sceneTitles(db)
+    const sceneText = (nodeId: string): string | null => {
+      try {
+        return sceneTextOf(getDocumentContent(db, nodeId).content)
+      } catch (err) {
+        if (err instanceof AppError) return null
+        throw err
+      }
+    }
+    return flowDetail(db, id, sceneText, (nodeId) => titleOf(nodeId) || 'Untitled')
+  })
+
+  register('editFlow:noteUndone', ({ id, index }) => {
+    const db = manager.require().connection.orm
+    markNoteEditUndone(db, id, index)
+    const run = flowRunOf(db, requireFlowRow(db, id))
+    emit(windows(), 'editFlow:changed', run)
+    return run
   })
 
   register('editPass:presets', () => getPresets(manager.require().connection.orm))
@@ -5930,6 +5992,8 @@ export function registerHandlers({
     // F-14.15: a pass running in the project that left stops without writing; one left running
     // by a crash or a quit reads as stopped in the project that opened, ready to resume.
     editPasses.clear()
+    // Notes redesign phase 2: an edit-flow run is an edit-pass row; the interrupt covers it too.
+    editFlows.clear()
     if (info) interruptRunningPasses(manager.require().connection.orm)
     // F-4.12b: the memoised word counts and what was last published belong to the project that
     // left, so a project opened again publishes its proposals afresh rather than staying silent

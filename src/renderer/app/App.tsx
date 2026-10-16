@@ -116,6 +116,7 @@ import { ContradictionCard } from '@renderer/features/editor/ContradictionCard'
 import { startReaderTriggers, stopReaderTriggers } from '@renderer/features/memory/readerTriggers'
 import { EntityEditor } from '@renderer/features/entities/EntityEditor'
 import { EditPassReport } from '@renderer/features/editPass/EditPassReport'
+import { useEditFlowStore } from '@renderer/features/editFlow/editFlowStore'
 import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
 import { EditPassWorkspace } from '@renderer/features/editPass/EditPassWorkspace'
@@ -334,6 +335,8 @@ export function App(): React.JSX.Element {
       useContinuityStore.getState().clear()
       // F-14.15: the edit passes, their reports, and the workspace belong to the project that closed.
       useEditPassStore.getState().clear()
+      // Notes redesign phase 2: the edit flow's panel and runs (loaded when the panel opens).
+      useEditFlowStore.getState().clear()
       // F-7.1: a shell dialog left open over the closing project must not reappear over the next one.
       useShellDialogStore.getState().close()
       // F-12.2: a draft under review belongs to the project it would be written into.

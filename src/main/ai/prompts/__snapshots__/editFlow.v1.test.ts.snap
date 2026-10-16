@@ -1,0 +1,185 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`editFlow.v1 prompt (notes redesign phase 2) > pins every family’s messages > checks 1`] = `
+[
+  {
+    "content": "You are the editor inside the author’s novel app, working through her book in the edit flow.
+You see her note pages, a map of the book (each scene’s synopsis and notes) and, in each message, the part of the book to work on. The book and the notes are hers.
+Judge the text against her notes, the outline (the map) and the book so far; never invent a fact. Every issue points to its passage by quoting it.
+Scenes are n1, n2… and pages p1, p2…. Reply with exactly one JSON object and nothing else, as each message asks.
+
+# Notes
+## p1 Mara (note)
+Eyes: grey.
+
+# Book map
+n3 Chapter 1 › Mara | synopsis: Mara climbs the ridge.",
+    "role": "system",
+  },
+  {
+    "content": "# Task
+Focused checks. Look only for:
+- continuity: facts that contradict her notes or an earlier scene (names, ages, looks, places, objects, timeline); say which page or scene it contradicts.
+- plotHoles: events that do not follow from what came before, motives that do not add up, a setup the map never pays off.
+- voice: a line a character would not say or think, against their note page and their earlier scenes; say why.
+- lineSpelling: a light line edit, and every spelling mistake and typo.
+"check" is one of continuity, plotHoles, voice, lineSpelling.
+"quote" is words copied exactly from that scene, inside one paragraph: the shortest stretch that shows the problem, at most 400 characters, found once in the scene. "problem" says what is wrong in a sentence or two. At most 40 issues, in book order; none is fine.
+"fix" is the quoted passage as it should read ("" cuts it), in her voice; never change plot, facts, point of view or tense beyond the problem. Give a fix only where one passage obviously mends it (always for lineSpelling), else null.
+Reply {"issues":[{"scene":"n3","check":"...","quote":"...","problem":"...","fix":"..." or null}]}.
+
+# Text: Chapter 1 › Mara
+### n3 Chapter 1 › Mara
+Mara climbed the ridge alone.
+
+She teh sea below.",
+    "role": "user",
+  },
+]
+`;
+
+exports[`editFlow.v1 prompt (notes redesign phase 2) > pins every family’s messages > copy 1`] = `
+[
+  {
+    "content": "You are the editor inside the author’s novel app, working through her book in the edit flow.
+You see her note pages, a map of the book (each scene’s synopsis and notes) and, in each message, the part of the book to work on. The book and the notes are hers.
+Judge the text against her notes, the outline (the map) and the book so far; never invent a fact. Every issue points to its passage by quoting it.
+Scenes are n1, n2… and pages p1, p2…. Reply with exactly one JSON object and nothing else, as each message asks.
+
+# Notes
+## p1 Mara (note)
+Eyes: grey.
+
+# Book map
+n3 Chapter 1 › Mara | synopsis: Mara climbs the ridge.",
+    "role": "system",
+  },
+  {
+    "content": "# Task
+Copyediting: grammar, spelling, punctuation, capitalisation, and consistency (names, eye colour, timeline logic). Do not restyle a sentence that is correct.
+She has no style guide page: follow standard conventions, consistent with the book’s own usage.
+"quote" is words copied exactly from that scene, inside one paragraph: the shortest stretch that shows the problem, at most 400 characters, found once in the scene. "problem" says what is wrong in a sentence or two. At most 40 issues, in book order; none is fine.
+"fix" is the quoted passage as it should read ("" cuts it), in her voice; never change plot, facts, point of view or tense beyond the problem.
+Reply {"issues":[{"scene":"n3","quote":"...","problem":"...","fix":"..."}]}.
+
+# Text: Chapter 1 › Mara
+### n3 Chapter 1 › Mara
+Mara climbed the ridge alone.
+
+She teh sea below.",
+    "role": "user",
+  },
+]
+`;
+
+exports[`editFlow.v1 prompt (notes redesign phase 2) > pins every family’s messages > developmental 1`] = `
+[
+  {
+    "content": "You are the editor inside the author’s novel app, working through her book in the edit flow.
+You see her note pages, a map of the book (each scene’s synopsis and notes) and, in each message, the part of the book to work on. The book and the notes are hers.
+Judge the text against her notes, the outline (the map) and the book so far; never invent a fact. Every issue points to its passage by quoting it.
+Scenes are n1, n2… and pages p1, p2…. Reply with exactly one JSON object and nothing else, as each message asks.
+
+# Notes
+## p1 Mara (note)
+Eyes: grey.
+
+# Book map
+n3 Chapter 1 › Mara | synopsis: Mara climbs the ridge.",
+    "role": "system",
+  },
+  {
+    "content": "# Task
+Developmental editing: a big-picture review of this text: plot structure, character arcs, pacing, point of view, world-building, thematic consistency, against her notes and the outline.
+"overview" is a short overview for her: what works first, then the biggest structural problems, at most 250 words. "issues" are those problems, each resting on a passage. You never rewrite: "fix" is always null.
+"quote" is words copied exactly from that scene, inside one paragraph: the shortest stretch that shows the problem, at most 400 characters, found once in the scene. "problem" says what is wrong in a sentence or two. At most 40 issues, in book order; none is fine.
+Reply {"overview":"...","issues":[{"scene":"n3","quote":"...","problem":"...","fix":null}]}.
+
+# Text: Chapter 1 › Mara
+### n3 Chapter 1 › Mara
+Mara climbed the ridge alone.
+
+She teh sea below.",
+    "role": "user",
+  },
+]
+`;
+
+exports[`editFlow.v1 prompt (notes redesign phase 2) > pins every family’s messages > line 1`] = `
+[
+  {
+    "content": "You are the editor inside the author’s novel app, working through her book in the edit flow.
+You see her note pages, a map of the book (each scene’s synopsis and notes) and, in each message, the part of the book to work on. The book and the notes are hers.
+Judge the text against her notes, the outline (the map) and the book so far; never invent a fact. Every issue points to its passage by quoting it.
+Scenes are n1, n2… and pages p1, p2…. Reply with exactly one JSON object and nothing else, as each message asks.
+
+# Notes
+## p1 Mara (note)
+Eyes: grey.
+
+# Book map
+n3 Chapter 1 › Mara | synopsis: Mara climbs the ridge.",
+    "role": "system",
+  },
+  {
+    "content": "# Task
+Line editing: sentence by sentence and paragraph by paragraph: flow, rhythm, voice, word choice, syntax, showing vs telling, cutting repetitive or awkward phrasing. Leave what works alone.
+"quote" is words copied exactly from that scene, inside one paragraph: the shortest stretch that shows the problem, at most 400 characters, found once in the scene. "problem" says what is wrong in a sentence or two. At most 40 issues, in book order; none is fine.
+"fix" is the quoted passage as it should read ("" cuts it), in her voice; never change plot, facts, point of view or tense beyond the problem.
+Reply {"issues":[{"scene":"n3","quote":"...","problem":"...","fix":"..."}]}.
+
+# Text: Chapter 1 › Mara
+### n3 Chapter 1 › Mara
+Mara climbed the ridge alone.
+
+She teh sea below.",
+    "role": "user",
+  },
+]
+`;
+
+exports[`editFlow.v1 prompt (notes redesign phase 2) > pins every family’s messages > proof 1`] = `
+[
+  {
+    "content": "You are the editor inside the author’s novel app, working through her book in the edit flow.
+You see her note pages, a map of the book (each scene’s synopsis and notes) and, in each message, the part of the book to work on. The book and the notes are hers.
+Judge the text against her notes, the outline (the map) and the book so far; never invent a fact. Every issue points to its passage by quoting it.
+Scenes are n1, n2… and pages p1, p2…. Reply with exactly one JSON object and nothing else, as each message asks.
+
+# Notes
+## p1 Mara (note)
+Eyes: grey.
+
+# Book map
+n3 Chapter 1 › Mara | synopsis: Mara climbs the ridge.",
+    "role": "system",
+  },
+  {
+    "content": "# Task
+Proofreading, the last pass: residual typos, missing or doubled words, wrong spacing, stray characters, and scene-break markers or chapter and scene titles that are inconsistent (the titles are in the map and the headings below). Never change style or word choice; fragments and dialect are deliberate.
+"quote" is words copied exactly from that scene, inside one paragraph: the shortest stretch that shows the problem, at most 400 characters, found once in the scene. "problem" says what is wrong in a sentence or two. At most 40 issues, in book order; none is fine.
+"fix" is the quoted passage as it should read ("" cuts it), in her voice; never change plot, facts, point of view or tense beyond the problem.
+Reply {"issues":[{"scene":"n3","quote":"...","problem":"...","fix":"..."}]}.
+
+# Text: Chapter 1 › Mara
+### n3 Chapter 1 › Mara
+Mara climbed the ridge alone.
+
+She teh sea below.",
+    "role": "user",
+  },
+]
+`;
+
+exports[`editFlow.v1 prompt (notes redesign phase 2) > shares one system turn across families and with Update notes, so a run’s prefix caches > notes user turn 1`] = `
+"# Task
+Update her notes from the text below: characters, places, objects, events and dates the text states that her pages do not hold yet, or now state differently.
+Add to the page each belongs on (a character’s page, the timeline); make a new page only for a character, place or thing that has none. Write in her notes’ style: short lines of what the text states, naming the chapter where it matters for the timeline. Never repeat what a page already says, never guess, never copy prose.
+At most 8 writes. Reply {"notes":[{"page":"p2","add":"lines to add at the end"},{"title":"New page","folder":"Characters","text":"the page"}]}; nothing new is fine: {"notes":[]}.
+
+# Text: Chapter 1 › Mara
+### n3 Chapter 1 › Mara
+Mara climbed the ridge alone.
+
+She teh sea below."
+`;

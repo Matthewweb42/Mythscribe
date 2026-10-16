@@ -109,7 +109,7 @@ describe('migrate', () => {
 
   it('applies the real bundled migrations to an empty database', () => {
     const result = migrate(db)
-    expect(result.version).toBe(42)
+    expect(result.version).toBe(43)
     expect(tables()).toContain('project')
     expect(tables()).toContain('todo_item')
     expect(tables()).toContain('node')
@@ -1968,5 +1968,50 @@ describe('the notebook (0041, notes redesign phase 1) leaves every older row and
       objects.filter((object) => !/^(sqlite_autoindex_)?notebook_/.test(object.name))
     expect(JSON.stringify(older(schemaOf(db)))).toBe(JSON.stringify(older(objectsBefore)))
     expect(JSON.stringify(dumpOf(db, tables))).toBe(JSON.stringify(rowsBefore))
+  })
+})
+
+describe('the edit flow (0042, notes redesign phase 2) leaves every older row and column', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    migrate(db, loadMigrations().slice(0, 42))
+    fillEveryTable(db)
+  })
+  afterEach(() => db.close())
+
+  it('adds the flow columns to edit_pass and edit_change; older rows read as edit passes', () => {
+    const tables = tableNamesOf(db).filter((table) => table !== 'schema_migrations')
+    const rowsBefore = dumpOf(db, tables)
+
+    expect(migrate(db, loadMigrations().slice(0, 43)).applied).toEqual(['0042_edit_flow'])
+
+    expect(tableNamesOf(db).filter((table) => table !== 'schema_migrations')).toEqual(tables)
+    const columns = (table: string): [string, number][] =>
+      (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string; notnull: number }[]).map(
+        (column) => [column.name, column.notnull]
+      )
+    expect(columns('edit_pass').slice(-3)).toEqual([
+      ['flow', 0],
+      ['overview', 0],
+      ['note_edits', 1]
+    ])
+    expect(columns('edit_change').at(-1)).toEqual(['flow_category', 0])
+    const rowsAfter = dumpOf(db, tables)
+    expect(rowsAfter.edit_pass).toEqual(
+      (rowsBefore.edit_pass ?? []).map((row) => ({
+        ...(row as object),
+        flow: null,
+        overview: null,
+        note_edits: '[]'
+      }))
+    )
+    expect(rowsAfter.edit_change).toEqual(
+      (rowsBefore.edit_change ?? []).map((row) => ({ ...(row as object), flow_category: null }))
+    )
+    const { edit_pass: _p, edit_change: _c, ...restAfter } = rowsAfter
+    const { edit_pass: _pb, edit_change: _cb, ...restBefore } = rowsBefore
+    expect(JSON.stringify(restAfter)).toBe(JSON.stringify(restBefore))
   })
 })

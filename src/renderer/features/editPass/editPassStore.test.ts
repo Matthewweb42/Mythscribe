@@ -214,6 +214,24 @@ describe('editPassStore (F-14.15)', () => {
     expect(store().changesByNode['sc-1']).toEqual([])
   })
 
+  it('accepting inline in a scene drawing the change settles it accepted, never stale (notes phase 2)', async () => {
+    changes = [change()]
+    const live = mount()
+    const storage = live.storage.trackedChanges
+    if (!storage) throw new Error('no tracked changes storage')
+    // The editor's own wiring (useTrackedChanges): its orphan reports settle stale.
+    storage.onStale = (ids) => void store().markStale(ids)
+    registerTrackedEditor('sc-1', live)
+    await store().loadChanges('sc-1')
+    live.commands.setTrackedChanges([
+      { id: 'c1', original: 'rang very very slowly', replacement: 'rang slowly', rationale: '', flagged: false }
+    ])
+    await store().accept(store().changesByNode['sc-1'] ?? [])
+    await flush()
+    expect(live.state.doc.textContent).toBe('The harbour bell rang slowly over the water.')
+    expect(settles).toEqual([{ ids: ['c1'], status: 'accepted' }])
+  })
+
   it('settles a change whose passage is gone as stale, and warns', async () => {
     changes = [change({ original: 'not in the scene any more' })]
     registerTrackedEditor('sc-1', mount())

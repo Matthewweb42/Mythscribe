@@ -157,6 +157,7 @@ import {
   EditPassSummary,
   EditPassType
 } from '../editPass'
+import { EditFlowDetail, EditFlowPlanResult, EditFlowRun, EditFlowSpec } from '../editFlow'
 import { EntityExchangeFormat, EntityImportItem, EntityImportPlan } from '../entityExchange'
 import { Background, FocusSettings } from '../focus'
 import { GoalsPatch, GoalsStatus } from '../goals'
@@ -808,6 +809,21 @@ export const EditPassStartResult = z.discriminatedUnion('ok', [
   })
 ])
 export type EditPassStartResult = z.infer<typeof EditPassStartResult>
+
+/**
+ * What `editFlow:start` answers (notes redesign phase 2): the run as it starts, or an expected AI
+ * failure as data (Use AI off, the feature off), as `editPass:start` does.
+ */
+export const EditFlowStartResult = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), run: EditFlowRun }),
+  z.object({
+    ok: z.literal(false),
+    code: AiErrorCode,
+    message: z.string(),
+    nextStep: z.string()
+  })
+])
+export type EditFlowStartResult = z.infer<typeof EditFlowStartResult>
 
 /**
  * What `ai:whatNext` answers (F-5.17): up to three directions (`dropped` counts the ones that
@@ -2788,6 +2804,24 @@ export const contract = {
     output: AiScribeResult
   },
   /**
+   * Notes redesign phase 2 (story memory v1): the edit flow. `editFlow:plan` reads what a run of
+   * the spec would send (its scope, requests and tokens) so the panel prices it before Run;
+   * nothing is sent. `editFlow:start` starts it (one run at a time) and answers at once;
+   * `editFlow:changed` follows every request answered. The latest run of each scope is kept
+   * (`editFlow:list`, newest first; `editFlow:get` with its issues). A fix is an edit-pass change:
+   * it is fetched, accepted and settled through `editPass:changes` and `editPass:settle`.
+   * `editFlow:noteUndone` records that the renderer undid one of Update notes' edits (by index).
+   */
+  'editFlow:plan': { input: EditFlowSpec, output: EditFlowPlanResult },
+  'editFlow:start': { input: EditFlowSpec, output: EditFlowStartResult },
+  'editFlow:cancel': { input: z.object({ id: z.string() }), output: z.null() },
+  'editFlow:list': { input: z.undefined(), output: z.array(EditFlowRun) },
+  'editFlow:get': { input: z.object({ id: z.string() }), output: EditFlowDetail },
+  'editFlow:noteUndone': {
+    input: z.object({ id: z.string(), index: z.number().int().nonnegative() }),
+    output: EditFlowRun
+  },
+  /**
    * 2026-10-07: the prose behind one of the agent's write intents, drafted in the author's voice
    * and fidelity-checked: an insertion (`passage` null; `before` is the scene's text before the
    * insertion point) or a rewrite of `passage` (`before` and `after` its context). The first
@@ -4051,6 +4085,8 @@ export const events = {
   'planLinks:changed': z.object({ changedNodeIds: z.array(z.string()) }),
   /** An edit pass moved (F-14.15): started, finished a scene, stopped, failed, finished, or had changes settled. */
   'editPass:changed': EditPassSummary,
+  /** An edit-flow run moved (notes redesign phase 2): started, a request answered, stopped, failed, finished, or had issues settled. */
+  'editFlow:changed': EditFlowRun,
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /**

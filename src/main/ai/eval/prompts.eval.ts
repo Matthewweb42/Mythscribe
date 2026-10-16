@@ -12,6 +12,7 @@ import { settleRoute } from '@shared/assistantRoute'
 import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote, normalizeForMatch } from '@shared/critique'
 import type { EditPassType } from '@shared/editPass'
+import { parseFlowIssues, parseFlowNotes } from '../../editFlow/parse'
 import { parseFilingAnswer, quoteParagraph } from '@shared/filing'
 import { locateQuote } from '@shared/memory/quote'
 import { parseReaderAnswer, parseVerifyAnswer, unfence } from '@shared/memory/readerAnswer'
@@ -509,6 +510,53 @@ function scoreEditPass(type: EditPassType, text: string, answer: string): LiveRe
       : { kind: 'json', ok: false, problem: `${dropped} of ${kept + dropped} dropped` }
   } catch {
     return { kind: 'json', ok: false, problem: 'not the changes or notes JSON asked for' }
+  }
+}
+
+/**
+ * The edit flow (notes redesign phase 2) scores through the feature's own parser, so the verdict
+ * is what the author would see: every issue's quote found in a scene of the slice, every fix a
+ * valid tracked change (once in the scene, one paragraph, no overlap, a proofread a correction);
+ * a dropped item is tokens the model wasted.
+ */
+function scoreEditFlow(
+  scoring: Extract<EvalCase['scoring'], { kind: 'editFlow' }>,
+  answer: string
+): LiveResult['verdict'] {
+  try {
+    const parsed = parseFlowIssues(answer, {
+      family: scoring.family,
+      checks: scoring.checks,
+      items: scoring.items.map((item) => ({
+        ...item,
+        title: item.ref,
+        part: { index: 0, count: 1 }
+      })),
+      scenes: new Map(scoring.items.map((item) => [item.nodeId, normalizeForMatch(item.text)])),
+      keep: new Set(),
+      taken: new Map()
+    })
+    const kept = parsed.issues.length
+    if (scoring.family === 'developmental' && parsed.overview === null) {
+      return { kind: 'json', ok: false, problem: 'no overview' }
+    }
+    return parsed.dropped === 0
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `${parsed.dropped} of ${kept + parsed.dropped} dropped` }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not the issues JSON asked for' }
+  }
+}
+
+/** Update notes scores through its own parser: the writes must parse, none dropped. */
+function scoreEditNotes(answer: string): LiveResult['verdict'] {
+  try {
+    const parsed = parseFlowNotes(answer)
+    return parsed.dropped === 0
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `${parsed.dropped} writes dropped` }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not the notes JSON asked for' }
   }
 }
 
@@ -1501,6 +1549,14 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
         answer: reply.text,
         verdict: scoreStructure({ ...c, scoring: c.scoring }, reply.text)
       })
+      continue
+    }
+    if (c.scoring.kind === 'editFlow') {
+      results.push({ ...base, answer: reply.text, verdict: scoreEditFlow(c.scoring, reply.text) })
+      continue
+    }
+    if (c.scoring.kind === 'editNotes') {
+      results.push({ ...base, answer: reply.text, verdict: scoreEditNotes(reply.text) })
       continue
     }
     const answer =
