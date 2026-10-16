@@ -1067,6 +1067,7 @@ describe('useAssistantStore Ms Scribe prose suggestions as tracked changes (note
       content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
     })
     registerTrackedEditor('sc-1', editor)
+    useActiveEditorStore.getState().set('sc-1', editor)
     return editor
   }
 
@@ -1102,7 +1103,7 @@ describe('useAssistantStore Ms Scribe prose suggestions as tracked changes (note
     expect(findCard(first.messageId)).toMatchObject({ status: 'skipped' })
   })
 
-  it('Apply on the card accepts the tracked change in the scene and settles it there', async () => {
+  it('Apply on the card accepts the tracked change in the scene and settles it there, and Undo puts it back', async () => {
     const editor = mountScene(PROSE.find)
     const { messageId, changeId, proposalId } = await suggest()
     trackedRows = [row()]
@@ -1112,6 +1113,9 @@ describe('useAssistantStore Ms Scribe prose suggestions as tracked changes (note
     expect(trackedSettles).toEqual([{ ids: ['tc-1'], status: 'accepted' }])
     expect(findCard(messageId)).toMatchObject({ status: 'applied' })
     expect(settles).toEqual([{ id: proposalId, status: 'accepted', note: null }])
+    await store().undoChange(messageId, changeId)
+    expect(editor.getText()).toBe(PROSE.find)
+    expect(findCard(messageId)).toMatchObject({ status: 'undone' })
     editor.destroy()
   })
 

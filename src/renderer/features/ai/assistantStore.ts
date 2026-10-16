@@ -84,7 +84,11 @@ import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { applyAgentEdit, openEditor, undoNotebookEdit } from './agentApply'
-import { AgentEditError, removeInsertedProse } from '@renderer/features/editor/agentEditing'
+import {
+  AgentEditError,
+  removeInsertedProse,
+  undoReplacePassage
+} from '@renderer/features/editor/agentEditing'
 import {
   acceptLanding,
   dismissLanding,
@@ -1668,6 +1672,22 @@ export const TRACKED_TEXT_CHANGED = 'the text changed since she suggested it'
 /** Why a card's tracked change is gone: settled elsewhere or cleared with old turns. */
 export const TRACKED_GONE = 'it is no longer waiting in the scene'
 
+/**
+ * The card's Undo for a tracked suggestion once it is in the text (notes fixes, 2026-10-15): the
+ * new words found again and the old put back, as the chat's own Apply undoes; this session only,
+ * and none for a cut (nothing is left to find it by).
+ */
+function rememberTrackedUndo(changeId: string, edit: AgentEdit): void {
+  if (edit.kind !== 'text' || edit.replace === '') return
+  undoers.set(changeId, async () =>
+    undoReplacePassage(await openEditor(edit.nodeId), {
+      removed: edit.find,
+      inserted: edit.replace,
+      before: ''
+    })
+  )
+}
+
 /** A scene's tracked change by id while it is still pending, read fresh from main. */
 async function pendingTracked(nodeId: string, trackedId: string): Promise<EditChange | null> {
   await useEditPassStore.getState().loadChanges(nodeId)
@@ -1700,7 +1720,9 @@ async function acceptTracked(
       patchChange(messageId, changeId, { status: 'failed', error: TRACKED_GONE })
     } else {
       const outcome = await useEditPassStore.getState().accept([tracked])
+      const found = findChange(messageId, changeId)
       if (outcome.applied.includes(trackedId)) {
+        if (found !== null) rememberTrackedUndo(changeId, found.change.edit)
         patchChange(messageId, changeId, { status: 'applied', error: null })
       } else if (outcome.stale.includes(trackedId)) {
         patchChange(messageId, changeId, { status: 'failed', error: TRACKED_TEXT_CHANGED })
@@ -1721,18 +1743,29 @@ async function acceptTracked(
  */
 function onTrackedSettled({ changes }: { changes: EditChange[] }): void {
   const status = new Map(changes.map((change) => [change.id, change.status]))
-  const touched: { messageId: string; changeId: string; status: EditChange['status'] }[] = []
+  const touched: {
+    messageId: string
+    changeId: string
+    edit: AgentEdit
+    status: EditChange['status']
+  }[] = []
   for (const conversation of useAssistantStore.getState().conversations?.items ?? []) {
     for (const message of conversation.messages) {
       for (const change of message.agent?.changes ?? []) {
         const next = change.trackedId === null ? undefined : status.get(change.trackedId)
         if (next === undefined || change.status !== 'pending') continue
-        touched.push({ messageId: message.id, changeId: change.id, status: next })
+        touched.push({
+          messageId: message.id,
+          changeId: change.id,
+          edit: change.edit,
+          status: next
+        })
       }
     }
   }
   for (const entry of touched) {
     if (entry.status === 'accepted') {
+      rememberTrackedUndo(entry.changeId, entry.edit)
       patchChange(entry.messageId, entry.changeId, { status: 'applied', error: null })
     } else if (entry.status === 'rejected') {
       patchChange(entry.messageId, entry.changeId, { status: 'skipped' })

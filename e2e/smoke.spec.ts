@@ -5672,7 +5672,8 @@ test('create, close, reopen a project on disk', async () => {
   // Notes redesign phase 1: in Write, Ms Scribe suggests prose as a change waiting for Apply:
   // the current text struck through, the new text marked. Apply changes Scene 1 in the editor
   // (AI-origin marked) and leaves a log line with Undo, which puts it back. Prose never changes
-  // without the author's Apply, in any mode.
+  // without the author's Apply, in any mode. Since the notes fixes (2026-10-15) the suggestion is
+  // also drawn in the scene as a tracked change, and the card's Accept settles both.
   await assistant.getByRole('button', { name: 'New conversation', exact: true }).click()
   await expect(turns).toHaveCount(0)
   await assistant.getByRole('radio', { name: 'Write', exact: true }).click()
@@ -5686,6 +5687,7 @@ test('create, close, reopen a project on disk', async () => {
   await expect(editCard).toHaveAttribute('data-status', 'pending')
   await expect(editCard.locator('del').first()).toBeVisible()
   await expect(editCard.locator('ins').first()).toBeVisible()
+  await expect(editor.locator('.tracked-ins')).toHaveText([AGENT_EDIT_REPLACEMENT])
   const sceneBefore = await documentTextWithoutGhost()
   expect(sceneBefore).not.toContain(AGENT_EDIT_REPLACEMENT)
   await editTurn.getByText('Looked up 2 things').click()
@@ -5695,6 +5697,7 @@ test('create, close, reopen a project on disk', async () => {
   ])
   await editCard.getByTestId('agent-change-apply').click()
   await expect(editCard).toHaveAttribute('data-status', 'applied')
+  await expect(editor.locator('.tracked-ins')).toHaveCount(0)
   await expect(editCard).toContainText(`Changed Chapter 1 › Scene 1: “${AGENT_EDIT_REPLACEMENT}”`)
   await expect(editor).toContainText(AGENT_EDIT_REPLACEMENT)
   await expect(editor.locator('.ai-origin', { hasText: AGENT_EDIT_REPLACEMENT })).toHaveCount(1)
@@ -7412,10 +7415,11 @@ async function fullscreenViewport(): Promise<{ w: number; h: number }> {
   return viewport()
 }
 
+/** The editor's text without ghost text or a tracked change's drawn replacement and buttons. */
 async function documentTextWithoutGhost(): Promise<string> {
   return page.getByRole('textbox', { name: 'Document' }).evaluate((element) => {
     const clone = element.cloneNode(true) as HTMLElement
-    clone.querySelectorAll('.ghost-text').forEach((ghost) => ghost.remove())
+    clone.querySelectorAll('.ghost-text, .tracked-change').forEach((drawn) => drawn.remove())
     return clone.textContent ?? ''
   })
 }
