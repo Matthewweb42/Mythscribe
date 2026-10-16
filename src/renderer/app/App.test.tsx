@@ -392,7 +392,7 @@ describe('App', () => {
     const picker = within(aside).getByRole('button', { name: 'Section: Manuscript' })
     const banner = screen.getByRole('banner')
     await waitFor(() =>
-      expect(within(banner).queryByRole('button', { name: 'Tags', exact: true })).toBeNull()
+      expect(within(banner).queryByRole('button', { name: 'Tags' })).toBeNull()
     )
     expect(within(banner).queryByRole('button', { name: 'References' })).toBeNull()
     await userEvent.click(picker)
