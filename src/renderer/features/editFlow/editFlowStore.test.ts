@@ -4,6 +4,7 @@ import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ip
 import { resetEditPassStore, useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
+import { resetFocusStore } from '@renderer/features/focus/focusStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetLayoutStore, useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -115,6 +116,7 @@ beforeEach(() => {
   resetEditPassStore()
   resetPendingSaves()
   resetLayoutStore()
+  resetFocusStore()
   useDialogStore.setState({ modals: [], toasts: [] })
   useTreeStore.setState({ ...buildIndex(treeFixture), loaded: true })
   setIpcClient(client())

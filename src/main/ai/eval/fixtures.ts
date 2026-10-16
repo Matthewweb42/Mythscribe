@@ -6845,8 +6845,6 @@ export const EVAL_CASES: EvalCase[] = [
   ...scribe2EvalCases(),
   // Notes redesign phase 2: the edit flow's stages and checks, and its Update notes.
   ...editFlowEvalCases(),
-  // Notes structure part B (2026-10-16): Sort with Ms Scribe.
-  ...notesSortEvalCases(),
   // Notes fixes (2026-10-15): Rewrite in Vibe, bolder; the v4 cases are Write's and Brainstorm's.
   rewriteCaseV6(
     'fresh',
@@ -6861,5 +6859,7 @@ export const EVAL_CASES: EvalCase[] = [
   rewriteCaseV6('maxed', 'every cap at its limit in Vibe, the mood and theme at their caps', {
     ...rewriteMaxedV3,
     mood: MAXED_MOOD
-  })
+  }),
+  // Notes structure part B (2026-10-16): Sort with Ms Scribe.
+  ...notesSortEvalCases(),
 ]

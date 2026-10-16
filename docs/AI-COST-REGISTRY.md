@@ -50,6 +50,7 @@ git history of this file is the log of each feature's cost over time (author req
 | `judge` | Contradiction check | background | judge.v1 | fast | 775 / 2683 | 120 / 300 | $0.0000924 · $0.000299 | $0.000115 | $0.00112 | 2 | $0.000185 |
 | `scribe` | Assistant with your notes and book | every chat message | scribe.v5 | strong | 4210 / 52984 | 400 / 6000 | $0.00201 · $0.0260 | $0.00251 | $0.0165 | 2 | $0.00401 |
 | `editFlow` | Edit flow | on request | editNotes.v1 | fast | 608 / 608 | 1500 / 8000 | $0.000328 · $0.00151 | $0.000410 | $0.00721 | 4 | $0.00131 |
+| `notesSort` | Sort uploads into notes | on request | notesSort.v1 | fast | 404 / 883 | 2500 / 5000 | $0.000492 · $0.000990 | $0.000615 | $0.0116 | 1 | $0.000492 |
 
 ## When each runs, and ideas to make it cheaper
 
@@ -222,6 +223,11 @@ git history of this file is the log of each feature's cost over time (author req
 
 - **When:** Notes redesign phase 2: the edit flow, run from the Edit button in the right column (or opened pre-filled by the chat) and priced before Run. editFlow.v1 for the stages and the focused checks, editNotes.v1 for Update notes; JSON. One system prefix shared by every request of a run (cached by the provider after the first): the rules, every note page (≤ 30,000 tokens), the book map; then one slice of the scope’s text and the family’s task. Quick: fast tier (DeepSeek V4 Flash), a chapter a slice (≤ 16,000 tokens). Deep: strong tier (DeepSeek V4 Pro), slices of ≤ 60,000 tokens (the author’s whole book in one); a Deep run of a scene or a chapter also carries the rest of the book in the prefix (with the slice ≤ 60,000). Requests = slices × (one per stage picked, one for the checks together, one for Update notes). max_tokens 8,000. Figures for the author’s book (about 23k words of prose, 12k of notes): a Quick copyedit of a chapter about 0.2¢; a Deep developmental edit of the whole book about 2–3¢ fresh. Notes redesign phase 3: also Update notes Quick on a chapter, automatically when the author leaves it after writing in it (Settings › AI, off by default, at most 10 runs a day by default; one request a chapter, about 0.2¢).
 - **Ideas:** Batch the stages of one slice into one request when the ledger shows the outputs are small; skip a slice whose text and notes did not change since the last run of the same scope; send the book map only to the families that use it (continuity, plot holes, developmental).
+
+### `notesSort` — Sort uploads into notes
+
+- **When:** Notes structure part B (2026-10-16): Sort with Ms Scribe, picked for files dropped or picked into Notes (each file is imported as one page first and kept) or from a note page’s menu, priced before it starts. notesSort.v1, fast tier (DeepSeek V4 Flash), JSON. The document is sent in parts of at most 12,000 characters (about 3,000 tokens), one request a part, each after the same system prefix (the rules and the Notes folders and page titles as they were when the sort started, ≤ 4,000 characters, cached by the provider after the first). She answers the pages with their folders and the text copied from the part, so the output is about the size of the part (max_tokens 5,000). Figures: a 2,000-word worldbuilding doc is one request, about 3,500 tokens in and 3,000 out, about 0.1¢ on V4 Flash.
+- **Ideas:** Answer with line ranges of the part instead of copied text (a fraction of the output tokens); skip a part that is only headings or blank; send the folder names only, not the page titles, once Notes is large.
 
 ## Planned: story memory (F-16)
 
