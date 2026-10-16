@@ -273,11 +273,11 @@ export const PROMPT_VERSIONS = [
   SCRIBE_V2_PROMPT_VERSION,
   // Notes redesign (2026-10-15, vibe.md): the mode in the moment, Vibe's bolder suggestions.
   SCRIBE_V3_PROMPT_VERSION,
+  // Notes fixes (2026-10-15, fixes-1.md §2): the folders' templates known before she writes.
+  SCRIBE_V4_PROMPT_VERSION,
   // Notes redesign phase 2: the edit flow's stages and checks, and its Update notes.
   EDIT_FLOW_PROMPT_VERSION,
   EDIT_NOTES_PROMPT_VERSION,
-  // Notes fixes (2026-10-15, fixes-1.md §2): the folders' templates known before she writes.
-  SCRIBE_V4_PROMPT_VERSION,
   // Notes fixes (2026-10-15, fixes-1.md §3): Rewrite in Vibe, bolder within the passage.
   REWRITE_PROMPT_V6_VERSION
 ] as const
