@@ -81,6 +81,7 @@ import { SHEET_WRITE_UP_PROMPT_VERSION } from './sheetWriteUp.v1'
 import { GHOST_PROMPT_V5_VERSION } from './ghostText.v5'
 import { GHOST_REGEN_PROMPT_V5_VERSION } from './ghostTextRegen.v5'
 import { REWRITE_PROMPT_V5_VERSION } from './rewrite.v5'
+import { REWRITE_PROMPT_V6_VERSION } from './rewrite.v6'
 import { REWRITE_REGEN_PROMPT_V5_VERSION } from './rewriteRegen.v5'
 import { CHAT_PROMPT_V6_VERSION } from './chat.v6'
 import { CHAT_REGEN_PROMPT_V6_VERSION } from './chatRegen.v6'
@@ -276,7 +277,9 @@ export const PROMPT_VERSIONS = [
   EDIT_FLOW_PROMPT_VERSION,
   EDIT_NOTES_PROMPT_VERSION,
   // Notes fixes (2026-10-15, fixes-1.md §2): the folders' templates known before she writes.
-  SCRIBE_V4_PROMPT_VERSION
+  SCRIBE_V4_PROMPT_VERSION,
+  // Notes fixes (2026-10-15, fixes-1.md §3): Rewrite in Vibe, bolder within the passage.
+  REWRITE_PROMPT_V6_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -659,6 +662,13 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'strong',
     output: 'text',
     since: 'F-16.14'
+  },
+  // Notes fixes (2026-10-15): Rewrite in Vibe, v4's request with a bolder line in the user turn.
+  [REWRITE_PROMPT_V6_VERSION]: {
+    feature: 'rewrite',
+    tier: 'strong',
+    output: 'text',
+    since: 'F-14.10'
   },
   [REWRITE_REGEN_PROMPT_V5_VERSION]: {
     feature: 'rewrite',

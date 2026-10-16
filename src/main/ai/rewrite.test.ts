@@ -24,6 +24,7 @@ import { bumpVoiceVersion, resetVoiceProfileCache } from '../voice/versionCache'
 import { defaultAiUsageState, dayOf } from './dailyCap'
 import { cancelInflight, inflightCount, resetInflight } from './inflight'
 import { REGEN_CLAUSE_PREFIX } from './prompts/ghostTextRegen.v1'
+import { REWRITE_V6_VIBE_LINE } from './prompts/rewrite.v6'
 import {
   AiCancelledError,
   AiProviderError,
@@ -463,6 +464,49 @@ describe('runRewrite fidelity check (F-14.7)', () => {
     await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' })
     expect(ledger).toHaveLength(1)
     expect(inflightCount()).toBe(0)
+  })
+})
+
+describe('runRewrite in Vibe (notes fixes, 2026-10-15)', () => {
+  it('sends rewrite.v6 in Vibe, the bolder line after v4’s request, and v4 in Write and Brainstorm', async () => {
+    const vibe = await rewrite({ mode: 'vibe' })
+    expect(vibe.promptVersion).toBe('rewrite.v6')
+    const sent = stream.mock.calls[0]![0].messages
+    expect(sent[1]?.content).toBe(
+      `Passage to rewrite:\n"""\n${PASSAGE}\n"""\n\nRewrite the passage.\n\n${REWRITE_V6_VIBE_LINE}`
+    )
+    // Not the cached Vibe answer: Write is its own request, v4's, with the same system turn.
+    const write = await rewrite({ mode: 'write' })
+    expect(write.promptVersion).toBe('rewrite.v4')
+    expect(stream).toHaveBeenCalledTimes(2)
+    expect(stream.mock.calls[1]![0].messages[0]).toEqual(sent[0])
+    expect(stream.mock.calls[1]![0].messages[1]?.content).not.toContain(REWRITE_V6_VIBE_LINE)
+    expect((await rewrite({ mode: 'brainstorm' })).promptVersion).toBe('rewrite.v4')
+    expect((await rewrite()).promptVersion).toBe('rewrite.v4')
+    // Brainstorm and no mode at all answer from Write's cache: the same request.
+    expect(ledger.map((row) => [row.promptVersion, row.cached])).toEqual([
+      ['rewrite.v6', false],
+      ['rewrite.v4', false],
+      ['rewrite.v4', true],
+      ['rewrite.v4', true]
+    ])
+  })
+
+  it('keeps the fidelity regenerate and the author’s regenerate as before in Vibe', async () => {
+    strongProfile()
+    streams(OFF_VOICE)
+    answers(CLEAN)
+    const result = await rewrite({ mode: 'vibe' })
+    expect(ledger.map((row) => row.promptVersion)).toEqual(['rewrite.v6', 'rewriteRegen.v4'])
+    expect(result.promptVersion).toBe('rewriteRegen.v4')
+    streams(CLEAN)
+    const again = await rewrite({ mode: 'vibe', note: 'Colder.', regeneratedFrom: 'p-1' })
+    expect(again.promptVersion).toBe('rewriteRegen.v4')
+  })
+
+  it('sends the v2 version in a story memory v2 project whatever the mode', async () => {
+    const result = await rewrite({ mode: 'vibe', memory: 'v2' })
+    expect(result.promptVersion).toBe('rewrite.v5')
   })
 })
 

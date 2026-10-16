@@ -2913,7 +2913,12 @@ export const contract = {
       after: z.string().max(REWRITE_CONTEXT_CHARS),
       requestId: z.string(),
       note: z.string().max(PROPOSAL_NOTE_MAX).nullable().optional(),
-      regeneratedFrom: z.string().nullable().optional()
+      regeneratedFrom: z.string().nullable().optional(),
+      /**
+       * Notes fixes (2026-10-15): the chat mode the author is in. A first rewrite in Vibe (story
+       * memory v1) sends `rewrite.v6`, the bolder version; absent reads as any other mode.
+       */
+      mode: AssistantMode.optional()
     }),
     output: AiRewriteResult
   },

@@ -456,6 +456,7 @@ import {
   REWRITE_PROMPT_V5_VERSION,
   type BuildRewritePromptV5Input
 } from '../prompts/rewrite.v5'
+import { buildRewritePromptV6 } from '../prompts/rewrite.v6'
 import {
   buildRewriteRegenPromptV5,
   REWRITE_REGEN_PROMPT_V5_VERSION
@@ -3805,6 +3806,22 @@ function rewriteCaseV5(
   }
 }
 
+/**
+ * Notes fixes (2026-10-15): Rewrite in Vibe (`rewrite.v6`), v4's request with the bolder line; the
+ * same passages as v4's cases, which are what Write and Brainstorm send.
+ */
+function rewriteCaseV6(name: string, note: string, input: BuildRewritePromptV4Input): EvalCase {
+  const built = buildRewritePromptV6(input)
+  return {
+    version: built.version,
+    name,
+    note,
+    messages: built.messages,
+    maxTokens: built.maxTokens,
+    scoring: { kind: 'chat', profile: input.voice === null ? null : FIXTURE_STATS }
+  }
+}
+
 function chatV6(input: BuildChatPromptV5Input, storyNotes: string | null): BuildChatPromptV6Input {
   const { bible: _bible, steer: _steer, ...rest } = input
   return { ...rest, storyNotes }
@@ -6821,5 +6838,20 @@ export const EVAL_CASES: EvalCase[] = [
   // Notes redesign phase 1 (story memory v1): Ms Scribe with the notes and the book in view.
   ...scribe2EvalCases(),
   // Notes redesign phase 2: the edit flow's stages and checks, and its Update notes.
-  ...editFlowEvalCases()
+  ...editFlowEvalCases(),
+  // Notes fixes (2026-10-15): Rewrite in Vibe, bolder; the v4 cases are Write's and Brainstorm's.
+  rewriteCaseV6(
+    'fresh',
+    'the v4 fresh case in Vibe: a scene with no reading yet, the bolder line last',
+    { ...rewriteFreshV3, mood: null }
+  ),
+  rewriteCaseV6(
+    'full',
+    'the v4 full case (what Write sends) in Vibe: tighten, cut, reorder, sharpen, a missing beat',
+    { ...rewriteFullV3, mood: FIXTURE_MOOD }
+  ),
+  rewriteCaseV6('maxed', 'every cap at its limit in Vibe, the mood and theme at their caps', {
+    ...rewriteMaxedV3,
+    mood: MAXED_MOOD
+  })
 ]

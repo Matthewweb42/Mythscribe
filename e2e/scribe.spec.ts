@@ -31,7 +31,8 @@ import { clickIntoEditor } from './support'
  * Then (2026-10-15, `scribe.v3`) Vibe: asked to make the scene better, she proposes a change to the
  * sea line unasked; it waits in the chat (the old words struck, the new marked) and, since the
  * notes fixes (2026-10-15), inline in the scene as a tracked change; Accept in the text puts it in
- * the scene and the card shows it accepted.
+ * the scene and the card shows it accepted. Still in Vibe, Rewrite in my voice on a selection sends
+ * `rewrite.v6`: the bolder line closes its user turn.
  */
 
 let app: ElectronApplication
@@ -51,6 +52,10 @@ const SEA_QUESTION = 'Where does Tash first see the sea?'
 const VIBE_QUESTION = 'What can I do to make this scene better?'
 const VIBE_REPLACEMENT = 'Below the ridge the sea lay still and grey as a blade'
 const VIBE_ANSWER = 'One change: the sea line, sharper and colder.'
+/** `rewrite.v1`'s opening (every rewrite version's system turn starts with it). */
+const REWRITE_SENTINEL = 'You are the rewrite feature inside a novel-writing app.'
+/** The start of `rewrite.v6`'s Vibe line (notes fixes, 2026-10-15), last in the user turn. */
+const REWRITE_VIBE_LINE = 'Mode Vibe: be bolder than a close rewrite'
 /** The paragraph of Tash's scene her source quotes, far enough down to need a scroll. */
 const SEA_AT = 14
 const SEA_QUOTE = 'Below the ridge the sea lay flat as hammered tin'
@@ -426,4 +431,40 @@ test('Vibe proposes a bolder change unasked, which waits as a tracked change in 
   await expect(editor).toContainText(VIBE_REPLACEMENT)
   await expect(editor).not.toContainText(SEA_QUOTE)
   await expect(change).toHaveAttribute('data-status', 'applied')
+})
+
+test('Rewrite in Vibe sends the bolder version, its line last in the user turn (notes fixes)', async () => {
+  // Continues in Vibe, Tash's scene open in the editor.
+  const editor = page.getByRole('textbox', { name: 'Document' })
+  const rewriteButton = page.getByTestId('selection-rewrite')
+  await clickIntoEditor(editor)
+  const first = editor.locator('p').first()
+  await first.scrollIntoViewIfNeeded()
+  await first.evaluate((paragraph) => {
+    const text = paragraph.firstChild
+    if (!(text instanceof Text)) throw new Error('expected the paragraph to open with text')
+    const range = document.createRange()
+    range.setStart(text, 0)
+    range.setEnd(text, Math.min(60, text.length))
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  })
+  await expect
+    .poll(() => page.evaluate(() => (window.getSelection()?.toString() ?? '').length))
+    .toBeGreaterThan(20)
+  await expect(rewriteButton).toBeEnabled()
+  const before = bodies.length
+  await rewriteButton.click()
+  const panel = page.getByTestId('rewrite-panel')
+  await expect(panel.getByTestId('rewrite-diff')).toBeVisible({ timeout: 15_000 })
+  const rewrite = bodies
+    .slice(before)
+    .find((b) => b.messages[0]?.content.startsWith(REWRITE_SENTINEL) === true)
+  expect(rewrite).toBeDefined()
+  const user = rewrite?.messages.at(-1)?.content ?? ''
+  expect(user).toContain('Rewrite the passage.')
+  expect(user.slice(user.lastIndexOf('\n\n') + 2).startsWith(REWRITE_VIBE_LINE)).toBe(true)
+  await panel.getByTestId('rewrite-reject').click()
+  await expect(panel).toHaveCount(0)
 })

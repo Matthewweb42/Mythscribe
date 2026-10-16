@@ -82,7 +82,7 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
   },
   rewrite: {
     trigger: 'on request',
-    when: 'Rewrite a selection (bubble, chat, or agent edit).',
+    when: 'Rewrite a selection (bubble, chat, or agent edit). In the chat’s Vibe mode (story memory v1, notes fixes 2026-10-15) the first draft sends rewrite.v6: rewrite.v4 with one bolder line (about 50 tokens) at the end of the user turn, so the cached system turn is the same; regenerates send rewriteRegen.v4 as before.',
     callsPerUse: 1,
     typicalOutTokens: 250,
     ideas:

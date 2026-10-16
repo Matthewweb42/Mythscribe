@@ -1,5 +1,9 @@
 # Small fixes after phase 6 (2026-10-15)
 
+**Status: built 2026-10-15** (one commit per fix; contract additive: `trackedId` on Ms Scribe's
+changes, the event `scribe:trackedSettled`, `mode` on `ai:rewrite`; no migration; prompts
+`scribe.v4` and `rewrite.v6`; calls in `QUESTIONS.md` "Small fixes (2026-10-15)").
+
 The author asked (2026-10-15): "Do the small fixes you already know about." Three fixes; calls
 marked "decided by Claude" go in `QUESTIONS.md` ("Small fixes (2026-10-15)").
 

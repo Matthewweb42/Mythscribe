@@ -10,6 +10,8 @@ import type {
 } from '@shared/ipc/contract'
 import { resetAiActivityStore, useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
 import { resetProposalStore } from '@renderer/features/ai/proposalStore'
+import { resetAiSettingsStore, useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
+import { defaultAiSettings } from '@shared/aiSettings'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
 import { IpcRequestError, setIpcClient, type IpcClient } from '@renderer/lib/ipc'
@@ -114,6 +116,7 @@ async function ready(): Promise<PendingRewrite> {
 beforeEach(() => {
   resetTagStore()
   resetRewriteStore()
+  resetAiSettingsStore()
   resetAiActivityStore()
   resetProposalStore()
   useDialogStore.setState({ modals: [], toasts: [] })
@@ -135,6 +138,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetRewriteStore()
+  resetAiSettingsStore()
   resetAiActivityStore()
   resetProposalStore()
   if (!editor.isDestroyed) editor.destroy()
@@ -142,6 +146,12 @@ afterEach(() => {
 })
 
 describe('rewriteStore (F-14.10)', () => {
+  it('sends the chat mode the author is in, Vibe included (notes fixes, 2026-10-15)', async () => {
+    useAiSettingsStore.setState({ settings: { ...defaultAiSettings(), dial: 1, chatMode: 'vibe' } })
+    const request = await startFirst()
+    expect(request.input.mode).toBe('vibe')
+  })
+
   it('start captures the passage and its context, sets the target, tracks the request, and streams the draft', async () => {
     const request = await startFirst()
     expect(request.input).toEqual({
@@ -151,7 +161,9 @@ describe('rewriteStore (F-14.10)', () => {
       text: FIRST,
       before: '',
       after: `\n\n${SECOND}`,
-      requestId: expect.stringMatching(/^rw-/) as string
+      requestId: expect.stringMatching(/^rw-/) as string,
+      // Notes fixes (2026-10-15): the chat mode rides along; Write with no settings loaded.
+      mode: 'write'
     })
     expect(session()).toMatchObject({
       nodeId: 'sc-1',
@@ -327,7 +339,8 @@ describe('rewriteStore (F-14.10)', () => {
       after: `\n\n${SECOND}`,
       requestId: expect.stringMatching(/^rw-/) as string,
       note: 'Keep the short sentences.',
-      regeneratedFrom: 'p1'
+      regeneratedFrom: 'p1',
+      mode: 'write'
     })
     expect(second.input.requestId).not.toBe(first.input.requestId)
     expect(session()).toMatchObject({ status: 'streaming', draft: '', result: null })

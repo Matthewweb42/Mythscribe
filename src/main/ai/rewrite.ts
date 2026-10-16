@@ -2,6 +2,7 @@ import { promptSceneMeta } from '@shared/sceneMeta'
 import { REWRITE_CONTEXT_CHARS, REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '@shared/rewrite'
 import { normalizeProposalNote } from '@shared/proposal'
 import { STORY_BIBLE_TOKEN_BUDGET } from '@shared/storyBible'
+import type { AssistantMode } from '@shared/aiSettings'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
 import { requireDocument } from '../document/documentStore'
 import { getSceneMeta } from '../document/sceneMetaStore'
@@ -21,6 +22,7 @@ import { buildRewritePromptV4, type BuildRewritePromptV4Input } from './prompts/
 import { buildRewriteRegenPromptV4 } from './prompts/rewriteRegen.v4'
 import { buildRewritePromptV5, type BuildRewritePromptV5Input } from './prompts/rewrite.v5'
 import { buildRewriteRegenPromptV5 } from './prompts/rewriteRegen.v5'
+import { buildRewritePromptV6 } from './prompts/rewrite.v6'
 import { AiCancelledError } from './providers/types'
 import {
   runAiRequest,
@@ -55,6 +57,12 @@ export interface RewriteInput {
    * with the scene line read from the typed details.
    */
   memory: StoryMemoryVersion
+  /**
+   * Notes fixes (2026-10-15): the chat mode the author is in. In Vibe a v1 project's first draft
+   * sends `rewrite.v6`, bolder within the passage; any other mode, a v2 project, and every
+   * regenerate (the author's or the fidelity check's) send what they sent before.
+   */
+  mode?: AssistantMode
 }
 
 /** The same shape a chat answer has, so the renderer's handling of the two is shared. */
@@ -153,13 +161,16 @@ export async function runRewrite(
   const note = normalizeProposalNote(input.note)
   const regeneratedFrom = input.regeneratedFrom ?? null
   const authorRegenerate = note !== null || regeneratedFrom !== null
+  const vibe = !v2 && !authorRegenerate && input.mode === 'vibe'
   const prompt = v2
     ? authorRegenerate
       ? buildRewriteRegenPromptV5({ ...baseV5, note, violation: null })
       : buildRewritePromptV5(baseV5)
     : authorRegenerate
       ? buildRewriteRegenPromptV4({ ...base, note, violation: null })
-      : buildRewritePromptV4(base)
+      : vibe
+        ? buildRewritePromptV6(base)
+        : buildRewritePromptV4(base)
   const hashed = {
     text: input.text,
     before: input.before,
@@ -171,7 +182,8 @@ export async function runRewrite(
     mood,
     note,
     regeneratedFrom: authorRegenerate ? regeneratedFrom : null,
-    voiceVersion: voiceProfileVersion()
+    voiceVersion: voiceProfileVersion(),
+    ...(vibe ? { vibe } : {})
   }
   const request = {
     feature: 'rewrite' as const,

@@ -3757,7 +3757,8 @@ export function registerHandlers({
       after,
       requestId,
       note,
-      regeneratedFrom
+      regeneratedFrom,
+      mode
     }): Promise<AiRewriteResult> => {
       try {
         const db = manager.require().connection.orm
@@ -3765,7 +3766,17 @@ export function registerHandlers({
         const result = await runRewrite(
           db,
           deps,
-          { nodeId, text, before, after, note, regeneratedFrom, requestId, memory: memory() },
+          {
+            nodeId,
+            text,
+            before,
+            after,
+            note,
+            regeneratedFrom,
+            requestId,
+            memory: memory(),
+            ...(mode === undefined ? {} : { mode })
+          },
           (delta) => emit(windows(), 'ai:rewriteDelta', { requestId, delta })
         )
         const { usage, costUsd, cached, model, flagged, violation } = result

@@ -3,7 +3,9 @@ import type { Editor } from '@tiptap/core'
 import type { AiUsage } from '@shared/ai'
 import type { AiRewriteResult, EventPayload, Input } from '@shared/ipc/contract'
 import { REWRITE_TEXT_MAX, REWRITE_TEXT_MIN } from '@shared/rewrite'
+import { DEFAULT_ASSISTANT_MODE } from '@shared/aiSettings'
 import { useAiActivityStore } from '@renderer/features/ai/aiActivityStore'
+import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { proposalStore } from '@renderer/features/ai/proposalStore'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
@@ -153,10 +155,15 @@ function fail(requestId: string, message: string): void {
   useRewriteStore.setState({ session: { ...session, status: 'error', error: message } })
 }
 
-function send(input: Input<'ai:rewrite'>): void {
+/**
+ * Sends one rewrite with the chat mode the author is in (notes fixes, 2026-10-15: Vibe's first
+ * draft is bolder; main decides what each mode sends).
+ */
+function send(input: Omit<Input<'ai:rewrite'>, 'mode'>): void {
+  const mode = useAiSettingsStore.getState().settings?.chatMode ?? DEFAULT_ASSISTANT_MODE
   useAiActivityStore
     .getState()
-    .track('rewrite', input.requestId, ipc().invoke('ai:rewrite', input))
+    .track('rewrite', input.requestId, ipc().invoke('ai:rewrite', { ...input, mode }))
     .then(
       (result) => settle(input.requestId, result),
       (err: unknown) => fail(input.requestId, describeError(err))
