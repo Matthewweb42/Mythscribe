@@ -18,6 +18,10 @@ tests for what changes, the full gate suite once at the end of each part.
 
 ## A. Two tabs: Manuscript | Notes (renderer only) — built 2026-10-16
 
+**Changed by the author (2026-10-16):** three tabs, Manuscript | Notes | Edits; Outline and
+Timeline are two large folders at the top of the Notes tree (built the same day). The text below is
+the first version.
+
 - **While the old story bible is archived** (the fresh start, `useIsArchived('storyBible')`), the
   sidebar's section dropdown becomes **two tabs side by side, Manuscript and Notes**, on the same
   row as the dock controls (`controls`). With the story bible on, or in a v2 project, the dropdown
