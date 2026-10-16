@@ -27,6 +27,7 @@ import { resetDocumentStore } from '@renderer/features/editor/documentStore'
 import { buildExtensions } from '@renderer/features/editor/extensions'
 import { resetRewriteStore, useRewriteStore } from '@renderer/features/editor/rewriteStore'
 import { resetEditPassStore, useEditPassStore } from '@renderer/features/editPass/editPassStore'
+import { resetEditFlowStore, useEditFlowStore } from '@renderer/features/editFlow/editFlowStore'
 import {
   resetSceneSuggestStore,
   useSceneSuggestStore
@@ -47,6 +48,7 @@ import { resetAiActivityStore } from './aiActivityStore'
 import { resetAiSettingsStore, useAiSettingsStore } from './aiSettingsStore'
 import {
   ATTACHMENT_MAX,
+  editFlowOpenedText,
   PLAN_NO_EDITS_MESSAGE,
   REWRITE_STARTED_MESSAGE,
   resetAssistantStore,
@@ -274,6 +276,7 @@ beforeEach(async () => {
   resetCritiqueStore()
   resetRewriteStore()
   resetEditPassStore()
+  resetEditFlowStore()
   resetSceneSuggestStore()
   resetContinuityStore()
   resetLayoutStore()
@@ -300,6 +303,7 @@ afterEach(() => {
   resetCritiqueStore()
   resetRewriteStore()
   resetEditPassStore()
+  resetEditFlowStore()
   resetSceneSuggestStore()
   resetContinuityStore()
   resetLayoutStore()
@@ -481,41 +485,67 @@ describe('edit requests (F-5.26)', () => {
     expect(sent('editPass:start')[0]?.instruction?.startsWith('Dialogue pass: ')).toBe(true)
   })
 
-  it('with a selection, the pass reads only the selected passage', async () => {
-    route = editRoute({ pass: 'proofread', target: 'selection', chapter: null })
+  it('with a selection, a custom pass reads only the selected passage', async () => {
+    route = editRoute({ pass: 'custom', target: 'selection', chapter: null }, 'Cut the adverbs.')
     editor.commands.setTextSelection({ from: 1, to: 40 })
-    await useAssistantStore.getState().send('Proofread this')
+    await useAssistantStore.getState().send('Cut the adverbs here')
     expect(sent('editPass:start')).toEqual([
       {
-        type: 'proofread',
-        instruction: null,
+        type: 'custom',
+        instruction: 'Cut the adverbs.',
         nodeIds: ['sc-1'],
         excerpt: SCENE.slice(0, 39)
       }
     ])
-    expect(turns()[1]?.content).toContain('Proofread started on the selection in “Scene 1”')
+    expect(turns()[1]?.content).toContain('Custom pass started on the selection in “Scene 1”')
   })
 
-  it('a specific request on a named chapter runs at once over its scenes', async () => {
+  it('in a v1 project a specific request opens the edit flow pre-filled; nothing starts (notes phase 2)', async () => {
+    route = editRoute({ pass: 'proofread', target: 'selection', chapter: null })
+    editor.commands.setTextSelection({ from: 1, to: 40 })
+    await useAssistantStore.getState().send('Proofread this')
+    expect(sent('editPass:start')).toHaveLength(0)
+    expect(sent('editFlow:start')).toHaveLength(0)
+    expect(useEditFlowStore.getState()).toMatchObject({
+      open: true,
+      categories: ['proofread'],
+      scope: 'scene',
+      chapterId: null,
+      shownId: null
+    })
+    expect(turns()[1]).toMatchObject({
+      action: 'editPass',
+      content: editFlowOpenedText('proofread', 'Scene 1'),
+      edit: null
+    })
+  })
+
+  it('a request on a named chapter opens the flow on that chapter', async () => {
     route = editRoute({ pass: 'proofread', target: 'chapter', chapter: 'chapter 3' })
     await useAssistantStore.getState().send('Proofread chapter 3')
-    expect(sent('editPass:start')).toEqual([
-      { type: 'proofread', instruction: null, nodeIds: ['sc-3'], excerpt: null }
-    ])
-    expect(turns()[1]?.edit).toMatchObject({
-      target: { kind: 'chapter', title: 'Chapter 3' },
-      picked: 'proofread'
+    expect(sent('editPass:start')).toHaveLength(0)
+    expect(useEditFlowStore.getState()).toMatchObject({
+      open: true,
+      categories: ['proofread'],
+      scope: 'chapter',
+      chapterId: 'ch-3'
     })
+    expect(turns()[1]?.content).toBe(editFlowOpenedText('proofread', 'Chapter 3'))
   })
 
   it("this chapter is the open scene's; a chapter that is not there says so", async () => {
     route = editRoute({ pass: 'developmental', target: 'chapter', chapter: null })
     await useAssistantStore.getState().send('Fix the pacing of this chapter')
-    expect(sent('editPass:start')[0]).toMatchObject({ type: 'developmental', nodeIds: ['sc-1'] })
+    expect(useEditFlowStore.getState()).toMatchObject({
+      categories: ['developmental'],
+      scope: 'chapter',
+      chapterId: 'ch-1'
+    })
 
+    useEditFlowStore.getState().close()
     route = editRoute({ pass: 'line', target: 'chapter', chapter: 'Chapter 40' })
     await useAssistantStore.getState().send('Tighten chapter 40')
-    expect(sent('editPass:start')).toHaveLength(1)
+    expect(useEditFlowStore.getState().open).toBe(false)
     expect(turns()[3]?.content).toBe('No chapter called “Chapter 40” in the manuscript.')
   })
 
@@ -533,13 +563,13 @@ describe('edit requests (F-5.26)', () => {
   })
 
   it('a pass already running answers with the reason and keeps the choice to try later', async () => {
-    route = editRoute({ pass: 'line', target: 'scene', chapter: null })
-    await useAssistantStore.getState().send('Tighten the prose')
-    await useAssistantStore.getState().send('Tighten the prose again')
+    route = editRoute({ pass: 'dialogue', target: 'scene', chapter: null })
+    await useAssistantStore.getState().send('A dialogue pass please')
+    await useAssistantStore.getState().send('Another dialogue pass')
     expect(sent('editPass:start')).toHaveLength(1)
     expect(turns()[3]).toMatchObject({
       content: 'An edit pass is already running. Stop it or wait for it to finish.',
-      edit: { choices: ['line'], picked: null }
+      edit: { choices: ['dialogue'], picked: null }
     })
   })
 

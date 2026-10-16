@@ -45,6 +45,8 @@ import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useAssistantName } from '@renderer/features/shell/viewStore'
 import { useShownSideWork } from '@renderer/features/sideWork/sideWork'
+import { EditFlowButton, EditFlowPanel } from '@renderer/features/editFlow/EditFlowPanel'
+import { useEditFlowStore } from '@renderer/features/editFlow/editFlowStore'
 import { SuggestionsPanel } from '@renderer/features/memory/suggestions/SuggestionsPanel'
 import { APP_SHORTCUTS, matchesShortcut } from '@renderer/features/shell/shortcuts'
 import { prefersReducedMotion } from '@renderer/lib/motion'
@@ -161,12 +163,14 @@ export function AssistantPanel(): React.JSX.Element | null {
  * results of the scene features (`AiResults`, 2026-10-06) sit above both views, and the
  * Continuity link under them while there are findings. Side work the author opened from the
  * status bar (2026-10-10: Organise, the upload review) takes the place of both until it closes
- * or the author goes back to the conversation.
+ * or the author goes back to the conversation. The edit flow (notes redesign phase 2) takes the
+ * chat's place while its Edit button is pressed.
  */
 export function AssistantBody(): React.JSX.Element {
   // Notes redesign (fresh start): the continuity findings go with the old story bible.
   const bibleArchived = useIsArchived('storyBible')
   const continuity = useContinuityStore((s) => s.viewOpen) && !bibleArchived
+  const editFlow = useEditFlowStore((s) => s.open)
   const sideWork = useShownSideWork()
   if (sideWork !== null) {
     return (
@@ -179,6 +183,14 @@ export function AssistantBody(): React.JSX.Element {
         ) : (
           <SuggestionsPanel />
         )}
+      </>
+    )
+  }
+  if (editFlow) {
+    return (
+      <>
+        <AiResults />
+        <EditFlowPanel />
       </>
     )
   }
@@ -200,9 +212,9 @@ export function AssistantBody(): React.JSX.Element {
 }
 
 /**
- * The dock's grip and panel menu and the title, nothing else (2026-10-06, the author's polish:
- * no action buttons up here; the actions are chat turns Auto routes and the rotating suggestions
- * above the message box).
+ * The dock's grip and panel menu and the title (2026-10-06, the author's polish: no action buttons
+ * up here; the actions are chat turns Auto routes and the rotating suggestions above the message
+ * box), and since notes redesign phase 2 the one exception, Edit, which opens the edit flow.
  */
 function PanelHeader(): React.JSX.Element {
   const assistantName = useAssistantName()
@@ -212,6 +224,7 @@ function PanelHeader(): React.JSX.Element {
       <h2 className="m-0 min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">
         {assistantName}
       </h2>
+      <EditFlowButton />
     </div>
   )
 }

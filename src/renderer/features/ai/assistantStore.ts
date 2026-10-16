@@ -101,6 +101,7 @@ import {
 import { useAiActivityStore } from './aiActivityStore'
 import {
   EDIT_NO_SCENE_MESSAGE,
+  editChapterId,
   editChoiceReason,
   quoteChoice,
   resolveEditTarget,
@@ -115,6 +116,8 @@ import {
   contradictionsTurnOf
 } from '@renderer/features/memory/needsALook/findingView'
 import { currentStoryMemory } from '@renderer/features/project/storyMemory'
+import { useEditFlowStore } from '@renderer/features/editFlow/editFlowStore'
+import { EDIT_FLOW_LABEL, flowCategoryForPass, type EditFlowCategory } from '@shared/editFlow'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 
 /** The title of a conversation nobody has written in yet. */
@@ -1408,6 +1411,11 @@ async function dispatchRoute(id: string, routed: RoutedTurn): Promise<void> {
   }
 }
 
+/** What the chat says when a request opened the edit flow (notes redesign phase 2). */
+export function editFlowOpenedText(category: EditFlowCategory, title: string): string {
+  return `I opened the edit flow with ${EDIT_FLOW_LABEL[category]} on “${title}”. Check the price on the right and press Run.`
+}
+
 /**
  * An edit request (F-5.26) on conversation `id`'s turn: the target it covers (or why there is
  * none), then for a vague request the question with its quick picks, and for a specific one its
@@ -1432,6 +1440,19 @@ async function runEditRequest(
     return
   }
   const choice = choiceForPass(edit.pass)
+  // Notes redesign phase 2: in a story memory v1 project a request the edit flow has a category
+  // for ("edit this chapter for continuity") opens the flow pre-filled, priced before Run.
+  const category = choice === null ? null : flowCategoryForPass(choice)
+  if (category !== null && currentStoryMemory() === 'v1') {
+    const chapter = target.kind === 'chapter' ? editChapterId(edit, open) : null
+    useEditFlowStore.getState().openFlow({
+      categories: [category],
+      scope: target.kind === 'chapter' ? 'chapter' : 'scene',
+      chapterId: chapter !== null && 'id' in chapter ? chapter.id : null
+    })
+    finishTurn(id, { content: editFlowOpenedText(category, target.title), ...cost }, false)
+    return
+  }
   // Editor's notes read one scene, so a chapter is not offered them.
   const choices =
     choice === null

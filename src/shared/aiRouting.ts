@@ -20,7 +20,8 @@ import { PricingResult } from './cloudApi'
 /**
  * The Auto table bundled with the app: the tier each feature's call site asks for, so Auto
  * changes nothing on its own (rewrite moved to `strong` at the author's request, 2026-10-10). Continuity and edit passes pick their tier per request
- * (background or on demand; per pass type, `EDIT_PASS_TIER`), so they are absent and keep the
+ * (background or on demand; per pass type, `EDIT_PASS_TIER`), and the edit flow per depth
+ * (`EDIT_FLOW_TIER`), so they are absent and keep the
  * caller's tier unless the author overrides them. MythScribe Cloud may send its own table
  * (`hostedAutoTable` of `GET /pricing`), which wins on Cloud for the features it names.
  */

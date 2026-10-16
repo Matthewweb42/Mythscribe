@@ -86,6 +86,8 @@ import { judgeEvalCases } from './judgeFixtures'
 import type { JudgeVerdict } from '@shared/memory/findings'
 import { scribeEvalCases } from './scribeFixtures'
 import { scribe2EvalCases } from './scribe2Fixtures'
+import { editFlowEvalCases } from './editFlowFixtures'
+import type { EditFlowCategory, EditFlowFamily } from '@shared/editFlow'
 import { CARD_GIST_MAX_WORDS, CARD_LINE_MAX_WORDS } from '@shared/memory/claims'
 import type { PromptCard } from '@shared/memory/cardText'
 import {
@@ -872,6 +874,19 @@ export interface EvalCase {
      * feature's own parser against the piece as sent (here the whole scene), nothing dropped.
      */
     | { kind: 'editPass'; type: EditPassType; text: string }
+    /**
+     * The edit flow (notes redesign phase 2): the answer must parse, and every issue must survive
+     * the feature's own parser against the slice as sent (its quote in a scene, its fix a valid
+     * tracked change), nothing dropped.
+     */
+    | {
+        kind: 'editFlow'
+        family: Exclude<EditFlowFamily, 'notes'>
+        checks: EditFlowCategory[]
+        items: { nodeId: string; ref: string; text: string }[]
+      }
+    /** Update notes in the edit flow: the answer must parse to its writes, nothing dropped. */
+    | { kind: 'editNotes' }
     /**
      * A context-library chunk (F-9.8): the answer must parse to the shape the prompt asks for,
      * every entity must be of a known kind with a name, and every name in `expected` must be found.
@@ -6804,5 +6819,7 @@ export const EVAL_CASES: EvalCase[] = [
   // history read again.
   ...MEMORY_V7_EVAL_CASES,
   // Notes redesign phase 1 (story memory v1): Ms Scribe with the notes and the book in view.
-  ...scribe2EvalCases()
+  ...scribe2EvalCases(),
+  // Notes redesign phase 2: the edit flow's stages and checks, and its Update notes.
+  ...editFlowEvalCases()
 ]

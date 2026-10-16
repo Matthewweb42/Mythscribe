@@ -114,6 +114,12 @@ let unsubscribe: (() => void) | null = null
 let generation = 0
 /** The editors showing a scene with tracked changes, by scene id (the accept path uses them). */
 const mounted = new Map<string, Editor>()
+/**
+ * The changes being accepted right now. Applying one in a live editor removes its passage, so the
+ * editor's tracked-changes plugin reports it orphaned at once; that report must not settle it
+ * stale before the accept settles it accepted (notes redesign phase 2: accept inline).
+ */
+const accepting = new Set<string>()
 
 /** Lets the accept path reach a scene's live editor; returns the unregister. */
 export function registerTrackedEditor(nodeId: string, editor: Editor): () => void {
@@ -425,6 +431,7 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
     const pending = changes.filter((c) => c.status === 'pending' && c.kind === 'change')
     if (pending.length === 0 || get().busy) return
     set({ busy: true })
+    for (const change of pending) accepting.add(change.id)
     try {
       const applied: string[] = []
       const stale: string[] = []
@@ -448,6 +455,7 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
     } catch (err) {
       toast.error(describeError(err))
     } finally {
+      for (const change of pending) accepting.delete(change.id)
       set({ busy: false })
     }
   },
@@ -538,7 +546,10 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
 
   async markStale(ids) {
     try {
-      await settle(ids, 'stale')
+      await settle(
+        ids.filter((id) => !accepting.has(id)),
+        'stale'
+      )
     } catch (err) {
       toast.error(describeError(err))
     }
@@ -551,6 +562,7 @@ export function resetEditPassStore(): void {
   unsubscribe = null
   generation = 0
   mounted.clear()
+  accepting.clear()
   useEditPassStore.setState({
     byId: {},
     ids: [],

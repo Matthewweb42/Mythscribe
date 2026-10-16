@@ -115,6 +115,8 @@ import { READER_V6_PROMPT_VERSION } from './reader.v6'
 import { READER_V7_PROMPT_VERSION } from './reader.v7'
 import { SCRIBE_PROMPT_VERSION } from './scribe.v1'
 import { SCRIBE_V2_PROMPT_VERSION } from './scribe.v2'
+import { EDIT_FLOW_PROMPT_VERSION } from './editFlow.v1'
+import { EDIT_NOTES_PROMPT_VERSION } from './editNotes.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -265,7 +267,10 @@ export const PROMPT_VERSIONS = [
   READER_V7_PROMPT_VERSION,
   // Notes redesign phase 1 (story memory v1): Ms Scribe with the notes and the book in view.
   SCRIBE_PROMPT_VERSION,
-  SCRIBE_V2_PROMPT_VERSION
+  SCRIBE_V2_PROMPT_VERSION,
+  // Notes redesign phase 2: the edit flow's stages and checks, and its Update notes.
+  EDIT_FLOW_PROMPT_VERSION,
+  EDIT_NOTES_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -771,6 +776,19 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'strong',
     output: 'json',
     since: 'Notes P1'
+  },
+  // Quick sends both on fast (its catalogue tier); Deep on strong (its cases say so).
+  [EDIT_FLOW_PROMPT_VERSION]: {
+    feature: 'editFlow',
+    tier: 'fast',
+    output: 'json',
+    since: 'Notes P2'
+  },
+  [EDIT_NOTES_PROMPT_VERSION]: {
+    feature: 'editFlow',
+    tier: 'fast',
+    output: 'json',
+    since: 'Notes P2'
   }
 }
 

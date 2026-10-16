@@ -137,13 +137,40 @@ function onlyOccurrence(scene: string, quote: string): number {
 }
 
 /**
+ * Where a proposed change sits in the normalized scene, or null when it cannot be a tracked
+ * change: a replacement equal to the quote; a quote not in the text sent; a quote not exactly once
+ * in the scene (so the editor finds the right passage); a quote or replacement spanning a
+ * paragraph break or over its cap; an overlap with a change kept before it (`taken`, shared across
+ * the scene's pieces). A proofread also refuses anything larger than a correction or that only
+ * "corrects" a keep word (`isCorrection`, F-14.12's rule). The edit flow (notes redesign phase 2)
+ * checks its fixes through this too; the caller records `taken` for what it keeps.
+ */
+export function changeSpan(
+  original: string,
+  replacement: string,
+  sentText: string,
+  scene: string,
+  options: { proofread: boolean; keep: ReadonlySet<string>; taken: { at: number; end: number }[] }
+): { at: number; end: number } | null {
+  const at = onlyOccurrence(scene, original)
+  const end = at + normalizeForMatch(original).length
+  const valid =
+    original.length <= EDIT_PASS_QUOTE_MAX &&
+    replacement.length <= EDIT_PASS_REPLACEMENT_MAX &&
+    !original.includes(LINE_BREAK) &&
+    !replacement.includes(LINE_BREAK) &&
+    normalizeForMatch(replacement) !== normalizeForMatch(original) &&
+    findQuote(sentText, original) &&
+    at >= 0 &&
+    (!options.proofread || isCorrection(original, replacement, options.keep)) &&
+    !options.taken.some((other) => at < other.end && other.at < end)
+  return valid ? { at, end } : null
+}
+
+/**
  * The model's `{ changes: [...] }` against the piece that was sent and the saved scene: PROVIDER
- * when the answer is not that shape at all, lenient item by item otherwise. Dropped and counted:
- * a replacement equal to the quote; a quote not in the piece sent; a quote not exactly once in
- * the scene (so the editor finds the right passage); a quote or replacement spanning a paragraph
- * break or over its cap; an overlap with a change kept before it (`taken`, shared across the
- * scene's pieces). A proofread also drops anything larger than a correction or that only
- * "corrects" a keep word (`isCorrection`, F-14.12's rule).
+ * when the answer is not that shape at all, lenient item by item otherwise. A change `changeSpan`
+ * refuses is dropped and counted.
  */
 export function parseEditChanges(
   answer: string,
@@ -161,24 +188,17 @@ export function parseEditChanges(
     const replacement = item.data.replacement.trim()
     const rationale = (item.data.why ?? '').trim().slice(0, EDIT_PASS_RATIONALE_MAX)
     if (!original) continue
-    const at = onlyOccurrence(scene, original)
-    const end = at + normalizeForMatch(original).length
-    const valid =
-      original.length <= EDIT_PASS_QUOTE_MAX &&
-      replacement.length <= EDIT_PASS_REPLACEMENT_MAX &&
-      !original.includes(LINE_BREAK) &&
-      !replacement.includes(LINE_BREAK) &&
-      normalizeForMatch(replacement) !== normalizeForMatch(original) &&
-      findQuote(sentText, original) &&
-      at >= 0 &&
-      (options.type !== 'proofread' || isCorrection(original, replacement, options.keep)) &&
-      !options.taken.some((other) => at < other.end && other.at < end)
-    if (!valid || changes.length >= EDIT_PASS_MAX_ITEMS) {
+    const span = changeSpan(original, replacement, sentText, scene, {
+      proofread: options.type === 'proofread',
+      keep: options.keep,
+      taken: options.taken
+    })
+    if (span === null || changes.length >= EDIT_PASS_MAX_ITEMS) {
       dropped += 1
       continue
     }
-    options.taken.push({ at, end })
-    changes.push({ original, replacement, rationale, at })
+    options.taken.push(span)
+    changes.push({ original, replacement, rationale, at: span.at })
   }
   return { changes, dropped }
 }
@@ -295,7 +315,7 @@ function fitPieces(text: string, build: (piece: string) => AiMessage[]): string[
 }
 
 /** One request, retried after a transient failure (rate limit, network, provider) with the queue's backoff. */
-async function requestWithRetry(
+export async function requestWithRetry(
   deps: AiRequestDeps,
   build: (attempt: number) => Parameters<typeof runAiRequest>[1],
   signal: AbortSignal,
@@ -342,7 +362,7 @@ export function sceneTextOf(content: TiptapNodeT | null): string {
 }
 
 /** Text with a blank line between its non-empty lines, each trimmed: the shape pieces are cut in. */
-function paragraphsOf(text: string): string {
+export function paragraphsOf(text: string): string {
   return text
     .split('\n')
     .map((line) => line.trim())

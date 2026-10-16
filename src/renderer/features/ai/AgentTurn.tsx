@@ -323,7 +323,7 @@ function ClearCard({
  * highlighted (what went struck through, what came in colour) and a link that opens the page in
  * the notes area. Her edit is already in the notes; its Undo sits on the log line.
  */
-function NotebookChange({
+export function NotebookChange({
   edit
 }: {
   edit: Extract<AgentEdit, { kind: 'notebook' }>

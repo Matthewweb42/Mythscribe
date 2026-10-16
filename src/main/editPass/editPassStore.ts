@@ -239,7 +239,7 @@ export function proposalChangeCounts(
   return counts
 }
 
-function countsFor(db: TreeDb, passId: string): EditPassSummary['counts'] {
+export function countsFor(db: TreeDb, passId: string): EditPassSummary['counts'] {
   const counts = { pending: 0, accepted: 0, rejected: 0, stale: 0 }
   const rows = db
     .select({ status: editChange.status, n: sql<number>`count(*)` })

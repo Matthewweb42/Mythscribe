@@ -271,6 +271,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     typicalOutTokens: 400,
     ideas:
       'Send the picked scenes only once the book passes the whole-book line (already); move the moment after the history if the provider’s cache shows misses; answer a lookup the map already answers without a tool step; batch note edits into one tool call.'
+  },
+  editFlow: {
+    trigger: 'on request',
+    when: 'Notes redesign phase 2: the edit flow, run from the Edit button in the right column (or opened pre-filled by the chat) and priced before Run. editFlow.v1 for the stages and the focused checks, editNotes.v1 for Update notes; JSON. One system prefix shared by every request of a run (cached by the provider after the first): the rules, every note page (≤ 30,000 tokens), the book map; then one slice of the scope’s text and the family’s task. Quick: fast tier (DeepSeek V4 Flash), a chapter a slice (≤ 16,000 tokens). Deep: strong tier (DeepSeek V4 Pro), slices of ≤ 60,000 tokens (the author’s whole book in one); a Deep run of a scene or a chapter also carries the rest of the book in the prefix (with the slice ≤ 60,000). Requests = slices × (one per stage picked, one for the checks together, one for Update notes). max_tokens 8,000. Figures for the author’s book (about 23k words of prose, 12k of notes): a Quick copyedit of a chapter about 0.2¢; a Deep developmental edit of the whole book about 2–3¢ fresh.',
+    callsPerUse: 4,
+    typicalOutTokens: 1500,
+    ideas:
+      'Batch the stages of one slice into one request when the ledger shows the outputs are small; skip a slice whose text and notes did not change since the last run of the same scope; send the book map only to the families that use it (continuity, plot holes, developmental).'
   }
 }
 

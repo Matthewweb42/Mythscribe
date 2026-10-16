@@ -811,7 +811,8 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
     sends:
       'For every chat message: your message and the recent turns of the conversation; every ' +
       'note page (title and text; past about 30,000 tokens, the list of pages and the pages ' +
-      'that match), your story-bible sheets and the text of your Library uploads; a map of the ' +
+      'that match), your story-bible sheets and the text of your Library uploads (only while the ' +
+      'Old story bible is switched on); a map of the ' +
       'book (each scene’s title, chapter, synopsis and notes, or its stored summary where it has ' +
       'no synopsis); the book itself, whole when everything fits in about 60,000 tokens (or when ' +
       'you ask for the whole book), else the scenes that name what you ask about, that the ' +
@@ -819,6 +820,19 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'the selected passage. Then, one lookup at a time (at most 6 per message), what the ' +
       'assistant asks to read: search results, a scene, a note page. When it suggests a prose ' +
       'change, the voice check runs on this machine.',
+    minDial: 1
+  },
+  editFlow: {
+    label: 'Edit flow',
+    sends:
+      'Only when you run it: every note page (title and text; past about 30,000 tokens, the ' +
+      'list of pages and the pages the text names), your story-bible sheets and the text of ' +
+      'your Library uploads (only while the Old story bible is switched on); a map of the book (each scene’s title, chapter, synopsis and notes, ' +
+      'or its stored summary where it has no synopsis); and the text of the scenes you chose ' +
+      '(this scene, this chapter or the whole book) with their titles, a chapter at a time on ' +
+      'Quick, up to about 60,000 tokens at a time on Deep, once for each stage you picked, once ' +
+      'for the focused checks together and once for Update notes; on Deep for a scene or a ' +
+      'chapter, the rest of the book as well, as much as fits with them in about 60,000 tokens.',
     minDial: 1
   },
   judge: {
@@ -881,7 +895,8 @@ export const MEMORY_ONLY_FEATURES: Readonly<Record<StoryMemoryVersion, readonly 
     'sheetSync',
     'route',
     'query',
-    'scribe'
+    'scribe',
+    'editFlow'
   ],
   v2: ['reader', 'verify', 'cite', 'navigator', 'judge']
 }

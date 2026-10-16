@@ -1,4 +1,4 @@
-import { DEFAULT_MODELS, outputBudget, type Tier } from '@shared/ai'
+import { DEFAULT_MODELS, outputBudget, type AiFeatureId, type Tier } from '@shared/ai'
 import type { AiSource } from '@shared/aiSettings'
 import {
   EDIT_PASS_TIER,
@@ -27,27 +27,37 @@ interface ModelInputs {
 }
 
 /**
- * The tier and model a pass of this kind goes out on (F-5.11, F-15.4), after the author's model
- * choice (AI-BILLING-SPEC M8, R4). On MythScribe Cloud a tier left at its default follows the
- * server's routing table, as main does.
+ * The tier and model a request of `feature` asking for `requested` goes out on (F-5.11, F-15.4),
+ * after the author's model choice (AI-BILLING-SPEC M8, R4). On MythScribe Cloud a tier left at its
+ * default follows the server's routing table, as main does. The edit flow (notes redesign phase 2)
+ * prices its runs through it too.
  */
-function passModelOf(
-  type: EditPassType,
+function modelOf(
+  feature: AiFeatureId,
+  requested: Tier,
   { source, status, choice, pricing }: ModelInputs
 ): { tier: Tier; model: string; source: AiSource } {
-  const tier = routedTier(choice, source, 'editPass', EDIT_PASS_TIER[type])
+  const tier = routedTier(choice, source, feature, requested)
   const chosen = status?.models[providerOf(status, source)][tier] ?? DEFAULT_MODELS[tier]
   const model = source === 'cloud' ? hostedModelFor(tier, chosen, pricing) : chosen
   return { tier, model, source }
 }
 
-/** The pass's model for the project's source, following the stores (the workspace and the chat card). */
-export function usePassModel(type: EditPassType): { tier: Tier; model: string; source: AiSource } {
+/** The model of `feature` at `requested` for the project's source, following the stores. */
+export function useFeatureModel(
+  feature: AiFeatureId,
+  requested: Tier
+): { tier: Tier; model: string; source: AiSource } {
   const source = useAiSettingsStore((s) => s.settings?.source ?? 'ownKey')
   const status = useAiStore((s) => s.status)
   const choice = useAiStore((s) => s.choice)
   const pricing = useHostedPricing()
-  return passModelOf(type, { source, status, choice, pricing })
+  return modelOf(feature, requested, { source, status, choice, pricing })
+}
+
+/** The pass's model for the project's source, following the stores (the workspace and the chat card). */
+export function usePassModel(type: EditPassType): { tier: Tier; model: string; source: AiSource } {
+  return useFeatureModel('editPass', EDIT_PASS_TIER[type])
 }
 
 export interface PassQuote {
@@ -55,6 +65,20 @@ export interface PassQuote {
   estimate: EditPassEstimate
   /** The hosted quote on MythScribe Cloud; null on an own key or a local model. */
   quote: HostedQuote | null
+}
+
+/**
+ * The quote for an estimate already counted (the edit flow's, from `editFlow:plan`): the same
+ * hosted quote and confirm threshold as a pass's.
+ */
+export function quoteEstimate(
+  estimate: EditPassEstimate,
+  model: string,
+  hosted: boolean,
+  pricing: PricingResult
+): PassQuote {
+  const quote = hosted ? hostedQuote(pricing, model, estimate.tokensIn, estimate.tokensOut) : null
+  return { model, estimate, quote }
 }
 
 /** A pass's estimate and quote for scenes of `sceneWords` words on `model`. */
@@ -77,7 +101,7 @@ export function quotePassNow(type: EditPassType, sceneWords: readonly number[]):
   const source = useAiSettingsStore.getState().settings?.source ?? 'ownKey'
   const { status, choice } = useAiStore.getState()
   const pricing = hostedPricingNow()
-  const { model } = passModelOf(type, { source, status, choice, pricing })
+  const { model } = modelOf('editPass', EDIT_PASS_TIER[type], { source, status, choice, pricing })
   return quotePass(type, sceneWords, model, source === 'cloud', pricing)
 }
 

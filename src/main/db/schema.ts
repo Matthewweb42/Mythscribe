@@ -24,6 +24,7 @@ import {
   EDIT_PASS_STATUSES,
   EDIT_PASS_TYPES
 } from '../../shared/editPass'
+import { EDIT_FLOW_CATEGORIES } from '../../shared/editFlow'
 import { CONTEXT_FILE_TYPES } from '../../shared/contextLibrary'
 import { CATEGORY_ICONS, CATEGORY_ORIGINS } from '../../shared/categories'
 import { ENTITY_ORIGINS, ENTITY_TEMPLATES } from '../../shared/entities'
@@ -781,7 +782,10 @@ export type SnapshotTextRow = typeof snapshotText.$inferSelect
  * by a crash or a cancel can resume where it was), what it cost, and how it ended. `excerpt` is
  * the selected passage a one-scene pass reads instead of the whole scene (F-5.26, 2026-10-11; null
  * for a pass over whole scenes). Derived data: nothing here is the author's text until a change
- * is accepted in the editor.
+ * is accepted in the editor. Notes redesign phase 2 (migration 0042): a run of the edit flow is a
+ * row with `flow` set (JSON: the spec, the scope's title, the requests answered of all), its
+ * developmental `overview`, and the note pages Update notes changed (`note_edits`, JSON); `type`
+ * is `custom` and unused there, and `node_ids` holds the scope's scenes.
  */
 export const editPass = sqliteTable(
   'edit_pass',
@@ -800,7 +804,10 @@ export const editPass = sqliteTable(
     dropped: integer('dropped').notNull().default(0),
     error: text('error'),
     createdAt: text('created_at').notNull(),
-    finishedAt: text('finished_at')
+    finishedAt: text('finished_at'),
+    flow: text('flow'),
+    overview: text('overview'),
+    noteEdits: text('note_edits').notNull().default('[]')
   },
   (t) => [index('edit_pass_created_idx').on(t.createdAt)]
 )
@@ -812,6 +819,8 @@ export type EditPassRow = typeof editPass.$inferSelect
  * proposes ('' cuts it; null for a note). The renderer finds `original` again before it shows or
  * applies anything, so a change the author's later edits orphaned is marked `stale`, never
  * misapplied. Cascaded from the pass and from the scene; the proposal is set null when evicted.
+ * `flow_category` (notes redesign phase 2, migration 0042) is the edit-flow category an issue was
+ * found under; null for an edit-pass change. In the flow a `note` row is an issue with no fix.
  */
 export const editChange = sqliteTable(
   'edit_change',
@@ -832,7 +841,8 @@ export const editChange = sqliteTable(
     flagged: integer('flagged', { mode: 'boolean' }).notNull().default(false),
     violation: text('violation'),
     status: text('status', { enum: EDIT_CHANGE_STATUSES }).notNull().default('pending'),
-    proposalId: text('proposal_id').references(() => aiProposal.id, { onDelete: 'set null' })
+    proposalId: text('proposal_id').references(() => aiProposal.id, { onDelete: 'set null' }),
+    flowCategory: text('flow_category', { enum: EDIT_FLOW_CATEGORIES })
   },
   (t) => [index('edit_change_pass_idx').on(t.passId), index('edit_change_node_idx').on(t.nodeId)]
 )
