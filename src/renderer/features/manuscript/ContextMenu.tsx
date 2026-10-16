@@ -16,7 +16,8 @@ const CHOOSABLE = 'button:not(:disabled)'
 /**
  * A fixed-position popup menu (F-2.2). Focus lands on the first item; arrows move, Enter/Space
  * choose, Escape and any outside click close it. The parent owns which items it lists, and may
- * mark one disabled (F-9.5), which keeps it visible and out of the keyboard's way.
+ * mark one disabled (F-9.5), which keeps it visible and out of the keyboard's way, or a heading
+ * (a group's label, never chosen).
  */
 export function ContextMenu({
   x,
@@ -76,29 +77,39 @@ export function ContextMenu({
       onContextMenu={(event) => event.preventDefault()}
       className="fixed z-40 m-0 min-w-40 list-none rounded-md border border-line bg-surface-raised p-1 shadow-panel"
     >
-      {items.map((item) => (
-        <li key={item.id} role="none" className="m-0 p-0">
-          <button
-            type="button"
-            role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
-            aria-checked={item.checked}
-            tabIndex={-1}
-            disabled={item.disabled}
-            title={item.title}
-            onClick={() => onSelect(item.id)}
-            className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm hover:bg-surface focus:bg-surface focus:outline-none disabled:opacity-50 disabled:hover:bg-transparent"
+      {items.map((item) =>
+        item.heading === true ? (
+          <li
+            key={item.id}
+            role="presentation"
+            className="m-0 px-2 pt-1.5 pb-0.5 text-xs font-medium text-fg-subtle select-none"
           >
-            {item.checked !== undefined ? (
-              <Check
-                size={14}
-                aria-hidden="true"
-                className={item.checked ? 'shrink-0' : 'shrink-0 opacity-0'}
-              />
-            ) : null}
             {item.label}
-          </button>
-        </li>
-      ))}
+          </li>
+        ) : (
+          <li key={item.id} role="none" className="m-0 p-0">
+            <button
+              type="button"
+              role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+              aria-checked={item.checked}
+              tabIndex={-1}
+              disabled={item.disabled}
+              title={item.title}
+              onClick={() => onSelect(item.id)}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm hover:bg-surface focus:bg-surface focus:outline-none disabled:opacity-50 disabled:hover:bg-transparent"
+            >
+              {item.checked !== undefined ? (
+                <Check
+                  size={14}
+                  aria-hidden="true"
+                  className={item.checked ? 'shrink-0' : 'shrink-0 opacity-0'}
+                />
+              ) : null}
+              {item.label}
+            </button>
+          </li>
+        )
+      )}
     </ul>
   )
 }

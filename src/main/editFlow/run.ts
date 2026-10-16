@@ -14,6 +14,7 @@ import {
   type EditFlowSpec
 } from '@shared/editFlow'
 import type { AgentEdit } from '@shared/agent'
+import { STYLE_GUIDE_TITLE } from '@shared/notebookTemplates'
 import { getAiSettings } from '../project/settingsStore'
 import { projectSpellingWords } from '../spellcheck/projectWords'
 import type { TreeDb } from '../tree/treeStore'
@@ -190,7 +191,8 @@ export async function prepareFlow(
         )
       : null
   const guide = material.pages.find(
-    (page) => page.kind === 'note' && page.title.trim().toLowerCase() === 'style guide'
+    (page) =>
+      page.kind === 'note' && page.title.trim().toLowerCase() === STYLE_GUIDE_TITLE.toLowerCase()
   )
   return {
     spec,

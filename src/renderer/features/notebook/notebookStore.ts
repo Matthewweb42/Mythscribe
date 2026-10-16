@@ -6,6 +6,15 @@ import type {
   NotebookKind,
   NotebookVersion
 } from '@shared/notebook'
+import {
+  NOTEBOOK_STARTER_FOLDERS,
+  STYLE_GUIDE_TITLE,
+  TEMPLATES_FOLDER_TITLE,
+  isTemplatesFolder,
+  notebookTemplate,
+  templateDoc,
+  type NotebookTemplateId
+} from '@shared/notebookTemplates'
 import { EMPTY_DOC, type TiptapNodeT } from '@shared/tiptap'
 import { useEditPassViewStore } from '@renderer/features/editPass/editPassViewStore'
 import { useEntityStore } from '@renderer/features/entities/entityStore'
@@ -16,6 +25,7 @@ import { ipc } from '@renderer/lib/ipc'
 import { useNotebookPageStore } from './notebookPageStore'
 import { useOpenNotebookPageStore } from './openPage'
 import {
+  NOTEBOOK_ROOT,
   buildNotebookIndex,
   isWithin,
   notebookTargetFolder,
@@ -29,7 +39,8 @@ import {
  * refetches `notebook:list` (a few hundred rows at most), and so does `notebook:changed`, which
  * main sends after any write, the author's or Ms Scribe's. The open page's text is the page
  * store's (`notebookPageStore`); when main changed it behind the editor (Ms Scribe), the editor
- * reloads it and the bar offers Show changes and Undo.
+ * reloads it and the bar offers Show changes and Undo. Note templates (phase 6): a page made from a
+ * built-in or from a page in Templates, Save as template, and the starter set of an empty Notes.
  */
 
 /** Ms Scribe's latest edit on the open page: the version that holds the page as it was before it. */
@@ -38,6 +49,16 @@ export interface AiEdit {
   versionId: string
   /** The page's text before her edit (the version's content). */
   before: TiptapNodeT | null
+}
+
+/** What a page is made from (note templates, phase 6): a built-in, or a page in Templates. */
+export type NotebookTemplateChoice =
+  { kind: 'builtIn'; id: NotebookTemplateId } | { kind: 'mine'; pageId: string }
+
+/** A new page's title and text, when it is not an empty "Untitled page". */
+export interface NotebookPageSeed {
+  title: string
+  content: TiptapNodeT | null
 }
 
 /** A dropped file for `importFiles`: its name, the folders it was dropped in, its bytes. */
@@ -75,8 +96,27 @@ interface NotebookState extends NotebookIndex {
   toggle: (id: string) => void
   startRename: (id: string) => void
   endRename: () => void
-  /** A new page (opened, its title ready to type) or folder in the selected folder, or `parentId`. */
-  create: (kind: NotebookKind, parentId?: string | null) => Promise<NotebookItem>
+  /**
+   * A new page (opened, its title ready to type) or folder in the selected folder, or `parentId`;
+   * a page from `seed` takes its title and text.
+   */
+  create: (
+    kind: NotebookKind,
+    parentId?: string | null,
+    seed?: NotebookPageSeed
+  ) => Promise<NotebookItem>
+  /** A new page from a template, made as `create` makes one (opened, its title ready to type). */
+  createFromTemplate: (
+    choice: NotebookTemplateChoice,
+    parentId?: string | null
+  ) => Promise<NotebookItem>
+  /** Copies a page into the top-level Templates folder, making that folder the first time. */
+  saveAsTemplate: (id: string) => Promise<void>
+  /**
+   * The starter set for an empty Notes: the folders of `NOTEBOOK_STARTER_FOLDERS` and a Style
+   * guide page, each made only when the top level has none of that name.
+   */
+  startWithFolders: () => Promise<void>
   rename: (id: string, title: string) => Promise<void>
   /** Deletes an item and what is inside it, with Undo on the toast. */
   remove: (id: string) => Promise<void>
@@ -144,6 +184,13 @@ export function unseenAiEdit(
 
 const failed = (err: unknown): void => {
   toast.error(describeError(err))
+}
+
+/** A page as stored, after the open page's last typing is saved (so a copy has all of it). */
+async function pageNow(id: string): Promise<{ title: string; content: TiptapNodeT | null }> {
+  await useNotebookPageStore.getState().flush()
+  const page = await ipc().invoke('notebook:get', { id })
+  return { title: page.title, content: page.content }
 }
 
 /** Bumped by `clear`, so an answer for a project that closed is dropped. */
@@ -264,20 +311,78 @@ export const useNotebookStore = create<NotebookState>((set, get) => {
       set({ renamingId: null })
     },
 
-    async create(kind, parentId) {
+    async create(kind, parentId, seed) {
       const state = get()
       const parent =
         parentId === undefined ? notebookTargetFolder(state, state.selectedId) : parentId
       const made = await ipc().invoke('notebook:create', {
         parentId: parent,
         kind,
-        title: kind === 'page' ? NEW_PAGE_TITLE : NEW_FOLDER_TITLE
+        title: seed?.title ?? (kind === 'page' ? NEW_PAGE_TITLE : NEW_FOLDER_TITLE),
+        ...(kind === 'page' && seed !== undefined ? { content: seed.content } : {})
       })
       await get().load()
       if (parent !== null && get().collapsed[parent] === true) get().toggle(parent)
       set({ selectedId: made.id, renamingId: made.id })
       if (kind === 'page') get().open(made.id)
       return made
+    },
+
+    async createFromTemplate(choice, parentId) {
+      if (choice.kind === 'builtIn') {
+        const template = notebookTemplate(choice.id)
+        return get().create('page', parentId, {
+          title: template.pageTitle,
+          content: templateDoc(template)
+        })
+      }
+      const source = await pageNow(choice.pageId)
+      return get().create('page', parentId, { title: source.title, content: source.content })
+    },
+
+    async saveAsTemplate(id) {
+      const source = await pageNow(id)
+      const top = get().childrenOf[NOTEBOOK_ROOT] ?? []
+      let folder = top.find((each) => {
+        const item = get().byId[each]
+        return item?.kind === 'folder' && isTemplatesFolder(item.title)
+      })
+      folder ??= (
+        await ipc().invoke('notebook:create', {
+          parentId: null,
+          kind: 'folder',
+          title: TEMPLATES_FOLDER_TITLE
+        })
+      ).id
+      await ipc().invoke('notebook:create', {
+        parentId: folder,
+        kind: 'page',
+        title: source.title,
+        content: source.content
+      })
+      await get().load()
+      toast.success(`Saved “${source.title}” as a template`)
+    },
+
+    async startWithFolders() {
+      const titles = new Set(
+        (get().childrenOf[NOTEBOOK_ROOT] ?? []).map(
+          (id) => `${get().byId[id]?.kind}:${get().byId[id]?.title.trim().toLowerCase()}`
+        )
+      )
+      for (const title of NOTEBOOK_STARTER_FOLDERS) {
+        if (titles.has(`folder:${title.toLowerCase()}`)) continue
+        await ipc().invoke('notebook:create', { parentId: null, kind: 'folder', title })
+      }
+      if (!titles.has(`page:${STYLE_GUIDE_TITLE.toLowerCase()}`)) {
+        await ipc().invoke('notebook:create', {
+          parentId: null,
+          kind: 'page',
+          title: STYLE_GUIDE_TITLE,
+          content: templateDoc(notebookTemplate('styleGuide'))
+        })
+      }
+      await get().load()
     },
 
     async rename(id, title) {

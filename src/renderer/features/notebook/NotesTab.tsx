@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FilePlus, FolderPlus, RefreshCw, Upload } from 'lucide-react'
+import { FilePlus, FolderPlus, LayoutTemplate, RefreshCw, Upload } from 'lucide-react'
 import { isFeatureAllowed } from '@shared/aiSettings'
 import { useCanWrite } from '@renderer/features/account/appAccessStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
@@ -8,6 +8,7 @@ import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { takeDropped } from './droppedEntries'
+import { NotebookTemplateMenu } from './NotebookTemplateMenu'
 import { NotebookTree } from './NotebookTree'
 import { useNotebookStore } from './notebookStore'
 
@@ -21,10 +22,10 @@ const failed = (err: unknown): void => {
 }
 
 /**
- * The Notes section of the sidebar (notes redesign phase 1, slice 1): New page, New folder and
- * Import files… above the notebook's tree. Files and folders dropped on the section become pages
- * (a folder keeps its folders), in the folder under the pointer, or beside the page under it, or
- * at the top level. Notes redesign phase 3: Update notes… opens the edit flow pre-filled with
+ * The Notes section of the sidebar (notes redesign phase 1, slice 1): New page, New folder, New
+ * from template (note templates, phase 6) and Import files… above the notebook's tree. Files and
+ * folders dropped on the section become pages (a folder keeps its folders), in the folder under
+ * the pointer, or beside the page under it, or at the top level. Notes redesign phase 3: Update notes… opens the edit flow pre-filled with
  * Update notes on the open scene's chapter (the book when no scene is open), while the edit flow
  * can run (v1, Use AI on).
  */
@@ -32,6 +33,7 @@ export function NotesTab(): React.JSX.Element {
   const busy = useNotebookStore((s) => s.busy)
   const writable = useCanWrite()
   const [dropping, setDropping] = useState(false)
+  const [templateMenu, setTemplateMenu] = useState<{ x: number; y: number } | null>(null)
   const memory = useStoryMemory()
   const canUpdate = useAiSettingsStore(
     (s) => memory === 'v1' && s.settings !== null && isFeatureAllowed(s.settings, 'editFlow')
@@ -105,6 +107,20 @@ export function NotesTab(): React.JSX.Element {
         </button>
         <button
           type="button"
+          disabled={!writable}
+          aria-haspopup="menu"
+          title="A page laid out for a character, a place, a style guide…, or one of your own templates"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            setTemplateMenu((open) => (open ? null : { x: rect.left, y: rect.bottom }))
+          }}
+          className={BUTTON}
+        >
+          <LayoutTemplate size={12} aria-hidden="true" />
+          New from template
+        </button>
+        <button
+          type="button"
           disabled={!writable || busy}
           title="Word, Markdown, text and PDF files, one page each"
           onClick={() => {
@@ -132,6 +148,13 @@ export function NotesTab(): React.JSX.Element {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <NotebookTree />
       </div>
+      {templateMenu !== null ? (
+        <NotebookTemplateMenu
+          x={templateMenu.x}
+          y={templateMenu.y}
+          onClose={() => setTemplateMenu(null)}
+        />
+      ) : null}
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { categoryOf } from '@shared/categories'
 import type { Entity } from '@shared/ipc/contract'
 import type { NotebookItem } from '@shared/notebook'
+import { inTemplates } from '@shared/notebookTemplates'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import { getSummary } from '../document/summaryStore'
 import { listCategories } from '../entity/categoryStore'
@@ -15,7 +16,7 @@ import type { ScribePage, ScribeScene } from './context'
 
 /**
  * What Ms Scribe's v1 context is made of, read from the open project (notes redesign phase 1):
- * the notebook's pages, and while the old story bible is switched back on (Settings › Archived
+ * the notebook's pages (those in a Templates folder left out), and while the old story bible is switched back on (Settings › Archived
  * features; archived by default since the fresh start) its sheets and the Library's uploads as
  * pages too; the manuscript's scenes in reading order under the agent's refs; and the
  * names to look for (page titles, sheet names and their other names).
@@ -91,7 +92,10 @@ export async function loadScribeSources(
   const items = listNotebook(db)
   let n = 0
   const ref = (): string => `p${++n}`
-  const pages: ScribePage[] = listNotebookPages(db).map((page) => ({
+  // Note templates (phase 6): the pages in a Templates folder are page shapes, not story notes;
+  // `list_notes` names them and `open_note` reads one when she is asked about them.
+  const notes = listNotebookPages(db).filter((page) => !inTemplates(items, page.parentId))
+  const pages: ScribePage[] = notes.map((page) => ({
     ref: ref(),
     id: page.id,
     kind: 'note',

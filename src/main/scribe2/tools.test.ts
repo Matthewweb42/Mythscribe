@@ -4,6 +4,7 @@ import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { notebookDocFromText } from '@shared/notebook'
+import { notebookTemplate } from '@shared/notebookTemplates'
 import { SCRIBE_MAX_WRITES, SCRIBE_VIBE_PROSE_MAX } from '@shared/scribe2'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { node } from '../db/schema'
@@ -116,14 +117,14 @@ describe('Ms Scribe’s v1 tools (notes redesign phase 1)', () => {
   })
 
   it('create_note makes a page (in a folder by title), which later tools can name', async () => {
-    const people = createNotebookItem(db, { parentId: null, kind: 'folder', title: 'People' })
+    const people = createNotebookItem(db, { parentId: null, kind: 'folder', title: 'Smugglers' })
     const r = await run()
     const out = runScribeTool(r, 'create_note', {
       title: 'Rook',
       text: 'A smuggler.',
-      folder: 'people'
+      folder: 'smugglers'
     })
-    expect(out.result).toBe('Created p1 Rook in People.')
+    expect(out.result).toBe('Created p1 Rook in Smugglers.')
     const [page] = listNotebookPages(db)
     expect(page).toMatchObject({ title: 'Rook', parentId: people.id, plain: 'A smuggler.' })
     expect(r.changes[0]?.proposal.edit).toMatchObject({
@@ -135,6 +136,94 @@ describe('Ms Scribe’s v1 tools (notes redesign phase 1)', () => {
       'Edited p1 Rook.'
     )
     expect(getNotebookPage(db, page?.id ?? '').plain).toBe('A smuggler.\nMore')
+  })
+
+  it('create_note in Characters lays the page out on the Character template and names its sections', async () => {
+    const characters = createNotebookItem(db, {
+      parentId: null,
+      kind: 'folder',
+      title: 'Characters'
+    })
+    const r = await run()
+    const out = runScribeTool(r, 'create_note', {
+      title: 'Rook',
+      text: 'A smuggler from the reef.\nRole: Mara’s rival\nFears: the open sea',
+      folder: 'Characters'
+    })
+    expect(out.result).toBe(
+      'Created p1 Rook in Characters. Laid out on the Character template; sections filled: Role, Fears. Empty: Appearance, Wants, Voice and speech, Powers, Relationships, Arc, First appears; fill what you know with edit_note {"id":"p1","section":"<section>","text":"…"}, leave the rest empty.'
+    )
+    const [page] = listNotebookPages(db)
+    expect(page?.parentId).toBe(characters.id)
+    const blocks = page?.content?.content ?? []
+    expect(blocks.filter((b) => b.type === 'heading').map((b) => b.content?.[0]?.text)).toEqual(
+      notebookTemplate('character').headings
+    )
+    expect(page?.plain.split('\n').slice(0, 4)).toEqual([
+      'A smuggler from the reef.',
+      'Role',
+      'Mara’s rival',
+      'Appearance'
+    ])
+    // A section she fills later replaces the empty line under its heading.
+    expect(
+      runScribeTool(r, 'edit_note', { id: 'p1', section: 'Appearance', text: 'Salt-white hair' })
+        .result
+    ).toBe('Edited p1 Rook.')
+    expect(getNotebookPage(db, page?.id ?? '').plain).toContain(
+      'Appearance\nSalt-white hair\nWants'
+    )
+  })
+
+  it('her own template of the folder’s name wins; templates are listed apart and read by title', async () => {
+    createNotebookItem(db, { parentId: null, kind: 'folder', title: 'Ships' })
+    const templates = createNotebookItem(db, {
+      parentId: null,
+      kind: 'folder',
+      title: 'Templates'
+    })
+    createNotebookItem(db, {
+      parentId: templates.id,
+      kind: 'page',
+      title: 'Ship',
+      content: notebookDocFromText('Captain:\nCrew:')
+    })
+    const r = await run()
+    expect(r.pages).toEqual([])
+    expect(runScribeTool(r, 'list_notes', {}).result).toBe(
+      'There are no note pages yet.\nTemplates (page shapes, not story notes; open_note by title): Ship'
+    )
+    expect(runScribeTool(r, 'open_note', { id: 'ship' }).result).toBe(
+      'Template Ship (a page shape, not story notes):\nCaptain:\nCrew:'
+    )
+    const out = runScribeTool(r, 'create_note', {
+      title: 'The Gull',
+      text: 'Captain: Rook',
+      folder: 'Ships'
+    })
+    expect(out.result).toContain(
+      'Laid out on the Ship template; sections filled: Captain. Empty: Crew;'
+    )
+    const gull = listNotebookPages(db).find((page) => page.title === 'The Gull')
+    expect(gull?.plain).toBe('Captain: Rook\nCrew:')
+  })
+
+  it('Ms Scribe’s sources leave out the pages in a Templates folder', async () => {
+    const templates = createNotebookItem(db, {
+      parentId: null,
+      kind: 'folder',
+      title: 'templates'
+    })
+    createNotebookItem(db, {
+      parentId: templates.id,
+      kind: 'page',
+      title: 'Character',
+      content: notebookDocFromText('Role')
+    })
+    createNotebookItem(db, { parentId: null, kind: 'page', title: 'Mara', content: null })
+    const material = await loadScribeSources(db, session.folder, scene)
+    expect(material.pages.map((page) => page.title)).toEqual(['Mara'])
+    expect(material.names).not.toContain('Character')
   })
 
   it('Brainstorm refuses every write; a sheet is read-only', async () => {

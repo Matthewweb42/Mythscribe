@@ -1,6 +1,7 @@
 import { categoryOf } from '@shared/categories'
 import type { Entity } from '@shared/ipc/contract'
 import { sheetAt } from '@shared/facts'
+import { inTemplates } from '@shared/notebookTemplates'
 import { observedAttributeLabel } from '@shared/observedFacts'
 import { parseStoredSceneMeta } from '@shared/sceneMeta'
 import {
@@ -18,7 +19,7 @@ import { summariesFor } from '../../document/summaryStore'
 import { listCategories } from '../../entity/categoryStore'
 import { listEntities } from '../../entity/entityStore'
 import { factsForEntities } from '../../entity/factStore'
-import { listNotebookPages } from '../../notebook/notebookStore'
+import { listNotebook, listNotebookPages } from '../../notebook/notebookStore'
 import { storyBibleArchivedIn } from '../../project/settingsStore'
 import { pagesNamedIn } from '../../scribe2/context'
 import { listDocumentTags } from '../../tag/documentTagStore'
@@ -71,10 +72,12 @@ export function buildStoryBible(db: TreeDb, input: StoryBibleInput): string | nu
  * The note pages a manuscript scene names (notes redesign, 2026-10-15): a page whose title, or a
  * capitalised word of it of four letters or more, stands in the scene's text (as written) or in
  * its synopsis or scene notes (caseless, the author's typing), most often named first
- * (`pagesNamedIn`, Ms Scribe's matching). Titles only, no AI.
+ * (`pagesNamedIn`, Ms Scribe's matching). Titles only, no AI. Pages in a Templates folder (note
+ * templates, phase 6) are page shapes and never count.
  */
 export function namedNotePages(db: TreeDb, row: NodeRow): StoryBibleNote[] {
-  const pages = listNotebookPages(db)
+  const items = listNotebook(db)
+  const pages = listNotebookPages(db).filter((page) => !inTemplates(items, page.parentId))
   if (pages.length === 0) return []
   return pagesNamedIn(pages, [
     { text: documentText(row), caseless: false },

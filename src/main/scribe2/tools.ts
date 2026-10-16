@@ -1,6 +1,13 @@
 import { docToText } from '@shared/docText'
 import { NOTEBOOK_TITLE_MAX, notebookDocFromText, notebookPlain } from '@shared/notebook'
 import {
+  layoutOnTemplate,
+  myTemplatePages,
+  templateDoc,
+  templateForFolder,
+  type TemplateLayout
+} from '@shared/notebookTemplates'
+import {
   SCRIBE_DIFF_CHARS,
   SCRIBE_MAX_WRITES,
   SCRIBE_NOTE_TEXT_MAX,
@@ -191,9 +198,29 @@ function openScene(run: ScribeRun, ref: unknown, fromArg: unknown): ToolOutcome 
   }
 }
 
+/**
+ * The author's own templates (note templates, phase 6): page shapes in a Templates folder, never
+ * story notes, so they are not among her pages; `list_notes` names them on one line and `open_note`
+ * reads one by its title.
+ */
+function templatesLine(run: ScribeRun): string | null {
+  const titles = myTemplatePages(listNotebook(run.db)).map((page) => page.title)
+  return titles.length === 0
+    ? null
+    : `Templates (page shapes, not story notes; open_note by title): ${titles.join(', ')}`
+}
+
 function listNotes(run: ScribeRun): ToolOutcome {
   const step: AgentStep = { tool: 'list_notes', label: 'Listing the notes…' }
-  if (run.pages.length === 0) return { step, result: 'There are no note pages yet.' }
+  const templates = templatesLine(run)
+  if (run.pages.length === 0) {
+    return {
+      step,
+      result: ['There are no note pages yet.', ...(templates === null ? [] : [templates])].join(
+        '\n'
+      )
+    }
+  }
   const lines = run.pages.map((page) => {
     const kind =
       page.kind === 'note'
@@ -204,12 +231,37 @@ function listNotes(run: ScribeRun): ToolOutcome {
     const words = page.text.split(/\s+/).filter(Boolean).length
     return `${page.ref} ${page.title} (${kind}${page.folder === '' ? '' : `, ${page.folder}`}, ${words} words)`
   })
+  if (templates !== null) lines.push(templates)
   return { step, result: lines.join('\n') }
+}
+
+/** One of the author's templates by its title (caseless), read whole, or null. */
+function openTemplate(run: ScribeRun, ref: unknown, fromArg: unknown): ToolOutcome | null {
+  const key = flat(str(ref)).toLowerCase()
+  if (key === '') return null
+  const found = myTemplatePages(listNotebook(run.db)).find(
+    (page) => page.title.trim().toLowerCase() === key
+  )
+  if (found === undefined) return null
+  const step: AgentStep = { tool: 'open_note', label: `Reading the template ${found.title}…` }
+  const text = getNotebookPage(run.db, found.id).plain
+  const from = Math.max(
+    0,
+    Math.min(typeof fromArg === 'number' ? Math.floor(fromArg) : 0, text.length)
+  )
+  const to = Math.min(text.length, from + SCRIBE_READ_CHARS)
+  const more = to < text.length ? `\n(continues; read on with "from":${to})` : ''
+  return {
+    step,
+    result: `Template ${found.title} (a page shape, not story notes):\n${text.slice(from, to) || '(empty)'}${more}`
+  }
 }
 
 function openNote(run: ScribeRun, ref: unknown, fromArg: unknown): ToolOutcome {
   const page = pageByRef(run, ref)
   if (page === undefined) {
+    const template = openTemplate(run, ref, fromArg)
+    if (template !== null) return template
     return {
       step: { tool: 'open_note', label: 'Looking for a page…' },
       result: `No page is ${str(ref) || 'that'}; list the notes.`
@@ -302,6 +354,15 @@ function editNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome {
   }
 }
 
+function templateNote(ref: string, name: string, laid: TemplateLayout): string {
+  const filled = laid.filled.length === 0 ? 'none' : laid.filled.join(', ')
+  const empty =
+    laid.empty.length === 0
+      ? ''
+      : ` Empty: ${laid.empty.join(', ')}; fill what you know with edit_note {"id":"${ref}","section":"<section>","text":"…"}, leave the rest empty.`
+  return ` Laid out on the ${name} template; sections filled: ${filled}.${empty}`
+}
+
 function createNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome {
   const title = flat(str(args.title)).slice(0, NOTEBOOK_TITLE_MAX)
   const step: AgentStep = { tool: 'create_note', label: `Making the note ${title || 'page'}…` }
@@ -309,18 +370,32 @@ function createNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome 
   if (!writesLeft(run)) return { step, result: 'No more writes in this message.' }
   const text = str(args.text).slice(0, SCRIBE_NOTE_TEXT_MAX)
   const folderName = flat(str(args.folder)).toLowerCase()
+  const items = listNotebook(run.db)
   const folder =
     folderName === ''
       ? undefined
-      : listNotebook(run.db).find(
+      : items.find(
           (item) => item.kind === 'folder' && item.title.trim().toLowerCase() === folderName
         )
   try {
+    // Note templates (phase 6): a page in a folder with a template follows its sections.
+    const shape = folder === undefined ? null : templateForFolder(items, folder.id)
+    const laid =
+      shape === null
+        ? null
+        : layoutOnTemplate(
+            shape.kind === 'builtIn'
+              ? templateDoc(shape.template)
+              : getNotebookPage(run.db, shape.pageId).content,
+            text
+          )
+    const shapeName =
+      shape === null ? '' : shape.kind === 'builtIn' ? shape.template.name : shape.name
     const page = createNotebookItem(run.db, {
       parentId: folder?.id ?? null,
       kind: 'page',
       title,
-      content: text.trim() === '' ? null : notebookDocFromText(text)
+      content: laid !== null ? laid.content : text.trim() === '' ? null : notebookDocFromText(text)
     })
     run.notebookChanged([page.id])
     run.used.add(page.id)
@@ -346,7 +421,10 @@ function createNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome 
           ? ''
           : ' (no such folder; made at the top)'
         : ` in ${folder.title}`
-    return { step, result: `Created ${ref} ${page.title}${where}.` }
+    return {
+      step,
+      result: `Created ${ref} ${page.title}${where}.${laid === null ? '' : templateNote(ref, shapeName, laid)}`
+    }
   } catch (err) {
     if (err instanceof AppError) return { step, result: err.message }
     throw err

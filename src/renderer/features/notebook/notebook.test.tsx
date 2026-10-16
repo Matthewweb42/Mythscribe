@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import type { TiptapEditorHTMLElement } from '@tiptap/core'
+import { getSchema, type TiptapEditorHTMLElement } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Channel, EventName, EventPayload, Input, Output } from '@shared/ipc/contract'
 import {
@@ -9,7 +9,15 @@ import {
   type NotebookPage,
   type NotebookVersion
 } from '@shared/notebook'
+import {
+  NOTEBOOK_STARTER_FOLDERS,
+  NOTEBOOK_TEMPLATE_IDS,
+  NOTEBOOK_TEMPLATES,
+  notebookTemplate,
+  templateDoc
+} from '@shared/notebookTemplates'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { buildExtensions } from '@renderer/features/editor/extensions'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
 import { useDialogStore } from '@renderer/features/shell/dialogs/dialogStore'
@@ -20,6 +28,7 @@ import { resetNotebookPageStore, useNotebookPageStore } from './notebookPageStor
 import { NEW_PAGE_TITLE, resetNotebookStore, unseenAiEdit, useNotebookStore } from './notebookStore'
 import { NotesTab } from './NotesTab'
 import { openNotebookPage, resetOpenNotebookPage, useOpenNotebookPageStore } from './openPage'
+import { templateChoiceOf, templateMenuItems } from './templateMenu'
 
 /**
  * Notes redesign phase 1, slice 1: the notebook store over a fake main that keeps the items and
@@ -121,9 +130,11 @@ function install(): void {
         case 'notebook:get':
           return pageOf(find((input as Input<'notebook:get'>).id)) as Output<C>
         case 'notebook:create': {
-          const { parentId, kind, title } = input as Input<'notebook:create'>
+          const { parentId, kind, title, content } = input as Input<'notebook:create'>
           const made = row(`n-${rows.length + 1}`, kind, parentId, rows.length)
           made.title = title
+          made.content = content ?? null
+          made.plain = notebookPlain(made.content)
           rows.push(made)
           return pageOf(made) as Output<C>
         }
@@ -463,5 +474,130 @@ describe('the Notes tab', () => {
     const read = await takeDropped({ items: [], files: [file] })()
     expect(read).toHaveLength(1)
     expect(read[0]).toMatchObject({ name: 'Reef.md', folders: [] })
+  })
+})
+
+describe('note templates (phase 6)', () => {
+  const created = (): Input<'notebook:create'>[] =>
+    sent('notebook:create') as Input<'notebook:create'>[]
+
+  it('each built-in loads in the notes editor’s schema with its headings', () => {
+    const schema = getSchema(buildExtensions({ sceneBreak: '* * *', onSave: () => undefined }))
+    for (const id of NOTEBOOK_TEMPLATE_IDS) {
+      const template = notebookTemplate(id)
+      const loaded = schema.nodeFromJSON(templateDoc(template))
+      loaded.check()
+      const headings: string[] = []
+      loaded.forEach((block) => {
+        if (block.type.name === 'heading') headings.push(block.textContent)
+      })
+      expect(headings).toEqual(template.headings)
+    }
+  })
+
+  it('the menu lists My templates first, then the built-ins', async () => {
+    rows.push(row('Templates', 'folder', null, 3), row('Villain', 'page', 'Templates', 0, 'Wants'))
+    const store = useNotebookStore.getState
+    await store().load()
+    const items = templateMenuItems(store())
+    expect(items.map((item) => item.label)).toEqual([
+      'My templates',
+      'Villain',
+      'Built-in',
+      ...NOTEBOOK_TEMPLATES.map((template) => template.name)
+    ])
+    expect(items.filter((item) => item.heading === true)).toHaveLength(2)
+    expect(templateChoiceOf(items[1]?.id ?? '')).toEqual({ kind: 'mine', pageId: 'Villain' })
+    expect(templateChoiceOf('template-built-in:character')).toEqual({
+      kind: 'builtIn',
+      id: 'character'
+    })
+    expect(templateChoiceOf('template-built-in:nope')).toBeNull()
+    rows = rows.filter((r) => r.id !== 'Templates' && r.id !== 'Villain')
+    await store().load()
+    expect(templateMenuItems(store()).some((item) => item.heading === true)).toBe(false)
+  })
+
+  it('makes a page from the Character template in the toolbar, opened with its title to type over', async () => {
+    await useNotebookStore.getState().load()
+    render(<NotesTab />)
+    fireEvent.click(screen.getByRole('button', { name: 'New from template' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Character' }))
+    await screen.findByRole('textbox', { name: 'Rename' })
+    expect(created()).toEqual([
+      {
+        parentId: null,
+        kind: 'page',
+        title: 'New character',
+        content: templateDoc(notebookTemplate('character'))
+      }
+    ])
+    expect(useNotebookStore.getState().openId).toBe(useNotebookStore.getState().renamingId)
+  })
+
+  it('a folder’s menu makes a page from one of her templates inside that folder', async () => {
+    rows.push(row('Templates', 'folder', null, 3), row('Villain', 'page', 'Templates', 0, 'Wants'))
+    await useNotebookStore.getState().load()
+    render(<NotesTab />)
+    const tree = screen.getByRole('tree', { name: 'Notes' })
+    fireEvent.contextMenu(within(tree).getByText('People'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New from template ›' }))
+    expect(screen.getByText('My templates')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Villain' }))
+    await waitFor(() => expect(created()).toHaveLength(1))
+    expect(created()[0]).toEqual({
+      parentId: 'People',
+      kind: 'page',
+      title: 'Villain',
+      content: notebookDocFromText('Wants')
+    })
+  })
+
+  it('Save as template copies the page into Templates, making the folder once', async () => {
+    const store = useNotebookStore.getState
+    await store().load()
+    render(<NotesTab />)
+    const tree = screen.getByRole('tree', { name: 'Notes' })
+    fireEvent.contextMenu(within(tree).getByText('Mara'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Save as template' }))
+    await waitFor(() => expect(toasts()).toContain('Saved “Mara” as a template'))
+    await store().saveAsTemplate('Ideas')
+    const folders = live().filter((r) => r.kind === 'folder' && r.title === 'Templates')
+    expect(folders).toHaveLength(1)
+    const copies = live().filter((r) => r.parentId === folders[0]?.id)
+    expect(copies.map((r) => [r.title, r.plain])).toEqual([
+      ['Mara', 'Eyes: grey.'],
+      ['Ideas', 'A twin in the north.']
+    ])
+    // A page already in Templates is not offered again.
+    const copy = copies[0]?.id ?? ''
+    await waitFor(() => expect(within(tree).getAllByText('Mara')).toHaveLength(2))
+    fireEvent.contextMenu(
+      within(tree)
+        .getAllByRole('treeitem')
+        .find((each) => each.dataset.notebookId === copy)
+        ?.querySelector('div') ?? tree
+    )
+    expect(screen.queryByRole('menuitem', { name: 'Save as template' })).not.toBeInTheDocument()
+  })
+
+  it('an empty Notes starts with the folders and a Style guide page, made once', async () => {
+    rows = []
+    const store = useNotebookStore.getState
+    await store().load()
+    render(<NotesTab />)
+    expect(screen.getByRole('button', { name: 'Start blank' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Start with folders' }))
+    const tree = await screen.findByRole('tree', { name: 'Notes' })
+    expect(
+      within(tree)
+        .getAllByRole('treeitem')
+        .map((item) => item.getAttribute('aria-label'))
+    ).toEqual([...NOTEBOOK_STARTER_FOLDERS, 'Style guide'])
+    const guide = live().find((r) => r.title === 'Style guide')
+    expect(guide?.content).toEqual(templateDoc(notebookTemplate('styleGuide')))
+    const made = created().length
+    await store().startWithFolders()
+    expect(created()).toHaveLength(made)
   })
 })

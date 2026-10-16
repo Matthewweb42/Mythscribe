@@ -154,6 +154,28 @@ test('notes: a folder and a page, typed text kept across a reopen, delete and Un
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(tree.getByRole('treeitem', { name: 'Mara' })).toBeVisible()
   expect(await storedText('Mara')).toBe(TYPED)
+
+  // Note templates (phase 6): a page from the Character template, typed in under Role, saved
+  // as a template, then offered under My templates.
+  await toolbar.getByRole('button', { name: 'New from template' }).click()
+  await page.getByRole('menuitem', { name: 'Character', exact: true }).click()
+  await nameIt('Rook')
+  const rook = page.getByRole('textbox', { name: 'Note page' })
+  await expect(rook.locator('h2').first()).toHaveText('Role')
+  await rook.locator('h2:text-is("Role") + p').click()
+  await page.keyboard.type('A smuggler')
+  await expect.poll(() => storedText('Rook')).toMatch(/^Role\nA smuggler\nAppearance\n/)
+  await tree.getByRole('treeitem', { name: 'Rook' }).getByText('Rook', { exact: true }).click({
+    button: 'right'
+  })
+  await page.getByRole('menuitem', { name: 'Save as template' }).click()
+  await expect(tree.getByRole('treeitem', { name: 'Templates' })).toBeVisible()
+  await toolbar.getByRole('button', { name: 'New from template' }).click()
+  const menu = page.getByRole('menu')
+  await expect(menu.getByText('My templates')).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'Rook', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
 })
 
 test('fresh start: a project’s Library file opens in Notes › Docs, with no Characters section', async () => {

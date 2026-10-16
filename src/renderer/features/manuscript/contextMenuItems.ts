@@ -14,6 +14,8 @@ export interface MenuItem {
   title?: string
   /** A checkbox item (F-12.4 Include in compile) and whether it is ticked; absent: a plain item. */
   checked?: boolean
+  /** A group's label (note templates: My templates, Built-in), shown but never chosen or focused. */
+  heading?: boolean
 }
 
 /** The id of the `Include in compile` checkbox item (F-12.4). */

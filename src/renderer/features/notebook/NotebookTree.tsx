@@ -1,12 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen } from 'lucide-react'
 import { NOTEBOOK_TITLE_MAX } from '@shared/notebook'
+import { inTemplates } from '@shared/notebookTemplates'
+import { useCanWrite } from '@renderer/features/account/appAccessStore'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
 import type { MenuItem } from '@renderer/features/manuscript/contextMenuItems'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
 import { describeError } from '@renderer/lib/errors'
 import { useNotebookStore } from './notebookStore'
+import { NotebookTemplateMenu } from './NotebookTemplateMenu'
 import {
   NOTEBOOK_ROOT,
   notebookDropTarget,
@@ -33,18 +36,27 @@ const failed = (err: unknown): void => {
   toast.error(describeError(err))
 }
 
-function menuItems(kind: 'folder' | 'page'): MenuItem[] {
+/**
+ * A row's menu: a folder makes a page (blank or from a template) or a folder inside it; a page
+ * outside the Templates folder can be saved as a template (note templates, phase 6).
+ */
+function menuItems(kind: 'folder' | 'page', template = false): MenuItem[] {
   return [
     ...(kind === 'folder'
       ? [
           { id: 'new-page', label: 'New page here' },
+          { id: 'new-from-template', label: 'New from template ›' },
           { id: 'new-folder', label: 'New folder here' }
         ]
       : []),
     { id: 'rename', label: 'Rename' },
+    ...(kind === 'page' && !template ? [{ id: 'save-template', label: 'Save as template' }] : []),
     { id: 'delete', label: 'Delete' }
   ]
 }
+
+const START_BUTTON =
+  'rounded-md border border-line px-2 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40'
 
 function zoneOf(kind: 'folder' | 'page', event: React.DragEvent<HTMLElement>): NotebookDropZone {
   const rect = event.currentTarget.getBoundingClientRect()
@@ -57,8 +69,9 @@ function zoneOf(kind: 'folder' | 'page', event: React.DragEvent<HTMLElement>): N
  * the manuscript tree (F-2.1: rows, chevrons, the shared rename field and context menu, the
  * before / into / after drag zones of F-2.4), over the notebook store. A click on a page opens it;
  * a double-click or F2 renames; the menu renames, deletes (with Undo on the toast) and makes a
- * page or folder inside a folder. Rows drag onto a folder to go inside it, or onto a row's top or
- * bottom edge to go beside it.
+ * page (blank or from a template) or folder inside a folder, and saves a page as a template. An
+ * empty Notes offers the starter folders or a blank page (note templates, phase 6). Rows drag
+ * onto a folder to go inside it, or onto a row's top or bottom edge to go beside it.
  */
 export function NotebookTree(): React.JSX.Element | null {
   const loaded = useNotebookStore((s) => s.loaded)
@@ -69,6 +82,8 @@ export function NotebookTree(): React.JSX.Element | null {
   const openId = useNotebookStore((s) => s.openId)
   const renamingId = useNotebookStore((s) => s.renamingId)
   const [menu, setMenu] = useState<MenuAnchor | null>(null)
+  const [templateMenu, setTemplateMenu] = useState<MenuAnchor | null>(null)
+  const writable = useCanWrite()
   const [dragId, setDragId] = useState<string | null>(null)
   const [over, setOver] = useState<DragOver | null>(null)
   const items = useRef(new Map<string, HTMLLIElement>())
@@ -96,6 +111,8 @@ export function NotebookTree(): React.JSX.Element | null {
     else if (itemId === 'delete') store.remove(id).catch(failed)
     else if (itemId === 'new-page') store.create('page', id).catch(failed)
     else if (itemId === 'new-folder') store.create('folder', id).catch(failed)
+    else if (itemId === 'new-from-template') setTemplateMenu(menu)
+    else if (itemId === 'save-template') store.saveAsTemplate(id).catch(failed)
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLUListElement>): void => {
@@ -141,9 +158,34 @@ export function NotebookTree(): React.JSX.Element | null {
   if (!loaded) return null
   if (rows.length === 0) {
     return (
-      <p className="m-0 p-3 text-sm text-fg-muted">
-        No notes yet. Make a page or a folder, or drop files here.
-      </p>
+      <div className="flex flex-col gap-2 p-3 text-sm text-fg-muted">
+        <p className="m-0">
+          No notes yet. Start with a few folders, a blank page, or drop files here.
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            disabled={!writable}
+            title="Characters, Places, World, Plot and Timeline folders, and a Style guide page"
+            onClick={() => {
+              useNotebookStore.getState().startWithFolders().catch(failed)
+            }}
+            className={START_BUTTON}
+          >
+            Start with folders
+          </button>
+          <button
+            type="button"
+            disabled={!writable}
+            onClick={() => {
+              useNotebookStore.getState().create('page').catch(failed)
+            }}
+            className={START_BUTTON}
+          >
+            Start blank
+          </button>
+        </div>
+      </div>
     )
   }
 
@@ -290,9 +332,17 @@ export function NotebookTree(): React.JSX.Element | null {
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={menuItems(menuItem.kind)}
+          items={menuItems(menuItem.kind, inTemplates(Object.values(byId), menuItem.parentId))}
           onSelect={onMenuSelect}
           onClose={closeMenu}
+        />
+      ) : null}
+      {templateMenu !== null ? (
+        <NotebookTemplateMenu
+          x={templateMenu.x}
+          y={templateMenu.y}
+          parentId={templateMenu.id}
+          onClose={() => setTemplateMenu(null)}
         />
       ) : null}
     </>
