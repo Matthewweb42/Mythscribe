@@ -360,7 +360,8 @@ function logLine(change: AgentChange): string {
       // F-16.26: a sheet line's confirmation ("Pinned on Mara’s sheet: “hates the sea”").
       return edit.kind === 'sheetLine' ? sheetLineDone(edit) : `${head}${detail}`
     case 'skipped':
-      return `Skipped: ${head}`
+      // Notes fixes (2026-10-15): her tracked suggestion was rejected, here or in the scene.
+      return change.trackedId !== null ? `Rejected: ${head}` : `Skipped: ${head}`
     case 'undone':
       return `Undone: ${head}`
     default:
@@ -467,6 +468,7 @@ export function AgentChanges({
           )
         }
         const deletion = isDeletion(change.edit)
+        const tracked = change.trackedId !== null
         return (
           <div
             key={change.id}
@@ -484,6 +486,11 @@ export function AgentChanges({
               <OffVoiceFlag violation={change.violation} testId="agent-change-flag" />
             ) : null}
             <EditPreview edit={change.edit} />
+            {tracked ? (
+              <p data-testid="agent-change-tracked" className="m-0 text-xs text-fg-muted">
+                Also marked in the scene: accept or reject it there or here.
+              </p>
+            ) : null}
             <div className="flex gap-1">
               <button
                 type="button"
@@ -493,11 +500,13 @@ export function AgentChanges({
                 onClick={() => void applyChange(messageId, change.id)}
                 className={FIX_PRIMARY_BUTTON}
               >
-                {deletion
-                  ? 'Delete'
-                  : isDraftIntent(change.edit) || isRewriteIntent(change.edit)
-                    ? 'Write'
-                    : 'Apply'}
+                {tracked
+                  ? 'Accept'
+                  : deletion
+                    ? 'Delete'
+                    : isDraftIntent(change.edit) || isRewriteIntent(change.edit)
+                      ? 'Write'
+                      : 'Apply'}
               </button>
               <button
                 type="button"
@@ -506,7 +515,7 @@ export function AgentChanges({
                 onClick={() => skipChange(messageId, change.id)}
                 className={FIX_BUTTON}
               >
-                Skip
+                {tracked ? 'Reject' : 'Skip'}
               </button>
             </div>
           </div>

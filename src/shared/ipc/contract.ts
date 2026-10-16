@@ -681,7 +681,16 @@ export const AiScribeResult = z.discriminatedUnion('ok', [
     answer: z.string(),
     steps: z.array(AgentStep),
     changes: z.array(
-      z.object({ edit: AgentEdit, violation: z.string().nullable(), applied: z.boolean() })
+      z.object({
+        edit: AgentEdit,
+        violation: z.string().nullable(),
+        applied: z.boolean(),
+        /**
+         * Notes fixes (2026-10-15): a prose suggestion's tracked change in the scene (its
+         * `edit_change` id; settled through `editPass:settle`); null for a note edit.
+         */
+        trackedId: z.string().nullable().default(null)
+      })
     ),
     sources: ScribeSources,
     usage: AiUsage,
@@ -4109,6 +4118,11 @@ export const events = {
   'editPass:changed': EditPassSummary,
   /** An edit-flow run moved (notes redesign phase 2): started, a request answered, stopped, failed, finished, or had issues settled. */
   'editFlow:changed': EditFlowRun,
+  /**
+   * Ms Scribe's tracked changes were settled (notes fixes, 2026-10-15): accepted, rejected or
+   * found stale in the text or from the chat card; the chat marks the cards that carry them.
+   */
+  'scribe:trackedSettled': z.object({ changes: z.array(EditChange) }),
   /** The window entered or left fullscreen (F-6.1), whoever asked: the OS, the window manager, or the app. */
   'window:fullScreenChanged': z.object({ on: z.boolean() }),
   /**

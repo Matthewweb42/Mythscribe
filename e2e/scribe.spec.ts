@@ -29,8 +29,9 @@ import { clickIntoEditor } from './support'
  * chip opens the scene with that passage selected and at the middle of the view.
  *
  * Then (2026-10-15, `scribe.v3`) Vibe: asked to make the scene better, she proposes a change to the
- * sea line unasked; it waits in the chat as a tracked change (the old words struck, the new
- * marked), the scene untouched, until Apply puts it in the editor.
+ * sea line unasked; it waits in the chat (the old words struck, the new marked) and, since the
+ * notes fixes (2026-10-15), inline in the scene as a tracked change; Accept in the text puts it in
+ * the scene and the card shows it accepted.
  */
 
 let app: ElectronApplication
@@ -377,7 +378,7 @@ test('a source opens the scene at the passage she quotes, and her answer names t
     .toBe(true)
 })
 
-test('Vibe proposes a bolder change unasked, which waits as a tracked change until Apply', async () => {
+test('Vibe proposes a bolder change unasked, which waits as a tracked change in the scene until Accept', async () => {
   // Continues in the same project, Tash's scene open in the editor.
   const assistant = page.getByTestId('assistant-panel')
   const messageBox = assistant.getByRole('textbox', { name: 'Message' })
@@ -403,18 +404,26 @@ test('Vibe proposes a bolder change unasked, which waits as a tracked change unt
     /^Result of propose_prose_edit:\nOffered/
   )
 
-  // The change waits: the old words struck, the new ones marked, the scene as it was.
+  // The change waits: the old words struck, the new ones marked, the scene's text as it was.
   const change = answer.getByTestId('agent-change')
   await expect(change).toHaveAttribute('data-status', 'pending')
   // A word diff: the replaced words struck ("flat"), the new ones marked ("still").
   await expect(change.locator('del').first()).toContainText('flat')
   await expect(change.locator('ins').first()).toContainText('still')
-  await expect(editor).toContainText(SEA_QUOTE)
-  await expect(editor).not.toContainText(VIBE_REPLACEMENT)
+  await expect(change.getByTestId('agent-change-tracked')).toBeVisible()
+  await expect(change.getByTestId('agent-change-apply')).toHaveText('Accept')
 
-  // Apply puts it in the scene.
-  await change.getByTestId('agent-change-apply').click()
-  await expect(change).toHaveAttribute('data-status', 'applied')
+  // Notes fixes (2026-10-15): it shows inline in the scene as a tracked change, the old words
+  // still in the text until it is accepted.
+  const tracked = editor.locator('.tracked-change', { hasText: VIBE_REPLACEMENT })
+  await expect(tracked).toHaveCount(1)
+  await expect(editor.locator('.tracked-ins')).toHaveText([VIBE_REPLACEMENT])
+  await expect(editor).toContainText(SEA_QUOTE)
+
+  // Accept in the text applies it, and the card shows it accepted.
+  await tracked.locator('.tracked-accept').click()
+  await expect(editor.locator('.tracked-ins')).toHaveCount(0)
   await expect(editor).toContainText(VIBE_REPLACEMENT)
   await expect(editor).not.toContainText(SEA_QUOTE)
+  await expect(change).toHaveAttribute('data-status', 'applied')
 })

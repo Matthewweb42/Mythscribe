@@ -22,6 +22,7 @@ import {
   type RouteEdit
 } from '@shared/assistantRoute'
 import type { ClearGroup } from '@shared/bibleClear'
+import type { EditChange } from '@shared/editPass'
 import type { RecordPage } from '@shared/memory/records'
 import { DEFAULT_ASSISTANT_MODE, type AssistantMode } from '@shared/aiSettings'
 import {
@@ -108,6 +109,7 @@ import {
   runEditChoice
 } from './editRequest'
 import { confirmLine } from '@renderer/features/editPass/passQuote'
+import { useEditPassStore } from '@renderer/features/editPass/editPassStore'
 import { useAiSettingsStore } from './aiSettingsStore'
 import { instantCardText } from './instantCardText'
 import { proposalStore } from './proposalStore'
@@ -325,6 +327,7 @@ let generation = 0
 let unregister: (() => void) | null = null
 let unsubscribeSteps: (() => void) | null = null
 let unsubscribeAnswer: (() => void) | null = null
+let unsubscribeTracked: (() => void) | null = null
 let counter = 0
 /** Change id → how to take an applied agent edit back; gone with the session or the project. */
 const undoers = new Map<string, () => Promise<void>>()
@@ -637,6 +640,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     unregister ??= registerPendingSave(flush)
     unsubscribeSteps ??= ipc().on('ai:agentStep', onAgentStep)
     unsubscribeAnswer ??= ipc().on('ai:agentDelta', onAgentDelta)
+    unsubscribeTracked ??= ipc().on('scribe:trackedSettled', onTrackedSettled)
     const mine = ++generation
     const value = await ipc().invoke('conversations:get', undefined)
     if (mine !== generation) return
@@ -654,6 +658,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     unsubscribeSteps = null
     unsubscribeAnswer?.()
     unsubscribeAnswer = null
+    unsubscribeTracked?.()
+    unsubscribeTracked = null
     undoers.clear()
     writing.clear()
     skipped.clear()
@@ -810,6 +816,12 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
       await writeIntent(messageId, changeId, false)
       return
     }
+    // Notes fixes (2026-10-15): Ms Scribe's suggestion is a tracked change in the scene too; the
+    // edit passes' accept applies it and settles both.
+    if (found.change.trackedId !== null && found.change.edit.kind === 'text') {
+      await acceptTracked(messageId, changeId, found.change.edit.nodeId, found.change.trackedId)
+      return
+    }
     const drafted = found.change.proposalId
     setChanging(changeId, true)
     try {
@@ -864,6 +876,10 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     }
     if (found.change.status !== 'pending') return
     patchChange(messageId, changeId, { status: 'skipped' })
+    // Notes fixes (2026-10-15): Skip rejects her tracked change in the scene too.
+    if (found.change.trackedId !== null && found.change.edit.kind === 'text') {
+      void rejectTracked(found.change.edit.nodeId, found.change.trackedId)
+    }
     if (found.change.proposalId !== null) {
       void proposalStore.settle(found.change.proposalId, 'rejected', null)
     }
@@ -1583,7 +1599,15 @@ async function runScribeTurn(
   }
   dropSteps(requestId)
   if (useAssistantStore.getState().pending[id] !== requestId) {
-    if (result.ok) void proposalStore.settle(result.proposalId, 'rejected', null)
+    if (result.ok) {
+      void proposalStore.settle(result.proposalId, 'rejected', null)
+      // Her suggestions leave the scene with the turn nobody is waiting for.
+      for (const change of result.changes) {
+        if (change.trackedId !== null && change.edit.kind === 'text') {
+          void rejectTracked(change.edit.nodeId, change.trackedId)
+        }
+      }
+    }
     return
   }
   if (!result.ok) {
@@ -1601,7 +1625,8 @@ async function runScribeTurn(
     violation: change.violation,
     error: null,
     proposalId: null,
-    notice: null
+    notice: null,
+    trackedId: change.trackedId
   }))
   const messageId =
     useAssistantStore
@@ -1622,6 +1647,105 @@ async function runScribeTurn(
     result.cached
   )
   if (messageId !== null) settleChanges(messageId)
+  showTracked(changes)
+}
+
+/** The tracked changes of a Ms Scribe turn draw in the scenes already showing theirs. */
+function showTracked(changes: readonly AgentChange[]): void {
+  const passes = useEditPassStore.getState()
+  const scenes = new Set(
+    changes.flatMap((change) =>
+      change.trackedId !== null && change.edit.kind === 'text' ? [change.edit.nodeId] : []
+    )
+  )
+  for (const nodeId of scenes) {
+    if (passes.changesByNode[nodeId] !== undefined) void passes.loadChanges(nodeId)
+  }
+}
+
+/** Why a card's tracked change was not taken: its passage changed (notes fixes, 2026-10-15). */
+export const TRACKED_TEXT_CHANGED = 'the text changed since she suggested it'
+/** Why a card's tracked change is gone: settled elsewhere or cleared with old turns. */
+export const TRACKED_GONE = 'it is no longer waiting in the scene'
+
+/** A scene's tracked change by id while it is still pending, read fresh from main. */
+async function pendingTracked(nodeId: string, trackedId: string): Promise<EditChange | null> {
+  await useEditPassStore.getState().loadChanges(nodeId)
+  const list = useEditPassStore.getState().changesByNode[nodeId] ?? []
+  return list.find((change) => change.id === trackedId) ?? null
+}
+
+/** Rejects one of Ms Scribe's tracked changes, if it still waits. */
+async function rejectTracked(nodeId: string, trackedId: string): Promise<void> {
+  const tracked = await pendingTracked(nodeId, trackedId)
+  if (tracked !== null) await useEditPassStore.getState().reject([tracked])
+}
+
+/**
+ * A card's Apply on Ms Scribe's tracked suggestion (notes fixes, 2026-10-15): accepted through
+ * the edit passes' path, so the scene's tracked change and the card settle together; a passage
+ * changed since reads "text changed" on the card. One the edit passes did not take (another
+ * accept under way, the scene in a running pass) stays pending.
+ */
+async function acceptTracked(
+  messageId: string,
+  changeId: string,
+  nodeId: string,
+  trackedId: string
+): Promise<void> {
+  setChanging(changeId, true)
+  try {
+    const tracked = await pendingTracked(nodeId, trackedId)
+    if (tracked === null) {
+      patchChange(messageId, changeId, { status: 'failed', error: TRACKED_GONE })
+    } else {
+      const outcome = await useEditPassStore.getState().accept([tracked])
+      if (outcome.applied.includes(trackedId)) {
+        patchChange(messageId, changeId, { status: 'applied', error: null })
+      } else if (outcome.stale.includes(trackedId)) {
+        patchChange(messageId, changeId, { status: 'failed', error: TRACKED_TEXT_CHANGED })
+      }
+    }
+  } catch (err) {
+    patchChange(messageId, changeId, { status: 'failed', error: describeError(err) })
+  } finally {
+    setChanging(changeId, false)
+  }
+  settleChanges(messageId)
+}
+
+/**
+ * Ms Scribe's tracked changes settled in the text (or by a card): each card still waiting on one
+ * shows how it went (accepted as applied, rejected as skipped, stale as "text changed"), and its
+ * turn's proposal settles once none waits.
+ */
+function onTrackedSettled({ changes }: { changes: EditChange[] }): void {
+  const status = new Map(changes.map((change) => [change.id, change.status]))
+  const touched: { messageId: string; changeId: string; status: EditChange['status'] }[] = []
+  for (const conversation of useAssistantStore.getState().conversations?.items ?? []) {
+    for (const message of conversation.messages) {
+      for (const change of message.agent?.changes ?? []) {
+        const next = change.trackedId === null ? undefined : status.get(change.trackedId)
+        if (next === undefined || change.status !== 'pending') continue
+        touched.push({ messageId: message.id, changeId: change.id, status: next })
+      }
+    }
+  }
+  for (const entry of touched) {
+    if (entry.status === 'accepted') {
+      patchChange(entry.messageId, entry.changeId, { status: 'applied', error: null })
+    } else if (entry.status === 'rejected') {
+      patchChange(entry.messageId, entry.changeId, { status: 'skipped' })
+    } else if (entry.status === 'stale') {
+      patchChange(entry.messageId, entry.changeId, {
+        status: 'failed',
+        error: TRACKED_TEXT_CHANGED
+      })
+    }
+  }
+  for (const messageId of new Set(touched.map((entry) => entry.messageId))) {
+    settleChanges(messageId)
+  }
 }
 
 /**
@@ -1678,7 +1802,8 @@ async function runAgentTurn(
     violation: change.violation,
     error: null,
     proposalId: null,
-    notice: null
+    notice: null,
+    trackedId: null
   }))
   const messageId =
     useAssistantStore

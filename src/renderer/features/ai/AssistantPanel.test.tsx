@@ -52,6 +52,7 @@ import {
   NO_SCENE_MESSAGE,
   PLAN_NO_EDITS_MESSAGE,
   resetAssistantStore,
+  TRACKED_TEXT_CHANGED,
   useAssistantStore
 } from './assistantStore'
 import { CONVERSATION_BUSY_MESSAGE } from './aiActions'
@@ -944,6 +945,7 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
     error: null,
     proposalId: null,
     notice: null,
+    trackedId: null,
     ...over
   })
 
@@ -1000,6 +1002,28 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
       'uses a banned phrase'
     )
     expect(within(turns()[1]!).getByTestId('agent-apply-all')).toBeInTheDocument()
+  })
+
+  it('shows Ms Scribe’s tracked suggestion with Accept and Reject, and logs a rejected or changed one (notes fixes, 2026-10-15)', async () => {
+    await mountOpen(
+      withChanges([
+        change('e-1', TEXT_EDIT, { trackedId: 'tc-1' }),
+        change('e-2', TEXT_EDIT, { trackedId: 'tc-2', status: 'skipped' }),
+        change('e-3', TEXT_EDIT, {
+          trackedId: 'tc-3',
+          status: 'failed',
+          error: TRACKED_TEXT_CHANGED
+        })
+      ])
+    )
+    const cards = within(turns()[1]!).getAllByTestId('agent-change')
+    expect(within(cards[0]!).getByTestId('agent-change-tracked')).toHaveTextContent(
+      'Also marked in the scene'
+    )
+    expect(within(cards[0]!).getByTestId('agent-change-apply')).toHaveTextContent('Accept')
+    expect(within(cards[0]!).getByTestId('agent-change-skip')).toHaveTextContent('Reject')
+    expect(cards[1]).toHaveTextContent('Rejected: Changed Chapter 1 › Scene 1')
+    expect(cards[2]).toHaveTextContent(`(${TRACKED_TEXT_CHANGED})`)
   })
 
   /** One line of a clear card: the items it covers, by id. */

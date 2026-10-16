@@ -121,6 +121,7 @@ import {
   deletePass,
   getPresets,
   interruptRunningPasses,
+  isScribePass,
   listPassRows,
   passDetail,
   pendingChangesFor,
@@ -554,6 +555,7 @@ import {
 import { runNavigate } from '../scribe/navigate'
 import { runScribe } from '../scribe/runScribe'
 import { runScribe2 } from '../scribe2/run'
+import { trackScribeProposals } from '../scribe2/tracked'
 import { searchMisses } from '../scribe/searchMissStore'
 import { addSheetLine, removeSheetLine } from '../scribe/sheetLines'
 import { getSceneDetails, setSceneDetails } from '../memory/sceneDetailStore'
@@ -3991,10 +3993,21 @@ export function registerHandlers({
 
   // A scene's proposal (F-14.5) settles once none of its changes is pending: accepted when every
   // one was, rejected when none was, acceptedPart otherwise (a stale change counts as not taken).
+  // Ms Scribe's tracked changes (notes fixes, 2026-10-15) settle her turn's proposal through the
+  // chat's cards instead, which `scribe:trackedSettled` marks.
   register('editPass:settle', ({ ids, status }) => {
     const db = manager.require().connection.orm
     const moved = settleChanges(db, ids, status)
-    const proposals = new Set(moved.flatMap((change) => change.proposalId ?? []))
+    const scribePasses = new Set(
+      [...new Set(moved.map((change) => change.passId))].filter((passId) =>
+        isScribePass(requirePass(db, passId))
+      )
+    )
+    const proposals = new Set(
+      moved.flatMap((change) =>
+        scribePasses.has(change.passId) ? [] : (change.proposalId ?? [])
+      )
+    )
     for (const proposalId of proposals) {
       const counts = proposalChangeCounts(db, proposalId)
       if (counts.pending > 0) continue
@@ -4007,9 +4020,14 @@ export function registerHandlers({
       )
     }
     for (const passId of new Set(moved.map((change) => change.passId))) {
+      if (scribePasses.has(passId)) continue
       const row = requirePass(db, passId)
       if (readFlow(row) === null) emit(windows(), 'editPass:changed', passSummary(db, passId))
       else emit(windows(), 'editFlow:changed', flowRunOf(db, row))
+    }
+    const scribeMoved = moved.filter((change) => scribePasses.has(change.passId))
+    if (scribeMoved.length > 0) {
+      emit(windows(), 'scribe:trackedSettled', { changes: scribeMoved })
     }
     return moved
   })
@@ -4573,11 +4591,23 @@ export function registerHandlers({
           flagged: changes.some((change) => change.violation !== null),
           violation: changes.find((change) => change.violation !== null)?.violation ?? null
         })
+        // Notes fixes (2026-10-15): her prose suggestions also wait in the scene as tracked changes.
+        const tracked = trackScribeProposals(db, changes, proposal.id, (id) => {
+          try {
+            return sceneTextOf(getDocumentContent(db, id).content)
+          } catch (err) {
+            if (err instanceof AppError) return null
+            throw err
+          }
+        })
         return {
           ok: true,
           answer,
           steps,
-          changes,
+          changes: changes.map((change, index) => ({
+            ...change,
+            trackedId: tracked[index] ?? null
+          })),
           sources,
           usage,
           costUsd,

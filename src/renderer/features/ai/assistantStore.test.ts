@@ -9,6 +9,7 @@ import {
   type Conversations
 } from '@shared/chat'
 import { defaultAiSettings } from '@shared/aiSettings'
+import type { EditChange } from '@shared/editPass'
 import type { RouteAction } from '@shared/assistantRoute'
 import type {
   AiAgentResult,
@@ -40,6 +41,10 @@ import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { entityFixture } from '@renderer/features/entities/entityFixture'
 import { resetEntityStore, useEntityStore } from '@renderer/features/entities/entityStore'
 import { resetTagStore } from '@renderer/features/tags/tagStore'
+import {
+  registerTrackedEditor,
+  resetEditPassStore
+} from '@renderer/features/editPass/editPassStore'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import {
   costPartsOf,
@@ -49,6 +54,7 @@ import {
   OPEN_SCENE_TIMEOUT_MS,
   PASSAGE_GONE_MESSAGE,
   resetAssistantStore,
+  TRACKED_TEXT_CHANGED,
   useAssistantStore
 } from './assistantStore'
 import { resetAiActivityStore, useAiActivityStore } from './aiActivityStore'
@@ -104,6 +110,10 @@ let logUndos: string[]
 /** F-16.26: the sheet lines the chat added and took back. */
 let addedLines: Input<'record:addLine'>[]
 let removedLines: Input<'record:removeLine'>[]
+/** Notes fixes (2026-10-15): Ms Scribe's tracked changes main holds, their settles, the listener. */
+let trackedRows: EditChange[]
+let trackedSettles: Input<'editPass:settle'>[]
+let trackedListener: ((payload: EventPayload<'scribe:trackedSettled'>) => void) | null
 
 /**
  * `conversations:get` answers with `stored`; `ai:route` picks `routeAction` locally at once;
@@ -229,6 +239,21 @@ function deferredClient(stored: Conversations): IpcClient {
         removedLines.push(input as Input<'record:removeLine'>)
         return storyRecord() as Output<C>
       }
+      if (channel === 'editPass:changes') {
+        const { nodeId } = input as Input<'editPass:changes'>
+        return trackedRows.filter(
+          (row) => row.nodeId === nodeId && row.status === 'pending'
+        ) as Output<C>
+      }
+      if (channel === 'editPass:settle') {
+        const asked = input as Input<'editPass:settle'>
+        trackedSettles.push(asked)
+        const moved = trackedRows
+          .filter((row) => asked.ids.includes(row.id) && row.status === 'pending')
+          .map((row) => ({ ...row, status: asked.status }))
+        trackedRows = trackedRows.map((row) => moved.find((entry) => entry.id === row.id) ?? row)
+        return moved as Output<C>
+      }
       if (channel === 'ai:cancel') {
         cancels.push((input as Input<'ai:cancel'>).requestId)
         return { cancelled: true } as Output<C>
@@ -253,6 +278,9 @@ function deferredClient(stored: Conversations): IpcClient {
     on<E extends EventName>(event: E, listener: (payload: EventPayload<E>) => void) {
       if (event === 'ai:agentStep') {
         stepListener = listener as (payload: EventPayload<'ai:agentStep'>) => void
+      }
+      if (event === 'scribe:trackedSettled') {
+        trackedListener = listener as (payload: EventPayload<'scribe:trackedSettled'>) => void
       }
       return () => {
         unsubscribed++
@@ -421,6 +449,10 @@ beforeEach(() => {
   logUndos = []
   addedLines = []
   removedLines = []
+  trackedRows = []
+  trackedSettles = []
+  trackedListener = null
+  resetEditPassStore()
   resetChangesStore()
   resetEntityStore()
   resetAssistantStore()
@@ -437,6 +469,7 @@ beforeEach(() => {
   setIpcClient(deferredClient(STORED))
 })
 afterEach(() => {
+  resetEditPassStore()
   resetChangesStore()
   resetEntityStore()
   resetAssistantStore()
@@ -522,8 +555,8 @@ describe('useAssistantStore load and persistence (F-5.4)', () => {
     store().newConversation()
     store().clear()
     expect(store().conversations).toBeNull()
-    // The lookup steps and (2026-10-07) the streamed answer.
-    expect(unsubscribed).toBe(2)
+    // The lookup steps, (2026-10-07) the streamed answer and (2026-10-15) the tracked settles.
+    expect(unsubscribed).toBe(3)
     expect(stepListener).toBeNull()
     await vi.advanceTimersByTimeAsync(SETTINGS_SAVE_DELAY_MS)
     expect(sets).toHaveLength(0)
@@ -936,9 +969,9 @@ describe('useAssistantStore Ms Scribe changes (notes redesign phase 1)', () => {
     request.resolve(
       scribeOk(request.input.requestId, 'Added it to Mara.', {
         changes: [
-          { edit: NOTE_EDIT, violation: null, applied: true },
-          { edit: NOTE_CREATED, violation: null, applied: true },
-          { edit: PROSE, violation: null, applied: false }
+          { edit: NOTE_EDIT, violation: null, applied: true, trackedId: null },
+          { edit: NOTE_CREATED, violation: null, applied: true, trackedId: null },
+          { edit: PROSE, violation: null, applied: false, trackedId: null }
         ],
         sources: {
           scenes: [{ nodeId: 'sc-1', title: 'Scene 1', quotes: [] }],
@@ -971,7 +1004,7 @@ describe('useAssistantStore Ms Scribe changes (notes redesign phase 1)', () => {
     const request = await sendAndCapture('Save that.')
     request.resolve(
       scribeOk(request.input.requestId, 'Saved.', {
-        changes: [{ edit: NOTE_EDIT, violation: null, applied: true }]
+        changes: [{ edit: NOTE_EDIT, violation: null, applied: true, trackedId: null }]
       })
     )
     await settle()
@@ -980,6 +1013,135 @@ describe('useAssistantStore Ms Scribe changes (notes redesign phase 1)', () => {
     ])
   })
 })
+
+describe('useAssistantStore Ms Scribe prose suggestions as tracked changes (notes fixes, 2026-10-15)', () => {
+  const PROSE = {
+    kind: 'text',
+    nodeId: 'sc-1',
+    title: 'Scene 1',
+    find: 'Mara climbed the ridge alone.',
+    replace: 'Mara climbed the ridge with her fear.',
+    brief: ''
+  } as const
+  const row = (over: Partial<EditChange> = {}): EditChange => ({
+    id: 'tc-1',
+    passId: 'scribe-pass',
+    nodeId: 'sc-1',
+    kind: 'change',
+    position: 0,
+    original: PROSE.find,
+    replacement: PROSE.replace,
+    rationale: 'Ms Scribe’s suggestion',
+    category: null,
+    flagged: false,
+    violation: null,
+    status: 'pending',
+    proposalId: 'prop-x',
+    ...over
+  })
+
+  /** A Vibe turn whose one prose suggestion waits as tracked change `tc-1`; answers the card. */
+  async function suggest(): Promise<{ messageId: string; changeId: string; proposalId: string }> {
+    inMode('vibe')
+    await store().load()
+    const request = await sendAndCapture('Make this scene better.')
+    request.resolve(
+      scribeOk(request.input.requestId, 'One change: the ridge line.', {
+        changes: [{ edit: PROSE, violation: null, applied: false, trackedId: 'tc-1' }]
+      })
+    )
+    await settle()
+    const turn = active().messages.at(-1)
+    const change = turn?.agent?.changes[0]
+    expect(change).toMatchObject({ status: 'pending', trackedId: 'tc-1' })
+    return {
+      messageId: turn?.id ?? '',
+      changeId: change?.id ?? '',
+      proposalId: `prop-${request.input.requestId}`
+    }
+  }
+
+  function mountScene(text: string): Editor {
+    const editor = new Editor({
+      extensions: buildExtensions({ sceneBreak: '~~~', onSave: () => {}, inlineTagNodeId: 'sc-1' }),
+      content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
+    })
+    registerTrackedEditor('sc-1', editor)
+    return editor
+  }
+
+  it('marks the card from a settle in the text: accepted as applied, and the turn settles', async () => {
+    const { proposalId } = await suggest()
+    expect(trackedListener).not.toBeNull()
+    trackedListener?.({ changes: [row({ status: 'accepted' })] })
+    await settle()
+    expect(active().messages.at(-1)?.agent?.changes[0]?.status).toBe('applied')
+    expect(settles).toEqual([{ id: proposalId, status: 'accepted', note: null }])
+  })
+
+  it('marks a rejection in the text as rejected, and a passage edited since as text changed', async () => {
+    const first = await suggest()
+    trackedListener?.({ changes: [row({ status: 'rejected' })] })
+    await settle()
+    expect(findCard(first.messageId)).toMatchObject({ status: 'skipped' })
+    expect(settles).toEqual([{ id: first.proposalId, status: 'rejected', note: null }])
+
+    const request = await sendAndCapture('And again.')
+    request.resolve(
+      scribeOk(request.input.requestId, 'Another.', {
+        changes: [{ edit: PROSE, violation: null, applied: false, trackedId: 'tc-2' }]
+      })
+    )
+    await settle()
+    const second = active().messages.at(-1)?.id ?? ''
+    trackedListener?.({ changes: [row({ id: 'tc-2', status: 'stale' })] })
+    await settle()
+    expect(findCard(second)).toMatchObject({ status: 'failed', error: TRACKED_TEXT_CHANGED })
+    // A settle for a card already decided changes nothing.
+    trackedListener?.({ changes: [row({ status: 'accepted' })] })
+    expect(findCard(first.messageId)).toMatchObject({ status: 'skipped' })
+  })
+
+  it('Apply on the card accepts the tracked change in the scene and settles it there', async () => {
+    const editor = mountScene(PROSE.find)
+    const { messageId, changeId, proposalId } = await suggest()
+    trackedRows = [row()]
+    await store().applyChange(messageId, changeId)
+    await settle()
+    expect(editor.getText()).toBe(PROSE.replace)
+    expect(trackedSettles).toEqual([{ ids: ['tc-1'], status: 'accepted' }])
+    expect(findCard(messageId)).toMatchObject({ status: 'applied' })
+    expect(settles).toEqual([{ id: proposalId, status: 'accepted', note: null }])
+    editor.destroy()
+  })
+
+  it('Apply on a card whose passage changed since marks it text changed, and nothing lands', async () => {
+    const editor = mountScene('Mara stayed home.')
+    const { messageId, changeId } = await suggest()
+    trackedRows = [row()]
+    await store().applyChange(messageId, changeId)
+    await settle()
+    expect(editor.getText()).toBe('Mara stayed home.')
+    expect(trackedSettles).toEqual([{ ids: ['tc-1'], status: 'stale' }])
+    expect(findCard(messageId)).toMatchObject({ status: 'failed', error: TRACKED_TEXT_CHANGED })
+    editor.destroy()
+  })
+
+  it('Skip on the card rejects the tracked change in the scene', async () => {
+    const { messageId, changeId } = await suggest()
+    trackedRows = [row()]
+    store().skipChange(messageId, changeId)
+    await settle()
+    expect(findCard(messageId)).toMatchObject({ status: 'skipped' })
+    expect(trackedSettles).toEqual([{ ids: ['tc-1'], status: 'rejected' }])
+  })
+
+  function findCard(messageId: string): AgentChangeView | undefined {
+    return active().messages.find((m) => m.id === messageId)?.agent?.changes[0]
+  }
+})
+
+type AgentChangeView = NonNullable<Conversation['messages'][number]['agent']>['changes'][number]
 
 describe("useAssistantStore send, a question about the book (the router's query pick, Ms Scribe in v1)", () => {
   beforeEach(() => {

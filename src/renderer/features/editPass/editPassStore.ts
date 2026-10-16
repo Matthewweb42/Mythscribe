@@ -55,6 +55,12 @@ export interface StartPassInput {
   excerpt?: string | null
 }
 
+/** What one accept did: the changes applied to the text and those whose passage was gone. */
+export interface AcceptOutcome {
+  applied: string[]
+  stale: string[]
+}
+
 interface EditPassState {
   /** Every pass by id, and the newest-first order of the Edit reports list. */
   byId: Record<string, EditPassSummary>
@@ -83,8 +89,11 @@ interface EditPassState {
   resume: (passId: string) => Promise<void>
   remove: (passId: string) => Promise<void>
   loadChanges: (nodeId: string) => Promise<void>
-  /** Accepts changes (any scenes): applied to the text, then settled; a gone passage settles stale. */
-  accept: (changes: readonly EditChange[]) => Promise<void>
+  /**
+   * Accepts changes (any scenes): applied to the text, then settled; a gone passage settles stale.
+   * Answers the ids applied and the ids found stale (none while another accept is under way).
+   */
+  accept: (changes: readonly EditChange[]) => Promise<AcceptOutcome>
   /** Rejects changes, or dismisses notes. */
   reject: (changes: readonly EditChange[]) => Promise<void>
   /** Marks developmental notes addressed. */
@@ -429,12 +438,12 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
 
   async accept(changes) {
     const pending = changes.filter((c) => c.status === 'pending' && c.kind === 'change')
-    if (pending.length === 0 || get().busy) return
+    const applied: string[] = []
+    const stale: string[] = []
+    if (pending.length === 0 || get().busy) return { applied, stale }
     set({ busy: true })
     for (const change of pending) accepting.add(change.id)
     try {
-      const applied: string[] = []
-      const stale: string[] = []
       for (const [nodeId, group] of byScene(pending)) {
         // The run reads the saved scenes; a scene still in the running pass is not touched.
         const running = runningPass(get())
@@ -448,8 +457,8 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
       if (stale.length > 0) {
         toast.warning(
           stale.length === 1
-            ? 'One change could not be applied: its passage has changed since the pass.'
-            : `${stale.length} changes could not be applied: their passages have changed since the pass.`
+            ? 'One change could not be applied: its passage has changed since it was suggested.'
+            : `${stale.length} changes could not be applied: their passages have changed since they were suggested.`
         )
       }
     } catch (err) {
@@ -458,6 +467,7 @@ export const useEditPassStore = create<EditPassState>((set, get) => ({
       for (const change of pending) accepting.delete(change.id)
       set({ busy: false })
     }
+    return { applied, stale }
   },
 
   async reject(changes) {

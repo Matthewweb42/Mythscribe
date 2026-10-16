@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, isNotNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { findQuote } from '@shared/critique'
 import {
@@ -14,7 +14,12 @@ import {
 } from '@shared/editFlow'
 import type { EditChange } from '@shared/editPass'
 import { editChange, editPass, type EditPassRow } from '../db/schema'
-import { countsFor, evictPasses, passNodeIds } from '../editPass/editPassStore'
+import {
+  countsFor,
+  evictPasses,
+  passNodeIds,
+  SCRIBE_PASS_FLOW
+} from '../editPass/editPassStore'
 import { AppError } from '../ipc/errors'
 import type { TreeDb } from '../tree/treeStore'
 
@@ -110,12 +115,12 @@ export function createFlowRun(db: TreeDb, input: CreateFlowRunInput): EditPassRo
   return requireFlowRow(db, id)
 }
 
-/** Every flow run, newest first. */
+/** Every flow run, newest first (Ms Scribe's hidden rows share the column and are not runs). */
 export function flowRows(db: TreeDb): EditPassRow[] {
   return db
     .select()
     .from(editPass)
-    .where(isNotNull(editPass.flow))
+    .where(and(isNotNull(editPass.flow), ne(editPass.flow, SCRIBE_PASS_FLOW)))
     .orderBy(desc(editPass.createdAt), desc(sql`rowid`))
     .all()
 }

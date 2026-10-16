@@ -414,7 +414,13 @@ export const AgentChange = z.object({
    * 2026-10-07: what the author should know about how the edit landed ("“…” is not in the
    * scene; placed at the caret instead."), shown on its line; null for nothing to say.
    */
-  notice: z.string().nullable().default(null)
+  notice: z.string().nullable().default(null),
+  /**
+   * Notes fixes (2026-10-15): Ms Scribe's prose suggestion is also a tracked change in the scene
+   * (its `edit_change` id): Apply and Skip settle it, and settling it in the text marks the card.
+   * Null for every other edit.
+   */
+  trackedId: z.string().nullable().default(null)
 })
 export type AgentChange = z.infer<typeof AgentChange>
 

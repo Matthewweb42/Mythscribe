@@ -37,7 +37,8 @@ const CHANGE: AgentChange = {
   violation: null,
   error: null,
   proposalId: null,
-  notice: null
+  notice: null,
+  trackedId: null
 }
 
 const turn = (

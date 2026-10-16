@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, notInArray, or, sql } from 'drizzle-orm'
 import {
   EDIT_PASS_PRESETS_KEY,
   EDIT_PASS_RETENTION_MAX,
@@ -33,6 +33,64 @@ function readIds(value: string): string[] {
   } catch {
     return []
   }
+}
+
+/**
+ * The `flow` value of Ms Scribe's hidden rows (notes fixes, 2026-10-15): one `edit_pass` row per
+ * chat turn that proposed prose, owning that turn's tracked changes, so they draw in the scene and
+ * settle through `editPass:settle` like the edit passes' own. Neither an edit pass (`editPass:list`
+ * lists `flow` null only) nor an edit-flow run (`flowRows` skips it); kept apart from the passes'
+ * cap (`evictPasses`) under their own (`SCRIBE_PASS_RETENTION_MAX`).
+ */
+export const SCRIBE_PASS_FLOW = '{"owner":"scribe"}'
+/** Ms Scribe's hidden rows kept per project; the oldest go (with their changes) beyond it. */
+export const SCRIBE_PASS_RETENTION_MAX = 200
+
+/** Whether a row is Ms Scribe's hidden row, not an edit pass or an edit-flow run. */
+export function isScribePass(row: Pick<EditPassRow, 'flow'>): boolean {
+  return row.flow === SCRIBE_PASS_FLOW
+}
+
+/** Rows that are not Ms Scribe's (`flow` null, or an edit-flow run's). */
+const notScribe = or(isNull(editPass.flow), ne(editPass.flow, SCRIBE_PASS_FLOW))
+
+/**
+ * Inserts Ms Scribe's finished hidden row over `nodeIds` (the scenes her turn proposed changes
+ * in) and evicts her oldest rows beyond `SCRIBE_PASS_RETENTION_MAX`; the passes' cap is untouched.
+ */
+export function createScribePass(
+  db: TreeDb,
+  nodeIds: readonly string[],
+  now = new Date().toISOString(),
+  max = SCRIBE_PASS_RETENTION_MAX
+): EditPassRow {
+  const id = randomUUID()
+  const ids = JSON.stringify(nodeIds)
+  db.insert(editPass)
+    .values({
+      id,
+      type: 'custom',
+      instruction: null,
+      status: 'done',
+      nodeIds: ids,
+      doneNodeIds: ids,
+      createdAt: now,
+      finishedAt: now,
+      flow: SCRIBE_PASS_FLOW
+    })
+    .run()
+  const keep = db
+    .select({ id: editPass.id })
+    .from(editPass)
+    .where(eq(editPass.flow, SCRIBE_PASS_FLOW))
+    .orderBy(desc(editPass.createdAt), desc(sql`rowid`))
+    .limit(max)
+    .all()
+    .map((row) => row.id)
+  db.delete(editPass)
+    .where(and(eq(editPass.flow, SCRIBE_PASS_FLOW), notInArray(editPass.id, keep)))
+    .run()
+  return requirePass(db, id)
 }
 
 export interface CreatePassInput {
@@ -119,11 +177,15 @@ export function interruptRunningPasses(db: TreeDb): number {
     .run().changes
 }
 
-/** Keeps the newest `max` passes; a running pass is never evicted. */
+/**
+ * Keeps the newest `max` passes (edit passes and edit-flow runs; Ms Scribe's hidden rows have
+ * their own cap); a running pass is never evicted.
+ */
 export function evictPasses(db: TreeDb, max = EDIT_PASS_RETENTION_MAX): number {
   const keep = db
     .select({ id: editPass.id })
     .from(editPass)
+    .where(notScribe)
     .orderBy(desc(editPass.createdAt), desc(sql`rowid`))
     .limit(max)
     .all()
@@ -131,7 +193,7 @@ export function evictPasses(db: TreeDb, max = EDIT_PASS_RETENTION_MAX): number {
   if (keep.length < max) return 0
   return db
     .delete(editPass)
-    .where(and(ne(editPass.status, 'running'), notInArray(editPass.id, keep)))
+    .where(and(ne(editPass.status, 'running'), notScribe, notInArray(editPass.id, keep)))
     .run().changes
 }
 
@@ -145,12 +207,16 @@ export function deletePass(db: TreeDb, id: string): void {
 
 export type ChangeInput = Omit<EditChange, 'id' | 'status'>
 
-/** Inserts a scene's changes or notes as `pending`. */
-export function insertChanges(db: TreeDb, changes: readonly ChangeInput[]): void {
-  if (changes.length === 0) return
-  db.insert(editChange)
-    .values(changes.map((change) => ({ ...change, id: randomUUID(), status: 'pending' as const })))
-    .run()
+/** Inserts a scene's changes or notes as `pending`; answers their ids, in order. */
+export function insertChanges(db: TreeDb, changes: readonly ChangeInput[]): string[] {
+  if (changes.length === 0) return []
+  const rows = changes.map((change) => ({
+    ...change,
+    id: randomUUID(),
+    status: 'pending' as const
+  }))
+  db.insert(editChange).values(rows).run()
+  return rows.map((row) => row.id)
 }
 
 /** A pass's changes or notes, in reading order of the pass's scenes, then position. */
