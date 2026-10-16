@@ -1,0 +1,25 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`notesSort.v1 prompt (notes structure B, Sort with Ms Scribe) > puts the rules and the Notes listing first, then one part of the document 1`] = `
+[
+  {
+    "content": "You are the notes sorter inside a novel-writing app, breaking a document the author put in her notes into smaller pages.
+Make one page for each character, place, group, object, event, system or topic the document covers; title it with its name as the document writes it, short.
+Copy the text: every line you write must be in the document as it stands. You may leave out lines, headings that only repeat the title, and what fits no page (the document stays in her notes), but never reword, summarise, merge sentences or add a word.
+Put each page in a folder: one of hers below when it fits, written as listed; else a new short plural name (Characters, Places, Magic); "" for the top of her notes. A title she already has in that folder is fine: the text is added to her page.
+At most 30 pages. Reply with JSON only: {"pages":[{"folder":"Characters","title":"Mara","text":"lines copied from the document, one per line"}]}; nothing to sort is {"pages":[]}.
+
+# Her notes
+Folders: Characters; Places
+Pages: Characters › Mara",
+    "role": "system",
+  },
+  {
+    "content": "# Document: Fenlands (part 2 of 2)
+## Rook
+
+A smuggler.",
+    "role": "user",
+  },
+]
+`;

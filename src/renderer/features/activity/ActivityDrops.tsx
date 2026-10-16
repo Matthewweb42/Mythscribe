@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import type { ActivityNote } from './activityJobs'
-import { openNote, retryNote } from './activityRoutes'
+import { openNote, retryNote, undoNote } from './activityRoutes'
 import { useActivityStore } from './activityStore'
 
 const BUTTON =
@@ -17,7 +17,7 @@ const DANGER =
  * is ready to review", "Edit pass finished") with Open and ×; a failure is in the danger colour
  * with its reason and Retry where the job can run again. Outside focus mode they stay until
  * opened or dismissed; in focus mode one shows for a few seconds, then waits for focus mode to
- * end (`activityStore` parks it). The × is "Dismiss notification", like the toasts'.
+ * end (`activityStore` parks it). A sort's line (notes structure B) also has Undo. The × is "Dismiss notification", like the toasts'.
  */
 export function ActivityDrops(): React.JSX.Element | null {
   const notes = useActivityStore((s) => s.notes)
@@ -58,6 +58,11 @@ function Drop({ note }: { note: ActivityNote }): React.JSX.Element {
         {note.canRetry ? (
           <button type="button" onClick={() => void retryNote(note)} className={DANGER}>
             Retry
+          </button>
+        ) : null}
+        {note.canUndo === true ? (
+          <button type="button" onClick={() => void undoNote(note)} className={BUTTON}>
+            Undo
           </button>
         ) : null}
         {note.canOpen ? (

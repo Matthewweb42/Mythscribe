@@ -8,6 +8,7 @@ import {
   moveNotebookItem,
   updateNotebookItem
 } from '../notebook/notebookStore'
+import type { TreeDb } from '../tree/treeStore'
 import { nodeByRef, resolveAgentEdit, type ToolOutcome } from '../ai/agentTools'
 import { headTruncate } from '../ai/context/chatContext'
 import { folderPath } from './source'
@@ -113,10 +114,15 @@ export function findFolder(
 
 /**
  * The folder a name or path names, made when missing (each missing part of a path, under the
- * deepest part found), each new folder a `notebookFolder` change of the run. Null for the top.
+ * deepest part found); `onMade` hears each new folder with the listing from before it was made.
+ * Null for the top. Shared by Ms Scribe's tools and Sort with Ms Scribe (notes structure B).
  */
-export function ensureFolder(run: ScribeRun, name: string): NotebookItem | null {
-  let items = listNotebook(run.db)
+export function ensureFolderPath(
+  db: TreeDb,
+  name: string,
+  onMade: (made: NotebookItem, before: readonly NotebookItem[]) => void
+): NotebookItem | null {
+  let items = listNotebook(db)
   const found = findFolder(items, name)
   if (found !== undefined) return found
   const parts = segments(name).map((part) => part.slice(0, NOTEBOOK_TITLE_MAX))
@@ -127,11 +133,20 @@ export function ensureFolder(run: ScribeRun, name: string): NotebookItem | null 
       at = existing
       continue
     }
-    const made = createNotebookItem(run.db, {
-      parentId: at?.id ?? null,
-      kind: 'folder',
-      title: part
-    })
+    const made = createNotebookItem(db, { parentId: at?.id ?? null, kind: 'folder', title: part })
+    onMade(made, items)
+    items = listNotebook(db)
+    at = items.find((item) => item.id === made.id) ?? null
+  }
+  return at
+}
+
+/**
+ * The folder a name or path names, made when missing (`ensureFolderPath`), each new folder a
+ * `notebookFolder` change of the run. Null for the top.
+ */
+export function ensureFolder(run: ScribeRun, name: string): NotebookItem | null {
+  return ensureFolderPath(run.db, name, (made, items) => {
     run.notebookChanged([made.id])
     done(
       run,
@@ -143,10 +158,7 @@ export function ensureFolder(run: ScribeRun, name: string): NotebookItem | null 
       },
       true
     )
-    items = listNotebook(run.db)
-    at = items.find((item) => item.id === made.id) ?? null
-  }
-  return at
+  })
 }
 
 /** A Notes page (by ref or title) or folder (by title or path) the model named, or why not. */

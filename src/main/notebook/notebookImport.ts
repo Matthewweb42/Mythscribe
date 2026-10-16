@@ -5,22 +5,27 @@ import {
   notebookDocFromText,
   notebookTitleFromFileName,
   type NotebookImportResult,
-  type NotebookItem
+  type NotebookImportSplit,
+  type NotebookItem,
+  type NotebookSplitResult
 } from '@shared/notebook'
 import type { TiptapNodeT } from '@shared/tiptap'
+import { AppError } from '../ipc/errors'
 import type { ImportBlock } from '../import/blocks'
 import { readDocx } from '../import/docx'
 import { readMarkdown, readPlainText } from '../import/text'
 import { extractContextText } from '../library/extract'
 import type { TreeDb } from '../tree/treeStore'
-import { createNotebookItem } from './notebookStore'
+import { createNotebookItem, deleteNotebookItem, getNotebookPage } from './notebookStore'
 
 /**
  * Importing files as note pages (notes redesign phase 1, slice 1): one page per file, through the
  * readers the manuscript import (F-12.2) and the context library (F-9.8) already use. Word and
  * Markdown keep their headings and paragraphs (with bold and italic), plain text its paragraphs,
  * a PDF the paragraphs of its text layer. A file dropped inside folders lands in the same folders,
- * made once per import.
+ * made once per import. Notes structure part B (2026-10-16): Split at headings makes a folder per
+ * file with a page per heading (`splitAtHeadings`), and a page already in Notes splits the same
+ * way (`splitNotebookPage`).
  */
 
 /** The heading levels a page holds (the editor's 1–3); a deeper heading becomes a level-3 one. */
@@ -94,22 +99,113 @@ export async function notebookPageFromFile(
   return hasText(content) ? { content } : { skip: NO_TEXT }
 }
 
+/** One page of a split: its title and its blocks (null when the heading had nothing under it). */
+export interface SplitPart {
+  title: string
+  content: TiptapNodeT | null
+}
+
+const headingText = (block: TiptapNodeT): string =>
+  docToText({ type: 'doc', content: [block] })
+    .replace(/\s+/g, ' ')
+    .trim()
+
+const isHeading = (block: TiptapNodeT): boolean =>
+  block.type === 'heading' && headingText(block) !== ''
+
+const levelOf = (block: TiptapNodeT): number => {
+  const level = block.attrs?.level
+  return typeof level === 'number' ? level : 1
+}
+
+/**
+ * A document split at the headings of the highest level it uses (the smallest level number): one
+ * part per such heading, titled by it, holding what follows it up to the next one (lower headings
+ * stay inside); text before the first heading is a part titled `title`. Null when the document
+ * has no heading. Nothing is lost: every block is in exactly one part, but the split headings,
+ * which become the titles.
+ */
+export function splitAtHeadings(title: string, doc: TiptapNodeT | null): SplitPart[] | null {
+  const blocks = doc?.content ?? []
+  const headings = blocks.filter(isHeading)
+  if (headings.length === 0) return null
+  const top = Math.min(...headings.map(levelOf))
+  const parts: { title: string; blocks: TiptapNodeT[] }[] = []
+  let current: { title: string; blocks: TiptapNodeT[] } = { title, blocks: [] }
+  let opening = true
+  const close = (): void => {
+    const body = { type: 'doc', content: current.blocks }
+    // The text before the first heading is a page only when it holds something.
+    if (!opening || hasText(body)) parts.push(current)
+  }
+  for (const block of blocks) {
+    if (isHeading(block) && levelOf(block) === top) {
+      close()
+      opening = false
+      current = { title: headingText(block).slice(0, NOTEBOOK_TITLE_MAX), blocks: [] }
+    } else {
+      current.blocks.push(block)
+    }
+  }
+  close()
+  return parts.map((part) => ({
+    title: part.title,
+    content: part.blocks.length === 0 ? null : { type: 'doc', content: part.blocks }
+  }))
+}
+
+/**
+ * Splits a page already in Notes at its headings, in one transaction: a folder named after the
+ * page takes its place (its parent, its position), a page per part goes in it, and the page is
+ * deleted (soft: restoring it and deleting the folder is the Undo). VALIDATION for a folder or a
+ * page with no heading.
+ */
+export function splitNotebookPage(db: TreeDb, id: string): NotebookSplitResult {
+  const page = getNotebookPage(db, id)
+  if (page.kind !== 'page') throw new AppError('VALIDATION', 'Only a page can be split.')
+  const parts = splitAtHeadings(page.title, page.content)
+  if (parts === null) {
+    throw new AppError('VALIDATION', `“${page.title}” has no headings to split at.`)
+  }
+  return db.transaction((tx) => {
+    const folder = createNotebookItem(tx, {
+      parentId: page.parentId,
+      kind: 'folder',
+      title: page.title,
+      position: page.position
+    })
+    const pages = parts.map((part) =>
+      createNotebookItem(tx, {
+        parentId: folder.id,
+        kind: 'page',
+        title: part.title,
+        content: part.content
+      })
+    )
+    deleteNotebookItem(tx, id)
+    return { folder: toItem(folder), pages: pages.map(toItem), pageId: id }
+  })
+}
+
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
 /**
  * Imports `sources` under `parentId`: the folders each was dropped in first (one folder per path,
- * made on first use), then its page. A file that cannot become a page is skipped with its reason
- * and the rest still import.
+ * made on first use), then its page, or with `split` `headings` a folder named after the file
+ * holding a page per heading (a file with no heading is one page, named in `unsplit`). A file
+ * that cannot become a page is skipped with its reason and the rest still import.
  */
 export async function importNotebookFiles(
   db: TreeDb,
   parentId: string | null,
-  sources: readonly NotebookImportSource[]
+  sources: readonly NotebookImportSource[],
+  split: NotebookImportSplit = 'none'
 ): Promise<NotebookImportResult> {
   const items: NotebookItem[] = []
   const skipped: NotebookImportResult['skipped'] = []
+  const unsplit: string[] = []
   const folders = new Map<string, string>()
   const folderFor = (path: readonly string[]): string | null => {
     let parent = parentId
@@ -144,15 +240,42 @@ export async function importNotebookFiles(
       skipped.push({ name: source.name, reason: page.skip })
       continue
     }
-    const made = createNotebookItem(db, {
+    const title = notebookTitleFromFileName(source.name)
+    const parts = split === 'headings' ? splitAtHeadings(title, page.content) : null
+    if (split === 'headings' && parts === null) unsplit.push(source.name)
+    if (parts === null) {
+      items.push(
+        createNotebookItem(db, {
+          parentId: folderFor(source.folders),
+          kind: 'page',
+          title,
+          content: page.content
+        })
+      )
+      continue
+    }
+    const folder = createNotebookItem(db, {
       parentId: folderFor(source.folders),
-      kind: 'page',
-      title: notebookTitleFromFileName(source.name),
-      content: page.content
+      kind: 'folder',
+      title
     })
-    items.push(made)
+    items.push(folder)
+    for (const part of parts) {
+      items.push(
+        createNotebookItem(db, {
+          parentId: folder.id,
+          kind: 'page',
+          title: part.title,
+          content: part.content
+        })
+      )
+    }
   }
-  return { items: items.map(toItem), skipped }
+  return {
+    items: items.map(toItem),
+    skipped,
+    ...(split === 'headings' ? { unsplit } : {})
+  }
 }
 
 function toItem(page: NotebookItem): NotebookItem {

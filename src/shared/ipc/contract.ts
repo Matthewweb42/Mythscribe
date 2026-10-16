@@ -183,12 +183,15 @@ import { TodoCheckResult, TodoSuggestResult, TodoView } from '../todo'
 import {
   NotebookImportFile,
   NotebookImportResult,
+  NotebookImportSplit,
   NotebookItem,
   NotebookKind,
   NotebookPage,
+  NotebookSplitResult,
   NotebookTitle,
   NotebookVersion
 } from '../notebook'
+import { NotesSortEstimate, NotesSortEstimateInput, NotesSortRunResult } from '../notesSort'
 import {
   CHANGES_PAGE,
   CHANGES_PAGE_MAX,
@@ -1375,15 +1378,41 @@ export const contract = {
    * each with the folders it was dropped in, which are made as folders; `paths` are files picked
    * on disk (the new-project wizard's, notes redesign fresh start); with neither, main asks with
    * the open dialog (null when cancelled). Images and other types are skipped with a reason.
-   * Pushes `notebook:changed`.
+   * `split` (notes structure part B): `headings` makes a folder named after each file with a
+   * page per heading of the highest level it uses (a file with none is one page, named in
+   * `unsplit`); absent or `none`, one page each. Pushes `notebook:changed`.
    */
   'notebook:import': {
     input: z.object({
       parentId: z.string().nullable(),
       files: z.array(NotebookImportFile).min(1).optional(),
-      paths: z.array(z.string().min(1)).min(1).optional()
+      paths: z.array(z.string().min(1)).min(1).optional(),
+      split: NotebookImportSplit.optional()
     }),
     output: NotebookImportResult.nullable()
+  },
+  /**
+   * Notes structure part B: a page split at its headings, as an import's Split at headings: a
+   * folder named after the page takes its place, one page per heading of the highest level; the
+   * page is deleted (`notebook:restore` and deleting the folder undo it). VALIDATION for a page
+   * with no headings or a folder. Pushes `notebook:changed`.
+   */
+  'notebook:splitPage': { input: z.object({ id: z.string() }), output: NotebookSplitResult },
+  /**
+   * Notes structure part B: what Sort with Ms Scribe would send for these pages or files, counted
+   * locally (nothing is sent), for the price shown before it starts.
+   */
+  'notesSort:estimate': { input: NotesSortEstimateInput, output: NotesSortEstimate },
+  /**
+   * Notes structure part B: Sort with Ms Scribe (`notesSort.v1`) over note pages, one at a time.
+   * Each part's pages are written as it answers (folders reused by name, a page of the same title
+   * appended to under the document's title with its version kept); the pages are kept. Answers
+   * what it made and appended to, for the one Undo, or an expected AI failure. VALIDATION while
+   * another sort runs. Pushes `notebook:changed`.
+   */
+  'notesSort:run': {
+    input: z.object({ pageIds: z.array(z.string()).min(1) }),
+    output: NotesSortRunResult
   },
   /**
    * Crash recovery (F-8.3): writes the editor's latest unsaved state of one record to the

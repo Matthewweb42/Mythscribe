@@ -92,12 +92,36 @@ export const NotebookImportFile = z.object({
 })
 export type NotebookImportFile = z.infer<typeof NotebookImportFile>
 
-/** What an import made (folders and pages, in the order made) and the files it left out, with why. */
+/**
+ * How an import breaks each file up (notes structure part B, 2026-10-16): one page each (`none`),
+ * or a folder named after the file with a page per heading of the highest level it uses
+ * (`headings`). Sort with Ms Scribe imports one page each and then sorts it (`notesSort:run`).
+ */
+export const NOTEBOOK_IMPORT_SPLITS = ['none', 'headings'] as const
+export const NotebookImportSplit = z.enum(NOTEBOOK_IMPORT_SPLITS)
+export type NotebookImportSplit = z.infer<typeof NotebookImportSplit>
+
+/**
+ * What an import made (folders and pages, in the order made) and the files it left out, with why;
+ * `unsplit` names the files Split at headings found no heading in, each imported as one page.
+ */
 export const NotebookImportResult = z.object({
   items: z.array(NotebookItem),
-  skipped: z.array(z.object({ name: z.string(), reason: z.string() }))
+  skipped: z.array(z.object({ name: z.string(), reason: z.string() })),
+  unsplit: z.array(z.string()).optional()
 })
 export type NotebookImportResult = z.infer<typeof NotebookImportResult>
+
+/**
+ * A page split at its headings (`notebook:splitPage`): the folder that took the page's place, the
+ * pages made in it, and the page itself (deleted; `notebook:restore` brings it back for Undo).
+ */
+export const NotebookSplitResult = z.object({
+  folder: NotebookItem,
+  pages: z.array(NotebookItem),
+  pageId: z.string()
+})
+export type NotebookSplitResult = z.infer<typeof NotebookSplitResult>
 
 /** A page's title from its file name: the name without its extension, cut to the title limit. */
 export function notebookTitleFromFileName(name: string): string {

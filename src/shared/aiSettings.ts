@@ -841,6 +841,15 @@ export const AI_DATA_SHARING: Record<AiFeatureId, AiDataSharing> = {
       'that chapter each time you leave it after writing in it (at most the daily cap).',
     minDial: 1
   },
+  notesSort: {
+    label: 'Sort uploads into notes',
+    sends:
+      'Only when you pick Sort with Ms Scribe for a file you add to Notes or for a note page: ' +
+      'the text of that file or page (a part of about 12,000 characters at a time, each part ' +
+      'once), its title, and the names of your Notes folders and pages (up to about 4,000 ' +
+      'characters), so the pages go into folders you already have.',
+    minDial: 1
+  },
   judge: {
     label: 'Contradiction check',
     sends:

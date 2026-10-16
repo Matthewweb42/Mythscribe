@@ -107,6 +107,8 @@ import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { NotebookPageView } from '@renderer/features/notebook/NotebookPageView'
 import { useNotebookPageStore } from '@renderer/features/notebook/notebookPageStore'
 import { useNotebookStore } from '@renderer/features/notebook/notebookStore'
+import { NotesImportDialog } from '@renderer/features/notebook/NotesImportDialog'
+import { useNotesSortStore } from '@renderer/features/notebook/notesSortStore'
 import { currentStoryMemory, useStoryMemory } from '@renderer/features/project/storyMemory'
 import { usePageStore } from '@renderer/features/research/pageStore'
 import { ResearchPage } from '@renderer/features/research/ResearchPage'
@@ -361,6 +363,8 @@ export function App(): React.JSX.Element {
       // Notes redesign phase 1: the notebook and its open page belong to the project that closed.
       useNotebookStore.getState().clear()
       useNotebookPageStore.getState().clear()
+      // Notes structure B: an import's choice and the sort's Undo belong to it too.
+      useNotesSortStore.getState().clear()
       // F-16.8: and so do the Research meta and the open pages.
       useResearchStore.getState().clear()
       usePageStore.getState().clear()
@@ -1196,6 +1200,8 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       <RecordCreateDialog />
       <LabelsDialog />
       <CategoryCreateDialog />
+      {/* Notes structure B: how dropped or picked files come into Notes, and Sort with Ms Scribe. */}
+      <NotesImportDialog />
       {/* F-9.5: the entity import review, open only while a plan is under review. */}
       <EntityImportDialog />
       {/* F-9.8: the context library's estimate; the pass and its review are side work. */}

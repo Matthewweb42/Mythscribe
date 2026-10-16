@@ -7,6 +7,11 @@ import type { OrganiseRequest } from '@shared/organise'
 import type { ContinuityCheck, ContinuityOutcome } from '@renderer/features/ai/continuityStore'
 import type { EditPassView } from '@renderer/features/editPass/editPassViewStore'
 import type { LibraryFlow } from '@renderer/features/library/libraryStore'
+import type {
+  NotesSortDone,
+  NotesSortFailure,
+  NotesSortJob
+} from '@renderer/features/notebook/notesSortStore'
 import type { OrganisePhase } from '@renderer/features/organise/organiseStore'
 import type { TodoCheckOutcome } from '@renderer/features/todo/todoStore'
 
@@ -29,6 +34,7 @@ export type ActivityKind =
   | 'rebuild'
   | 'checkBook'
   | 'notesUpdate'
+  | 'notesSort'
 
 /** One long job running now. */
 export interface ActivityJob {
@@ -81,6 +87,12 @@ export interface ActivitySnapshot {
    * and the run whose results show in the right column (null: none, or the panel is closed).
    */
   editFlow: { runs: EditFlowRun[]; shownId: string | null }
+  /** Notes structure B: Sort with Ms Scribe under way, just finished (with its Undo), or failed. */
+  notesSort: {
+    running: NotesSortJob | null
+    done: NotesSortDone | null
+    failed: NotesSortFailure | null
+  }
 }
 
 /** A finished or failed job's notification (the drop from the top centre). */
@@ -95,6 +107,8 @@ export interface ActivityNote {
   /** Open shows the result (the review dialog, the report, the list). */
   canOpen: boolean
   canRetry: boolean
+  /** Undo takes the result back (notes structure B: a sort's pages); absent, no Undo. */
+  canUndo?: boolean
   /** Hidden in focus mode after its few seconds; it drops down again when focus mode ends. */
   parked: boolean
 }
@@ -106,8 +120,18 @@ const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? '' 
 /** Every long job running now, in a fixed order (the hover lists them so). */
 export function readJobs(snap: ActivitySnapshot): ActivityJob[] {
   const jobs: ActivityJob[] = []
-  const { organise, upload, editPasses, todo, continuity, conversion, queue, memory, editFlow } =
-    snap
+  const {
+    organise,
+    upload,
+    editPasses,
+    todo,
+    continuity,
+    conversion,
+    queue,
+    memory,
+    editFlow,
+    notesSort
+  } = snap
   if (organise.phase === 'running' && organise.requestId !== null) {
     jobs.push({
       key: `organise:${organise.requestId}`,
@@ -191,6 +215,16 @@ export function readJobs(snap: ActivitySnapshot): ActivityJob[] {
       ref: run.id
     })
   }
+  // Notes structure B: Sort with Ms Scribe, one request a part, not counted here.
+  if (notesSort.running !== null) {
+    jobs.push({
+      key: `notesSort:${notesSort.running.key}`,
+      kind: 'notesSort',
+      name: `Sorting ${notesSort.running.title}`,
+      steps: null,
+      ref: notesSort.running.key
+    })
+  }
   return jobs
 }
 
@@ -210,7 +244,8 @@ export const CRAWL_MS: Record<ActivityKind, number> = {
   conversion: CONVERSION_SECONDS_PER_SCENE * 1000,
   rebuild: 20_000,
   checkBook: 5_000,
-  notesUpdate: 15_000
+  notesUpdate: 15_000,
+  notesSort: 20_000
 }
 
 /** The estimated share of a step done after `elapsedMs`: creeps toward `CRAWL_CAP`, never past. */
@@ -468,6 +503,31 @@ export function outcomeOf(job: ActivityJob, snap: ActivitySnapshot): ActivityNot
         canRetry: false
       }
     }
+    case 'notesSort': {
+      // Structure B: "Sorted <file> into N pages", with Open and the sort's one Undo.
+      const { done, failed } = snap.notesSort
+      if (failed?.key === job.ref) {
+        return {
+          ...base,
+          status: 'failed',
+          title: `Sorting ${failed.title} failed`,
+          detail: failed.message,
+          canOpen: false,
+          canRetry: false
+        }
+      }
+      if (done?.key !== job.ref) return null
+      const wrote = done.made.length > 0 || done.appended.length > 0
+      return {
+        ...base,
+        status: 'done',
+        title: `Sorted ${done.title} into ${plural(done.pages, 'page')}`,
+        detail: done.stopped,
+        canOpen: wrote,
+        canRetry: false,
+        canUndo: wrote
+      }
+    }
   }
 }
 
@@ -511,6 +571,12 @@ export function noteStale(note: ActivityNote, snap: ActivitySnapshot): boolean {
     case 'notesUpdate': {
       const run = snap.editFlow.runs.find((each) => each.id === note.ref)
       return run === undefined || run.status === 'running' || snap.editFlow.shownId === note.ref
+    }
+    case 'notesSort': {
+      const { done, failed } = snap.notesSort
+      return note.status === 'done'
+        ? done?.key !== note.ref || done.undone
+        : failed?.key !== note.ref
     }
   }
 }

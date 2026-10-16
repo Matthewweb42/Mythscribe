@@ -87,6 +87,7 @@ import type { JudgeVerdict } from '@shared/memory/findings'
 import { scribeEvalCases } from './scribeFixtures'
 import { scribe2EvalCases } from './scribe2Fixtures'
 import { editFlowEvalCases } from './editFlowFixtures'
+import { notesSortEvalCases } from './notesSortFixtures'
 import type { EditFlowCategory, EditFlowFamily } from '@shared/editFlow'
 import { CARD_GIST_MAX_WORDS, CARD_LINE_MAX_WORDS } from '@shared/memory/claims'
 import type { PromptCard } from '@shared/memory/cardText'
@@ -888,6 +889,11 @@ export interface EvalCase {
       }
     /** Update notes in the edit flow: the answer must parse to its writes, nothing dropped. */
     | { kind: 'editNotes' }
+    /**
+     * Sort with Ms Scribe (notes structure B): the answer must parse to pages, none dropped (every
+     * line copied from `part`), and each title in `expected` must be among them.
+     */
+    | { kind: 'notesSort'; part: string; expected: string[] }
     /**
      * A context-library chunk (F-9.8): the answer must parse to the shape the prompt asks for,
      * every entity must be of a known kind with a name, and every name in `expected` must be found.
@@ -6839,6 +6845,8 @@ export const EVAL_CASES: EvalCase[] = [
   ...scribe2EvalCases(),
   // Notes redesign phase 2: the edit flow's stages and checks, and its Update notes.
   ...editFlowEvalCases(),
+  // Notes structure part B (2026-10-16): Sort with Ms Scribe.
+  ...notesSortEvalCases(),
   // Notes fixes (2026-10-15): Rewrite in Vibe, bolder; the v4 cases are Write's and Brainstorm's.
   rewriteCaseV6(
     'fresh',

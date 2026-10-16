@@ -7,8 +7,19 @@ import { notebookTitleFromFileName } from '@shared/notebook'
 import { textPdf } from '../library/pdfFixture'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
 import type { TreeDb } from '../tree/treeStore'
-import { importNotebookFiles, notebookPageFromFile } from './notebookImport'
-import { createNotebookItem, getNotebookPage, listNotebook } from './notebookStore'
+import {
+  importNotebookFiles,
+  notebookPageFromFile,
+  splitAtHeadings,
+  splitNotebookPage
+} from './notebookImport'
+import {
+  createNotebookItem,
+  deleteNotebookItem,
+  getNotebookPage,
+  listNotebook,
+  restoreNotebookItem
+} from './notebookStore'
 
 const SAMPLE_DOCX = path.join(import.meta.dirname, '..', 'import', 'fixtures', 'sample.docx')
 
@@ -119,6 +130,133 @@ describe('importNotebookFiles', () => {
     expect(result.skipped.map((s) => s.name)).toEqual(['art.jpg', 'big.md', 'broken.docx'])
     expect(result.skipped[1]?.reason).toBe('The file is larger than 25 MB.')
     expect(result.skipped[2]?.reason).toMatch(/^Could not read the file/)
+  })
+})
+
+describe('Split at headings (notes structure B)', () => {
+  const heading = (level: number, text: string) => ({
+    type: 'heading',
+    attrs: { level },
+    content: [{ type: 'text', text }]
+  })
+  const para = (text: string) => ({ type: 'paragraph', content: [{ type: 'text', text }] })
+
+  it('splits at the highest level used, lower headings kept inside, text before the first a page of its own', () => {
+    const parts = splitAtHeadings('World', {
+      type: 'doc',
+      content: [
+        para('An opening line.'),
+        heading(2, 'Mara'),
+        para('Grey eyes.'),
+        heading(3, 'Voice'),
+        para('Clipped.'),
+        heading(2, 'Rook'),
+        heading(2, 'Saltmarket'),
+        para('A bell.')
+      ]
+    })
+    expect(parts?.map((part) => [part.title, docToText(part.content ?? { type: 'doc' })])).toEqual([
+      ['World', 'An opening line.'],
+      ['Mara', 'Grey eyes.\nVoice\nClipped.'],
+      ['Rook', ''],
+      ['Saltmarket', 'A bell.']
+    ])
+    expect(parts?.[2]?.content).toBeNull()
+  })
+
+  it('makes no opening page when the document starts with its heading, and nothing without headings', () => {
+    expect(
+      splitAtHeadings('World', { type: 'doc', content: [heading(1, 'Mara'), para('Grey.')] })?.map(
+        (part) => part.title
+      )
+    ).toEqual(['Mara'])
+    expect(splitAtHeadings('World', { type: 'doc', content: [para('Only text.')] })).toBeNull()
+    expect(splitAtHeadings('World', null)).toBeNull()
+  })
+
+  it('imports a file as a folder of pages, and a file with no headings as one page, said so', async () => {
+    const into = createNotebookItem(db, { parentId: null, kind: 'folder', title: 'Docs' })
+    const result = await importNotebookFiles(
+      db,
+      into.id,
+      [
+        source(
+          'World.md',
+          'Opening.\n\n# Mara\n\nGrey eyes.\n\n## Voice\n\nClipped.\n\n# Rook\n\nTall.'
+        ),
+        source('Plain.txt', 'Just text.')
+      ],
+      'headings'
+    )
+    expect(result.unsplit).toEqual(['Plain.txt'])
+    expect(result.items.map((item) => [item.kind, item.title])).toEqual([
+      ['folder', 'World'],
+      ['page', 'World'],
+      ['page', 'Mara'],
+      ['page', 'Rook'],
+      ['page', 'Plain']
+    ])
+    const world = result.items[0]
+    expect(world?.parentId).toBe(into.id)
+    expect(result.items.slice(1, 4).every((item) => item.parentId === world?.id)).toBe(true)
+    expect(getNotebookPage(db, result.items[2]?.id ?? '').plain).toBe('Grey eyes.\nVoice\nClipped.')
+    expect(result.items[4]?.parentId).toBe(into.id)
+    // Without a split, nothing is said about headings.
+    const whole = await importNotebookFiles(db, null, [source('World.md', '# Mara\n\nGrey.')])
+    expect(whole.unsplit).toBeUndefined()
+    expect(whole.items.map((item) => item.kind)).toEqual(['page'])
+  })
+
+  it('splits a page in place, and restoring it and deleting the folder undoes it', () => {
+    const folder = createNotebookItem(db, { parentId: null, kind: 'folder', title: 'Docs' })
+    const first = createNotebookItem(db, { parentId: folder.id, kind: 'page', title: 'First' })
+    const page = createNotebookItem(db, {
+      parentId: folder.id,
+      kind: 'page',
+      title: 'Fenlands',
+      content: {
+        type: 'doc',
+        content: [heading(2, 'Mara'), para('Grey.'), heading(2, 'Rook'), para('Tall.')]
+      }
+    })
+    const before = listNotebook(db).map((item) => [item.id, item.parentId, item.position])
+
+    const result = splitNotebookPage(db, page.id)
+
+    expect(result.pageId).toBe(page.id)
+    expect(result.folder).toMatchObject({
+      kind: 'folder',
+      title: 'Fenlands',
+      parentId: folder.id,
+      position: page.position
+    })
+    expect(result.pages.map((item) => [item.title, item.parentId])).toEqual([
+      ['Mara', result.folder.id],
+      ['Rook', result.folder.id]
+    ])
+    expect(listNotebook(db).some((item) => item.id === page.id)).toBe(false)
+    expect(
+      listNotebook(db)
+        .filter((item) => item.parentId === folder.id)
+        .map((i) => i.id)
+    ).toEqual([first.id, result.folder.id])
+
+    deleteNotebookItem(db, result.folder.id)
+    restoreNotebookItem(db, page.id)
+    expect(listNotebook(db).map((item) => [item.id, item.parentId, item.position])).toEqual(before)
+    expect(getNotebookPage(db, page.id).plain).toBe('Mara\nGrey.\nRook\nTall.')
+  })
+
+  it('refuses a page with no headings and a folder', () => {
+    const page = createNotebookItem(db, {
+      parentId: null,
+      kind: 'page',
+      title: 'Plain',
+      content: null
+    })
+    expect(() => splitNotebookPage(db, page.id)).toThrow('“Plain” has no headings to split at.')
+    const folder = createNotebookItem(db, { parentId: null, kind: 'folder', title: 'F' })
+    expect(() => splitNotebookPage(db, folder.id)).toThrow('Only a page can be split.')
   })
 })
 

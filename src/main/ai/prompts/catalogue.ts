@@ -121,6 +121,7 @@ import { SCRIBE_V4_PROMPT_VERSION } from './scribe.v4'
 import { SCRIBE_V5_PROMPT_VERSION } from './scribe.v5'
 import { EDIT_FLOW_PROMPT_VERSION } from './editFlow.v1'
 import { EDIT_NOTES_PROMPT_VERSION } from './editNotes.v1'
+import { NOTES_SORT_PROMPT_VERSION } from './notesSort.v1'
 
 /**
  * The catalogue of shipped prompt versions (F-5.12): one entry per `<feature>.v<N>.ts` file in
@@ -282,7 +283,9 @@ export const PROMPT_VERSIONS = [
   EDIT_FLOW_PROMPT_VERSION,
   EDIT_NOTES_PROMPT_VERSION,
   // Notes fixes (2026-10-15, fixes-1.md §3): Rewrite in Vibe, bolder within the passage.
-  REWRITE_PROMPT_V6_VERSION
+  REWRITE_PROMPT_V6_VERSION,
+  // Notes structure part B (2026-10-16, structure.md §B): Sort with Ms Scribe.
+  NOTES_SORT_PROMPT_VERSION
 ] as const
 export type PromptVersion = (typeof PROMPT_VERSIONS)[number]
 
@@ -829,6 +832,13 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
     tier: 'fast',
     output: 'json',
     since: 'Notes P2'
+  },
+  // Sort with Ms Scribe: a document's part into pages in folders, its text copied (2026-10-16).
+  [NOTES_SORT_PROMPT_VERSION]: {
+    feature: 'notesSort',
+    tier: 'fast',
+    output: 'json',
+    since: 'Notes B'
   }
 }
 

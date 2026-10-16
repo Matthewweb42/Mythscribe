@@ -6,6 +6,7 @@ import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { useConversionStore } from '@renderer/features/knowledge/conversionStore'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { useMemoryStore } from '@renderer/features/memory/memoryStore'
+import { useNotesSortStore } from '@renderer/features/notebook/notesSortStore'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { showSideWork } from '@renderer/features/sideWork/sideWork'
@@ -65,6 +66,10 @@ export async function openNote(note: ActivityNote): Promise<void> {
       await flow.show(note.ref)
       return
     }
+    case 'notesSort':
+      // Structure B: the first page the sort made, in the Notes tab.
+      useNotesSortStore.getState().openResult()
+      return
   }
 }
 
@@ -96,6 +101,13 @@ export async function retryNote(note: ActivityNote): Promise<void> {
     case 'rebuild':
     case 'checkBook':
     case 'notesUpdate':
+    case 'notesSort':
       return
   }
+}
+
+/** Undo on a notification (structure B: Sort with Ms Scribe's one Undo); the notification goes. */
+export async function undoNote(note: ActivityNote): Promise<void> {
+  useActivityStore.getState().dismiss(note.id)
+  if (note.kind === 'notesSort') await useNotesSortStore.getState().undo()
 }

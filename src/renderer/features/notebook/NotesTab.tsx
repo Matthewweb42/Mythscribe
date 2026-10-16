@@ -20,6 +20,7 @@ import { takeDropped } from './droppedEntries'
 import { NotebookTemplateMenu } from './NotebookTemplateMenu'
 import { NotebookTree } from './NotebookTree'
 import { useNotebookStore } from './notebookStore'
+import { useNotesSortStore } from './notesSortStore'
 
 const BUTTON =
   'flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent'
@@ -50,7 +51,8 @@ interface NotesTabProps {
  * Update notes on the open scene's chapter (the book when no scene is open), while the edit flow
  * can run (v1, Use AI on). Structure A (2026-10-16): in the fresh start the views that live under
  * Notes (Outline, Timeline, Edits) are rows above the tree; a row opens its section, which the
- * sidebar shows under the Notes tab with a back row.
+ * sidebar shows under the Notes tab with a back row. Structure B (2026-10-16): a drop or a pick
+ * asks first how the files come in (`NotesImportDialog`).
  */
 export function NotesTab({ views = [] }: NotesTabProps): React.JSX.Element {
   const busy = useNotebookStore((s) => s.busy)
@@ -75,8 +77,9 @@ export function NotesTab({ views = [] }: NotesTabProps): React.JSX.Element {
     const item = row === undefined ? undefined : store.byId[row]
     const parentId = item === undefined ? null : item.kind === 'folder' ? item.id : item.parentId
     if (!writable) return
+    // Structure B: how the files come in is asked first (one page each, split, or sorted).
     read()
-      .then((files) => (files.length === 0 ? undefined : store.importFiles(files, parentId)))
+      .then((files) => useNotesSortStore.getState().askImport(files, parentId))
       .catch(failed)
   }
 
@@ -145,9 +148,9 @@ export function NotesTab({ views = [] }: NotesTabProps): React.JSX.Element {
         <button
           type="button"
           disabled={!writable || busy}
-          title="Word, Markdown, text and PDF files, one page each"
+          title="Word, Markdown, text and PDF files: one page each, split at headings, or sorted"
           onClick={() => {
-            useNotebookStore.getState().importFiles().catch(failed)
+            useNotesSortStore.getState().askImport().catch(failed)
           }}
           className={BUTTON}
         >

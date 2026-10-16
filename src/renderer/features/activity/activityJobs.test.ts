@@ -62,6 +62,7 @@ function snapshot(over: Partial<ActivitySnapshot> = {}): ActivitySnapshot {
     queue: IDLE_INDEX_QUEUE,
     memory: { rebuild: null, dialogOpen: false, check: null, checkOpen: false },
     editFlow: { runs: [], shownId: null },
+    notesSort: { running: null, done: null, failed: null },
     ...over
   }
 }
@@ -623,5 +624,91 @@ describe('the automatic notes update (notes redesign phase 3)', () => {
     expect(noteStale(line, snapshot(flow(done)))).toBe(false)
     expect(noteStale(line, snapshot(flow(done, 'run-a')))).toBe(true)
     expect(noteStale(line, snapshot())).toBe(true)
+  })
+})
+
+describe('Sort with Ms Scribe (notes structure B)', () => {
+  const page = (id: string, parentId: string | null = null) => ({
+    id,
+    parentId,
+    kind: 'page' as const,
+    title: id,
+    position: 0,
+    modified: '2026-10-16T10:00:00.000Z'
+  })
+  const running = { key: 'sort-1', title: 'Fenlands' }
+  const done = {
+    ...running,
+    pages: 3,
+    made: [page('Rook'), page('Magic')],
+    appended: [{ pageId: 'Mara', versionId: 'v1', title: 'Mara' }],
+    stopped: null,
+    undone: false
+  }
+
+  it('runs as a job while a sort goes, then says how many pages it wrote, with Undo', () => {
+    const jobs = readJobs(snapshot({ notesSort: { running, done: null, failed: null } }))
+    expect(jobs).toEqual([
+      {
+        key: 'notesSort:sort-1',
+        kind: 'notesSort',
+        name: 'Sorting Fenlands',
+        steps: null,
+        ref: 'sort-1'
+      }
+    ])
+    const job = jobs[0]!
+    expect(outcomeOf(job, snapshot({ notesSort: { running: null, done, failed: null } }))).toEqual({
+      kind: 'notesSort',
+      ref: 'sort-1',
+      status: 'done',
+      title: 'Sorted Fenlands into 3 pages',
+      detail: null,
+      canOpen: true,
+      canRetry: false,
+      canUndo: true
+    })
+    const empty = { ...done, pages: 0, made: [], appended: [] }
+    expect(
+      outcomeOf(job, snapshot({ notesSort: { running: null, done: empty, failed: null } }))
+    ).toMatchObject({ title: 'Sorted Fenlands into 0 pages', canOpen: false, canUndo: false })
+    expect(
+      outcomeOf(
+        job,
+        snapshot({
+          notesSort: { running: null, done: null, failed: { ...running, message: 'No API key.' } }
+        })
+      )
+    ).toMatchObject({ status: 'failed', title: 'Sorting Fenlands failed', detail: 'No API key.' })
+  })
+
+  it('drops its line once the sort is undone or another took its place', () => {
+    const line: ActivityNote = {
+      id: 'n',
+      kind: 'notesSort',
+      status: 'done',
+      title: 'Sorted Fenlands into 3 pages',
+      detail: null,
+      ref: 'sort-1',
+      canOpen: true,
+      canRetry: false,
+      canUndo: true,
+      parked: false
+    }
+    expect(noteStale(line, snapshot({ notesSort: { running: null, done, failed: null } }))).toBe(
+      false
+    )
+    expect(
+      noteStale(
+        line,
+        snapshot({ notesSort: { running: null, done: { ...done, undone: true }, failed: null } })
+      )
+    ).toBe(true)
+    expect(
+      noteStale(
+        line,
+        snapshot({ notesSort: { running: null, done: { ...done, key: 'sort-2' }, failed: null } })
+      )
+    ).toBe(true)
   })
 })

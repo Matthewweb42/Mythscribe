@@ -177,7 +177,8 @@ describe('budgets', () => {
       navigator: 150,
       judge: 300,
       scribe: 6_000,
-      editFlow: 8_000
+      editFlow: 8_000,
+      notesSort: 5_000
     })
     expect(Object.keys(FEATURE_INPUT_BUDGETS).sort()).toEqual(Object.keys(FEATURE_BUDGETS).sort())
     for (const feature of AI_FEATURE_IDS) {

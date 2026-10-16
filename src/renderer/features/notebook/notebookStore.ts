@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { docToText } from '@shared/docText'
 import type {
   NotebookImportResult,
+  NotebookImportSplit,
   NotebookItem,
   NotebookKind,
   NotebookVersion
@@ -122,8 +123,22 @@ interface NotebookState extends NotebookIndex {
   remove: (id: string) => Promise<void>
   restore: (id: string) => Promise<void>
   move: (id: string, parentId: string | null, position: number) => Promise<void>
-  /** Imports dropped files, or (none given) asks main to open the file dialog. */
-  importFiles: (files?: NotebookDroppedFile[], parentId?: string | null) => Promise<void>
+  /**
+   * Imports dropped files, or picked `paths`, or (neither given) asks main to open the file
+   * dialog; `split` `headings` makes a folder of pages per file (notes structure B). Answers what
+   * was made (null when the dialog was cancelled).
+   */
+  importFiles: (
+    files?: NotebookDroppedFile[],
+    parentId?: string | null,
+    split?: NotebookImportSplit,
+    paths?: string[]
+  ) => Promise<NotebookImportResult | null>
+  /**
+   * Notes structure B: a page split at its headings, a folder in its place, with Undo on the
+   * toast (the page restored, the folder deleted).
+   */
+  splitPage: (id: string) => Promise<void>
   /**
    * Notes redesign (fresh start): files picked on disk (the new-project wizard's) become pages in
    * a new top-level folder `folder`. Toasts what was skipped; opens nothing.
@@ -421,29 +436,60 @@ export const useNotebookStore = create<NotebookState>((set, get) => {
       await get().load()
     },
 
-    async importFiles(files, parentId) {
+    async importFiles(files, parentId, split, paths) {
       const state = get()
       const parent =
         parentId === undefined ? notebookTargetFolder(state, state.selectedId) : parentId
       set({ busy: true })
       let result: NotebookImportResult | null
       try {
-        result = await ipc().invoke(
-          'notebook:import',
-          files === undefined ? { parentId: parent } : { parentId: parent, files }
-        )
+        result = await ipc().invoke('notebook:import', {
+          parentId: parent,
+          ...(files === undefined ? {} : { files }),
+          ...(paths === undefined ? {} : { paths }),
+          ...(split === undefined || split === 'none' ? {} : { split })
+        })
       } finally {
         set({ busy: false })
       }
-      if (result === null) return
+      if (result === null) return null
       await get().load()
       const pages = result.items.filter((item) => item.kind === 'page')
       if (pages.length > 0) {
         toast.success(pages.length === 1 ? 'Imported 1 page' : `Imported ${pages.length} pages`)
       }
       for (const skip of result.skipped) toast.warning(`${skip.name}: ${skip.reason}`)
+      for (const name of result.unsplit ?? []) {
+        toast.warning(`${name}: no headings to split at, so it came in as one page.`)
+      }
       const first = pages[0]
       if (pages.length === 1 && first !== undefined) get().open(first.id)
+      return result
+    },
+
+    async splitPage(id) {
+      const item = get().byId[id]
+      if (item === undefined) return
+      const open = get().openId === id
+      // The open page's last typing is saved first, so the split (and its Undo) has all of it.
+      if (open) await useNotebookPageStore.getState().flush()
+      const result = await ipc().invoke('notebook:splitPage', { id })
+      if (open) get().close()
+      if (get().selectedId === id) set({ selectedId: result.folder.id })
+      await get().load()
+      toast.successWithAction(
+        `Split “${item.title}” into ${result.pages.length} ${result.pages.length === 1 ? 'page' : 'pages'}`,
+        {
+          label: 'Undo',
+          run: () => {
+            ipc()
+              .invoke('notebook:delete', { id: result.folder.id })
+              .then(() => ipc().invoke('notebook:restore', { id }))
+              .then(() => get().load())
+              .catch(failed)
+          }
+        }
+      )
     },
 
     async importPathsInto(paths, folder) {

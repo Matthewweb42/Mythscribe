@@ -13,6 +13,7 @@ import { AUTHOR_RULES_HEADER } from '@shared/authorRules'
 import { findQuote, normalizeForMatch } from '@shared/critique'
 import type { EditPassType } from '@shared/editPass'
 import { parseFlowIssues, parseFlowNotes } from '../../editFlow/parse'
+import { parseSortAnswer } from '../../notebook/notesSort'
 import { parseFilingAnswer, quoteParagraph } from '@shared/filing'
 import { locateQuote } from '@shared/memory/quote'
 import { parseReaderAnswer, parseVerifyAnswer, unfence } from '@shared/memory/readerAnswer'
@@ -545,6 +546,29 @@ function scoreEditFlow(
       : { kind: 'json', ok: false, problem: `${parsed.dropped} of ${kept + parsed.dropped} dropped` }
   } catch {
     return { kind: 'json', ok: false, problem: 'not the issues JSON asked for' }
+  }
+}
+
+/**
+ * Sort with Ms Scribe scores through its own parser: the pages must parse with none dropped (a
+ * dropped page has a line not in the part), and every expected title must be made.
+ */
+function scoreNotesSort(
+  scoring: Extract<EvalCase['scoring'], { kind: 'notesSort' }>,
+  answer: string
+): LiveResult['verdict'] {
+  try {
+    const parsed = parseSortAnswer(answer, scoring.part)
+    const titles = new Set(parsed.pages.map((page) => page.title.toLowerCase()))
+    const missing = scoring.expected.filter((title) => !titles.has(title.toLowerCase()))
+    if (parsed.dropped > 0) {
+      return { kind: 'json', ok: false, problem: `${parsed.dropped} pages dropped` }
+    }
+    return missing.length === 0
+      ? { kind: 'json', ok: true, problem: null }
+      : { kind: 'json', ok: false, problem: `missing ${missing.join(', ')}` }
+  } catch {
+    return { kind: 'json', ok: false, problem: 'not the pages JSON asked for' }
   }
 }
 
@@ -1557,6 +1581,10 @@ export async function runLivePrompts(live: LiveProvider): Promise<LiveResult[]> 
     }
     if (c.scoring.kind === 'editNotes') {
       results.push({ ...base, answer: reply.text, verdict: scoreEditNotes(reply.text) })
+      continue
+    }
+    if (c.scoring.kind === 'notesSort') {
+      results.push({ ...base, answer: reply.text, verdict: scoreNotesSort(c.scoring, reply.text) })
       continue
     }
     const answer =

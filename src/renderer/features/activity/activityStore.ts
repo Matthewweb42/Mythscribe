@@ -8,6 +8,7 @@ import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { useConversionStore } from '@renderer/features/knowledge/conversionStore'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
 import { useMemoryStore } from '@renderer/features/memory/memoryStore'
+import { useNotesSortStore } from '@renderer/features/notebook/notesSortStore'
 import { useOrganiseStore } from '@renderer/features/organise/organiseStore'
 import { useTodoStore } from '@renderer/features/todo/todoStore'
 import {
@@ -24,7 +25,7 @@ import {
  * The background activity in the renderer (F-7.12). The job stores own every fact (Organise's
  * phase, the upload's flow and progress, the edit passes, the To do check, the consistency check,
  * the conversion's re-read, story memory's *Rebuild memory* and *Check the book*, the automatic
- * notes update after a chapter); `startActivityWatch` derives the running jobs from them on every
+ * notes update after a chapter, Sort with Ms Scribe); `startActivityWatch` derives the running jobs from them on every
  * change (`readJobs`) and keeps here only what none of them holds: when each job was first seen
  * and last moved (for the crawl), the jobs that just ended (the bar fills and fades), and the
  * drop notifications with their focus-mode parking. `jobs` is the watch's last reading, written
@@ -120,6 +121,12 @@ export function readSnapshot(): ActivitySnapshot {
     editFlow: {
       runs: useEditFlowStore.getState().runs,
       shownId: useEditFlowStore.getState().open ? useEditFlowStore.getState().shownId : null
+    },
+    // Notes structure B: Sort with Ms Scribe.
+    notesSort: {
+      running: useNotesSortStore.getState().running,
+      done: useNotesSortStore.getState().done,
+      failed: useNotesSortStore.getState().failed
     }
   }
 }
@@ -235,6 +242,7 @@ export function startActivityWatch(): () => void {
     useIndexingStore.subscribe(sync),
     useMemoryStore.subscribe(sync),
     useEditFlowStore.subscribe(sync),
+    useNotesSortStore.subscribe(sync),
     useFocusStore.subscribe((state, prev) => {
       if (state.active !== prev.active) onFocusChange(state.active)
     })

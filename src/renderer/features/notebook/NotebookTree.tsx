@@ -1,14 +1,18 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen } from 'lucide-react'
+import { isFeatureAllowed } from '@shared/aiSettings'
 import { NOTEBOOK_TITLE_MAX } from '@shared/notebook'
 import { inTemplates } from '@shared/notebookTemplates'
 import { useCanWrite } from '@renderer/features/account/appAccessStore'
+import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
 import type { MenuItem } from '@renderer/features/manuscript/contextMenuItems'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { InlineRenameInput } from '@renderer/features/shell/InlineRenameInput'
+import { useAssistantName } from '@renderer/features/shell/viewStore'
 import { describeError } from '@renderer/lib/errors'
 import { useNotebookStore } from './notebookStore'
+import { useNotesSortStore } from './notesSortStore'
 import { NotebookTemplateMenu } from './NotebookTemplateMenu'
 import {
   NOTEBOOK_ROOT,
@@ -38,9 +42,16 @@ const failed = (err: unknown): void => {
 
 /**
  * A row's menu: a folder makes a page (blank or from a template) or a folder inside it; a page
- * outside the Templates folder can be saved as a template (note templates, phase 6).
+ * outside the Templates folder can be saved as a template (note templates, phase 6), split at its
+ * headings, or sorted with the assistant while the feature can run (notes structure B, `sortAs`
+ * its label, null when it cannot).
  */
-function menuItems(kind: 'folder' | 'page', template = false): MenuItem[] {
+function menuItems(
+  kind: 'folder' | 'page',
+  template = false,
+  sortAs: string | null = null
+): MenuItem[] {
+  const page = kind === 'page' && !template
   return [
     ...(kind === 'folder'
       ? [
@@ -50,7 +61,9 @@ function menuItems(kind: 'folder' | 'page', template = false): MenuItem[] {
         ]
       : []),
     { id: 'rename', label: 'Rename' },
-    ...(kind === 'page' && !template ? [{ id: 'save-template', label: 'Save as template' }] : []),
+    ...(page ? [{ id: 'save-template', label: 'Save as template' }] : []),
+    ...(page ? [{ id: 'split-headings', label: 'Split at headings' }] : []),
+    ...(page && sortAs !== null ? [{ id: 'sort-scribe', label: sortAs }] : []),
     { id: 'delete', label: 'Delete' }
   ]
 }
@@ -69,7 +82,8 @@ function zoneOf(kind: 'folder' | 'page', event: React.DragEvent<HTMLElement>): N
  * the manuscript tree (F-2.1: rows, chevrons, the shared rename field and context menu, the
  * before / into / after drag zones of F-2.4), over the notebook store. A click on a page opens it;
  * a double-click or F2 renames; the menu renames, deletes (with Undo on the toast) and makes a
- * page (blank or from a template) or folder inside a folder, and saves a page as a template. An
+ * page (blank or from a template) or folder inside a folder, saves a page as a template, and
+ * splits a page at its headings or sorts it with the assistant (notes structure B). An
  * empty Notes offers the starter folders or a blank page (note templates, phase 6). Rows drag
  * onto a folder to go inside it, or onto a row's top or bottom edge to go beside it.
  */
@@ -84,6 +98,10 @@ export function NotebookTree(): React.JSX.Element | null {
   const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const [templateMenu, setTemplateMenu] = useState<MenuAnchor | null>(null)
   const writable = useCanWrite()
+  const assistantName = useAssistantName()
+  const canSort = useAiSettingsStore(
+    (s) => s.settings !== null && isFeatureAllowed(s.settings, 'notesSort')
+  )
   const [dragId, setDragId] = useState<string | null>(null)
   const [over, setOver] = useState<DragOver | null>(null)
   const items = useRef(new Map<string, HTMLLIElement>())
@@ -113,6 +131,8 @@ export function NotebookTree(): React.JSX.Element | null {
     else if (itemId === 'new-folder') store.create('folder', id).catch(failed)
     else if (itemId === 'new-from-template') setTemplateMenu(menu)
     else if (itemId === 'save-template') store.saveAsTemplate(id).catch(failed)
+    else if (itemId === 'split-headings') store.splitPage(id).catch(failed)
+    else if (itemId === 'sort-scribe') useNotesSortStore.getState().askSort(id)
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLUListElement>): void => {
@@ -332,7 +352,11 @@ export function NotebookTree(): React.JSX.Element | null {
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={menuItems(menuItem.kind, inTemplates(Object.values(byId), menuItem.parentId))}
+          items={menuItems(
+            menuItem.kind,
+            inTemplates(Object.values(byId), menuItem.parentId),
+            canSort ? `Sort with ${assistantName}…` : null
+          )}
           onSelect={onMenuSelect}
           onClose={closeMenu}
         />

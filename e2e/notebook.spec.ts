@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import {
@@ -16,8 +17,13 @@ import { caretToEnd, showOldStoryBible } from './support'
  * Notes redesign phase 1, slice 1: the Notes section. A project made through the wizard (Use AI
  * off, story memory v1 as installed builds run) gets a folder and a page in it, both named in the
  * tree; text typed on the page is saved and is still there after the project is closed and
- * opened again; the page is deleted from its menu and the toast's Undo brings it back. Nothing
- * here reaches a provider: the own-key URL and the Cloud URL are closed local ports.
+ * opened again; the page is deleted from its menu and the toast's Undo brings it back. The first
+ * two tests reach no provider (Use AI off; the Cloud URL is a closed local port).
+ *
+ * Notes structure B (2026-10-16): a Markdown file with headings dropped on Notes, Split at
+ * headings picked, comes in as a folder of pages; another dropped with Sort with Ms Scribe picked
+ * is priced, then sorted against the fake provider on loopback into two pages in two folders, and
+ * the activity line's Undo removes them (the file stays as its own page).
  */
 
 let app: ElectronApplication
@@ -29,9 +35,79 @@ const NAME = 'Notebook Novel'
 const TYPED = 'Mara keeps a fen-wight skull above her door.'
 /** The fresh start's project (notes redesign, 2026-10-15). */
 const DOCS_NAME = 'Docs Novel'
+/** Structure B's project (Use AI on, against the fake provider). */
+const SORT_NAME = 'Sort Novel'
+/** `notesSort.v1`'s opening (`NOTES_SORT_SENTINEL`). */
+const SORT_SENTINEL =
+  'You are the notes sorter inside a novel-writing app, breaking a document the author put in her notes into smaller pages.'
+const BESTIARY =
+  '# Bestiary\n\nFen-wights wear the skulls of drowned dogs.\n\nSaltmarket bars its doors at the second bell.\n'
+
+/** Every request the fake provider saw (its system turn). */
+const systems: string[] = []
+let provider: http.Server
+
+/** The fake provider: a sort answers two pages in two folders, copied from the file. */
+function startFakeProvider(): Promise<string> {
+  provider = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json')
+    if (req.method !== 'POST' || !(req.url ?? '').endsWith('/chat/completions')) {
+      const id = (req.url ?? '').split('/').pop() ?? ''
+      res.end(JSON.stringify({ id, object: 'model', created: 0, owned_by: 'system' }))
+      return
+    }
+    let body = ''
+    req.setEncoding('utf8')
+    req.on('data', (chunk: string) => {
+      body += chunk
+    })
+    req.on('end', () => {
+      const request = JSON.parse(body) as {
+        model: string
+        messages: { role: string; content: string }[]
+      }
+      const system = request.messages[0]?.content ?? ''
+      systems.push(system)
+      const content = system.startsWith(SORT_SENTINEL)
+        ? JSON.stringify({
+            pages: [
+              {
+                folder: 'Creatures',
+                title: 'Fen-wight',
+                text: 'Fen-wights wear the skulls of drowned dogs.'
+              },
+              {
+                folder: 'Places',
+                title: 'Saltmarket',
+                text: 'Saltmarket bars its doors at the second bell.'
+              }
+            ]
+          })
+        : '{}'
+      res.end(
+        JSON.stringify({
+          id: 'chatcmpl-fake',
+          created: 0,
+          model: request.model,
+          object: 'chat.completion',
+          choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 400, completion_tokens: 60, total_tokens: 460 }
+        })
+      )
+    })
+  })
+  return new Promise((resolve) => {
+    provider.listen(0, '127.0.0.1', () => {
+      const address = provider.address()
+      if (!address || typeof address === 'string') throw new Error('the fake provider has no port')
+      resolve(`http://127.0.0.1:${address.port}/v1`)
+    })
+  })
+}
 
 test.beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-e2e-notebook-'))
+  const providerUrl = await startFakeProvider()
   const env = {
     ...Object.fromEntries(
       Object.entries(process.env).filter(
@@ -41,7 +117,8 @@ test.beforeAll(async () => {
     NODE_ENV: 'test',
     MYTHSCRIBE_USER_DATA: path.join(tmp, 'userData'),
     MYTHSCRIBE_E2E_PLAINTEXT_KEYS: '1',
-    OPENAI_BASE_URL: 'http://127.0.0.1:9',
+    // Nothing leaves the machine: the own-key provider is the fake, Cloud a closed port.
+    OPENAI_BASE_URL: providerUrl,
     MYTHSCRIBE_CLOUD_API_URL: 'http://127.0.0.1:9'
   }
   app = await electron.launch({ args: ['.'], env })
@@ -53,6 +130,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   if (!exited) await app?.close()
+  provider?.close()
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -73,6 +151,19 @@ async function showNotes(): Promise<void> {
     .getByRole('tab', { name: 'Notes', exact: true })
   await notes.click()
   await expect(notes).toHaveAttribute('aria-selected', 'true')
+}
+
+/** Drops `name` with `text` on the Notes section, as a file from the desktop would land. */
+async function dropFile(name: string, text: string): Promise<void> {
+  const transfer = await page.evaluateHandle(
+    ({ fileName, body }) => {
+      const data = new DataTransfer()
+      data.items.add(new File([body], fileName, { type: 'text/markdown' }))
+      return data
+    },
+    { fileName: name, body: text }
+  )
+  await page.locator('[data-notebook-drop]').dispatchEvent('drop', { dataTransfer: transfer })
 }
 
 /** Types `name` into the tree's rename field and commits it. */
@@ -255,4 +346,84 @@ test('fresh start: a project’s Library file opens in Notes › Docs, with no C
   await expect(page.getByRole('region', { name: 'Edits section', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Back to Notes' }).click()
   await expect(page.getByRole('tree', { name: 'Notes' })).toBeVisible()
+})
+
+test('structure B: a dropped file split at headings, another sorted with Ms Scribe and undone', async () => {
+  await page.getByRole('button', { name: 'Close project' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+
+  // A new project through the wizard, Use AI on (its default), a key for the fake provider.
+  const projectPath = path.join(tmp, `${SORT_NAME}.mythscribe`)
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
+  }, projectPath)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const wizard = page.getByRole('dialog')
+  const nameField = wizard.getByRole('textbox', { name: 'Project name' })
+  await nameField.fill('')
+  await nameField.fill(SORT_NAME)
+  for (let step = 0; step < 4; step += 1) {
+    await wizard.getByRole('button', { name: 'Next' }).click()
+  }
+  await wizard.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByTestId('project-name')).toHaveText(SORT_NAME)
+  await invoke('ai:setOwnKeyProvider', { provider: 'openai' })
+  await invoke('ai:setKey', { key: 'sk-live-notes-sort-1234' })
+  await showNotes()
+  const tree = page.getByRole('tree', { name: 'Notes' })
+
+  // Split at headings: the file becomes a folder with a page per top heading.
+  await dropFile(
+    'Fenlands.md',
+    'A drowned country.\n\n## Mara\n\nFerry keeper.\n\n### Voice\n\nClipped.\n\n## Rook\n\nA smuggler.\n'
+  )
+  const choice = page.getByTestId('notes-import-dialog')
+  await expect(choice.getByRole('heading')).toHaveText('Add “Fenlands.md” to Notes')
+  await expect(choice.getByRole('radio', { name: /One page each/ })).toBeChecked()
+  await choice.getByRole('radio', { name: /Split at headings/ }).check()
+  await choice.getByRole('button', { name: 'Add' }).click()
+  await expect(choice).toHaveCount(0)
+  const fenlands = tree.getByRole('treeitem', { name: 'Fenlands' })
+  await expect(fenlands.first()).toHaveAttribute('aria-level', '1')
+  for (const title of ['Mara', 'Rook']) {
+    await expect(tree.getByRole('treeitem', { name: title, exact: true })).toHaveAttribute(
+      'aria-level',
+      '2'
+    )
+  }
+  // The text before the first heading is a page named after the file, inside the folder.
+  await expect(tree.locator('[aria-level="2"][aria-label="Fenlands"]')).toHaveCount(1)
+  expect(await storedText('Mara')).toBe('Ferry keeper.\nVoice\nClipped.')
+
+  // Sort with Ms Scribe: priced first, then two pages in two folders; the file stays a page.
+  await dropFile('Bestiary.md', BESTIARY)
+  await choice.getByRole('radio', { name: /Sort with Ms Scribe/ }).check()
+  await expect(choice.getByTestId('notes-sort-price')).toContainText('1 request')
+  await choice.getByRole('button', { name: 'Sort' }).click()
+  const line = page.locator('[data-testid="activity-drop"][data-kind="notesSort"]')
+  await expect(line).toContainText('Sorted Bestiary into 2 pages', { timeout: 15_000 })
+  expect(systems.filter((system) => system.startsWith(SORT_SENTINEL))).toHaveLength(1)
+  for (const [folder, title] of [
+    ['Creatures', 'Fen-wight'],
+    ['Places', 'Saltmarket']
+  ] as const) {
+    await expect(tree.getByRole('treeitem', { name: folder, exact: true })).toHaveAttribute(
+      'aria-level',
+      '1'
+    )
+    await expect(tree.getByRole('treeitem', { name: title, exact: true })).toHaveAttribute(
+      'aria-level',
+      '2'
+    )
+  }
+  expect(await storedText('Saltmarket')).toBe('Saltmarket bars its doors at the second bell.')
+  await expect(tree.getByRole('treeitem', { name: 'Bestiary', exact: true })).toBeVisible()
+
+  // The line's Undo removes what the sort made; the file's own page stays.
+  await line.getByRole('button', { name: 'Undo' }).click()
+  await expect(tree.getByRole('treeitem', { name: 'Creatures', exact: true })).toHaveCount(0)
+  await expect(tree.getByRole('treeitem', { name: 'Places', exact: true })).toHaveCount(0)
+  await expect(tree.getByRole('treeitem', { name: 'Bestiary', exact: true })).toBeVisible()
+  const items = await invoke<NotebookItem[]>('notebook:list', undefined)
+  expect(items.some((item) => item.title === 'Saltmarket')).toBe(false)
 })

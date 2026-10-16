@@ -3,7 +3,7 @@ import { Library, NotebookPen, NotebookText } from 'lucide-react'
 import { currentStoryMemory, useStoryMemory } from '@renderer/features/project/storyMemory'
 import { useResearchStore } from '@renderer/features/research/researchStore'
 import { takeDropped } from '@renderer/features/notebook/droppedEntries'
-import { useNotebookStore } from '@renderer/features/notebook/notebookStore'
+import { useNotesSortStore } from '@renderer/features/notebook/notesSortStore'
 import { archivedNow, useIsArchived } from '@renderer/features/shell/archived'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
@@ -64,10 +64,9 @@ export function DropOverlay(): React.JSX.Element | null {
       // add to; the files become note pages at the top of Notes, as a drop on Notes would.
       if (archivedNow('storyBible') && event.dataTransfer !== null) {
         const read = takeDropped(event.dataTransfer)
+        // Notes structure B: asked first how they come in, as a drop on Notes is.
         read()
-          .then((files) =>
-            files.length === 0 ? undefined : useNotebookStore.getState().importFiles(files, null)
-          )
+          .then((files) => useNotesSortStore.getState().askImport(files, null))
           .catch((err: unknown) => toast.error(describeError(err)))
         return
       }

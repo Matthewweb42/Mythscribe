@@ -279,6 +279,14 @@ export const AI_COST_NOTES: Record<AiFeatureId, AiCostNote> = {
     typicalOutTokens: 1500,
     ideas:
       'Batch the stages of one slice into one request when the ledger shows the outputs are small; skip a slice whose text and notes did not change since the last run of the same scope; send the book map only to the families that use it (continuity, plot holes, developmental).'
+  },
+  notesSort: {
+    trigger: 'on request',
+    when: 'Notes structure part B (2026-10-16): Sort with Ms Scribe, picked for files dropped or picked into Notes (each file is imported as one page first and kept) or from a note page’s menu, priced before it starts. notesSort.v1, fast tier (DeepSeek V4 Flash), JSON. The document is sent in parts of at most 12,000 characters (about 3,000 tokens), one request a part, each after the same system prefix (the rules and the Notes folders and page titles as they were when the sort started, ≤ 4,000 characters, cached by the provider after the first). She answers the pages with their folders and the text copied from the part, so the output is about the size of the part (max_tokens 5,000). Figures: a 2,000-word worldbuilding doc is one request, about 3,500 tokens in and 3,000 out, about 0.1¢ on V4 Flash.',
+    callsPerUse: 1,
+    typicalOutTokens: 2500,
+    ideas:
+      'Answer with line ranges of the part instead of copied text (a fraction of the output tokens); skip a part that is only headings or blank; send the folder names only, not the page titles, once Notes is large.'
   }
 }
 

@@ -40,6 +40,7 @@ import {
 } from '@shared/entityExchange'
 import type { Background } from '@shared/focus'
 import type { ContextProcessResult } from '@shared/contextLibrary'
+import { notebookTitleFromFileName } from '@shared/notebook'
 import type { OrganisePlanResult } from '@shared/organise'
 import type { ReviewChatResult } from '@shared/reviewChat'
 import type { FilingProcessResult } from '@shared/filing'
@@ -290,7 +291,19 @@ import {
   restoreNotebookVersion,
   updateNotebookItem
 } from '../notebook/notebookStore'
-import { importNotebookFiles, type NotebookImportSource } from '../notebook/notebookImport'
+import {
+  importNotebookFiles,
+  notebookPageFromFile,
+  splitNotebookPage,
+  type NotebookImportSource
+} from '../notebook/notebookImport'
+import {
+  estimateNotesSort,
+  runNotesSort,
+  sortSourceText,
+  sortSourcesOf,
+  type SortSource
+} from '../notebook/notesSort'
 import { copyLibraryDocsOnce } from '../notebook/libraryDocs'
 import {
   runTodoPass,
@@ -2856,30 +2869,97 @@ export function registerHandlers({
     notebookMoved([page.id])
     return page
   })
+  /** Files to import or price: dropped ones as bytes with their folders, picked ones by path. */
+  const importSources = (
+    files: readonly { name: string; folders: string[]; data: Uint8Array }[] | undefined,
+    paths: readonly string[]
+  ): NotebookImportSource[] =>
+    files === undefined
+      ? paths.map((file) => ({
+          name: path.basename(file),
+          folders: [],
+          size: fs.statSync(file).size,
+          read: () => fs.readFileSync(file)
+        }))
+      : files.map((file) => ({
+          name: file.name,
+          folders: file.folders,
+          read: () => Buffer.from(file.data)
+        }))
   // Dropped files come as bytes with their folders; Import files… picks paths in the open dialog.
-  register('notebook:import', async ({ parentId, files, paths }) => {
+  register('notebook:import', async ({ parentId, files, paths, split }) => {
     manager.require()
-    let sources: NotebookImportSource[]
+    let chosen: readonly string[] = []
     if (files === undefined) {
-      // Picked files (the wizard's), else the open dialog.
-      const chosen = paths ?? (await dialogs.chooseContextFiles())
-      if (chosen === null) return null
-      sources = chosen.map((file) => ({
-        name: path.basename(file),
-        folders: [],
-        size: fs.statSync(file).size,
-        read: () => fs.readFileSync(file)
-      }))
-    } else {
-      sources = files.map((file) => ({
-        name: file.name,
-        folders: file.folders,
-        read: () => Buffer.from(file.data)
-      }))
+      // Picked files (the wizard's, the Notes tab's), else the open dialog.
+      const picked = paths ?? (await dialogs.chooseContextFiles())
+      if (picked === null) return null
+      chosen = picked
     }
-    const result = await importNotebookFiles(notebookDb(), parentId, sources)
+    const result = await importNotebookFiles(
+      notebookDb(),
+      parentId,
+      importSources(files, chosen),
+      split
+    )
     if (result.items.length > 0) notebookMoved(result.items.map((item) => item.id))
     return result
+  })
+  // Notes structure part B: a page split at its headings, the folder in its place.
+  register('notebook:splitPage', ({ id }) => {
+    const result = splitNotebookPage(notebookDb(), id)
+    notebookMoved([result.folder.id, ...result.pages.map((item) => item.id), id])
+    return result
+  })
+  // Sort with Ms Scribe's price: pages as they are, files read as the import would read them.
+  register('notesSort:estimate', async ({ pageIds, files, paths }) => {
+    const db = notebookDb()
+    const sources: SortSource[] = pageIds === undefined ? [] : sortSourcesOf(db, pageIds)
+    if (files !== undefined || paths !== undefined) {
+      for (const source of importSources(files, paths ?? [])) {
+        let page: Awaited<ReturnType<typeof notebookPageFromFile>>
+        try {
+          page = await notebookPageFromFile(source.name, source.read())
+        } catch {
+          continue
+        }
+        if ('skip' in page) continue
+        sources.push({
+          pageId: null,
+          title: notebookTitleFromFileName(source.name),
+          text: sortSourceText(page.content)
+        })
+      }
+    }
+    return estimateNotesSort(sources, listNotebook(db))
+  })
+  // One sort at a time; each part's pages are written as it answers.
+  let sorting = false
+  register('notesSort:run', async ({ pageIds }) => {
+    if (sorting) throw new AppError('VALIDATION', 'Ms Scribe is already sorting a document.')
+    const session = manager.require()
+    const db = session.connection.orm
+    sorting = true
+    try {
+      const outcome = await runNotesSort(
+        {
+          db,
+          requestDeps: requestDeps(db),
+          notebookChanged: notebookMoved,
+          live: () =>
+            manager.current() !== null && manager.require().connection === session.connection,
+          signal: new AbortController().signal,
+          runId: randomUUID()
+        },
+        pageIds
+      )
+      return { ok: true as const, ...outcome }
+    } catch (err) {
+      if (err instanceof AiProviderError) return aiFailure(err.code, err.message)
+      throw err
+    } finally {
+      sorting = false
+    }
   })
 
   register('todo:list', () => {

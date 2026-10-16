@@ -39,7 +39,7 @@ Where: `src/renderer/features/shell/SidebarSections.tsx`, `sectionList.ts`,
 archived, dropdown otherwise; `edits` selects Notes with Edits open; back row), the e2e steps
 that pick a section through the dropdown in the fresh start updated to the tabs.
 
-## B. Breaking an upload into smaller pages
+## B. Breaking an upload into smaller pages — built 2026-10-16
 
 - **After a drop or a pick into Notes**, before importing, one small choice for the files
   (decided by Claude: one choice for the whole drop): **One page each** (as today) · **Split at

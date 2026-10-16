@@ -361,7 +361,10 @@ export const AI_FEATURE_IDS = [
   'scribe',
   // Notes redesign phase 2 (2026-10-15): the edit flow, stages and checks over a scene, a chapter
   // or the whole book with the notes and the book map in view; Quick on fast, Deep on strong.
-  'editFlow'
+  'editFlow',
+  // Notes structure part B (2026-10-16): Sort with Ms Scribe, an uploaded document (or a note
+  // page) broken into smaller pages in folders, its text copied, never written anew.
+  'notesSort'
 ] as const
 export const AiFeatureId = z.enum(AI_FEATURE_IDS)
 export type AiFeatureId = z.infer<typeof AiFeatureId>
@@ -486,7 +489,10 @@ export const FEATURE_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   scribe: 6_000,
   // Notes redesign phase 2: one request's issues as JSON (up to 40, each with its quote, the
   // problem and a fix), plus Developmental editing's overview (`EDIT_FLOW_MAX_TOKENS`).
-  editFlow: 8_000
+  editFlow: 8_000,
+  // Notes structure B: one chunk's pages as JSON, its text copied (a chunk is at most
+  // `NOTES_SORT_CHUNK_CHARS`, about 3,000 tokens, plus the JSON around it).
+  notesSort: 5_000
 }
 
 /**
@@ -596,7 +602,10 @@ export const FEATURE_INPUT_BUDGETS: Partial<Record<AiFeatureId, number>> = {
   // pages the scope names), the book map, on Deep for a scene or a chapter the rest of the book
   // (with the slice ≤ 60,000), then one slice of the scope's text (≤ 16,000 tokens Quick, ≤ 60,000
   // Deep) and the family's task. Ms Scribe's cap, for the same notes and map.
-  editFlow: 140_000
+  editFlow: 140_000,
+  // Notes structure B: the rules, the folders and page titles of Notes (≤ 4,000 characters) and
+  // one chunk of the document (≤ 12,000 characters, about 3,000 tokens).
+  notesSort: 7_000
 }
 
 /** The feature's `max_tokens` cap, or `DEFAULT_OUTPUT_BUDGET` until its line exists. */
