@@ -11,6 +11,7 @@ import {
 import { defaultEditorSettings } from '@shared/editorSettings'
 import type { TiptapNodeT } from '@shared/tiptap'
 import { countWords } from '@shared/wordCount'
+import { resetBackgroundStore, useBackgroundStore } from '@renderer/features/focus/backgroundStore'
 import { resetFocusStore, useFocusStore } from '@renderer/features/focus/focusStore'
 import { treeFixture } from '@renderer/features/manuscript/treeFixture'
 import { buildIndex, useTreeStore } from '@renderer/features/manuscript/treeStore'
@@ -132,6 +133,7 @@ beforeEach(() => {
   resetEditorSettingsStore()
   resetPendingSaves()
   resetFocusStore()
+  resetBackgroundStore()
   useTreeStore.getState().clear()
   useDialogStore.setState({ modals: [], toasts: [] })
   const fake = fakeClient()
@@ -208,7 +210,7 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
   it('draws each region as a sheet on the desk, with the separators between them on the desk (F-7.11)', () => {
     loadTree()
     render(<StackedEditor folderId="arc-1" format="webnovel" />)
-    const stack = regions()[0]?.parentElement
+    const stack = regions()[0]?.parentElement?.parentElement
     expect(stack).toHaveClass('bg-page')
     for (const region of regions()) expect(region).toHaveClass('ms-sheet')
     for (const sep of screen.getAllByRole('separator', { name: 'Scene break' })) {
@@ -225,6 +227,39 @@ describe('StackedEditor (F-3.8, F-2.5)', () => {
       expect(region).toHaveClass('max-w-(--ms-editor-max-width)')
     }
     expect(stack).not.toHaveClass('bg-page')
+  })
+
+  it('puts the stack on one focus panel over a background, without remounting its regions (F-6.2)', () => {
+    loadTree()
+    render(<StackedEditor folderId="arc-1" format="webnovel" />)
+    const before = regions()
+    const stack = screen.getByTestId('stack')
+    expect(stack).not.toHaveClass('focus-surface')
+    act(() => {
+      useBackgroundStore.setState({
+        backgrounds: [
+          { id: 'bg-1', name: 'fen.png', url: 'mythscribe-asset://backgrounds/fen.png' }
+        ],
+        settings: {
+          backgroundId: 'bg-1',
+          rotation: { enabled: false, intervalMinutes: 15 },
+          overlay: { darkness: 60, width: 70 }
+        }
+      })
+      useFocusStore.setState({ active: true })
+    })
+    expect(screen.getByTestId('stack')).toHaveClass('focus-surface')
+    // The regions fill the panel, which is the column, and are the same elements as before.
+    const after = regions()
+    expect(after).toHaveLength(before.length)
+    after.forEach((region, index) => {
+      expect(region).toBe(before[index])
+      expect(region).toHaveClass('w-full')
+      expect(region).not.toHaveClass('max-w-(--ms-editor-max-width)')
+    })
+    // No background: the plain stack, as before.
+    act(() => useBackgroundStore.setState({ settings: null }))
+    expect(screen.getByTestId('stack')).not.toHaveClass('focus-surface')
   })
 
   it('sets the same column class on the page-break separator between matter documents (F-3.4)', () => {

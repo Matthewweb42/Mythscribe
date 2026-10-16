@@ -335,8 +335,9 @@ function SectionPicker({ format, all, controls }: SectionViewProps): React.JSX.E
  * Notes) side by side on the dock controls' row, the current one's panel below. A section that
  * lives under a tab (Outline, Timeline, Edits under Notes) keeps that tab selected and shows its
  * view with a back row to the tab's own panel. The layout store's sidebar tab stays the one state:
- * `edits` selects Notes with Edits open, `notes` its tree; an id with no section falls back to the
- * first tab. Clicking the selected tab while a view under it is open goes back to the tab's own
+ * `edits` selects Notes with Edits open, `notes` its tree; an id a section lists in `aliases` opens
+ * that section (the notes binder: `outline` and `timeline` open Notes while the old views are
+ * archived); any other id with no section falls back to the first tab. Clicking the selected tab while a view under it is open goes back to the tab's own
  * panel. An ARIA tablist: Left/Right move and wrap, Home/End jump, each selecting as it moves.
  */
 function SectionTabs({ format, all, controls }: SectionViewProps): React.JSX.Element {
@@ -347,7 +348,10 @@ function SectionTabs({ format, all, controls }: SectionViewProps): React.JSX.Ele
 
   const tabs = all.filter((section) => section.under === undefined)
   const currentId = normalizeSectionId(stored)
-  const current = all.find((section) => section.id === currentId) ?? tabs[0]
+  const current =
+    all.find((section) => section.id === currentId) ??
+    all.find((section) => section.aliases?.includes(currentId) === true) ??
+    tabs[0]
   const selected =
     current?.under === undefined ? current : tabs.find((tab) => tab.id === current.under)
   const tabId = (id: string): string => `${baseId}-tab-${id}`
@@ -391,7 +395,6 @@ function SectionTabs({ format, all, controls }: SectionViewProps): React.JSX.Ele
           className="flex min-w-0 flex-1 items-center gap-1"
         >
           {tabs.map((tab) => {
-            const TabIcon = tab.icon
             const isSelected = tab.id === selected?.id
             return (
               <button
@@ -407,9 +410,10 @@ function SectionTabs({ format, all, controls }: SectionViewProps): React.JSX.Ele
                 aria-controls="sidebar-panel"
                 tabIndex={isSelected ? 0 : -1}
                 onClick={() => setSidebarTab(tab.id)}
-                className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none aria-selected:bg-surface-raised aria-selected:font-medium aria-selected:text-fg"
+                // Names only, sized to their words: with three tabs and the dock controls on the
+                // row, icons cut "Manuscript" short at the default sidebar width.
+                className="flex min-w-0 flex-auto items-center justify-center rounded-md px-1.5 py-1 text-sm text-fg-muted hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none aria-selected:bg-surface-raised aria-selected:font-medium aria-selected:text-fg"
               >
-                <TabIcon size={15} aria-hidden="true" className="shrink-0" />
                 <span className="min-w-0 truncate">{tab.label}</span>
               </button>
             )

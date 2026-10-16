@@ -1,8 +1,10 @@
-import { Fragment, useRef, useState } from 'react'
+import { Fragment, useRef, useState, type CSSProperties } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { Editor } from '@tiptap/core'
 import type { NovelFormat } from '@shared/ipc/contract'
+import { OVERLAY_WIDTH } from '@shared/focus'
 import { levelLabel, type SectionType } from '@shared/labels'
+import { useBackgroundStore, useCurrentBackground } from '@renderer/features/focus/backgroundStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { descendantDocuments, useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
@@ -57,6 +59,11 @@ export function StackedEditor({
   const zoom = useEditorZoom()
   // F-7.11: each region is a sheet on the desk; focus mode keeps the plain stack (F-6.4).
   const sheet = usePageEdges() && !focus
+  // F-6.2 / F-6.4: over a focus background the stack sits on one translucent panel, a share of
+  // the pane wide, as a single document's column does; without it the text lay on the image.
+  const background = useCurrentBackground()
+  const focusWidth = useBackgroundStore((s) => s.settings?.overlay.width ?? OVERLAY_WIDTH.default)
+  const surface = focus && background !== null
   const scroller = useRef<HTMLDivElement>(null)
   const loaded = useDocumentStore((s) => docIds.every((d) => (s.docs[d]?.content ?? null) !== null))
   useScrollMemory(scroller, folderId, loaded && docIds.length > 0)
@@ -75,8 +82,25 @@ export function StackedEditor({
       </div>
     )
 
+  const stack = docIds.map((id, index) => (
+    <Fragment key={id}>
+      {index > 0 ? <RegionSeparator sceneBreak={settings.sceneBreak} section={section} /> : null}
+      <Region id={id} format={format} sheet={sheet} onPanel={surface} onFocus={setActive} />
+    </Fragment>
+  ))
+
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={editorStyle(settings, zoom)}>
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      style={
+        focus
+          ? ({
+              ...editorStyle(settings, zoom),
+              '--ms-editor-max-width': `${focusWidth}%`
+            } as CSSProperties)
+          : editorStyle(settings, zoom)
+      }
+    >
       {focus ? null : (
         <Toolbar
           editor={editor}
@@ -92,14 +116,14 @@ export function StackedEditor({
         ref={scroller}
         className={`min-h-0 flex-1 overflow-y-auto pb-12 ${sheet ? 'bg-page px-4' : ''}`}
       >
-        {docIds.map((id, index) => (
-          <Fragment key={id}>
-            {index > 0 ? (
-              <RegionSeparator sceneBreak={settings.sceneBreak} section={section} />
-            ) : null}
-            <Region id={id} format={format} sheet={sheet} onFocus={setActive} />
-          </Fragment>
-        ))}
+        {/* Always this one wrapper, only its class changing, so entering focus mode never
+            remounts the regions' editors (the caret stays where it was). */}
+        <div
+          data-testid="stack"
+          className={surface ? `${COLUMN} focus-surface min-h-full pb-[50vh]` : undefined}
+        >
+          {stack}
+        </div>
       </div>
       <StatusBar words={words} />
     </div>
@@ -115,16 +139,22 @@ function Region({
   id,
   format,
   sheet,
+  onPanel,
   onFocus
 }: {
   id: string
   format: NovelFormat
   sheet: boolean
+  /** On the focus panel, which is the column already: the region fills it. */
+  onPanel: boolean
   onFocus: (region: ActiveRegion) => void
 }): React.JSX.Element {
   const title = useTreeStore((s) => s.byId[id]?.title ?? '')
   return (
-    <section aria-label={title} className={`${columnClass(sheet)} ${sheet ? 'my-6' : ''}`}>
+    <section
+      aria-label={title}
+      className={onPanel ? 'w-full' : `${columnClass(sheet)} ${sheet ? 'my-6' : ''}`}
+    >
       <h2 className="m-0 pt-6 text-sm font-medium text-fg-muted">{title}</h2>
       <DocumentEditor
         id={id}
