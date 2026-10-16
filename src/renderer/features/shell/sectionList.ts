@@ -76,6 +76,11 @@ export interface SidebarSection {
   /** What the picker shows beside the name: documents, sheets, tags…; null for none. */
   count: number | null
   used: boolean
+  /**
+   * The section whose tab it opens under, when the sidebar shows tabs (the fresh start: Outline,
+   * Timeline and Edits under Notes); undefined for a section of its own.
+   */
+  under?: string
   /** The section's panel content; the panel is a column flex box, so it may fill and scroll. */
   render: (format: NovelFormat) => ReactNode
 }
@@ -348,16 +353,28 @@ export function buildSections(
  * Notes redesign, fresh start (the author 2026-10-15): with the old story bible archived, a v1
  * project lists Manuscript, Notes, Outline, Timeline and Edits. The categories, the Index,
  * Threads, Library, To do and Changes are hidden; a stored section among them opens on Manuscript.
+ * Two tabs (structure A, 2026-10-16): Manuscript and Notes; Outline, Timeline and Edits live under
+ * Notes, always listed as rows above its tree (an empty one shows its own empty state), their ids
+ * unchanged so a stored or requested `edits` opens Notes with Edits.
  */
 const FRESH_START_TOOLS: readonly SidebarToolId[] = ['outline', 'timeline', 'edits']
 
 function buildFreshStartSections(counts: SectionCounts): SidebarSection[] {
+  const views = TOOLS.filter((tool) => FRESH_START_TOOLS.includes(tool.id)).map(
+    (tool): SidebarSection => ({
+      ...toolSection(tool, counts, 'tools'),
+      used: true,
+      under: NOTES.id
+    })
+  )
+  const rows = views.map(({ id, label, icon }) => ({ id, label, icon }))
   return [
     toolSection(MANUSCRIPT, counts, 'manuscript'),
-    toolSection(NOTES, counts, 'manuscript'),
-    ...TOOLS.filter((tool) => FRESH_START_TOOLS.includes(tool.id)).map((tool) =>
-      toolSection(tool, counts, 'tools')
-    )
+    {
+      ...toolSection(NOTES, counts, 'manuscript'),
+      render: () => createElement(NotesTab, { views: rows })
+    },
+    ...views
   ]
 }
 

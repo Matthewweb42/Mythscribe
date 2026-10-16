@@ -1501,7 +1501,7 @@ test('create, close, reopen a project on disk', async () => {
   // author rules, editor's notes, proofread, and since the fresh start the old story bible:
   // categories, tags, Library, To do, Changes…) are archived by default; Settings › Archived
   // features brings each one back, so the steps below still cover them. A new project starts
-  // with the old story bible archived: only Manuscript, Notes and the kept tools are listed.
+  // with the old story bible archived: two tabs, Manuscript and Notes (structure A, 2026-10-16).
   await firstSettings.getByRole('tab', { name: 'Archived features' }).click()
   const archiveSwitches = firstSettings
     .getByRole('list', { name: 'Archived features' })
@@ -1509,14 +1509,10 @@ test('create, close, reopen a project on disk', async () => {
   await expect(archiveSwitches.first()).toBeEnabled()
   await expect(firstSettings.getByRole('switch', { name: 'Archive Old story bible' })).toBeChecked()
   await firstSettings.getByRole('button', { name: 'Close settings' }).click()
-  await page.getByRole('button', { name: /^Section: / }).click()
-  await expect(sectionOptions()).toHaveText([
-    /^Manuscript\d*$/,
-    /^Notes\d*$/,
-    /^Outline\d*$/,
-    /^Show unused sections \(\d+\)$/
+  await expect(page.getByRole('tablist', { name: 'Sections' }).getByRole('tab')).toHaveText([
+    'Manuscript',
+    'Notes'
   ])
-  await page.keyboard.press('Escape')
   const headerTags = page.getByRole('banner').getByRole('button', { name: 'Tags', exact: true })
   await expect(headerTags).toHaveCount(0)
   await page.getByRole('button', { name: 'Settings' }).click()

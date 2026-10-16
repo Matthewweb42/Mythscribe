@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { ChevronDown, Eye, EyeOff, Plus } from 'lucide-react'
+import { ChevronDown, ChevronLeft, Eye, EyeOff, Plus } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { normalizeSectionId } from '@shared/sidebarTabs'
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
@@ -38,6 +38,32 @@ interface Row {
 }
 
 /**
+ * The sidebar's sections and their panel. While the old story bible is archived (the fresh start,
+ * structure A 2026-10-16) they are two tabs, Manuscript and Notes (`SectionTabs`); otherwise, with
+ * the story bible on or in a v2 project, the section picker (`SectionPicker`).
+ */
+export function SidebarSections({
+  format,
+  sections,
+  controls
+}: SidebarSectionsProps): React.JSX.Element {
+  const projectSections = useSidebarSections()
+  const bibleArchived = useIsArchived('storyBible')
+  const all = sections ?? projectSections
+  return bibleArchived ? (
+    <SectionTabs format={format} all={all} controls={controls} />
+  ) : (
+    <SectionPicker format={format} all={all} controls={controls} />
+  )
+}
+
+interface SectionViewProps {
+  format: NovelFormat
+  all: readonly SidebarSection[]
+  controls: React.ReactNode
+}
+
+/**
  * The sidebar's section picker and panel (F-9.11, replacing F-7.3's row of icon tabs): one
  * labelled button at the top shows the current section's icon and name; it opens a list of every
  * used section by name, with its icon and how many things it holds — the Manuscript, the
@@ -50,14 +76,7 @@ interface Row {
  * rest. `controls` (the dock grip and menu) share the button's row, so the sidebar spends no row
  * on them.
  */
-export function SidebarSections({
-  format,
-  sections,
-  controls
-}: SidebarSectionsProps): React.JSX.Element {
-  const projectSections = useSidebarSections()
-  const bibleArchived = useIsArchived('storyBible')
-  const all = sections ?? projectSections
+function SectionPicker({ format, all, controls }: SectionViewProps): React.JSX.Element {
   const stored = useLayoutStore((s) => s.layout.sidebar.tab)
   const setSidebarTab = useLayoutStore((s) => s.setSidebarTab)
   const [open, setOpen] = useState(false)
@@ -79,8 +98,7 @@ export function SidebarSections({
     ...shown.map((section) => ({ id: section.id, section })),
     ...(unused.length > 0 ? [{ id: SHOW_UNUSED, section: null }] : []),
     ...(showUnused ? unused.map((section) => ({ id: section.id, section })) : []),
-    // Notes redesign (fresh start): no new story-bible category while the old one is archived.
-    ...(bibleArchived ? [] : [{ id: NEW_CATEGORY, section: null }])
+    { id: NEW_CATEGORY, section: null }
   ]
   const optionId = (id: string): string => `${listId}-${id}`
 
@@ -307,6 +325,126 @@ export function SidebarSections({
         className="flex min-h-0 flex-1 flex-col"
       >
         {current?.render(format)}
+      </div>
+    </>
+  )
+}
+
+/**
+ * The fresh start's two tabs (structure A, 2026-10-16): the sections of their own (Manuscript,
+ * Notes) side by side on the dock controls' row, the current one's panel below. A section that
+ * lives under a tab (Outline, Timeline, Edits under Notes) keeps that tab selected and shows its
+ * view with a back row to the tab's own panel. The layout store's sidebar tab stays the one state:
+ * `edits` selects Notes with Edits open, `notes` its tree; an id with no section falls back to the
+ * first tab. Clicking the selected tab while a view under it is open goes back to the tab's own
+ * panel. An ARIA tablist: Left/Right move and wrap, Home/End jump, each selecting as it moves.
+ */
+function SectionTabs({ format, all, controls }: SectionViewProps): React.JSX.Element {
+  const stored = useLayoutStore((s) => s.layout.sidebar.tab)
+  const setSidebarTab = useLayoutStore((s) => s.setSidebarTab)
+  const baseId = useId()
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>())
+
+  const tabs = all.filter((section) => section.under === undefined)
+  const currentId = normalizeSectionId(stored)
+  const current = all.find((section) => section.id === currentId) ?? tabs[0]
+  const selected =
+    current?.under === undefined ? current : tabs.find((tab) => tab.id === current.under)
+  const tabId = (id: string): string => `${baseId}-tab-${id}`
+
+  const select = (index: number): void => {
+    const tab = tabs[(index + tabs.length) % tabs.length]
+    if (tab === undefined) return
+    setSidebarTab(tab.id)
+    tabRefs.current.get(tab.id)?.focus()
+  }
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    const at = tabs.findIndex((tab) => tab.id === selected?.id)
+    switch (event.key) {
+      case 'ArrowRight':
+        select(at + 1)
+        break
+      case 'ArrowLeft':
+        select(at - 1)
+        break
+      case 'Home':
+        select(0)
+        break
+      case 'End':
+        select(tabs.length - 1)
+        break
+      default:
+        return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  return (
+    <>
+      <div className="flex shrink-0 items-center gap-1 border-b border-line bg-panel-title py-1.5 pr-1 pl-2">
+        <div
+          role="tablist"
+          aria-label="Sections"
+          onKeyDown={onKeyDown}
+          className="flex min-w-0 flex-1 items-center gap-1"
+        >
+          {tabs.map((tab) => {
+            const TabIcon = tab.icon
+            const isSelected = tab.id === selected?.id
+            return (
+              <button
+                key={tab.id}
+                ref={(node) => {
+                  if (node === null) tabRefs.current.delete(tab.id)
+                  else tabRefs.current.set(tab.id, node)
+                }}
+                id={tabId(tab.id)}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                aria-controls="sidebar-panel"
+                tabIndex={isSelected ? 0 : -1}
+                onClick={() => setSidebarTab(tab.id)}
+                className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none aria-selected:bg-surface-raised aria-selected:font-medium aria-selected:text-fg"
+              >
+                <TabIcon size={15} aria-hidden="true" className="shrink-0" />
+                <span className="min-w-0 truncate">{tab.label}</span>
+              </button>
+            )
+          })}
+        </div>
+        {controls}
+      </div>
+      <div
+        role="tabpanel"
+        id="sidebar-panel"
+        aria-labelledby={selected === undefined ? undefined : tabId(selected.id)}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        {current !== undefined && current !== selected && selected !== undefined ? (
+          <>
+            <button
+              type="button"
+              aria-label={`Back to ${selected.label}`}
+              onClick={() => setSidebarTab(selected.id)}
+              className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg focus-visible:bg-surface-raised focus-visible:outline-none"
+            >
+              <ChevronLeft size={14} aria-hidden="true" className="shrink-0" />
+              {selected.label}
+            </button>
+            <div
+              role="region"
+              aria-label={`${current.label} section`}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              {current.render(format)}
+            </div>
+          </>
+        ) : (
+          current?.render(format)
+        )}
       </div>
     </>
   )

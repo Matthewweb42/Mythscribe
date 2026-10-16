@@ -66,11 +66,13 @@ async function invoke<T>(channel: string, input: unknown): Promise<T> {
   return result.data
 }
 
+/** Selects the Notes tab (the fresh start shows Manuscript and Notes as two tabs). */
 async function showNotes(): Promise<void> {
-  await page.getByRole('button', { name: /^Section: / }).click()
-  const list = page.getByRole('listbox', { name: 'Sections' })
-  await list.getByRole('option', { name: 'Notes', exact: true }).click()
-  await expect(list).toHaveCount(0)
+  const notes = page
+    .getByRole('tablist', { name: 'Sections' })
+    .getByRole('tab', { name: 'Notes', exact: true })
+  await notes.click()
+  await expect(notes).toHaveAttribute('aria-selected', 'true')
 }
 
 /** Types `name` into the tree's rename field and commits it. */
@@ -234,13 +236,23 @@ test('fresh start: a project’s Library file opens in Notes › Docs, with no C
   await expect(notePage.locator('h1')).toHaveText('Powers')
   await expect(notePage).toContainText('Shadow walking costs a memory.')
 
-  // The sections: no story-bible category or Library, not even among the unused.
-  await page.getByRole('button', { name: /^Section: / }).click()
-  const list = page.getByRole('listbox', { name: 'Sections' })
-  await expect(list.getByRole('option', { name: 'Notes', exact: true })).toBeVisible()
-  await list.getByRole('option', { name: /^Show unused sections/ }).click()
-  await expect(list.getByRole('option', { name: 'Outline', exact: true })).toBeVisible()
-  await expect(list.getByRole('option', { name: 'Characters', exact: true })).toHaveCount(0)
-  await expect(list.getByRole('option', { name: 'Library', exact: true })).toHaveCount(0)
-  await page.keyboard.press('Escape')
+  // The sections: two tabs, Manuscript and Notes, with Outline, Timeline and Edits under Notes;
+  // no story-bible category or Library anywhere.
+  await expect(page.getByRole('button', { name: /^Section: / })).toHaveCount(0)
+  await expect(page.getByRole('tablist', { name: 'Sections' }).getByRole('tab')).toHaveText([
+    'Manuscript',
+    'Notes'
+  ])
+  const views = page.getByRole('group', { name: 'Views' })
+  await expect(views.getByRole('button')).toHaveText(['Outline', 'Timeline', 'Edits'])
+  await expect(page.getByRole('tab', { name: 'Characters', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('tab', { name: 'Library', exact: true })).toHaveCount(0)
+
+  // Edits opens under Notes with a back row; the Notes tab stays selected.
+  await views.getByRole('button', { name: 'Edits', exact: true }).click()
+  const notesTab = page.getByRole('tab', { name: 'Notes', exact: true })
+  await expect(notesTab).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('region', { name: 'Edits section', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Back to Notes' }).click()
+  await expect(page.getByRole('tree', { name: 'Notes' })).toBeVisible()
 })

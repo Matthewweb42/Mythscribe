@@ -1,7 +1,16 @@
 import { isValidElement } from 'react'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { BookOpen, Sparkles, Tag, Users } from 'lucide-react'
+import {
+  BookOpen,
+  CalendarRange,
+  FilePenLine,
+  ListTree,
+  NotebookPen,
+  Sparkles,
+  Tag,
+  Users
+} from 'lucide-react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ALL_BUILTIN_CATEGORIES, BUILTIN_CATEGORIES, categoryFromInput } from '@shared/categories'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
@@ -18,6 +27,7 @@ import { resetLayoutStore, useLayoutStore } from './layoutStore'
 import { SidebarSections } from './SidebarSections'
 import { RecordTab } from '@renderer/features/records/RecordTab'
 import { ResearchTab } from '@renderer/features/research/ResearchTab'
+import { NotesTab } from '@renderer/features/notebook/NotesTab'
 import { buildSections, type SidebarSection } from './sectionList'
 
 const section = (
@@ -204,19 +214,113 @@ describe('SidebarSections with the old story bible archived (fresh start)', () =
     resetEditorSettingsStore()
   })
 
-  it('offers no New category while it is archived, and again once it is switched back on', async () => {
-    const user = userEvent.setup()
+  const fresh: readonly SidebarSection[] = [
+    section({ id: 'manuscript', label: 'Manuscript', group: 'manuscript', count: 12 }),
+    section({ id: 'notes', label: 'Notes', group: 'manuscript', icon: NotebookPen }),
+    section({ id: 'outline', label: 'Outline', group: 'tools', icon: ListTree, under: 'notes' }),
+    section({
+      id: 'timeline',
+      label: 'Timeline',
+      group: 'tools',
+      icon: CalendarRange,
+      under: 'notes'
+    }),
+    section({ id: 'edits', label: 'Edits', group: 'tools', icon: FilePenLine, under: 'notes' })
+  ]
+  const archived = (): void => {
     useEditorSettingsStore.setState({ settings: defaultEditorSettings('novel') })
-    const { unmount } = render(<SidebarSections format="novel" sections={sections} />)
-    await user.click(picker())
-    expect(optionNames()).not.toContain('New category…')
+  }
+  const tabs = (): HTMLElement => screen.getByRole('tablist', { name: 'Sections' })
+  const tab = (name: string): HTMLElement => within(tabs()).getByRole('tab', { name })
+  const panel = (): HTMLElement => screen.getByRole('tabpanel')
+
+  it('shows Manuscript and Notes as two tabs on the controls’ row, and the picker once switched back on', async () => {
+    const user = userEvent.setup()
+    archived()
+    const { unmount } = render(
+      <SidebarSections
+        format="novel"
+        sections={fresh}
+        controls={<button type="button">Move sidebar</button>}
+      />
+    )
+    expect(
+      within(tabs())
+        .getAllByRole('tab')
+        .map((t) => t.textContent)
+    ).toEqual(['Manuscript', 'Notes'])
+    expect(tabs().parentElement).toContainElement(
+      screen.getByRole('button', { name: 'Move sidebar' })
+    )
+    expect(screen.queryByRole('button', { name: /^Section: / })).not.toBeInTheDocument()
+    expect(tab('Manuscript')).toHaveAttribute('aria-selected', 'true')
+    expect(panel()).toHaveAccessibleName('Manuscript')
+    expect(panel()).toHaveTextContent('Manuscript here')
+    await user.click(tab('Notes'))
+    expect(current()).toBe('notes')
+    expect(tab('Notes')).toHaveAttribute('aria-selected', 'true')
+    expect(panel()).toHaveTextContent('Notes here')
     unmount()
+
+    // The story bible switched back on: the picker as before, New category included.
     useEditorSettingsStore.setState({
       settings: { ...defaultEditorSettings('novel'), unarchived: ['storyBible'] }
     })
     render(<SidebarSections format="novel" sections={sections} />)
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     await user.click(picker())
     expect(optionNames()).toContain('New category…')
+  })
+
+  it('opens a view under Notes from its stored id, with a back row to the tree', async () => {
+    const user = userEvent.setup()
+    archived()
+    useLayoutStore.getState().setSidebarTab('edits')
+    render(<SidebarSections format="novel" sections={fresh} />)
+    expect(tab('Notes')).toHaveAttribute('aria-selected', 'true')
+    expect(panel()).toHaveAccessibleName('Notes')
+    expect(within(panel()).getByRole('region', { name: 'Edits section' })).toHaveTextContent(
+      'Edits here'
+    )
+    expect(panel()).not.toHaveTextContent('Notes here')
+    await user.click(within(panel()).getByRole('button', { name: 'Back to Notes' }))
+    expect(current()).toBe('notes')
+    expect(panel()).toHaveTextContent('Notes here')
+    expect(within(panel()).queryByRole('button', { name: 'Back to Notes' })).not.toBeInTheDocument()
+
+    // The selected tab clicked while a view is open goes back to the tree as well.
+    useLayoutStore.getState().setSidebarTab('timeline')
+    expect(await within(panel()).findByText('Timeline here')).toBeInTheDocument()
+    await user.click(tab('Notes'))
+    expect(current()).toBe('notes')
+  })
+
+  it('moves between the tabs from the keyboard: Left/Right wrap, Home/End jump', async () => {
+    const user = userEvent.setup()
+    archived()
+    useLayoutStore.getState().setSidebarTab('outline')
+    render(<SidebarSections format="novel" sections={fresh} />)
+    expect(tab('Notes')).toHaveAttribute('tabindex', '0')
+    expect(tab('Manuscript')).toHaveAttribute('tabindex', '-1')
+    tab('Notes').focus()
+    await user.keyboard('{ArrowRight}')
+    expect(current()).toBe('manuscript')
+    expect(tab('Manuscript')).toHaveFocus()
+    await user.keyboard('{ArrowLeft}')
+    expect(current()).toBe('notes')
+    expect(tab('Notes')).toHaveFocus()
+    await user.keyboard('{Home}')
+    expect(current()).toBe('manuscript')
+    await user.keyboard('{End}')
+    expect(current()).toBe('notes')
+  })
+
+  it('opens an id with no section in the fresh start on the first tab', () => {
+    archived()
+    useLayoutStore.getState().setSidebarTab('character')
+    render(<SidebarSections format="novel" sections={fresh} />)
+    expect(tab('Manuscript')).toHaveAttribute('aria-selected', 'true')
+    expect(panel()).toHaveTextContent('Manuscript here')
   })
 })
 
@@ -249,13 +353,26 @@ describe('buildSections (F-9.11)', () => {
       sheets: { character: 2, thread: 1 }
     }
     const built = buildSections(ALL_BUILTIN_CATEGORIES, busy, 'v1', { storyBibleArchived: true })
-    expect(built.map((s) => [s.id, s.used])).toEqual([
-      ['manuscript', true],
-      ['notes', true],
-      ['outline', true],
-      ['timeline', true],
-      ['edits', true]
+    expect(built.map((s) => [s.id, s.used, s.under])).toEqual([
+      ['manuscript', true, undefined],
+      ['notes', true, undefined],
+      ['outline', true, 'notes'],
+      ['timeline', true, 'notes'],
+      ['edits', true, 'notes']
     ])
+    // Structure A: the views under Notes are always listed (each shows its own empty state), as
+    // rows above the Notes tree.
+    const empty = buildSections(ALL_BUILTIN_CATEGORIES, counts, 'v1', { storyBibleArchived: true })
+    expect(empty.map((s) => s.used)).toEqual([true, true, true, true, true])
+    const notes = empty.find((s) => s.id === 'notes')?.render('novel')
+    expect(isValidElement(notes) ? notes.type : null).toBe(NotesTab)
+    expect(isValidElement(notes) ? notes.props : null).toEqual({
+      views: [
+        { id: 'outline', label: 'Outline', icon: ListTree },
+        { id: 'timeline', label: 'Timeline', icon: CalendarRange },
+        { id: 'edits', label: 'Edits', icon: FilePenLine }
+      ]
+    })
     // Switched back on, the list is v1's as it was; v2 never archives it.
     const ids = (built: SidebarSection[]): string[] => built.map((s) => s.id)
     expect(

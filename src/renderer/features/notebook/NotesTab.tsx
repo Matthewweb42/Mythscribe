@@ -1,11 +1,20 @@
 import { useState } from 'react'
-import { FilePlus, FolderPlus, LayoutTemplate, RefreshCw, Upload } from 'lucide-react'
+import {
+  ChevronRight,
+  FilePlus,
+  FolderPlus,
+  LayoutTemplate,
+  RefreshCw,
+  Upload,
+  type LucideIcon
+} from 'lucide-react'
 import { isFeatureAllowed } from '@shared/aiSettings'
 import { useCanWrite } from '@renderer/features/account/appAccessStore'
 import { useAiSettingsStore } from '@renderer/features/ai/aiSettingsStore'
 import { openNotesUpdateHere } from '@renderer/features/editFlow/editFlowStore'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
+import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { describeError } from '@renderer/lib/errors'
 import { takeDropped } from './droppedEntries'
 import { NotebookTemplateMenu } from './NotebookTemplateMenu'
@@ -21,15 +30,29 @@ const failed = (err: unknown): void => {
   toast.error(describeError(err))
 }
 
+/** A sidebar section shown under Notes (the fresh start: Outline, Timeline, Edits). */
+export interface NotesView {
+  id: string
+  label: string
+  icon: LucideIcon
+}
+
+interface NotesTabProps {
+  /** The views listed above the tree; each opens in the Notes panel. None outside the fresh start. */
+  views?: readonly NotesView[]
+}
+
 /**
  * The Notes section of the sidebar (notes redesign phase 1, slice 1): New page, New folder, New
  * from template (note templates, phase 6) and Import files… above the notebook's tree. Files and
  * folders dropped on the section become pages (a folder keeps its folders), in the folder under
  * the pointer, or beside the page under it, or at the top level. Notes redesign phase 3: Update notes… opens the edit flow pre-filled with
  * Update notes on the open scene's chapter (the book when no scene is open), while the edit flow
- * can run (v1, Use AI on).
+ * can run (v1, Use AI on). Structure A (2026-10-16): in the fresh start the views that live under
+ * Notes (Outline, Timeline, Edits) are rows above the tree; a row opens its section, which the
+ * sidebar shows under the Notes tab with a back row.
  */
-export function NotesTab(): React.JSX.Element {
+export function NotesTab({ views = [] }: NotesTabProps): React.JSX.Element {
   const busy = useNotebookStore((s) => s.busy)
   const writable = useCanWrite()
   const [dropping, setDropping] = useState(false)
@@ -145,6 +168,22 @@ export function NotesTab(): React.JSX.Element {
           </button>
         ) : null}
       </div>
+      {views.length > 0 ? (
+        <div role="group" aria-label="Views" className="shrink-0 border-b border-line py-1">
+          {views.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => useLayoutStore.getState().setSidebarTab(id)}
+              className="flex w-full items-center gap-2 px-3 py-1 text-left text-sm hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
+            >
+              <Icon size={15} aria-hidden="true" className="shrink-0 text-fg-muted" />
+              <span className="min-w-0 flex-1 truncate">{label}</span>
+              <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-fg-muted" />
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <NotebookTree />
       </div>
