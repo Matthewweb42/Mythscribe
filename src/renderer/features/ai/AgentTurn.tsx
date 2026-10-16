@@ -26,7 +26,7 @@ import {
 import { openNotebookPage } from '@renderer/features/notebook/openPage'
 import { AiWaitText } from './AiWaitText'
 import { AI_WAIT_PHRASES } from './aiWaitPhrases'
-import { canUndoChange, useAssistantStore } from './assistantStore'
+import { canUndo, useAssistantStore } from './assistantStore'
 import { SheetLineCard } from './SheetLineCard'
 
 /** How much of a changed passage a log line quotes. */
@@ -97,13 +97,18 @@ const NAME_LIST_SHOWN = 8
 
 /** The items a bulk edit covers (F-5.25), the first few by name. */
 function NameList({ names }: { names: readonly string[] }): React.JSX.Element {
-  const shown = names.slice(0, NAME_LIST_SHOWN).join(', ')
-  const more = names.length - NAME_LIST_SHOWN
   return (
     <p data-testid="agent-change-items" className="m-0 text-xs text-fg-muted">
-      {more > 0 ? `${shown}, and ${more} more` : shown}
+      {namesShown(names)}
     </p>
   )
+}
+
+/** A bulk change's names (F-5.25; scribe.v5's log lines too), the first few, then "and N more". */
+function namesShown(names: readonly string[]): string {
+  const shown = names.slice(0, NAME_LIST_SHOWN).join(', ')
+  const more = names.length - NAME_LIST_SHOWN
+  return more > 0 ? `${shown}, and ${more} more` : shown
 }
 
 /** What a pending edit shows under its heading: the current text with what goes struck through and what comes in colour. */
@@ -349,12 +354,22 @@ export function NotebookChange({
 function logLine(change: AgentChange): string {
   const { edit } = change
   const head = describeEdit(edit)
+  const moved =
+    edit.kind === 'notebookMove' && edit.items.length > 1
+      ? edit.items.map((item) => item.title)
+      : edit.kind === 'moveMany' && edit.nodes.length > 1
+        ? edit.nodes.map((node) => node.title)
+        : edit.kind === 'create' && edit.moveIn.length > 0
+          ? edit.moveIn.map((node) => node.title)
+          : []
   const detail =
     edit.kind === 'text' && edit.replace !== ''
       ? `: “${excerpt(edit.replace)}”`
       : edit.kind === 'insert'
         ? `: “${excerpt(edit.text)}”`
-        : ''
+        : moved.length > 0
+          ? `: ${namesShown(moved)}`
+          : ''
   switch (change.status) {
     case 'applied':
       // F-16.26: a sheet line's confirmation ("Pinned on Mara’s sheet: “hates the sea”").
@@ -389,12 +404,15 @@ export function AgentChanges({
   const skipChange = useAssistantStore((s) => s.skipChange)
   const acceptChange = useAssistantStore((s) => s.acceptChange)
   const undoChange = useAssistantStore((s) => s.undoChange)
+  const undoAll = useAssistantStore((s) => s.undoAll)
   const applyAll = useAssistantStore((s) => s.applyAll)
   if (changes.length === 0) return null
   const waiting = changes.filter(
     (change) =>
       change.status === 'pending' && !isDeletion(change.edit) && !isSheetQuestion(change.edit)
   ).length
+  // Notes structure part C (2026-10-16, decided by Claude): one Undo all when several have one.
+  const undoable = changes.filter((change) => change.status === 'applied' && canUndo(change)).length
   return (
     <div className="flex flex-col gap-1.5">
       {changes.map((change) => {
@@ -430,8 +448,7 @@ export function AgentChanges({
                 ) : null}
                 {change.edit.kind === 'notebook' ? <NotebookChange edit={change.edit} /> : null}
               </div>
-              {change.status === 'applied' &&
-              (change.edit.kind === 'notebook' || canUndoChange(change.id)) ? (
+              {change.status === 'applied' && canUndo(change) ? (
                 <button
                   type="button"
                   data-testid="agent-change-undo"
@@ -515,7 +532,7 @@ export function AgentChanges({
                 onClick={() => skipChange(messageId, change.id)}
                 className={FIX_BUTTON}
               >
-                {tracked ? 'Reject' : 'Skip'}
+                {tracked ? 'Reject' : deletion ? 'Keep' : 'Skip'}
               </button>
             </div>
           </div>
@@ -530,6 +547,17 @@ export function AgentChanges({
           className={`self-start ${FIX_BUTTON}`}
         >
           Apply all remaining
+        </button>
+      ) : null}
+      {undoable >= 2 ? (
+        <button
+          type="button"
+          data-testid="agent-undo-all"
+          onClick={() => void undoAll(messageId)}
+          className={`self-start ${FIX_BUTTON}`}
+        >
+          <Undo2 size={12} aria-hidden="true" />
+          Undo all
         </button>
       ) : null}
     </div>

@@ -26,11 +26,20 @@ describe('chat modes Brainstorm, Write, Vibe (notes redesign phase 1)', () => {
     expect(defaultAiSettings().chatMode).toBe('write')
   })
 
-  it('lets Brainstorm write notes only when the author asks it to save, and never prose', () => {
-    expect(scribeAccess('brainstorm', 'What if Rook lied?')).toEqual({ notes: false, prose: false })
-    expect(scribeAccess('brainstorm', 'Good, save that.')).toEqual({ notes: true, prose: false })
-    expect(scribeAccess('write', 'Anything')).toEqual({ notes: true, prose: true })
-    expect(scribeAccess('vibe', 'Anything')).toEqual({ notes: true, prose: true })
+  it('lets Brainstorm write notes only when the author asks it to save, and never prose or structure', () => {
+    expect(scribeAccess('brainstorm', 'What if Rook lied?')).toEqual({
+      notes: false,
+      prose: false,
+      structure: false
+    })
+    expect(scribeAccess('brainstorm', 'Good, save that.')).toEqual({
+      notes: true,
+      prose: false,
+      structure: false
+    })
+    const all = { notes: true, prose: true, structure: true }
+    expect(scribeAccess('write', 'Anything')).toEqual(all)
+    expect(scribeAccess('vibe', 'Anything')).toEqual(all)
   })
 
   it('hears "save that" and its cousins, and not a plain question', () => {

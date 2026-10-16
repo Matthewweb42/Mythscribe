@@ -5,9 +5,11 @@ import {
   AGENT_SELECTION_CHARS,
   isDeletion,
   isDraftIntent,
+  isNotebookEdit,
   isOpenAction,
   isRewriteIntent,
   isSheetQuestion,
+  isTreeEdit,
   settledAfterReload,
   type AgentAccess,
   type AgentChange,
@@ -303,6 +305,11 @@ interface AssistantState {
    */
   undoChange: (messageId: string, changeId: string) => Promise<void>
   /**
+   * Undo all (notes structure part C, 2026-10-16): takes back every applied change of the turn
+   * that has an Undo, newest first; one that fails stays, with its reason toasted.
+   */
+  undoAll: (messageId: string) => Promise<void>
+  /**
    * F-5.26: runs one choice of an edit request's turn on the turn's target (an edit pass whose
    * changes come back as tracked changes, or Editor's notes) and records the pick and the pass.
    * Not in Plan; a choice that cannot run now toasts why.
@@ -512,6 +519,11 @@ function isIntent(edit: AgentEdit): boolean {
 /** Whether `undoChange` can still take this change back (its undo lives in memory). */
 export function canUndoChange(changeId: string): boolean {
   return undoers.has(changeId)
+}
+
+/** Whether an applied change has an Undo: stored with it (Notes), or held this session. */
+export function canUndo(change: AgentChange): boolean {
+  return isNotebookEdit(change.edit) || undoers.has(change.id)
 }
 
 /**
@@ -927,9 +939,10 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   async undoChange(messageId, changeId) {
     const found = findChange(messageId, changeId)
     if (found?.change.status !== 'applied') return
-    // Notes redesign phase 1: a note edit's Undo is stored with it, so it outlives the session.
+    // Notes redesign phase 1: a change to Notes keeps its Undo stored with it, so it outlives the
+    // session (scribe.v5's folders, moves, renames and confirmed deletions too).
     const edit = found.change.edit
-    const undo = edit.kind === 'notebook' ? () => undoNotebookEdit(edit) : undoers.get(changeId)
+    const undo = isNotebookEdit(edit) ? () => undoNotebookEdit(edit) : undoers.get(changeId)
     if (undo === undefined) return
     if (get().changing[changeId]) return
     setChanging(changeId, true)
@@ -942,6 +955,15 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     } finally {
       setChanging(changeId, false)
     }
+  },
+
+  async undoAll(messageId) {
+    const changes = findMessage(messageId)?.agent?.changes ?? []
+    const ids = changes
+      .filter((change) => change.status === 'applied' && canUndo(change))
+      .map((change) => change.id)
+      .reverse()
+    for (const changeId of ids) await get().undoChange(messageId, changeId)
   },
 
   async openScene(ref, quote) {
@@ -1650,8 +1672,16 @@ async function runScribeTurn(
     },
     result.cached
   )
-  if (messageId !== null) settleChanges(messageId)
   showTracked(changes)
+  if (messageId === null) return
+  // scribe.v5 (notes structure part C): her new, moved, renamed and split chapters and scenes land
+  // at once, in order, each with its Undo, as the chat agent's Auto applied them; a merge or a
+  // deletion waits for Delete. Main only offers them in Write and Vibe.
+  for (const change of changes) {
+    if (isTreeEdit(change.edit))
+      await useAssistantStore.getState().applyChange(messageId, change.id)
+  }
+  settleChanges(messageId)
 }
 
 /** The tracked changes of a Ms Scribe turn draw in the scenes already showing theirs. */

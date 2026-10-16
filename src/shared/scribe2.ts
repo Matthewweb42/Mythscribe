@@ -69,17 +69,50 @@ export const SCRIBE_QUOTE_MIN = 8
 export const SCRIBE_READ_TOOLS = ['search_book', 'open_scene', 'list_notes', 'open_note'] as const
 export const SCRIBE_NOTE_TOOLS = ['edit_note', 'create_note'] as const
 export const SCRIBE_PROSE_TOOLS = ['propose_prose_edit'] as const
+/**
+ * The structure tools `scribe.v5` names (notes structure part C, 2026-10-16): Notes folders and
+ * pages made, moved, renamed and deleted in main at once (deletions ask), and the manuscript's
+ * chapters and scenes through the chat agent's own tree edits, applied by the chat with Undo.
+ */
+export const SCRIBE_NOTES_STRUCTURE_TOOLS = [
+  'create_folder',
+  'move_note',
+  'rename_note',
+  'delete_note'
+] as const
+export const SCRIBE_BOOK_STRUCTURE_TOOLS = [
+  'create_chapter',
+  'create_scene',
+  'move_scene',
+  'rename_scene',
+  'split_scene',
+  'merge_scenes',
+  'delete_scene'
+] as const
+export const SCRIBE_STRUCTURE_TOOLS = [
+  ...SCRIBE_NOTES_STRUCTURE_TOOLS,
+  ...SCRIBE_BOOK_STRUCTURE_TOOLS
+] as const
 export const SCRIBE_TOOLS = [
   ...SCRIBE_READ_TOOLS,
   ...SCRIBE_NOTE_TOOLS,
-  ...SCRIBE_PROSE_TOOLS
+  ...SCRIBE_PROSE_TOOLS,
+  ...SCRIBE_STRUCTURE_TOOLS
 ] as const
 export type ScribeTool = (typeof SCRIBE_TOOLS)[number]
 
-/** What a message may write: note pages, prose suggestions. */
+/**
+ * Structure changes one message may make (`scribe.v5`, decided by Claude: 40), each item moved
+ * counted; apart from `SCRIBE_MAX_WRITES`, which counts note writes and prose suggestions.
+ */
+export const SCRIBE_MAX_STRUCTURE = 40
+
+/** What a message may write: note pages, prose suggestions, structure (folders, chapters, scenes). */
 export interface ScribeAccess {
   notes: boolean
   prose: boolean
+  /** `scribe.v5`'s structure tools; left out (the edit flow's notes run), none. */
+  structure?: boolean
 }
 
 /**
@@ -104,12 +137,12 @@ export function wantsSave(message: string): boolean {
 
 /**
  * What a message may write in `mode` (the author's decision of 2026-10-15): Brainstorm writes
- * nothing unless the message asks her to save, and then only note pages; Write and Vibe edit
- * notes and suggest prose.
+ * nothing unless the message asks her to save, and then only note pages, never structure; Write
+ * and Vibe edit notes, suggest prose and change the structure (2026-10-16).
  */
 export function scribeAccess(mode: AssistantMode, message: string): ScribeAccess {
-  if (mode === 'brainstorm') return { notes: wantsSave(message), prose: false }
-  return { notes: true, prose: true }
+  if (mode === 'brainstorm') return { notes: wantsSave(message), prose: false, structure: false }
+  return { notes: true, prose: true, structure: true }
 }
 
 /** A page source's kind: a note page, a story-bible sheet, a Library upload (until phase 4). */

@@ -256,7 +256,8 @@ export function runAgentTool(
     case 'find_passages':
       return findPassages(project, str(args.query))
     // F-16.25: the navigator's tools (P3) are no agent version's: no list names them; nor are
-    // Ms Scribe's v1 tools (notes redesign phase 1, `src/main/scribe2/tools.ts`).
+    // Ms Scribe's v1 tools (notes redesign phase 1, `src/main/scribe2/tools.ts`; scribe.v5's
+    // structure tools in `structure.ts`).
     case 'read':
     case 'state':
     case 'knows':
@@ -271,6 +272,17 @@ export function runAgentTool(
     case 'edit_note':
     case 'create_note':
     case 'propose_prose_edit':
+    case 'create_folder':
+    case 'move_note':
+    case 'rename_note':
+    case 'delete_note':
+    case 'create_chapter':
+    case 'create_scene':
+    case 'move_scene':
+    case 'rename_scene':
+    case 'split_scene':
+    case 'merge_scenes':
+    case 'delete_scene':
       return {
         step: { tool: 'outline', label: 'Looking around…' },
         result: `There is no tool "${tool.data}". Use one of the tools listed.`
@@ -984,7 +996,7 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
   // F-16.4: a v2 project has no tags, sheets, statuses, To do items or summaries to edit.
   if (project.memory === 'v2' && refusesV2Edit(edit)) return { error: AGENT_V2_REFUSED }
   if (project.bibleOff === true && refusesV2Edit(edit)) return { error: AGENT_BIBLE_OFF }
-  const nameOf = (row: NodeRow): string => project.titleOf(row.id) || row.title
+  const nameOf = (row: NodeRow): string => rowName(project, row)
   const documentArg = (): NodeRow | string => {
     const row = nodeByRef(project, edit.id)
     return isDocument(row) ? row : `${str(edit.id) || 'the id'} is not a document`
@@ -1088,7 +1100,7 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
     case 'create': {
       const level = edit.level === 'chapter' ? 'chapter' : edit.level === 'scene' ? 'scene' : null
       if (level === null) return { error: 'level must be scene or chapter' }
-      const parent = nodeByRef(project, edit.in)
+      const parent = folderOrRoot(project, edit.in)
       if (parent?.kind !== 'folder') return { error: '"in" is not a folder' }
       const afterRow = str(edit.after) === '' ? undefined : nodeByRef(project, edit.after)
       if (str(edit.after) !== '' && afterRow?.parentId !== parent.id) {
@@ -1104,7 +1116,8 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
           parentTitle: nameOf(parent),
           afterId: afterRow?.id ?? null,
           title,
-          text: level === 'scene' ? text(edit.text) : ''
+          text: level === 'scene' ? text(edit.text) : '',
+          moveIn: []
         }
       }
     }
@@ -1118,7 +1131,7 @@ export function resolveAgentEdit(project: AgentProject, raw: unknown): ResolvedE
     case 'move': {
       if (edit.ids !== undefined || edit.from !== undefined) return resolveMoveMany(project, edit)
       const row = nodeByRef(project, edit.id)
-      const parent = nodeByRef(project, edit.in)
+      const parent = folderOrRoot(project, edit.in)
       if (!row?.parentId) return { error: 'not a movable id' }
       if (parent?.kind !== 'folder') return { error: '"in" is not a folder' }
       const afterRow = str(edit.after) === '' ? undefined : nodeByRef(project, edit.after)
@@ -1271,6 +1284,25 @@ function resolveClear(project: AgentProject, edit: Record<string, unknown>): Res
   return { edit: { kind: 'clear', options } }
 }
 
+/** How the chat names a node: its `Chapter › Scene` title; a section root (`folderOrRoot`) its own. */
+function rowName(project: AgentProject, row: NodeRow): string {
+  if (row.parentId === null) return row.title
+  return project.titleOf(row.id) || row.title
+}
+
+/**
+ * A folder by ref, or (notes structure part C, scribe.v5) the word `manuscript` for the
+ * Manuscript section's root, which has no ref: a new chapter at the top of the book goes there.
+ */
+function folderOrRoot(project: AgentProject, ref: unknown): NodeRow | undefined {
+  if (str(ref).trim().toLowerCase() !== 'manuscript') return nodeByRef(project, ref)
+  const root = listNodes(project.db).find(
+    (row) => row.parentId === null && row.sectionType === 'manuscript'
+  )
+  // The root's stored title is its section id; the chat names it as the author sees it.
+  return root === undefined ? undefined : { ...root, title: 'Manuscript' }
+}
+
 /** The manuscript's documents in reading order (the front and end matter left out). */
 function manuscriptDocuments(project: AgentProject): NodeRow[] {
   // The project's rows leave the three section roots out (`nodesInTreeOrder`); read them here.
@@ -1350,7 +1382,7 @@ function resolveTagMany(project: AgentProject, edit: Record<string, unknown>): R
  * folder into itself or under itself.
  */
 function resolveMoveMany(project: AgentProject, edit: Record<string, unknown>): ResolvedEdit {
-  const parent = nodeByRef(project, edit.in)
+  const parent = folderOrRoot(project, edit.in)
   if (parent?.kind !== 'folder') return { error: '"in" is not a folder' }
   const rows: NodeRow[] = []
   if (edit.from !== undefined) {
@@ -1370,7 +1402,7 @@ function resolveMoveMany(project: AgentProject, edit: Record<string, unknown>): 
   }
   if (rows.length === 0) return { error: 'nothing to move' }
   if (rows.length > AGENT_BULK_MAX) return { error: `more than ${AGENT_BULK_MAX} items` }
-  const nameOf = (row: NodeRow): string => project.titleOf(row.id) || row.title
+  const nameOf = (row: NodeRow): string => rowName(project, row)
   return {
     edit: {
       kind: 'moveMany',

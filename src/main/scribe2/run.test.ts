@@ -22,7 +22,7 @@ import { defaultAiUsageState, dayOf } from '../ai/dailyCap'
 import { loadAgentProject } from '../ai/agentTools'
 import { resetInflight } from '../ai/inflight'
 import { SCRIBE_SENTINEL } from '../ai/prompts/scribe.v1'
-import { SCRIBE_V3_MODE_RULES } from '../ai/prompts/scribe.v3'
+import { SCRIBE_V5_MODE_RULES } from '../ai/prompts/scribe.v5'
 import { SCRIBE_V4_TEMPLATE_RULE } from '../ai/prompts/scribe.v4'
 import type { CompletionRequest, CompletionResult, Provider } from '../ai/providers/types'
 import type { AiRequestDeps } from '../ai/request'
@@ -167,11 +167,11 @@ describe('runScribe2 (notes redesign phase 1)', () => {
     )
     const result = await ask('What could happen next?', 'brainstorm')
     // scribe.v3: the mode is said last in the moment, after the cached prefix.
-    expect(request(0).messages[0]?.content.endsWith(SCRIBE_V3_MODE_RULES.brainstorm)).toBe(true)
+    expect(request(0).messages[0]?.content.endsWith(SCRIBE_V5_MODE_RULES.brainstorm)).toBe(true)
     expect(request(1).messages.at(-1)?.content).toContain('Brainstorm changes nothing')
     expect(result.changes).toEqual([])
     expect(changed).toEqual([])
-    expect(result.promptVersion).toBe('scribe.v4')
+    expect(result.promptVersion).toBe('scribe.v5')
   })
 
   it('knows the folders’ templates before she writes: the notes block lists them once (notes fixes)', async () => {
@@ -208,7 +208,7 @@ describe('runScribe2 (notes redesign phase 1)', () => {
       { answer: 'Saved it in Ideas.', sources: [] }
     )
     const result = await ask('Save that to my notes.', 'brainstorm')
-    expect(request(0).messages[0]?.content.endsWith(SCRIBE_V3_MODE_RULES.save)).toBe(true)
+    expect(request(0).messages[0]?.content.endsWith(SCRIBE_V5_MODE_RULES.save)).toBe(true)
     expect(request(1).messages.at(-1)?.content).toContain('No prose changes in this mode')
     expect(result.changes).toMatchObject([
       { applied: true, edit: { kind: 'notebook', created: true } }
@@ -230,7 +230,7 @@ describe('runScribe2 (notes redesign phase 1)', () => {
     )
     const result = await ask('What can I do to make this scene better?', 'vibe')
     const system = request(0).messages[0]?.content ?? ''
-    expect(system.endsWith(SCRIBE_V3_MODE_RULES.vibe)).toBe(true)
+    expect(system.endsWith(SCRIBE_V5_MODE_RULES.vibe)).toBe(true)
     expect(request(4).messages.at(-1)?.content).toContain('No more prose suggestions')
     expect(result.changes).toHaveLength(3)
     expect(result.changes.every((change) => !change.applied && change.edit.kind === 'text')).toBe(
@@ -243,8 +243,37 @@ describe('runScribe2 (notes redesign phase 1)', () => {
     replies({ answer: 'Two options.', sources: [] })
     await ask('What can I do to make this scene better?', 'write')
     const write = request(5).messages[0]?.content ?? ''
-    expect(write.endsWith(SCRIBE_V3_MODE_RULES.write)).toBe(true)
+    expect(write.endsWith(SCRIBE_V5_MODE_RULES.write)).toBe(true)
     expect(write.slice(0, write.indexOf('# Now'))).toBe(system.slice(0, system.indexOf('# Now')))
+  })
+
+  it('Write: the structure tools move notes at once and leave a scene deletion waiting (scribe.v5)', async () => {
+    createNotebookItem(db, { parentId: null, kind: 'page', title: 'Tash', content: null })
+    createNotebookItem(db, { parentId: null, kind: 'page', title: 'Mara', content: null })
+    const ref0 = loadAgentProject(db, null, 'v1').refOf.get(scenes[0]!) ?? ''
+    replies(
+      { tool: 'move_note', args: { ids: ['p1', 'p2'], to: 'Characters' } },
+      { tool: 'delete_scene', args: { id: ref0 } },
+      {
+        answer: 'Moved Tash and Mara into Characters; the scene waits for your Delete.',
+        sources: []
+      }
+    )
+    const result = await ask(
+      'Put Tash and Mara in a Characters folder, and delete the first scene.',
+      'write'
+    )
+    expect(request(0).messages[0]?.content).toContain('move_note {"ids"')
+    expect(request(1).messages.at(-1)?.content).toBe(
+      'Result of move_note:\nMoved Tash, Mara into Characters.'
+    )
+    expect(result.changes.map((change) => [change.edit.kind, change.applied])).toEqual([
+      ['notebookFolder', true],
+      ['notebookMove', true],
+      ['delete', false]
+    ])
+    expect(changed.length).toBeGreaterThan(0)
+    expect(manuscriptDocuments(db).some((row) => row.id === scenes[0])).toBe(true)
   })
 
   it('refuses when the feature is off', async () => {

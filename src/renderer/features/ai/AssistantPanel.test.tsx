@@ -963,6 +963,8 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
     expect(cards[1]).toHaveTextContent('Delete Scene 2')
     expect(cards[1]).toHaveTextContent('This deletes; it always asks first, even in Auto.')
     expect(within(cards[1]!).getByTestId('agent-change-apply')).toHaveTextContent('Delete')
+    // scribe.v5: a deletion's other button keeps the item.
+    expect(within(cards[1]!).getByTestId('agent-change-skip')).toHaveTextContent('Keep')
     // One waiting edit besides the deletion: no Apply all.
     expect(within(turn).queryByTestId('agent-apply-all')).not.toBeInTheDocument()
 
@@ -970,6 +972,43 @@ describe('AssistantPanel agent edits (F-5.22)', () => {
     const skipped = within(turns()[1]!).getAllByTestId('agent-change')[1]!
     expect(skipped).toHaveAttribute('data-status', 'skipped')
     expect(skipped).toHaveTextContent('Skipped: Delete Scene 2')
+  })
+
+  it('lists her Notes structure changes a line each with Undo, one Undo all, and a Notes deletion waiting (scribe.v5)', async () => {
+    await mountOpen(
+      withChanges([
+        change(
+          'e-1',
+          { kind: 'notebookFolder', folderId: 'f-1', title: 'Characters', parent: '' },
+          { status: 'applied' }
+        ),
+        change(
+          'e-2',
+          {
+            kind: 'notebookMove',
+            items: [
+              { id: 'pg-1', title: 'Tash', folder: false, fromParentId: null, fromPosition: 0 },
+              { id: 'pg-2', title: 'Mara', folder: false, fromParentId: null, fromPosition: 1 }
+            ],
+            parentId: 'f-1',
+            parentTitle: 'Characters'
+          },
+          { status: 'applied' }
+        ),
+        change('e-3', { kind: 'notebookDelete', id: 'pg-3', title: 'Old', folder: false, pages: 0 })
+      ])
+    )
+    const turn = turns()[1]!
+    const cards = within(turn).getAllByTestId('agent-change')
+    expect(cards[0]).toHaveTextContent('New folder: Characters')
+    expect(cards[1]).toHaveTextContent('Moved 2 notes into Characters: Tash, Mara')
+    // Stored with the change, so a turn from another session keeps its Undo.
+    expect(within(cards[0]!).getByTestId('agent-change-undo')).toBeInTheDocument()
+    expect(within(cards[1]!).getByTestId('agent-change-undo')).toBeInTheDocument()
+    expect(within(turn).getByTestId('agent-undo-all')).toHaveTextContent('Undo all')
+    expect(cards[2]).toHaveTextContent('Delete the note “Old”')
+    expect(within(cards[2]!).getByTestId('agent-change-apply')).toHaveTextContent('Delete')
+    expect(within(cards[2]!).getByTestId('agent-change-skip')).toHaveTextContent('Keep')
   })
 
   it('logs applied and failed edits as lines, offers Apply all for two waiting, and flags an off-voice one', async () => {

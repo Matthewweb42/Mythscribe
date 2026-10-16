@@ -29,8 +29,7 @@ import { assertFeatureAllowed } from '../ai/dial'
 import type { AgentTranscriptStep } from '../ai/prompts/agent.v1'
 import type { ChatTurn } from '../ai/prompts/chat.v1'
 import type { BuildScribePromptInput } from '../ai/prompts/scribe.v1'
-import { scribeModeLineV3 } from '../ai/prompts/scribe.v3'
-import { buildScribePromptV4, SCRIBE_V4_RULES } from '../ai/prompts/scribe.v4'
+import { buildScribePromptV5, scribeModeLineV5, SCRIBE_V5_RULES } from '../ai/prompts/scribe.v5'
 import type { CompletionUsage } from '../ai/providers/types'
 import type { AiRequestDeps } from '../ai/request'
 import { buildScribeContext } from './context'
@@ -53,7 +52,10 @@ export interface Scribe2Input {
 export interface Scribe2Result {
   answer: string
   steps: AgentStep[]
-  /** Note edits (applied already) and prose suggestions (waiting for the author), in order. */
+  /**
+   * Note edits and Notes structure changes (applied already), prose suggestions, manuscript
+   * structure changes and deletions (waiting: the chat applies the tree's non-deletions at once).
+   */
   changes: (AgentProposal & { applied: boolean })[]
   sources: ScribeSources
   usage: CompletionUsage
@@ -72,7 +74,7 @@ const PICK_SEARCH_RESULTS = 20
  */
 export function fitScribePrompt(
   input: BuildScribePromptInput,
-  build: (input: BuildScribePromptInput) => AgentLoopPrompt = buildScribePromptV4
+  build: (input: BuildScribePromptInput) => AgentLoopPrompt = buildScribePromptV5
 ): AgentLoopPrompt {
   const budget = inputBudget('scribe')
   const estimate = (built: AgentLoopPrompt): number =>
@@ -302,8 +304,9 @@ export function readableAnswer(run: Pick<ScribeRun, 'project' | 'pages'>, answer
  * Ms Scribe's turn in a story memory v1 project (notes redesign phase 1). The gate first
  * (`scribe`); then the context (`buildScribeContext`: every note page, the book map, the book whole
  * when it fits or the picked scenes, the moment), and the chat agent's research loop
- * (`runAgentLoop`, strong tier) with her tools, on `scribe.v4` (the mode said in the moment; the
- * notes block ends with the folders' templates, which v4's rule line has her follow).
+ * (`runAgentLoop`, strong tier) with her tools, on `scribe.v5` (the mode said in the moment; the
+ * notes block ends with the folders' templates, which v4's rule line has her follow; v5's
+ * structure tools make, move, rename and delete folders, pages, chapters and scenes).
  * Note writes land in the notebook as she makes them (`notebookChanged` tells the windows); prose
  * suggestions come back for the author's accept, at most `scribeProseMax(mode)` of them (three in
  * Vibe, where she proposes them unasked).
@@ -324,7 +327,7 @@ export async function runScribe2(
   const pov = active ? parseStoredSceneMeta(active.sceneMeta).pov.trim() : ''
   const profile = access.prose ? buildVoiceProfile(db, { pov: pov || undefined }) : null
   const context = buildScribeContext({
-    rulesTokens: estimateTokens(`${SCRIBE_V4_RULES}\n${scribeModeLineV3(input.mode, access)}`),
+    rulesTokens: estimateTokens(`${SCRIBE_V5_RULES}\n${scribeModeLineV5(input.mode, access)}`),
     pages: material.pages,
     scenes: material.scenes,
     currentId: input.nodeId,

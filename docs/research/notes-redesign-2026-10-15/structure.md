@@ -78,7 +78,7 @@ e2e (`e2e/notebook.spec.ts`): drop a Markdown file with headings, pick Split at 
 pages appear in a folder; Sort with Ms Scribe against the fake provider makes two pages in two
 folders and Undo removes them.
 
-## C. Ms Scribe moves, makes and deletes folders and files
+## C. Ms Scribe moves, makes and deletes folders and files — built 2026-10-16
 
 New tools in Write and Vibe (Brainstorm refuses them as it refuses `edit_note` now). Prompt
 **`scribe.v5`** (v4 stays catalogued as shipped) with the tools' one-line descriptions only.

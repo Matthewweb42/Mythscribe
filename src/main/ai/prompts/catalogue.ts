@@ -118,6 +118,7 @@ import { SCRIBE_PROMPT_VERSION } from './scribe.v1'
 import { SCRIBE_V2_PROMPT_VERSION } from './scribe.v2'
 import { SCRIBE_V3_PROMPT_VERSION } from './scribe.v3'
 import { SCRIBE_V4_PROMPT_VERSION } from './scribe.v4'
+import { SCRIBE_V5_PROMPT_VERSION } from './scribe.v5'
 import { EDIT_FLOW_PROMPT_VERSION } from './editFlow.v1'
 import { EDIT_NOTES_PROMPT_VERSION } from './editNotes.v1'
 
@@ -275,6 +276,8 @@ export const PROMPT_VERSIONS = [
   SCRIBE_V3_PROMPT_VERSION,
   // Notes fixes (2026-10-15, fixes-1.md §2): the folders' templates known before she writes.
   SCRIBE_V4_PROMPT_VERSION,
+  // Notes structure part C (2026-10-16, structure.md §C): she makes, moves, renames and deletes.
+  SCRIBE_V5_PROMPT_VERSION,
   // Notes redesign phase 2: the edit flow's stages and checks, and its Update notes.
   EDIT_FLOW_PROMPT_VERSION,
   EDIT_NOTES_PROMPT_VERSION,
@@ -802,6 +805,13 @@ export const PROMPT_CATALOGUE: Record<PromptVersion, PromptEntry> = {
   },
   // The notes block lists the folders' templates; one rule line has her write under them (2026-10-15).
   [SCRIBE_V4_PROMPT_VERSION]: {
+    feature: 'scribe',
+    tier: 'strong',
+    output: 'json',
+    since: 'Notes P1'
+  },
+  // The structure tools: folders, pages, chapters and scenes made, moved, renamed, deleted (2026-10-16).
+  [SCRIBE_V5_PROMPT_VERSION]: {
     feature: 'scribe',
     tier: 'strong',
     output: 'json',

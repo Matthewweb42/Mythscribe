@@ -211,7 +211,12 @@ export const AgentEdit = z.discriminatedUnion('kind', [
     afterId: z.string().nullable(),
     title: z.string().min(1).max(AGENT_TITLE_MAX),
     /** A new scene's opening text; empty for none (always, for a chapter). */
-    text: Passage
+    text: Passage,
+    /**
+     * Notes structure part C (scribe.v5, 2026-10-16): documents moved into the new chapter right
+     * after it is made, in order ("a new chapter with these scenes"); its Undo moves them back.
+     */
+    moveIn: z.array(z.object(NodeRef)).max(AGENT_BULK_MAX).default([])
   }),
   /** `title` is the current one. */
   z.object({
@@ -373,10 +378,89 @@ export const AgentEdit = z.discriminatedUnion('kind', [
     section: z.string().nullable(),
     before: z.string().max(SCRIBE_DIFF_CHARS),
     after: z.string().max(SCRIBE_DIFF_CHARS)
+  }),
+  /**
+   * Notes structure part C (scribe.v5, 2026-10-16): a Notes folder Ms Scribe made, in `parent`
+   * (its path, '' at the top). Made in main as she works; its Undo deletes it (`notebook:delete`).
+   */
+  z.object({
+    kind: z.literal('notebookFolder'),
+    folderId: z.string(),
+    title: z.string(),
+    parent: z.string()
+  }),
+  /**
+   * scribe.v5: Notes pages or folders she moved into `parentId` (null: the top, `parentTitle`
+   * "Notes"), each with where it was, which its Undo puts it back to (`notebook:move`). Made in main.
+   */
+  z.object({
+    kind: z.literal('notebookMove'),
+    items: z
+      .array(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+          folder: z.boolean(),
+          fromParentId: z.string().nullable(),
+          fromPosition: z.number()
+        })
+      )
+      .min(1)
+      .max(AGENT_BULK_MAX),
+    parentId: z.string().nullable(),
+    parentTitle: z.string()
+  }),
+  /** scribe.v5: a Notes page or folder she renamed (`title` the old name); Undo names it back. */
+  z.object({
+    kind: z.literal('notebookRename'),
+    id: z.string(),
+    folder: z.boolean(),
+    title: z.string(),
+    after: z.string()
+  }),
+  /**
+   * scribe.v5: a Notes page or folder (with the `pages` inside it) she asks to delete. It waits for
+   * the author's Delete; then its Undo brings it back (`notebook:restore`).
+   */
+  z.object({
+    kind: z.literal('notebookDelete'),
+    id: z.string(),
+    title: z.string(),
+    folder: z.boolean(),
+    pages: z.number().int().min(0)
   })
 ])
 export type AgentEdit = z.infer<typeof AgentEdit>
 export type AgentEditKind = AgentEdit['kind']
+
+/** Ms Scribe's changes to Notes (note edits, and scribe.v5's folders, moves, renames, deletes). */
+export const NOTEBOOK_EDIT_KINDS = [
+  'notebook',
+  'notebookFolder',
+  'notebookMove',
+  'notebookRename',
+  'notebookDelete'
+] as const
+export type NotebookEdit = Extract<AgentEdit, { kind: (typeof NOTEBOOK_EDIT_KINDS)[number] }>
+
+/** A change to Notes: its Undo is stored with it, so it outlives a restart. */
+export function isNotebookEdit(edit: AgentEdit): edit is NotebookEdit {
+  return (NOTEBOOK_EDIT_KINDS as readonly string[]).includes(edit.kind)
+}
+
+/**
+ * The manuscript structure edits Ms Scribe's turn applies at once in Write and Vibe (scribe.v5):
+ * a new chapter or scene, a rename, a move, a split. Merges and deletions ask.
+ */
+export function isTreeEdit(edit: AgentEdit): boolean {
+  return (
+    edit.kind === 'create' ||
+    edit.kind === 'rename' ||
+    edit.kind === 'move' ||
+    edit.kind === 'moveMany' ||
+    edit.kind === 'split'
+  )
+}
 
 /**
  * Where an edit stands. 2026-10-07: `writing` while the app drafts an edit's prose (streaming
@@ -460,7 +544,8 @@ export function isDeletion(edit: AgentEdit): boolean {
     edit.kind === 'clear' ||
     edit.kind === 'sheetMerge' ||
     edit.kind === 'notesClear' ||
-    edit.kind === 'undoTurn'
+    edit.kind === 'undoTurn' ||
+    edit.kind === 'notebookDelete'
   )
 }
 
@@ -530,8 +615,12 @@ export function describeEdit(edit: AgentEdit): string {
       return `Added to the notes of ${edit.title}`
     case 'sheet':
       return `Changed ${edit.name}: ${edit.label}`
-    case 'create':
-      return `Created the ${edit.level} “${edit.title}” in ${edit.parentTitle}`
+    case 'create': {
+      const moved = edit.moveIn.length
+      const into =
+        moved === 0 ? '' : `, with ${moved === 1 ? 'one item' : `${moved} items`} moved in`
+      return `Created the ${edit.level} “${edit.title}” in ${edit.parentTitle}${into}`
+    }
     case 'rename':
       return `Renamed ${edit.title} to “${edit.after}”`
     case 'move':
@@ -601,6 +690,21 @@ export function describeEdit(edit: AgentEdit): string {
         : edit.section === null
           ? `Edited the note “${edit.title}”`
           : `Edited “${edit.section}” in the note “${edit.title}”`
+    case 'notebookFolder':
+      return edit.parent === ''
+        ? `New folder: ${edit.title}`
+        : `New folder: ${edit.title} in ${edit.parent}`
+    case 'notebookMove':
+      return edit.items.length === 1
+        ? `Moved ${edit.items[0]?.title ?? ''} into ${edit.parentTitle}`
+        : `Moved ${edit.items.length} notes into ${edit.parentTitle}`
+    case 'notebookRename':
+      return `Renamed the ${edit.folder ? 'folder' : 'note'} ${edit.title} to “${edit.after}”`
+    case 'notebookDelete':
+      if (!edit.folder) return `Delete the note “${edit.title}”`
+      return edit.pages === 0
+        ? `Delete the folder “${edit.title}”`
+        : `Delete the folder “${edit.title}” and the ${edit.pages === 1 ? 'page' : `${edit.pages} pages`} in it`
   }
 }
 

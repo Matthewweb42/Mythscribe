@@ -191,7 +191,7 @@ describe('Ms Scribe’s v1 tools (notes redesign phase 1)', () => {
     const r = await run()
     expect(r.pages).toEqual([])
     expect(runScribeTool(r, 'list_notes', {}).result).toBe(
-      'There are no note pages yet.\nTemplates (page shapes, not story notes; open_note by title): Ship'
+      'There are no note pages yet.\nFolders: Ships\nTemplates (page shapes, not story notes; open_note by title): Ship'
     )
     expect(runScribeTool(r, 'open_note', { id: 'ship' }).result).toBe(
       'Template Ship (a page shape, not story notes):\nCaptain:\nCrew:'

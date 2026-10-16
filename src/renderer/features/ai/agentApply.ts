@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/core'
-import { describeEdit, type AgentEdit } from '@shared/agent'
+import { describeEdit, type AgentEdit, type NotebookEdit } from '@shared/agent'
 import { clearSelectionOf } from '@shared/bibleClear'
 import { NO_UNDO_REASON, changeLabel, type RecordedChange } from '@shared/changes'
 import type { EntityFieldId, EntityFields } from '@shared/entities'
@@ -39,6 +39,7 @@ import { useTagStore } from '@renderer/features/tags/tagStore'
 import { useFactStore } from '@renderer/features/entities/factStore'
 import { useFocusStore } from '@renderer/features/focus/focusStore'
 import { useLibraryStore } from '@renderer/features/library/libraryStore'
+import { useNotebookPageStore } from '@renderer/features/notebook/notebookPageStore'
 import { pageKey, PAGE_WRITE_TRIES, writeBehindPage } from '@renderer/features/research/pageStore'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
@@ -128,7 +129,19 @@ export async function applyAgentEdit(
         .createIn(edit.level, edit.parentId, edit.afterId, edit.title)
       if (node === null) throw new AgentEditError('The project closed')
       if (edit.text !== '') await writeDocument(node.id, proseDocument(edit.text, proposalId))
-      return () => useTreeStore.getState().remove(node.id)
+      if (edit.moveIn.length === 0) return () => useTreeStore.getState().remove(node.id)
+      // scribe.v5: a new chapter with these scenes; a failure part-way undoes it all, then reports.
+      let moveBack: () => Promise<void> = () => Promise.resolve()
+      try {
+        moveBack = await moveToEnd(edit.moveIn, node.id)
+      } catch (err) {
+        await useTreeStore.getState().remove(node.id)
+        throw err
+      }
+      return async () => {
+        await moveBack()
+        await useTreeStore.getState().remove(node.id)
+      }
     }
     case 'rename': {
       await useTreeStore.getState().rename(edit.nodeId, edit.after)
@@ -268,36 +281,9 @@ export async function applyAgentEdit(
         if (made !== undefined) await useTagStore.getState().remove(tagId)
       })
     }
-    case 'moveMany': {
+    case 'moveMany':
       // F-5.25: each item to the end of the folder in turn; the Undo moves them back newest first.
-      // A failure part-way moves back what it moved, then reports.
-      const back: { nodeId: string; parentId: string; previous: string | null }[] = []
-      const moveBack = async (): Promise<void> => {
-        for (const step of [...back].reverse()) {
-          await useTreeStore.getState().move(step.nodeId, step.parentId, step.previous)
-        }
-      }
-      try {
-        for (const node of edit.nodes) {
-          const tree = useTreeStore.getState()
-          const parentId = tree.byId[node.nodeId]?.parentId ?? null
-          if (parentId === null) {
-            throw new AgentEditError(`${node.title} is no longer in the project`)
-          }
-          const siblings = tree.childrenOf[parentId] ?? []
-          const index = siblings.indexOf(node.nodeId)
-          const previous = index > 0 ? (siblings[index - 1] ?? null) : null
-          const last =
-            (tree.childrenOf[edit.parentId] ?? []).filter((id) => id !== node.nodeId).at(-1) ?? null
-          await tree.move(node.nodeId, edit.parentId, last)
-          back.push({ nodeId: node.nodeId, parentId, previous })
-        }
-      } catch (err) {
-        await moveBack()
-        throw err
-      }
-      return moveBack
-    }
+      return moveToEnd(edit.nodes, edit.parentId)
     case 'tagRename':
       return applyOrganiseAction(
         {
@@ -408,23 +394,92 @@ export async function applyAgentEdit(
     case 'notebook':
       // Ms Scribe's note edits land in main as she writes them; the chat only undoes them.
       throw new AgentEditError('This note edit is already in your notes')
+    case 'notebookFolder':
+    case 'notebookMove':
+    case 'notebookRename':
+      // scribe.v5: made in main as she works; the chat only undoes them.
+      throw new AgentEditError('This change is already in your notes')
+    case 'notebookDelete': {
+      // scribe.v5: the author pressed Delete. The open page's last typing is saved first, so the
+      // Undo brings it back whole; `notebook:changed` closes it if it went.
+      await useNotebookPageStore.getState().flush()
+      await ipc().invoke('notebook:delete', { id: edit.id })
+      return () => undoNotebookEdit(edit)
+    }
   }
 }
 
 /**
- * The Undo of one of Ms Scribe's note edits (notes redesign phase 1): an edited page goes back to
- * the version kept before her write (`notebook:restoreVersion`); a page she created is deleted.
- * Both are stored with the turn, so the Undo still works after a restart.
+ * Moves each node to the end of `parentId` in turn and answers the Undo, which moves them back
+ * newest first (F-5.25's bulk move; scribe.v5's new chapter with its scenes). A failure part-way
+ * moves back what it moved, then reports.
  */
-export async function undoNotebookEdit(
-  edit: Extract<AgentEdit, { kind: 'notebook' }>
-): Promise<void> {
-  if (edit.created) {
-    await ipc().invoke('notebook:delete', { id: edit.pageId })
-    return
+async function moveToEnd(
+  nodes: readonly { nodeId: string; title: string }[],
+  parentId: string
+): Promise<() => Promise<void>> {
+  const back: { nodeId: string; parentId: string; previous: string | null }[] = []
+  const moveBack = async (): Promise<void> => {
+    for (const step of [...back].reverse()) {
+      await useTreeStore.getState().move(step.nodeId, step.parentId, step.previous)
+    }
   }
-  if (edit.versionId === null) throw new AgentEditError('That edit kept no earlier version')
-  await ipc().invoke('notebook:restoreVersion', { versionId: edit.versionId })
+  try {
+    for (const node of nodes) {
+      const tree = useTreeStore.getState()
+      const from = tree.byId[node.nodeId]?.parentId ?? null
+      if (from === null) throw new AgentEditError(`${node.title} is no longer in the project`)
+      const siblings = tree.childrenOf[from] ?? []
+      const index = siblings.indexOf(node.nodeId)
+      const previous = index > 0 ? (siblings[index - 1] ?? null) : null
+      const last =
+        (tree.childrenOf[parentId] ?? []).filter((id) => id !== node.nodeId).at(-1) ?? null
+      await tree.move(node.nodeId, parentId, last)
+      back.push({ nodeId: node.nodeId, parentId: from, previous })
+    }
+  } catch (err) {
+    await moveBack()
+    throw err
+  }
+  return moveBack
+}
+
+/**
+ * The Undo of one of Ms Scribe's changes to Notes, stored with the turn so it still works after a
+ * restart. A note edit (notes redesign phase 1): an edited page goes back to the version kept
+ * before her write (`notebook:restoreVersion`); a page she created is deleted. scribe.v5: a folder
+ * she made is deleted; moved items go back where they were, newest first; a renamed one takes its
+ * old name; a deletion the author confirmed is restored (`notebook:restore`). Main pushes
+ * `notebook:changed` after each, which refreshes the tree.
+ */
+export async function undoNotebookEdit(edit: NotebookEdit): Promise<void> {
+  switch (edit.kind) {
+    case 'notebook':
+      if (edit.created) {
+        await ipc().invoke('notebook:delete', { id: edit.pageId })
+        return
+      }
+      if (edit.versionId === null) throw new AgentEditError('That edit kept no earlier version')
+      await ipc().invoke('notebook:restoreVersion', { versionId: edit.versionId })
+      return
+    case 'notebookFolder':
+      await ipc().invoke('notebook:delete', { id: edit.folderId })
+      return
+    case 'notebookMove':
+      for (const item of [...edit.items].reverse()) {
+        await ipc().invoke('notebook:move', {
+          id: item.id,
+          parentId: item.fromParentId,
+          position: item.fromPosition
+        })
+      }
+      return
+    case 'notebookRename':
+      await ipc().invoke('notebook:update', { id: edit.id, title: edit.title })
+      return
+    case 'notebookDelete':
+      await ipc().invoke('notebook:restore', { id: edit.id })
+  }
 }
 
 /** What a sheet line whose place the author has not picked says when it is applied. */

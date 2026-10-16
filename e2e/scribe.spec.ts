@@ -10,7 +10,7 @@ import {
   type Page
 } from '@playwright/test'
 import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
-import type { NotebookPage, NotebookVersion } from '../src/shared/notebook'
+import type { NotebookItem, NotebookPage, NotebookVersion } from '../src/shared/notebook'
 import { clickIntoEditor } from './support'
 
 /**
@@ -33,6 +33,11 @@ import { clickIntoEditor } from './support'
  * notes fixes (2026-10-15), inline in the scene as a tracked change; Accept in the text puts it in
  * the scene and the card shows it accepted. Still in Vibe, Rewrite in my voice on a selection sends
  * `rewrite.v6`: the bolder line closes its user turn.
+ *
+ * Then (2026-10-16, `scribe.v5`, notes structure part C) in Write: "put Tash in a Characters
+ * folder" makes the folder and moves the page at once (two lines, each with Undo, and Undo all,
+ * which puts Tash back at the top and removes the folder); a delete shows the card and removes
+ * nothing until Delete, after which the page is gone.
  */
 
 let app: ElectronApplication
@@ -52,6 +57,10 @@ const SEA_QUESTION = 'Where does Tash first see the sea?'
 const VIBE_QUESTION = 'What can I do to make this scene better?'
 const VIBE_REPLACEMENT = 'Below the ridge the sea lay still and grey as a blade'
 const VIBE_ANSWER = 'One change: the sea line, sharper and colder.'
+const MOVE_MESSAGE = 'Put Tash in a Characters folder.'
+const MOVE_ANSWER = 'Tash is in Characters now.'
+const DELETE_MESSAGE = 'Delete my Old ideas page.'
+const DELETE_ANSWER = 'It waits for your Delete.'
 /** `rewrite.v1`'s opening (every rewrite version's system turn starts with it). */
 const REWRITE_SENTINEL = 'You are the rewrite feature inside a novel-writing app.'
 /** The start of `rewrite.v6`'s Vibe line (notes fixes, 2026-10-15), last in the user turn. */
@@ -85,6 +94,16 @@ function scribeAnswer(messages: { role: string; content: string }[]): string {
     })
   }
   if (asked === WRITE_MESSAGE) return JSON.stringify({ answer: WRITE_ANSWER, sources: ['p1'] })
+  if (asked === MOVE_MESSAGE) {
+    return looked
+      ? JSON.stringify({ answer: MOVE_ANSWER, sources: [] })
+      : JSON.stringify({ tool: 'move_note', args: { ids: ['Tash'], to: 'Characters' } })
+  }
+  if (asked === DELETE_MESSAGE) {
+    return looked
+      ? JSON.stringify({ answer: DELETE_ANSWER, sources: [] })
+      : JSON.stringify({ tool: 'delete_note', args: { id: 'Old ideas' } })
+  }
   if (asked === VIBE_QUESTION) {
     const ref =
       /### (n\d+) Blades of Alandor › Tash\n/.exec(messages[0]?.content ?? '')?.[1] ?? 'n0'
@@ -467,4 +486,76 @@ test('Rewrite in Vibe sends the bolder version, its line last in the user turn (
   expect(user.slice(user.lastIndexOf('\n\n') + 2).startsWith(REWRITE_VIBE_LINE)).toBe(true)
   await panel.getByTestId('rewrite-reject').click()
   await expect(panel).toHaveCount(0)
+})
+
+test('in Write she makes a folder and moves a page at once with Undo, and a delete waits for Delete (scribe.v5)', async () => {
+  // Continues in the same project, Ms Scribe's panel open. Two loose pages at the top of Notes.
+  const tash = await invoke<NotebookPage>('notebook:create', {
+    parentId: null,
+    kind: 'page',
+    title: 'Tash',
+    content: paragraphs('Climbs.')
+  })
+  const old = await invoke<NotebookPage>('notebook:create', {
+    parentId: null,
+    kind: 'page',
+    title: 'Old ideas',
+    content: paragraphs('A storm.')
+  })
+  const assistant = page.getByTestId('assistant-panel')
+  const messageBox = assistant.getByRole('textbox', { name: 'Message' })
+  const turns = assistant.locator('[data-testid="chat-turn"]')
+  await assistant.getByRole('radio', { name: 'Write', exact: true }).click()
+  await expect(assistant.getByRole('radio', { name: 'Write', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  const notebook = async (): Promise<NotebookItem[]> =>
+    invoke<NotebookItem[]>('notebook:list', undefined)
+
+  // "Put Tash in a Characters folder": the folder is made and the page moved, at once.
+  let before = await turns.count()
+  await messageBox.fill(MOVE_MESSAGE)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(before + 2)
+  const moved = turns.nth(before + 1)
+  await expect(moved).toContainText(MOVE_ANSWER, { timeout: 15_000 })
+  const system =
+    bodies.filter((b) => b.messages[0]?.content.startsWith(SCRIBE_SENTINEL) === true).at(-1)
+      ?.messages[0]?.content ?? ''
+  expect(system).toContain('move_note {"ids"')
+  const lines = moved.getByTestId('agent-change')
+  await expect(lines).toHaveCount(2)
+  await expect(lines.nth(0)).toContainText('New folder: Characters')
+  await expect(lines.nth(1)).toContainText('Moved Tash into Characters')
+  await expect(lines.nth(1)).toHaveAttribute('data-status', 'applied')
+  const characters = (await notebook()).find((item) => item.title === 'Characters')
+  expect(characters?.kind).toBe('folder')
+  expect((await notebook()).find((item) => item.id === tash.id)?.parentId).toBe(characters?.id)
+  // Undo all: Tash goes back to the top and the folder goes.
+  await moved.getByTestId('agent-undo-all').click()
+  await expect(lines.nth(0)).toHaveAttribute('data-status', 'undone')
+  await expect(lines.nth(1)).toHaveAttribute('data-status', 'undone')
+  await expect
+    .poll(async () => (await notebook()).find((item) => item.id === tash.id)?.parentId)
+    .toBeNull()
+  await expect
+    .poll(async () => (await notebook()).some((item) => item.title === 'Characters'))
+    .toBe(false)
+
+  // A delete asks: the card waits and nothing goes until Delete.
+  before = await turns.count()
+  await messageBox.fill(DELETE_MESSAGE)
+  await messageBox.press('Enter')
+  await expect(turns).toHaveCount(before + 2)
+  const deleting = turns.nth(before + 1)
+  await expect(deleting).toContainText(DELETE_ANSWER, { timeout: 15_000 })
+  const card = deleting.getByTestId('agent-change')
+  await expect(card).toHaveAttribute('data-status', 'pending')
+  await expect(card).toContainText('Delete the note “Old ideas”')
+  await expect(card.getByTestId('agent-change-skip')).toHaveText('Keep')
+  expect((await notebook()).some((item) => item.id === old.id)).toBe(true)
+  await card.getByTestId('agent-change-apply').click()
+  await expect(card).toHaveAttribute('data-status', 'applied')
+  await expect.poll(async () => (await notebook()).some((item) => item.id === old.id)).toBe(false)
 })

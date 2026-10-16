@@ -1,6 +1,8 @@
 import { docToText } from '@shared/docText'
 import { NOTEBOOK_TITLE_MAX, notebookDocFromText, notebookPlain } from '@shared/notebook'
 import {
+  inTemplates,
+  isTemplatesFolder,
   layoutOnTemplate,
   myTemplatePages,
   templateDoc,
@@ -13,6 +15,7 @@ import {
   SCRIBE_NOTE_TEXT_MAX,
   SCRIBE_READ_CHARS,
   SCRIBE_SEARCH_RESULTS,
+  SCRIBE_STRUCTURE_TOOLS,
   SCRIBE_TOOLS,
   type ScribeAccess,
   type ScribeTool
@@ -33,6 +36,8 @@ import { offerEdit, type AgentProposal } from '../ai/agent'
 import { nodeByRef, type AgentProject, type ToolOutcome } from '../ai/agentTools'
 import { headTruncate } from '../ai/context/chatContext'
 import type { ScribePage, ScribeScene } from './context'
+import { folderPath } from './source'
+import { ensureFolder, STRUCTURE_TOOLS } from './structure'
 
 /**
  * Ms Scribe's tools in a story memory v1 project (notes redesign phase 1, `scribe.v1`). The read
@@ -41,6 +46,7 @@ import type { ScribePage, ScribeScene } from './context'
  * (Ms Scribe's write keeps the page as it was, which the chat's Undo restores), and
  * `propose_prose_edit` only offers a change to the book, resolved and voice-checked as the chat
  * agent's are, for the author to accept. A tool never throws for the model's mistakes.
+ * `scribe.v5` (2026-10-16) adds the structure tools (`structure.ts`) for Write and Vibe.
  */
 
 /** One run's state: what she may do, what she wrote, what she read. */
@@ -53,7 +59,10 @@ export interface ScribeRun {
   /** Prose suggestions this message may make (`scribeProseMax`: three in Vibe). */
   proseMax: number
   profile: VoiceProfile | null
-  /** Note edits applied (already in the notebook) and prose suggestions offered, in order. */
+  /**
+   * Note edits applied (already in the notebook), prose suggestions offered, and structure
+   * changes (Notes ones applied, the manuscript's and every deletion waiting), in order.
+   */
   changes: { proposal: AgentProposal; applied: boolean }[]
   /** Scenes and pages she opened or edited (their ids), for the answer's sources. */
   used: Set<string>
@@ -65,6 +74,11 @@ const str = (value: unknown): string => (typeof value === 'string' ? value : '')
 
 const isTool = (name: unknown): name is ScribeTool =>
   typeof name === 'string' && (SCRIBE_TOOLS as readonly string[]).includes(name)
+
+type StructureTool = (typeof SCRIBE_STRUCTURE_TOOLS)[number]
+
+const isStructureTool = (name: ScribeTool): name is StructureTool =>
+  (SCRIBE_STRUCTURE_TOOLS as readonly string[]).includes(name)
 
 const flat = (text: string): string => text.replace(/\s+/g, ' ').trim()
 
@@ -210,15 +224,36 @@ function templatesLine(run: ScribeRun): string | null {
     : `Templates (page shapes, not story notes; open_note by title): ${titles.join(', ')}`
 }
 
+/**
+ * Every Notes folder by its path (scribe.v5's structure tools name them so), the Templates folder
+ * and what is in it left out; null for none.
+ */
+function foldersLine(run: ScribeRun): string | null {
+  const items = listNotebook(run.db)
+  const paths = items
+    .filter(
+      (item) =>
+        item.kind === 'folder' &&
+        !isTemplatesFolder(item.title) &&
+        !inTemplates(items, item.parentId)
+    )
+    .map((item) => folderPath(items, item.id))
+    .sort((a, b) => a.localeCompare(b))
+  return paths.length === 0 ? null : `Folders: ${paths.join(', ')}`
+}
+
 function listNotes(run: ScribeRun): ToolOutcome {
   const step: AgentStep = { tool: 'list_notes', label: 'Listing the notes…' }
   const templates = templatesLine(run)
+  const folders = foldersLine(run)
   if (run.pages.length === 0) {
     return {
       step,
-      result: ['There are no note pages yet.', ...(templates === null ? [] : [templates])].join(
-        '\n'
-      )
+      result: [
+        'There are no note pages yet.',
+        ...(folders === null ? [] : [folders]),
+        ...(templates === null ? [] : [templates])
+      ].join('\n')
     }
   }
   const lines = run.pages.map((page) => {
@@ -231,6 +266,7 @@ function listNotes(run: ScribeRun): ToolOutcome {
     const words = page.text.split(/\s+/).filter(Boolean).length
     return `${page.ref} ${page.title} (${kind}${page.folder === '' ? '' : `, ${page.folder}`}, ${words} words)`
   })
+  if (folders !== null) lines.push(folders)
   if (templates !== null) lines.push(templates)
   return { step, result: lines.join('\n') }
 }
@@ -279,8 +315,12 @@ function openNote(run: ScribeRun, ref: unknown, fromArg: unknown): ToolOutcome {
   return { step, result: `${page.ref} ${page.title}:\n${text.slice(from, to) || '(empty)'}${more}` }
 }
 
+/** Note writes and prose suggestions left this message; structure changes have their own cap. */
 function writesLeft(run: ScribeRun): boolean {
-  return run.changes.length < SCRIBE_MAX_WRITES
+  const writes = run.changes.filter(
+    (change) => change.proposal.edit.kind === 'notebook' || change.proposal.edit.kind === 'text'
+  )
+  return writes.length < SCRIBE_MAX_WRITES
 }
 
 function notebookEdit(
@@ -370,14 +410,19 @@ function createNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome 
   if (!writesLeft(run)) return { step, result: 'No more writes in this message.' }
   const text = str(args.text).slice(0, SCRIBE_NOTE_TEXT_MAX)
   const folderName = flat(str(args.folder)).toLowerCase()
-  const items = listNotebook(run.db)
-  const folder =
+  let items = listNotebook(run.db)
+  let folder =
     folderName === ''
       ? undefined
       : items.find(
           (item) => item.kind === 'folder' && item.title.trim().toLowerCase() === folderName
         )
   try {
+    // scribe.v5: with the structure tools, a folder that does not exist yet is made (once).
+    if (folder === undefined && folderName !== '' && run.access.structure === true) {
+      folder = ensureFolder(run, flat(str(args.folder))) ?? undefined
+      items = listNotebook(run.db)
+    }
     // Note templates (phase 6): a page in a folder with a template follows its sections.
     const shape = folder === undefined ? null : templateForFolder(items, folder.id)
     const laid =
@@ -434,7 +479,7 @@ function createNote(run: ScribeRun, args: Record<string, unknown>): ToolOutcome 
 function proposeProse(run: ScribeRun, args: Record<string, unknown>): ToolOutcome {
   const step: AgentStep = { tool: 'propose_prose_edit', label: 'Suggesting a change…' }
   if (!writesLeft(run)) return { step, result: 'No more suggestions in this message.' }
-  const offeredSoFar = run.changes.filter((change) => change.proposal.edit.kind !== 'notebook')
+  const offeredSoFar = run.changes.filter((change) => change.proposal.edit.kind === 'text')
   if (offeredSoFar.length >= run.proseMax) {
     return {
       step,
@@ -478,6 +523,11 @@ export function runScribeTool(
     step: { tool: name, label: 'Not in this mode' },
     result: why
   })
+  if (isStructureTool(name)) {
+    return run.access.structure === true
+      ? STRUCTURE_TOOLS[name](run, args)
+      : refused('Brainstorm changes nothing; answer instead.')
+  }
   switch (name) {
     case 'search_book':
       return searchBook(run, str(args.query))

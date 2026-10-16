@@ -94,6 +94,8 @@ let scribes: PendingScribe[]
 /** The note versions and pages Undo asked main to restore and delete (notes redesign phase 1). */
 let restoredVersions: string[]
 let deletedPages: string[]
+/** scribe.v5: the Notes moves an Undo asked main for. */
+let movedNotes: Input<'notebook:move'>[]
 let settles: Input<'proposal:settle'>[]
 /** The request ids `ai:cancel` was asked to stop. */
 let cancels: string[]
@@ -154,6 +156,10 @@ function deferredClient(stored: Conversations): IpcClient {
       }
       if (channel === 'notebook:delete') {
         deletedPages.push((input as Input<'notebook:delete'>).id)
+        return null as Output<C>
+      }
+      if (channel === 'notebook:move') {
+        movedNotes.push(input as Input<'notebook:move'>)
         return null as Output<C>
       }
       if (channel === 'ai:whatNext') {
@@ -438,6 +444,7 @@ beforeEach(() => {
   scribes = []
   restoredVersions = []
   deletedPages = []
+  movedNotes = []
   whatNexts = []
   settles = []
   cancels = []
@@ -991,6 +998,46 @@ describe('useAssistantStore Ms Scribe changes (notes redesign phase 1)', () => {
     await store().undoChange(turn?.id ?? '', created?.id ?? '')
     expect(restoredVersions).toEqual(['v-1'])
     expect(deletedPages).toEqual(['pg-new'])
+    expect(
+      active()
+        .messages.at(-1)
+        ?.agent?.changes.map((c) => c.status)
+    ).toEqual(['undone', 'undone', 'pending'])
+  })
+
+  it('applies her chapter and scene changes at once with Undo, leaves a deletion waiting, and Undo all takes back the rest (scribe.v5)', async () => {
+    useTreeStore.setState(buildIndex(treeFixture))
+    inMode('write')
+    await store().load()
+    const request = await sendAndCapture('Move Tash into Characters and rename the first scene.')
+    const MOVE = {
+      kind: 'notebookMove' as const,
+      items: [{ id: 'pg-tash', title: 'Tash', folder: false, fromParentId: null, fromPosition: 2 }],
+      parentId: 'f-chars',
+      parentTitle: 'Characters'
+    }
+    const RENAME = { kind: 'rename', nodeId: 'sc-1', title: 'Scene 1', after: 'The ridge' } as const
+    const DELETE = { kind: 'delete', target: 'node', id: 'sc-1', name: 'Scene 1' } as const
+    request.resolve(
+      scribeOk(request.input.requestId, 'Done.', {
+        changes: [
+          { edit: MOVE, violation: null, applied: true, trackedId: null },
+          { edit: RENAME, violation: null, applied: false, trackedId: null },
+          { edit: DELETE, violation: null, applied: false, trackedId: null }
+        ]
+      })
+    )
+    await settle()
+    const turn = active().messages.at(-1)
+    expect(turn?.agent?.changes.map((c) => c.status)).toEqual(['applied', 'applied', 'pending'])
+    expect(renames).toEqual([{ id: 'sc-1', title: 'The ridge' }])
+    expect(deletedPages).toEqual([])
+    expect(settles).toEqual([])
+
+    await store().undoAll(turn?.id ?? '')
+    // Newest first: the rename back, then Tash back where she was.
+    expect(renames.at(-1)).toEqual({ id: 'sc-1', title: 'Scene 1' })
+    expect(movedNotes).toEqual([{ id: 'pg-tash', parentId: null, position: 2 }])
     expect(
       active()
         .messages.at(-1)
