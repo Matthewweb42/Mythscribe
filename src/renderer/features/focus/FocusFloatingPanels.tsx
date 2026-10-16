@@ -8,6 +8,7 @@ import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { FloatingWindow } from './FloatingWindow'
 import { useFocusStore } from './focusStore'
 import { useAssistantName } from '@renderer/features/shell/viewStore'
+import { useIsArchived } from '@renderer/features/shell/archived'
 
 /**
  * The floating Notes, References, and AI assistant windows of focus mode (F-6.6; References
@@ -24,6 +25,8 @@ export function FocusFloatingPanels(): React.JSX.Element {
   const togglePanel = useFocusStore((s) => s.togglePanel)
   const assistantName = useAssistantName()
   const selectedId = useTreeStore((s) => s.selectedId)
+  // Notes redesign (fresh start): the quick reference goes with the old story bible.
+  const bibleArchived = useIsArchived('storyBible')
   return (
     <>
       {panels.notes ? (
@@ -33,7 +36,7 @@ export function FocusFloatingPanels(): React.JSX.Element {
           </div>
         </FloatingWindow>
       ) : null}
-      {panels.references ? (
+      {panels.references && !bibleArchived ? (
         <FloatingWindow
           name="references"
           title="References"

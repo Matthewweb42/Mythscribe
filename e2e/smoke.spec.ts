@@ -1497,8 +1497,37 @@ test('create, close, reopen a project on disk', async () => {
   await expect(firstSettings.getByTestId('ai-source-cloud')).toBeDisabled()
   await expect(firstSettings.getByTestId('ai-source-cloud-coming-soon')).toHaveText('Coming soon')
   await expect(firstSettings.getByTestId('ai-model-rate-fast')).toHaveCount(0)
+  // Notes redesign: the features this smoke covers below (writing presets, the voice profile,
+  // author rules, editor's notes, proofread, and since the fresh start the old story bible:
+  // categories, tags, Library, To do, Changes…) are archived by default; Settings › Archived
+  // features brings each one back, so the steps below still cover them. A new project starts
+  // with the old story bible archived: only Manuscript, Notes and the kept tools are listed.
+  await firstSettings.getByRole('tab', { name: 'Archived features' }).click()
+  const archiveSwitches = firstSettings
+    .getByRole('list', { name: 'Archived features' })
+    .getByRole('switch')
+  await expect(archiveSwitches.first()).toBeEnabled()
+  await expect(firstSettings.getByRole('switch', { name: 'Archive Old story bible' })).toBeChecked()
+  await firstSettings.getByRole('button', { name: 'Close settings' }).click()
+  await page.getByRole('button', { name: /^Section: / }).click()
+  await expect(sectionOptions()).toHaveText([
+    /^Manuscript\d*$/,
+    /^Notes\d*$/,
+    /^Outline\d*$/,
+    /^Show unused sections \(\d+\)$/
+  ])
+  await page.keyboard.press('Escape')
+  const headerTags = page.getByRole('banner').getByRole('button', { name: 'Tags', exact: true })
+  await expect(headerTags).toHaveCount(0)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await firstSettings.getByRole('tab', { name: 'Archived features' }).click()
+  for (let i = 0; i < (await archiveSwitches.count()); i++) {
+    await archiveSwitches.nth(i).uncheck()
+    await expect(archiveSwitches.nth(i)).not.toBeChecked()
+  }
   await firstSettings.getByRole('button', { name: 'Close settings' }).click()
   await expect(firstSettings).toHaveCount(0)
+  await expect(headerTags).toBeVisible()
   // F-7.13: the assistant is Ms Scribe until renamed in Settings › AI; the header toggle follows
   // the name, and a blank name goes back to Ms Scribe.
   const assistantToggle = (name: string): Locator =>
@@ -2009,19 +2038,7 @@ test('create, close, reopen a project on disk', async () => {
   await useAi.uncheck()
   await expect(ghostTextToggle).toBeDisabled()
   await expect.poll(async () => (await aiSettings()).dial).toBe(0)
-  // Notes redesign phase 1: the features this smoke covers below (writing presets, the voice
-  // profile, author rules, editor's notes, proofread…) are archived by default; Settings ›
-  // Archived features brings each one back, so the steps below still cover them.
-  await settingsDialog.getByRole('tab', { name: 'Archived features' }).click()
-  const archiveSwitches = settingsDialog
-    .getByRole('list', { name: 'Archived features' })
-    .getByRole('switch')
-  await expect(archiveSwitches.first()).toBeEnabled()
-  for (let i = 0; i < (await archiveSwitches.count()); i++) {
-    await archiveSwitches.nth(i).uncheck()
-    await expect(archiveSwitches.nth(i)).not.toBeChecked()
-  }
-  await settingsDialog.getByRole('tab', { name: 'AI' }).click()
+  // (Every archived feature was switched back on right after the project was created, above.)
   // F-5.2: the writing presets start on General; Suspense/Mystery lands in the settings table
   // and survives closing the dialog, with its parameters shown read-only; Custom exposes the
   // fields and a new instruction persists; back to General so nothing below depends on it.

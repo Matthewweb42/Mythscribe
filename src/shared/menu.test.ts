@@ -59,6 +59,36 @@ describe('menu definition (F-7.1)', () => {
     expect(ids('v2', true)).not.toContain('openTags')
   })
 
+  it('leaves the old story bible’s items out while it is archived, and no doubled separator (fresh start)', () => {
+    const archived = menuFor({ devTools: false, storyMemory: 'v1', storyBibleArchived: true })
+    expect(menuFor({ devTools: false, storyMemory: 'v1', storyBibleArchived: true })).toBe(archived)
+    const ids = menuItems(archived).map((item) => item.id)
+    for (const id of [
+      'insertCharacter',
+      'insertSetting',
+      'insertWorldItem',
+      'toggleReferences',
+      'toggleTags',
+      'openTags'
+    ]) {
+      expect(ids).not.toContain(id)
+    }
+    expect(ids).toEqual(expect.arrayContaining(['insertScene', 'insertSceneBreak', 'openGoals']))
+    for (const section of archived) {
+      section.entries.forEach((entry, index) => {
+        if (!isSeparator(entry)) return
+        expect(index).toBeGreaterThan(0)
+        expect(index).toBeLessThan(section.entries.length - 1)
+        const before = section.entries[index - 1]
+        expect(before !== undefined && isSeparator(before)).toBe(false)
+      })
+    }
+    // Not archived: the menu as it was.
+    expect(menuFor({ devTools: false, storyMemory: 'v1', storyBibleArchived: false })).toBe(
+      menuFor({ devTools: false, storyMemory: 'v1' })
+    )
+  })
+
   it('adds Help › Developer tools and Chromium DevTools only while developer tools are on', () => {
     // Built once per story memory, so a redraw without developer tools reuses the same menu.
     expect(menuFor({ devTools: false, storyMemory: 'v1' })).toBe(

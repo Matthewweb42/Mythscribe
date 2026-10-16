@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { SHEET_SYNC_DUE_KEY, SHEET_SYNC_DUE_MAX } from '@shared/sheetSync'
+import { isStoryBibleArchived } from '@shared/archivedFeatures'
 import {
   AI_SETTINGS_KEY,
   AiSettings,
@@ -102,6 +103,18 @@ export function getEditorSettings(db: TreeDb, format: NovelFormat): EditorSettin
   }
   const parsed = EditorSettings.safeParse(json)
   return parsed.success ? parsed.data : defaultEditorSettings(format)
+}
+
+/**
+ * Whether the old story bible is archived in this project (notes redesign, fresh start; Settings ›
+ * Archived features): read from the same editor-settings row the renderer writes, so main and the
+ * window never disagree. A v2 project never archives it (`isStoryBibleArchived`). While archived,
+ * main reads none of it and its background jobs write nothing.
+ */
+export function storyBibleArchivedIn(db: TreeDb, memory: StoryMemoryVersion): boolean {
+  if (memory !== 'v1') return false
+  // The format only shapes the defaults' formatting, never `unarchived`.
+  return isStoryBibleArchived(getEditorSettings(db, 'novel').unarchived, memory)
 }
 
 /** Replaces the project's editor formatting (upsert on the settings key) and returns what was stored. */

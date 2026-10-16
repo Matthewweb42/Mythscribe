@@ -69,6 +69,7 @@ import { useContinuityStore } from './continuityStore'
 import { InstantCard } from './InstantCard'
 import { RequestCost } from './RequestCost'
 import { ScribeAnswer } from './ScribeAnswer'
+import { useIsArchived } from '@renderer/features/shell/archived'
 
 const ICON_BUTTON =
   'rounded-md p-1 text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted'
@@ -163,7 +164,9 @@ export function AssistantPanel(): React.JSX.Element | null {
  * or the author goes back to the conversation.
  */
 export function AssistantBody(): React.JSX.Element {
-  const continuity = useContinuityStore((s) => s.viewOpen)
+  // Notes redesign (fresh start): the continuity findings go with the old story bible.
+  const bibleArchived = useIsArchived('storyBible')
+  const continuity = useContinuityStore((s) => s.viewOpen) && !bibleArchived
   const sideWork = useShownSideWork()
   if (sideWork !== null) {
     return (
@@ -182,7 +185,7 @@ export function AssistantBody(): React.JSX.Element {
   return (
     <>
       <AiResults />
-      <ContinuityLink />
+      {bibleArchived ? null : <ContinuityLink />}
       {continuity ? (
         <ContinuityView />
       ) : (

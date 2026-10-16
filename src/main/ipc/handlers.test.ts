@@ -91,9 +91,11 @@ import { manuscriptDocuments } from '../voice/profile'
 import { passageHash, replaceAutoExemplars } from '../voice/exemplarStore'
 import { bumpVoiceVersion } from '../voice/versionCache'
 import {
+  getEditorSettings,
   getObservedDismissed,
   getStoryMemory,
   getVoiceAutoState,
+  setEditorSettings,
   setObservedDismissed,
   setStoryMemory,
   setVoiceNotes
@@ -297,6 +299,9 @@ const dialogs: ProjectDialogs = {
   }
 }
 
+/** Whether the harness switches the old story bible back on in every project it opens. */
+let bibleOnAtOpen = true
+
 beforeEach(() => {
   vi.mocked(ipcMain.handle).mockClear()
   resetInflight()
@@ -309,6 +314,18 @@ beforeEach(() => {
   entityFilePath = null
   tagBankPath = null
   manager = new ProjectManager()
+  // Notes redesign (fresh start): a project keeps the old story bible archived unless switched
+  // back on. These tests cover the story bible itself, so every project they open has it on,
+  // written before the handlers' own open runs (this listener is the manager's first); the
+  // fresh start's own tests (`old story bible archived`) archive it again.
+  bibleOnAtOpen = true
+  manager.onChange((info) => {
+    if (info === null || !bibleOnAtOpen) return
+    const db = manager.require().connection.orm
+    const stored = getEditorSettings(db, info.format)
+    if (stored.unarchived !== undefined) return
+    setEditorSettings(db, { ...stored, unarchived: ['storyBible'] })
+  })
   fullScreen = false
   fakeWin = {
     close: vi.fn(),
@@ -1282,6 +1299,11 @@ describe('sceneMeta:get / sceneMeta:set (F-4.5)', () => {
 })
 
 describe('editorSettings:get / editorSettings:set', () => {
+  // The stored settings exactly as seeded: the harness leaves the old story bible archived here.
+  beforeEach(() => {
+    bibleOnAtOpen = false
+  })
+
   it('reports NO_PROJECT for both when nothing is open', async () => {
     await expect(invoke('editorSettings:get', undefined)).rejects.toThrowError(/^NO_PROJECT: /)
     await expect(invoke('editorSettings:set', defaultEditorSettings('novel'))).rejects.toThrowError(
@@ -10818,5 +10840,172 @@ describe('the story-memory switch-over channels (F-16.15, F-16.31 part A)', () =
     await expect(invoke('switchover:trial', undefined)).rejects.toThrow(/^VALIDATION: /)
     // The original is untouched.
     expect((await invoke('project:open', { path: original?.path ?? '' }))?.storyMemory).toBe('v1')
+  })
+})
+
+describe('old story bible archived (notes redesign, fresh start)', () => {
+  const KEY = 'sk-test-secret-1234abcd'
+
+  /** Writes `text` to a file in the temp folder and answers its path. */
+  const file = (name: string, text: string): string => {
+    const at = path.join(tmp, name)
+    fs.writeFileSync(at, text)
+    return at
+  }
+
+  /** Archives the old story bible in the open project, as Settings › Archived features does. */
+  async function archive(): Promise<void> {
+    const stored = await invoke('editorSettings:get', undefined)
+    await invoke('editorSettings:set', { ...stored, unarchived: [] })
+  }
+
+  /** The Docs folders and the titles of the pages in them. */
+  async function docs(): Promise<{ folders: number; pages: string[] }> {
+    const items = await invoke('notebook:list', undefined)
+    const folders = items.filter((item) => item.kind === 'folder' && item.title === 'Docs')
+    const pages = items
+      .filter((item) => folders.some((folder) => folder.id === item.parentId))
+      .map((item) => item.title)
+    return { folders: folders.length, pages }
+  }
+
+  const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+
+  it('starts a new project with it archived and copies nothing while the Library is empty', async () => {
+    bibleOnAtOpen = false
+    const created = await invoke('project:create', {
+      name: 'Fresh',
+      format: 'novel',
+      directory: tmp
+    })
+    expect((await invoke('editorSettings:get', undefined)).unarchived).toBeUndefined()
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    await settle()
+    expect(await invoke('notebook:list', undefined)).toEqual([])
+    // A file the Library gets later (the story bible switched on meanwhile) comes on a later open.
+    await invoke('library:add', { paths: [file('Late.md', 'Added after.')] })
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    await vi.waitFor(async () => expect((await docs()).pages).toEqual(['Late']))
+  })
+
+  it('copies the Library’s files into Notes › Docs once, headings kept, and never makes it again', async () => {
+    // A project from before the fresh start: the story bible in use, two uploads in its Library.
+    const created = await invoke('project:create', {
+      name: 'Docs',
+      format: 'novel',
+      directory: tmp
+    })
+    bibleOnAtOpen = false
+    await invoke('library:add', {
+      paths: [
+        file('Powers.md', '# Powers\n\nShadow walking costs a memory.\n'),
+        file('Places.txt', 'The quay floods at spring tide.')
+      ]
+    })
+    await archive()
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    await vi.waitFor(async () => expect((await docs()).pages).toEqual(['Places', 'Powers']))
+    expect((await docs()).folders).toBe(1)
+    const items = await invoke('notebook:list', undefined)
+    const powers = items.find((item) => item.title === 'Powers')
+    const page = await invoke('notebook:get', { id: powers?.id ?? '' })
+    expect(page.content?.content?.[0]).toMatchObject({
+      type: 'heading',
+      content: [{ type: 'text', text: 'Powers' }]
+    })
+    expect(page.plain).toContain('Shadow walking costs a memory.')
+    expect(
+      vi
+        .mocked(fakeWin.webContents.send)
+        .mock.calls.some(([channel]) => channel === 'notebook:changed')
+    ).toBe(true)
+    // The Library itself is left as it was.
+    expect((await invoke('library:list', undefined)).map((f) => f.name).sort()).toEqual([
+      'Places.txt',
+      'Powers.md'
+    ])
+
+    // Opened again: no second copy. Deleted by the author and opened again: not made again.
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    await settle()
+    expect((await docs()).folders).toBe(1)
+    const folder = (await invoke('notebook:list', undefined)).find((item) => item.title === 'Docs')
+    await invoke('notebook:delete', { id: folder?.id ?? '' })
+    await invoke('project:close', undefined)
+    await invoke('project:open', { path: created?.path ?? '' })
+    await settle()
+    expect(await invoke('notebook:list', undefined)).toEqual([])
+  })
+
+  it('stores the summary but no tags or facts, and asks no consistency check', async () => {
+    bibleOnAtOpen = false
+    await invoke('project:create', { name: 'Quiet', format: 'novel', directory: tmp })
+    const rows = await invoke('tree:list', undefined)
+    const scene = rows.find((r) => r.kind === 'document' && r.hierarchyLevel === 'scene')
+    if (!scene) throw new Error('skeleton not seeded')
+    const quote = 'Mara was twenty-nine that winter'
+    await invoke('document:save', {
+      id: scene.id,
+      content: {
+        type: 'doc',
+        content: [
+          'The ferry landing was empty when Mara reached it. The rope hung slack in the water and the bell had lost its clapper years ago.',
+          `${quote}, and she had stopped counting the crossings.`,
+          'She set the lantern down on the post and waited. She did not turn.'
+        ].map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] }))
+      }
+    })
+    const mara = await invoke('entity:create', {
+      kind: 'character',
+      name: 'Mara',
+      fields: { age: '34' }
+    })
+    await invoke('aiSettings:set', { ...defaultAiSettings(), dial: 1 })
+    await invoke('ai:setKey', { key: KEY })
+    const factsBefore = await invoke('fact:listForEntity', { entityId: mara.id })
+    vi.mocked(fakeWin.webContents.send).mockClear()
+    complete.mockResolvedValueOnce({
+      text: JSON.stringify({
+        summary: 'Mara waits at the ferry landing.',
+        keyPoints: [],
+        characters: ['Mara'],
+        facts: [
+          { entity: 'Mara', kind: 'character', attribute: 'age', value: 'twenty-nine', quote }
+        ],
+        tags: [{ name: 'Ferry', category: 'setting' }]
+      }),
+      model: 'gpt-fake',
+      usage: { inputTokens: 700, outputTokens: 90 }
+    })
+    const summarized = await invoke('ai:summarize', { nodeId: scene.id, requestId: 's-1' })
+    expect(summarized.ok).toBe(true)
+    // One request: the summary. No background consistency check after it.
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(await invoke('fact:listForEntity', { entityId: mara.id })).toEqual(factsBefore)
+    expect(await invoke('documentTag:list', { nodeId: scene.id })).toEqual([])
+    expect(await invoke('continuity:list', undefined)).toEqual([])
+    const sent = vi.mocked(fakeWin.webContents.send).mock.calls.map(([channel]) => channel)
+    expect(sent).not.toContain('fact:changed')
+    expect(sent).not.toContain('continuity:changed')
+  })
+
+  it('takes picked files into Notes through notebook:import, as the wizard does', async () => {
+    bibleOnAtOpen = false
+    await invoke('project:create', { name: 'Wizard', format: 'novel', directory: tmp })
+    const folder = await invoke('notebook:create', {
+      parentId: null,
+      kind: 'folder',
+      title: 'Docs'
+    })
+    const result = await invoke('notebook:import', {
+      parentId: folder.id,
+      paths: [file('World.md', '## Rules\n\nNo one crosses at night.'), file('map.png', 'x')]
+    })
+    expect(result?.items.map((item) => [item.title, item.parentId])).toEqual([['World', folder.id]])
+    expect(result?.skipped.map((skip) => skip.name)).toEqual(['map.png'])
   })
 })

@@ -7,6 +7,11 @@ import { ALL_BUILTIN_CATEGORIES, BUILTIN_CATEGORIES, categoryFromInput } from '@
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import { resetCategoryStore, useCategoryStore } from '@renderer/features/entities/categoryStore'
 import { resetPendingSaves } from '@renderer/features/project/pendingSaves'
+import { defaultEditorSettings } from '@shared/editorSettings'
+import {
+  resetEditorSettingsStore,
+  useEditorSettingsStore
+} from '@renderer/features/editor/settingsStore'
 import { ThreadsTab } from '@renderer/features/threads/ThreadsTab'
 import { setIpcClient, type IpcClient } from '@renderer/lib/ipc'
 import { resetLayoutStore, useLayoutStore } from './layoutStore'
@@ -184,6 +189,37 @@ describe('SidebarSections (F-9.11)', () => {
   })
 })
 
+describe('SidebarSections with the old story bible archived (fresh start)', () => {
+  beforeEach(() => {
+    resetPendingSaves()
+    resetLayoutStore()
+    resetCategoryStore()
+    resetEditorSettingsStore()
+    setIpcClient(client)
+  })
+
+  afterEach(() => {
+    resetLayoutStore()
+    resetCategoryStore()
+    resetEditorSettingsStore()
+  })
+
+  it('offers no New category while it is archived, and again once it is switched back on', async () => {
+    const user = userEvent.setup()
+    useEditorSettingsStore.setState({ settings: defaultEditorSettings('novel') })
+    const { unmount } = render(<SidebarSections format="novel" sections={sections} />)
+    await user.click(picker())
+    expect(optionNames()).not.toContain('New category…')
+    unmount()
+    useEditorSettingsStore.setState({
+      settings: { ...defaultEditorSettings('novel'), unarchived: ['storyBible'] }
+    })
+    render(<SidebarSections format="novel" sections={sections} />)
+    await user.click(picker())
+    expect(optionNames()).toContain('New category…')
+  })
+})
+
 describe('buildSections (F-9.11)', () => {
   const counts = {
     documents: 0,
@@ -199,6 +235,38 @@ describe('buildSections (F-9.11)', () => {
     notes: 0
   }
   const used = (built: SidebarSection[]): string[] => built.filter((s) => s.used).map((s) => s.id)
+
+  it('lists Manuscript, Notes, Outline, Timeline and Edits while the old story bible is archived (fresh start)', () => {
+    const busy = {
+      ...counts,
+      documents: 4,
+      tags: 3,
+      timeline: 1,
+      edits: 1,
+      library: 2,
+      changes: 5,
+      todo: 2,
+      sheets: { character: 2, thread: 1 }
+    }
+    const built = buildSections(ALL_BUILTIN_CATEGORIES, busy, 'v1', { storyBibleArchived: true })
+    expect(built.map((s) => [s.id, s.used])).toEqual([
+      ['manuscript', true],
+      ['notes', true],
+      ['outline', true],
+      ['timeline', true],
+      ['edits', true]
+    ])
+    // Switched back on, the list is v1's as it was; v2 never archives it.
+    const ids = (built: SidebarSection[]): string[] => built.map((s) => s.id)
+    expect(
+      ids(buildSections(ALL_BUILTIN_CATEGORIES, busy, 'v1', { storyBibleArchived: false }))
+    ).toEqual(ids(buildSections(ALL_BUILTIN_CATEGORIES, busy, 'v1')))
+    expect(
+      buildSections(ALL_BUILTIN_CATEGORIES, busy, 'v2', { storyBibleArchived: true }).map(
+        (s) => s.id
+      )
+    ).toEqual(buildSections(ALL_BUILTIN_CATEGORIES, busy, 'v2').map((s) => s.id))
+  })
 
   it('always uses Manuscript, Characters, Places, the Index, and To do; the rest once they hold something', () => {
     expect(used(buildSections(BUILTIN_CATEGORIES, counts, 'v1'))).toEqual([

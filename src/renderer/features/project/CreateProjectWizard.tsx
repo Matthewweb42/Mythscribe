@@ -299,14 +299,24 @@ export function CreateProjectWizard({
             </>
           ) : step === 'context' ? (
             <>
-              <p className="mt-4 mb-0 text-sm text-fg-muted">
-                Character notes, settings, world rules, a plot outline, maps, or art (Word,
-                Markdown, text, PDF, images). They are kept in the project’s Library.
-                {useAi === 'on'
-                  ? ' Once the project is open, the AI sorts them into your story bible: you see the cost first and review everything before it lands.'
-                  : ' Turn on Use AI later to have them sorted into your story bible.'}{' '}
-                Optional: skip this and press Create.
-              </p>
+              {memory === 'v1' ? (
+                // Notes redesign (fresh start): a new v1 project starts with the old story bible
+                // archived, so the files become note pages (App's `onCreate`).
+                <p className="mt-4 mb-0 text-sm text-fg-muted">
+                  Character notes, settings, world rules, a plot outline (Word, Markdown, text,
+                  PDF). Each becomes a page in Notes › Docs that you can edit. Optional: skip this
+                  and press Create.
+                </p>
+              ) : (
+                <p className="mt-4 mb-0 text-sm text-fg-muted">
+                  Character notes, settings, world rules, a plot outline, maps, or art (Word,
+                  Markdown, text, PDF, images). They are kept in the project’s Library.
+                  {useAi === 'on'
+                    ? ' Once the project is open, the AI sorts them into your story bible: you see the cost first and review everything before it lands.'
+                    : ' Turn on Use AI later to have them sorted into your story bible.'}{' '}
+                  Optional: skip this and press Create.
+                </p>
+              )}
               <div className="mt-3 flex items-center gap-2">
                 <button
                   type="button"

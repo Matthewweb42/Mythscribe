@@ -17,6 +17,7 @@ import {
   type InlineTagSuggestListHandle,
   type InlineTagSuggestListProps
 } from './InlineTagSuggestList'
+import { archivedNow } from '@renderer/features/shell/archived'
 
 export interface InlineTagOptions {
   /** The document the tokens link tags to (F-4.4); null leaves the `#` suggestion out (notes). */
@@ -194,6 +195,9 @@ export const InlineTag = Node.create<InlineTagOptions>({
         editor: this.editor,
         char: '#',
         allowSpaces: false,
+        // Notes redesign (fresh start): no `#` suggestion while the old story bible is archived;
+        // asked as the author types, so switching it never rebuilds the editor.
+        allow: () => !archivedNow('storyBible'),
         items: ({ query }) => {
           const bank = useTagStore.getState()
           return suggestItems(

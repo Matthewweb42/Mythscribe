@@ -6,6 +6,8 @@ import type { AiSource, AiSwitch } from '@shared/aiSettings'
 import type { NovelFormat, TreeNode } from '@shared/ipc/contract'
 import { formatLabel, type HierarchyLevel } from '@shared/labels'
 import type { DockPanelId } from '@shared/dock'
+import { isStoryBibleArchived } from '@shared/archivedFeatures'
+import { DOCS_FOLDER_TITLE } from '@shared/notebook'
 import { DEFAULT_THEME, THEME_TOKENS, THEME_TOKEN_VARS, resolveTheme } from '@shared/themes'
 import { useAccountStore } from '@renderer/features/account/accountStore'
 import { useAppAccessStore, useExtrasUnlocked } from '@renderer/features/account/appAccessStore'
@@ -24,6 +26,8 @@ import { AboutDialog } from '@renderer/features/shell/AboutDialog'
 import { DialogHost } from '@renderer/features/shell/dialogs/DialogHost'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { DockColumn, DockPanelControls, DockSlot } from '@renderer/features/shell/Dock'
+import { useDockLayout } from '@renderer/features/shell/dockLayout'
+import { Unarchived } from '@renderer/features/shell/Unarchived'
 import { isColumnShown, useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { Logo } from '@renderer/features/shell/Logo'
 import { MenuBar } from '@renderer/features/shell/MenuBar'
@@ -629,9 +633,18 @@ export function App(): React.JSX.Element {
                 <AiActivityIndicator />
                 <IndexingIndicator />
                 <SearchButton />
-                <ReferencesToggleButton />
+                {/* Notes redesign (fresh start): hidden with the old story bible (v1 only). */}
+                <Unarchived feature="storyBible">
+                  <ReferencesToggleButton />
+                </Unarchived>
                 {/* F-16.4, F-16.12: no tags in story memory v2; its slot is This scene. */}
-                {current.storyMemory === 'v2' ? <ThisSceneToggleButton /> : <TagsToggleButton />}
+                {current.storyMemory === 'v2' ? (
+                  <ThisSceneToggleButton />
+                ) : (
+                  <Unarchived feature="storyBible">
+                    <TagsToggleButton />
+                  </Unarchived>
+                )}
                 <AssistantToggleButton />
               </>
             ) : null}
@@ -755,9 +768,16 @@ function WelcomeScreen(): React.JSX.Element {
     const info = await create(name, format, undefined, aiSource, aiSwitch)
     if (!info) return
     toast.success(`Created "${info.name}"`)
-    // F-9.8: the wizard's worldbuilding files go into the new project's Library, and from there
-    // to the estimate and the review, as if they had been added from the Library tab.
-    if (contextPaths.length > 0) {
+    // Notes redesign (fresh start): a new project starts with the old story bible archived, so
+    // the wizard's worldbuilding files become pages in Notes › Docs, with no AI and no Library.
+    if (contextPaths.length > 0 && isStoryBibleArchived(undefined, info.storyMemory)) {
+      useNotebookStore
+        .getState()
+        .importPathsInto(contextPaths, DOCS_FOLDER_TITLE)
+        .catch((err: unknown) => toast.error(describeError(err)))
+    } else if (contextPaths.length > 0) {
+      // F-9.8: the wizard's worldbuilding files go into the new project's Library, and from there
+      // to the estimate and the review, as if they had been added from the Library tab.
       useLibraryStore
         .getState()
         .add(contextPaths)
@@ -1097,7 +1117,8 @@ function SettingsButton(): React.JSX.Element {
  * control bar toggles them; both close on exit) and float as windows over the editor instead.
  */
 function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
-  const layout = useLayoutStore((s) => s.layout)
+  // Notes redesign (fresh start): the archived story bible's panels stay closed on screen.
+  const layout = useDockLayout()
   const focus = useFocusStore((s) => s.active)
   const nodeId = useMainNodeId()
   // Every non-root node of the book carries tags; a section root is never selectable, but the
@@ -1173,7 +1194,11 @@ function ProjectScreen({ format }: { format: NovelFormat }): React.JSX.Element {
       {/* F-10.3: the Goals dialog, open while the goals store says so. */}
       <GoalsDialog />
       {/* F-9.14: the conversion pass's cost and go-ahead, open while main says scenes wait (v1). */}
-      {v2 ? null : <ConversionDialog />}
+      {v2 ? null : (
+        <Unarchived feature="storyBible">
+          <ConversionDialog />
+        </Unarchived>
+      )}
       {/* F-16.10: the one Dismissed list, opened from the This scene panel's footer (v2). */}
       {v2 ? <DismissedDialog /> : null}
       {/* F-16.19: Rebuild memory's price, progress and summary (v2). */}

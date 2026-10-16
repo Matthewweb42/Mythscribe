@@ -37,6 +37,9 @@ describe('search vocabulary (F-10.1)', () => {
     // v1 is exactly as it was; v2 searches records in place of the v1 sheets (F-16.6).
     expect(searchTypesFor('v1')).toEqual(['document', 'notes', 'character', 'setting', 'world'])
     expect(searchTypesFor('v2')).toEqual(['document', 'notes', 'record', 'research'])
+    // Notes redesign (fresh start): an archived old story bible takes the sheets out of v1 only.
+    expect(searchTypesFor('v1', true)).toEqual(['document', 'notes'])
+    expect(searchTypesFor('v2', true)).toEqual(['document', 'notes', 'record', 'research'])
     expect(SEARCH_RESULT_KIND.record).toBeNull()
     // F-16.8: a Research hit says it is a source document.
     expect(SEARCH_RESULT_KIND.research).toBe('Source document')

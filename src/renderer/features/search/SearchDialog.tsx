@@ -12,6 +12,7 @@ import {
   type SearchRange,
   type SearchResult
 } from '@shared/search'
+import { useIsArchived } from '@renderer/features/shell/archived'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { APP_SHORTCUTS, formatShortcut } from '@renderer/features/shell/shortcuts'
@@ -107,7 +108,9 @@ function SearchDialogBody(): React.JSX.Element {
   // F-16.8: a v2 project's search offers its Research documents too, and (F-16.6) its records
   // in place of the v1 sheets; (F-16.7) its filter is by label, not by tag.
   const memory = useStoryMemory()
-  const offered = searchTypesFor(memory)
+  // Notes redesign (fresh start): with the old story bible archived, no sheets and no tag filter.
+  const bibleArchived = useIsArchived('storyBible')
+  const offered = searchTypesFor(memory, bibleArchived)
   const tagsById = useTagStore((s) => s.byId)
   const labelId = useSearchStore((s) => s.labelId)
   const setLabelId = useSearchStore((s) => s.setLabelId)
@@ -234,7 +237,7 @@ function SearchDialogBody(): React.JSX.Element {
                 </option>
               ))}
             </select>
-          ) : (
+          ) : bibleArchived ? null : (
             <select
               aria-label="Filter by tag"
               value={tagId ?? ''}

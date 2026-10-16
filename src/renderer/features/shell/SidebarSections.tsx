@@ -3,6 +3,7 @@ import { ChevronDown, Eye, EyeOff, Plus } from 'lucide-react'
 import type { NovelFormat } from '@shared/ipc/contract'
 import { normalizeSectionId } from '@shared/sidebarTabs'
 import { useCategoryStore } from '@renderer/features/entities/categoryStore'
+import { useIsArchived } from '@renderer/features/shell/archived'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import {
   useSidebarSections,
@@ -55,6 +56,7 @@ export function SidebarSections({
   controls
 }: SidebarSectionsProps): React.JSX.Element {
   const projectSections = useSidebarSections()
+  const bibleArchived = useIsArchived('storyBible')
   const all = sections ?? projectSections
   const stored = useLayoutStore((s) => s.layout.sidebar.tab)
   const setSidebarTab = useLayoutStore((s) => s.setSidebarTab)
@@ -77,7 +79,8 @@ export function SidebarSections({
     ...shown.map((section) => ({ id: section.id, section })),
     ...(unused.length > 0 ? [{ id: SHOW_UNUSED, section: null }] : []),
     ...(showUnused ? unused.map((section) => ({ id: section.id, section })) : []),
-    { id: NEW_CATEGORY, section: null }
+    // Notes redesign (fresh start): no new story-bible category while the old one is archived.
+    ...(bibleArchived ? [] : [{ id: NEW_CATEGORY, section: null }])
   ]
   const optionId = (id: string): string => `${listId}-${id}`
 
@@ -251,6 +254,7 @@ export function SidebarSections({
       )
     }
     const tail = rows.slice(index).map((row, i) => renderRow(row, index + i))
+    if (tail.length === 0) return out
     out.push(
       <div key="actions" role="group" aria-label="More" className="mt-1 border-t border-line pt-1">
         {tail}

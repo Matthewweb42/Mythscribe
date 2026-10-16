@@ -14,7 +14,7 @@ import type { AiSettings } from '../src/shared/aiSettings'
 import type { IpcResult, ProjectInfo, TreeNode } from '../src/shared/ipc/contract'
 import type { ResearchDoc } from '../src/shared/research'
 import type { TiptapNodeT } from '../src/shared/tiptap'
-import { caretToEnd, clickIntoEditor } from './support'
+import { caretToEnd, clickIntoEditor, showOldStoryBible } from './support'
 
 /**
  * Story memory v2 (FEATURES.md §2.16; plan P1). The app is launched with
@@ -3865,7 +3865,9 @@ test('story memory: the switch-over on a copy of a v1 project (P1 slice 6)', asy
   await expect(page.getByTestId('project-name')).toHaveText('Switch Novel')
   expect((await invoke<ProjectInfo | null>('project:current', undefined))?.storyMemory).toBe('v1')
 
-  // A character tag, made in the Index, typed inline through the `#` suggestion.
+  // A character tag, made in the Index, typed inline through the `#` suggestion; the old story
+  // bible is archived in a new project (notes redesign, fresh start), so it is switched on first.
+  await showOldStoryBible(page)
   await showSection('Index')
   const tagsPanel = page.getByRole('region', { name: 'Index section', exact: true })
   await tagsPanel
@@ -4074,7 +4076,9 @@ test('story memory: the switch-over of a v1 project in place, as the installed a
   expect(created?.storyMemory).toBe('v1')
   expect(created?.path).toBe(projectPath)
 
-  // 2. A character tag, made in the Index, typed inline at the start of the first scene.
+  // 2. A character tag, made in the Index, typed inline at the start of the first scene (the
+  // old story bible switched back on first: a new project keeps it archived, fresh start).
+  await showOldStoryBible(page)
   await showSection('Index')
   const tagsPanel = page.getByRole('region', { name: 'Index section', exact: true })
   await tagsPanel

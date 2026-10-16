@@ -12,6 +12,7 @@ import { nameAssistant } from '@shared/assistantName'
 import { columnLimits, columnWidth, type LayoutPanel } from '@shared/layout'
 import { ContextMenu } from '@renderer/features/manuscript/ContextMenu'
 import { DOCK_DRAG_TYPE, resetDockDrag, useDockDragStore } from './dockDragStore'
+import { useDockLayout } from './dockLayout'
 import { isColumnShown, resizePanelBy, useLayoutStore } from './layoutStore'
 import { ResizeHandle } from './ResizeHandle'
 import type { StoryMemoryVersion } from '@shared/storyMemory'
@@ -58,7 +59,7 @@ export function DockPanelControls({
   vertical?: boolean
 }): React.JSX.Element {
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
-  const layout = useLayoutStore((s) => s.layout)
+  const layout = useDockLayout()
   const assistantName = useAssistantName()
   const memory = useStoryMemory()
   const label = panelLabel(id, assistantName, memory)
@@ -208,7 +209,7 @@ export function DockColumn({
   side: 'left' | 'right'
   render: (id: DockPanelId) => React.ReactNode
 }): React.JSX.Element | null {
-  const layout = useLayoutStore((s) => s.layout)
+  const layout = useDockLayout()
   const assistantName = useAssistantName()
   const memory = useStoryMemory()
   if (!isColumnShown(layout, column)) return null

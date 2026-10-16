@@ -1,6 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ARCHIVABLE_FEATURES, isArchived, withArchived } from '@shared/archivedFeatures'
+import {
+  ARCHIVABLE_FEATURES,
+  isArchived,
+  isStoryBibleArchived,
+  withArchived
+} from '@shared/archivedFeatures'
 import { defaultEditorSettings, EditorSettings } from '@shared/editorSettings'
 import type { Channel, Input, Output } from '@shared/ipc/contract'
 import {
@@ -36,14 +41,20 @@ afterEach(() => {
 })
 
 describe('the archive rule', () => {
-  it('archives all seven by default and switches one back on or off', () => {
-    expect(ARCHIVABLE_FEATURES).toHaveLength(7)
+  it('archives all eight by default and switches one back on or off', () => {
+    expect(ARCHIVABLE_FEATURES).toHaveLength(8)
     for (const feature of ARCHIVABLE_FEATURES) expect(isArchived(feature, undefined)).toBe(true)
     const on = withArchived(undefined, 'proofread', false)
     expect(on).toEqual(['proofread'])
     expect(isArchived('proofread', on)).toBe(false)
     expect(isArchived('voiceProfile', on)).toBe(true)
     expect(withArchived(on, 'proofread', true)).toEqual([])
+  })
+
+  it('archives the old story bible in story memory v1 only (fresh start)', () => {
+    expect(isStoryBibleArchived(undefined, 'v1')).toBe(true)
+    expect(isStoryBibleArchived(['storyBible'], 'v1')).toBe(false)
+    expect(isStoryBibleArchived(undefined, 'v2')).toBe(false)
   })
 
   it('keeps the switched-on list in the editor settings, a row without it still parsing', () => {
@@ -57,7 +68,7 @@ describe('the archive rule', () => {
 })
 
 describe('ArchivedFeaturesTab', () => {
-  it('lists the seven switches on, and switching one off brings its entry point back', async () => {
+  it('lists the eight switches on, and switching one off brings its entry point back', async () => {
     useEditorSettingsStore.setState({ settings: defaultEditorSettings('novel') })
     render(
       <>
@@ -68,7 +79,7 @@ describe('ArchivedFeaturesTab', () => {
       </>
     )
     const switches = screen.getAllByRole('switch')
-    expect(switches).toHaveLength(7)
+    expect(switches).toHaveLength(8)
     for (const each of switches) expect(each).toBeChecked()
     expect(archivedNow('proofread')).toBe(true)
     expect(screen.queryByRole('button', { name: 'Proofread the scene' })).not.toBeInTheDocument()

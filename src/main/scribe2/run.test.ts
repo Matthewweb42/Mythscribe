@@ -12,7 +12,9 @@ import { node } from '../db/schema'
 import { saveDocument } from '../document/documentStore'
 import { createNotebookItem, getNotebookPage } from '../notebook/notebookStore'
 import { projectFolderFor, type ProjectSession } from '../project/projectStore'
-import { setAiSettings } from '../project/settingsStore'
+import { getEditorSettings, setAiSettings, setEditorSettings } from '../project/settingsStore'
+import { createEntity } from '../entity/entityStore'
+import { addContextFiles } from '../library/libraryStore'
 import { createSeededProject } from '../project/testProject'
 import { createNode, getNode, listNodes, renameNode, type TreeDb } from '../tree/treeStore'
 import { manuscriptDocuments } from '../voice/profile'
@@ -312,6 +314,27 @@ describe('Ms Scribe’s sources and refs', () => {
     expect(
       answerSources({ ...run, scenes: material.scenes, used: new Set() }, ref, []).scenes
     ).toEqual([{ nodeId: tash.id, title: 'Prologue', quotes: [] }])
+  })
+
+  it('reads the old story bible’s sheets and uploads only while it is switched back on (fresh start)', async () => {
+    createNotebookItem(db, { parentId: null, kind: 'page', title: 'Mara', content: null })
+    createEntity(db, { kind: 'character', name: 'Rook' })
+    await addContextFiles(db, session.folder, [
+      { name: 'Powers.md', read: () => Buffer.from('# Powers\n\nShadow walking costs a memory.') }
+    ])
+    // A new project keeps the old story bible archived: the notes alone.
+    const archived = await loadScribeSources(db, session.folder, null)
+    expect(archived.pages.map((page) => [page.kind, page.title])).toEqual([['note', 'Mara']])
+    expect(archived.names).toEqual(['Mara'])
+
+    setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: ['storyBible'] })
+    const shown = await loadScribeSources(db, session.folder, null)
+    expect(shown.pages.map((page) => [page.kind, page.title])).toEqual([
+      ['note', 'Mara'],
+      ['sheet', 'Rook'],
+      ['library', 'Powers.md']
+    ])
+    expect(shown.names).toEqual(['Mara', 'Rook'])
   })
 
   it('reads a page ref after its own title once', async () => {

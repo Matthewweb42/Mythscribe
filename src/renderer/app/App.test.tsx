@@ -239,7 +239,11 @@ function install(overrides: Partial<Record<string, unknown>> = {}): ReturnType<t
       return { id: (input as { id: string }).id, meta: { location: '', pov: '', timeline: '' } }
     if (channel === 'document:get') return { id: (input as { id: string }).id, content: null }
     if (channel === 'notes:get') return { id: (input as { id: string }).id, notes: null }
-    if (channel === 'editorSettings:get') return defaultEditorSettings('novel')
+    // Notes redesign (fresh start): these tests cover the old story bible, so it is switched back
+    // on (a project keeps it archived); the archived shell has its own test.
+    if (channel === 'editorSettings:get') {
+      return { ...defaultEditorSettings('novel'), unarchived: ['storyBible'] }
+    }
     if (channel === 'aiSettings:get') return defaultAiSettings()
     if (channel === 'authorRules:get') return defaultAuthorRules()
     if (channel === 'storyBible:get') return defaultStoryBibleSettings()
@@ -372,6 +376,42 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close' }))
     expect(await screen.findByRole('button', { name: /new project/i })).toBeInTheDocument()
     expect(invoke).toHaveBeenCalledWith('project:close', undefined)
+  })
+
+  it('hides the old story bible while it is archived: the sections, the header toggles, the menu (fresh start)', async () => {
+    install({
+      'project:create': { ...info, name: 'Fresh', format: 'novel' },
+      'tree:list': treeFixture,
+      'tag:list': tagFixture,
+      'editorSettings:get': defaultEditorSettings('novel')
+    })
+    render(<App />)
+    await fillWizard('Fresh', /^novel/i)
+    expect(await screen.findByTestId('project-name')).toHaveTextContent('Fresh')
+    const aside = screen.getByRole('complementary')
+    const picker = within(aside).getByRole('button', { name: 'Section: Manuscript' })
+    const banner = screen.getByRole('banner')
+    await waitFor(() =>
+      expect(within(banner).queryByRole('button', { name: 'Tags', exact: true })).toBeNull()
+    )
+    expect(within(banner).queryByRole('button', { name: 'References' })).toBeNull()
+    await userEvent.click(picker)
+    const listbox = within(aside).getByRole('listbox', { name: 'Sections' })
+    await userEvent.click(within(listbox).getByRole('option', { name: /^Show unused sections/ }))
+    expect(
+      within(listbox)
+        .getAllByRole('option')
+        .map((o) => o.getAttribute('aria-label') ?? o.textContent ?? '')
+    ).toEqual(['Manuscript', 'Notes', 'Outline', 'Hide unused sections', 'Timeline', 'Edits'])
+    await userEvent.keyboard('{Escape}')
+    // The menu bar: no Character, Setting or World-building note under Insert.
+    const bar = screen.getByRole('menubar', { name: 'Application menu' })
+    await userEvent.click(within(bar).getByRole('menuitem', { name: 'Insert' }))
+    expect(
+      within(screen.getByRole('menu', { name: 'Insert' }))
+        .getAllByRole('menuitem')
+        .map((m) => m.textContent)
+    ).toEqual(['SceneCtrl+Shift+S', 'ChapterCtrl+Shift+C', 'PartCtrl+Shift+P', 'Scene break'])
   })
 
   it('shows the project name and format in the shell header, window title, and tree (F-1.5, F-2.1)', async () => {

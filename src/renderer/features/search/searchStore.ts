@@ -8,6 +8,7 @@ import {
   type SearchType
 } from '@shared/search'
 import { currentStoryMemory } from '@renderer/features/project/storyMemory'
+import { archivedNow } from '@renderer/features/shell/archived'
 import { describeError } from '@renderer/lib/errors'
 import { ipc } from '@renderer/lib/ipc'
 
@@ -67,7 +68,9 @@ let timer: ReturnType<typeof setTimeout> | null = null
  * story memory v2, so a v1 project asks exactly as it did.
  */
 export function offeredSearchTypes(chosen: readonly SearchType[]): SearchType[] {
-  return searchTypesFor(currentStoryMemory()).filter((type) => chosen.includes(type))
+  return searchTypesFor(currentStoryMemory(), archivedNow('storyBible')).filter((type) =>
+    chosen.includes(type)
+  )
 }
 
 function cancelTimer(): void {
@@ -92,7 +95,7 @@ export const useSearchStore = create<SearchState>((set, get) => {
       const request =
         currentStoryMemory() === 'v2'
           ? { query: normalized, types, tagId: null, labelId }
-          : { query: normalized, types, tagId }
+          : { query: normalized, types, tagId: archivedNow('storyBible') ? null : tagId }
       const response = await ipc().invoke('search:query', request)
       if (mine !== generation) return // a newer request, a close, or a reset overtook this one
       set({ response, answeredQuery: normalized, status: 'done' })

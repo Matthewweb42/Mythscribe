@@ -1340,14 +1340,16 @@ export const contract = {
   /**
    * Imports files as note pages under `parentId` (null: the top level), one page each: Word
    * (headings kept), Markdown, text and PDF (its text layer). `files` are dropped files as bytes,
-   * each with the folders it was dropped in, which are made as folders; omitted, main asks with
+   * each with the folders it was dropped in, which are made as folders; `paths` are files picked
+   * on disk (the new-project wizard's, notes redesign fresh start); with neither, main asks with
    * the open dialog (null when cancelled). Images and other types are skipped with a reason.
    * Pushes `notebook:changed`.
    */
   'notebook:import': {
     input: z.object({
       parentId: z.string().nullable(),
-      files: z.array(NotebookImportFile).min(1).optional()
+      files: z.array(NotebookImportFile).min(1).optional(),
+      paths: z.array(z.string().min(1)).min(1).optional()
     }),
     output: NotebookImportResult.nullable()
   },

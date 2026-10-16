@@ -44,6 +44,7 @@ import { registerHandlers } from './ipc/handlers'
 import { emit } from './ipc/registry'
 import { installSingleInstance } from './lifecycle'
 import { installApplicationMenu } from './menu'
+import { storyBibleArchivedIn } from './project/settingsStore'
 import { bookFontsDir } from './export/pdf'
 import { assetPathFor, bookFontPathFor } from './project/assetUrl'
 import { CloudSyncService } from './project/cloudSyncService'
@@ -292,6 +293,12 @@ if (!primaryInstance) {
       manager,
       devTools: () => devtools?.enabled() ?? false,
       assistantName: () => appState.get().view.assistantName,
+      // Notes redesign (fresh start): the old story bible's items, absent while it is archived.
+      storyBibleArchived: () => {
+        if (manager.current() === null) return false
+        const session = manager.require()
+        return storyBibleArchivedIn(session.connection.orm, session.storyMemory)
+      },
       platform: process.platform,
       target: () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
     })
@@ -491,6 +498,7 @@ if (!primaryInstance) {
       windows: () => BrowserWindow.getAllWindows(),
       focusedWindow: () => BrowserWindow.getFocusedWindow(),
       onAssistantNameChanged: () => menu.rebuild(),
+      onEditorSettingsChanged: () => menu.rebuild(),
       spellDictionary,
       openExternal: (url) => shell.openExternal(url),
       openPath: (folder) => shell.openPath(folder),

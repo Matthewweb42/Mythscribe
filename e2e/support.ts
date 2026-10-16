@@ -1,4 +1,4 @@
-import { expect, type Locator } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 
 /**
  * Helpers shared by the e2e specs (`smoke.spec.ts`, `memory.spec.ts`). The caret helpers carry the
@@ -41,4 +41,19 @@ export async function caretToEnd(target: Locator): Promise<void> {
   await clickIntoEditor(target)
   await target.page().keyboard.press('Control+End')
   await expect.poll(() => caretAtEnd(target)).toBe(true)
+}
+
+/**
+ * Switches the old story bible back on in the open project (notes redesign, fresh start: a new
+ * project keeps it archived), through Settings › Archived features, as the author would.
+ */
+export async function showOldStoryBible(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('tab', { name: 'Archived features' }).click()
+  const archive = settings.getByRole('switch', { name: 'Archive Old story bible' })
+  await archive.uncheck()
+  await expect(archive).not.toBeChecked()
+  await settings.getByRole('button', { name: 'Close settings' }).click()
+  await expect(settings).toHaveCount(0)
 }

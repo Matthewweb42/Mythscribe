@@ -16,6 +16,7 @@ import { centreCaret } from './typewriter'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useSessionStore } from '@renderer/features/project/sessionStore'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
+import { archivedNow, useIsArchived } from '@renderer/features/shell/archived'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { useLayoutStore } from '@renderer/features/shell/layoutStore'
 import { useEditorZoom, usePageEdges } from '@renderer/features/shell/viewStore'
@@ -228,6 +229,10 @@ function RegionEditor({
   const { sceneBreak } = settings
   // F-16.4: story memory v2 has no tags: tokens and ranges are inert, and no tag menu opens.
   const inertTags = useStoryMemory() === 'v2'
+  // Notes redesign (fresh start): the old story bible archived leaves the selection menu's tag
+  // items out (the `#` suggestion checks it itself, `InlineTag`).
+  const bibleArchived = useIsArchived('storyBible')
+  const noTags = inertTags || bibleArchived
   const extensions = useMemo(
     () =>
       buildExtensions({
@@ -236,7 +241,13 @@ function RegionEditor({
         onEscape: escapeFocusMode,
         inlineTagNodeId: id,
         inertTags,
-        onTagSelection: inertTags ? undefined : (editor) => setPicker(pickerAtSelection(editor))
+        // Notes redesign (fresh start): no tag picker while the old story bible is archived;
+        // read at the key press, so the switch never rebuilds the editor.
+        onTagSelection: inertTags
+          ? undefined
+          : (editor) => {
+              if (!archivedNow('storyBible')) setPicker(pickerAtSelection(editor))
+            }
       }),
     [sceneBreak, id, inertTags]
   )
@@ -411,8 +422,10 @@ function RegionEditor({
     const onContextMenu = (event: MouseEvent): void => {
       const selection = before ?? editor.state.selection
       before = null
+      // Read at the click, so archiving the old story bible never re-runs this effect.
+      const noTags = inertTags || archivedNow('storyBible')
       const target = event.target instanceof Element ? event.target : null
-      const token = inertTags ? null : (target?.closest<HTMLElement>(INLINE_TAG_SELECTOR) ?? null)
+      const token = noTags ? null : (target?.closest<HTMLElement>(INLINE_TAG_SELECTOR) ?? null)
       if (token) {
         event.preventDefault()
         setMenu({
@@ -425,10 +438,10 @@ function RegionEditor({
       }
       if (!editor.isEditable) return
       const { from, to } = selection
-      const range = inertTags ? null : (target?.closest<HTMLElement>(TAG_RANGE_SELECTOR) ?? null)
+      const range = noTags ? null : (target?.closest<HTMLElement>(TAG_RANGE_SELECTOR) ?? null)
       if (from === to && !range) return
       // In v2 the menu holds only the AI's items: with none offered, the browser's menu stays.
-      if (inertTags) {
+      if (noTags) {
         const offer = selectionOffer(useAiSettingsStore.getState().settings)
         if (!offer.rewrite && !offer.ask) return
       }
@@ -522,7 +535,7 @@ function RegionEditor({
         <ContextMenu
           x={rangeMenu.x}
           y={rangeMenu.y}
-          items={rangeMenuItems(editor, rangeMenu, aiSettings, inertTags)}
+          items={rangeMenuItems(editor, rangeMenu, aiSettings, noTags)}
           onSelect={onRangeMenuSelect}
           onClose={() => setRangeMenu(null)}
         />

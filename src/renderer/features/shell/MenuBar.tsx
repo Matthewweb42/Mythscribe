@@ -23,6 +23,7 @@ import { useProjectStore } from '@renderer/features/project/projectStore'
 import { runMenuAction } from '@renderer/features/shell/menuActions'
 import { formatShortcut } from '@renderer/features/shell/shortcuts'
 import { useAssistantName } from './viewStore'
+import { useIsArchived } from './archived'
 
 /**
  * The in-app menu bar (F-7.1), rendered from the same definition as the native menu and
@@ -42,6 +43,8 @@ export function MenuBar(): React.JSX.Element {
   const devTools = useDevToolsStore((s) => s.enabled)
   // F-16.4: a project on story memory v2 has no tag items.
   const storyMemory = useProjectStore((s) => s.current?.storyMemory ?? null)
+  // Notes redesign (fresh start): the old story bible's items go while it is archived.
+  const storyBibleArchived = useIsArchived('storyBible')
   const [openId, setOpenId] = useState<MenuSectionId | null>(null)
   const bar = useRef<HTMLDivElement>(null)
   /** Mirrors `openId` for the callbacks, so opening knows whether the bar was closed before. */
@@ -174,7 +177,7 @@ export function MenuBar(): React.JSX.Element {
       data-testid="menu-bar"
       className="flex items-center gap-0.5 text-sm"
     >
-      {menuFor({ devTools, storyMemory }).map((section, index) => (
+      {menuFor({ devTools, storyMemory, storyBibleArchived }).map((section, index) => (
         <MenuTrigger
           key={section.id}
           section={section}

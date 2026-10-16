@@ -20,6 +20,7 @@ import { useLabelFilterView } from '@renderer/features/labels/labelFilter'
 import { useMemoryStore } from '@renderer/features/memory/memoryStore'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
+import { useIsArchived } from '@renderer/features/shell/archived'
 import { BeatBoard } from './BeatsView'
 import { listOutline } from './outlineRows'
 import { useOutlineViewStore, type OutlineMode } from './outlineViewStore'
@@ -54,8 +55,10 @@ function useShownMode(): OutlineMode {
   const template = useStructureStore((s) => s.template)
   const mode = useOutlineViewStore((s) => s.outlineMode)
   const memory = useStoryMemory()
+  // Notes redesign (fresh start): the threads are the old story bible's.
+  const bibleArchived = useIsArchived('storyBible')
   if (mode === 'beats' && template === null) return 'outline'
-  if (mode === 'threads' && memory === 'v2') return 'outline'
+  if (mode === 'threads' && (memory === 'v2' || bibleArchived)) return 'outline'
   return mode
 }
 
@@ -98,6 +101,7 @@ function StructureHeader(): React.JSX.Element {
   const mode = useShownMode()
   const setMode = useOutlineViewStore((s) => s.setOutlineMode)
   const memory = useStoryMemory()
+  const bibleArchived = useIsArchived('storyBible')
   const selectId = useId()
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-2">
@@ -129,7 +133,7 @@ function StructureHeader(): React.JSX.Element {
         {OUTLINE_MODES.filter(
           (option) =>
             (option.mode !== 'beats' || template !== null) &&
-            (option.mode !== 'threads' || memory === 'v1')
+            (option.mode !== 'threads' || (memory === 'v1' && !bibleArchived))
         ).map((option) => (
           <button
             key={option.mode}

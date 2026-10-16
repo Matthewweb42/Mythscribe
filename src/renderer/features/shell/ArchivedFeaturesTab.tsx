@@ -2,6 +2,10 @@ import { ARCHIVABLE_FEATURES, ARCHIVABLE_FEATURE_LABEL, isArchived } from '@shar
 import { useEditorSettingsStore } from '@renderer/features/editor/settingsStore'
 import { setArchived } from './archived'
 
+/** What the old story bible's switch puts away (notes redesign, fresh start, 2026-10-15). */
+const STORY_BIBLE_HINT =
+  'Characters, places and the other categories, the Index and tags, threads, the Library, To do, Changes, Organise and the quick reference. Nothing reads or changes them while archived; their data stays in the project.'
+
 /**
  * Settings › Archived features (notes redesign, 2026-10-15): one switch per archivable feature.
  * On (archived, the default) hides every way into the feature; off brings them back. Nothing is
@@ -22,7 +26,12 @@ export function ArchivedFeaturesTab(): React.JSX.Element {
           return (
             <li key={feature}>
               <label className="flex items-center justify-between gap-3">
-                <span>{ARCHIVABLE_FEATURE_LABEL[feature]}</span>
+                <span className="flex flex-col">
+                  {ARCHIVABLE_FEATURE_LABEL[feature]}
+                  {feature === 'storyBible' ? (
+                    <span className="text-xs text-fg-muted">{STORY_BIBLE_HINT}</span>
+                  ) : null}
+                </span>
                 <span className="flex items-center gap-2 text-xs text-fg-muted">
                   {archived ? 'Archived' : 'Shown'}
                   <input

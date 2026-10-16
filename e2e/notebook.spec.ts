@@ -10,7 +10,7 @@ import {
 } from '@playwright/test'
 import type { IpcResult } from '../src/shared/ipc/contract'
 import type { NotebookItem, NotebookPage } from '../src/shared/notebook'
-import { caretToEnd } from './support'
+import { caretToEnd, showOldStoryBible } from './support'
 
 /**
  * Notes redesign phase 1, slice 1: the Notes section. A project made through the wizard (Use AI
@@ -27,6 +27,8 @@ let exited = false
 
 const NAME = 'Notebook Novel'
 const TYPED = 'Mara keeps a fen-wight skull above her door.'
+/** The fresh start's project (notes redesign, 2026-10-15). */
+const DOCS_NAME = 'Docs Novel'
 
 test.beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mythscribe-e2e-notebook-'))
@@ -152,4 +154,71 @@ test('notes: a folder and a page, typed text kept across a reopen, delete and Un
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(tree.getByRole('treeitem', { name: 'Mara' })).toBeVisible()
   expect(await storedText('Mara')).toBe(TYPED)
+})
+
+test('fresh start: a project’s Library file opens in Notes › Docs, with no Characters section', async () => {
+  await page.getByRole('button', { name: 'Close project' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+
+  // A project from before the fresh start: the story bible in use, an upload in its Library.
+  const projectPath = path.join(tmp, `${DOCS_NAME}.mythscribe`)
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath })
+  }, projectPath)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const wizard = page.getByRole('dialog')
+  const nameField = wizard.getByRole('textbox', { name: 'Project name' })
+  await nameField.fill('')
+  await nameField.fill(DOCS_NAME)
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByText('Off', { exact: true }).click()
+  await wizard.getByRole('button', { name: 'Next' }).click()
+  await wizard.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByTestId('project-name')).toHaveText(DOCS_NAME)
+  await showOldStoryBible(page)
+  const upload = path.join(tmp, 'Powers.md')
+  fs.writeFileSync(upload, '# Powers\n\nShadow walking costs a memory.\n')
+  await invoke('library:add', { paths: [upload] })
+
+  // The old story bible put away again and the project reopened: its upload is a note page.
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('tab', { name: 'Archived features' }).click()
+  await settings.getByRole('switch', { name: 'Archive Old story bible' }).check()
+  await settings.getByRole('button', { name: 'Close settings' }).click()
+  await expect
+    .poll(
+      async () =>
+        (await invoke<{ unarchived?: string[] }>('editorSettings:get', undefined)).unarchived
+    )
+    .toEqual([])
+  await page.getByRole('button', { name: 'Close project' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
+  await page
+    .getByRole('list', { name: 'Recent projects' })
+    .getByRole('button', { name: DOCS_NAME, exact: true })
+    .click()
+  await expect(page.getByTestId('project-name')).toHaveText(DOCS_NAME)
+
+  await showNotes()
+  const tree = page.getByRole('tree', { name: 'Notes' })
+  await expect(tree.getByRole('treeitem', { name: 'Docs' })).toHaveAttribute('aria-level', '1')
+  const powers = tree.getByRole('treeitem', { name: 'Powers' })
+  await expect(powers).toHaveAttribute('aria-level', '2')
+  await powers.getByText('Powers', { exact: true }).click()
+  const notePage = page.getByRole('textbox', { name: 'Note page' })
+  await expect(notePage.locator('h1')).toHaveText('Powers')
+  await expect(notePage).toContainText('Shadow walking costs a memory.')
+
+  // The sections: no story-bible category or Library, not even among the unused.
+  await page.getByRole('button', { name: /^Section: / }).click()
+  const list = page.getByRole('listbox', { name: 'Sections' })
+  await expect(list.getByRole('option', { name: 'Notes', exact: true })).toBeVisible()
+  await list.getByRole('option', { name: /^Show unused sections/ }).click()
+  await expect(list.getByRole('option', { name: 'Outline', exact: true })).toBeVisible()
+  await expect(list.getByRole('option', { name: 'Characters', exact: true })).toHaveCount(0)
+  await expect(list.getByRole('option', { name: 'Library', exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
 })

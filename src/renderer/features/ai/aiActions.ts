@@ -222,7 +222,9 @@ function sceneActionBusy(id: SceneActionId, nodeId: string | null): string | nul
 /** The actions an archived feature (Settings › Archived features) turns off. */
 const ARCHIVED_ACTIONS: Partial<Record<AiActionId, ArchivableFeature>> = {
   critique: 'editorsNotes',
-  proofread: 'proofread'
+  proofread: 'proofread',
+  // Notes redesign (fresh start): Check consistency compares the scene with the old story bible.
+  continuity: 'storyBible'
 }
 
 /**
@@ -239,7 +241,9 @@ export function aiActionReason(
   // 2026-10-15: Editor's notes and Proofread are archived unless switched back on.
   const archived = ARCHIVED_ACTIONS[id]
   if (archived !== undefined && archivedNow(archived)) {
-    return `${AI_ACTIONS[id].label} is archived. Switch it back on in Settings › Archived features.`
+    return archived === 'storyBible'
+      ? `${AI_ACTIONS[id].label} goes with the old story bible, which is archived. Switch it back on in Settings › Archived features.`
+      : `${AI_ACTIONS[id].label} is archived. Switch it back on in Settings › Archived features.`
   }
   const { feature, minLength } = AI_ACTIONS[id]
   const busy =

@@ -26,7 +26,7 @@ import { createEntity, deleteEntity, listEntities } from '../entity/entityStore'
 import { listFactsForEntity, setFactHidden } from '../entity/factStore'
 import { AppError } from '../ipc/errors'
 import { createProject, projectFolderFor, type ProjectSession } from '../project/projectStore'
-import { setAiSettings } from '../project/settingsStore'
+import { getEditorSettings, setAiSettings, setEditorSettings } from '../project/settingsStore'
 import { addDocumentTag, listDocumentTags, removeDocumentTag } from '../tag/documentTagStore'
 import { createTag, deleteTag, getTag, listTags } from '../tag/tagStore'
 import { node } from '../db/schema'
@@ -153,6 +153,9 @@ beforeEach(() => {
   if (!scene || !folder) throw new Error('skeleton not seeded')
   saveDocument(db, scene, doc(SCENE))
   setAiSettings(db, { ...defaultAiSettings(), dial: 1 })
+  // Notes redesign (fresh start): these tests cover the old story bible's derived data, so it is
+  // switched back on (a new project keeps it archived); the archived run has its own test.
+  setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: ['storyBible'] })
   complete = vi.fn<Complete>()
   answers(ANSWER)
   ledger = []
@@ -642,6 +645,37 @@ describe('summarizeScene logs the story bible (F-5.16)', () => {
     expect(changes).toEqual([])
     expect(logged).toEqual([])
     expect(result.summary.contentHash).toBe(summarySource(db, scene)?.contentHash)
+  })
+
+  it('derives nothing while the old story bible is archived, and clears nothing either (fresh start)', async () => {
+    const mara = createEntity(db, { kind: 'character', name: 'Mara' }).entity
+    answers({ ...ANSWER, facts: [FACT, TOMAS], tags: [{ name: 'Tomas', category: 'character' }] })
+    await run()
+    const before = { facts: factsOf('Mara'), tags: listTags(db), entities: listEntities(db) }
+    expect(before.facts).toHaveLength(1)
+    setEditorSettings(db, { ...getEditorSettings(db, 'novel'), unarchived: [] })
+    changes = []
+    const logged: number[] = []
+    // A new text, so the stored row is stale and the request goes out.
+    saveDocument(db, scene, doc(`${SCENE} She waited.`))
+    answers({ ...ANSWER, facts: [{ ...FACT, value: 'Carries a torch' }], tags: [] })
+    const result = await summarize({
+      onFactsChanged: (change) => void changes.push(change),
+      onChangesLogged: () => void logged.push(1)
+    })
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(getSummary(db, scene)).toEqual(result.summary)
+    // The old rows stand exactly as they were: no fact replaced, no tag link dropped.
+    expect({ facts: factsOf('Mara'), tags: listTags(db), entities: listEntities(db) }).toEqual(
+      before
+    )
+    expect(mara.id).toBe(before.entities[0]?.id)
+    expect(changes).toEqual([])
+    expect(logged).toEqual([])
+    // Cut under the minimum: the summary goes, the old facts stay.
+    saveDocument(db, scene, doc('Short.'))
+    await expect(run()).rejects.toMatchObject({ code: 'VALIDATION' })
+    expect(factsOf('Mara')).toEqual(before.facts)
   })
 
   it('never changes scene text: a run that logs facts, a sheet, and tags leaves every document byte-identical (F-9.13)', async () => {

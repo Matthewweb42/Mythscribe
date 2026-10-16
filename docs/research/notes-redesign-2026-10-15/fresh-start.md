@@ -1,5 +1,7 @@
 # Fresh start: the old story bible put away (2026-10-15)
 
+Status: built 2026-10-15 (decisions in `QUESTIONS.md`, "Fresh start: the old story bible put away").
+
 Replaces phase 4 ("conversion") of `plan.md`. The author's decision (2026-10-15): "I don't want
 the story bible stuff that's there right now. Most of it is AI generated and I kinda wanna restart
 it all anyway… So long as my manuscript stays untouched." No conversion of sheets.

@@ -53,11 +53,17 @@ const V2_TYPES: readonly SearchType[] = ['record', 'research']
 /**
  * The types a project's search offers. Story memory v2 searches records (names, Pinned, Ideas)
  * in place of the v1 sheets, and Research's documents (F-16.8); a v1 project has neither, so its
- * chips are as they were.
+ * chips are as they were. With the old story bible archived (notes redesign, fresh start) a v1
+ * project searches no sheets either.
  */
-export function searchTypesFor(memory: 'v1' | 'v2'): readonly SearchType[] {
+export function searchTypesFor(
+  memory: 'v1' | 'v2',
+  storyBibleArchived = false
+): readonly SearchType[] {
   const left = memory === 'v2' ? SHEET_TYPES : V2_TYPES
-  return SEARCH_TYPES.filter((type) => !left.includes(type))
+  return SEARCH_TYPES.filter(
+    (type) => !left.includes(type) && !(storyBibleArchived && SHEET_TYPES.includes(type))
+  )
 }
 
 /** What a record hit's field says for each page (F-16.6): Pinned is canon, Ideas never are. */

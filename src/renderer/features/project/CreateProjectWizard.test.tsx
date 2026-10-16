@@ -220,7 +220,9 @@ describe('CreateProjectWizard', () => {
     const { onCreate } = setup()
     await goToContextStep('My Book')
     expect(screen.getByRole('dialog')).toHaveTextContent('Step 5 of 5')
-    expect(screen.getByRole('dialog')).toHaveTextContent('review everything before it lands')
+    // Notes redesign (fresh start): a new v1 project keeps the old story bible archived, so the
+    // files become note pages in Notes › Docs (App's `onCreate`), not Library uploads.
+    expect(screen.getByRole('dialog')).toHaveTextContent('Each becomes a page in Notes › Docs')
     chosen = ['/docs/people.md', '/docs/map.png']
     await userEvent.click(screen.getByTestId('wizard-context-add'))
     expect(await screen.findByRole('list', { name: 'Files to add' })).toHaveTextContent('people.md')

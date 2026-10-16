@@ -105,3 +105,17 @@ export function notebookTitleFromFileName(name: string): string {
   const base = (dot > 0 ? name.slice(0, dot) : name).trim()
   return (base === '' ? 'Untitled' : base).slice(0, NOTEBOOK_TITLE_MAX)
 }
+
+/**
+ * Notes redesign, fresh start (the author 2026-10-15): the folder the author's uploaded docs come
+ * into, once per project (the Library's files on the first open after the old story bible was put
+ * away, or the new-project wizard's files).
+ */
+export const DOCS_FOLDER_TITLE = 'Docs'
+
+/**
+ * The project `settings` row that records the Library's files were copied into Notes › Docs (or
+ * that there were none to copy), so the copy never runs twice and a deleted Docs folder is never
+ * made again.
+ */
+export const NOTEBOOK_DOCS_COPIED_KEY = 'notebookDocsCopied'

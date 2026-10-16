@@ -102,6 +102,11 @@ export interface MenuItem {
    * project's story memory, which the welcome screen has none of.
    */
   openProjectOnly?: true
+  /**
+   * Part of the old story bible (notes redesign, fresh start, 2026-10-15): absent while Settings ›
+   * Archived features keeps it archived.
+   */
+  storyBible?: true
 }
 
 export interface MenuSeparator {
@@ -187,9 +192,14 @@ export const MENU: readonly MenuSection[] = [
       { id: 'insertPart', label: 'Part', shortcut: 'insertPart', level: 'part', when: 'project' },
       SEPARATOR,
       // F-9.3: each opens the creation dialog of its kind.
-      { id: 'insertCharacter', label: 'Character', when: 'project' },
-      { id: 'insertSetting', label: 'Setting', when: 'project' },
-      { id: 'insertWorldItem', label: 'World-building note', when: 'project' },
+      { id: 'insertCharacter', label: 'Character', when: 'project', storyBible: true },
+      { id: 'insertSetting', label: 'Setting', when: 'project', storyBible: true },
+      {
+        id: 'insertWorldItem',
+        label: 'World-building note',
+        when: 'project',
+        storyBible: true
+      },
       SEPARATOR,
       { id: 'insertSceneBreak', label: 'Scene break', when: 'project' }
     ]
@@ -202,9 +212,9 @@ export const MENU: readonly MenuSection[] = [
       { id: 'toggleNotes', label: 'Notes', when: 'project' },
       { id: 'toggleAssistant', label: 'AI assistant', shortcut: 'assistant', when: 'project' },
       // F-9.6: the quick reference panel.
-      { id: 'toggleReferences', label: 'References', when: 'project' },
+      { id: 'toggleReferences', label: 'References', when: 'project', storyBible: true },
       // The tags column, which replaced the tag bar above the editor (2026-10-06).
-      { id: 'toggleTags', label: 'Tags', when: 'project', memory: 'v1' },
+      { id: 'toggleTags', label: 'Tags', when: 'project', memory: 'v1', storyBible: true },
       // F-16.12: the This scene panel sits in the tags column's place in a v2 project.
       { id: 'toggleThisScene', label: 'This scene', when: 'project', memory: 'v2' },
       // Layout 3c: the columns back to the default arrangement and widths.
@@ -227,7 +237,7 @@ export const MENU: readonly MenuSection[] = [
     id: 'tools',
     label: 'Tools',
     entries: [
-      { id: 'openTags', label: 'Tags', when: 'project', memory: 'v1' },
+      { id: 'openTags', label: 'Tags', when: 'project', memory: 'v1', storyBible: true },
       { id: 'openGoals', label: 'Goals…', when: 'project' },
       { id: 'openWordCount', label: 'Word count…', when: 'project' },
       { id: 'openStatistics', label: 'Statistics…', when: 'project' },
@@ -304,15 +314,49 @@ const MENU_BY_MEMORY: Readonly<Record<StoryMemoryVersion | 'none', readonly Menu
 export function menuFor(options: {
   devTools: boolean
   storyMemory: StoryMemoryVersion | null
+  /** The old story bible is archived in the open project (`isStoryBibleArchived`): its items go. */
+  storyBibleArchived?: boolean
 }): readonly MenuSection[] {
   const { devTools, storyMemory } = options
-  const base = MENU_BY_MEMORY[storyMemory ?? 'none']
+  const base = (options.storyBibleArchived === true ? MENU_ARCHIVED_BY_MEMORY : MENU_BY_MEMORY)[
+    storyMemory ?? 'none'
+  ]
   if (!devTools) return base
   return base.map((section) =>
     section.id === 'help'
       ? { ...section, entries: [...section.entries, ...DEVELOPER_MENU_ENTRIES] }
       : section
   )
+}
+
+/**
+ * `menu` less the old story bible's items, and less the separators that leaves doubled or at an
+ * end (Insert's character, setting and world items sit between two).
+ */
+function withoutStoryBible(menu: readonly MenuSection[]): readonly MenuSection[] {
+  return menu.map((section) => {
+    const entries: MenuEntry[] = []
+    for (const entry of section.entries) {
+      if (isSeparator(entry)) {
+        const last = entries[entries.length - 1]
+        if (last !== undefined && !isSeparator(last)) entries.push(entry)
+      } else if (entry.storyBible !== true) {
+        entries.push(entry)
+      }
+    }
+    const last = entries[entries.length - 1]
+    if (last !== undefined && isSeparator(last)) entries.pop()
+    return { ...section, entries }
+  })
+}
+
+/** The same menus with the old story bible archived (`menuFor`'s `storyBibleArchived`). */
+const MENU_ARCHIVED_BY_MEMORY: Readonly<
+  Record<StoryMemoryVersion | 'none', readonly MenuSection[]>
+> = {
+  v1: withoutStoryBible(MENU_BY_MEMORY.v1),
+  v2: withoutStoryBible(MENU_BY_MEMORY.v2),
+  none: withoutStoryBible(MENU_BY_MEMORY.none)
 }
 
 export function isSeparator(entry: MenuEntry): entry is MenuSeparator {

@@ -84,6 +84,11 @@ interface NotebookState extends NotebookIndex {
   move: (id: string, parentId: string | null, position: number) => Promise<void>
   /** Imports dropped files, or (none given) asks main to open the file dialog. */
   importFiles: (files?: NotebookDroppedFile[], parentId?: string | null) => Promise<void>
+  /**
+   * Notes redesign (fresh start): files picked on disk (the new-project wizard's) become pages in
+   * a new top-level folder `folder`. Toasts what was skipped; opens nothing.
+   */
+  importPathsInto: (paths: string[], folder: string) => Promise<void>
   /** Reads the page's versions: a newest one by Ms Scribe the author has not seen raises the bar. */
   checkAiEdit: (pageId: string) => Promise<void>
   /** Puts the page back as it was before Ms Scribe's edit. */
@@ -334,6 +339,24 @@ export const useNotebookStore = create<NotebookState>((set, get) => {
       for (const skip of result.skipped) toast.warning(`${skip.name}: ${skip.reason}`)
       const first = pages[0]
       if (pages.length === 1 && first !== undefined) get().open(first.id)
+    },
+
+    async importPathsInto(paths, folder) {
+      if (paths.length === 0) return
+      const made = await ipc().invoke('notebook:create', {
+        parentId: null,
+        kind: 'folder',
+        title: folder
+      })
+      set({ busy: true })
+      let result: NotebookImportResult | null
+      try {
+        result = await ipc().invoke('notebook:import', { parentId: made.id, paths })
+      } finally {
+        set({ busy: false })
+      }
+      await get().load()
+      for (const skip of result?.skipped ?? []) toast.warning(`${skip.name}: ${skip.reason}`)
     },
 
     async checkAiEdit(pageId) {

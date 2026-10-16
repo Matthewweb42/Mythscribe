@@ -6,6 +6,7 @@ import { getSummary } from '../document/summaryStore'
 import { listCategories } from '../entity/categoryStore'
 import { listContextFiles, getContextFileRow, readContextText } from '../library/libraryStore'
 import { listNotebook, listNotebookPages } from '../notebook/notebookStore'
+import { storyBibleArchivedIn } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { documentText } from '../voice/profile'
 import { loadAgentProject, type AgentProject } from '../ai/agentTools'
@@ -14,8 +15,9 @@ import type { ScribePage, ScribeScene } from './context'
 
 /**
  * What Ms Scribe's v1 context is made of, read from the open project (notes redesign phase 1):
- * the notebook's pages, and until phase 4 converts them the story-bible sheets and the Library's
- * uploads as pages too; the manuscript's scenes in reading order under the agent's refs; and the
+ * the notebook's pages, and while the old story bible is switched back on (Settings › Archived
+ * features; archived by default since the fresh start) its sheets and the Library's uploads as
+ * pages too; the manuscript's scenes in reading order under the agent's refs; and the
  * names to look for (page titles, sheet names and their other names).
  */
 export interface ScribeMaterial {
@@ -83,6 +85,9 @@ export async function loadScribeSources(
   nodeId: string | null
 ): Promise<ScribeMaterial> {
   const project = loadAgentProject(db, nodeId, 'v1')
+  // Notes redesign (fresh start): while the old story bible is archived its sheets and the
+  // Library's uploads are not read; the notes and the manuscript are all she gets.
+  const bible = !storyBibleArchivedIn(db, 'v1')
   const items = listNotebook(db)
   let n = 0
   const ref = (): string => `p${++n}`
@@ -94,7 +99,7 @@ export async function loadScribeSources(
     folder: folderPath(items, page.parentId),
     text: page.plain
   }))
-  for (const entity of project.entities) {
+  for (const entity of bible ? project.entities : []) {
     pages.push({
       ref: ref(),
       id: entity.id,
@@ -104,7 +109,7 @@ export async function loadScribeSources(
       text: sheetText(db, entity)
     })
   }
-  for (const upload of await libraryPages(db, folder)) {
+  for (const upload of bible ? await libraryPages(db, folder) : []) {
     pages.push({
       ref: ref(),
       id: upload.id,
@@ -131,7 +136,7 @@ export async function loadScribeSources(
   })
   const names = [
     ...pages.filter((page) => page.kind !== 'library').map((page) => page.title),
-    ...project.entities.flatMap((entity) => entity.aliases)
+    ...(bible ? project.entities.flatMap((entity) => entity.aliases) : [])
   ]
   return { project, pages, scenes, names }
 }

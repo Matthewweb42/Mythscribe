@@ -36,6 +36,7 @@ import { ManuscriptTab } from '@renderer/features/manuscript/ManuscriptTab'
 import { useTreeStore } from '@renderer/features/manuscript/treeStore'
 import { OutlineTab } from '@renderer/features/outline/OutlineTab'
 import { useStoryMemory } from '@renderer/features/project/storyMemory'
+import { useIsArchived } from '@renderer/features/shell/archived'
 import { RecordTab } from '@renderer/features/records/RecordTab'
 import { useRecordStore } from '@renderer/features/records/recordStore'
 import { ResearchTab } from '@renderer/features/research/ResearchTab'
@@ -322,9 +323,11 @@ function categorySection(
 export function buildSections(
   categories: readonly StoryCategory[],
   counts: SectionCounts,
-  memory: StoryMemoryVersion
+  memory: StoryMemoryVersion,
+  options: { storyBibleArchived?: boolean } = {}
 ): SidebarSection[] {
   if (memory === 'v2') return buildV2Sections(categories, counts)
+  if (options.storyBibleArchived === true) return buildFreshStartSections(counts)
   const all = withStrays(categories, counts.sheets)
   const threads = all.find((category) => category.id === THREAD_KIND)
   return [
@@ -338,6 +341,23 @@ export function buildSections(
       ? []
       : [categorySection(threads, counts.sheets[threads.id] ?? 0, 'tools')]),
     ...TOOLS.map((tool) => toolSection(tool, counts, 'tools'))
+  ]
+}
+
+/**
+ * Notes redesign, fresh start (the author 2026-10-15): with the old story bible archived, a v1
+ * project lists Manuscript, Notes, Outline, Timeline and Edits. The categories, the Index,
+ * Threads, Library, To do and Changes are hidden; a stored section among them opens on Manuscript.
+ */
+const FRESH_START_TOOLS: readonly SidebarToolId[] = ['outline', 'timeline', 'edits']
+
+function buildFreshStartSections(counts: SectionCounts): SidebarSection[] {
+  return [
+    toolSection(MANUSCRIPT, counts, 'manuscript'),
+    toolSection(NOTES, counts, 'manuscript'),
+    ...TOOLS.filter((tool) => FRESH_START_TOOLS.includes(tool.id)).map((tool) =>
+      toolSection(tool, counts, 'tools')
+    )
   ]
 }
 
@@ -399,9 +419,11 @@ export function useSidebarSections(): SidebarSection[] {
       return counts
     })
   )
+  const storyBibleArchived = useIsArchived('storyBible')
   return buildSections(
     categories,
     { documents, tags, timeline, edits, library, changes, todo, sheets, research, records, notes },
-    memory
+    memory,
+    { storyBibleArchived }
   )
 }

@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Library, NotebookText } from 'lucide-react'
+import { Library, NotebookPen, NotebookText } from 'lucide-react'
 import { currentStoryMemory, useStoryMemory } from '@renderer/features/project/storyMemory'
 import { useResearchStore } from '@renderer/features/research/researchStore'
+import { takeDropped } from '@renderer/features/notebook/droppedEntries'
+import { useNotebookStore } from '@renderer/features/notebook/notebookStore'
+import { archivedNow, useIsArchived } from '@renderer/features/shell/archived'
 import { toast } from '@renderer/features/shell/dialogs/dialogStore'
 import { describeError } from '@renderer/lib/errors'
 import { useLibraryStore } from './libraryStore'
@@ -57,6 +60,17 @@ export function DropOverlay(): React.JSX.Element | null {
       event.stopPropagation()
       depth = 0
       setOver(false)
+      // Notes redesign (fresh start): with the old story bible archived there is no Library to
+      // add to; the files become note pages at the top of Notes, as a drop on Notes would.
+      if (archivedNow('storyBible') && event.dataTransfer !== null) {
+        const read = takeDropped(event.dataTransfer)
+        read()
+          .then((files) =>
+            files.length === 0 ? undefined : useNotebookStore.getState().importFiles(files, null)
+          )
+          .catch((err: unknown) => toast.error(describeError(err)))
+        return
+      }
       const files = Array.from(event.dataTransfer?.files ?? [])
       if (files.length === 0) return
       const adding =
@@ -84,7 +98,19 @@ export function DropOverlay(): React.JSX.Element | null {
 /** What a drop will do, in the open project's story memory. */
 function DropHint(): React.JSX.Element {
   const research = useStoryMemory() === 'v2'
-  const Icon = research ? NotebookText : Library
+  // Notes redesign (fresh start): with the old story bible archived, a drop makes note pages.
+  const notes = useIsArchived('storyBible')
+  const Icon = notes ? NotebookPen : research ? NotebookText : Library
+  const title = notes
+    ? 'Drop to add to Notes'
+    : research
+      ? 'Drop to add to Research'
+      : 'Drop to add to the Library'
+  const detail = notes
+    ? 'Worldbuilding documents and notes (Word, Markdown, text, PDF), each as a page you can edit.'
+    : research
+      ? 'Worldbuilding documents, notes, maps, and art, each as a page you can read and edit.'
+      : 'Worldbuilding documents, character notes, maps, and art. You review before anything lands.'
   return (
     <div
       data-testid="library-drop-overlay"
@@ -92,14 +118,8 @@ function DropHint(): React.JSX.Element {
     >
       <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-accent bg-surface-raised px-10 py-8 text-center shadow-panel">
         <Icon size={28} aria-hidden="true" className="text-accent" />
-        <p className="m-0 text-base font-semibold">
-          {research ? 'Drop to add to Research' : 'Drop to add to the Library'}
-        </p>
-        <p className="m-0 text-sm text-fg-muted">
-          {research
-            ? 'Worldbuilding documents, notes, maps, and art, each as a page you can read and edit.'
-            : 'Worldbuilding documents, character notes, maps, and art. You review before anything lands.'}
-        </p>
+        <p className="m-0 text-base font-semibold">{title}</p>
+        <p className="m-0 text-sm text-fg-muted">{detail}</p>
       </div>
     </div>
   )

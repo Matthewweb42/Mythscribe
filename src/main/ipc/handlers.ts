@@ -286,6 +286,7 @@ import {
   updateNotebookItem
 } from '../notebook/notebookStore'
 import { importNotebookFiles, type NotebookImportSource } from '../notebook/notebookImport'
+import { copyLibraryDocsOnce } from '../notebook/libraryDocs'
 import {
   runTodoPass,
   suggestTodo,
@@ -361,6 +362,7 @@ import {
   getKeptSpellings,
   setKeptSpellings,
   getEditorSettings,
+  storyBibleArchivedIn,
   getFocusSettings,
   getProjectDictionary,
   getProjectSession,
@@ -642,6 +644,11 @@ export interface HandlerDeps {
    * Absent in the unit tests, which have no menu.
    */
   onAssistantNameChanged?: () => void
+  /**
+   * Notes redesign (fresh start): the project's editor settings were saved, which may have
+   * archived the old story bible or switched it back on; `index.ts` rebuilds the native menu.
+   */
+  onEditorSettingsChanged?: () => void
 }
 
 export function registerHandlers({
@@ -664,7 +671,8 @@ export function registerHandlers({
   openExternal,
   openPath,
   onCloseCancelled,
-  onAssistantNameChanged
+  onAssistantNameChanged,
+  onEditorSettingsChanged
 }: HandlerDeps): void {
   /**
    * AI-BILLING-SPEC M1: every channel is registered through the read-only gate. A `write` channel
@@ -695,6 +703,17 @@ export function registerHandlers({
    * which every branching feature takes as its `memory` input.
    */
   const memory = (): StoryMemoryVersion => manager.require().storyMemory
+  /**
+   * Notes redesign (fresh start): whether the open project keeps the old story bible archived
+   * (Settings › Archived features, read from its editor settings row). While it does, nothing here
+   * reads it or writes it: no automatic tags or observed facts, no background consistency check,
+   * no To do sync, no sheet sync, no mention scan, no conversions on open. False with no project.
+   */
+  const bibleArchived = (): boolean => {
+    if (manager.current() === null) return false
+    const session = manager.require()
+    return storyBibleArchivedIn(session.connection.orm, session.storyMemory)
+  }
   /**
    * The failure envelope every AI channel answers with. Developer tools: the request path traces
    * and logs its own failures, but a feature the AI switch or its toggle forbids is refused
@@ -785,7 +804,9 @@ export function registerHandlers({
       // cancel is passed on, so Stop still stops the job. Nothing is shown but the panel's count.
       let checked: Awaited<ReturnType<typeof runBackgroundContinuity>> = null
       // F-16.4: the consistency check is v1's (its findings are v1 rows); P4 replaces it.
-      if (memoryNow === 'v1') {
+      // Notes redesign (fresh start): it compares the scene with the old story bible, so it does
+      // not run while that is archived.
+      if (memoryNow === 'v1' && !bibleArchived()) {
         try {
           checked = await runBackgroundContinuity(db, deps, {
             nodeId: job.nodeId,
@@ -872,6 +893,8 @@ export function registerHandlers({
   const queueTodo = (db: TreeDb): void => {
     // F-16.4: the To do list is v1's; a v2 project has the author's own to-dos instead.
     if (manager.current()?.storyMemory === 'v2') return
+    // Notes redesign (fresh start): nor while the old story bible is archived.
+    if (bibleArchived()) return
     todoBookMoved()
     const root = manuscriptRootId(db)
     if (root !== null) todoQueue.touch('todo', root)
@@ -1220,7 +1243,8 @@ export function registerHandlers({
   const sheetSync = createSheetSyncService({
     db: () => (manager.current() === null ? null : manager.require().connection.orm),
     request: (db) => requestDeps(db),
-    ready: (db) => access.writable() && Boolean(ai.get(sourceOf(db))),
+    // Notes redesign (fresh start): a sheet's views are not kept while the bible is archived.
+    ready: (db) => access.writable() && Boolean(ai.get(sourceOf(db))) && !bibleArchived(),
     cancelRequest: (requestId) => void cancelInflight(requestId),
     onStatuses: (statuses) => emit(windows(), 'sheetSync:changed', statuses),
     onEntity: (entity) => {
@@ -1450,6 +1474,7 @@ export function registerHandlers({
     const v2 = memory() === 'v2'
     // F-16.17 (plan P2a §3.7): `summary.v5` is off in v2; the reader reads the scenes instead.
     const summaries = !v2 && isFeatureAllowed(getAiSettings(db), 'summary')
+    const bibleOff = !v2 && bibleArchived()
     for (const id of ids) {
       if (summaries) queue.touch('summary', id)
       if (v2) {
@@ -1463,7 +1488,8 @@ export function registerHandlers({
       // F-4.12: the mention scan is local, so it has no gate to read — every save queues one, and
       // the scan itself answers "nothing changed" for a node that is not a manuscript document.
       // F-4.12b: a scan that read the document again republishes the proposed tags itself.
-      mentionQueue.touch('mentions', id)
+      // Notes redesign (fresh start): no scan while the old story bible is archived.
+      if (!bibleOff) mentionQueue.touch('mentions', id)
     }
     if (v2 && origin === 'bulk') {
       mentionQueue.indexAll('anchors', [...ids])
@@ -1725,9 +1751,19 @@ export function registerHandlers({
     return getEditorSettings(session.connection.orm, session.info.format)
   })
 
-  register('editorSettings:set', (value) =>
-    setEditorSettings(manager.require().connection.orm, value)
-  )
+  register('editorSettings:set', (value) => {
+    const db = manager.require().connection.orm
+    const wasArchived = bibleArchived()
+    const stored = setEditorSettings(db, value)
+    // Notes redesign (fresh start): the old story bible's menu items follow its switch, and
+    // switched back on, its local index catches up with what was written meanwhile (free).
+    onEditorSettingsChanged?.()
+    if (wasArchived && !bibleArchived()) {
+      mentionQueue.indexAll('mentions', staleMentionNodeIds(db))
+      queueTodo(db)
+    }
+    return stored
+  })
 
   register('aiSettings:get', () => getAiSettings(manager.require().connection.orm))
 
@@ -2763,6 +2799,22 @@ export function registerHandlers({
   // Notes redesign phase 1: the notebook. Every write tells the windows which items moved.
   const notebookMoved = (ids: string[]): void => emit(windows(), 'notebook:changed', { ids })
   const notebookDb = (): TreeDb => manager.require().connection.orm
+  /**
+   * Notes redesign (fresh start): the Library's files into Notes › Docs, once per project, as the
+   * project opens with the old story bible archived. Local and free; a failure never stops the
+   * open and leaves the copy for the next one.
+   */
+  const copyDocsOnce = (db: TreeDb): void => {
+    if (manager.current() === null) return
+    const session = manager.require()
+    const stillOpen = (): boolean =>
+      manager.current() !== null && manager.require().connection === session.connection
+    copyLibraryDocsOnce(db, session.folder, stillOpen)
+      .then((ids) => {
+        if (ids.length > 0) notebookMoved(ids)
+      })
+      .catch((err: unknown) => console.warn('Could not copy the Library into Notes', err))
+  }
   register('notebook:list', () => listNotebook(notebookDb()))
   register('notebook:get', ({ id }) => getNotebookPage(notebookDb(), id))
   register('notebook:create', ({ parentId, kind, title, content }) => {
@@ -2797,11 +2849,12 @@ export function registerHandlers({
     return page
   })
   // Dropped files come as bytes with their folders; Import files… picks paths in the open dialog.
-  register('notebook:import', async ({ parentId, files }) => {
+  register('notebook:import', async ({ parentId, files, paths }) => {
     manager.require()
     let sources: NotebookImportSource[]
     if (files === undefined) {
-      const chosen = await dialogs.chooseContextFiles()
+      // Picked files (the wizard's), else the open dialog.
+      const chosen = paths ?? (await dialogs.chooseContextFiles())
       if (chosen === null) return null
       sources = chosen.map((file) => ({
         name: path.basename(file),
@@ -5957,7 +6010,9 @@ export function registerHandlers({
     // documents that left the manuscript. Local and free; a failure never stops the open.
     // F-16.4: a v2 project skips all of it (v1's conversions write v1 tables) and prunes its own
     // passage index instead.
-    if (info?.storyMemory === 'v1') {
+    // Notes redesign (fresh start): while the old story bible is archived none of this runs, so
+    // its rows stay exactly as they were.
+    if (info?.storyMemory === 'v1' && !bibleArchived()) {
       try {
         const db = manager.require().connection.orm
         convertKnowledgeIndex(db)
@@ -6000,6 +6055,13 @@ export function registerHandlers({
           console.warn('Could not drop the summary jobs', err)
         }
         reader.opened()
+      } else if (bibleArchived()) {
+        // Notes redesign (fresh start): the old story bible is archived: the summaries (the book
+        // map reads them) and the voice job only; no mention scan, To do sync or sheet sync. The
+        // Library's files come into Notes › Docs, once per project.
+        queue.load()
+        voiceQueue.load()
+        copyDocsOnce(opened)
       } else {
         queue.load()
         mentionQueue.indexAll('mentions', staleMentionNodeIds(opened))

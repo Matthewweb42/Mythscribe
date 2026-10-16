@@ -10,6 +10,7 @@ import { BackgroundManager } from './BackgroundManager'
 import { useBackgroundStore } from './backgroundStore'
 import { useFocusStore } from './focusStore'
 import { useAssistantName } from '@renderer/features/shell/viewStore'
+import { Unarchived } from '@renderer/features/shell/Unarchived'
 
 const BUTTON =
   'flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-fg-muted hover:bg-surface-raised hover:text-fg disabled:opacity-40 aria-pressed:bg-surface-raised aria-pressed:text-accent'
@@ -103,16 +104,19 @@ export function FocusControlBar(): React.JSX.Element {
           <StickyNote size={14} aria-hidden="true" />
           Notes
         </button>
-        <button
-          type="button"
-          aria-pressed={panels.references}
-          onMouseDown={keepCaret}
-          onClick={() => togglePanel('references')}
-          className={BUTTON}
-        >
-          <Pin size={14} aria-hidden="true" />
-          References
-        </button>
+        {/* Notes redesign (fresh start): the quick reference goes with the old story bible. */}
+        <Unarchived feature="storyBible">
+          <button
+            type="button"
+            aria-pressed={panels.references}
+            onMouseDown={keepCaret}
+            onClick={() => togglePanel('references')}
+            className={BUTTON}
+          >
+            <Pin size={14} aria-hidden="true" />
+            References
+          </button>
+        </Unarchived>
         <button
           type="button"
           aria-pressed={panels.assistant}

@@ -40,7 +40,7 @@ import {
 } from '@shared/summary'
 import { deleteSummary, getSummary, summariesFor, upsertSummary } from '../document/summaryStore'
 import { AppError } from '../ipc/errors'
-import { getAiSettings } from '../project/settingsStore'
+import { getAiSettings, storyBibleArchivedIn } from '../project/settingsStore'
 import type { TreeDb } from '../tree/treeStore'
 import { documentText, manuscriptDocuments } from '../voice/profile'
 import type { NodeRow } from '../db/schema'
@@ -296,6 +296,10 @@ export async function summarizeScene(
   input: SummarizeSceneInput
 ): Promise<SummarizeSceneResult> {
   assertFeatureAllowed(getAiSettings(db), 'summary')
+  // F-16.4: a v2 project derives nothing. Notes redesign (fresh start): nor does a v1 project
+  // while the old story bible is archived: the summary (and its card) is stored, no fact, tag,
+  // sheet, thread or Changes row is written or cleared, so the old rows stay as they were.
+  const derives = input.memory === 'v1' && !storyBibleArchivedIn(db, input.memory)
 
   const source = summarySource(db, input.nodeId)
   if (source === null) {
@@ -310,8 +314,9 @@ export async function summarizeScene(
     const cleared = db.transaction((tx) => {
       deleteSummary(tx, input.nodeId)
       // F-9.13: with no text read, every AI fact of the scene has lost its quote; nothing is added.
-      // F-16.4: a v2 project derives nothing, so there is nothing to clear either.
-      if (input.memory === 'v2') return null
+      // F-16.4: a v2 project derives nothing, so there is nothing to clear either; nor does an
+      // archived story bible (its rows stay untouched).
+      if (!derives) return null
       return applyDerivedKnowledge(tx, {
         nodeId: input.nodeId,
         facts: [],
@@ -373,18 +378,17 @@ export async function summarizeScene(
       sourceHash(source.sceneText, source.meta, knownNames(tx, source.sceneText)) ===
       source.contentHash
     // F-9.13: facts, sheets, tags, and the Changes log, together. F-16.4: none of it in v2.
-    const derived =
-      input.memory === 'v2'
-        ? NOTHING_DERIVED
-        : applyDerivedKnowledge(tx, {
-            nodeId: input.nodeId,
-            facts: parsed.facts,
-            tags: parsed.tags,
-            relations: parsed.relations,
-            threads: parsed.threads,
-            sceneText: source.sceneText,
-            now: deps.now().toISOString()
-          })
+    const derived = !derives
+      ? NOTHING_DERIVED
+      : applyDerivedKnowledge(tx, {
+          nodeId: input.nodeId,
+          facts: parsed.facts,
+          tags: parsed.tags,
+          relations: parsed.relations,
+          threads: parsed.threads,
+          sceneText: source.sceneText,
+          now: deps.now().toISOString()
+        })
     const applied = derived.facts
     const tags = derived.tags
     const row: StoredSceneSummary = {
