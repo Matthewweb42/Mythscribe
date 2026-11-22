@@ -1,0 +1,27 @@
+{
+  "name": "mythscribe-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Mythscribe Desk as a web app: Desk's page, a browser shim for its capabilities, and a Worker for AI and sync.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && wrangler d1 migrations apply mythscribe-web --local && wrangler dev",
+    "test": "node scripts/build.mjs && vitest run",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types worker-configuration.d.ts",
+    "smoke": "node test/smoke/run.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.12.0"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.8",
+    "jsdom": "^26.1.0",
+    "jszip": "^3.10.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "5.0.0",
+    "wrangler": "4.131.2"
+  }
+}

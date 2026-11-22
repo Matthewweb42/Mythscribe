@@ -1,0 +1,3 @@
+# Copy to .dev.vars for local runs. .dev.vars is git-ignored; never commit a real key.
+AUTH_MODE=none
+ANTHROPIC_API_KEY=put-your-key-here
