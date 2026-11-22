@@ -8,6 +8,10 @@ compatibility_date = "2026-09-01"
 account_id = "dcc26cac35ac537e749bfab8672bd8d3"
 workers_dev = true
 
+# Desk's page (public/index.html) is built, not kept in git, so every deploy builds it first.
+[build]
+command = "node scripts/build.mjs"
+
 [assets]
 directory = "public"
 binding = "ASSETS"
