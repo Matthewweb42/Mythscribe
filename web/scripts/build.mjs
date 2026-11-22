@@ -7,9 +7,11 @@ import path from 'node:path'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(here, '..')
-const src = readFileSync(path.join(root, 'desk', 'mythscribe-desk.html'), 'utf8')
-const localImport = readFileSync(path.join(root, 'desk', 'patches', 'local-doc-import.js'), 'utf8')
-const readerLinks = readFileSync(path.join(root, 'desk', 'patches', 'reader-links.js'), 'utf8')
+// Read with Unix line endings, so the patches match on a Windows checkout (git autocrlf) too.
+const read = (...p) => readFileSync(path.join(root, ...p), 'utf8').replace(/\r\n/g, '\n')
+const src = read('desk', 'mythscribe-desk.html')
+const localImport = read('desk', 'patches', 'local-doc-import.js')
+const readerLinks = read('desk', 'patches', 'reader-links.js')
 
 const patches = [
   {
