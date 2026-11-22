@@ -75,11 +75,12 @@ Cloudflare account, with both migrations applied, and its id in `wrangler.toml`.
 
 Left for you, from `web/` on this branch:
 
-1. The AI key: `npx wrangler secret put ANTHROPIC_API_KEY` (it asks for the key; paste it there).
-2. `npx wrangler deploy`. It goes up at `https://mythscribe-web.<your-subdomain>.workers.dev`;
-   `workers_dev = true` and there's no route, so the live mythscribe.app site isn't touched.
+1. `npx wrangler deploy`, signed in to that account (`npx wrangler login` first if needed). It
+   goes up at `https://mythscribe-web.<your-subdomain>.workers.dev`; `workers_dev = true` and
+   there's no route, so the live mythscribe.app site isn't touched.
+2. The AI key: `npx wrangler secret put ANTHROPIC_API_KEY` (it asks for the key; paste it there).
 
-Run the secret step after the first deploy if wrangler says the Worker doesn't exist yet. Sign-in
+Sign-in
 uses `CLOUD_API` (`https://api.mythscribe.app`), so the cloud Worker must answer there. A later
 migration goes on with `npx wrangler d1 migrations apply mythscribe-web --remote`.
 
