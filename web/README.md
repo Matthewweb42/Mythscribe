@@ -68,22 +68,20 @@ Checks:
   restored on a second device, sync between two devices, Ms Scribe's tool loop, and a reader
   link from making it to bringing the reader's note in.
 
-## What you create before it goes live
+## Putting it online
 
-Nothing in your Cloudflare account was created or changed for this.
+Done already (Nov 22): the D1 database `mythscribe-web` in the Webeckematthew@gmail.com
+Cloudflare account, with both migrations applied, and its id in `wrangler.toml`.
 
-1. The database: `npx wrangler d1 create mythscribe-web`. Put the id it prints in `wrangler.toml`
-   in place of the zeros.
-2. Its tables: `npx wrangler d1 migrations apply mythscribe-web --remote`. This applies both
-   migrations, `0001_web.sql` and `0002_rooms.sql` (reader links). Nothing else is new for week 2.
-3. The AI key: `npx wrangler secret put ANTHROPIC_API_KEY`.
-4. An address. The Worker has no route and `workers_dev = false`, so a deploy reaches nobody until
-   you add one, for example a `routes` entry for `desk.mythscribe.app`. The live mythscribe.app
-   site isn't touched.
-5. Then `npx wrangler deploy`.
+Left for you, from `web/` on this branch:
 
-Sign-in uses `CLOUD_API` (`https://api.mythscribe.app`), so the cloud Worker must be deployed
-for sign-in to work.
+1. The AI key: `npx wrangler secret put ANTHROPIC_API_KEY` (it asks for the key; paste it there).
+2. `npx wrangler deploy`. It goes up at `https://mythscribe-web.<your-subdomain>.workers.dev`;
+   `workers_dev = true` and there's no route, so the live mythscribe.app site isn't touched.
+
+Run the secret step after the first deploy if wrangler says the Worker doesn't exist yet. Sign-in
+uses `CLOUD_API` (`https://api.mythscribe.app`), so the cloud Worker must answer there. A later
+migration goes on with `npx wrangler d1 migrations apply mythscribe-web --remote`.
 
 ## Known gaps (on purpose, for now)
 
