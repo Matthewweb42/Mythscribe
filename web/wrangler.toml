@@ -1,0 +1,36 @@
+# Mythscribe Desk on the web (week 1 MVP): serves Desk's page with a browser shim, and two API
+# routes: /api/ai (Ms Scribe's calls, on the Anthropic API) and /api/sync (books kept in the
+# browser, copied to D1). See README.md. It goes online at its workers.dev address only; no
+# route is set, so it never touches mythscribe.app.
+name = "mythscribe-web"
+main = "src/worker.ts"
+compatibility_date = "2026-09-01"
+account_id = "dcc26cac35ac537e749bfab8672bd8d3"
+workers_dev = true
+
+# Desk's page (public/index.html) is built, not kept in git, so every deploy builds it first.
+[build]
+command = "node scripts/build.mjs"
+
+[assets]
+directory = "public"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/r/*"]
+
+# Created 2026-11-22 with both migrations applied. Local runs (`npm run dev`) use a local copy.
+[[d1_databases]]
+binding = "DB"
+database_name = "mythscribe-web"
+database_id = "828ac685-38c8-4ac5-a63a-b3251b7cd3fb"
+migrations_dir = "migrations"
+
+[vars]
+# `cloud`: sign in with the MythScribe account (email link or code), checked against CLOUD_API.
+# `none`: one local author, no sign-in (local runs only; set it in .dev.vars).
+AUTH_MODE = "cloud"
+CLOUD_API = "https://api.mythscribe.app"
+# Each account's AI spend per calendar month, in US dollars, before /api/ai answers "quota".
+AI_MONTHLY_CAP_USD = "10"
+
+# Secret (never in this file): ANTHROPIC_API_KEY, set with `npx wrangler secret put ANTHROPIC_API_KEY`
+# for the deployed Worker, or in .dev.vars for local runs.
