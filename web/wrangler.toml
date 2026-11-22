@@ -10,7 +10,7 @@ workers_dev = false
 [assets]
 directory = "public"
 binding = "ASSETS"
-run_worker_first = ["/api/*"]
+run_worker_first = ["/api/*", "/r/*"]
 
 # Create it with `npx wrangler d1 create mythscribe-web` and paste its id here. Local runs
 # (`npm run dev`) use a local copy and work with this placeholder.

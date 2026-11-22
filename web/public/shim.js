@@ -490,6 +490,22 @@
   };
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
+  /* ---------------- reader links (Desk's reading page, kept on the server) ---------------- */
+  async function roomsCall(path, init) {
+    const r = await api(path, init);
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw err(body.code || "upstream_error", body.message || "The reader links didn't answer (" + r.status + ").");
+    return body;
+  }
+  const rooms = {
+    available: true,
+    create: (d) => roomsCall("/api/rooms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(d) }),
+    list: (bookId) => roomsCall("/api/rooms?book=" + encodeURIComponent(bookId || "")).then((b) => b.rooms || []),
+    notes: (token) => roomsCall("/api/rooms/" + encodeURIComponent(token) + "/notes"),
+    close: (token) => roomsCall("/api/rooms/" + encodeURIComponent(token) + "/close", { method: "POST" }),
+    link: (token) => location.origin + "/r/" + token,
+  };
+
   /* ---------------- window.claude ---------------- */
   const caps = {
     db: () => dbReady().then(() => db),
@@ -507,5 +523,5 @@
   });
   Object.defineProperty(window, "claude", { value: claude, configurable: false, writable: false });
   // For tests and the console: the web build's own hooks.
-  window.__mythscribeWeb = { sync, db, sample, signOut: () => { const t = session; saveSession(null); if (t) post("/api/auth/signout", {}, { authorization: "Bearer " + (t.access || t.token) }).catch(() => {}); location.reload(); } };
+  window.__mythscribeWeb = { sync, db, sample, rooms, signOut: () => { const t = session; saveSession(null); if (t) post("/api/auth/signout", {}, { authorization: "Bearer " + (t.access || t.token) }).catch(() => {}); location.reload(); } };
 })();

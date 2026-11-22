@@ -1,5 +1,5 @@
 // `npm run smoke`: starts the stand-in AI service and a throwaway `wrangler dev` (its own data
-// folder, AUTH_MODE=none, no real key), runs the two smoke checks, then stops both.
+// folder, AUTH_MODE=none, no real key), runs the smoke checks, then stops both.
 import { spawn, execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -25,7 +25,7 @@ for (let i = 0; ; i++) {
   await new Promise((r) => setTimeout(r, 1000))
 }
 let failed = false
-for (const f of ['shim-e2e.mjs', 'desk-flow.mjs']) {
+for (const f of ['shim-e2e.mjs', 'desk-flow.mjs', 'rooms-flow.mjs']) {
   console.log('\n# ' + f)
   try { execFileSync('node', [path.join(here, f)], { stdio: 'inherit', timeout: 120000 }) } catch { failed = true }
 }
